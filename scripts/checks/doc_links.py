@@ -16,7 +16,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple
 
 # Repo root: three levels up from this file (scripts/checks/doc_links.py).
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -37,10 +37,10 @@ class BrokenLink(NamedTuple):
     reason: str
 
 
-def _collect_md_files(repo_root: Path) -> List[Path]:
+def _collect_md_files(repo_root: Path) -> list[Path]:
     """Return all markdown files in docs/ (recursive) and repo root (depth <=1)."""
     docs_dir = repo_root / "docs"
-    files: List[Path] = []
+    files: list[Path] = []
 
     if docs_dir.is_dir():
         files.extend(sorted(docs_dir.rglob("*.md")))
@@ -61,10 +61,10 @@ def _collect_md_files(repo_root: Path) -> List[Path]:
     return files
 
 
-def check_doc_links(repo_root: Path, verbose: bool = False) -> List[BrokenLink]:
+def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
     """Scan markdown files and return a list of broken internal links."""
     md_files = _collect_md_files(repo_root)
-    failures: List[BrokenLink] = []
+    failures: list[BrokenLink] = []
     checked = 0
 
     print("[SCAN] Checking documentation links...")
@@ -130,7 +130,7 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> List[BrokenLink]:
     return failures
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
 
     parser = argparse.ArgumentParser(description="Check for broken documentation links.")

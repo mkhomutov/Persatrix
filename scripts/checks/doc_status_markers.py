@@ -14,7 +14,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Tuple
+from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -66,13 +66,13 @@ class MarkerIssue(NamedTuple):
 def check_status_markers(
     repo_root: Path,
     verbose: bool = False,
-) -> Tuple[List[MarkerIssue], List[MarkerIssue]]:
+) -> tuple[list[MarkerIssue], list[MarkerIssue]]:
     """Scan docs/ for status markers. Returns (failures, warnings)."""
     docs_dir = repo_root / "docs"
     md_files = sorted(docs_dir.rglob("*.md")) if docs_dir.is_dir() else []
 
-    failures: List[MarkerIssue] = []
-    warnings: List[MarkerIssue] = []
+    failures: list[MarkerIssue] = []
+    warnings: list[MarkerIssue] = []
 
     all_allowed = set(ALLOWED_MARKERS)
     all_context = set(CONTEXT_MARKERS)
@@ -127,7 +127,7 @@ def check_status_markers(
     return failures, warnings
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
 
     parser = argparse.ArgumentParser(

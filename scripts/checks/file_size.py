@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Tuple
+from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -59,7 +59,7 @@ class FileSizeWarning(NamedTuple):
 def _count_words(text: str) -> int:
     """Count words in *text*, stripping fenced code blocks."""
     in_code_block = False
-    prose_lines: List[str] = []
+    prose_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -75,11 +75,11 @@ def _scan_files(
     max_code_lines: int = DEFAULT_MAX_CODE_LINES,
     max_doc_words: int = DEFAULT_MAX_DOC_WORDS,
     max_rfc_words: int = DEFAULT_MAX_RFC_WORDS,
-) -> Tuple[List[FileSizeWarning], List[Tuple[str, int]], List[Tuple[str, int]]]:
+) -> tuple[list[FileSizeWarning], list[tuple[str, int]], list[tuple[str, int]]]:
     """Single-pass scan — returns warnings plus all file measurements."""
-    warnings: List[FileSizeWarning] = []
-    code_results: List[Tuple[str, int]] = []
-    doc_results: List[Tuple[str, int]] = []
+    warnings: list[FileSizeWarning] = []
+    code_results: list[tuple[str, int]] = []
+    doc_results: list[tuple[str, int]] = []
 
     for fpath in walk_files(repo_root, extensions=CODE_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS):
         try:
@@ -114,10 +114,10 @@ def _scan_files(
 
 
 def get_warnings(
-    repo_root: Optional[Path] = None,
+    repo_root: Path | None = None,
     max_code_lines: int = DEFAULT_MAX_CODE_LINES,
     max_doc_words: int = DEFAULT_MAX_DOC_WORDS,
-) -> List[FileSizeWarning]:
+) -> list[FileSizeWarning]:
     """Programmatic API — returns warnings without printing."""
     root = repo_root or REPO_ROOT
     warnings, _, _ = _scan_files(root, max_code_lines, max_doc_words)
@@ -159,7 +159,7 @@ def check_file_size(
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
 
     parser = argparse.ArgumentParser(description="Check file sizes against review-friendly limits.")

@@ -24,13 +24,12 @@ import sys
 from collections import defaultdict
 from datetime import date, timezone
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = REPO_ROOT / "FILEMAP.md"
 
 
-def _get_tracked_files() -> List[str]:
+def _get_tracked_files() -> list[str]:
     """Return sorted list of git-tracked file paths (forward-slash separated)."""
     result = subprocess.run(
         ["git", "ls-files"],
@@ -43,9 +42,9 @@ def _get_tracked_files() -> List[str]:
     return sorted(files)
 
 
-def _build_tree(files: List[str]) -> Dict:
+def _build_tree(files: list[str]) -> dict:
     """Build a nested dict representing the directory tree."""
-    tree: Dict = {}
+    tree: dict = {}
     for filepath in files:
         parts = PurePosixPath(filepath).parts
         node = tree
@@ -56,9 +55,9 @@ def _build_tree(files: List[str]) -> Dict:
     return tree
 
 
-def _render_tree(tree: Dict, prefix: str = "") -> List[str]:
+def _render_tree(tree: dict, prefix: str = "") -> list[str]:
     """Render tree dict into indented lines."""
-    lines: List[str] = []
+    lines: list[str] = []
     entries = list(tree.items())
     for i, (name, subtree) in enumerate(entries):
         is_last = i == len(entries) - 1
@@ -70,16 +69,16 @@ def _render_tree(tree: Dict, prefix: str = "") -> List[str]:
     return lines
 
 
-def _count_by_extension(files: List[str]) -> Dict[str, int]:
+def _count_by_extension(files: list[str]) -> dict[str, int]:
     """Count files grouped by extension."""
-    counts: Dict[str, int] = defaultdict(int)
+    counts: dict[str, int] = defaultdict(int)
     for f in files:
         ext = PurePosixPath(f).suffix or "(no extension)"
         counts[ext] += 1
     return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
 
-def _count_top_dirs(files: List[str]) -> Dict[str, int]:
+def _count_top_dirs(files: list[str]) -> dict[str, int]:
     """Count files per top-level directory."""
     counts: Dict[str, int] = defaultdict(int)
     for f in files:
@@ -137,7 +136,7 @@ def generate_filemap() -> str:
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate FILEMAP.md from git-tracked files.")
     parser.add_argument(
         "--check",

@@ -26,7 +26,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -37,7 +36,7 @@ from scripts.checks import ensure_utf8_streams  # noqa: E402
 
 _FMT_LABELS = {"go fmt", "ruff format", "cargo fmt"}
 
-_CHECKS: List[Tuple[str, List[str]]] = [
+_CHECKS: list[tuple[str, list[str]]] = [
     ("go fmt", ["go", "fmt", "-l", "./internal/...", "./cmd/..."]),
     ("ruff format", ["{python}", "-m", "ruff", "check", "agents/"]),
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
@@ -45,7 +44,7 @@ _CHECKS: List[Tuple[str, List[str]]] = [
 ]
 
 
-def _resolve_argv(argv: List[str]) -> List[str]:
+def _resolve_argv(argv: list[str]) -> list[str]:
     return [sys.executable if tok == "{python}" else tok for tok in argv]
 
 
@@ -73,7 +72,7 @@ def _update_filemap() -> bool:
         return False
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_streams()
 
     parser = argparse.ArgumentParser(description="Run fast pre-commit checks.")
@@ -85,7 +84,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     checks = _CHECKS if not args.skip_fmt else [c for c in _CHECKS if c[0] not in _FMT_LABELS]
 
-    results: List[Tuple[str, bool, float]] = []
+    results: list[tuple[str, bool, float]] = []
     print("=" * 60)
     print("Pre-commit checks")
     print("=" * 60)

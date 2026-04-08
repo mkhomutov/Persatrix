@@ -20,7 +20,6 @@ import os
 import stat
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -45,7 +44,7 @@ PYTHON="${PYTHON:-$(command -v python3 || command -v python)}"
 """
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_streams()
 
     parser = argparse.ArgumentParser(description="Install the pre-commit hook.")

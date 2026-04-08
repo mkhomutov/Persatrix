@@ -7,7 +7,7 @@ Provides the core check-script infrastructure:
 - ``report_violations()`` — violation output formatting
 - ``ensure_utf8_stdout()`` / ``ensure_utf8_streams()`` — Windows encoding fixes
 
-All utilities use only Python stdlib.  Minimum Python version: 3.8.
+All utilities use only Python stdlib.  Minimum Python version: 3.11.
 """
 
 from __future__ import annotations
@@ -15,9 +15,10 @@ from __future__ import annotations
 import io
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, TextIO
+from typing import TextIO
 
 from scripts.checks.analysis import has_allow_comment
 
@@ -36,7 +37,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _in_ranges(ranges: List[tuple], idx: int) -> bool:
+def _in_ranges(ranges: list[tuple], idx: int) -> bool:
     """Return ``True`` if *idx* falls inside any ``(start, end)`` range."""
     return any(s <= idx <= e for s, e in ranges)
 
@@ -108,11 +109,11 @@ class Pattern:
 
 def check_patterns(
     files: Iterable[Path],
-    patterns: List[Pattern],
-    allow_marker: Optional[str] = None,
+    patterns: list[Pattern],
+    allow_marker: str | None = None,
     skip_comments: bool = True,
     re_flags: int = 0,
-) -> List[Violation]:
+) -> list[Violation]:
     """Apply *patterns* to every line of every file and collect violations.
 
     Parameters:
@@ -127,7 +128,7 @@ def check_patterns(
     """
     compiled = [(re.compile(p.regex, re_flags), p) for p in patterns]
 
-    violations: List[Violation] = []
+    violations: list[Violation] = []
 
     for filepath in files:
         try:
@@ -173,10 +174,10 @@ def check_patterns(
 
 
 def report_violations(
-    violations: List[Violation],
+    violations: list[Violation],
     title: str = "Check",
     verbose: bool = False,
-    file: Optional[TextIO] = None,
+    file: TextIO | None = None,
 ) -> int:
     """Print violations and return an exit code (0 = pass, 1 = fail).
 
@@ -204,7 +205,7 @@ def report_violations(
         print(file=out)
 
     if verbose:
-        files: Dict[str, int] = {}
+        files: dict[str, int] = {}
         for v in violations:
             files[v.file] = files.get(v.file, 0) + 1
         print("  Files with violations:", file=out)

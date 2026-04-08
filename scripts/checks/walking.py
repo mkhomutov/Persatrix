@@ -3,15 +3,15 @@
 Provides ``walk_files()`` helper that yields paths under a directory tree
 while respecting glob-based exclusion patterns.
 
-All utilities use only Python stdlib.  Minimum Python version: 3.8.
+All utilities use only Python stdlib.  Minimum Python version: 3.11.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Iterator, List, Optional, Union
 
 __all__ = [
     "DEFAULT_EXCLUDES",
@@ -29,9 +29,9 @@ DEFAULT_EXCLUDES = [
 
 
 def _walk_files_impl(
-    directory: Union[str, Path],
-    extensions: Optional[List[str]],
-    exclude_patterns: List[str],
+    directory: str | Path,
+    extensions: list[str] | None,
+    exclude_patterns: list[str],
 ) -> Iterator[Path]:
     """Yield files under *directory*, applying extension and exclude filters."""
     root = Path(directory)
@@ -66,9 +66,9 @@ def _walk_files_impl(
 
 
 def walk_files(
-    directory: Union[str, Path],
-    extensions: Optional[List[str]] = None,
-    exclude_patterns: Optional[List[str]] = None,
+    directory: str | Path,
+    extensions: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
 ) -> Iterator[Path]:
     """Yield files under *directory*, optionally filtering by extension.
 

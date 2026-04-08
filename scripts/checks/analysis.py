@@ -2,13 +2,12 @@
 
 Provides helpers for recognising allow-comment suppression markers.
 
-All utilities use only Python stdlib.  Minimum Python version: 3.8.
+All utilities use only Python stdlib.  Minimum Python version: 3.11.
 """
 
 from __future__ import annotations
 
 import re
-from typing import List, Sequence, Tuple
 
 __all__ = [
     "has_allow_comment",

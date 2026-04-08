@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from contextlib import redirect_stdout
 import io
 
@@ -47,8 +47,8 @@ class CheckResult:
     passed: bool
     violation_count: int
     warning_count: int = 0
-    violations: List[AuditViolation] = field(default_factory=list)
-    warnings: List[AuditViolation] = field(default_factory=list)
+    violations: list[AuditViolation] = field(default_factory=list)
+    warnings: list[AuditViolation] = field(default_factory=list)
     elapsed_secs: float = 0.0
 
 
@@ -57,7 +57,7 @@ class AuditReport:
     all_passed: bool
     total_violations: int
     total_warnings: int
-    checks: List[CheckResult] = field(default_factory=list)
+    checks: list[CheckResult] = field(default_factory=list)
     elapsed_secs: float = 0.0
 
 
@@ -195,7 +195,7 @@ def _print_text_report(report: AuditReport) -> None:
     print("=" * 60)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
 
     parser = argparse.ArgumentParser(description="Run documentation audit checks.")

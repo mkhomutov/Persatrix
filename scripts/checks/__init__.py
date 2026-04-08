@@ -1,7 +1,7 @@
 """Shared utilities for cross-platform Python check scripts.
 
 All utilities use only Python stdlib (pathlib, re, os, dataclasses, etc.).
-Minimum Python version: 3.8.
+Minimum Python version: 3.11.
 
 Implementation is split across focused submodules:
 
@@ -32,8 +32,6 @@ from scripts.checks.analysis import (  # noqa: F401
 from scripts.checks.patterns import (  # noqa: F401
     Pattern,
     Violation,
-    _in_ranges,
-    _reconfigure_stream,
     check_patterns,
     ensure_utf8_stdout,
     ensure_utf8_streams,
