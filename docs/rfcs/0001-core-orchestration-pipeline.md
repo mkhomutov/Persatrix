@@ -15,7 +15,7 @@
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
 - [Design / Implementation](#design--implementation)
-  - [Phase 1: InMemoryStateStore](#phase-1-inmemoryStateStore)
+  - [Phase 1: InMemoryStateStore](#phase-1-inmemorystatestore)
   - [Phase 2: InMemoryRegistry](#phase-2-inmemoryregistry)
   - [Phase 3: YAMLPlanner](#phase-3-yamlplanner)
   - [Phase 4: Wire into main.go](#phase-4-wire-into-maingo)
@@ -121,6 +121,7 @@ type Store interface {
 - `InMemoryStore` backed by `sync.RWMutex` + `map[string]*WorkflowRun`.
 - All methods are goroutine-safe.
 - `CreateRun` generates a UUID if `run.ID` is empty.
+- `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.)
 - `UpdateStepState` merges into the existing run's `Steps` map.
 
 ### Phase 2: InMemoryRegistry
@@ -132,7 +133,7 @@ Implements the existing `Registry` interface with an in-memory map.
 #### Implementation
 
 - `InMemoryRegistry` backed by `sync.RWMutex` + `map[string]*AgentInfo`.
-- `Register` rejects duplicate IDs (returns error).
+- `Register` rejects duplicate IDs (returns `ErrAgentAlreadyRegistered`). Re-registration after agent restart requires calling `Unregister` first, then `Register` with the new address. An `Update` method may be added later if idempotent re-registration becomes a common pattern.
 - `Get` returns `ErrAgentNotFound` (sentinel error) on miss.
 - `FindByCapability` iterates all agents and filters.
 - `List` returns a snapshot copy (not a reference to internal state).
@@ -147,7 +148,14 @@ The planner is the most complex component in this RFC. It has three responsibili
 #### 3a. Parse — YAML to Workflow struct
 
 - Read a workflow YAML file from disk (path provided by caller).
-- Unmarshal into the existing `Workflow` struct.
+- Unmarshal into a `WorkflowFile` wrapper type first, since workflow YAML files (e.g. `feature-builder.yaml`) have a top-level `schema_version:` field alongside a `workflow:` object:
+  ```go
+  type WorkflowFile struct {
+      SchemaVersion string   `yaml:"schema_version"`
+      Workflow      Workflow `yaml:"workflow"`
+  }
+  ```
+  The `Parse` method unmarshals into `WorkflowFile`, validates `SchemaVersion`, then returns the inner `Workflow`. Without this wrapper, `yaml.Unmarshal` will fail on the actual fixture files.
 - Validate required fields: `id`, `name`, at least one step, each step has `id` and `agent`.
 - Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
 - Validate that `depends_on` references point to existing step IDs.
@@ -174,6 +182,8 @@ The planner is the most complex component in this RFC. It has three responsibili
 - Recognize `{{ user_request }}` and `{{ steps.<id>.output }}` patterns.
 - At parse/plan time: extract and store variable references, do **not** resolve values (values are only known at execution time).
 - Provide a `ResolveInputs(step Step, outputs map[string]string, vars map[string]string) (string, error)` helper that the Scheduler/Executor will call at runtime to substitute actual values.
+- `ResolveInputs` returns an error if a template references a step ID not present in the `outputs` map or a variable not present in the `vars` map. Fail-fast prevents silent data loss from typos or misordered execution.
+- Template resolution is **single-pass** — output values substituted into an input string are NOT re-scanned for template patterns. This prevents second-order template injection if a step's output happens to contain `{{ }}` patterns.
 - Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
 
 #### Constructor

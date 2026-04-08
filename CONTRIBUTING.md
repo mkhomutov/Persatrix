@@ -95,6 +95,10 @@ Trunk-based development. See [BRANCHING.md](docs/BRANCHING.md) for details.
 - Squash merge to `main`
 - PRs < 500 lines
 
+### Significant Design Changes
+
+For changes that affect architecture, cross-component interfaces, or introduce new subsystems, follow the [RFC process](docs/rfcs/README.md) before implementation.
+
 ### Code Conventions
 
 #### Go (Orchestrator)
