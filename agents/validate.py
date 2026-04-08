@@ -28,8 +28,10 @@ def validate_config_dir(config_dir: str) -> bool:
 
     # TODO: Implement validation
     print(f"Validating configs in {config_dir}...")
-    print("WARNING: Validation not yet implemented")
-    return True
+    # Fail honestly: make validate should not silently succeed without real validation.
+    # This prevents false confidence that configs are correct.
+    print("ERROR: Validation not yet implemented — failing to prevent false confidence")
+    return False
 
 
 if __name__ == "__main__":

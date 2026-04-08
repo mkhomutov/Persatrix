@@ -16,7 +16,7 @@ A general-purpose **agent society engine** — a runtime for creating, connectin
 
 ```bash
 # Clone
-git clone https://github.com/orchestr8/orchestr8.git
+git clone https://github.com/mkhomutov/Orchestr8.git
 cd orchestr8
 
 # Configure

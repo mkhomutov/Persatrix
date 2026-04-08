@@ -15,7 +15,12 @@
           "id": { "type": "string" },
           "type": { "type": "string", "enum": ["group", "direct", "broadcast", "meeting"] },
           "name": { "type": "string" },
-          "members": {},
+          "members": {
+            "oneOf": [
+              { "type": "string", "const": "all" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
           "history_visible": { "type": "boolean" },
           "max_history_messages": { "type": "integer" }
         }

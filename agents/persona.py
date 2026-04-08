@@ -5,6 +5,7 @@ Extends BaseAgent with async event handling, channel messaging,
 sub-agent spawning, delegation, and autonomous behavior.
 """
 
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -128,6 +129,7 @@ class PersonaAgent(BaseAgent):
 
     # ─── Core event handler ────────────────────────────
 
+    @abstractmethod
     async def on_event(self, event: AgentEvent) -> list[AgentAction]:
         """
         Core event handler. Override this in your persona agent.
@@ -136,9 +138,9 @@ class PersonaAgent(BaseAgent):
         actions (send message, spawn sub-agent, delegate, complete task).
         The framework executes actions and delivers results as new events.
         """
-        raise NotImplementedError(
-            f"PersonaAgent {self.agent_id} must implement on_event()"
-        )
+        # Using @abstractmethod (consistent with BaseAgent.handle) so missing
+        # implementations are caught at instantiation time, not first event.
+        ...
 
     async def on_tick(self) -> list[AgentAction]:
         """

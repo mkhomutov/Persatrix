@@ -29,7 +29,8 @@ class AgentServer:
     def register_agent(self, agent) -> None:
         """Register an agent instance with the server."""
         self.agents[agent.agent_id] = agent
-        logger.info(f"Registered agent: {agent.agent_id} ({agent.name})")
+        # Use %-formatting for lazy evaluation (avoid interpolation when log level is disabled)
+        logger.info("Registered agent: %s (%s)", agent.agent_id, agent.name)
 
     async def start(self) -> None:
         """Start the gRPC server."""
@@ -37,8 +38,8 @@ class AgentServer:
         # TODO: Add AgentService servicer
         # TODO: Add health check servicer
         # TODO: Start serving
-        logger.info(f"Agent server listening on {self.host}:{self.port}")
-        logger.info(f"Serving {len(self.agents)} agent(s): {list(self.agents.keys())}")
+        logger.info("Agent server listening on %s:%s", self.host, self.port)
+        logger.info("Serving %d agent(s): %s", len(self.agents), list(self.agents.keys()))
 
     async def stop(self) -> None:
         """Gracefully stop the server."""
@@ -85,8 +86,13 @@ def main():
         loop.create_task(server.stop())
         loop.stop()
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, handle_signal)
+    # loop.add_signal_handler() is POSIX-only and raises NotImplementedError on Windows.
+    # Use platform detection to support both POSIX and Windows signal handling.
+    if sys.platform != "win32":
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, handle_signal)
+    else:
+        signal.signal(signal.SIGINT, lambda s, f: handle_signal())
 
     try:
         loop.run_until_complete(server.start())

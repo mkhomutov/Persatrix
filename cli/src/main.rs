@@ -188,7 +188,7 @@ async fn main() {
 
     // TODO: Implement each command by calling the orchestrator REST API
     match cli.command {
-        Commands::Run { workflow, input, profile } => {
+        Commands::Run { workflow, input: _input, profile } => {
             println!("→ Running workflow: {} (profile: {})", workflow, profile);
             // TODO: POST /api/v1/workflows/run
             println!("  Not yet implemented");
@@ -206,7 +206,7 @@ async fn main() {
             AgentCommands::Info { agent_id } => {
                 println!("→ Agent info: {}", agent_id);
             }
-            AgentCommands::Reload { agent_id, config } => {
+            AgentCommands::Reload { agent_id, config: _config } => {
                 println!("→ Reloading agent: {}", agent_id);
             }
         },
