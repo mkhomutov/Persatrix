@@ -34,11 +34,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.checks import ensure_utf8_streams  # noqa: E402
 
-_FMT_LABELS = {"go fmt", "ruff format", "cargo fmt"}
+_FMT_LABELS = {"go fmt", "cargo fmt"}
 
 _CHECKS: list[tuple[str, list[str]]] = [
     ("go fmt", ["go", "fmt", "-l", "./internal/...", "./cmd/..."]),
-    ("ruff format", ["{python}", "-m", "ruff", "check", "agents/"]),
+    ("ruff check", ["{python}", "-m", "ruff", "check", "agents/"]),
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
 ]

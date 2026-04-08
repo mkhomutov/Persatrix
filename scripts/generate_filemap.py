@@ -80,7 +80,7 @@ def _count_by_extension(files: list[str]) -> dict[str, int]:
 
 def _count_top_dirs(files: list[str]) -> dict[str, int]:
     """Count files per top-level directory."""
-    counts: Dict[str, int] = defaultdict(int)
+    counts: dict[str, int] = defaultdict(int)
     for f in files:
         parts = PurePosixPath(f).parts
         top = parts[0] + "/" if len(parts) > 1 else "(root)"
