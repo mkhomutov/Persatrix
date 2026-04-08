@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .base import BaseAgent, TaskInput, TaskOutput
+from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 
 
 # ─── Events that a persona agent can receive ───────────────
@@ -81,11 +81,19 @@ class SubAgentRequest:
     restricted_permissions: list[str] = field(default_factory=list)
 
 
+class SubAgentStatus(Enum):
+    """Status of a sub-agent execution."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+
+
 @dataclass
 class SubAgentResult:
     """Result from an ephemeral sub-agent."""
 
-    status: str  # "completed" | "failed" | "timeout"
+    status: SubAgentStatus
     result: Any = None
     summary: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -120,12 +128,16 @@ class PersonaAgent(BaseAgent):
         for action in actions:
             if action.action_type == ActionType.COMPLETE_TASK:
                 return TaskOutput(
-                    status="completed",
+                    status=TaskStatus.COMPLETED,
                     result=action.payload.get("result", ""),
                     metadata=action.payload.get("metadata", {}),
                 )
 
-        return TaskOutput(status="failed", result="No completion action taken")
+        action_types = [a.action_type.value for a in actions]
+        return TaskOutput(
+            status=TaskStatus.FAILED,
+            result=f"No COMPLETE_TASK action taken; got actions: {action_types}",
+        )
 
     # ─── Core event handler ────────────────────────────
 

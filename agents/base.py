@@ -8,7 +8,15 @@ event-driven communication, sub-agent spawning, and autonomy.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
+
+
+class TaskStatus(Enum):
+    """Status of a completed task. Prevents stringly-typed bugs across agents."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 @dataclass
@@ -25,7 +33,7 @@ class TaskInput:
 class TaskOutput:
     """Result from an agent's task execution."""
 
-    status: str  # "completed" | "failed"
+    status: TaskStatus
     result: str
     metadata: dict[str, Any] = field(default_factory=dict)
 

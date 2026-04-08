@@ -42,6 +42,11 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - orchestrator
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50051), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # ─── Agent: Code Writer ──────────────────────────
   agent-coder:
@@ -59,6 +64,11 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - orchestrator
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50052), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # ─── Agent: Code Reviewer ────────────────────────
   agent-reviewer:
@@ -76,6 +86,11 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     depends_on:
       - orchestrator
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50053), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # ─── Observability: Jaeger (OTEL-compatible) ─────
   jaeger:

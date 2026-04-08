@@ -9,8 +9,11 @@ Tools are typed functions that agents can invoke. Three tiers:
 
 import functools
 import inspect
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -99,6 +102,7 @@ def tool(
                     return result
                 return ToolResult(success=True, data=result)
             except Exception as e:
+                logger.exception("Tool '%s' failed", tool_name)
                 return ToolResult(success=False, error=str(e))
 
         return wrapper
