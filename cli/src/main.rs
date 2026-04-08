@@ -210,8 +210,16 @@ async fn main() {
                 println!("→ Reloading agent: {}", agent_id);
             }
         },
-        _ => {
-            println!("Command not yet implemented");
-        }
+        // Exhaustive match instead of catch-all `_ =>` so that adding a new
+        // Commands variant produces a compile error until its handler is added.
+        Commands::Test { .. } => println!("Command 'test' not yet implemented"),
+        Commands::Status { .. } => println!("Command 'status' not yet implemented"),
+        Commands::Logs { .. } => println!("Command 'logs' not yet implemented"),
+        Commands::Init { .. } => println!("Command 'init' not yet implemented"),
+        Commands::Replay { .. } => println!("Command 'replay' not yet implemented"),
+        Commands::Cost { .. } => println!("Command 'cost' not yet implemented"),
+        Commands::State(_) => println!("Command 'state' not yet implemented"),
+        Commands::Node(_) => println!("Command 'node' not yet implemented"),
+        Commands::Mesh(_) => println!("Command 'mesh' not yet implemented"),
     }
 }

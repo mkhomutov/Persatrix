@@ -60,10 +60,10 @@ test-go: ## Run Go unit tests
 	go test ./internal/... -v -race -cover
 
 test-python: ## Run Python agent tests
-	cd agents && $(PYTHON) -m pytest tests/ -v --tb=short
+	$(PYTHON) -m pytest tests/unit/python/ -v --tb=short
 
 test-integration: ## Run integration tests
-	$(PYTHON) -m pytest tests/integration/ -v --tb=short
+	$(PYTHON) -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
 
 test-persona: ## Run persona consistency tests (AGENT=sarah-chen)
 	cd agents && $(PYTHON) -m pytest tests/ -v -k "persona" --agent $(AGENT)

@@ -36,8 +36,16 @@ orchestr8-agent = "orchestr8_agents.server:main"
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
+# Map the agents/ directory to the 'orchestr8_agents' import path.
+# Without this, pip install would discover sub-packages (generated, memory, etc.)
+# as top-level packages, and 'python -m orchestr8_agents.server' would fail
+# with ModuleNotFoundError since no 'orchestr8_agents' package would exist.
+[tool.setuptools.package-dir]
+orchestr8_agents = "."
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["orchestr8_agents*"]
 
 [tool.ruff]
 line-length = 100
@@ -53,4 +61,6 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# testpaths is not set here because test paths are specified explicitly
+# in the Makefile targets. Python tests live at tests/unit/python/ (repo root),
+# not under agents/tests/.
