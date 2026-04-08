@@ -23,6 +23,10 @@ class ToolResult:
     success: bool
     data: Any = None
     error: str | None = None
+    # PR review: preserving error_type enables distinguishing transient failures
+    # (TimeoutError, ConnectionError) from permanent ones (ValueError, PermissionError)
+    # for retry and circuit-breaker decisions.
+    error_type: str | None = None
 
 
 @dataclass
@@ -103,7 +107,11 @@ def tool(
                 return ToolResult(success=True, data=result)
             except Exception as e:
                 logger.exception("Tool '%s' failed", tool_name)
-                return ToolResult(success=False, error=str(e))
+                return ToolResult(
+                    success=False,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
 
         return wrapper
 

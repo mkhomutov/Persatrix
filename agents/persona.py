@@ -9,7 +9,7 @@ import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 
@@ -102,6 +102,25 @@ class SubAgentResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+# ─── Orchestrator Client Protocol ──────────────────────────
+
+@runtime_checkable
+class OrchestratorClient(Protocol):
+    """
+    Protocol defining the interface for the orchestrator client injected
+    into PersonaAgent. Using a Protocol (structural typing) instead of Any
+    enables type checking and makes the expected interface self-documenting
+    for testing.
+
+    PR review: _orchestrator_client was typed as Any, providing zero type
+    safety and making it impossible to verify mocks implement the contract.
+    """
+
+    async def spawn_sub_agent(
+        self, *, parent_id: str, request: SubAgentRequest
+    ) -> SubAgentResult: ...
+
+
 # ─── Persona Agent Base Class ──────────────────────────────
 
 class PersonaAgent(BaseAgent):
@@ -116,7 +135,7 @@ class PersonaAgent(BaseAgent):
     def __init__(self, agent_id: str, config: dict[str, Any] | None = None):
         super().__init__(agent_id, config)
         self._persona_state: dict[str, Any] = {}
-        self._orchestrator_client: Any = None  # injected by framework
+        self._orchestrator_client: OrchestratorClient | None = None  # injected by framework
 
     # ─── BaseAgent compatibility ───────────────────────
 

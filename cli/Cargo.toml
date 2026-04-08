@@ -9,7 +9,9 @@ license = "Apache-2.0"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+# PR review: serde_yaml is deprecated and unmaintained; serde_yml is the
+# maintained successor crate. Migrated before any code depends on the API.
+serde_yml = "0.0.12"
 # "full" pulls every Tokio sub-crate (io_uring, process, fs …).
 # A CLI only needs the async runtime and macros for #[tokio::main].
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

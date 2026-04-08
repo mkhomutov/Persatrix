@@ -21,9 +21,16 @@ var (
 func main() {
 	flag.Parse()
 
-	// Use zap.NewDevelopment() for dev; swap to zap.NewProduction() for
-	// staging/production once --env flag drives the decision.
-	logger, err := zap.NewDevelopment()
+	// PR review: development logger (DPanic panics, verbose stacktraces) was
+	// hardcoded regardless of --env flag. Use production logger for non-dev
+	// environments to get JSON output, appropriate log levels, and no DPanic.
+	var logger *zap.Logger
+	var err error
+	if *env == "development" {
+		logger, err = zap.NewDevelopment()
+	} else {
+		logger, err = zap.NewProduction()
+	}
 	if err != nil {
 		panic("failed to initialise logger: " + err.Error())
 	}
