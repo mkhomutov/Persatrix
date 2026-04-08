@@ -1,0 +1,280 @@
+# RFC 0001 — Core Orchestration Pipeline (Planner + State + Registry)
+
+**Type**: architecture  
+**Status**: 📋 Proposed  
+**Author**: Orchestr8 team  
+**Date**: 2026-04-08  
+**Target**: v0.1 (MVP)
+
+---
+
+## Table of Contents
+
+- [Summary](#summary)
+- [Motivation](#motivation)
+- [Goals](#goals)
+- [Non-Goals](#non-goals)
+- [Design / Implementation](#design--implementation)
+  - [Phase 1: InMemoryStateStore](#phase-1-inmemoryStateStore)
+  - [Phase 2: InMemoryRegistry](#phase-2-inmemoryregistry)
+  - [Phase 3: YAMLPlanner](#phase-3-yamlplanner)
+  - [Phase 4: Wire into main.go](#phase-4-wire-into-maingo)
+- [Security Considerations](#security-considerations)
+- [Files Touched (Estimated)](#files-touched-estimated)
+- [Test Strategy](#test-strategy)
+- [Open Questions](#open-questions)
+- [Decision / Next Steps](#decision--next-steps)
+- [Related Documentation](#related-documentation)
+
+---
+
+## Summary
+
+Implement the three foundational Go orchestrator components that the entire execution pipeline depends on: **InMemoryStateStore**, **InMemoryRegistry**, and **YAMLPlanner**. These are the minimum viable internals needed before the Scheduler, Executor, REST API, or gRPC server can function. Without these, the orchestrator is an empty shell that starts, logs, and exits.
+
+## Motivation
+
+The orchestrator's `main.go` currently initializes logging and graceful shutdown but performs no actual work. All `internal/` packages are interface definitions and TODO stubs. The dependency chain for end-to-end workflow execution is:
+
+```
+Workflow YAML → Planner (parse + DAG) → Scheduler → Executor → Agents
+                    ↕                       ↕           ↕
+                  State Store           State Store   Registry
+```
+
+**Planner**, **State**, and **Registry** sit at the bottom of this dependency graph. Nothing above them can be implemented or tested without them. They have zero external dependencies (no gRPC, no HTTP, no LLM calls) and can be built and unit-tested in complete isolation.
+
+If we do nothing, the project remains a well-documented skeleton with no executable logic.
+
+## Goals
+
+1. Implement `InMemoryStateStore` in `internal/state/` — track workflow and step execution state.
+2. Implement `InMemoryRegistry` in `internal/registry/` — register, look up, and health-track agents.
+3. Implement `YAMLPlanner` in `internal/planner/` — parse workflow YAML files, validate the DAG (cycle detection), and produce topologically sorted `ExecutionPlan` with parallel stages.
+4. Implement template variable resolution for `{{ steps.X.output }}` references in step inputs.
+5. Wire all three into `cmd/orchestrator/main.go` initialization sequence (steps 3, 6, 8 in the existing TODO list).
+6. Achieve ≥ 80% test coverage for all three packages (`go test -race -cover`).
+
+## Non-Goals
+
+- HTTP/REST API server (separate RFC, depends on this one).
+- gRPC server or agent communication (separate RFC).
+- Scheduler or Executor logic (next step after this RFC).
+- Persistent storage (SQLite is v0.2+; in-memory only for now).
+- Condition expression evaluation (`{{ steps.review.output.approved == false }}`). Parse and store condition strings but defer evaluation to the Scheduler/Executor RFC.
+- MCP bridge, cost tracking, telemetry, security gates (independent packages that follow this RFC).
+
+## Design / Implementation
+
+### Phase 1: InMemoryStateStore
+
+**Package:** `internal/state/`
+
+The state store tracks workflow runs and individual step statuses. It is the single source of truth for "what happened" during execution.
+
+#### Types
+
+```go
+type WorkflowRun struct {
+    ID         string
+    WorkflowID string
+    Status     RunStatus           // Pending, Running, Completed, Failed, Cancelled
+    Steps      map[string]StepState
+    StartedAt  time.Time
+    FinishedAt time.Time
+    Inputs     map[string]string   // user-provided variables (e.g. user_request)
+}
+
+type StepState struct {
+    StepID    string
+    Status    RunStatus
+    Output    string              // captured agent response
+    Error     string
+    StartedAt time.Time
+    FinishedAt time.Time
+}
+
+type RunStatus int
+const (
+    RunPending RunStatus = iota
+    RunRunning
+    RunCompleted
+    RunFailed
+    RunCancelled
+)
+```
+
+#### Interface (add to existing)
+
+```go
+type Store interface {
+    CreateRun(ctx context.Context, run *WorkflowRun) error
+    GetRun(ctx context.Context, runID string) (*WorkflowRun, error)
+    ListRuns(ctx context.Context) ([]*WorkflowRun, error)
+    UpdateRunStatus(ctx context.Context, runID string, status RunStatus) error
+    UpdateStepState(ctx context.Context, runID string, step StepState) error
+}
+```
+
+#### Implementation
+
+- `InMemoryStore` backed by `sync.RWMutex` + `map[string]*WorkflowRun`.
+- All methods are goroutine-safe.
+- `CreateRun` generates a UUID if `run.ID` is empty.
+- `UpdateStepState` merges into the existing run's `Steps` map.
+
+### Phase 2: InMemoryRegistry
+
+**Package:** `internal/registry/`
+
+Implements the existing `Registry` interface with an in-memory map.
+
+#### Implementation
+
+- `InMemoryRegistry` backed by `sync.RWMutex` + `map[string]*AgentInfo`.
+- `Register` rejects duplicate IDs (returns error).
+- `Get` returns `ErrAgentNotFound` (sentinel error) on miss.
+- `FindByCapability` iterates all agents and filters.
+- `List` returns a snapshot copy (not a reference to internal state).
+- **No health-check loop yet** — just `UpdateStatus()` for external callers. Health-check polling is deferred to the Executor/gRPC RFC when agents are reachable.
+
+### Phase 3: YAMLPlanner
+
+**Package:** `internal/planner/`
+
+The planner is the most complex component in this RFC. It has three responsibilities:
+
+#### 3a. Parse — YAML to Workflow struct
+
+- Read a workflow YAML file from disk (path provided by caller).
+- Unmarshal into the existing `Workflow` struct.
+- Validate required fields: `id`, `name`, at least one step, each step has `id` and `agent`.
+- Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
+- Validate that `depends_on` references point to existing step IDs.
+
+#### 3b. ValidateDAG — Cycle detection
+
+- Build adjacency list from `depends_on` edges.
+- Run DFS-based cycle detection.
+- Return a descriptive error listing the cycle if one is found (e.g. `"cycle detected: review → revise → review"`).
+
+#### 3c. Plan — Topological sort into parallel stages
+
+- Kahn's algorithm (BFS topological sort) to produce layers.
+- Each layer is a group of steps whose dependencies are all satisfied by prior layers.
+- Output: `ExecutionPlan{ Stages: [][]Step }`.
+- Example for `feature-builder.yaml`:
+  - Stage 0: `[plan]`
+  - Stage 1: `[implement]`
+  - Stage 2: `[review]`
+  - Stage 3: `[revise]`
+
+#### 3d. Template variable resolution (basic)
+
+- Recognize `{{ user_request }}` and `{{ steps.<id>.output }}` patterns.
+- At parse/plan time: extract and store variable references, do **not** resolve values (values are only known at execution time).
+- Provide a `ResolveInputs(step Step, outputs map[string]string, vars map[string]string) (string, error)` helper that the Scheduler/Executor will call at runtime to substitute actual values.
+- Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
+
+#### Constructor
+
+```go
+func NewYAMLPlanner(logger *zap.Logger) *YAMLPlanner
+```
+
+The planner receives a logger (consistent with project conventions) and implements the existing `Planner` interface.
+
+### Phase 4: Wire into main.go
+
+Update `cmd/orchestrator/main.go` to:
+
+1. Create `state.NewInMemoryStore()`.
+2. Create `registry.NewInMemoryRegistry()`.
+3. Create `planner.NewYAMLPlanner(logger)`.
+4. Log successful initialization of each component.
+5. Keep the existing graceful-shutdown logic; no behavioral change to startup/shutdown flow yet.
+
+This phase is minimal wiring — the components exist but aren't serving traffic yet (that requires the REST API, which is the next RFC).
+
+## Security Considerations
+
+- **No new attack surface.** These components are internal-only; no network listeners are added.
+- **State store concurrency.** `sync.RWMutex` prevents data races; CI runs `go test -race`.
+- **YAML parsing.** Use `gopkg.in/yaml.v3` (or `encoding/json` for schemas); limit file size to prevent DoS from malformed input. Reject YAML files > 1 MB.
+- **Template injection.** `ResolveInputs` does simple string substitution, not expression evaluation. Step outputs are treated as opaque strings, never executed. Condition evaluation is deferred.
+- **Agent ID validation.** Enforced at parse time to prevent injection via agent IDs in downstream components (gRPC addresses, file paths, etc.).
+
+## Phased Implementation Plan
+
+### Phase 1: InMemoryStateStore (~200 LOC, ~1 day)
+
+- Types, interface, implementation, unit tests.
+- Deliverables: `internal/state/state.go` (types + interface + impl), `internal/state/state_test.go`.
+
+### Phase 2: InMemoryRegistry (~150 LOC, ~0.5 day)
+
+- Implementation of existing interface, sentinel errors, unit tests.
+- Deliverables: `internal/registry/registry.go` (expanded), `internal/registry/registry_test.go`.
+
+### Phase 3: YAMLPlanner (~400 LOC, ~2 days)
+
+- Parse, ValidateDAG, Plan, ResolveInputs, unit tests.
+- Test against `workflows/feature-builder.yaml` as a real fixture.
+- Deliverables: `internal/planner/planner.go` (expanded), `internal/planner/planner_test.go`.
+
+### Phase 4: Wire into main.go (~30 LOC, ~0.5 day)
+
+- Initialize components in main, add `go.mod` dependency for YAML parser.
+- Deliverable: updated `cmd/orchestrator/main.go`, updated `go.mod`.
+
+**Total estimated scope:** ~780 LOC implementation + tests. 4 days.
+
+## Files Touched (Estimated)
+
+| Component | Files | Change |
+|-----------|-------|--------|
+| Go orchestrator | `internal/state/state.go` | Add types, `Store` interface, `InMemoryStore` implementation |
+| Go orchestrator | `internal/state/state_test.go` | New — unit tests for state store |
+| Go orchestrator | `internal/registry/registry.go` | Add `InMemoryRegistry` implementation, sentinel errors |
+| Go orchestrator | `internal/registry/registry_test.go` | New — unit tests for registry |
+| Go orchestrator | `internal/planner/planner.go` | Add `YAMLPlanner` implementation (parse, DAG validate, plan, resolve) |
+| Go orchestrator | `internal/planner/planner_test.go` | New — unit tests (valid workflow, cycles, missing deps, template vars) |
+| Go orchestrator | `cmd/orchestrator/main.go` | Wire state store, registry, planner initialization |
+| Go orchestrator | `go.mod` / `go.sum` | Add `gopkg.in/yaml.v3` dependency |
+
+## Test Strategy
+
+- **Unit tests per package** using `testify/assert` and `testify/require`.
+- **Table-driven tests** for planner parsing (valid, invalid YAML, missing fields, bad agent IDs).
+- **Cycle detection tests**: no-cycle graph, simple cycle (A→B→A), complex cycle (A→B→C→A), self-referencing step.
+- **Topological sort tests**: linear chain, diamond dependency, fully parallel (no deps), single step.
+- **State store tests**: CRUD operations, concurrent read/write with goroutines, status transitions.
+- **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update.
+- **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
+- **Race detector**: all tests run with `-race` flag (already enforced in CI/Makefile).
+
+## Open Questions
+
+1. **YAML library choice**: `gopkg.in/yaml.v3` is the standard Go YAML library. Any reason to prefer `sigs.k8s.io/yaml` (JSON-compatible subset)?
+2. **Workflow schema version**: `feature-builder.yaml` declares `schema_version: "0.1"`. Should the planner enforce this and reject unknown versions?
+3. **Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?
+4. **State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?
+
+## Decision / Next Steps
+
+Once this RFC is accepted:
+
+1. Create feature branch `feature/v01-core-pipeline`.
+2. Implement in phase order (State → Registry → Planner → Wiring).
+3. PR < 500 lines per phase if needed; squash merge to `main`.
+4. **Next RFC**: `0002-rest-api-server.md` — HTTP server with workflow submission endpoint, run status queries, and SSE streaming. Depends on all three components from this RFC.
+5. **After that**: `0003-scheduler-executor.md` — parallel stage execution and gRPC task dispatch to agents.
+
+## Related Documentation
+
+- [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — Core MVP specification
+- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — Extension spec (v0.2+ features)
+- [orchestr8-spec-audit.md](../orchestr8-spec-audit.md) — Spec gap audit
+- [BRANCHING.md](../BRANCHING.md) — Branch naming and PR size guidelines
+- Existing stubs: `internal/planner/planner.go`, `internal/state/state.go`, `internal/registry/registry.go`
+- Workflow fixture: `workflows/feature-builder.yaml`
