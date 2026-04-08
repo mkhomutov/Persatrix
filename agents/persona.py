@@ -5,6 +5,7 @@ Extends BaseAgent with async event handling, channel messaging,
 sub-agent spawning, delegation, and autonomous behavior.
 """
 
+import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -36,7 +37,9 @@ class AgentEvent:
     channel_id: str | None = None
     sender_id: str | None = None
     message_id: str | None = None
-    timestamp: float = 0.0
+    # default_factory=time.time ensures each event gets the current timestamp
+    # rather than a sentinel 0.0 that callers might forget to override.
+    timestamp: float = field(default_factory=time.time)
 
 
 # ─── Actions that a persona agent can take ─────────────────

@@ -121,5 +121,10 @@ def list_tools() -> list[ToolDefinition]:
 
 
 def clear_registry() -> None:
+    """Reset the tool registry. Use in test fixtures for isolation."""
+    _tool_registry.clear()
+
+
+def clear_registry() -> None:
     """Clear all registered tools (for testing)."""
     _tool_registry.clear()

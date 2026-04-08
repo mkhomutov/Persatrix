@@ -4,10 +4,11 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -20,11 +21,18 @@ var (
 func main() {
 	flag.Parse()
 
-	fmt.Printf("Orchestr8 Server starting...\n")
-	fmt.Printf("  Config:      %s\n", *configDir)
-	fmt.Printf("  gRPC port:   %d\n", *port)
-	fmt.Printf("  HTTP port:   %d\n", *httpPort)
-	fmt.Printf("  Environment: %s\n", *env)
+	// Use zap.NewDevelopment() for dev; swap to zap.NewProduction() for
+	// staging/production once --env flag drives the decision.
+	logger, _ := zap.NewDevelopment()
+	defer logger.Sync() //nolint:errcheck
+	log := logger.Sugar()
+
+	log.Infow("Orchestr8 Server starting",
+		"config", *configDir,
+		"grpcPort", *port,
+		"httpPort", *httpPort,
+		"env", *env,
+	)
 
 	// TODO: Initialize components in order:
 	// 1. Load and validate configuration
@@ -49,7 +57,7 @@ func main() {
 
 	select {
 	case sig := <-sigCh:
-		fmt.Printf("\nReceived %s, initiating graceful shutdown...\n", sig)
+		log.Infow("Received signal, initiating graceful shutdown", "signal", sig)
 		cancel()
 		// TODO: Drain in-flight workflows
 		// TODO: Notify agents to wrap up
@@ -58,5 +66,5 @@ func main() {
 	case <-ctx.Done():
 	}
 
-	fmt.Println("Orchestr8 Server stopped.")
+	log.Info("Orchestr8 Server stopped")
 }
