@@ -1,0 +1,13 @@
+# Organization Topology (v0.2+)
+schema_version: "0.2"
+
+# organization:
+#   id: "acme-engineering"
+#   name: "Acme Corp Engineering"
+#   topology: "hierarchy"
+#   structure:
+#     - agent_id: "sarah-chen"
+#       role: "VP of Engineering"
+#       manages:
+#         - agent_id: "mike-torres"
+#           role: "Senior Backend Engineer"

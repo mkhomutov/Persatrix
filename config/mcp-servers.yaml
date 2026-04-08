@@ -1,0 +1,23 @@
+# Orchestr8 MCP Server Configuration
+schema_version: "0.1"
+
+mcp_servers:
+  - id: "github"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+    allowed_tools:
+      - "create_pull_request"
+      - "search_repositories"
+      - "get_file_contents"
+      - "list_commits"
+
+  - id: "filesystem"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    sandbox:
+      allowed_paths: ["/workspace"]
+      read_only: false

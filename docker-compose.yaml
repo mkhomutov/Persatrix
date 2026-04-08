@@ -1,0 +1,92 @@
+# Orchestr8 — Local Development Stack
+# Usage: docker compose up -d
+
+services:
+  # ─── Orchestrator (Go) ────────────────────────────
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    ports:
+      - "9090:9090"   # gRPC
+      - "8080:8080"   # HTTP REST + SSE
+    volumes:
+      - ./config:/app/config:ro
+      - ./workflows:/app/workflows:ro
+      - workspace:/workspace
+    environment:
+      - ENVIRONMENT=development
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - OTEL_SERVICE_NAME=orchestr8-server
+    depends_on:
+      - jaeger
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── Agent: Planner ──────────────────────────────
+  agent-planner:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command: ["--agent", "planner", "--port", "50051"]
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - orchestrator
+
+  # ─── Agent: Code Writer ──────────────────────────
+  agent-coder:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command: ["--agent", "code-writer", "--port", "50052"]
+    ports:
+      - "50052:50052"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - orchestrator
+
+  # ─── Agent: Code Reviewer ────────────────────────
+  agent-reviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command: ["--agent", "code-reviewer", "--port", "50053"]
+    ports:
+      - "50053:50053"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      - orchestrator
+
+  # ─── Observability: Jaeger (OTEL-compatible) ─────
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+volumes:
+  workspace:
+    driver: local

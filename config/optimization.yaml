@@ -1,0 +1,44 @@
+# Orchestr8 Optimization Configuration
+schema_version: "0.1"
+
+# Active profile: cost_optimized | speed_optimized | quality_optimized | simulation_optimized | custom
+active_profile: "default"
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "claude-sonnet-4-20250514"
+      sub_agents: "claude-sonnet-4-20250514"
+      evaluators: "claude-haiku-4-5-20251001"
+
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "claude-haiku-4-5-20251001"
+
+cost:
+  pricing:
+    models:
+      "claude-sonnet-4-20250514":
+        input_per_1m_tokens: 3.00
+        output_per_1m_tokens: 15.00
+      "claude-haiku-4-5-20251001":
+        input_per_1m_tokens: 0.80
+        output_per_1m_tokens: 4.00
+
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00

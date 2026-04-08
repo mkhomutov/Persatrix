@@ -1,0 +1,31 @@
+# Reusable Persona Templates
+# Reference: { extends: "templates/personas.yaml#senior_engineer" }
+
+persona_templates:
+  senior_engineer:
+    personality:
+      communication_style: "technical, precise, backs claims with evidence"
+      decision_making: "engineering-first, prefers measurable outcomes"
+    knowledge:
+      domains: ["software architecture", "code review", "testing"]
+
+  product_manager:
+    personality:
+      communication_style: "user-focused, concise, uses data"
+      decision_making: "balances user value against engineering cost"
+    knowledge:
+      domains: ["product strategy", "user research", "agile"]
+
+  qa_engineer:
+    personality:
+      communication_style: "detail-oriented, systematic, asks edge-case questions"
+      decision_making: "risk-averse, quality-first"
+    knowledge:
+      domains: ["testing", "automation", "quality assurance"]
+
+  creative_writer:
+    personality:
+      communication_style: "expressive, metaphorical, comfortable with ambiguity"
+      decision_making: "intuition-driven, seeks emotional resonance"
+    knowledge:
+      domains: ["storytelling", "character development", "dialogue"]

@@ -1,0 +1,99 @@
+"""
+Orchestr8 Agent gRPC Server.
+
+Runs one or more agents in a single process, exposing them via gRPC
+for the orchestrator to communicate with.
+"""
+
+import argparse
+import asyncio
+import logging
+import signal
+import sys
+
+# TODO: Import generated gRPC stubs
+# from .generated import task_pb2, task_pb2_grpc
+
+logger = logging.getLogger("orchestr8.agent.server")
+
+
+class AgentServer:
+    """gRPC server hosting one or more agents."""
+
+    def __init__(self, host: str = "0.0.0.0", port: int = 50051):
+        self.host = host
+        self.port = port
+        self.agents: dict = {}  # agent_id -> BaseAgent instance
+        self._server = None
+
+    def register_agent(self, agent) -> None:
+        """Register an agent instance with the server."""
+        self.agents[agent.agent_id] = agent
+        logger.info(f"Registered agent: {agent.agent_id} ({agent.name})")
+
+    async def start(self) -> None:
+        """Start the gRPC server."""
+        # TODO: Create gRPC server
+        # TODO: Add AgentService servicer
+        # TODO: Add health check servicer
+        # TODO: Start serving
+        logger.info(f"Agent server listening on {self.host}:{self.port}")
+        logger.info(f"Serving {len(self.agents)} agent(s): {list(self.agents.keys())}")
+
+    async def stop(self) -> None:
+        """Gracefully stop the server."""
+        logger.info("Shutting down agent server...")
+        for agent in self.agents.values():
+            await agent.shutdown()
+        if self._server:
+            await self._server.stop(grace=5)
+        logger.info("Agent server stopped.")
+
+
+def load_agent(agent_id: str):
+    """Load an agent by ID from config. Returns a BaseAgent instance."""
+    # TODO: Load agent config from YAML
+    # TODO: Determine agent type (task vs persona)
+    # TODO: Instantiate appropriate class
+    # TODO: Initialize LLM client
+    # TODO: Register tools
+    raise NotImplementedError(f"Agent loading not yet implemented: {agent_id}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Orchestr8 Agent Server")
+    parser.add_argument("--agent", required=True, help="Agent ID to run")
+    parser.add_argument("--port", type=int, default=50051, help="gRPC port")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address")
+    parser.add_argument("--config", default="../config/agents.yaml", help="Agent config path")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
+    server = AgentServer(host=args.host, port=args.port)
+
+    # TODO: Load and register agent
+    # agent = load_agent(args.agent)
+    # server.register_agent(agent)
+
+    loop = asyncio.new_event_loop()
+
+    def handle_signal():
+        loop.create_task(server.stop())
+        loop.stop()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, handle_signal)
+
+    try:
+        loop.run_until_complete(server.start())
+        loop.run_forever()
+    finally:
+        loop.close()
+
+
+if __name__ == "__main__":
+    main()

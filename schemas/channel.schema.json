@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orchestr8.dev/schemas/channel.schema.json",
+  "title": "Orchestr8 Channel Configuration (v0.2+)",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "channels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["group", "direct", "broadcast", "meeting"] },
+          "name": { "type": "string" },
+          "members": {},
+          "history_visible": { "type": "boolean" },
+          "max_history_messages": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

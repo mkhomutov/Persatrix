@@ -1,0 +1,44 @@
+# Build artifacts
+bin/
+cli/target/
+internal/generated/
+agents/generated/
+
+# Dependencies
+vendor/
+node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data
+*.db
+*.sqlite
+/workspace/
+/data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Logs
+*.log

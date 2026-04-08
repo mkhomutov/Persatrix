@@ -1,0 +1,108 @@
+# Orchestr8 Agent Configuration
+# Schema: schemas/agent.schema.json
+schema_version: "0.1"
+
+agents:
+  # ─── Task Agent (v0.1) ────────────────────────────────
+  - id: "planner"
+    name: "Planner"
+    role: "Decomposes high-level goals into actionable step-by-step plans"
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.3
+    capabilities:
+      - planning
+      - decomposition
+      - prioritization
+    tools: []
+    max_retries: 2
+    timeout_seconds: 120
+    permissions:
+      network:
+        allow: ["api.anthropic.com"]
+        deny: ["*"]
+
+  - id: "code-writer"
+    name: "Code Writer"
+    role: "Writes clean, tested code from specifications"
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.3
+    capabilities:
+      - code_generation
+      - code_review
+      - unit_testing
+    tools:
+      - file_read
+      - file_write
+      - shell_exec
+      - mcp:github
+    max_retries: 2
+    timeout_seconds: 300
+    permissions:
+      filesystem:
+        read: ["/workspace/src/**", "/workspace/tests/**"]
+        write: ["/workspace/src/**", "/workspace/tests/**"]
+        deny: ["/workspace/.env", "**/.git/**"]
+      shell:
+        allowed_commands: ["python", "pytest", "ruff", "git diff"]
+        max_execution_seconds: 30
+      network:
+        allow: ["api.anthropic.com"]
+        deny: ["*"]
+
+  - id: "code-reviewer"
+    name: "Code Reviewer"
+    role: "Reviews code for correctness, style, and security"
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.2
+    capabilities:
+      - code_review
+      - security_audit
+    tools:
+      - file_read
+      - mcp:github
+    max_retries: 1
+    timeout_seconds: 180
+    permissions:
+      filesystem:
+        read: ["/workspace/**"]
+        write: []
+      network:
+        allow: ["api.anthropic.com"]
+        deny: ["*"]
+
+  # ─── Persona Agent (v0.2+, commented out for v0.1) ────
+  # - id: "sarah-chen"
+  #   name: "Sarah Chen"
+  #   role: "Engineering leadership and technical oversight"
+  #   model: "claude-sonnet-4-20250514"
+  #   temperature: 0.7
+  #   capabilities:
+  #     - architecture_review
+  #     - sprint_planning
+  #     - team_management
+  #   tools:
+  #     - file_read
+  #     - mcp:github
+  #   max_retries: 2
+  #   timeout_seconds: 300
+  #   persona:
+  #     title: "VP of Engineering"
+  #     background: |
+  #       15 years in software engineering. Former tech lead at a Series B startup.
+  #       Values pragmatism over perfection.
+  #     personality:
+  #       traits: [pragmatic, direct, collaborative]
+  #       communication_style: "concise and structured"
+  #       decision_making: "data-driven"
+  #     goals:
+  #       primary: "Ship v2.0 on time with acceptable quality"
+  #       secondary: ["Reduce tech debt by 20%"]
+  #   autonomy:
+  #     level: "semi-autonomous"
+  #     can_initiate_conversations: true
+  #     can_delegate_tasks: true
+  #     can_spawn_sub_agents: true
+  #   relationships:
+  #     - agent_id: "mike-torres"
+  #       type: "reports_to_me"
+  #       trust_level: 0.9

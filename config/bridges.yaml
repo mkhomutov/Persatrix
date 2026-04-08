@@ -1,0 +1,12 @@
+# External Bridge Configuration (v0.2+)
+schema_version: "0.2"
+
+# bridges:
+#   - id: "email"
+#     type: "email"
+#     provider: "smtp"
+#     config:
+#       smtp_host: "smtp.gmail.com"
+#       smtp_port: 587
+#       username: "${EMAIL_USERNAME}"
+#       password: "${EMAIL_PASSWORD}"

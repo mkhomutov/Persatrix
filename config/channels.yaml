@@ -1,0 +1,10 @@
+# Channel Configuration (v0.2+)
+schema_version: "0.2"
+
+# channels:
+#   - id: "eng-general"
+#     type: "group"
+#     name: "#engineering-general"
+#     members: ["sarah-chen", "mike-torres", "james-wu"]
+#     history_visible: true
+#     max_history_messages: 100

@@ -1,0 +1,34 @@
+# Reusable Sub-Agent Templates
+# Reference in code: SubAgentRequest(template="researcher", ...)
+
+sub_agent_templates:
+  researcher:
+    role: "research analyst"
+    tools: [http_request, file_write]
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.3
+
+  coder:
+    role: "implementation specialist"
+    tools: [file_read, file_write, shell_exec]
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.2
+
+  code_reviewer:
+    role: "code quality analyst"
+    tools: [file_read]
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.1
+    restricted_permissions: ["filesystem:write", "shell:*"]
+
+  writer:
+    role: "content writer"
+    tools: [file_read, file_write]
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.7
+
+  translator:
+    role: "professional translator"
+    tools: []
+    model: "claude-haiku-4-5-20251001"
+    temperature: 0.3

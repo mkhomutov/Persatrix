@@ -1,0 +1,21 @@
+[package]
+name = "orch"
+version = "0.1.0"
+edition = "2021"
+description = "Orchestr8 CLI — manage agents, workflows, and the mesh"
+license = "Apache-2.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12"                    # gRPC client
+reqwest = { version = "0.12", features = ["json"] }
+colored = "2"
+tabled = "0.16"                   # table output formatting
+indicatif = "0.17"                # progress bars
+
+[build-dependencies]
+tonic-build = "0.12"
