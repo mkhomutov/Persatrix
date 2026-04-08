@@ -1,0 +1,40 @@
+name: PR Title (Conventional Commits)
+
+# Enforces conventional commit format on PR titles.
+# Since this project uses squash-merge, the PR title becomes the merge commit
+# message — ensuring git-cliff can parse it correctly for changelog generation.
+
+on:
+  pull_request:
+    types: [ opened, edited, synchronize, reopened ]
+
+# Restrict defaults; each job grants only what it needs
+permissions: {}
+
+jobs:
+  commitlint:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check PR title
+        uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825 # v5
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            ci
+            test
+            chore
+            style
+            build
+            revert
+            infra
+          requireScope: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
