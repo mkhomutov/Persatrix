@@ -23,7 +23,10 @@ func main() {
 
 	// Use zap.NewDevelopment() for dev; swap to zap.NewProduction() for
 	// staging/production once --env flag drives the decision.
-	logger, _ := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic("failed to initialise logger: " + err.Error())
+	}
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
