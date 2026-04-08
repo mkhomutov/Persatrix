@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orchestr8.dev/schemas/workflow.schema.json",
+  "title": "Orchestr8 Workflow Definition",
+  "type": "object",
+  "required": ["schema_version", "workflow"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "workflow": {
+      "type": "object",
+      "required": ["id", "name", "steps"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "trigger": { "type": "string", "enum": ["manual", "schedule", "event"] },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "agent", "input"],
+            "properties": {
+              "id": { "type": "string" },
+              "agent": { "type": "string" },
+              "input": { "type": "string" },
+              "output_key": { "type": "string" },
+              "depends_on": { "type": "array", "items": { "type": "string" } },
+              "condition": { "type": "string" },
+              "approval_required": { "type": "boolean" },
+              "approval_timeout": { "type": "integer" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+# Prevent sending unnecessary files to Docker daemon during builds.
+# Without this, the entire repo context (build artifacts, .git, docs, etc.)
+# is sent to the daemon, significantly slowing builds.
+
+# Version control
+.git/
+.gitignore
+
+# Build artifacts
+bin/
+cli/target/
+internal/generated/
+agents/generated/
+
+# Dependencies / caches
+vendor/
+node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment / secrets
+.env
+.env.*
+
+# Documentation (not needed in images)
+docs/
+*.md
+LICENSE
+
+# Tests (not needed in production images)
+tests/
+evaluators/
+
+# OS files
+.DS_Store
+Thumbs.db

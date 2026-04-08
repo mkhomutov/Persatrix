@@ -1,0 +1,25 @@
+[package]
+name = "orch"
+version = "0.1.0"
+edition = "2021"
+description = "Orchestr8 CLI — manage agents, workflows, and the mesh"
+license = "Apache-2.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# PR review: serde_yaml is deprecated and unmaintained; serde_yml is the
+# maintained successor crate. Migrated before any code depends on the API.
+serde_yml = "0.0.12"
+# "full" pulls every Tokio sub-crate (io_uring, process, fs …).
+# A CLI only needs the async runtime and macros for #[tokio::main].
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tonic = "0.12"                    # gRPC client
+reqwest = { version = "0.12", features = ["json"] }
+colored = "2"
+tabled = "0.16"                   # table output formatting
+indicatif = "0.17"                # progress bars
+
+# tonic-build removed: no build.rs exists to compile proto stubs.
+# Re-add together with a build.rs when the CLI needs generated gRPC types.

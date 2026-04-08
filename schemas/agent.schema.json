@@ -1,0 +1,136 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orchestr8.dev/schemas/agent.schema.json",
+  "title": "Orchestr8 Agent Configuration",
+  "type": "object",
+  "required": ["schema_version", "agents"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["0.1", "0.2"]
+    },
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/agent" }
+    }
+  },
+  "definitions": {
+    "agent": {
+      "type": "object",
+      "required": ["id", "name", "role", "model"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+          "description": "Unique agent identifier (lowercase, hyphens allowed)"
+        },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "model": { "type": "string" },
+        "temperature": {
+          "type": "number", "minimum": 0, "maximum": 2, "default": 0.3
+        },
+        "capabilities": {
+          "type": "array", "items": { "type": "string" }
+        },
+        "tools": {
+          "type": "array", "items": { "type": "string" }
+        },
+        "max_retries": {
+          "type": "integer", "minimum": 0, "default": 2
+        },
+        "timeout_seconds": {
+          "type": "integer", "minimum": 1, "default": 120
+        },
+        "permissions": { "$ref": "#/definitions/permissions" },
+        "persona": { "$ref": "#/definitions/persona" },
+        "autonomy": { "$ref": "#/definitions/autonomy" },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/relationship" }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "filesystem": {
+          "type": "object",
+          "properties": {
+            "read": { "type": "array", "items": { "type": "string" } },
+            "write": { "type": "array", "items": { "type": "string" } },
+            "deny": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "allow": { "type": "array", "items": { "type": "string" } },
+            "deny": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "shell": {
+          "type": "object",
+          "properties": {
+            "allowed_commands": { "type": "array", "items": { "type": "string" } },
+            "max_execution_seconds": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "background": { "type": "string" },
+        "personality": {
+          "type": "object",
+          "properties": {
+            "traits": { "type": "array", "items": { "type": "string" } },
+            "communication_style": { "type": "string" },
+            "decision_making": { "type": "string" }
+          }
+        },
+        "goals": {
+          "type": "object",
+          "properties": {
+            "primary": { "type": "string" },
+            "secondary": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "knowledge": {
+          "type": "object",
+          "properties": {
+            "domains": { "type": "array", "items": { "type": "string" } },
+            "limitations": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["passive", "reactive", "semi-autonomous", "autonomous", "supervisor"]
+        },
+        "can_initiate_conversations": { "type": "boolean" },
+        "can_delegate_tasks": { "type": "boolean" },
+        "can_spawn_sub_agents": { "type": "boolean" },
+        "requires_approval_for": {
+          "type": "array", "items": { "type": "string" }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["agent_id", "type"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "type": { "type": "string" },
+        "trust_level": { "type": "number", "minimum": 0, "maximum": 1 },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

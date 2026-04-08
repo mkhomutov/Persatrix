@@ -1,0 +1,21 @@
+# Blueprint: Software Development Team
+# Usage: orch init --blueprint software-team
+
+blueprint:
+  id: "software-team"
+  description: "A small dev team building a product"
+  agents:
+    - { extends: "templates/personas.yaml#product_manager", id: "pm" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "architect" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "backend-dev" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "frontend-dev" }
+    - { extends: "templates/personas.yaml#qa_engineer", id: "qa" }
+  organization:
+    topology: "flat"
+    lead: "pm"
+  channels:
+    - { id: "general", members: "all" }
+    - { id: "code-review", members: ["architect", "backend-dev", "frontend-dev"] }
+    - { id: "bugs", members: ["qa", "backend-dev", "frontend-dev"] }
+  workflows:
+    - "workflows/feature-development.yaml"

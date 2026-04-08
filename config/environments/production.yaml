@@ -1,0 +1,17 @@
+environment: "production"
+
+deployment:
+  mode: "hub_and_spoke"
+
+observability:
+  otlp:
+    endpoint: "http://otel-collector:4318"
+  content_capture:
+    llm_prompts: false
+    llm_responses: false
+
+cost:
+  budgets:
+    global:
+      max_daily_usd: 500.00
+      on_exceed: "hard_stop"

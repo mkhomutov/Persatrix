@@ -1,0 +1,17 @@
+{
+  "_comment": "Mock LLM response for planner agent — basic task decomposition",
+  "model": "claude-sonnet-4-20250514",
+  "input_hash": "example_hash",
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "## Plan\n1. Analyze requirements\n2. Design architecture\n3. Implement core logic\n4. Write tests\n5. Review and refine"
+      }
+    ],
+    "usage": {
+      "input_tokens": 150,
+      "output_tokens": 80
+    }
+  }
+}

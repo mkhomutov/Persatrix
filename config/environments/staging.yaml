@@ -1,0 +1,16 @@
+environment: "staging"
+
+deployment:
+  mode: "local"
+
+observability:
+  otlp:
+    endpoint: "http://otel-collector:4318"
+  content_capture:
+    llm_prompts: false
+    llm_responses: true
+
+cost:
+  budgets:
+    global:
+      max_daily_usd: 50.00

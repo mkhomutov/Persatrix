@@ -1,0 +1,17 @@
+# Blueprint: Social Experiment
+# Usage: orch init --blueprint social-experiment
+
+blueprint:
+  id: "social-experiment"
+  description: "N individuals debating a policy topic"
+  parameters:
+    num_participants: 12
+    topic: "Universal basic income"
+    diversity_axes:
+      - political_leaning: ["progressive", "moderate", "conservative"]
+      - age_group: ["gen-z", "millennial", "gen-x", "boomer"]
+  auto_generate_personas: true
+  channels:
+    - { id: "town-hall", type: "meeting", protocol: "debate" }
+  observers:
+    - { id: "researcher", type: "passive", metrics: ["sentiment", "consensus"] }
