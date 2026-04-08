@@ -5,6 +5,7 @@ Runs a fast subset of checks (target: <10 s) sequentially and prints a
 summary at the end.  Exits 0 if all pass, 1 if any fail.
 
 Checks executed:
+  0. Regenerate FILEMAP.md and ``git add`` it
   1. ``go fmt`` check (Go orchestrator)
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
@@ -48,12 +49,39 @@ def _resolve_argv(argv: List[str]) -> List[str]:
     return [sys.executable if tok == "{python}" else tok for tok in argv]
 
 
+def _update_filemap() -> bool:
+    """Regenerate FILEMAP.md and stage it.  Returns True on success."""
+    print("\n▶ filemap")
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "scripts/generate_filemap.py"],
+            cwd=REPO_ROOT,
+        )
+        if proc.returncode != 0:
+            elapsed = time.monotonic() - t0
+            print(f"  ✗ FAIL  ({elapsed:.1f}s)")
+            return False
+        # Stage the updated file so it's included in the commit.
+        subprocess.run(["git", "add", "FILEMAP.md"], cwd=REPO_ROOT, check=True)
+        elapsed = time.monotonic() - t0
+        print(f"  ✓ PASS  ({elapsed:.1f}s)")
+        return True
+    except FileNotFoundError:
+        elapsed = time.monotonic() - t0
+        print(f"  ✗ FAIL  (git or python not found) ({elapsed:.1f}s)")
+        return False
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ensure_utf8_streams()
 
     parser = argparse.ArgumentParser(description="Run fast pre-commit checks.")
     parser.add_argument("--skip-fmt", action="store_true", help="Skip formatting checks.")
     args = parser.parse_args(argv)
+
+    # Always regenerate the file map first (and stage it).
+    _update_filemap()
 
     checks = _CHECKS if not args.skip_fmt else [c for c in _CHECKS if c[0] not in _FMT_LABELS]
 
