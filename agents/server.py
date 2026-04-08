@@ -20,7 +20,7 @@ logger = logging.getLogger("orchestr8.agent.server")
 class AgentServer:
     """gRPC server hosting one or more agents."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 50051):
+    def __init__(self, host: str = "127.0.0.1", port: int = 50051):
         self.host = host
         self.port = port
         self.agents: dict = {}  # agent_id -> BaseAgent instance
@@ -65,7 +65,7 @@ def main():
     parser = argparse.ArgumentParser(description="Orchestr8 Agent Server")
     parser.add_argument("--agent", required=True, help="Agent ID to run")
     parser.add_argument("--port", type=int, default=50051, help="gRPC port")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (use 0.0.0.0 in containers)")
     parser.add_argument("--config", default="../config/agents.yaml", help="Agent config path")
     args = parser.parse_args()
 
@@ -80,25 +80,33 @@ def main():
     # agent = load_agent(args.agent)
     # server.register_agent(agent)
 
-    loop = asyncio.new_event_loop()
+    async def _run() -> None:
+        """Run server with asyncio.run() for proper event-loop management.
 
-    def handle_signal():
-        loop.create_task(server.stop())
-        loop.stop()
+        asyncio.run() (Python 3.7+) creates, sets, and tears down the loop
+        correctly — unlike the legacy new_event_loop() pattern which never
+        called set_event_loop(), so any code using get_event_loop() elsewhere
+        would silently get a *different* loop.
+        """
+        shutdown = asyncio.Event()
 
-    # loop.add_signal_handler() is POSIX-only and raises NotImplementedError on Windows.
-    # Use platform detection to support both POSIX and Windows signal handling.
-    if sys.platform != "win32":
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, handle_signal)
-    else:
-        signal.signal(signal.SIGINT, lambda s, f: handle_signal())
+        def request_shutdown():
+            shutdown.set()
 
-    try:
-        loop.run_until_complete(server.start())
-        loop.run_forever()
-    finally:
-        loop.close()
+        # loop.add_signal_handler() is POSIX-only and raises NotImplementedError on Windows.
+        # Use platform detection to support both POSIX and Windows signal handling.
+        if sys.platform != "win32":
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, request_shutdown)
+        else:
+            signal.signal(signal.SIGINT, lambda s, f: request_shutdown())
+
+        await server.start()
+        await shutdown.wait()
+        await server.stop()
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

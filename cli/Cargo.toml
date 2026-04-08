@@ -10,12 +10,14 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["full"] }
+# "full" pulls every Tokio sub-crate (io_uring, process, fs …).
+# A CLI only needs the async runtime and macros for #[tokio::main].
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = "0.12"                    # gRPC client
 reqwest = { version = "0.12", features = ["json"] }
 colored = "2"
 tabled = "0.16"                   # table output formatting
 indicatif = "0.17"                # progress bars
 
-[build-dependencies]
-tonic-build = "0.12"
+# tonic-build removed: no build.rs exists to compile proto stubs.
+# Re-add together with a build.rs when the CLI needs generated gRPC types.
