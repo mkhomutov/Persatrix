@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0001 defines ~780 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. The planner phase alone is estimated at ~400 LOC implementation + tests, which will exceed 500 lines with comprehensive test coverage. This plan splits the work into **4 PRs**, one per phase, with the planner split into two PRs if it exceeds the limit during implementation.
+RFC 0001 defines ~780 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. The planner phase alone is estimated at ~350–400 LOC implementation + ~300–500 LOC tests, which will exceed 500 lines. This plan splits the work into **5 PRs**: phases 1, 2, and 4 each get one PR, while phase 3 (planner) is split into two PRs at a natural boundary (Parse+DAG+Plan vs. ResolveInputs).
 
 Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
@@ -24,13 +24,15 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 **Branch**: `feature/v01-state-inmemory`
 **Estimated size**: ~350–450 lines (types + interface + implementation + tests)
 
+> **Note**: If this PR exceeds 500 lines during implementation, the concurrent goroutine tests (`_concurrent_test.go`) can be split into a follow-up PR within the same branch, keeping the core CRUD tests in the initial PR.
+
 #### Scope
 
 | File | Change |
 |------|--------|
 | `internal/state/state.go` | Replace TODO stubs with: `RunStatus` enum (explicit integers, no `iota`), `WorkflowRun`, `StepState` types, `Store` interface (6 methods), `InMemoryStore` implementation (`sync.RWMutex` + map), sentinel errors (`ErrRunAlreadyExists`, `ErrRunNotFound`), `NewInMemoryStore` constructor |
 | `internal/state/state_test.go` | New file — unit tests |
-| `go.mod` / `go.sum` | Add `github.com/google/uuid` (direct); promote `github.com/stretchr/testify` from indirect to direct |
+| `go.mod` / `go.sum` | Add `github.com/google/uuid` (direct, new — adds entries to both `go.mod` and `go.sum`); promote `github.com/stretchr/testify` from indirect to direct (`go.mod` only — already resolved in `go.sum` at v1.9.0) |
 
 #### Key implementation details
 
@@ -78,6 +80,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 #### Key implementation details
 
 - Reuse existing `AgentInfo`, `AgentStatus`, `Registry` interface — do not redefine.
+- **Note**: Existing `AgentStatus` uses `iota`, which is inconsistent with the explicit-integer mandate for `RunStatus` (PR 1). This is acceptable because `AgentStatus` has no proto wire-format alignment requirement — the proto `HealthStatus` enum has different semantics (`UNKNOWN=0, SERVING=1, NOT_SERVING=2`).
 - `Register` takes `AgentInfo` by value (existing interface signature); store internal pointer copy with `Capabilities` slice deep-copied.
 - `Get` / `List` / `FindByCapability` return copies with `Capabilities` slice reconstructed via `copy()`.
 - `Get` returns `ErrAgentNotFound` on miss.
@@ -87,7 +90,9 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 - Register / Unregister / Get / List / UpdateStatus / FindByCapability.
 - `ErrAgentAlreadyRegistered` on duplicate register.
-- `ErrAgentNotFound` on get/unregister/update of nonexistent agent.
+- `ErrAgentNotFound` on Get of nonexistent agent.
+- `ErrAgentNotFound` on Unregister of nonexistent agent.
+- `ErrAgentNotFound` on UpdateStatus of nonexistent agent.
 - Re-registration flow: register → unregister → register with same ID succeeds.
 - FindByCapability with multiple matches, no matches.
 - Deep copy verification: mutating returned `AgentInfo.Capabilities` must not affect registry.
@@ -102,41 +107,37 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 ---
 
-### PR 3: `feature/v01-planner-yaml` — YAMLPlanner
+### PR 3a: `feature/v01-planner-yaml` — YAMLPlanner (Parse + DAG + Plan)
 
 **Depends on**: PR 1 merged (uses `RunStatus` for alignment context, though no import dependency)
 **Branch**: `feature/v01-planner-yaml`
-**Estimated size**: ~400–500+ lines (implementation + tests)
+**Estimated size**: ~350–450 lines (implementation + tests)
 
-> **Note**: If this PR exceeds 500 lines during implementation, split into two PRs:
-> - **PR 3a**: Parse + ValidateDAG + Plan (core planner, ~300 LOC + tests)
-> - **PR 3b**: ResolveInputs + template resolution tests (~200 LOC + tests)
->
-> The split point is natural because `ResolveInputs` is a standalone package-level function with no dependency on `YAMLPlanner` state.
+> **Rationale for mandatory split**: The full planner phase (implementation ~350–400 LOC + tests ~300–500 LOC) realistically totals 650–900 lines. `ResolveInputs` is a standalone package-level function with no dependency on `YAMLPlanner` state, making it a natural split point into PR 3b.
 
 #### Scope
 
 | File | Change |
 |------|--------|
-| `internal/planner/planner.go` | Add below existing types/interface: `WorkflowFile` wrapper struct, `YAMLPlanner` struct, `NewYAMLPlanner` constructor, `Parse` (YAML read + validation), `ValidateDAG` (DFS cycle detection), `Plan` (Kahn's topological sort), `ResolveInputs` (package-level function), shared `stepIDPattern` const, validation regexes |
-| `internal/planner/planner_test.go` | New file — unit tests |
-| `go.mod` / `go.sum` | Add `gopkg.in/yaml.v3` (direct) |
+| `internal/planner/planner.go` | Add below existing types/interface: `WorkflowFile` wrapper struct, `YAMLPlanner` struct, `NewYAMLPlanner` constructor, `Parse` (YAML read + validation), `ValidateDAG` (DFS cycle detection), `Plan` (Kahn's topological sort), shared `stepIDPattern` const, validation regexes |
+| `internal/planner/planner_test.go` | New file — unit tests for Parse, ValidateDAG, Plan |
+| `internal/planner/testdata/` | Test fixtures: valid workflow YAML, invalid variants, oversized file for security test |
+| `go.mod` / `go.sum` | Promote `gopkg.in/yaml.v3` from indirect to direct (already resolved in `go.sum` at v3.0.1 via testify — no new checksum entries) |
 
 #### Key implementation details
 
-- **Parse**: `WorkflowFile` wrapper unmarshals `schema_version` + `workflow`. Validate: `SchemaVersion == "0.1"`, required fields (`id`, `name`, steps non-empty, each step has `id`/`agent`/`input`), workflow ID format, agent ID format, step ID format, `output_key` format (if present), `depends_on` references, step ID uniqueness. Silent handling of unknown YAML keys (no `KnownFields`). `filepath.Clean` on path. `io.LimitReader` with 1 MB + 1 byte overflow detection. YAML anchor/alias rejection.
+- **Parse**: `WorkflowFile` wrapper unmarshals `schema_version` + `workflow`. Validate: `SchemaVersion == "0.1"`, required fields (`id`, `name`, steps non-empty, each step has `id`/`agent`/`input`), workflow ID format, agent ID format, step ID format, `output_key` format (if present), `output_key` uniqueness across steps (reject duplicates to prevent silent overwrites), `depends_on` references point to existing step IDs, step ID uniqueness. Silent handling of unknown YAML keys (no `KnownFields`). `filepath.Clean` on path. `io.LimitReader` with 1 MB + 1 byte overflow detection.
+- **YAML anchor/alias rejection**: Decode to `yaml.Node` tree first, walk nodes rejecting any with `Kind == yaml.AliasNode`, then decode the validated node to the target struct. This 2-pass approach is necessary because `gopkg.in/yaml.v3` has no built-in "disable aliases" option.
 - **ValidateDAG**: DFS-based cycle detection with descriptive error (cycle path).
 - **Plan**: Kahn's algorithm producing `ExecutionPlan` with parallel stages. MUST verify `len(emitted) == len(workflow.Steps)` after completion.
-- **ResolveInputs**: Package-level function (not method). Single `const stepIDPattern` shared between Parse validation regex and template capture group. Single-pass substitution (no re-scan). Operates on `Step.Input` only (not `Step.Condition`). `logger.Warn` for suspicious unresolved patterns. Logger MUST be non-nil (use `zap.NewNop()` in tests).
-- **Regex**: Combined pattern `\{\{\s*(steps\.(<stepIDPattern>)\.output|([a-z_][a-z0-9_]*))\s*\}\}`.
+- **Fixture path strategy**: Tests use `testdata/` directory within `internal/planner/` for all YAML fixtures. The `feature-builder.yaml` integration test copies or embeds the repo-root fixture rather than relying on relative path resolution (which breaks because `go test` sets CWD to the package directory).
 
 #### Tests
 
-- **Parse**: valid fixture (`feature-builder.yaml`), missing required fields, bad agent IDs, bad step IDs, duplicate step IDs, empty steps, unknown schema version, empty schema version, `output_key` format validation.
+- **Parse**: valid fixture, missing required fields, bad workflow IDs, bad agent IDs, bad step IDs, duplicate step IDs, empty steps, unknown schema version, empty schema version, `output_key` format validation, `output_key` uniqueness violation, invalid `depends_on` reference (references nonexistent step ID).
 - **ValidateDAG**: no-cycle, simple cycle (A→B→A), complex cycle (A→B→C→A), self-reference.
 - **Plan**: linear chain, diamond dependency, fully parallel, single step. Node-count defense check.
-- **Pipeline integration**: Parse → ValidateDAG → Plan on `feature-builder.yaml`, assert 4 stages.
-- **ResolveInputs**: missing step ref, missing var ref, malformed patterns passthrough, multiple templates in one string, single-pass (no re-scan), suspicious pattern warning log, empty/nil maps, passthrough (no templates), single template input, extra unused outputs, multi-line block scalar input.
+- **Pipeline integration**: Parse → ValidateDAG → Plan on `feature-builder.yaml` fixture, assert 4 stages.
 - **Security**: YAML file >1 MB rejected, anchor/alias rejected, `filepath.Clean` normalization.
 - Race detector (`-race` flag).
 
@@ -145,14 +146,46 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 - [ ] `go test ./internal/planner/... -v -race -cover` passes
 - [ ] Coverage ≥ 80%
 - [ ] `stepIDPattern` defined as single const, referenced by both validation and template regex
-- [ ] Fixture test uses `workflows/feature-builder.yaml`
-- [ ] Total PR ≤ 500 lines (split if exceeded)
+- [ ] Fixtures in `internal/planner/testdata/`
+- [ ] Total PR ≤ 500 lines
 
 ---
 
-### PR 4: `feature/v01-orchestrator-wiring` — Wire into main.go
+### PR 3b: `feature/v01-planner-resolve` — ResolveInputs
 
-**Depends on**: PRs 1, 2, 3 merged
+**Depends on**: PR 3a merged
+**Branch**: `feature/v01-planner-resolve`
+**Estimated size**: ~200–350 lines (implementation + tests)
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/planner/planner.go` | Add `ResolveInputs` package-level function, combined regex pattern |
+| `internal/planner/resolve_test.go` | New file — ResolveInputs unit tests |
+
+#### Key implementation details
+
+- **ResolveInputs**: Package-level function (not method). Single `const stepIDPattern` shared between Parse validation regex and template capture group. Single-pass substitution (no re-scan). Operates on `Step.Input` only (not `Step.Condition`). `logger.Warn` for suspicious unresolved patterns. Logger MUST be non-nil (use `zap.NewNop()` in tests).
+- **Regex**: Combined pattern `\{\{\s*(steps\.(<stepIDPattern>)\.output|([a-z_][a-z0-9_]*))\s*\}\}`.
+
+#### Tests
+
+- **ResolveInputs**: missing step ref, missing var ref, malformed patterns passthrough, multiple templates in one string, single-pass (no re-scan), suspicious pattern warning log, empty/nil maps, passthrough (no templates), single template input, extra unused outputs, multi-line block scalar input.
+- Race detector (`-race` flag).
+
+#### PR checklist
+
+- [ ] `go test ./internal/planner/... -v -race -cover` passes
+- [ ] Coverage ≥ 80%
+- [ ] `stepIDPattern` reused from PR 3a (no duplication)
+- [ ] Total PR ≤ 500 lines
+
+---
+
+### PR 5: `feature/v01-orchestrator-wiring` — Wire into main.go
+
+**Depends on**: PRs 1, 2, 3a, 3b merged
 **Branch**: `feature/v01-orchestrator-wiring`
 **Estimated size**: ~30–50 lines
 
@@ -187,31 +220,29 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 ## Dependency Graph
 
 ```
-PR 1 (state)  ──┐
-                 ├──→  PR 4 (wiring)
-PR 2 (registry) ─┤
-                 │
-PR 3 (planner) ──┘
+PR 1 (state)  ──────────────────────────────────────┐
+PR 2 (registry) ──────────────────────────────────┼──→ PR 5 (wiring)
+PR 3a (planner parse+dag+plan) ──→ PR 3b (resolve) ──┘
 ```
 
-PRs 1, 2, and 3 are logically independent (no import dependencies between the three packages). However, PR 1 should land first because it promotes `testify` from indirect to direct in `go.mod` and adds `google/uuid`, which avoids `go.mod` merge conflicts in subsequent PRs. PRs 2 and 3 can proceed in parallel after PR 1.
-
-PR 4 depends on all three being merged.
+PRs 1, 2, and 3a have no import dependencies between their packages. However, PR 1 should land first because it promotes `testify` from indirect to direct in `go.mod` and adds `google/uuid`, which avoids `go.mod` merge conflicts in subsequent PRs. PRs 2 and 3a can proceed in parallel after PR 1. PR 3b depends on PR 3a. PR 5 (wiring) depends on all others being merged.
 
 ## CI Validation
 
 Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 
-- `make build-orchestrator` — binary compiles
-- `make test-go` — `go test ./internal/... -v -race -cover`
-- `make lint` — Go vet + staticcheck
-- `make validate` — JSON Schema validation of YAML configs (unchanged, but must not regress)
+- `go build ./cmd/orchestrator` — binary compiles
+- `go test ./internal/... -v -race -cover` — unit tests with race detector
+
+> **Note**: The CI pipeline does not currently run `make lint`, `go vet`, or `staticcheck`. These are local-only checks until CI is extended. Run `make lint` locally before opening each PR.
 
 ## Risk Mitigation
 
 | Risk | Mitigation |
 |------|------------|
-| PR 3 (planner) exceeds 500 lines | Pre-planned split point: Parse+DAG+Plan vs. ResolveInputs |
-| `go.mod` merge conflicts between parallel PRs | Land PR 1 first; PRs 2 and 3 rebase on updated `main` |
-| Planner tests depend on fixture file (`feature-builder.yaml`) | Fixture already exists and is committed; planner tests use relative path from test working directory |
-| `gopkg.in/yaml.v3` anchor/alias behavior differs across versions | Pin exact version in `go.mod`; test alias rejection explicitly |
+| PR 1 (state) exceeds 500 lines with concurrent tests | Concurrent goroutine tests can be split into `_concurrent_test.go` in a follow-up PR |
+| PR 3a (planner) exceeds 500 lines | Mandatory split: PR 3a (Parse+DAG+Plan) and PR 3b (ResolveInputs) |
+| `go.mod` merge conflicts between parallel PRs | Land PR 1 first; PRs 2 and 3a rebase on updated `main` |
+| Planner tests depend on fixture YAML files | Fixtures stored in `internal/planner/testdata/`; `go test` CWD is package directory, so repo-root relative paths would not resolve |
+| `gopkg.in/yaml.v3` anchor/alias behavior | Decode to `yaml.Node` tree, walk and reject `yaml.AliasNode` types, then decode node to struct (2-pass); pin exact version in `go.mod` |
+| Fixture path resolution fails in CI | Using `testdata/` within the package (standard Go convention); no repo-root path dependency |
