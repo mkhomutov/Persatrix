@@ -45,6 +45,9 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 }
 
 // statusCapture wraps http.ResponseWriter to record the written status code.
+// NOTE (Review finding F-05): implements http.Flusher conditionally to forward
+// Flush() calls to the underlying writer, preventing breakage when v0.2 SSE
+// streaming handlers type-assert to http.Flusher.
 type statusCapture struct {
 	http.ResponseWriter
 	status int
@@ -55,6 +58,15 @@ func (sc *statusCapture) WriteHeader(code int) {
 	sc.ResponseWriter.WriteHeader(code)
 }
 
+// Flush implements http.Flusher by delegating to the underlying ResponseWriter
+// if it supports flushing. This prevents silent failures or panics when
+// downstream handlers (e.g., SSE in v0.2) type-assert to http.Flusher.
+func (sc *statusCapture) Flush() {
+	if f, ok := sc.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // loggingMiddleware logs method, path, status code, latency, and request ID
 // for every completed request.
 func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
@@ -63,12 +75,24 @@ func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 		sc := &statusCapture{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sc, r)
 		reqID, _ := r.Context().Value(requestIDKey).(string)
-		logger.Info("http request",
-			zap.String("method", r.Method),
-			zap.String("path", r.URL.Path),
-			zap.Int("status", sc.status),
-			zap.Duration("latency", time.Since(start)),
-			zap.String("request_id", reqID),
-		)
+		// (Review finding F-06): Log 5xx responses at Warn level for operator alerting;
+		// all other responses at Info level.
+		if sc.status >= 500 {
+			logger.Warn("http request",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", sc.status),
+				zap.Duration("latency", time.Since(start)),
+				zap.String("request_id", reqID),
+			)
+		} else {
+			logger.Info("http request",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", sc.status),
+				zap.Duration("latency", time.Since(start)),
+				zap.String("request_id", reqID),
+			)
+		}
 	})
 }

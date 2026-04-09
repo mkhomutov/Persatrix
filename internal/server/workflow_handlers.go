@@ -45,6 +45,10 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 
 	resolvedPath, err := s.resolveWorkflowPath(req.WorkflowID)
 	if err != nil {
+		// Defense-in-depth (Review finding F-12): this branch is currently unreachable
+		// because the regex check at the top of the handler already rejects invalid IDs.
+		// Kept as a safety net in case resolveWorkflowPath is called from a new code path
+		// that doesn't pre-validate the ID.
 		if errors.Is(err, ErrInvalidWorkflowID) {
 			writeError(w, "BAD_REQUEST", "invalid workflow_id format", http.StatusBadRequest)
 			return
@@ -55,12 +59,20 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 
 	wf, err := s.planner.Parse(r.Context(), resolvedPath)
 	if err != nil {
-		writeError(w, "UNPROCESSABLE", "workflow parse error: "+err.Error(), http.StatusUnprocessableEntity)
+		// (Review finding F-10): Log the full error server-side but return a generic
+		// message to prevent leaking filesystem paths or YAML parser internals.
+		s.logger.Warn("workflow parse failed",
+			zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		writeError(w, "UNPROCESSABLE", "workflow file could not be parsed", http.StatusUnprocessableEntity)
 		return
 	}
 
 	if err := s.planner.ValidateDAG(r.Context(), wf); err != nil {
-		writeError(w, "UNPROCESSABLE", "workflow DAG validation error: "+err.Error(), http.StatusUnprocessableEntity)
+		// (Review finding F-11): Log the full error server-side but return a generic
+		// message to prevent leaking internal step IDs and dependency structure.
+		s.logger.Warn("workflow DAG validation failed",
+			zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		writeError(w, "UNPROCESSABLE", "workflow contains invalid dependencies", http.StatusUnprocessableEntity)
 		return
 	}
 

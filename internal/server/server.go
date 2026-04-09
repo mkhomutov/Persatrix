@@ -96,6 +96,7 @@ func (s *Server) registerRoutes() {
 // (Review finding F-01: r.WithContext creates a new *http.Request, so
 // loggingMiddleware must receive the request *after* requestID injects the ID.)
 func (s *Server) Handler() http.Handler {
+	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
 	var h http.Handler = s.mux
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)

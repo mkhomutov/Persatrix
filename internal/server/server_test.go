@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -566,6 +567,9 @@ func TestSubmitWorkflowRunParseError(t *testing.T) {
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	assert.Contains(t, rec.Body.String(), "UNPROCESSABLE")
+	// (Review finding F-10): error message must NOT leak filesystem paths or YAML internals.
+	assert.Contains(t, rec.Body.String(), "workflow file could not be parsed")
+	assert.NotContains(t, rec.Body.String(), dir, "response must not leak filesystem paths")
 }
 
 // --- Workflow DAG validation error (cycle) ---
@@ -595,6 +599,10 @@ workflow:
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	assert.Contains(t, rec.Body.String(), "UNPROCESSABLE")
+	// (Review finding F-11): error message must NOT leak internal step IDs or dependency structure.
+	assert.Contains(t, rec.Body.String(), "workflow contains invalid dependencies")
+	assert.NotContains(t, rec.Body.String(), "step-a", "response must not leak step IDs")
+	assert.NotContains(t, rec.Body.String(), "step-b", "response must not leak step IDs")
 }
 
 // --- resolveWorkflowPath: file outside directory (symlink) ---
@@ -615,4 +623,61 @@ func TestSubmitWorkflowRunNoInputs(t *testing.T) {
 	body := []byte(`{"workflow_id": "test-wf"}`)
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
 	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+// --- resolveWorkflowPath: symlink escape (T-01) ---
+
+func TestResolveWorkflowPathSymlinkEscape(t *testing.T) {
+	// (Review finding T-01): The RFC explicitly requires testing a symlink pointing
+	// outside the workflows directory. This validates the most critical security
+	// property of the 3-layer path traversal defense (regex + EvalSymlinks + HasPrefix).
+	if os.Getenv("CI") != "" && os.Getenv("RUNNER_OS") == "Windows" {
+		t.Skip("symlink creation may require elevated privileges on Windows CI")
+	}
+
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create a file outside the workflows directory.
+	outsideFile := filepath.Join(outsideDir, "secret-wf.yaml")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("schema_version: \"0.1\"\n"), 0644))
+
+	// Create a symlink inside the workflows directory pointing to the outside file.
+	symlinkPath := filepath.Join(dir, "escape-wf.yaml")
+	err := os.Symlink(outsideFile, symlinkPath)
+	if err != nil {
+		t.Skipf("cannot create symlink (likely unprivileged on Windows): %v", err)
+	}
+
+	logger := zap.NewNop()
+	srv, err := New("127.0.0.1:0", dir,
+		state.NewInMemoryStore(logger), registry.NewInMemoryRegistry(logger),
+		planner.NewYAMLPlanner(logger), logger)
+	require.NoError(t, err)
+
+	// resolveWorkflowPath must reject the symlink-escaped path.
+	_, err = srv.resolveWorkflowPath("escape-wf")
+	assert.ErrorIs(t, err, ErrWorkflowNotFound)
+}
+
+// --- Start error propagation (T-02) ---
+
+func TestStartErrorOnPortInUse(t *testing.T) {
+	// (Review finding T-02): Validates the errCh-based pattern in Start() handles
+	// the bind failure path (ListenAndServe returns immediately with an error).
+	srv, _ := testServer(t)
+
+	// Bind a listener to grab a port.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	// Point the server at the already-bound port.
+	srv.addr = ln.Addr().String()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = srv.Start(ctx)
+	assert.Error(t, err, "Start should return an error when the port is already in use")
 }
