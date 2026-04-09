@@ -1,7 +1,19 @@
 // Package registry manages agent registration, discovery, and health tracking.
 package registry
 
-import "context"
+import (
+	"context"
+	"errors"
+	"sync"
+
+	"go.uber.org/zap"
+)
+
+// Sentinel errors for registry operations.
+var (
+	ErrAgentAlreadyRegistered = errors.New("agent already registered")
+	ErrAgentNotFound          = errors.New("agent not found")
+)
 
 // AgentInfo holds metadata about a registered agent.
 type AgentInfo struct {
@@ -33,5 +45,140 @@ type Registry interface {
 	FindByCapability(ctx context.Context, capability string) ([]AgentInfo, error)
 }
 
-// TODO: Implement InMemoryRegistry
+// InMemoryRegistry is a goroutine-safe in-memory implementation of Registry.
+type InMemoryRegistry struct {
+	mu     sync.RWMutex
+	agents map[string]*AgentInfo
+	logger *zap.Logger
+}
+
+// NewInMemoryRegistry creates a new in-memory agent registry.
+func NewInMemoryRegistry(logger *zap.Logger) *InMemoryRegistry {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &InMemoryRegistry{
+		agents: make(map[string]*AgentInfo),
+		logger: logger,
+	}
+}
+
+// Register adds a new agent to the registry. Returns ErrAgentAlreadyRegistered
+// if an agent with the same ID is already registered. Re-registration requires
+// calling Unregister first (non-atomic; see RFC 0001 Phase 2 notes).
+func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.agents[agent.ID]; exists {
+		return ErrAgentAlreadyRegistered
+	}
+
+	// Store an internal copy with Capabilities slice deep-copied.
+	stored := &AgentInfo{
+		ID:      agent.ID,
+		Name:    agent.Name,
+		Role:    agent.Role,
+		Address: agent.Address,
+		NodeID:  agent.NodeID,
+		Status:  agent.Status,
+	}
+	stored.Capabilities = make([]string, len(agent.Capabilities))
+	copy(stored.Capabilities, agent.Capabilities)
+
+	r.agents[agent.ID] = stored
+	r.logger.Debug("agent registered", zap.String("agentID", agent.ID), zap.String("address", agent.Address))
+	return nil
+}
+
+// Unregister removes an agent from the registry.
+// Returns ErrAgentNotFound if the agent ID does not exist.
+func (r *InMemoryRegistry) Unregister(_ context.Context, agentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.agents[agentID]; !exists {
+		return ErrAgentNotFound
+	}
+
+	delete(r.agents, agentID)
+	r.logger.Debug("agent unregistered", zap.String("agentID", agentID))
+	return nil
+}
+
+// Get retrieves an agent by ID. Returns a deep copy to prevent callers from
+// mutating internal state. Returns ErrAgentNotFound on miss.
+func (r *InMemoryRegistry) Get(_ context.Context, agentID string) (*AgentInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	agent, exists := r.agents[agentID]
+	if !exists {
+		return nil, ErrAgentNotFound
+	}
+
+	return deepCopyAgent(agent), nil
+}
+
+// List returns deep copies of all registered agents.
+func (r *InMemoryRegistry) List(_ context.Context) ([]AgentInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]AgentInfo, 0, len(r.agents))
+	for _, agent := range r.agents {
+		result = append(result, *deepCopyAgent(agent))
+	}
+	return result, nil
+}
+
+// UpdateStatus updates the status of a registered agent.
+// Returns ErrAgentNotFound if the agent ID does not exist.
+func (r *InMemoryRegistry) UpdateStatus(_ context.Context, agentID string, status AgentStatus) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	agent, exists := r.agents[agentID]
+	if !exists {
+		return ErrAgentNotFound
+	}
+
+	agent.Status = status
+	r.logger.Debug("agent status updated", zap.String("agentID", agentID), zap.Int("status", int(status)))
+	return nil
+}
+
+// FindByCapability returns deep copies of all agents that have the specified capability.
+func (r *InMemoryRegistry) FindByCapability(_ context.Context, capability string) ([]AgentInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []AgentInfo
+	for _, agent := range r.agents {
+		for _, cap := range agent.Capabilities {
+			if cap == capability {
+				result = append(result, *deepCopyAgent(agent))
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+// deepCopyAgent creates a deep copy of an AgentInfo, reconstructing the
+// Capabilities slice to prevent shared backing-array mutation.
+func deepCopyAgent(agent *AgentInfo) *AgentInfo {
+	cp := &AgentInfo{
+		ID:      agent.ID,
+		Name:    agent.Name,
+		Role:    agent.Role,
+		Address: agent.Address,
+		NodeID:  agent.NodeID,
+		Status:  agent.Status,
+	}
+	cp.Capabilities = make([]string, len(agent.Capabilities))
+	copy(cp.Capabilities, agent.Capabilities)
+	return cp
+}
+
 // TODO: Implement health check loop

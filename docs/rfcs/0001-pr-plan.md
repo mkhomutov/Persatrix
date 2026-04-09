@@ -116,9 +116,29 @@ Actionable follow-ups for a **PR 1b follow-up** (`feature/v01-state-followup`) o
 
 #### PR checklist
 
-- [ ] `go test ./internal/registry/... -v -race -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] Existing `AgentStatus` constants reused (not redefined)
+- [x] `go test ./internal/registry/... -v -cover` passes (24/24, 100% coverage)
+- [x] Coverage ≥ 80% (achieved: 100%)
+- [x] Existing `AgentStatus` constants reused (not redefined)
+- [x] `go vet ./internal/registry/...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] Nil-logger guard in both `NewInMemoryRegistry` and `NewInMemoryStore`
+
+> **Note**: `-race` requires CGO (unavailable on Windows dev environment). CI (Linux) validates with `-race`.
+
+#### Post-merge review findings (PR #7)
+
+PR #7 was submitted as 637 lines (151 `registry.go` + 483 `registry_test.go` + 3 `state.go`), exceeding the 500-line limit. Same waiver rationale as PR #6 — 76% test lines. Full review: [`docs/pr-reviews/pr-007-registry-inmemory-review.md`](../../docs/pr-reviews/pr-007-registry-inmemory-review.md).
+
+PR 1 follow-up F-03 (nil-logger guard in `NewInMemoryStore`) was addressed in this PR.
+
+Actionable follow-ups for a **PR 2b follow-up** or folded into subsequent PRs:
+
+| Finding | Severity | Action | Disposition |
+|---------|----------|--------|-------------|
+| F-01: No agent ID validation in `Register` | Medium | Add comment that validation is caller's responsibility; add format validation when REST API lands | Document in PR 5 (wiring); validate in RFC 0002 |
+| F-02: `cap` shadows built-in `cap()` | Low | Rename loop var to `c` or `capName` in `FindByCapability` | Address in PR 2b or any follow-up |
+| F-03: nil vs empty slice inconsistency (`FindByCapability` vs `List`) | Low | Initialize `result` slice in `FindByCapability` for consistent JSON marshaling | Address before REST API (RFC 0002) |
+| F-05: No `String()` on `AgentStatus` | Low | Add `String()` method (combine with `RunStatus.String()` from PR #6 F-04) | Address in PR 5 (wiring) |
 
 ---
 
@@ -262,5 +282,7 @@ Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 | `gopkg.in/yaml.v3` anchor/alias behavior | Decode to `yaml.Node` tree, walk and reject `yaml.AliasNode` types, then decode node to struct (2-pass); pin exact version in `go.mod` |
 | Fixture path resolution fails in CI | Using `testdata/` within the package (standard Go convention); no repo-root path dependency |
 | PR 1 review findings need follow-up | Low-severity items (F-02 through F-06) tracked in PR plan; address in PR 1b or fold into subsequent PRs |
+| PR 2 (registry) exceeds 500 lines | **Resolved**: PR #7 submitted at 637 lines; size waiver accepted (76% tests, single-package, 100% coverage). See [review](../../docs/pr-reviews/pr-007-registry-inmemory-review.md). |
+| PR 2 review findings need follow-up | Medium: no agent ID validation (F-01, defer to RFC 0002). Low: `cap` builtin shadow (F-02), nil/empty slice inconsistency (F-03), no `AgentStatus.String()` (F-05). Tracked in PR plan. |
 | `UpdateRunStatus` has no timestamp management | Design gap documented for RFC 0003 — Scheduler will need `UpdateRun`/`PatchRun` or expanded `UpdateRunStatus` signature |
 | `-race` flag requires CGO on Windows | CI (Linux) runs `-race`; local Windows testing uses `-cover` only. Concurrency correctness verified via code inspection and CI. |
