@@ -153,6 +153,7 @@ func NewWorkflowScheduler(
     planner planner.Planner,
     executor Executor,
     logger *zap.Logger,
+    workflowsDir string,
 ) *WorkflowScheduler
 ```
 
@@ -192,6 +193,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
     // 1. Parse the workflow YAML from the stored WorkflowID.
     //    The workflow file path is resolved using the same workflowsDir
     //    that the server uses. The scheduler receives workflowsDir at construction.
+    workflowPath := s.resolveWorkflowPath(run.WorkflowID)
     workflow, err := s.planner.Parse(ctx, workflowPath)
     if err != nil {
         s.failRun(ctx, run.ID, "workflow parse error: "+err.Error())
@@ -227,9 +229,12 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
     }
 
     // 6. Transition to Completed.
-    s.store.UpdateRunStatus(ctx, run.ID, state.RunCompleted)
+    if err := s.store.UpdateRunStatus(ctx, run.ID, state.RunCompleted); err != nil {
+        s.logger.Error("failed to update run status to completed",
+            zap.String("run_id", run.ID), zap.Error(err))
+    }
     now := time.Now()
-    _ = now // TODO(RFC 0003 follow-up): set FinishedAt on WorkflowRun
+    _ = now // TODO(phase 4): use SetRunTimestamps to record FinishedAt
 }
 ```
 
@@ -296,6 +301,9 @@ func (s *WorkflowScheduler) executeStep(
     })
 
     // 2. Resolve template variables in step input.
+    //    Prerequisite: WorkflowRun.Inputs must be populated by RFC 0002's
+    //    handleRunWorkflow from the request body's "inputs" field.
+    //    If Inputs is nil, ResolveInputs will fail on {{ user_request }} templates.
     resolvedInput, err := planner.ResolveInputs(step, outputs, run.Inputs, s.logger)
     if err != nil {
         s.store.UpdateStepState(ctx, run.ID, state.StepState{
@@ -476,10 +484,14 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
     }
 
     // 7. Return result.
+    //    Metadata is a map<string, string> in proto/task.proto — extract
+    //    numeric values via string parsing (no typed accessors on maps).
+    tokensUsed, _ := strconv.ParseInt(resp.Metadata["tokens_used"], 10, 64)
+    durationMs, _ := strconv.ParseInt(resp.Metadata["duration_ms"], 10, 64)
     return &ExecuteResult{
         Output:     resp.Result,
-        TokensUsed: int64(resp.Metadata.GetTokensUsed()),
-        DurationMs: int64(resp.Metadata.GetDurationMs()),
+        TokensUsed: tokensUsed,
+        DurationMs: durationMs,
     }, nil
 }
 ```
@@ -508,11 +520,11 @@ func isTransient(err error) bool {
 `proto/task.proto` defines the `AgentService` with `ExecuteTask`, `ExecuteTaskStream`, and `HealthCheck` RPCs. This RFC generates Go stubs:
 
 ```
-proto/task.proto  ──protoc──►  internal/proto/gen/task.pb.go
-                               internal/proto/gen/task_grpc.pb.go
+proto/task.proto  ──protoc──►  internal/generated/taskpb/task.pb.go
+                               internal/generated/taskpb/task_grpc.pb.go
 ```
 
-The generated files live in `internal/proto/gen/` (not alongside the `.proto` source) to keep generated code separate from handwritten code. A `make proto-go` target is added to the Makefile.
+The generated files live in `internal/generated/taskpb/` — matching the existing `go_package` option (`github.com/orchestr8/orchestr8/internal/generated/taskpb`) and the Makefile's `PROTO_GO_OUT := internal/generated`. The existing `make proto` target already generates Go stubs; no additional Makefile target is needed.
 
 **Dependencies added to `go.mod`:**
 - `google.golang.org/grpc` — gRPC client and server framework
@@ -564,11 +576,12 @@ The Scheduler's resolution is simpler than the server's — it does not need pat
 
 Update `cmd/orchestrator/main.go` to:
 
-1. Generate gRPC stubs (build-time, via `make proto-go`).
+1. Generate gRPC stubs (build-time, via `make proto`).
 2. Create `executor.NewGRPCExecutor(reg, logger)`.
-3. Create `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger)` with `workflowsDir` from the existing `--workflows-dir` flag.
-4. Launch `sched.Run(ctx)` in a goroutine with error propagation via `cancel()`.
-5. Log `"scheduler started"`.
+3. `defer exec.Close()` — no-op in v0.1 (no persistent connections), wired for interface compliance and forward compatibility with connection pooling.
+4. Create `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, workflowsDir)` with `workflowsDir` from the existing `--workflows-dir` flag.
+5. Launch `sched.Run(ctx)` in a goroutine with error propagation via `cancel()`.
+6. Log `"scheduler started"`.
 
 This satisfies the deferred portion of TODO step 8 ("scheduler deferred to RFC 0003") in `main.go`.
 
@@ -605,9 +618,9 @@ A `WorkflowRun` that fails and is not deleted can be re-executed if a scheduler 
 Summary: Set up protobuf compilation toolchain and generate Go stubs from `proto/task.proto`.
 
 **Deliverables:**
-1. `internal/proto/gen/task.pb.go` — generated protobuf types.
-2. `internal/proto/gen/task_grpc.pb.go` — generated gRPC client/server stubs.
-3. `Makefile` update — `proto-go` target.
+1. `internal/generated/taskpb/task.pb.go` — generated protobuf types.
+2. `internal/generated/taskpb/task_grpc.pb.go` — generated gRPC client/server stubs.
+3. Reuse existing `make proto` target (already generates Go stubs via `PROTO_GO_OUT := internal/generated`).
 4. `go.mod` / `go.sum` — add `google.golang.org/grpc` and `google.golang.org/protobuf`.
 
 **Dependencies:** None (proto files exist from project inception).
@@ -630,7 +643,7 @@ Summary: Implement `WorkflowScheduler` with polling loop, parallel stage executi
 1. `internal/scheduler/scheduler.go` — `Scheduler` interface, `WorkflowScheduler` implementation, stage/step execution, outputs collection, state transitions.
 2. `internal/scheduler/scheduler_test.go` — unit tests with mock Executor, Store, and Planner.
 
-**Dependencies:** Phase 2 (Executor interface), RFC 0001 (Store, Planner), RFC 0002 (runs in Pending state).
+**Dependencies:** Phase 2 (Executor interface), Phase 4 (`SetRunTimestamps`, `RunRetrying`), RFC 0001 (Store, Planner), RFC 0002 (runs in Pending state).
 
 ### Phase 4: Store Extension + State Wiring (~100 LOC)
 
@@ -640,7 +653,7 @@ Summary: Extend `Store` interface with `SetRunTimestamps`, add `RunRetrying` sta
 1. `internal/state/state.go` — add `SetRunTimestamps` method, `RunRetrying` constant.
 2. `internal/state/state_test.go` — tests for new method and status.
 
-**Dependencies:** RFC 0001 (existing Store implementation).
+**Dependencies:** RFC 0001 (existing Store implementation). Independent of Phases 2–3; must complete before Phase 3 (scheduler needs `SetRunTimestamps` and `RunRetrying`).
 
 ### Phase 5: Wire into main.go (~50 LOC)
 
@@ -664,11 +677,11 @@ Summary: Instantiate Executor and Scheduler in `main.go`, launch scheduler loop.
 | Go orchestrator | `internal/state/state.go` | Add `SetRunTimestamps` method to `Store` interface and `InMemoryStore`, add `RunRetrying` constant |
 | Go orchestrator | `internal/state/state_test.go` | Extended — tests for `SetRunTimestamps` and `RunRetrying` |
 | Go orchestrator | `cmd/orchestrator/main.go` | Wire Executor + Scheduler, remove unused-var placeholders, launch scheduler goroutine |
-| Go generated | `internal/proto/gen/task.pb.go` | Generated — protobuf message types |
-| Go generated | `internal/proto/gen/task_grpc.pb.go` | Generated — gRPC client and server stubs |
+| Go generated | `internal/generated/taskpb/task.pb.go` | Generated — protobuf message types |
+| Go generated | `internal/generated/taskpb/task_grpc.pb.go` | Generated — gRPC client and server stubs |
 | Go dependency | `go.mod`, `go.sum` | Add `google.golang.org/grpc`, `google.golang.org/protobuf` |
-| Build | `Makefile` | Add `proto-go` target |
-| Proto | `proto/task.proto` | Add `option go_package` directive (if absent) for code generation |
+| Build | `Makefile` | Reuse existing `proto` target (already generates Go stubs) |
+| Proto | `proto/task.proto` | `go_package` already set to `internal/generated/taskpb` — no change needed |
 
 ## Test Strategy
 

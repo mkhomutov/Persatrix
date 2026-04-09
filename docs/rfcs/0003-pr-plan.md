@@ -30,25 +30,25 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 | File | Change |
 |------|--------|
-| `proto/task.proto` | Add `option go_package = "github.com/orchestr8/orchestr8/internal/proto/gen";` if absent |
-| `internal/proto/gen/task.pb.go` | Generated — protobuf message types |
-| `internal/proto/gen/task_grpc.pb.go` | Generated — gRPC service client/server stubs |
-| `Makefile` | Add `proto-go` target calling `protoc` with `--go_out` and `--go-grpc_out` |
+| `proto/task.proto` | `go_package` already set to `"github.com/orchestr8/orchestr8/internal/generated/taskpb"` — no change needed |
+| `internal/generated/taskpb/task.pb.go` | Generated — protobuf message types |
+| `internal/generated/taskpb/task_grpc.pb.go` | Generated — gRPC service client/server stubs |
+| `Makefile` | Existing `proto` target already generates Go stubs via `PROTO_GO_OUT := internal/generated` — no change needed |
 | `go.mod` / `go.sum` | Add `google.golang.org/grpc`, `google.golang.org/protobuf` |
 
 #### Key implementation details
 
 - `protoc` with `protoc-gen-go` and `protoc-gen-go-grpc` plugins.
-- Generated output in `internal/proto/gen/` — not alongside `.proto` source.
+- Generated output in `internal/generated/taskpb/` — matching the existing `go_package` option and `PROTO_GO_OUT` Makefile variable.
 - `.gitignore` does NOT exclude generated files — they are committed for reproducible builds without requiring `protoc` toolchain.
-- `make proto-go` must be idempotent.
+- `make proto` already handles Go stub generation — no new Makefile target needed.
 
 #### PR checklist
 
-- [ ] `make proto-go` succeeds
-- [ ] `go build ./internal/proto/gen/...` compiles
+- [ ] `make proto` succeeds
+- [ ] `go build ./internal/generated/...` compiles
 - [ ] Generated files committed to repo
-- [ ] `go vet ./internal/proto/gen/...` clean
+- [ ] `go vet ./internal/generated/...` clean
 
 ---
 
@@ -100,7 +100,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ### PR 3: `feature/v01-scheduler` — WorkflowScheduler
 
-**Depends on**: PR 2 merged (Executor interface)
+**Depends on**: PR 2 merged (Executor interface), PR 4 merged (`SetRunTimestamps`, `RunRetrying`)
 **Branch**: `feature/v01-scheduler`
 **Estimated size**: ~600–900 lines (implementation + tests)
 
@@ -155,9 +155,12 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ### PR 4: `feature/v01-state-extension` — Store Extension + RunRetrying
 
-**Depends on**: PR 3 merged (scheduler uses new state methods)
+**Depends on**: RFC 0001 (existing Store implementation) — independent of PRs 2–3
 **Branch**: `feature/v01-state-extension`
 **Estimated size**: ~200–300 lines (implementation + tests)
+
+> **Note**: PR 3 (scheduler) has a compile-time dependency on `SetRunTimestamps` and
+> `RunRetrying` introduced here. PR 4 must merge **before** PR 3, not after.
 
 #### Scope
 
@@ -207,7 +210,8 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 #### Key implementation details
 
 - `executor.NewGRPCExecutor(reg, logger)` — default timeout and retries.
-- `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger)` with `*workflowsDir`.
+- `defer exec.Close()` — no-op in v0.1 (no persistent connections), wired for interface compliance and forward compatibility with connection pooling.
+- `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, workflowsDir)` with `*workflowsDir`.
 - Goroutine: `go func() { if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) { logger.Error(...); cancel() } }()`.
 - Log `"scheduler started"` and `"executor initialized"`.
 - Remove all `_ = ...` suppression lines — variables now consumed.
@@ -238,12 +242,13 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 ## Dependency Graph
 
 ```
-PR 1 (proto-gen)
-    │
-    ▼
-PR 2 (executor) ──────► PR 3 (scheduler) ──────► PR 5 (wiring)
-                                                      ▲
-PR 4 (state-extension) ──────────────────────────────┘
+PR 1 (proto-gen)       PR 4 (state-extension)
+    │                       │
+    ▼                       │
+PR 2 (executor)             │
+    │                       │
+    ▼                       ▼
+PR 3 (scheduler) ──────────────────────► PR 5 (wiring)
 ```
 
-PR 4 (state extension) can proceed in parallel with PRs 2–3 since it modifies `internal/state/` independently. However, PR 5 (wiring) depends on all prior PRs.
+PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently. However, PR 3 (scheduler) depends on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). PR 5 (wiring) depends on all prior PRs.
