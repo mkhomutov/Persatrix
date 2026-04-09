@@ -24,14 +24,18 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 **Depends on**: RFC 0001 fully merged (all 5 PRs)
 **Branch**: `feature/v01-server-scaffold`
-**Estimated size**: ~350–450 lines (implementation + tests)
+**Estimated size**: ~600–800 lines (implementation + tests)
+
+> **Estimate calibration (F-03)**: RFC 0001 PRs consistently exceeded estimates by 73–138% (e.g. state: 350–450 est → 781 actual, planner: 350–450 est → 1,071 actual). Sizes in this plan are calibrated to ~1.7× of naive estimates. If PR 1 still exceeds 500 lines, apply the escape valve in the Risk Mitigation table.
+
+> **Dependencies note (F-09)**: No `go.mod` changes expected — `github.com/google/uuid` already present from RFC 0001. All new imports (`runtime/debug`, `net/http`, etc.) are stdlib.
 
 #### Scope
 
 | File | Change |
 |------|--------|
 | `internal/server/server.go` | New — `Server` struct, `New` constructor (validates + canonicalizes `workflowsDir`), `Handler()` (returns composed `http.Handler`), `Start(ctx)` with graceful shutdown, `resolveWorkflowPath` (path traversal protection), route registration, minimal `GET /healthz` handler |
-| `internal/server/types.go` | New — request/response DTOs: `SubmitRunRequest`, `SubmitRunResponse`, `RunStatusResponse`, `RegisterAgentRequest`, `ErrorResponse`; `*time.Time` for nullable timestamps (M-07); `runStatusString` helper mapping `state.RunStatus` → lowercase string |
+| `internal/server/types.go` | New — request/response DTOs: `SubmitRunRequest`, `SubmitRunResponse`, `RunStatusResponse`, `RegisterAgentRequest`, `RegisterAgentResponse`, `AgentResponse`, `ErrorResponse`; `*time.Time` for nullable timestamps (M-07); `runStatusString` helper mapping `state.RunStatus` → lowercase string. Agent response DTOs (`RegisterAgentResponse`, `AgentResponse`) provide snake_case `json:` tags for consistency — `registry.AgentInfo` has no tags, so direct serialization would produce PascalCase JSON (F-15). |
 | `internal/server/middleware.go` | New — `recoveryMiddleware` (with `runtime/debug.Stack()`), `requestIDMiddleware` (server-generated UUID only), `loggingMiddleware` (status capture wrapper), `contextKey` type for `SA1029` compliance |
 | `internal/server/helpers.go` | New — `writeJSON`, `writeError`, `requireJSON` (Content-Type enforcement), `decodeBody` (wraps `MaxBytesReader` + strict decoder + `MaxBytesError` check) |
 | `internal/server/server_test.go` | New — middleware tests, helper tests, `/healthz` test, `resolveWorkflowPath` tests (path traversal, symlink, valid ID) |
@@ -40,7 +44,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 - `New` returns `(*Server, error)`: validates `workflowsDir` via `os.Stat` + `IsDir()`, canonicalizes via `filepath.Abs` + `filepath.EvalSymlinks` (CS-02). Stores the canonical path so `resolveWorkflowPath` avoids repeated syscalls.
 - `resolveWorkflowPath`: regex-validates `workflow_id` first, then `filepath.Join` + `filepath.EvalSymlinks` + `strings.HasPrefix` prefix check against canonical root. Returns `ErrWorkflowNotFound` for both traversal attempts and missing files (no information leakage).
-- `Handler()` composes middleware in order: `recoveryMiddleware` → `loggingMiddleware` → `requestIDMiddleware` → `mux`.
+- `Handler()` composes middleware in order: `recoveryMiddleware` → `requestIDMiddleware` → `loggingMiddleware` → `mux`. (F-12: reordered from RFC 0002's stated `recovery → logging → requestID → mux` so that `loggingMiddleware` can read the request ID from context when its deferred log fires. With the original order, `requestIDMiddleware` has not yet set the ID when `loggingMiddleware` begins processing. RFC 0002 should be updated to match.)
 - `Start(ctx)` spawns a goroutine that waits on `ctx.Done()` and calls `srv.Shutdown` with a 10-second timeout. Logs shutdown errors via zap (CS-01).
 - `decodeBody` helper: wraps body with `http.MaxBytesReader(w, r.Body, 1<<20)`, creates strict decoder (`DisallowUnknownFields`), checks for `*http.MaxBytesError` before generic decode errors.
 - `GET /healthz` is registered in this PR to satisfy `docker-compose.yaml` healthcheck. Returns `200` with `{"status": "ok"}`.
@@ -53,7 +57,8 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 #### Tests
 
 - **Middleware**: `requestIDMiddleware` generates UUID, does not echo client-provided header; `recoveryMiddleware` catches panic and returns `500 INTERNAL` JSON; `loggingMiddleware` captures status code.
-- **Helpers**: `writeJSON` produces correct Content-Type and body; `writeError` produces correct error envelope; `requireJSON` rejects non-JSON Content-Type; `decodeBody` rejects oversized body (`400`), unknown fields (`400`), malformed JSON (`400`).
+- **Helpers**: `writeJSON` produces correct Content-Type and body; `writeError` produces correct error envelope; `requireJSON` rejects non-JSON Content-Type; `decodeBody` rejects oversized body (`400`), unknown fields (`400`), malformed JSON (`400`). Note: `requireJSON` is tested at the helper level in this PR; handler-level integration tests for Content-Type enforcement land in PRs 2 and 3 (F-05).
+- **Middleware ordering (F-13)**: Panic in handler returns `500` JSON error **with** `X-Request-ID` header — validates that recovery wraps requestID wraps logging correctly.
 - **Path traversal**: `resolveWorkflowPath` rejects `../etc/passwd`, URL-encoded traversal, empty ID, single-char ID; accepts valid `feature-builder` ID pointing to existing file.
 - **Healthz**: `GET /healthz` returns `200` with `{"status": "ok"}`.
 - **Server construction**: `New` rejects missing directory, non-directory path, nil logger fallback.
@@ -74,7 +79,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 **Depends on**: PR 1 merged
 **Branch**: `feature/v01-workflow-handlers`
-**Estimated size**: ~350–500 lines (implementation + tests)
+**Estimated size**: ~550–800 lines (implementation + tests)
 
 > **Note**: If this PR exceeds 500 lines during implementation, the `DELETE` handler and its running-status protection tests can be split into a follow-up PR within the same branch.
 
@@ -124,9 +129,9 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 ### PR 3: `feature/v01-agent-handlers` — Agent Registry Endpoints
 
-**Depends on**: PR 1 merged (PR 2 not required — agent handlers are independent)
+**Depends on**: PR 1 merged (PR 2 not required — agent handlers are independent). Uses `helpers.go` and agent response DTOs from PR 1 (F-07).
 **Branch**: `feature/v01-agent-handlers`
-**Estimated size**: ~250–350 lines (implementation + tests)
+**Estimated size**: ~400–550 lines (implementation + tests)
 
 #### Scope
 
@@ -171,7 +176,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 **Depends on**: PRs 1, 2, 3 merged
 **Branch**: `feature/v01-server-wiring`
-**Estimated size**: ~150–250 lines (implementation + tests)
+**Estimated size**: ~250–400 lines (implementation + tests)
 
 #### Scope
 
@@ -180,12 +185,12 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 | `internal/server/stub_handlers.go` | New — `handleGetLogs`, `handleGetCostSummary` returning `501 NOT_IMPLEMENTED` JSON |
 | `internal/server/server.go` | Update route registration to point to real stub handlers (replace temporary 501 placeholders for logs/cost) |
 | `internal/server/server_test.go` | Extended — stub endpoint tests, start/shutdown integration tests |
-| `cmd/orchestrator/main.go` | Add `--http-bind` flag (default `"127.0.0.1"`), `--workflows-dir` flag (default `"workflows/"`). Import `internal/server`. Instantiate `server.New(listenAddr, *workflowsDir, store, reg, pl, logger)`. Launch `srv.Start(ctx)` in goroutine with error → `cancel()` propagation. Log `"HTTP server listening"` with address. |
+| `cmd/orchestrator/main.go` | Add `--http-bind` flag (default `"127.0.0.1"`), `--workflows-dir` flag (default `"workflows/"`). Import `internal/server`. **Also instantiate** `state.NewInMemoryStore()`, `registry.NewInMemoryRegistry()`, and planner as local variables — these do not yet exist in `main.go` (F-01: the TODO block at steps 3/6/8 is still unimplemented). Instantiate `server.New(listenAddr, *workflowsDir, store, reg, pl, logger)`. Launch `srv.Start(ctx)` in goroutine with error → `cancel()` propagation. Log `"HTTP server listening"` with address. |
 | `docker-compose.yaml` | Add `command: ["--http-bind", "0.0.0.0"]` to orchestrator service so it's reachable from agent containers over the Docker network (M3) |
 
 #### Key implementation details
 
-- **Stub handlers**: Both return `501` with `{"error": "not implemented in v0.1", "code": "NOT_IMPLEMENTED"}`.
+- **Stub handlers**: `stub_handlers.go` provides **named** handler functions that return `501` with `{"error": "not implemented in v0.1", "code": "NOT_IMPLEMENTED"}`. These replace the **inline** anonymous 501 returns registered as placeholders in PR 1 — behavior is unchanged; this is a code-organization refactor (F-04).
 - **main.go wiring**: Uses structured zap logger (not sugar) for new code. Does NOT migrate existing sugar logger calls (separate cleanup PR per MI-04). `server.New` error → `logger.Fatal`. Start goroutine error → `logger.Error` + `cancel()` (not `logger.Fatal` to avoid bypassing deferred cleanup). `// TODO(v0.2): propagate Start error via errCh for non-zero exit code` comment (D-01). `// TODO(cleanup): migrate main.go sugar logger to structured zap` comment.
 - **Flag wiring**: `--http-bind` + `--http-port` (existing) formatted as `fmt.Sprintf("%s:%d", *httpBind, *httpPort)` for `listenAddr`. Satisfies TODO step 11 in main.go.
 - **Docker fix**: Pass `--http-bind 0.0.0.0` so the orchestrator is reachable across the Docker network. The default `127.0.0.1` bind only accepts loopback connections, making the orchestrator invisible to agent containers.
@@ -232,7 +237,7 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 | RFC 0001 Finding | Source | RFC 0002 Action |
 |------------------|--------|-----------------|
 | F-01: No agent ID validation in `Register` | PR #7 (registry) | Validated at HTTP handler boundary in PR 3 (`handleRegisterAgent`) |
-| F-03: nil vs empty slice in `FindByCapability` vs `List` | PR #7 (registry) | Ensure agent list endpoint returns `[]` not `null` for empty results |
+| F-03: nil vs empty slice in `FindByCapability` vs `List` | PR #7 (registry) | ✅ Already addressed — `List()` uses `make([]T, 0, len(map))` which produces `[]` in JSON. No RFC 0002 endpoint exposes `FindByCapability`. Agent/workflow list handlers must likewise initialize response slices with `make` (F-08). |
 | F-04: No `RunStatus.String()` | PR #6 (state) | `runStatusString` helper in `types.go` maps `RunStatus` → lowercase string for JSON |
 | F-05: No `AgentStatus.String()` | PR #7 (registry) | Not directly needed for RFC 0002 (agent JSON uses raw struct); defer to follow-up |
 | F-05: No timestamp management in `UpdateRunStatus` | PR #6 (state) | `StartedAt` set at submission time (I-03); document `CreatedAt` gap for RFC 0003 |
@@ -244,8 +249,8 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 
 | Risk | Mitigation |
 |------|------------|
-| PR 1 (scaffold) exceeds 500 lines with middleware + helper tests | Split: middleware + helpers + server core in PR 1; all handler logic in PRs 2–3. If still over, move `resolveWorkflowPath` tests to PR 2. |
-| PR 2 (workflow handlers) exceeds 500 lines | Split DELETE handler + running-status tests into a follow-up PR 2b if needed. |
+| PR 1 (scaffold) exceeds 500 lines with middleware + helper tests | Split: middleware + helpers + server core in PR 1; all handler logic in PRs 2–3. If still over, move `resolveWorkflowPath` + tests to PR 2, or split into PR 1a (server + types + middleware) and PR 1b (helpers + path resolution + healthz + tests). RFC 0001 showed 73–138% overrun on PRs with tests (F-03); PR 1 is the highest-risk PR for size. |
+| PR 2 (workflow handlers) exceeds 500 lines | Split DELETE handler + running-status tests into a follow-up PR 2b if needed. RFC 0001 pattern suggests this PR will likely reach 550–800 lines (F-03). |
 | Path traversal logic requires filesystem fixtures in tests | Use `t.TempDir()` for test workflow directories — clean, hermetic, no repo-path dependency. |
 | `resolveWorkflowPath` symlink test requires OS support | Use `os.Symlink` in test; skip on platforms where symlinks are unsupported (`t.Skip`). |
 | `docker-compose.yaml` change in PR 4 requires coordination | Change is additive (`command:` field); no conflict with parallel work. |
@@ -261,6 +266,9 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 
 - `go build ./cmd/orchestrator` — binary compiles
+- `go vet ./internal/... ./cmd/orchestrator/...` — static analysis (F-16)
 - `go test ./internal/... -v -race -cover` — unit tests with race detector
+
+No Python or Rust changes in RFC 0002 — only Go CI gates apply.
 
 Run `make lint` locally before opening each PR (not yet enforced in CI).
