@@ -126,7 +126,7 @@ type Store interface {
 - `CreateRun` generates a UUID if `run.ID` is empty.
 - `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.) Deep copy is implemented via manual field copy; the `Steps` map must be reconstructed with new `StepState` values — a simple map assignment would share the underlying map reference, creating a subtle concurrency hazard.
 - `UpdateStepState` merges into the existing run's `Steps` map. It returns an error if the `runID` does not exist. If the `StepID` is not already present in the run's `Steps` map, it is added — this allows the Scheduler to initialize step state on first execution without requiring pre-population.
-- `ListRuns` returns all runs. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
+- Like `GetRun`, `ListRuns` returns deep copies of all runs to prevent concurrent mutation — the Scheduler and REST API will both call `ListRuns`, and without copies, callers could corrupt the store's internal state. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
 
 ### Phase 2: InMemoryRegistry
 
@@ -193,6 +193,8 @@ The planner is the most complex component in this RFC. It has three responsibili
 - Note that `Step.Input` can contain multiple template references interleaved with literal text in a single string (e.g., `"{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"`). `ResolveInputs` replaces all occurrences via regexp global substitution, not just the first match.
 - Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
 - **Malformed patterns** (empty braces `{{ }}`, incomplete references `{{ steps. }}`, missing whitespace delimiters `{{no-spaces}}`) are left as-is in the output string — they are not substituted and do not cause an error. This is intentional: condition expressions like `{{ steps.review.output.approved == false }}` coexist in the same YAML file and must not be rejected by `ResolveInputs`.
+- **Warning on suspicious patterns**: When `ResolveInputs` encounters a pattern in `Step.Input` that resembles a template reference (matches `{{ ... }}` delimiters) but does not match the known `{{ variable }}` or `{{ steps.<id>.output }}` patterns, it emits a `logger.Warn` with the unresolved pattern text. This aids debugging of typos in workflow YAML without causing errors. Since `ResolveInputs` only operates on `Step.Input` (never on `Step.Condition`), this warning does not conflict with condition expressions.
+- **Output lookup key**: `ResolveInputs` resolves `{{ steps.<id>.output }}` by looking up `outputs[<id>]` where `<id>` is the step's `ID` field, not `OutputKey`. The `OutputKey` field is a downstream concern for how the Scheduler stores results externally; the `outputs` map parameter is keyed by step ID. In `feature-builder.yaml`, `id` and `output_key` happen to have the same values (e.g., both `"plan"`), which masks this distinction — implementations must use `Step.ID` as the canonical key.
 - **Interface placement**: `ResolveInputs` is an exported standalone function on `YAMLPlanner`, not a method on the `Planner` interface. It is a utility the Scheduler/Executor will call at runtime and does not fit the parse/plan/validate lifecycle that the interface represents. This avoids premature interface expansion.
 
 #### Constructor
@@ -283,7 +285,9 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update.
 - **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
-- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, and verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection).
+- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), and confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d).
+- **Schema version validation**: reject unknown schema versions (e.g., `schema_version: "0.2"`, `schema_version: ""`), confirm `schema_version: "0.1"` is accepted. This covers the behavior resolved in Open Question 2.
+- **YAML file size limit**: reject YAML files exceeding 1 MB (per Security Considerations). This is a security-critical behavior that must have explicit test coverage.
 - **Phase 4 smoke test**: build the binary (`go build ./cmd/orchestrator`) and verify it starts and shuts down cleanly with SIGINT. This validates that the wiring compiles and the component initialization doesn't panic.
 - **Race detector**: all tests run with `-race` flag (already enforced in CI/Makefile).
 
@@ -296,7 +300,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 3. ~~**Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?~~
    **Resolved**: v0.1 supports only the raw output string (`{{ steps.X.output }}`). Dotted field access (e.g. `{{ steps.X.output.field }}`) requires structured output parsing (JSON/YAML) and is deferred to a dedicated templating RFC or RFC 0003. The `feature-builder.yaml` fixture uses `{{ steps.review.output.approved == false }}` in a `condition` field, which is already out of scope for `ResolveInputs` per the Non-Goals and Phase 3d design. (2026-04-09)
 4. ~~**State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?~~
-   **Resolved**: Use `google/uuid`. It is the de facto standard for UUID generation in Go, produces RFC 4122-compliant identifiers that observability and logging tools expect, and adds only a single minimal dependency. (2026-04-09)
+   **Resolved**: Use `google/uuid` with **UUIDv4** (random). UUIDv4 is the most common and well-understood variant, sufficient for v0.1 where run listing is unordered. If time-ordered listing becomes important (e.g., for the REST API's `ListRuns` paginated response), a migration to UUIDv7 can be considered in the persistence RFC (v0.2+). (2026-04-09)
 
 ## Decision / Next Steps
 
