@@ -26,6 +26,23 @@ type workflowRunResponse struct {
 	Steps      map[string]any `json:"steps"`
 }
 
+// registerAgentRequest is the JSON request body for POST /api/v1/agents/register.
+type registerAgentRequest struct {
+	ID           string   `json:"id"`
+	Address      string   `json:"address"`
+	Capabilities []string `json:"capabilities"`
+}
+
+// agentResponse is the JSON response for agent endpoints.
+// registry.AgentInfo has no json tags and would produce PascalCase JSON if
+// serialized directly — these snake_case tags match the workflow DTO convention (F-15).
+type agentResponse struct {
+	ID           string   `json:"id"`
+	Address      string   `json:"address"`
+	Capabilities []string `json:"capabilities"`
+	Status       string   `json:"status"`
+}
+
 // errorResponse is the standard JSON error envelope.
 type errorResponse struct {
 	Error string `json:"error"`

@@ -83,6 +83,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/workflows", s.handleListWorkflows)
 	s.mux.HandleFunc("DELETE /api/v1/workflows/{id}", s.handleDeleteWorkflow)
 
+	// Agent registry endpoints (Phase 2)
+	s.mux.HandleFunc("POST /api/v1/agents/register", s.handleRegisterAgent)
+	s.mux.HandleFunc("GET /api/v1/agents", s.handleListAgents)
+	s.mux.HandleFunc("GET /api/v1/agents/{id}", s.handleGetAgent)
+	s.mux.HandleFunc("DELETE /api/v1/agents/{id}", s.handleDeleteAgent)
+
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 

@@ -190,12 +190,46 @@ Original plan for workflow handlers was combined into PR #14. See above.
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] Agent ID validated against `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
-- [ ] Registered agent status is `StatusHealthy` (not zero-value `StatusUnknown`)
-- [ ] `go vet ./internal/server/...` clean
-- [ ] `go build ./cmd/orchestrator` succeeds
+- [x] `go test ./internal/server/... -v -cover` passes (75/75 tests, 90.5% coverage)
+- [x] Coverage ≥ 80% (achieved: 90.5%)
+- [x] Agent ID validated against `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
+- [x] Registered agent status is `StatusHealthy` (not zero-value `StatusUnknown`)
+- [x] `go vet ./internal/server/...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] Defense-in-depth ID validation on GET/DELETE path parameters
+- [x] `failingRegistry` test wrapper covers all 4 handler 500 paths (carry-forward from PR #14 F-01)
+- [x] 458 lines (within 500-line limit)
+
+#### Post-merge review findings (PR #16)
+
+PR #16 was submitted as ~550 lines (141 implementation + 50 types + 10 routes + 350 tests). Actual size: 458 lines of meaningful change. Full review: [`docs/pr-reviews/pr-016-deep-review.md`](../../docs/pr-reviews/pr-016-deep-review.md).
+
+The PR went through 1 round of review fixes (commit `address PR #16 review findings`) addressing all medium-severity findings from the initial deep review.
+
+**Should Fix findings (carry-forward to PR 4 or follow-up):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-01: No address max-length validation | Medium | `address` field accepts arbitrary non-empty strings up to ~1 MiB (bounded by `decodeJSON`). Could pollute registry with nonsensical addresses and bloat logs. Recommend `len(req.Address) > 253` check. | Address in PR 4 or follow-up |
+| F-02: Weak list assertion in `TestListAgentsWithRegistrations` | Low | Test asserts `Len(t, list, 2)` but doesn't verify returned entries contain expected IDs. Set-based assertion would be more thorough. | Address in PR 4 or follow-up |
+| F-03: No `TestRegisterAgentContentTypeWithCharset` | Low | Workflow endpoint has `TestSubmitWorkflowRunContentTypeWithCharset` but no equivalent for agent registration. Code path covered through shared `requireJSON`, but symmetry preferred. | Address in PR 4 or follow-up |
+| F-04: `workflowIDRegex` name misleading for agent ID validation | Low | Shared regex validates both workflow and agent IDs — name suggests workflow-only. Consider renaming to `resourceIDRegex` or `entityIDRegex`. | Separate follow-up PR (touches planner package + all references) |
+
+**Nice to Have findings (no immediate action required):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-05: No mixed concurrent read/write test | Low | `TestConcurrentAgentAccess` only does concurrent registrations. A mixed register+get+list+delete test would be more realistic. | Combine with PR #14 F-02 in PR 4 |
+| F-06: No capability string validation | Low | Individual capability strings not validated (no regex, max length, max count). Acceptable since capabilities aren't used for authorization in v0.1. | Defer to v0.2 |
+| F-07: No `TestRegisterAgentMalformedJSON` | Informational | Code path covered via shared `decodeJSON` helper; test symmetry would be nice. | Optional follow-up |
+| F-08: No dedicated API reference documentation | Informational | RFC serves as current reference; OpenAPI spec would help CLI/agent implementors. | Defer to v0.2 |
+
+**PR #14 carry-forward status:**
+
+| Item | Source | Status |
+|------|--------|--------|
+| F-01: `failingStore` for 500-path coverage | PR #14 | ✅ Addressed as `failingRegistry` pattern — extend to `failingStore` in PR 4 |
+| F-10: `statusCapture.Flush()` with non-Flusher writer | PR #14 | Deferred to PR 4 or follow-up |
 
 ---
 
@@ -206,6 +240,8 @@ Original plan for workflow handlers was combined into PR #14. See above.
 **Estimated size**: ~250–400 lines (implementation + tests)
 
 > **PR #14 carry-forward items for PR 4**: (1) Add `failingStore` wrapper and test 500 paths for `handleGetWorkflowStatus`, `handleListWorkflows`, `handleDeleteWorkflow` (F-01, Medium — biggest coverage gap, raises `handleDeleteWorkflow` from 59.1% to ~90%+). (2) Add mixed concurrent stress test: submit + read + delete simultaneously with `-race` (F-02, Medium). (3) Deduplicate log field construction in `loggingMiddleware` (F-03, Low).
+>
+> **PR #16 carry-forward items for PR 4**: (1) Add address max-length validation (`len(req.Address) > 253`) in `handleRegisterAgent` (F-01, Medium). (2) Add set-based ID assertion in `TestListAgentsWithRegistrations` (F-02, Low). (3) Add `TestRegisterAgentContentTypeWithCharset` for parity with workflow test suite (F-03, Low). (4) Add mixed concurrent agent test: register + get + list + delete simultaneously (F-05, Low — combine with PR #14 F-02).
 
 #### Scope
 
@@ -257,10 +293,10 @@ Original plan:
 Actual execution:
   PR #14 (scaffold + middleware + workflow handlers)  ──┐
                                                         ├──→ PR 4 (stubs + wiring + docker)
-  PR 3 (agent handlers)  ───────────────────────────────┘
+  PR #16 (agent handlers)  ─────────────────────────────┘
 ```
 
-PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR 3 (agent handlers) can proceed independently. PR 4 depends on both PR #14 and PR 3 being merged.
+PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR #16 (agent handlers) builds on PR #14's helpers, middleware, and test patterns. PR 4 depends on both PR #14 and PR #16 being merged.
 
 ---
 
@@ -292,8 +328,10 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 | `main.go` has sugar logger but RFC convention requires structured zap | New code in PR 4 uses structured zap; existing sugar calls left untouched per MI-04. No mixing within the same log call. | Pending (PR 4) |
 | Empty `ListRuns` / `List` returns `null` JSON instead of `[]` | DTO conversion must initialize slices: `result := make([]RunStatusResponse, 0, len(runs))` to produce `[]` in JSON. Test explicitly. | ✅ Done in PR #14 |
 | `go.mod` conflicts if RFC 0002 PRs interleave with other work | No new `go.mod` dependencies expected — `google/uuid` already present from RFC 0001. Minimal conflict risk. | ✅ Confirmed — no new deps in PR #14 |
-| PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | Address in PR 3 or PR 4 |
-| PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | Address in PR 4 |
+| PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | Address in PR 4 (pattern established by `failingRegistry` in PR #16) |
+| PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | Address in PR 4 (combine with PR #16 F-05 agent concurrent test) |
+| PR #16 F-01: Address max-length validation missing | `handleRegisterAgent` accepts arbitrarily long address strings. Add `len(req.Address) > 253` check. | Address in PR 4 |
+| PR #16 F-04: `workflowIDRegex` name misleading | Shared regex used for both workflow and agent IDs; name suggests workflow-only. Rename to `resourceIDRegex`. | Separate follow-up PR (crosses planner/server boundary) |
 
 ---
 
