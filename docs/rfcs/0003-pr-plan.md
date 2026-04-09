@@ -59,6 +59,14 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 **Branch**: `feature/v01-executor`
 **Estimated size**: ~500–700 lines (implementation + tests)
 
+> **Fallback split plan (review P-02):** If the executor PR exceeds 500 lines,
+> split into PR 2a (`executor.go` + core tests: successful dispatch, agent not
+> found, agent unhealthy, timeout, FAILED status, context cancellation) and
+> PR 2b (`isTransient` table-driven tests + retry edge cases: transient retry
+> success, permanent failure, retry exhaustion). The `bufconn` mock server setup
+> is the most verbose part; keeping it in 2a with the core tests avoids
+> duplicating the setup across PRs.
+
 #### Scope
 
 | File | Change |
@@ -199,13 +207,14 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 | File | Change |
 |------|--------|
-| `internal/state/state.go` | Add `RunRetrying RunStatus = 5`, `SetRunTimestamps` to `Store` interface, implement in `InMemoryStore`, extend existing `RunStatus.String()` with `RunRetrying` case |
-| `internal/state/state_test.go` | Extended — tests for `SetRunTimestamps`, `RunRetrying`, `String()` |
+| `internal/state/state.go` | Add `RunRetrying RunStatus = 5`, `SetRunTimestamps` and `SetRunError` to `Store` interface, implement in `InMemoryStore`, extend existing `RunStatus.String()` with `RunRetrying` case |
+| `internal/state/state_test.go` | Extended — tests for `SetRunTimestamps`, `SetRunError`, `RunRetrying`, `String()` |
 
 #### Key implementation details
 
 - `RunRetrying RunStatus = 5` — explicit integer, aligned with `proto/task.proto` `RETRYING = 5`.
 - `SetRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` — nil pointer means "leave unchanged".
+- `SetRunError(ctx, runID, errMsg string)` — sets `WorkflowRun.Error` field. Used by the scheduler's `failRun` helper to persist failure reasons (review B-02). Without this method, the `Error` field on `WorkflowRun` would be unpopulable through the `Store` interface.
 - `RunStatus.String()` method: extend the existing method (covers values 0–4) with `case RunRetrying: return "retrying"`. Do NOT add a new method — one already exists in `state.go`.
 - Deep-copy semantics maintained for timestamp fields.
 
@@ -215,6 +224,8 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - `SetRunTimestamps` with only `StartedAt` → `FinishedAt` unchanged.
 - `SetRunTimestamps` with only `FinishedAt` → `StartedAt` unchanged.
 - `SetRunTimestamps` on nonexistent run → `ErrRunNotFound`.
+- `SetRunError` sets `WorkflowRun.Error` → verify via `GetRun`.
+- `SetRunError` on nonexistent run → `ErrRunNotFound`.
 - `RunRetrying` stored and retrieved correctly.
 - `RunStatus.String()` for all 6 values.
 - Race detector (`-race`).
@@ -239,6 +250,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 | File | Change |
 |------|--------|
 | `cmd/orchestrator/main.go` | Import `internal/executor`, `internal/scheduler`. Create `GRPCExecutor` and `WorkflowScheduler`. Launch `sched.Run(ctx)` in goroutine. Remove `_ = store`, `_ = reg`, `_ = plan` placeholders. Add structured log messages. |
+| `tests/integration/scheduler_executor_test.go` | New — Scheduler + Executor integration test (review P-05): real `InMemoryStore`, real `YAMLPlanner`, in-process mock gRPC server via `bufconn`, `feature-builder.yaml` fixture. Verifies end-to-end run completion with correct step ordering. |
 
 #### Key implementation details
 

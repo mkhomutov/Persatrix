@@ -21,7 +21,7 @@
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
-- [Open Questions](#open-questions)
+- [Design Decisions & Open Questions](#design-decisions--open-questions)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
 
@@ -35,7 +35,7 @@ Implement the Scheduler and Executor — the two components that bring the orche
 
 RFC 0001 built the foundational data structures (State, Registry, Planner) and RFC 0002 exposed them through the REST API. However, submitting a workflow run via `POST /api/v1/workflows/run` currently creates a `Pending` run that remains pending indefinitely — no component transitions runs through execution. The dependency chain is now:
 
-```
+```text
 CLI ──REST──► HTTP Server (RFC 0002)
                    │
                    └─ POST /api/v1/workflows/run  ──►  WorkflowRun{Status: Pending}
@@ -90,7 +90,7 @@ If we do nothing, the system remains non-functional from the user's perspective 
 
 ### Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │                  WorkflowScheduler                   │
 │                                                     │
@@ -277,15 +277,41 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
         s.logger.Error("failed to update run status to completed",
             zap.String("run_id", run.ID), zap.Error(err))
     }
-    now := time.Now()
-    if err := s.store.SetRunTimestamps(ctx, run.ID, nil, &now); err != nil {
+    // NOTE(review B-01): Use a distinct variable name — `now` is already
+    // declared at step 4 for StartedAt. Reusing `:=` would be a compile error.
+    finishedAt := time.Now()
+    if err := s.store.SetRunTimestamps(ctx, run.ID, nil, &finishedAt); err != nil {
         s.logger.Error("failed to set run finished timestamp",
             zap.String("run_id", run.ID), zap.Error(err))
     }
 }
 ```
 
-> **Note (F-05 from RFC 0001 review):** The current `Store` interface has no method to set `WorkflowRun.FinishedAt`. This RFC adds `SetRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` to the `Store` interface. See Phase 4 for details. The `failRun` helper (not shown above) must also call `SetRunTimestamps` to record `FinishedAt` on failure.
+> **Note (F-05 from RFC 0001 review):** The current `Store` interface has no method to set `WorkflowRun.FinishedAt`. This RFC adds `SetRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` to the `Store` interface. See Phase 4 for details. The `failRun` helper (shown below) must also call `SetRunTimestamps` to record `FinishedAt` on failure.
+
+#### `failRun` Helper
+
+The `failRun` helper is called whenever a run must be aborted (parse error, DAG validation failure, stage failure, cancellation). Its contract:
+
+```go
+func (s *WorkflowScheduler) failRun(ctx context.Context, runID string, errMsg string) {
+    if err := s.store.UpdateRunStatus(ctx, runID, state.RunFailed); err != nil {
+        s.logger.Error("failed to set run status to failed",
+            zap.String("run_id", runID), zap.Error(err))
+    }
+    if err := s.store.SetRunError(ctx, runID, errMsg); err != nil {
+        s.logger.Error("failed to set run error message",
+            zap.String("run_id", runID), zap.Error(err))
+    }
+    finishedAt := time.Now()
+    if err := s.store.SetRunTimestamps(ctx, runID, nil, &finishedAt); err != nil {
+        s.logger.Error("failed to set run finished timestamp",
+            zap.String("run_id", runID), zap.Error(err))
+    }
+}
+```
+
+> **Note (review B-02):** `WorkflowRun.Error` exists in the struct but the `Store` interface had no method to set it. This RFC adds `SetRunError` (see §State Store Extensions, Phase 4) alongside `SetRunTimestamps`.
 >
 > **Per-run timeout (review S-02):** This design enforces per-step timeouts via `executor.timeout` but does not enforce a per-run timeout. A workflow with many stages could run indefinitely. For v0.1 this is acceptable given single-node, low-volume operation. v0.2 should add a `maxRunDuration` option to `WorkflowScheduler` (recommended default: 30 minutes) using `context.WithTimeout` wrapping the entire `executeRun` call.
 
@@ -360,6 +386,14 @@ func (s *WorkflowScheduler) executeStep(
     //    Prerequisite: WorkflowRun.Inputs must be populated by RFC 0002's
     //    handleRunWorkflow from the request body's "inputs" field.
     //    If Inputs is nil, ResolveInputs will fail on {{ user_request }} templates.
+    //
+    //    NOTE(review B-03): Reading `outputs` here without holding `mu` is safe
+    //    because ResolveInputs only accesses keys from *prior* stages (enforced
+    //    by depends_on). Prior-stage outputs are immutable by the time the
+    //    current stage starts — the stage barrier in executeStage guarantees all
+    //    writes from a stage complete before the next stage begins. Steps within
+    //    the same stage have no depends_on edges between them (DAG invariant),
+    //    so no step reads a key that another concurrent step is writing.
     resolvedInput, err := planner.ResolveInputs(step, outputs, run.Inputs, s.logger)
     if err != nil {
         if storeErr := s.store.UpdateStepState(ctx, run.ID, state.StepState{
@@ -529,6 +563,11 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
             return nil, fmt.Errorf("permanent gRPC error from agent %q: %w", agent.ID, err)
         }
         if attempt < e.maxRetries {
+            // NOTE(review D-02): Deterministic exponential backoff creates a
+            // thundering-herd risk when multiple steps retry against the same
+            // recovering agent. The implementation should add ±25% jitter:
+            //   jitter := 0.75 + rand.Float64()*0.5  // [0.75, 1.25)
+            //   backoff = time.Duration(float64(backoff) * jitter)
             backoff := time.Duration(1<<uint(attempt)) * 100 * time.Millisecond
             e.logger.Warn("retrying transient gRPC error",
                 zap.String("agent_id", agent.ID),
@@ -595,7 +634,7 @@ func isTransient(err error) bool {
 
 `proto/task.proto` defines the `AgentService` with `ExecuteTask`, `ExecuteTaskStream`, and `HealthCheck` RPCs. This RFC generates Go stubs:
 
-```
+```text
 proto/task.proto  ──protoc──►  internal/generated/taskpb/task.pb.go
                                internal/generated/taskpb/task_grpc.pb.go
 ```
@@ -612,15 +651,22 @@ RFC 0001's `Store` interface lacks facilities for:
 1. Setting `WorkflowRun.FinishedAt` when a run completes or fails.
 2. Setting `WorkflowRun.StartedAt` to the actual execution start (currently set at submission time per RFC 0002).
 
-This RFC extends the `Store` interface with one additional method:
+This RFC extends the `Store` interface with two additional methods:
 
 ```go
 // SetRunTimestamps updates the started_at and finished_at timestamps for a run.
 // Either pointer may be nil to leave that field unchanged.
 SetRunTimestamps(ctx context.Context, runID string, startedAt, finishedAt *time.Time) error
+
+// SetRunError stores an error message on a workflow run (review B-02).
+// Used by the scheduler's failRun helper to persist the failure reason.
+// WorkflowRun.Error already exists in the struct; this method provides
+// a way to set it through the Store interface without changing
+// UpdateRunStatus's signature.
+SetRunError(ctx context.Context, runID string, errMsg string) error
 ```
 
-This is the minimal extension that avoids breaking the existing `UpdateRunStatus` signature while giving the Scheduler the ability to record accurate timing. The alternative — adding timestamp parameters to `UpdateRunStatus` — was rejected because it changes the signature used by multiple callers (REST API, tests) for a concern that only the Scheduler has.
+This is the minimal extension that avoids breaking the existing `UpdateRunStatus` signature while giving the Scheduler the ability to record accurate timing and failure reasons. The alternative — adding timestamp/error parameters to `UpdateRunStatus` — was rejected because it changes the signature used by multiple callers (REST API, tests) for concerns that only the Scheduler has.
 
 ### `RunStatus` Extension: `RunRetrying`
 
@@ -728,12 +774,12 @@ Summary: Implement `WorkflowScheduler` with polling loop, parallel stage executi
 Summary: Extend `Store` interface with `SetRunTimestamps`, add `RunRetrying` status, implement in `InMemoryStore`.
 
 **Deliverables:**
-1. `internal/state/state.go` — add `SetRunTimestamps` method, `RunRetrying` constant, extend existing `RunStatus.String()` with `RunRetrying` case.
-2. `internal/state/state_test.go` — tests for new method and status.
+1. `internal/state/state.go` — add `SetRunTimestamps` and `SetRunError` methods, `RunRetrying` constant, extend existing `RunStatus.String()` with `RunRetrying` case.
+2. `internal/state/state_test.go` — tests for new methods and status.
 
 > **Note (M-09):** `RunStatus.String()` already exists in `state.go` (covers values 0–4). Phase 4 only needs to add the `case RunRetrying` branch — not a new method.
 
-**Dependencies:** RFC 0001 (existing Store implementation). Independent of Phases 2–3; must complete before Phase 3 (scheduler needs `SetRunTimestamps` and `RunRetrying`).
+**Dependencies:** RFC 0001 (existing Store implementation). Independent of Phases 2–3; must complete before Phase 3 (scheduler needs `SetRunTimestamps`, `SetRunError`, and `RunRetrying`).
 
 ### Phase 5: Wire into main.go (~50 LOC)
 
@@ -754,7 +800,7 @@ Summary: Instantiate Executor and Scheduler in `main.go`, launch scheduler loop.
 | Go orchestrator | `internal/executor/executor_test.go` | New — unit tests with mock gRPC server |
 | Go orchestrator | `internal/scheduler/scheduler.go` | Replace TODO stubs — `Scheduler` interface, `WorkflowScheduler`, polling loop, stage/step execution |
 | Go orchestrator | `internal/scheduler/scheduler_test.go` | New — unit tests with mock dependencies |
-| Go orchestrator | `internal/state/state.go` | Add `SetRunTimestamps` method to `Store` interface and `InMemoryStore`, add `RunRetrying` constant |
+| Go orchestrator | `internal/state/state.go` | Add `SetRunTimestamps` and `SetRunError` methods to `Store` interface and `InMemoryStore`, add `RunRetrying` constant |
 | Go orchestrator | `internal/state/state_test.go` | Extended — tests for `SetRunTimestamps` and `RunRetrying` |
 | Go orchestrator | `cmd/orchestrator/main.go` | Wire Executor + Scheduler, remove unused-var placeholders, launch scheduler goroutine |
 | Go generated | `internal/generated/taskpb/task.pb.go` | Generated — protobuf message types |
@@ -807,13 +853,17 @@ Summary: Instantiate Executor and Scheduler in `main.go`, launch scheduler loop.
 - **Scheduler + Executor integration**: use a real (in-process) mock gRPC server, real `InMemoryStore`, real `YAMLPlanner`, and the `feature-builder.yaml` fixture. Submit a run, verify it completes with 4 steps in correct order.
 - **Build smoke test**: `go build ./cmd/orchestrator` succeeds after wiring.
 
-## Open Questions
+## Design Decisions & Open Questions
+
+### Resolved
 
 1. ~~**Polling vs. event-driven scheduler**: Should the scheduler poll `ListRuns` or receive events from the REST API?~~
    **Resolved**: Polling for v0.1 simplicity. Event-driven via channel injection is a v0.2 optimization. The polling interval defaults to 1 second, which is acceptable for the expected v0.1 run volume. (2026-04-09)
 
 2. ~~**Connection pooling**: Should the Executor maintain a pool of gRPC connections per agent?~~
    **Resolved**: No pooling in v0.1 — create a new connection per task dispatch, close after response. Connection pooling is a performance optimization for v0.2 when agents handle concurrent tasks. The overhead of per-task connection setup is negligible for v0.1 run volumes. (2026-04-09)
+
+### Open
 
 3. **Condition evaluation**: How should `{{ steps.review.output.approved == false }}` be evaluated? This requires parsing the step output as JSON/YAML and evaluating a boolean expression. Deferred — all steps execute unconditionally in v0.1.
 
