@@ -1461,7 +1461,7 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 	// NOTE(review-F04): goroutines assert status codes to verify correctness,
 	// not just absence of panics/deadlocks. Failures are collected via t.Errorf
 	// which is goroutine-safe.
-	done := make(chan struct{}, 30)
+	done := make(chan struct{}, 35)
 
 	// 10 goroutines submit new runs
 	for i := 0; i < 10; i++ {
@@ -1475,13 +1475,24 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 		}()
 	}
 
-	// 10 goroutines read existing runs
-	for i := 0; i < 10; i++ {
+	// 5 goroutines read runs not targeted by DELETE (safe — always 200)
+	for i := 5; i < 10; i++ {
 		go func(id string) {
 			defer func() { done <- struct{}{} }()
 			rec := doRequest(h, http.MethodGet, "/api/v1/workflows/"+id+"/status", nil)
 			if rec.Code != http.StatusOK {
 				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
+		}(runIDs[i])
+	}
+
+	// 5 goroutines read runs that may be concurrently deleted (accept 200 or 404)
+	for i := 0; i < 5; i++ {
+		go func(id string) {
+			defer func() { done <- struct{}{} }()
+			rec := doRequest(h, http.MethodGet, "/api/v1/workflows/"+id+"/status", nil)
+			if rec.Code != http.StatusOK && rec.Code != http.StatusNotFound {
+				t.Errorf("concurrent get-or-miss %s: got %d, want 200 or 404", id, rec.Code)
 			}
 		}(runIDs[i])
 	}
@@ -1497,7 +1508,19 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 30; i++ {
+	// 5 goroutines delete pre-created runs (PR #17 F-04: exercises TOCTOU delete path)
+	for i := 0; i < 5; i++ {
+		go func(id string) {
+			defer func() { done <- struct{}{} }()
+			rec := doRequest(h, http.MethodDelete, "/api/v1/workflows/"+id, nil)
+			// 204 = deleted, 404 = already deleted by another goroutine — both valid
+			if rec.Code != http.StatusNoContent && rec.Code != http.StatusNotFound {
+				t.Errorf("concurrent delete %s: got %d, want 204 or 404", id, rec.Code)
+			}
+		}(runIDs[i])
+	}
+
+	for i := 0; i < 35; i++ {
 		<-done
 	}
 }
@@ -1516,7 +1539,7 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 
 	// NOTE(review-F04): goroutines assert status codes to verify correctness,
 	// not just absence of panics/deadlocks.
-	done := make(chan struct{}, 30)
+	done := make(chan struct{}, 35)
 
 	// 10 goroutines register new agents
 	for i := 0; i < 10; i++ {
@@ -1531,14 +1554,26 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 		}(i)
 	}
 
-	// 10 goroutines get existing agents
-	for i := 0; i < 10; i++ {
+	// 5 goroutines get agents not targeted by DELETE (safe — always 200)
+	for i := 5; i < 10; i++ {
 		go func(n int) {
 			defer func() { done <- struct{}{} }()
 			id := fmt.Sprintf("pre-agent-%02d", n)
 			rec := doRequest(h, http.MethodGet, "/api/v1/agents/"+id, nil)
 			if rec.Code != http.StatusOK {
 				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
+		}(i)
+	}
+
+	// 5 goroutines get agents that may be concurrently deleted (accept 200 or 404)
+	for i := 0; i < 5; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			id := fmt.Sprintf("pre-agent-%02d", n)
+			rec := doRequest(h, http.MethodGet, "/api/v1/agents/"+id, nil)
+			if rec.Code != http.StatusOK && rec.Code != http.StatusNotFound {
+				t.Errorf("concurrent get-or-miss %s: got %d, want 200 or 404", id, rec.Code)
 			}
 		}(i)
 	}
@@ -1554,7 +1589,20 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 30; i++ {
+	// 5 goroutines delete pre-registered agents (PR #17 F-04: exercises concurrent unregister)
+	for i := 0; i < 5; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			id := fmt.Sprintf("pre-agent-%02d", n)
+			rec := doRequest(h, http.MethodDelete, "/api/v1/agents/"+id, nil)
+			// 204 = deleted, 404 = already deleted by another goroutine — both valid
+			if rec.Code != http.StatusNoContent && rec.Code != http.StatusNotFound {
+				t.Errorf("concurrent delete %s: got %d, want 204 or 404", id, rec.Code)
+			}
+		}(i)
+	}
+
+	for i := 0; i < 35; i++ {
 		<-done
 	}
 }

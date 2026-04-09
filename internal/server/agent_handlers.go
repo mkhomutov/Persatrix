@@ -24,8 +24,8 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Agent IDs share the same format as workflow IDs (^[a-z0-9][a-z0-9-]*[a-z0-9]$).
-	// Uses workflowIDRegex directly — single source of truth from planner package.
-	if !workflowIDRegex.MatchString(req.ID) {
+	// Uses resourceIDRegex directly — single source of truth from planner package.
+	if !resourceIDRegex.MatchString(req.ID) {
 		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	// with validateRunID() on workflow endpoints. Prevents arbitrary strings from
 	// reaching the registry layer, important for v0.2 SQLite migration.
 	// (Review finding F-01)
-	if !workflowIDRegex.MatchString(id) {
+	if !resourceIDRegex.MatchString(id) {
 		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
 		return
 	}
@@ -112,7 +112,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Validate agent ID format — consistent with handleGetAgent. (Review finding F-01)
-	if !workflowIDRegex.MatchString(id) {
+	if !resourceIDRegex.MatchString(id) {
 		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
 		return
 	}
