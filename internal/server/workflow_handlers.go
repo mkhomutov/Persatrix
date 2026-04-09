@@ -13,10 +13,10 @@ import (
 	"github.com/orchestr8/orchestr8/internal/state"
 )
 
-// workflowIDRegex is imported from the planner package to ensure a single source
-// of truth for the workflow ID validation pattern across security boundaries.
-// (Review finding F-04: eliminates divergence risk between planner and server.)
-var workflowIDRegex = planner.WorkflowIDRegex
+// resourceIDRegex is imported from the planner package to ensure a single source
+// of truth for the resource ID validation pattern across security boundaries.
+// Used for both workflow IDs and agent IDs (renamed from workflowIDRegex per PR #16 F-04).
+var resourceIDRegex = planner.ResourceIDRegex
 
 // Sentinel errors for workflow path resolution.
 var (
@@ -39,7 +39,7 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 		writeError(w, "BAD_REQUEST", "workflow_id is required", http.StatusBadRequest)
 		return
 	}
-	if !workflowIDRegex.MatchString(req.WorkflowID) {
+	if !resourceIDRegex.MatchString(req.WorkflowID) {
 		writeError(w, "BAD_REQUEST", "workflow_id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
 		return
 	}
@@ -183,7 +183,7 @@ func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 // within the workflows directory. Returns ErrWorkflowNotFound for traversal attempts
 // or missing files (no information leakage about path structure).
 func (s *Server) resolveWorkflowPath(workflowID string) (string, error) {
-	if !workflowIDRegex.MatchString(workflowID) {
+	if !resourceIDRegex.MatchString(workflowID) {
 		return "", ErrInvalidWorkflowID
 	}
 

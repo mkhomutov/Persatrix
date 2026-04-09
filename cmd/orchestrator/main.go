@@ -34,7 +34,8 @@ func main() {
 	switch *env {
 	case "development", "staging", "production":
 	default:
-		panic("invalid --env value: " + *env + " (must be development|staging|production)")
+		fmt.Fprintln(os.Stderr, "invalid --env value: "+*env+" (must be development|staging|production)")
+		os.Exit(1)
 	}
 
 	// PR review: development logger (DPanic panics, verbose stacktraces) was
