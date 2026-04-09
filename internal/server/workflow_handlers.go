@@ -34,6 +34,7 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// TODO(v0.3): validate input key names against variable name charset [a-z_][a-z0-9_]*
 	if req.WorkflowID == "" {
 		writeError(w, "BAD_REQUEST", "workflow_id is required", http.StatusBadRequest)
 		return

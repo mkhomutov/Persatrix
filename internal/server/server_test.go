@@ -719,6 +719,18 @@ func TestStatusCaptureFlush(t *testing.T) {
 	assert.True(t, rec.Flushed)
 }
 
+// --- statusCapture.Unwrap() (F-04) ---
+
+// TestStatusCaptureUnwrap validates that Unwrap() returns the underlying
+// ResponseWriter so Go 1.20+ http.ResponseController can discover optional
+// interfaces (http.Flusher, http.Hijacker) via the standard unwrapping protocol.
+// (Deep review finding F-04: 0% coverage on Unwrap() method.)
+func TestStatusCaptureUnwrap(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sc := &statusCapture{ResponseWriter: rec}
+	assert.Equal(t, rec, sc.Unwrap())
+}
+
 // --- Missing Content-Type header (F-07) ---
 
 // TestSubmitWorkflowRunNoContentType validates that requests with no Content-Type
