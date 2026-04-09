@@ -90,31 +90,46 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler returns the composed HTTP handler with middleware applied.
-// Composition order: recovery → logging → requestID → mux.
+// Execution order: recovery → requestID → logging → mux.
+// requestID must run before logging so the request ID is present in r.Context()
+// when the logging middleware reads it after next.ServeHTTP returns.
+// (Review finding F-01: r.WithContext creates a new *http.Request, so
+// loggingMiddleware must receive the request *after* requestID injects the ID.)
 func (s *Server) Handler() http.Handler {
 	var h http.Handler = s.mux
-	h = requestIDMiddleware(h)
 	h = loggingMiddleware(s.logger, h)
+	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)
 	return h
 }
 
 // Start runs the HTTP server until the context is cancelled, then drains
 // with a 10-second graceful shutdown window.
+// (Review finding F-05: previous implementation leaked a goroutine when
+// ListenAndServe failed immediately, because the shutdown goroutine blocked
+// on <-ctx.Done() forever. This select-based approach ensures no leak.)
 func (s *Server) Start(ctx context.Context) error {
 	srv := &http.Server{Addr: s.addr, Handler: s.Handler()}
+	errCh := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
+		errCh <- srv.ListenAndServe()
+	}()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			s.logger.Error("HTTP server shutdown error", zap.Error(err))
 		}
-	}()
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+		// Wait for ListenAndServe to return after Shutdown.
+		<-errCh
+		return nil
 	}
-	return nil
 }
 
 // handleHealthz returns a minimal 200 OK with {"status": "ok"}.

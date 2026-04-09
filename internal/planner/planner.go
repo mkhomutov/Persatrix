@@ -24,13 +24,16 @@ const stepIDPattern = `[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?`
 // maxYAMLSize is the maximum allowed YAML file size (1 MB).
 const maxYAMLSize = 1 << 20
 
-// workflowIDRegex and agentIDRegex require minimum 2 characters and no underscores
+// WorkflowIDRegex and agentIDRegex require minimum 2 characters and no underscores
 // (matching the agent ID convention: ^[a-z0-9][a-z0-9-]*[a-z0-9]$).
 // stepIDRegex intentionally allows underscores and single-character IDs (e.g. "a",
 // "step_1") because step IDs are workflow-internal identifiers, not externally
 // visible names. The patterns are kept separate for clearer error messages.
+//
+// WorkflowIDRegex is exported for reuse by the server package (review finding F-04:
+// eliminates regex duplication across security-relevant validation boundaries).
 var (
-	workflowIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+	WorkflowIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 	agentIDRegex    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 	stepIDRegex     = regexp.MustCompile(`^` + stepIDPattern + `$`)
 	outputKeyRegex  = regexp.MustCompile(`^` + stepIDPattern + `$`)
@@ -148,8 +151,8 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 	if w.ID == "" {
 		return errors.New("workflow id is required")
 	}
-	if !workflowIDRegex.MatchString(w.ID) {
-		return fmt.Errorf("invalid workflow id %q: must match %s", w.ID, workflowIDRegex.String())
+	if !WorkflowIDRegex.MatchString(w.ID) {
+		return fmt.Errorf("invalid workflow id %q: must match %s", w.ID, WorkflowIDRegex.String())
 	}
 
 	if w.Name == "" {

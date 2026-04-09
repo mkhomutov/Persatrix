@@ -4,17 +4,19 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/orchestr8/orchestr8/internal/planner"
 	"github.com/orchestr8/orchestr8/internal/state"
 )
 
-// workflowIDRegex validates workflow IDs: lowercase alphanumeric + hyphens, min 2 chars.
-var workflowIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+// workflowIDRegex is imported from the planner package to ensure a single source
+// of truth for the workflow ID validation pattern across security boundaries.
+// (Review finding F-04: eliminates divergence risk between planner and server.)
+var workflowIDRegex = planner.WorkflowIDRegex
 
 // Sentinel errors for workflow path resolution.
 var (
@@ -182,7 +184,8 @@ func runToResponse(run *state.WorkflowRun) workflowRunResponse {
 		RunID:      run.ID,
 		WorkflowID: run.WorkflowID,
 		Status:     runStatusString(run.Status),
-		Steps:      make(map[string]any),
+		// TODO(v0.3): populate from run.Steps when Scheduler/Executor is implemented (RFC 0003)
+		Steps: make(map[string]any),
 	}
 
 	if !run.StartedAt.IsZero() {

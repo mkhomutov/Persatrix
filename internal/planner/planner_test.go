@@ -671,14 +671,14 @@ func TestStepIDRegex_InvalidIDs(t *testing.T) {
 func TestWorkflowIDRegex_ValidIDs(t *testing.T) {
 	valid := []string{"ab", "feature-builder", "v01", "a1b2"}
 	for _, id := range valid {
-		assert.True(t, workflowIDRegex.MatchString(id), "expected valid: %q", id)
+		assert.True(t, WorkflowIDRegex.MatchString(id), "expected valid: %q", id)
 	}
 }
 
 func TestWorkflowIDRegex_InvalidIDs(t *testing.T) {
 	invalid := []string{"", "a", "-start", "end-", "A-B", "has space"}
 	for _, id := range invalid {
-		assert.False(t, workflowIDRegex.MatchString(id), "expected invalid: %q", id)
+		assert.False(t, WorkflowIDRegex.MatchString(id), "expected invalid: %q", id)
 	}
 }
 

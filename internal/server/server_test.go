@@ -186,7 +186,7 @@ func TestSubmitWorkflowRunMalformedJSON(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", []byte(`{invalid}`))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid JSON")
+	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
 }
 
 func TestSubmitWorkflowRunEmptyBody(t *testing.T) {
@@ -203,7 +203,7 @@ func TestSubmitWorkflowRunUnknownField(t *testing.T) {
 	body := []byte(`{"workflow_id": "test-wf", "unknown_field": "bad"}`)
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid JSON")
+	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
 }
 
 func TestSubmitWorkflowRunBodyTooLarge(t *testing.T) {
@@ -475,6 +475,38 @@ func TestRunToResponseWithFinishedAt(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 	assert.NotNil(t, resp.StartedAt)
 	assert.NotNil(t, resp.FinishedAt)
+}
+
+// --- Content-Type Handling (T-02) ---
+
+func TestSubmitWorkflowRunContentTypeWithCharset(t *testing.T) {
+	srv, dir := testServer(t)
+	writeWorkflowFixture(t, dir, "test-wf")
+	body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "test-wf"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/run", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+// --- Non-String Input Values (T-01) ---
+
+func TestSubmitWorkflowRunNonStringInputs(t *testing.T) {
+	srv, dir := testServer(t)
+	writeWorkflowFixture(t, dir, "test-wf")
+	// inputs.key is a number, but map[string]string requires all values to be strings.
+	body := []byte(`{"workflow_id": "test-wf", "inputs": {"key": 42}}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// --- Method Not Allowed (T-06) ---
+
+func TestMethodNotAllowed(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodPut, "/api/v1/workflows/run", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
 // --- Graceful Shutdown ---
