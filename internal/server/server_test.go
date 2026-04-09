@@ -1261,3 +1261,366 @@ func TestDeleteAgentInternalError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "INTERNAL")
 }
+
+// =============================================================================
+// Stub Endpoint Tests (Phase 3)
+// =============================================================================
+
+func TestGetLogsStub(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/any-id/logs", nil)
+	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NOT_IMPLEMENTED")
+	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
+}
+
+func TestGetCostSummaryStub(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/cost/summary", nil)
+	assert.Equal(t, http.StatusNotImplemented, rec.Code)
+	assert.Contains(t, rec.Body.String(), "NOT_IMPLEMENTED")
+	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
+}
+
+// NOTE(review-F09): Wrong-method tests document the HTTP method contract for
+// stub endpoints. Go 1.22+ ServeMux pattern routing handles 405 automatically.
+
+func TestLogsStubWrongMethod(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/executions/any-id/logs", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestCostSummaryStubWrongMethod(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/cost/summary", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+// =============================================================================
+// Failing Store Tests (PR #14 carry-forward F-01)
+// =============================================================================
+
+// failingStore wraps a real Store and forces specific methods to return
+// non-sentinel errors, enabling 500 error-path coverage for workflow handlers.
+type failingStore struct {
+	state.Store
+	failOn string // method name to fail on
+}
+
+func (f *failingStore) GetRun(ctx context.Context, runID string) (*state.WorkflowRun, error) {
+	if f.failOn == "GetRun" {
+		return nil, errors.New("simulated db error")
+	}
+	return f.Store.GetRun(ctx, runID)
+}
+
+func (f *failingStore) ListRuns(ctx context.Context) ([]*state.WorkflowRun, error) {
+	if f.failOn == "ListRuns" {
+		return nil, errors.New("simulated db error")
+	}
+	return f.Store.ListRuns(ctx)
+}
+
+func (f *failingStore) DeleteRun(ctx context.Context, runID string) error {
+	if f.failOn == "DeleteRun" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.DeleteRun(ctx, runID)
+}
+
+func (f *failingStore) CreateRun(ctx context.Context, run *state.WorkflowRun) error {
+	if f.failOn == "CreateRun" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.CreateRun(ctx, run)
+}
+
+// NOTE(review-F06): UpdateRunStatus and UpdateStepState are not called by any
+// v0.1 handler, but without explicit stubs the embedded interface's nil method
+// values would panic at runtime if RFC 0003 Scheduler/Executor handlers call
+// them before the stubs are replaced with real implementations.
+
+func (f *failingStore) UpdateRunStatus(ctx context.Context, runID string, status state.RunStatus) error {
+	if f.failOn == "UpdateRunStatus" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.UpdateRunStatus(ctx, runID, status)
+}
+
+func (f *failingStore) UpdateStepState(ctx context.Context, runID string, step state.StepState) error {
+	if f.failOn == "UpdateStepState" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.UpdateStepState(ctx, runID, step)
+}
+
+// testServerWithStore creates a Server using the provided store instead of
+// the default InMemoryStore. Used by failingStore tests.
+func testServerWithStore(t *testing.T, store state.Store) (*Server, string) {
+	t.Helper()
+	dir := t.TempDir()
+	logger := zap.NewNop()
+	reg := registry.NewInMemoryRegistry(logger)
+	pl := planner.NewYAMLPlanner(logger)
+	srv, err := New("127.0.0.1:0", dir, store, reg, pl, logger)
+	require.NoError(t, err)
+	return srv, dir
+}
+
+func TestGetWorkflowStatusInternalError(t *testing.T) {
+	store := &failingStore{
+		Store:  state.NewInMemoryStore(zap.NewNop()),
+		failOn: "GetRun",
+	}
+	srv, _ := testServerWithStore(t, store)
+	// Use a valid UUID format to pass validation
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/00000000-0000-4000-8000-000000000001/status", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestListWorkflowsInternalError(t *testing.T) {
+	store := &failingStore{
+		Store:  state.NewInMemoryStore(zap.NewNop()),
+		failOn: "ListRuns",
+	}
+	srv, _ := testServerWithStore(t, store)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestDeleteWorkflowInternalError(t *testing.T) {
+	store := &failingStore{
+		Store:  state.NewInMemoryStore(zap.NewNop()),
+		failOn: "DeleteRun",
+	}
+	srv, dir := testServerWithStore(t, store)
+	writeWorkflowFixture(t, dir, "test-wf")
+	h := srv.Handler()
+
+	// Create a run first (CreateRun not failing)
+	body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "test-wf"})
+	rec := doRequest(h, http.MethodPost, "/api/v1/workflows/run", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var cr submitWorkflowRunResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cr))
+
+	// Delete should hit the 500 path
+	rec = doRequest(h, http.MethodDelete, "/api/v1/workflows/"+cr.RunID, nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestDeleteWorkflowGetRunInternalError(t *testing.T) {
+	store := &failingStore{
+		Store:  state.NewInMemoryStore(zap.NewNop()),
+		failOn: "GetRun",
+	}
+	srv, _ := testServerWithStore(t, store)
+	// Use a valid UUID to pass validation — GetRun will fail with 500
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/00000000-0000-4000-8000-000000000001", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestSubmitWorkflowRunCreateRunInternalError(t *testing.T) {
+	store := &failingStore{
+		Store:  state.NewInMemoryStore(zap.NewNop()),
+		failOn: "CreateRun",
+	}
+	srv, dir := testServerWithStore(t, store)
+	writeWorkflowFixture(t, dir, "test-wf")
+	body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "test-wf"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+// =============================================================================
+// Mixed Concurrent Stress Tests (PR #14 carry-forward F-02, PR #16 F-05)
+// =============================================================================
+
+func TestMixedConcurrentWorkflowAccess(t *testing.T) {
+	srv, dir := testServer(t)
+	writeWorkflowFixture(t, dir, "concurrent-wf")
+	h := srv.Handler()
+
+	// Pre-create some runs to read and delete
+	var runIDs []string
+	for i := 0; i < 10; i++ {
+		body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "concurrent-wf"})
+		rec := doRequest(h, http.MethodPost, "/api/v1/workflows/run", body)
+		require.Equal(t, http.StatusCreated, rec.Code)
+		var cr submitWorkflowRunResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cr))
+		runIDs = append(runIDs, cr.RunID)
+	}
+
+	// NOTE(review-F04): goroutines assert status codes to verify correctness,
+	// not just absence of panics/deadlocks. Failures are collected via t.Errorf
+	// which is goroutine-safe.
+	done := make(chan struct{}, 30)
+
+	// 10 goroutines submit new runs
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "concurrent-wf"})
+			rec := doRequest(h, http.MethodPost, "/api/v1/workflows/run", body)
+			if rec.Code != http.StatusCreated {
+				t.Errorf("concurrent submit: got %d, want %d", rec.Code, http.StatusCreated)
+			}
+		}()
+	}
+
+	// 10 goroutines read existing runs
+	for i := 0; i < 10; i++ {
+		go func(id string) {
+			defer func() { done <- struct{}{} }()
+			rec := doRequest(h, http.MethodGet, "/api/v1/workflows/"+id+"/status", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
+		}(runIDs[i])
+	}
+
+	// 10 goroutines list all runs
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			rec := doRequest(h, http.MethodGet, "/api/v1/workflows", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent list: got %d, want %d", rec.Code, http.StatusOK)
+			}
+		}()
+	}
+
+	for i := 0; i < 30; i++ {
+		<-done
+	}
+}
+
+func TestMixedConcurrentAgentAccess(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	// Pre-register some agents
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("pre-agent-%02d", i)
+		body, _ := json.Marshal(registerAgentRequest{ID: id, Address: "localhost:50051"})
+		rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+		require.Equal(t, http.StatusCreated, rec.Code)
+	}
+
+	// NOTE(review-F04): goroutines assert status codes to verify correctness,
+	// not just absence of panics/deadlocks.
+	done := make(chan struct{}, 30)
+
+	// 10 goroutines register new agents
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			id := fmt.Sprintf("new-agent-%02d", n)
+			body, _ := json.Marshal(registerAgentRequest{ID: id, Address: "localhost:50052"})
+			rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+			if rec.Code != http.StatusCreated {
+				t.Errorf("concurrent register %s: got %d, want %d", id, rec.Code, http.StatusCreated)
+			}
+		}(i)
+	}
+
+	// 10 goroutines get existing agents
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			id := fmt.Sprintf("pre-agent-%02d", n)
+			rec := doRequest(h, http.MethodGet, "/api/v1/agents/"+id, nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
+		}(i)
+	}
+
+	// 10 goroutines list all agents
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			rec := doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent list: got %d, want %d", rec.Code, http.StatusOK)
+			}
+		}()
+	}
+
+	for i := 0; i < 30; i++ {
+		<-done
+	}
+}
+
+// =============================================================================
+// PR #16 Carry-Forward Tests
+// =============================================================================
+
+// TestRegisterAgentContentTypeWithCharset validates that charset=utf-8 parameter
+// is accepted (parity with TestSubmitWorkflowRunContentTypeWithCharset).
+// (PR #16 carry-forward F-03)
+func TestRegisterAgentContentTypeWithCharset(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "test-agent", "address": "localhost:50051"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+// TestListAgentsWithRegistrationsSetBased uses set-based ID assertion
+// instead of just checking count. (PR #16 carry-forward F-02)
+func TestListAgentsWithRegistrationsSetBased(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	body1 := []byte(`{"id": "agent-aa", "address": "localhost:50051", "capabilities": ["coding"]}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body1)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	body2 := []byte(`{"id": "agent-bb", "address": "localhost:50052", "capabilities": ["review"]}`)
+	rec = doRequest(h, http.MethodPost, "/api/v1/agents/register", body2)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var list []agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	require.Len(t, list, 2)
+
+	ids := map[string]bool{}
+	for _, a := range list {
+		ids[a.ID] = true
+	}
+	assert.True(t, ids["agent-aa"], "expected agent-aa in list")
+	assert.True(t, ids["agent-bb"], "expected agent-bb in list")
+}
+
+// TestRegisterAgentAddressTooLong validates max-length enforcement.
+// (PR #16 carry-forward F-01)
+func TestRegisterAgentAddressTooLong(t *testing.T) {
+	srv, _ := testServer(t)
+	longAddr := strings.Repeat("a", 254)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Address: longAddr})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "exceeds maximum length")
+}
+
+func TestRegisterAgentAddressMaxLength(t *testing.T) {
+	srv, _ := testServer(t)
+	// 253 characters should be accepted
+	maxAddr := strings.Repeat("a", 253)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Address: maxAddr})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}

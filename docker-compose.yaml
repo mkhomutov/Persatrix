@@ -8,6 +8,9 @@ services:
       context: .
       dockerfile: Dockerfile.orchestrator
     restart: unless-stopped
+    # NOTE(review-F02): Docker 'command' replaces Dockerfile CMD entirely.
+    # All required flags must be listed here, not just the override.
+    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--workflows-dir", "/app/workflows/"]
     ports:
       - "9090:9090"   # gRPC
       - "8080:8080"   # HTTP REST + SSE

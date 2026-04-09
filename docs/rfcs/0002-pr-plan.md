@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0002 defines ~420 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. Phases 1 and 2 together (~370 LOC implementation + ~400–600 LOC tests) will exceed the limit. This plan splits the work into **4 PRs**: Phase 1 is split into two PRs at the middleware/handler boundary (server scaffolding + middleware vs. workflow handlers), Phase 2 adds agent handlers, and Phase 3+4 are combined into a single PR (stubs + wiring are both small).
+RFC 0002 defines ~420 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. Phases 1 and 2 together (~370 LOC implementation + ~400–600 LOC tests) will exceed the limit. This plan splits the work into **5 PRs**: Phase 1 is split into two PRs at the middleware/handler boundary (server scaffolding + middleware vs. workflow handlers), Phase 2 adds agent handlers, Phase 3+4 are combined into a single PR (stubs + wiring are both small), and a final cleanup PR sweeps accumulated review findings.
 
 Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
@@ -233,11 +233,12 @@ The PR went through 1 round of review fixes (commit `address PR #16 review findi
 
 ---
 
-### PR 4: `feature/v01-server-wiring` — Stub Endpoints + Wire into main.go + Docker Fix
+### PR 4 = PR #17: `feature/v01-server-wiring` — Stub Endpoints + Wire into main.go + Docker Fix
 
-**Depends on**: PR #14 and PR 3 merged
+**Depends on**: PR #14 and PR #16 merged
 **Branch**: `feature/v01-server-wiring`
 **Estimated size**: ~250–400 lines (implementation + tests)
+**Actual size**: 440 lines (77 implementation + 363 tests)
 
 > **PR #14 carry-forward items for PR 4**: (1) Add `failingStore` wrapper and test 500 paths for `handleGetWorkflowStatus`, `handleListWorkflows`, `handleDeleteWorkflow` (F-01, Medium — biggest coverage gap, raises `handleDeleteWorkflow` from 59.1% to ~90%+). (2) Add mixed concurrent stress test: submit + read + delete simultaneously with `-race` (F-02, Medium). (3) Deduplicate log field construction in `loggingMiddleware` (F-03, Low).
 >
@@ -272,13 +273,122 @@ The PR went through 1 round of review fixes (commit `address PR #16 review findi
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/... -v -cover` passes
-- [ ] Coverage ≥ 80% for `internal/server/`
+- [x] `go test ./internal/server/... -v -cover` passes (90/90 tests, 96.7% coverage)
+- [x] Coverage ≥ 80% (achieved: 96.7%)
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] `go vet ./cmd/orchestrator/... ./internal/server/...` clean
+- [x] Binary starts, logs `"HTTP server starting"`, and shuts down cleanly with SIGINT
+- [x] `docker-compose.yaml` passes `--http-bind 0.0.0.0` to orchestrator
+- [x] All `// TODO` markers present per RFC 0002 requirements
+- [x] `failingStore` wrapper covers 5 workflow handler 500-paths (PR #14 carry-forward F-01)
+- [x] Mixed concurrent stress tests for workflows and agents (PR #14 F-02, PR #16 F-05)
+- [x] Logging field deduplication in `loggingMiddleware` (PR #14 F-03)
+- [x] Address max-length validation 253 chars (PR #16 F-01)
+- [x] Set-based list assertion (PR #16 F-02)
+- [x] Charset=utf-8 Content-Type test for agents (PR #16 F-03)
+- [x] 440 lines (within 500-line limit)
+
+#### Post-merge review findings (PR #17)
+
+PR #17 was submitted as 440 lines (77 implementation + 363 tests). Full review: [`docs/pr-reviews/pr-17-deep-review.md`](../../docs/pr-reviews/pr-17-deep-review.md).
+
+The PR went through 1 round of review fixes (commit `5691916`) addressing high and medium findings from the initial deep review.
+
+**Should Fix findings (carry-forward to follow-up PR):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-01: `panic()` for `--env` validation | Medium | Produces a full goroutine stack trace on stderr for a mistyped flag. Logger isn't initialized yet, so `logger.Fatal()` unavailable. Use `fmt.Fprintln(os.Stderr, msg)` + `os.Exit(1)` instead. | Follow-up PR |
+| F-02: No readiness signal from HTTP server | Medium | `logger.Info("HTTP server starting")` fires before `net.Listen` completes. No mechanism to confirm port is ready. Matters for integration tests and Docker healthcheck timing. | v0.2 — add `readyCh chan struct{}` to `Start()` |
+| F-03: No `--http-bind` format validation | Medium | Accepts arbitrary strings; invalid values produce cryptic `net.Listen` errors. Not a security concern (CLI flags are trusted), but a usability gap. | Consider — `net.Listen` already fails descriptively |
+| F-04: Mixed concurrent tests lack DELETE goroutines | Medium | `TestMixedConcurrentWorkflowAccess` and `TestMixedConcurrentAgentAccess` exercise create/read/list but not delete. TOCTOU delete path untested under concurrency. | Follow-up PR |
+
+**Nice to Have findings (no immediate action required):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-05: `ENVIRONMENT=development` env var unused | Low | `docker-compose.yaml` sets env var but `main.go` reads `--env` flag only. Misleading for operators. | Document or remove in follow-up |
+| F-06: Docker `command` relies on flag defaults for ports | Low | `--http-port 8080` and `--port 9090` not explicit in command; implicit coupling with defaults. | Consider making explicit |
+| F-07: Stub handlers ignore `{id}` path parameter | Low | No format validation on execution ID. Add TODO comment for RFC 0003 implementation. | Optional |
+| F-08: Non-deterministic log ordering | Low | "HTTP server starting" may log after Start goroutine errors. Extremely unlikely in practice. | Accepted |
+| F-09: Logging `fields` slice escapes to heap | Nice to Have | `fields...` spread in refactored middleware causes heap allocation. Negligible perf impact. | No action |
+| F-10: `failingStore` uses string matching for method selection | Nice to Have | `failOn == "GetRun"` is brittle if method renamed. Consistent with `failingRegistry` pattern. | No action — consistency wins |
+| F-11: Sugar vs structured logger inconsistency in main.go | Nice to Have | `log.Infow` (sugar) and `logger.Info` (structured) mixed in same file. Both write to same sink. | No action — separate cleanup per MI-04 |
+
+**PR #14 + #16 carry-forward status:**
+
+| Item | Source | Status |
+|------|--------|--------|
+| F-01: `failingStore` for 500-path coverage | PR #14 | ✅ Addressed — 5 tests cover GetRun, ListRuns, DeleteRun, CreateRun, GetRun-in-delete |
+| F-02: Mixed concurrent stress test | PR #14 | ✅ Addressed — `TestMixedConcurrentWorkflowAccess` (30 goroutines) |
+| F-03: Duplicate log field construction | PR #14 | ✅ Addressed — shared `fields` slice in `loggingMiddleware` |
+| F-01: Address max-length validation | PR #16 | ✅ Addressed — `len(req.Address) > 253` check |
+| F-02: Set-based list assertion | PR #16 | ✅ Addressed — `TestListAgentsWithRegistrationsSetBased` |
+| F-03: Charset Content-Type test | PR #16 | ✅ Addressed — `TestRegisterAgentContentTypeWithCharset` |
+| F-05: Mixed concurrent agent test | PR #16 | ✅ Addressed — `TestMixedConcurrentAgentAccess` (30 goroutines) |
+| F-10: `statusCapture.Flush()` with non-Flusher writer | PR #14 | Deferred — not addressed in PR #17 (low priority) |
+
+---
+
+### PR 5: `feature/v01-rfc0002-followup` — Review Findings Cleanup
+
+**Depends on**: PR #17 merged
+**Branch**: `feature/v01-rfc0002-followup`
+**Estimated size**: ~80–120 lines (implementation + tests)
+
+This is the final cleanup PR that addresses all accumulated should-fix and low-severity findings from PRs #14, #16, and #17. Closes out RFC 0002 with no carry-forward items remaining.
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `cmd/orchestrator/main.go` | Replace `panic()` with `fmt.Fprintln(os.Stderr, msg)` + `os.Exit(1)` for `--env` validation (PR #17 F-01) |
+| `internal/server/server_test.go` | Add DELETE goroutine groups to `TestMixedConcurrentWorkflowAccess` and `TestMixedConcurrentAgentAccess` (PR #17 F-04) |
+| `internal/planner/planner.go` | Rename `WorkflowIDRegex` → `ResourceIDRegex` (PR #16 F-04) |
+| `internal/server/agent_handlers.go` | Update `WorkflowIDRegex` → `ResourceIDRegex` import reference |
+| `internal/server/server.go` | Update `WorkflowIDRegex` → `ResourceIDRegex` import reference |
+| `internal/planner/planner_test.go` | Update test references if any |
+| `docker-compose.yaml` | Remove unused `ENVIRONMENT=development` env var; add explicit `--http-port 8080` and `--port 9090` to command (PR #17 F-05, F-06) |
+| `internal/server/stub_handlers.go` | Add `// TODO(v0.3): validate execution ID format before querying` comment (PR #17 F-07) |
+
+#### Key implementation details
+
+- **`panic()` → clean exit**: At the point of `--env` validation, the zap logger hasn't been constructed yet, so `logger.Fatal()` is not an option. `fmt.Fprintln(os.Stderr, ...)` + `os.Exit(1)` produces a clean single-line error matching `flag.Parse()` behavior.
+- **DELETE in concurrent tests**: Add ~5 goroutines per test that delete pre-created runs/agents. Accept `204` (success) or `404` (already deleted by another goroutine) as valid outcomes — this exercises the TOCTOU race path in `handleDeleteWorkflow` and concurrent unregister in agent handlers.
+- **`ResourceIDRegex` rename**: The regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` validates both workflow IDs and agent IDs. The current name `WorkflowIDRegex` is misleading since PR #16 reused it for agent ID validation. Rename to `ResourceIDRegex` with an explanatory comment.
+- **Docker command cleanup**: Make port flags explicit (`--http-port 8080`, `--port 9090`) so the Docker deployment is self-documenting and decoupled from Go flag defaults.
+
+#### Tests
+
+- **`--env` validation**: Manual smoke test — `go run ./cmd/orchestrator --env invalid` prints clean error and exits with code 1 (no stack trace).
+- **Concurrent DELETE workflows**: ~5 goroutines delete pre-seeded runs while 10 goroutines create and 10 read/list concurrently. Assert `204` or `404` for deletes. Run with `-race`.
+- **Concurrent DELETE agents**: Same pattern — ~5 goroutines unregister while others register/get/list. Assert `204` or `404`. Run with `-race`.
+- **Existing tests pass**: All 90+ server tests continue to pass after regex rename.
+- Race detector (`-race` flag).
+
+#### PR checklist
+
+- [ ] `go test ./internal/... -v -cover` passes
+- [ ] `go vet ./... ` clean
 - [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] `go vet ./cmd/orchestrator/... ./internal/server/...` clean
-- [ ] Binary starts, logs `"HTTP server listening"`, and shuts down cleanly with SIGINT
-- [ ] `docker-compose.yaml` passes `--http-bind 0.0.0.0` to orchestrator
-- [ ] All `// TODO` markers present per RFC 0002 requirements
+- [ ] `--env invalid` produces clean single-line error (no stack trace)
+- [ ] Mixed concurrent tests include DELETE goroutines
+- [ ] `WorkflowIDRegex` → `ResourceIDRegex` rename compiles across all packages
+- [ ] `docker-compose.yaml` has explicit port flags and no unused env vars
+- [ ] Branch: `feature/v01-rfc0002-followup`
+- [ ] Squash-merge ready
+
+#### Findings addressed
+
+| Source | Finding | Severity | Action |
+|--------|---------|----------|--------|
+| PR #17 F-01 | `panic()` for `--env` validation | Medium | Replace with `fmt.Fprintln` + `os.Exit(1)` |
+| PR #17 F-04 | Mixed concurrent tests lack DELETE | Medium | Add DELETE goroutine groups |
+| PR #16 F-04 | `workflowIDRegex` name misleading | Low | Rename to `ResourceIDRegex` |
+| PR #17 F-05 | `ENVIRONMENT` env var unused | Low | Remove from docker-compose |
+| PR #17 F-06 | Docker port flags implicit | Low | Add explicit `--http-port`/`--port` |
+| PR #17 F-07 | Stub handlers ignore `{id}` format | Low | Add TODO comment for v0.3 |
+| PR #14 F-10 | `statusCapture.Flush()` non-Flusher | Low | Deferred — defense-in-depth; `httptest.NewRecorder` implements `Flusher` |
 
 ---
 
@@ -292,11 +402,15 @@ Original plan:
 
 Actual execution:
   PR #14 (scaffold + middleware + workflow handlers)  ──┐
-                                                        ├──→ PR 4 (stubs + wiring + docker)
+                                                        ├──→ PR #17 (stubs + wiring + docker)  ✅
   PR #16 (agent handlers)  ─────────────────────────────┘
+                                                              │
+                                                              └──→ PR 5 (review findings cleanup)
 ```
 
-PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR #16 (agent handlers) builds on PR #14's helpers, middleware, and test patterns. PR 4 depends on both PR #14 and PR #16 being merged.
+PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR #16 (agent handlers) builds on PR #14's helpers, middleware, and test patterns. PR #17 depends on both PR #14 and PR #16 being merged. PR 5 sweeps all remaining review findings to close out RFC 0002.
+
+**RFC 0002 endpoint implementation is complete.** All 11 endpoints registered, `main.go` TODO step 11 satisfied, Docker networking fixed. Total: 90 server tests, 96.7% coverage. PR 5 addresses accumulated code quality findings only — no new functionality.
 
 ---
 
@@ -323,15 +437,17 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 | PR 2 (workflow handlers) exceeds 500 lines | Split DELETE handler + running-status tests into a follow-up PR 2b if needed. RFC 0001 pattern suggests this PR will likely reach 550–800 lines (F-03). | ✅ Resolved — combined into PR #14 |
 | Path traversal logic requires filesystem fixtures in tests | Use `t.TempDir()` for test workflow directories — clean, hermetic, no repo-path dependency. | ✅ Done in PR #14 |
 | `resolveWorkflowPath` symlink test requires OS support | Use `os.Symlink` in test; skip on platforms where symlinks are unsupported (`t.Skip`). | ✅ Done in PR #14 |
-| `docker-compose.yaml` change in PR 4 requires coordination | Change is additive (`command:` field); no conflict with parallel work. | Pending (PR 4) |
+| `docker-compose.yaml` change in PR 4 requires coordination | Change is additive (`command:` field); no conflict with parallel work. | ✅ Done in PR #17 |
 | PRs 2 and 3 both modify `server_test.go` | Merge PR 2 before PR 3 (or vice versa); second PR rebases. Minimal conflict since test functions are independent (workflow tests vs agent tests). | ✅ Resolved — PR 2 merged into PR #14; PR 3 rebases on PR #14 |
-| `main.go` has sugar logger but RFC convention requires structured zap | New code in PR 4 uses structured zap; existing sugar calls left untouched per MI-04. No mixing within the same log call. | Pending (PR 4) |
+| `main.go` has sugar logger but RFC convention requires structured zap | New code in PR 4 uses structured zap; existing sugar calls left untouched per MI-04. No mixing within the same log call. | ✅ Done in PR #17 — structured zap used for new code; sugar retained for startup message |
 | Empty `ListRuns` / `List` returns `null` JSON instead of `[]` | DTO conversion must initialize slices: `result := make([]RunStatusResponse, 0, len(runs))` to produce `[]` in JSON. Test explicitly. | ✅ Done in PR #14 |
 | `go.mod` conflicts if RFC 0002 PRs interleave with other work | No new `go.mod` dependencies expected — `google/uuid` already present from RFC 0001. Minimal conflict risk. | ✅ Confirmed — no new deps in PR #14 |
-| PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | Address in PR 4 (pattern established by `failingRegistry` in PR #16) |
-| PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | Address in PR 4 (combine with PR #16 F-05 agent concurrent test) |
-| PR #16 F-01: Address max-length validation missing | `handleRegisterAgent` accepts arbitrarily long address strings. Add `len(req.Address) > 253` check. | Address in PR 4 |
-| PR #16 F-04: `workflowIDRegex` name misleading | Shared regex used for both workflow and agent IDs; name suggests workflow-only. Rename to `resourceIDRegex`. | Separate follow-up PR (crosses planner/server boundary) |
+| PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | ✅ Addressed in PR #17 — `failingStore` covers 5 handler 500-paths |
+| PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | ✅ Addressed in PR #17 — `TestMixedConcurrentWorkflowAccess` (30 goroutines, create+read+list) |
+| PR #16 F-01: Address max-length validation missing | `handleRegisterAgent` accepts arbitrarily long address strings. Add `len(req.Address) > 253` check. | ✅ Addressed in PR #17 |
+| PR #16 F-04: `workflowIDRegex` name misleading | Shared regex used for both workflow and agent IDs; name suggests workflow-only. Rename to `ResourceIDRegex`. | PR 5 (follow-up) |
+| PR #17 F-01: `panic()` for `--env` validation | `panic()` produces stack trace. Use `fmt.Fprintln + os.Exit(1)` for clean error output. | PR 5 (follow-up) |
+| PR #17 F-04: Mixed concurrent tests lack DELETE | TOCTOU delete path untested under concurrency. Add DELETE goroutine group. | PR 5 (follow-up) |
 
 ---
 

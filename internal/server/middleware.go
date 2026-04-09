@@ -88,24 +88,22 @@ func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 		sc := &statusCapture{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sc, r)
 		reqID, _ := r.Context().Value(requestIDKey).(string)
-		// (Review finding F-06): Log 5xx responses at Warn level for operator alerting;
+		fields := []zap.Field{
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.Int("status", sc.status),
+			zap.Duration("latency", time.Since(start)),
+			zap.String("request_id", reqID),
+		}
+		// Shared fields slice avoids duplicating zap.Field construction across
+		// the Warn/Info branches.
+		//
+		// Log 5xx responses at Warn level for operator alerting;
 		// all other responses at Info level.
 		if sc.status >= 500 {
-			logger.Warn("http request",
-				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path),
-				zap.Int("status", sc.status),
-				zap.Duration("latency", time.Since(start)),
-				zap.String("request_id", reqID),
-			)
+			logger.Warn("http request", fields...)
 		} else {
-			logger.Info("http request",
-				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path),
-				zap.Int("status", sc.status),
-				zap.Duration("latency", time.Since(start)),
-				zap.String("request_id", reqID),
-			)
+			logger.Info("http request", fields...)
 		}
 	})
 }

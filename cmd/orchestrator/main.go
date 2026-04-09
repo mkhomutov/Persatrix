@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,14 +13,17 @@ import (
 
 	"github.com/orchestr8/orchestr8/internal/planner"
 	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/orchestr8/orchestr8/internal/server"
 	"github.com/orchestr8/orchestr8/internal/state"
 )
 
 var (
-	configDir = flag.String("config", "config/", "Path to configuration directory")
-	port      = flag.Int("port", 9090, "gRPC server port")
-	httpPort  = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
-	env       = flag.String("env", "development", "Environment: development|staging|production")
+	configDir    = flag.String("config", "config/", "Path to configuration directory")
+	port         = flag.Int("port", 9090, "gRPC server port")
+	httpPort     = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
+	httpBind     = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
+	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
+	env          = flag.String("env", "development", "Environment: development|staging|production")
 )
 
 func main() {
@@ -53,6 +57,8 @@ func main() {
 		"config", *configDir,
 		"grpcPort", *port,
 		"httpPort", *httpPort,
+		"httpBind", *httpBind,
+		"workflowsDir", *workflowsDir,
 		"env", *env,
 	)
 
@@ -79,17 +85,30 @@ func main() {
 
 	// 9. Initialize cost tracker
 	// 10. Start gRPC server (agent communication)
-	// 11. Start HTTP server (REST API + SSE streaming)
-	// 12. Start health check endpoints
-
-	// Prevent unused-variable errors until downstream consumers are wired.
-	_ = store
-	_ = reg
-	_ = plan
 
 	// Graceful shutdown on SIGTERM/SIGINT
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// 11. Start HTTP server (REST API + SSE streaming)
+	listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
+	srv, err := server.New(listenAddr, *workflowsDir, store, reg, plan, logger)
+	if err != nil {
+		logger.Fatal("failed to create HTTP server", zap.Error(err))
+	}
+	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
+	go func() {
+		if err := srv.Start(ctx); err != nil {
+			logger.Error("HTTP server terminated with error", zap.Error(err))
+			cancel() // propagate to root context so orchestrator can shutdown cleanly
+		}
+	}()
+	// NOTE(review-F01): message says "starting" not "listening" because the
+	// goroutine has not yet completed net.Listen at this point. Asserting
+	// readiness here would mislead operators and CI health-check scripts.
+	logger.Info("HTTP server starting", zap.String("addr", listenAddr))
+
+	// 12. Start health check endpoints
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)

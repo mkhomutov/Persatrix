@@ -89,6 +89,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agents/{id}", s.handleGetAgent)
 	s.mux.HandleFunc("DELETE /api/v1/agents/{id}", s.handleDeleteAgent)
 
+	// Stub endpoints — deferred to future RFCs (Phase 3)
+	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleGetLogs)
+	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummary)
+
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 
