@@ -4,7 +4,9 @@
 **Status**: 📋 Proposed  
 **Author**: Orchestr8 team  
 **Date**: 2026-04-08  
-**Target**: v0.1 (MVP)
+**Target**: v0.1 (MVP)  
+**Depends on**: None  
+**Superseded by**: None
 
 ---
 
@@ -15,11 +17,8 @@
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
 - [Design / Implementation](#design--implementation)
-  - [Phase 1: InMemoryStateStore](#phase-1-inmemorystatestore)
-  - [Phase 2: InMemoryRegistry](#phase-2-inmemoryregistry)
-  - [Phase 3: YAMLPlanner](#phase-3-yamlplanner)
-  - [Phase 4: Wire into main.go](#phase-4-wire-into-maingo)
 - [Security Considerations](#security-considerations)
+- [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
 - [Open Questions](#open-questions)
@@ -123,7 +122,7 @@ type Store interface {
 - `InMemoryStore` backed by `sync.RWMutex` + `map[string]*WorkflowRun`.
 - All methods are goroutine-safe.
 - `CreateRun` generates a UUID if `run.ID` is empty.
-- `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.)
+- `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.) Deep copy is implemented via manual field copy; the `Steps` map must be reconstructed with new `StepState` values — a simple map assignment would share the underlying map reference, creating a subtle concurrency hazard.
 - `UpdateStepState` merges into the existing run's `Steps` map.
 - `ListRuns` returns all runs. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
 
@@ -160,7 +159,7 @@ The planner is the most complex component in this RFC. It has three responsibili
   ```
   The `Parse` method unmarshals into `WorkflowFile`, validates `SchemaVersion`, then returns the inner `Workflow`. Without this wrapper, `yaml.Unmarshal` will fail on the actual fixture files.
 - Validate required fields: `id`, `name`, at least one step, each step has `id` and `agent`.
-- Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
+- Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. This regex requires a minimum of 2 characters, so single-character agent IDs are invalid. This aligns with `agent.schema.json`.
 - Validate that `depends_on` references point to existing step IDs.
 
 #### 3b. ValidateDAG — Cycle detection
@@ -208,6 +207,8 @@ Update `cmd/orchestrator/main.go` to:
 3. Create `planner.NewYAMLPlanner(logger)`.
 4. Log successful initialization of each component.
 5. Keep the existing graceful-shutdown logic; no behavioral change to startup/shutdown flow yet.
+
+This partially addresses `main.go` TODO step 8 ("Initialize workflow planner + scheduler") — only the planner is wired here. The scheduler portion is deferred to RFC 0003.
 
 This phase is minimal wiring — the components exist but aren't serving traffic yet (that requires the REST API, which is the next RFC).
 
@@ -269,15 +270,18 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
 - **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, and verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection).
+- **Phase 4 smoke test**: build the binary (`go build ./cmd/orchestrator`) and verify it starts and shuts down cleanly with SIGINT. This validates that the wiring compiles and the component initialization doesn't panic.
 - **Race detector**: all tests run with `-race` flag (already enforced in CI/Makefile).
 
 ## Open Questions
 
-1. **YAML library choice**: `gopkg.in/yaml.v3` is the standard Go YAML library. Any reason to prefer `sigs.k8s.io/yaml` (JSON-compatible subset)?
+1. ~~**YAML library choice**: `gopkg.in/yaml.v3` is the standard Go YAML library. Any reason to prefer `sigs.k8s.io/yaml` (JSON-compatible subset)?~~
+   **Resolved**: Use `gopkg.in/yaml.v3`. The project has no Kubernetes YAML or JSON round-trip requirement, so the standard library is the appropriate choice. It is also the most widely used and best-maintained Go YAML package. (2026-04-09)
 2. ~~**Workflow schema version**: `feature-builder.yaml` declares `schema_version: "0.1"`. Should the planner enforce this and reject unknown versions?~~
    **Resolved**: Yes — validate `SchemaVersion == "0.1"` and reject unknown versions. Phase 3a already proposes a `WorkflowFile` wrapper that parses `schema_version`, and `workflow.schema.json` declares it as required. Parsing the field without enforcing it would silently accept incompatible schemas. (2026-04-09)
 3. **Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?
-4. **State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?
+4. ~~**State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?~~
+   **Resolved**: Use `google/uuid`. It is the de facto standard for UUID generation in Go, produces RFC 4122-compliant identifiers that observability and logging tools expect, and adds only a single minimal dependency. (2026-04-09)
 
 ## Decision / Next Steps
 
