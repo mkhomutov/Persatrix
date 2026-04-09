@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -796,4 +797,302 @@ func TestDeleteWorkflowValidUUIDNotFound(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/00000000-0000-0000-0000-000000000000", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// =============================================================================
+// Agent Handler Tests
+// =============================================================================
+
+// --- Register Agent ---
+
+func TestRegisterAgent(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "code-writer", "address": "localhost:50051", "capabilities": ["code_generation", "code_review"]}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "code-writer", resp.ID)
+	assert.Equal(t, "localhost:50051", resp.Address)
+	assert.Equal(t, []string{"code_generation", "code_review"}, resp.Capabilities)
+	assert.Equal(t, "healthy", resp.Status)
+}
+
+func TestRegisterAgentMissingID(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "id is required")
+}
+
+func TestRegisterAgentInvalidID(t *testing.T) {
+	srv, _ := testServer(t)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"uppercase", "Code-Writer"},
+		{"underscore", "code_writer"},
+		{"single char", "a"},
+		{"starts with dash", "-writer"},
+		{"ends with dash", "writer-"},
+		{"with dots", "code.writer"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(registerAgentRequest{ID: tc.id, Address: "localhost:50051"})
+			rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
+func TestRegisterAgentEmptyAddress(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "test-agent", "address": ""}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "address is required")
+}
+
+func TestRegisterAgentMissingAddress(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "test-agent"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "address is required")
+}
+
+func TestRegisterAgentDuplicate(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "code-writer", "address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Second registration with same ID → 409
+	rec = doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "agent already registered")
+}
+
+func TestRegisterAgentWrongContentType(t *testing.T) {
+	srv, _ := testServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Content-Type must be application/json")
+}
+
+func TestRegisterAgentUnknownField(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "test-agent", "address": "localhost:50051", "unknown_field": "bad"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
+}
+
+func TestRegisterAgentNilCapabilities(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "test-agent", "address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	// Capabilities must serialize as [] not null
+	assert.NotNil(t, resp.Capabilities)
+	assert.Empty(t, resp.Capabilities)
+	// Verify raw JSON contains [] not null
+	assert.Contains(t, rec.Body.String(), `"capabilities":[]`)
+}
+
+// --- List Agents ---
+
+func TestListAgentsEmpty(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
+}
+
+func TestListAgentsWithRegistrations(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	// Register two agents
+	body1 := []byte(`{"id": "agent-01", "address": "localhost:50051", "capabilities": ["coding"]}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body1)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	body2 := []byte(`{"id": "agent-02", "address": "localhost:50052", "capabilities": ["review"]}`)
+	rec = doRequest(h, http.MethodPost, "/api/v1/agents/register", body2)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// List
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var list []agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Len(t, list, 2)
+}
+
+// --- Get Agent ---
+
+func TestGetAgent(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	body := []byte(`{"id": "code-writer", "address": "localhost:50051", "capabilities": ["coding"]}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents/code-writer", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "code-writer", resp.ID)
+	assert.Equal(t, "localhost:50051", resp.Address)
+	assert.Equal(t, "healthy", resp.Status)
+}
+
+func TestGetAgentNotFound(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents/nonexistent-agent", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "agent not found")
+}
+
+// --- Delete Agent ---
+
+func TestDeleteAgent(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	body := []byte(`{"id": "code-writer", "address": "localhost:50051"}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	rec = doRequest(h, http.MethodDelete, "/api/v1/agents/code-writer", nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify gone
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents/code-writer", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDeleteAgentNotFound(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/agents/nonexistent-agent", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "agent not found")
+}
+
+// --- Re-registration ---
+
+func TestAgentReRegistration(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	body := []byte(`{"id": "code-writer", "address": "localhost:50051"}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Delete
+	rec = doRequest(h, http.MethodDelete, "/api/v1/agents/code-writer", nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Re-register with same ID
+	rec = doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+// --- Agent Lifecycle ---
+
+func TestAgentLifecycle(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	// 1. Register → 201
+	body := []byte(`{"id": "lifecycle-agent", "address": "localhost:50051", "capabilities": ["cap-a"]}`)
+	rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// 2. Get → 200
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents/lifecycle-agent", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var getResp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &getResp))
+	assert.Equal(t, "lifecycle-agent", getResp.ID)
+	assert.Equal(t, "healthy", getResp.Status)
+
+	// 3. List → contains the agent
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var list []agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Len(t, list, 1)
+
+	// 4. Delete → 204
+	rec = doRequest(h, http.MethodDelete, "/api/v1/agents/lifecycle-agent", nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// 5. Get again → 404
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents/lifecycle-agent", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	// 6. List → empty
+	rec = doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
+}
+
+// --- agentStatusString ---
+
+func TestAgentStatusString(t *testing.T) {
+	tests := []struct {
+		status registry.AgentStatus
+		want   string
+	}{
+		{registry.StatusHealthy, "healthy"},
+		{registry.StatusDegraded, "degraded"},
+		{registry.StatusOffline, "offline"},
+		{registry.StatusUnknown, "unknown"},
+		{registry.AgentStatus(99), "unknown"},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, agentStatusString(tc.status))
+	}
+}
+
+// --- Concurrent Agent Access ---
+
+func TestConcurrentAgentAccess(t *testing.T) {
+	srv, _ := testServer(t)
+	h := srv.Handler()
+
+	done := make(chan struct{})
+	for i := 0; i < 20; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			id := fmt.Sprintf("agent-%02d", n)
+			body, _ := json.Marshal(registerAgentRequest{ID: id, Address: "localhost:50051"})
+			rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+			assert.Equal(t, http.StatusCreated, rec.Code)
+		}(i)
+	}
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+
+	// Verify all 20 agents exist
+	rec := doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+	var list []agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	assert.Len(t, list, 20)
 }
