@@ -325,3 +325,36 @@ func TestTemplateRegex_UsesStepIDPattern(t *testing.T) {
 		assert.NotRegexp(t, templateRegex, input, "templateRegex should NOT match %q", input)
 	}
 }
+
+// --- ResolveInputs: nil logger guard ---
+
+func TestResolveInputs_NilLogger(t *testing.T) {
+	step := Step{ID: "test", Input: "{{ steps.plan.output }}"}
+	outputs := map[string]string{"plan": "the plan"}
+
+	result, err := ResolveInputs(step, outputs, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "the plan", result)
+}
+
+// --- ResolveInputs: adjacent templates ---
+
+func TestResolveInputs_AdjacentTemplates(t *testing.T) {
+	step := Step{ID: "test", Input: "{{ user_request }}{{ project_name }}"}
+	vars := map[string]string{"user_request": "hello", "project_name": "world"}
+
+	result, err := ResolveInputs(step, nil, vars, nopLogger())
+	require.NoError(t, err)
+	assert.Equal(t, "helloworld", result)
+}
+
+// --- ResolveInputs: empty-string substitution ---
+
+func TestResolveInputs_EmptyStringSubstitution(t *testing.T) {
+	step := Step{ID: "test", Input: "prefix {{ steps.plan.output }} suffix"}
+	outputs := map[string]string{"plan": ""}
+
+	result, err := ResolveInputs(step, outputs, nil, nopLogger())
+	require.NoError(t, err)
+	assert.Equal(t, "prefix  suffix", result)
+}

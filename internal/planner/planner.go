@@ -363,6 +363,10 @@ var suspiciousRegex = regexp.MustCompile(`\{\{.*?\}\}`)
 // referenced step ID or variable is missing. Resolution is single-pass —
 // substituted values are not re-scanned for template patterns.
 func ResolveInputs(step Step, outputs map[string]string, vars map[string]string, logger *zap.Logger) (string, error) {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	input := step.Input
 
 	// Find all template matches and their positions for single-pass replacement.
