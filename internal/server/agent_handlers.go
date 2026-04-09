@@ -4,12 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"go.uber.org/zap"
+
 	"github.com/orchestr8/orchestr8/internal/registry"
 )
-
-// agentIDRegex reuses the same pattern as workflow IDs: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
-// Agent ID format validation is enforced at the REST API layer per RFC 0001 Phase 2 notes.
-var agentIDRegex = workflowIDRegex
 
 // handleRegisterAgent handles POST /api/v1/agents/register.
 func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
@@ -25,10 +23,14 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "id is required", http.StatusBadRequest)
 		return
 	}
-	if !agentIDRegex.MatchString(req.ID) {
+	// Agent IDs share the same format as workflow IDs (^[a-z0-9][a-z0-9-]*[a-z0-9]$).
+	// Uses workflowIDRegex directly — single source of truth from planner package.
+	if !workflowIDRegex.MatchString(req.ID) {
 		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
 		return
 	}
+	// TODO(v0.2): validate address format (host:port or URI scheme) and enforce
+	// max length. Currently any non-empty string is accepted per RFC 0002 v0.1 scope.
 	if req.Address == "" {
 		writeError(w, "BAD_REQUEST", "address is required", http.StatusBadRequest)
 		return
@@ -46,7 +48,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "CONFLICT", "agent already registered", http.StatusConflict)
 			return
 		}
-		s.logger.Error("failed to register agent")
+		s.logger.Error("failed to register agent", zap.Error(err), zap.String("agent_id", req.ID))
 		writeError(w, "INTERNAL", "failed to register agent", http.StatusInternalServerError)
 		return
 	}
@@ -58,7 +60,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := s.registry.List(r.Context())
 	if err != nil {
-		s.logger.Error("failed to list agents")
+		s.logger.Error("failed to list agents", zap.Error(err))
 		writeError(w, "INTERNAL", "failed to list agents", http.StatusInternalServerError)
 		return
 	}
@@ -73,6 +75,14 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 // handleGetAgent handles GET /api/v1/agents/{id}.
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// Validate agent ID format at the handler boundary — defense-in-depth consistent
+	// with validateRunID() on workflow endpoints. Prevents arbitrary strings from
+	// reaching the registry layer, important for v0.2 SQLite migration.
+	// (Review finding F-01)
+	if !workflowIDRegex.MatchString(id) {
+		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
+		return
+	}
 
 	agent, err := s.registry.Get(r.Context(), id)
 	if err != nil {
@@ -80,7 +90,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "NOT_FOUND", "agent not found", http.StatusNotFound)
 			return
 		}
-		s.logger.Error("failed to get agent")
+		s.logger.Error("failed to get agent", zap.Error(err), zap.String("agent_id", id))
 		writeError(w, "INTERNAL", "failed to get agent", http.StatusInternalServerError)
 		return
 	}
@@ -91,13 +101,21 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 // handleDeleteAgent handles DELETE /api/v1/agents/{id}.
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// Validate agent ID format — consistent with handleGetAgent. (Review finding F-01)
+	if !workflowIDRegex.MatchString(id) {
+		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
+		return
+	}
 
+	// TODO(v0.3): consider checking for active workflow runs referencing this agent
+	// before deletion, analogous to the "cannot delete running workflow" guard in
+	// handleDeleteWorkflow. Currently dormant — no execution in v0.1. (Review finding F-09)
 	if err := s.registry.Unregister(r.Context(), id); err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
 			writeError(w, "NOT_FOUND", "agent not found", http.StatusNotFound)
 			return
 		}
-		s.logger.Error("failed to delete agent")
+		s.logger.Error("failed to delete agent", zap.Error(err), zap.String("agent_id", id))
 		writeError(w, "INTERNAL", "failed to delete agent", http.StatusInternalServerError)
 		return
 	}

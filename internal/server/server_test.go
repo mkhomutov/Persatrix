@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1095,4 +1096,168 @@ func TestConcurrentAgentAccess(t *testing.T) {
 	var list []agentResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &list))
 	assert.Len(t, list, 20)
+}
+
+// --- Agent ID Validation on GET/DELETE (Review finding F-01) ---
+
+func TestGetAgentInvalidID(t *testing.T) {
+	srv, _ := testServer(t)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"uppercase", "Code-Writer"},
+		{"underscore", "code_writer"},
+		{"single char", "a"},
+		{"starts with dash", "-writer"},
+		{"ends with dash", "writer-"},
+		{"with dots", "code.writer"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents/"+tc.id, nil)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "invalid agent ID format")
+		})
+	}
+}
+
+func TestDeleteAgentInvalidID(t *testing.T) {
+	srv, _ := testServer(t)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"uppercase", "Code-Writer"},
+		{"underscore", "code_writer"},
+		{"single char", "a"},
+		{"starts with dash", "-writer"},
+		{"ends with dash", "writer-"},
+		{"with dots", "code.writer"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/agents/"+tc.id, nil)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "invalid agent ID format")
+		})
+	}
+}
+
+// --- Agent Registration Edge Cases (Review findings F-06, F-08) ---
+
+func TestRegisterAgentEmptyBody(t *testing.T) {
+	srv, _ := testServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestRegisterAgentBodyTooLarge(t *testing.T) {
+	srv, _ := testServer(t)
+	bigValue := strings.Repeat("x", (1<<20)+100)
+	body := []byte(`{"id":"` + bigValue + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "too large")
+}
+
+// --- Failing Registry (Review finding F-05, carry-forward from PR #14 F-01) ---
+
+// failingRegistry wraps a real Registry and forces specific methods to return
+// non-sentinel errors, enabling 500 error-path coverage for agent handlers.
+type failingRegistry struct {
+	registry.Registry
+	failOn string // method name to fail on
+}
+
+func (f *failingRegistry) Register(ctx context.Context, agent registry.AgentInfo) error {
+	if f.failOn == "Register" {
+		return errors.New("simulated db error")
+	}
+	return f.Registry.Register(ctx, agent)
+}
+
+func (f *failingRegistry) List(ctx context.Context) ([]registry.AgentInfo, error) {
+	if f.failOn == "List" {
+		return nil, errors.New("simulated db error")
+	}
+	return f.Registry.List(ctx)
+}
+
+func (f *failingRegistry) Get(ctx context.Context, agentID string) (*registry.AgentInfo, error) {
+	if f.failOn == "Get" {
+		return nil, errors.New("simulated db error")
+	}
+	return f.Registry.Get(ctx, agentID)
+}
+
+func (f *failingRegistry) Unregister(ctx context.Context, agentID string) error {
+	if f.failOn == "Unregister" {
+		return errors.New("simulated db error")
+	}
+	return f.Registry.Unregister(ctx, agentID)
+}
+
+// testServerWithRegistry creates a Server using the provided registry instead of
+// the default InMemoryRegistry. Used by failingRegistry tests.
+func testServerWithRegistry(t *testing.T, reg registry.Registry) *Server {
+	t.Helper()
+	dir := t.TempDir()
+	logger := zap.NewNop()
+	store := state.NewInMemoryStore(logger)
+	pl := planner.NewYAMLPlanner(logger)
+	srv, err := New("127.0.0.1:0", dir, store, reg, pl, logger)
+	require.NoError(t, err)
+	return srv
+}
+
+func TestRegisterAgentInternalError(t *testing.T) {
+	reg := &failingRegistry{
+		Registry: registry.NewInMemoryRegistry(zap.NewNop()),
+		failOn:   "Register",
+	}
+	srv := testServerWithRegistry(t, reg)
+	body := []byte(`{"id": "test-agent", "address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestListAgentsInternalError(t *testing.T) {
+	reg := &failingRegistry{
+		Registry: registry.NewInMemoryRegistry(zap.NewNop()),
+		failOn:   "List",
+	}
+	srv := testServerWithRegistry(t, reg)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestGetAgentInternalError(t *testing.T) {
+	reg := &failingRegistry{
+		Registry: registry.NewInMemoryRegistry(zap.NewNop()),
+		failOn:   "Get",
+	}
+	srv := testServerWithRegistry(t, reg)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents/test-agent", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
+}
+
+func TestDeleteAgentInternalError(t *testing.T) {
+	reg := &failingRegistry{
+		Registry: registry.NewInMemoryRegistry(zap.NewNop()),
+		failOn:   "Unregister",
+	}
+	srv := testServerWithRegistry(t, reg)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/agents/test-agent", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "INTERNAL")
 }
