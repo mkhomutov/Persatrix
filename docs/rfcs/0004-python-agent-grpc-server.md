@@ -93,6 +93,7 @@ If we do nothing, the project has a well-tested orchestrator that orchestrates n
 - **Telemetry / OTEL spans.** Tool invocation spans are scaffolded but not wired.
 - **`store_get` / `store_set` tools.** Task-scoped key-value store tools are deferred. The four core tools (`file_read`, `file_write`, `shell_exec`, `http_request`) are sufficient for v0.1 workflows.
 - **Config validation.** `agents/validate.py` is a separate concern. This RFC does not implement JSON Schema validation of `agents.yaml`.
+- **Per-task tool restriction.** `TaskConfig.allowed_tools` allows the orchestrator to restrict tools per-task. Enforcing this filter is deferred to v0.2; in v0.1 the agent uses its full configured tool set for every task. (Review-fix D2)
 
 ## Design / Implementation
 
@@ -150,6 +151,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             workflow_id=request.workflow_id,
             payload=request.payload,
             context=dict(request.context),
+            # Review-fix D1: pass per-task config overrides through to agent
+            config=TaskInputConfig(
+                max_llm_calls=request.config.max_llm_calls or 0,
+                max_tokens=request.config.max_tokens or 0,
+            ),
         )
 
         try:
@@ -166,7 +172,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                        else task_pb2.FAILED,
                 result=output.result,
                 metadata={
-                    **{k: str(v) for k, v in output.metadata.items()},
+                    # Review-fix P2: use json.dumps for non-str values to
+                    # produce parseable strings instead of repr()-like output
+                    # (e.g. "None", "{'k': 'v'}") from plain str().
+                    **{k: v if isinstance(v, str) else json.dumps(v)
+                       for k, v in output.metadata.items()},
                     "duration_ms": str(duration_ms),
                 },
                 error_message="" if output.status == TaskStatus.COMPLETED
@@ -237,7 +247,7 @@ Agent type resolution uses capabilities and config to map to the correct class:
 | `code-writer` | `CoderAgent` | `"code_generation" in capabilities` |
 | `code-reviewer` | `ReviewerAgent` | `"code_review" in capabilities and "code_generation" not in capabilities` |
 
-A `type` field in `agents.yaml` would be cleaner; the capability-based heuristic is a v0.1 pragmatic choice since adding a `type` field requires a schema change and config migration. A `# TODO(v0.2): add explicit 'type' field to agent config` comment marks this.
+A `type` field in `agents.yaml` would be cleaner; the capability-based heuristic is a v0.1 pragmatic choice since adding a `type` field requires a schema change and config migration. A `# TODO(v0.2): add explicit 'type' field to agent config` comment marks this. If no rule matches, the function raises `ValueError(f"Cannot determine agent type for {agent_id} from capabilities: {caps}")` so that misconfigured agents fail loudly at startup rather than silently falling through. (Review-fix D3)
 
 ### Task Agent Implementation
 
@@ -250,6 +260,50 @@ All three task agents follow the same pattern:
 5. Repeat the tool-use loop until the LLM returns a final text response or the max iteration limit is reached.
 6. Return a `TaskOutput` with the final result and metadata (tokens used, tool calls count).
 
+When the LLM returns multiple tool calls in a single response, tools are executed **sequentially** in the order they appear in `response.content`. This avoids file-write conflicts and makes tool side-effects deterministic. A `# TODO(v0.2): parallel tool execution with conflict detection` comment marks the optimization opportunity. (Review-fix D6)
+
+#### `_execute_tools` Method
+
+The `_execute_tools` helper parses Anthropic `ToolUseBlock` objects from the response content, dispatches each to the tool registry, enforces permissions, and formats results back into the Anthropic tool-result message format. (Review-fix M3)
+
+```python
+async def _execute_tools(self, content: list) -> list[dict]:
+    """Execute tool calls from LLM response content sequentially.
+
+    Parses ToolUseBlock objects, dispatches through the tool registry
+    with permission checks, and returns Anthropic-format tool results.
+    """
+    results = []
+    for block in content:
+        if block.type != "tool_use":
+            continue
+        tool_fn = self._tool_registry.get(block.name)
+        if tool_fn is None:
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": f"Unknown tool: {block.name}",
+                "is_error": True,
+            })
+            continue
+        try:
+            result = await tool_fn(**block.input)
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": result.data if result.success else result.error,
+                "is_error": not result.success,
+            })
+        except PermissionError as exc:
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": str(exc),
+                "is_error": True,
+            })
+    return results
+```
+
 ```python
 async def handle(self, task: TaskInput) -> TaskOutput:
     messages = self._build_messages(task)
@@ -257,12 +311,17 @@ async def handle(self, task: TaskInput) -> TaskOutput:
     total_tokens = 0
     tool_calls_count = 0
 
-    for _ in range(self.config.get("max_llm_calls", 10)):
+    # Review-fix D1: per-task overrides from TaskConfig take precedence
+    # over agent YAML config.  Zero means "not set" (proto int32 default).
+    max_llm_calls = task.config.max_llm_calls or self.config.get("max_llm_calls", 10)
+    max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
+
+    for _ in range(max_llm_calls):
         response = await self._llm_client.create_message(
             model=self.config["model"],
             messages=messages,
             tools=tools,
-            max_tokens=self.config.get("max_tokens", 4096),
+            max_tokens=max_tokens,
             temperature=self.config.get("temperature", 0.3),
         )
         total_tokens += response.usage.input_tokens + response.usage.output_tokens
@@ -271,6 +330,16 @@ async def handle(self, task: TaskInput) -> TaskOutput:
             return TaskOutput(
                 status=TaskStatus.COMPLETED,
                 result=self._extract_text(response),
+                metadata={"tokens_used": str(total_tokens), "tool_calls": str(tool_calls_count)},
+            )
+
+        # Review-fix B2: explicitly handle max_tokens truncation instead of
+        # letting the loop continue and eventually producing a misleading
+        # "Max LLM call iterations exceeded" failure.
+        if response.stop_reason == "max_tokens":
+            return TaskOutput(
+                status=TaskStatus.FAILED,
+                result="LLM response truncated: max_tokens limit reached",
                 metadata={"tokens_used": str(total_tokens), "tool_calls": str(tool_calls_count)},
             )
 
@@ -350,13 +419,16 @@ async def file_write(path: str, content: str) -> ToolResult:
 async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     # Split command, validate against allowlist (no shell=True)
     args = shlex.split(command)
-    if not permission_gate.is_command_allowed(args[0]):
+    if not permission_gate.is_command_allowed(args):
         return ToolResult(success=False, error=f"Command not allowed: {args[0]}", error_type="permanent")
 
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=workspace_root,  # Review-fix D5: explicit CWD prevents non-deterministic
+                              # behavior depending on server startup directory.
+                              # workspace_root is set from --workspace CLI flag.
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -371,7 +443,7 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     )
 ```
 
-**Security:** Commands are executed via `create_subprocess_exec` (not `shell=True`), are split with `shlex.split`, and must match the `allowed_commands` list from the agent's `permissions.shell` config. Only the command base name (first arg) is matched against the allowlist — arguments are unrestricted. A `# TODO(v0.2): argument pattern matching for shell commands` marks this gap.
+**Security:** Commands are executed via `create_subprocess_exec` (not `shell=True`), are split with `shlex.split`, and must match the `allowed_commands` list from the agent's `permissions.shell` config. The allowlist supports multi-word entries (e.g., `"git diff"`) by comparing progressively longer prefixes of the parsed command against the list — so `"git diff"` matches `["git diff"]` and also `["git"]`, but `"git push"` would **not** match `["git diff"]`. Arguments beyond the matched prefix are unrestricted. A `# TODO(v0.2): argument pattern matching for shell commands` marks this gap (see also [Security Considerations: Shell Command Argument Injection](#shell-command-argument-injection)).
 
 #### `http_request`
 
@@ -379,6 +451,16 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
 @tool(name="http_request", description="Make an HTTP request", permissions=["network:http"])
 async def http_request(url: str, method: str = "GET", body: str = "") -> ToolResult:
     parsed = urllib.parse.urlparse(url)
+
+    # Review-fix S1: reject malformed URLs and non-HTTP schemes before
+    # the domain check.  Without this, urlparse("not-a-url").hostname
+    # returns None causing TypeError in fnmatch, and non-HTTP schemes
+    # (file://, ftp://) could bypass the domain allowlist.
+    if parsed.scheme not in ("http", "https"):
+        return ToolResult(success=False, error=f"Unsupported URL scheme: {parsed.scheme!r}", error_type="permanent")
+    if not parsed.hostname:
+        return ToolResult(success=False, error=f"Invalid URL (no hostname): {url}", error_type="permanent")
+
     if not permission_gate.is_domain_allowed(parsed.hostname):
         return ToolResult(success=False, error=f"Domain not allowed: {parsed.hostname}", error_type="permanent")
 
@@ -410,10 +492,24 @@ class PermissionGate:
             return False  # deny by default
         # ... check action against category config
 
-    def is_command_allowed(self, command: str) -> bool:
-        """Check shell command against allowed_commands list."""
+    def is_command_allowed(self, args: list[str]) -> bool:
+        """Check shell command against allowed_commands list.
+
+        Supports multi-word entries (e.g. "git diff"): compares
+        progressively longer prefixes of `args` against the allowlist
+        so that both "git" (all git subcommands) and "git diff"
+        (only git-diff) can be expressed.  Longest match wins.
+
+        Review-fix B1: previously compared only args[0], which could
+        never match a multi-word entry like "git diff".
+        """
         allowed = self._permissions.get("shell", {}).get("allowed_commands", [])
-        return command in allowed
+        # Check progressively longer command prefixes (longest first)
+        for n in range(len(args), 0, -1):
+            candidate = " ".join(args[:n])
+            if candidate in allowed:
+                return True
+        return False
 
     def is_domain_allowed(self, domain: str) -> bool:
         """Check domain against network allow/deny lists."""
@@ -462,7 +558,7 @@ Path traversal protection: `Path.resolve()` canonicalizes the path (resolves `..
 
 The `main()` function in `agents/server.py`:
 
-1. Parse CLI args (`--agent`, `--port`, `--host`, `--config`).
+1. Parse CLI args (`--agent`, `--port`, `--host`, `--config`, `--orchestrator-url`, `--workspace`).
 2. Load agent config from YAML.
 3. Instantiate the agent with `load_agent(agent_id, config_path)`.
 4. Initialize the gRPC async server (`grpc.aio.server()`).
@@ -486,12 +582,18 @@ async def _self_register(self, orchestrator_url: str, agent_id: str, host: str, 
                 "id": agent_id,
                 "address": f"{host}:{port}",
                 "capabilities": self.agents[agent_id].capabilities,
-                "status": "healthy",
+                # Review-fix P1: "status" removed — RFC 0002 sets
+                # status=healthy server-side on registration; sending
+                # it here violates the API contract.
             },
         )
 ```
 
 The `--orchestrator-url` CLI flag (default: `http://127.0.0.1:8080`) configures the target. Self-registration is best-effort — if the orchestrator is unreachable, the agent logs a warning and continues serving. The orchestrator admin can manually register agents via the REST API.
+
+### Logging
+
+All modules use Python's stdlib `logging` module with `logging.getLogger(__name__)` per file, consistent with existing agent stubs. Log level is configurable via the `--log-level` CLI flag (default: `INFO`). Structured fields (task_id, agent_id, tool_name) are included in log messages via `logger.info("...", extra={...})` for grep-friendly output. API keys and tool output content are never logged. (Review-fix M1)
 
 ## Security Considerations
 
@@ -506,7 +608,7 @@ The Anthropic API key is read from the `ANTHROPIC_API_KEY` environment variable.
 ### Tool Sandboxing
 
 - **Filesystem:** All paths resolved to absolute form via `Path.resolve()`, then checked against allow/deny globs. Deny list takes precedence. `.env` and `.git/` are denied by default in agent config.
-- **Shell:** Commands split via `shlex.split()` (no shell injection via `shell=True`). Only allowlisted command base names are permitted. Execution timeout enforced via `asyncio.wait_for`.
+- **Shell:** Commands split via `shlex.split()` (no shell injection via `shell=True`). Only allowlisted command names or multi-word prefixes are permitted (see [Shell Command Argument Injection](#shell-command-argument-injection-known-risk)). Execution timeout enforced via `asyncio.wait_for`. Subprocess CWD is pinned to the workspace root.
 - **Network:** HTTP requests check domain against allow/deny lists before connecting. `deny: ["*"]` + `allow: ["api.anthropic.com"]` is the v0.1 default — agents can only reach the LLM API.
 
 ### Input Validation
@@ -516,6 +618,14 @@ The Anthropic API key is read from the `ANTHROPIC_API_KEY` environment variable.
 ### No Authentication (v0.1)
 
 The gRPC server accepts connections from any client on its bound address. In v0.1 the agent binds to `127.0.0.1` (loopback) by default. The `--host 0.0.0.0` flag is used in Docker containers where the agent needs to be reachable from the orchestrator container. Authentication is deferred to the security RFC.
+
+### Shell Command Argument Injection (Known Risk)
+
+The `shell_exec` tool validates the command base name (or multi-word prefix) against an allowlist but does **not** restrict arguments. An LLM could invoke an allowed command with dangerous arguments — e.g., `python -c "import os; os.system('rm -rf /')"` if `python` is in the allowlist. This is a **known v0.1 limitation**. Mitigation: agents run in Docker containers with limited filesystem mounts and the `PathValidator` deny list blocks sensitive paths. Full argument pattern matching (e.g., per-command regex on allowed argument patterns) is deferred to v0.2. (Review-fix S3)
+
+### DNS Rebinding (Known Limitation)
+
+The `http_request` tool checks the domain name against the allowlist before connecting, but a DNS record could resolve to a private IP after the check passes. This is a standard SSRF-via-DNS-rebinding vector. For v0.1, the impact is limited because the default network policy is `deny: ["*"]` with only `api.anthropic.com` allowed. DNS rebinding hardening (resolve DNS before connect, reject private IPs) is deferred to v0.2.
 
 ## Phased Implementation Plan
 
@@ -531,6 +641,8 @@ Summary: Generate Python gRPC stubs from `proto/task.proto`.
 5. `pyproject.toml` — add `grpcio`, `grpcio-tools`, `protobuf` dependencies.
 
 **Dependencies:** None (proto files exist).
+
+**Git policy:** Generated Python stubs (`agents/generated/*.py`) are committed to the repository, consistent with Go generated stubs in `internal/generated/`. This avoids requiring `grpcio-tools` at deployment time and keeps CI reproducible. (Review-fix M4)
 
 ### Phase 2: Permission Gate + Path Validator (~200 LOC)
 
@@ -584,6 +696,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 | Component | Files | Change |
 |-----------|-------|--------|
+| Python agents | `agents/base.py` | Add `TaskInputConfig` dataclass and `config` field to `TaskInput` (Review-fix D1) |
 | Python agents | `agents/server.py` | Replace stubs — `AgentServiceServicer`, `load_agent`, `AgentServer.start/stop`, self-registration |
 | Python agents | `agents/coder.py` | Implement `handle()` — system prompt, LLM call, tool loop |
 | Python agents | `agents/reviewer.py` | Implement `handle()` — review prompt, LLM call, structured output |
@@ -613,6 +726,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 - **Denied permission (default)**: no permission config → `False`.
 - **Deny overrides allow**: path matches both deny and allow → denied.
 - **Command allowlist**: allowed command → `True`; unlisted command → `False`.
+- **Multi-word command allowlist**: `"git diff"` in allowlist, `args=["git", "diff", "f.py"]` → `True`; `args=["git", "push"]` → `False`. (Review-fix B1)
 - **Domain allowlist**: allowed domain → `True`; wildcard deny with specific allow → `True`; deny all → `False`.
 
 ### Path Validator Tests
@@ -629,12 +743,15 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 - **`file_write`**: write file → content on disk; write denied path → `ToolResult(success=False)`.
 - **`shell_exec`**: run allowed command (e.g., `echo test`) → stdout returned; denied command → blocked; timeout → killed.
 - **`http_request`**: mock HTTP server → response returned; denied domain → blocked.
+- **`http_request` URL validation**: malformed URL (no hostname) → `ToolResult(success=False)`; `file://` scheme → `ToolResult(success=False)`. (Review-fix S1)
 
 ### Task Agent Tests
 
 - **Successful handle**: mock LLM returns text response → `TaskOutput(status=COMPLETED)`.
 - **Tool-use loop**: mock LLM returns tool call → tool dispatched → result sent back → final response.
 - **Max iterations**: mock LLM always returns tool calls → `TaskOutput(status=FAILED, result="Max LLM call iterations exceeded")`.
+- **Max tokens truncation**: mock LLM returns `stop_reason="max_tokens"` → `TaskOutput(status=FAILED, result="LLM response truncated: max_tokens limit reached")`. (Review-fix B2)
+- **Per-task config override**: mock LLM with `TaskInputConfig(max_llm_calls=2)` → agent uses 2 iterations, not YAML default. (Review-fix D1)
 - **LLM error**: mock LLM raises exception → `TaskOutput(status=FAILED)`.
 - **Token counting**: verify `metadata["tokens_used"]` from mock responses.
 
@@ -660,7 +777,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 2. **Agent config `type` field**: Current resolution uses capability-based heuristics. Should `config/agents.yaml` add an explicit `type: task | persona` field? Requires schema change.
 
-3. **Workspace root**: Built-in tools need a workspace root path for sandbox validation. Should this be a CLI flag (`--workspace /path`), derived from the orchestrator's `--workflows-dir`, or hardcoded to `/workspace` for Docker?
+3. **Workspace root**: Built-in tools need a workspace root path for sandbox validation. Should this be a CLI flag (`--workspace /path`), derived from the orchestrator's `--workflows-dir`, or hardcoded to `/workspace` for Docker? *Resolved: `--workspace` CLI flag (default: `/workspace` for Docker, CWD for local dev). Used by both `PathValidator` and `shell_exec` CWD. (Review-fix D5)*
 
 4. **`aiohttp` dependency**: `http_request` tool and self-registration use `aiohttp`. Is this acceptable or should we use the stdlib `urllib` (sync, wrapped in `asyncio.to_thread`)? `aiohttp` is a more natural fit for the async-first architecture.
 
