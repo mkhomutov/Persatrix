@@ -481,3 +481,19 @@ func TestFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, list)
 }
+
+func TestAgentStatusString(t *testing.T) {
+	tests := []struct {
+		status AgentStatus
+		want   string
+	}{
+		{StatusUnknown, "Unknown"},
+		{StatusHealthy, "Healthy"},
+		{StatusDegraded, "Degraded"},
+		{StatusOffline, "Offline"},
+		{AgentStatus(99), "AgentStatus(99)"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, tt.status.String())
+	}
+}

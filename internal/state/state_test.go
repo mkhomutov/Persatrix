@@ -543,3 +543,20 @@ func TestCRUDFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, runs)
 }
+
+func TestRunStatusString(t *testing.T) {
+	tests := []struct {
+		status RunStatus
+		want   string
+	}{
+		{RunPending, "Pending"},
+		{RunRunning, "Running"},
+		{RunCompleted, "Completed"},
+		{RunFailed, "Failed"},
+		{RunCancelled, "Cancelled"},
+		{RunStatus(99), "RunStatus(99)"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, tt.status.String())
+	}
+}

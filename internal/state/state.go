@@ -4,6 +4,7 @@ package state
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -224,6 +225,24 @@ func deepCopyRun(run *WorkflowRun) *WorkflowRun {
 	}
 
 	return cp
+}
+
+// String returns a human-readable representation of RunStatus for logging.
+func (s RunStatus) String() string {
+	switch s {
+	case RunPending:
+		return "Pending"
+	case RunRunning:
+		return "Running"
+	case RunCompleted:
+		return "Completed"
+	case RunFailed:
+		return "Failed"
+	case RunCancelled:
+		return "Cancelled"
+	default:
+		return fmt.Sprintf("RunStatus(%d)", int(s))
+	}
 }
 
 // TODO: Implement SQLiteStore (v0.2+)
