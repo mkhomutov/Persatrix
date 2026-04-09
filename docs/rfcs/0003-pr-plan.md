@@ -48,6 +48,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] `make proto` succeeds
 - [ ] `go build ./internal/generated/...` compiles
 - [ ] Generated files committed to repo
+- [ ] `go mod tidy` run and `go.sum` clean (review N-10)
 - [ ] `go vet ./internal/generated/...` clean
 
 ---
@@ -70,7 +71,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - `Executor` interface with `ExecuteTask(ctx, ExecuteRequest) (*ExecuteResult, error)` and `Close() error`.
 - `GRPCExecutor` creates a per-task gRPC connection (no pooling in v0.1). `// TODO(v0.2): connection pooling` comment.
 - Retry loop with exponential backoff: `100ms * 2^attempt`, max 3 retries.
-- `isTransient` classifies gRPC status codes: `Unavailable`, `ResourceExhausted`, `Aborted` → transient; `DeadlineExceeded` and all others → permanent (review S-04: retrying after timeout with the same timeout is unlikely to succeed).
+- `isTransient` classifies gRPC status codes: `Unavailable`, `ResourceExhausted`, `Aborted` → transient; `DeadlineExceeded` and all others → permanent (review S-04: retrying after timeout with the same timeout is unlikely to succeed). Non-gRPC errors (DNS, connection refused) default to transient (review B-03: these are the most common transient failures for per-task connections).
 - Functional options: `WithTimeout(d)`, `WithMaxRetries(n)`.
 - `grpc.WithTransportCredentials(insecure.NewCredentials())` with `// TODO(security): enable mTLS` comment.
 - Agent health status check before dial: `StatusHealthy` required, else error.
@@ -118,9 +119,10 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - `Scheduler` interface with `Run(ctx) error`.
 - `WorkflowScheduler` constructor takes `store`, `registry`, `planner`, `executor`, `logger`, `workflowsDir`.
 - Polling loop: `time.Ticker` with configurable `pollInterval` (default 1s).
-- Semaphore for max concurrent runs (default 10): `chan struct{}`. Acquisition inside spawned goroutine (review S-07) to avoid blocking the polling loop.
+- Semaphore for max concurrent runs (default 10): `chan struct{}`. Acquisition inside spawned goroutine (review S-07) with `select`/`ctx.Done()` to prevent goroutine leaks on shutdown (review B-01).
+- In-flight run tracking via `sync.Map` to prevent duplicate execution across poll cycles (review B-02).
 - `resolveWorkflowPath`: simple `filepath.Join(workflowsDir, id+".yaml")` — no traversal check (pre-validated by REST API).
-- `executeRun`: Parse → ValidateDAG → Plan → stages loop → state transitions.
+- `executeRun`: Parse → ValidateDAG → Plan → set `StartedAt` via `SetRunTimestamps` when transitioning to `RunRunning` (review B-06) → stages loop with `ctx.Done()` check between stages (review B-04) → state transitions.
 - `executeStage`: `sync.WaitGroup` + `sync.Mutex` + error channel for parallel fan-out/barrier. Mutex protects `outputs` map writes (review B-02).
 - `executeStep`: `planner.ResolveInputs` → `executor.ExecuteTask` → update `StepState`. All `UpdateStepState` errors logged (review B-03).
 - All steps execute unconditionally in v0.1. `// TODO(v0.2): evaluate step conditions` comment.
@@ -134,7 +136,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **Step failure fails run**: executor error → `RunFailed`.
 - **Poll loop**: pending run picked up within 2× interval.
 - **Graceful shutdown**: cancel ctx → `context.Canceled`.
+- **Graceful shutdown with blocked goroutines**: cancel ctx while goroutines wait on semaphore → goroutines exit cleanly (review B-01).
 - **Concurrent run limit**: excess runs queued.
+- **Duplicate run prevention**: same pending run across two poll cycles → executed once (review B-02).
 - **Empty poll cycle**: no pending runs → no-op.
 - **Parse failure**: bad YAML → `RunFailed`.
 - **DAG failure**: cycle → `RunFailed`.
@@ -147,6 +151,10 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] `go vet ./internal/scheduler/...` clean
 - [ ] Parallel step execution verified (not just sequential)
 - [ ] `outputs` map access is mutex-protected
+- [ ] Semaphore acquisition uses `select`/`ctx.Done()` (review B-01)
+- [ ] In-flight run deduplication verified (review B-02)
+- [ ] `StartedAt` set when transitioning to `RunRunning` (review B-06)
+- [ ] Cancellation check present between stages (review B-04)
 
 ---
 
@@ -267,15 +275,22 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 ## Dependency Graph
 
 ```
-PR 1 (proto-gen)       PR 4 (state-extension)
-    │                       │
-    ▼                       │
-PR 2 (executor)             │
-    │                       │
-    ▼                       ▼
-PR 3a (scheduler-core) ──► PR 3b (scheduler-templates) ──► PR 5 (wiring)
+PR 1 (proto-gen) ──────┐  PR 4 (state-extension) ──┐
+                        ▼                            │
+                   PR 2 (executor)                   │
+                        │                            │
+                        ▼                            ▼
+                   PR 3a (scheduler-core) ◄──── BOTH required
+                        │
+                        ▼
+                   PR 3b (scheduler-templates)
+                        │
+                        ▼
+                   PR 5 (wiring)
 ```
 
-PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently. However, PR 3a (scheduler core) depends on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). PR 3b extends PR 3a with template resolution tests. PR 5 (wiring) depends on all prior PRs.
+> **⚠️ GATE (review B-05):** PR 3a has a **compile-time** dependency on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). Neither can be skipped. PR 4 must merge **before** PR 3a despite its higher number.
+
+PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently.
 
 > **Recommended implementation order (review S-08):** PR numbering does not imply execution order. The recommended merge sequence is: **PR 1 ‖ PR 4** (parallel) → **PR 2** → **PR 3a** → **PR 3b** → **PR 5**. PR 4 must merge before PR 3a despite its higher number.

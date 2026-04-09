@@ -145,6 +145,7 @@ type WorkflowScheduler struct {
     executor  Executor
     logger    *zap.Logger
     pollInterval time.Duration // default: 1 second
+    inflight sync.Map          // map[string]struct{} — run IDs currently being executed (review B-02)
 }
 
 func NewWorkflowScheduler(
@@ -188,10 +189,18 @@ The maximum concurrent workflow runs is capped via a semaphore (`chan struct{}`)
 
 ```go
 // Inside pollAndExecute, for each pending run:
+if _, loaded := s.inflight.LoadOrStore(run.ID, struct{}{}); loaded {
+    continue // already in-flight, skip to avoid duplicate execution (review B-02)
+}
 go func(r *state.WorkflowRun) {
-    s.sem <- struct{}{}        // block here, not in pollAndExecute
-    defer func() { <-s.sem }() // release slot when done
-    s.executeRun(ctx, r)
+    defer s.inflight.Delete(r.ID)
+    select {
+    case s.sem <- struct{}{}: // acquire semaphore slot (review B-01: select prevents goroutine leak on shutdown)
+        defer func() { <-s.sem }()
+        s.executeRun(ctx, r)
+    case <-ctx.Done():
+        return
+    }
 }(run)
 ```
 
@@ -230,10 +239,15 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
         return
     }
 
-    // 4. Transition to Running.
+    // 4. Transition to Running and record actual execution start time (review B-06).
+    now := time.Now()
     if err := s.store.UpdateRunStatus(ctx, run.ID, state.RunRunning); err != nil {
         s.logger.Error("failed to update run status", zap.String("run_id", run.ID), zap.Error(err))
         return
+    }
+    if err := s.store.SetRunTimestamps(ctx, run.ID, &now, nil); err != nil {
+        s.logger.Error("failed to set run started timestamp",
+            zap.String("run_id", run.ID), zap.Error(err))
     }
 
     // TODO(S-09): validate that all {{ variable }} templates in the workflow have
@@ -244,6 +258,14 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
     // 5. Execute stages sequentially.
     outputs := make(map[string]string) // step ID → output
     for stageIdx, stage := range plan.Stages {
+        // Check for cancellation between stages (review B-04).
+        // Non-Goals states: "The Scheduler checks for cancellation between stages only."
+        select {
+        case <-ctx.Done():
+            s.failRun(ctx, run.ID, "run cancelled")
+            return
+        default:
+        }
         if err := s.executeStage(ctx, run, stageIdx, stage, outputs); err != nil {
             s.failRun(ctx, run.ID, fmt.Sprintf("stage %d failed: %s", stageIdx, err.Error()))
             return
@@ -550,7 +572,11 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 func isTransient(err error) bool {
     st, ok := status.FromError(err)
     if !ok {
-        return false
+        // Non-gRPC errors (DNS resolution failure, connection refused, network
+        // unreachable) are likely transient — the agent may be starting up.
+        // This is especially common in v0.1 where each task creates a new gRPC
+        // connection. Default to transient to allow retries. (review B-03)
+        return true
     }
     switch st.Code() {
     case codes.Unavailable, codes.ResourceExhausted, codes.Aborted:
@@ -659,7 +685,7 @@ The scheduler's semaphore (`maxConcurrentRuns`, default 10) prevents resource ex
 
 ### No Workflow Replay Protection
 
-A `WorkflowRun` that fails and is not deleted can be re-executed if a scheduler bug or race condition picks it up again. In v0.1, the `Pending → Running` transition (`UpdateRunStatus`) does not use compare-and-swap, so two scheduler goroutines could race to execute the same run. The mitigation is the semaphore + single-scheduler design. RFC 0003 follow-up should add an atomic `ClaimRun(runID) bool` method to the Store interface.
+A `WorkflowRun` that fails and is not deleted can be re-executed if a scheduler bug or race condition picks it up again. In v0.1, the `Pending → Running` transition (`UpdateRunStatus`) does not use compare-and-swap. To prevent duplicate execution within a single scheduler instance, the `WorkflowScheduler` tracks in-flight run IDs via `sync.Map` and skips runs that are already being executed (review B-02). This eliminates the race window between polling a run as `Pending` and transitioning it to `Running`. For v0.2 multi-instance scenarios, an atomic `ClaimRun(runID) bool` method should be added to the Store interface.
 
 > **Note:** This is documented as a known risk with a `// TODO(v0.2): add ClaimRun for atomic pending→running transition` comment.
 
