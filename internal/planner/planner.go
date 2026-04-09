@@ -23,6 +23,11 @@ const stepIDPattern = `[a-z0-9]([a-z0-9_-]*[a-z0-9])?`
 // maxYAMLSize is the maximum allowed YAML file size (1 MB).
 const maxYAMLSize = 1 << 20
 
+// workflowIDRegex and agentIDRegex require minimum 2 characters and no underscores
+// (matching the agent ID convention: ^[a-z0-9][a-z0-9-]*[a-z0-9]$).
+// stepIDRegex intentionally allows underscores and single-character IDs (e.g. "a",
+// "step_1") because step IDs are workflow-internal identifiers, not externally
+// visible names. The patterns are kept separate for clearer error messages.
 var (
 	workflowIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 	agentIDRegex    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
@@ -191,9 +196,12 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 		}
 	}
 
-	// Validate depends_on references point to existing step IDs.
+	// Validate depends_on references point to existing step IDs and are not self-referential.
 	for _, step := range w.Steps {
 		for _, dep := range step.DependsOn {
+			if dep == step.ID {
+				return fmt.Errorf("step %q: depends_on references itself", step.ID)
+			}
 			if !stepIDs[dep] {
 				return fmt.Errorf("step %q: depends_on references nonexistent step %q", step.ID, dep)
 			}
@@ -336,5 +344,95 @@ func (p *YAMLPlanner) Plan(_ context.Context, workflow *Workflow) (*ExecutionPla
 	}, nil
 }
 
-// TODO: Implement template variable resolution ({{ steps.X.output }}) — PR 3b
+// templateRegex matches {{ steps.<id>.output }} and {{ variable }} patterns.
+// Group 2 captures the step ID for output references; group 3 captures plain variable names.
+// The step ID sub-pattern reuses stepIDPattern to stay consistent with Parse validation.
+var templateRegex = regexp.MustCompile(
+	`\{\{\s*(steps\.(` + stepIDPattern + `)\.output|([a-z_][a-z0-9_]*))\s*\}\}`,
+)
+
+// suspiciousRegex matches anything that looks like {{ ... }} but was not matched
+// by templateRegex. Used to emit warnings for potential typos in workflow YAML.
+var suspiciousRegex = regexp.MustCompile(`\{\{.*?\}\}`)
+
+// ResolveInputs substitutes template variables in step.Input with actual values.
+// It resolves {{ steps.<id>.output }} from the outputs map and {{ variable }}
+// from the vars map. Returns the resolved input string or an error if any
+// referenced step ID or variable is missing. Resolution is single-pass —
+// substituted values are not re-scanned for template patterns.
+func ResolveInputs(step Step, outputs map[string]string, vars map[string]string, logger *zap.Logger) (string, error) {
+	input := step.Input
+
+	// Find all template matches and their positions for single-pass replacement.
+	matches := templateRegex.FindAllStringSubmatchIndex(input, -1)
+	if len(matches) == 0 {
+		// No templates found — check for suspicious patterns before returning.
+		warnSuspicious(input, nil, logger)
+		return input, nil
+	}
+
+	var b strings.Builder
+	b.Grow(len(input))
+	lastEnd := 0
+
+	// Track matched ranges for suspicious-pattern detection.
+	matchedRanges := make([][2]int, 0, len(matches))
+
+	for _, loc := range matches {
+		// loc indices: [0]=full match start, [1]=full match end,
+		// [2]=group1 start, [3]=group1 end (full inner match),
+		// [4]=group2 start, [5]=group2 end (step ID — may be -1),
+		// [6]=group3 start, [7]=group3 end (step ID inner group — may be -1),
+		// [8]=group4 start, [9]=group4 end (variable name — may be -1).
+		matchedRanges = append(matchedRanges, [2]int{loc[0], loc[1]})
+
+		// Write literal text before this match.
+		b.WriteString(input[lastEnd:loc[0]])
+
+		if loc[4] >= 0 {
+			// steps.<id>.output — group 2 is the step ID.
+			stepID := input[loc[4]:loc[5]]
+			val, ok := outputs[stepID]
+			if !ok {
+				return "", fmt.Errorf("unresolved step output reference: steps.%s.output (step %q not in outputs map)", stepID, stepID)
+			}
+			b.WriteString(val)
+		} else if loc[8] >= 0 {
+			// {{ variable }} — group 4 is the variable name.
+			varName := input[loc[8]:loc[9]]
+			val, ok := vars[varName]
+			if !ok {
+				return "", fmt.Errorf("unresolved variable reference: %s (not in vars map)", varName)
+			}
+			b.WriteString(val)
+		}
+
+		lastEnd = loc[1]
+	}
+
+	// Write trailing literal text.
+	b.WriteString(input[lastEnd:])
+
+	result := b.String()
+
+	// Warn about suspicious patterns that were not matched.
+	warnSuspicious(result, matchedRanges, logger)
+
+	return result, nil
+}
+
+// warnSuspicious emits logger.Warn for {{ ... }} patterns in text that were not
+// matched by templateRegex. The skipRanges parameter (relative to the original
+// input, before substitution) is unused here — we scan the final result string
+// for any remaining {{ ... }} occurrences since substituted values are not
+// re-scanned (single-pass guarantee means any {{ }} in the result is either
+// from unmatched original patterns or from substituted output values).
+func warnSuspicious(text string, _ [][2]int, logger *zap.Logger) {
+	for _, loc := range suspiciousRegex.FindAllStringIndex(text, -1) {
+		logger.Warn("suspicious unresolved template pattern in step input",
+			zap.String("pattern", text[loc[0]:loc[1]]),
+		)
+	}
+}
+
 // TODO: Implement condition evaluation
