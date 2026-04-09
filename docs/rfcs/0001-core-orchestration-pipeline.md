@@ -123,7 +123,7 @@ type Store interface {
 - All methods are goroutine-safe.
 - `CreateRun` generates a UUID if `run.ID` is empty.
 - `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.) Deep copy is implemented via manual field copy; the `Steps` map must be reconstructed with new `StepState` values — a simple map assignment would share the underlying map reference, creating a subtle concurrency hazard.
-- `UpdateStepState` merges into the existing run's `Steps` map.
+- `UpdateStepState` merges into the existing run's `Steps` map. It returns an error if the `runID` does not exist. If the `StepID` is not already present in the run's `Steps` map, it is added — this allows the Scheduler to initialize step state on first execution without requiring pre-population.
 - `ListRuns` returns all runs. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
 
 ### Phase 2: InMemoryRegistry
@@ -158,8 +158,9 @@ The planner is the most complex component in this RFC. It has three responsibili
   }
   ```
   The `Parse` method unmarshals into `WorkflowFile`, validates `SchemaVersion`, then returns the inner `Workflow`. Without this wrapper, `yaml.Unmarshal` will fail on the actual fixture files.
-- Validate required fields: `id`, `name`, at least one step, each step has `id` and `agent`.
+- Validate required fields: `id`, `name`, at least one step, each step has `id`, `agent`, and `input` (all three are required per `workflow.schema.json`).
 - Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. This regex requires a minimum of 2 characters, so single-character agent IDs are invalid. This aligns with `agent.schema.json`.
+- The existing `Workflow` struct includes a `Trigger` field (parsed from YAML, e.g. `"manual"`). This field is preserved in the parsed struct but not acted upon in v0.1 — trigger evaluation is a Scheduler concern (RFC 0003).
 - Validate that `depends_on` references point to existing step IDs.
 
 #### 3b. ValidateDAG — Cycle detection
@@ -189,6 +190,8 @@ The planner is the most complex component in this RFC. It has three responsibili
 - **Scope**: `ResolveInputs` operates on `Step.Input` only, NOT on `Step.Condition`. Condition strings (e.g., `{{ steps.review.output.approved == false }}`) are opaque to this RFC — they resemble template patterns but contain expressions that the Scheduler/Executor RFC will evaluate. Passing a condition string to `ResolveInputs` would produce incorrect results because `.approved == false` is not a valid step ID or variable name.
 - Note that `Step.Input` can contain multiple template references interleaved with literal text in a single string (e.g., `"{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"`). `ResolveInputs` replaces all occurrences via regexp global substitution, not just the first match.
 - Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
+- **Malformed patterns** (empty braces `{{ }}`, incomplete references `{{ steps. }}`, missing whitespace delimiters `{{no-spaces}}`) are left as-is in the output string — they are not substituted and do not cause an error. This is intentional: condition expressions like `{{ steps.review.output.approved == false }}` coexist in the same YAML file and must not be rejected by `ResolveInputs`.
+- **Interface placement**: `ResolveInputs` is an exported standalone function on `YAMLPlanner`, not a method on the `Planner` interface. It is a utility the Scheduler/Executor will call at runtime and does not fit the parse/plan/validate lifecycle that the interface represents. This avoids premature interface expansion.
 
 #### Constructor
 
