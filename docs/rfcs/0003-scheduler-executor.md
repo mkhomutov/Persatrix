@@ -896,7 +896,7 @@ Once this RFC is accepted:
 1. Create feature branches per the PR plan (`0003-pr-plan.md`).
 2. Implement in phase order (Proto Gen → Executor → Scheduler → State Extension → Wiring).
 3. PR < 500 lines per phase; squash merge to `main`.
-4. **Next RFC**: `0004-grpc-agent-server.md` — Python agent-side gRPC server implementation (`agents/server.py`) implementing `AgentService` from `proto/task.proto`.
+4. **Next RFC**: `0004-python-agent-grpc-server.md` — Python agent-side gRPC server implementation (`agents/server.py`) implementing `AgentService` from `proto/task.proto`.
 
 ## Related Documentation
 
