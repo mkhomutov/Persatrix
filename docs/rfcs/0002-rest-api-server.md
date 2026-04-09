@@ -88,6 +88,8 @@ The core spec (`ai-agents-orchestration-spec.md` §8.3) defines exactly eight v0
 
 Both are deliberate additions to support the operational lifecycle of runs. They are not unintentional omissions from the spec; the spec should be updated in a follow-up documentation PR to reflect these additions.
 
+Additionally, the runtime agent registration API (`POST /api/v1/agents/register`) diverges from `schemas/agent.schema.json`, which marks `name`, `role`, and `model` as **required** properties for statically configured agents. Runtime-registered agents provide only `id`, `address`, and `capabilities`. This is intentional: static config serves UI and scheduling metadata, while runtime registration provides the minimum needed for gRPC dispatch. See the [Phase 2 registration handler](#post-apiv1agentsregister) for details.
+
 ## Design / Implementation
 
 ### Router and Server Structure
@@ -114,12 +116,17 @@ func (s *Server) Handler() http.Handler
 func (s *Server) Start(ctx context.Context) error
 ```
 
-- `New` validates `workflowsDir`, builds the `ServeMux`, and registers all routes. It returns `(*Server, error)` so that a missing or inaccessible workflows directory is caught at startup rather than silently producing `404` errors on every workflow submission:
+- `New` validates `workflowsDir`, builds the `ServeMux`, and registers all routes. It returns `(*Server, error)` so that a missing, inaccessible, or non-directory workflows path is caught at startup rather than silently producing errors on every workflow submission:
   ```go
-  if _, err := os.Stat(workflowsDir); err != nil {
+  fi, err := os.Stat(workflowsDir)
+  if err != nil {
       return nil, fmt.Errorf("workflows directory %q not accessible: %w", workflowsDir, err)
   }
+  if !fi.IsDir() {
+      return nil, fmt.Errorf("workflows directory %q is not a directory", workflowsDir)
+  }
   ```
+  The `fi.IsDir()` check is necessary because `os.Stat` succeeds for any path type (regular file, symlink target, device node). Without it, passing a file path (e.g. `--workflows-dir workflows/feature-builder.yaml`) would pass startup validation but fail at runtime when `filepath.Join` produces invalid paths.
 - `Handler()` returns the composed `http.Handler` for use in tests (avoids `httptest.NewServer` binding to a real port).
 - `Start(ctx)` calls `http.ListenAndServe`, respects context cancellation for graceful shutdown via `http.Server.Shutdown`.
 - The `addr` field is set from `--http-bind` and `--http-port` formatted as `"127.0.0.1:8080"` (see Phase 4).
@@ -188,8 +195,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 }
 ```
 
-- `workflow_id`: required, must match `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
-- `inputs`: optional map of string key/value pairs; keys become `WorkflowRun.Inputs`.
+- `workflow_id`: required, must match `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. Minimum two characters; single-character workflow IDs are invalid by design (consistent with the agent ID constraint defined in the project conventions).
+- `inputs`: optional map of string key/value pairs; keys become `WorkflowRun.Inputs`. All input values **must** be JSON strings. Non-string values (numbers, booleans, objects, arrays) are rejected with `400 BAD_REQUEST` because `WorkflowRun.Inputs` is typed `map[string]string` (RFC 0001) and the strict JSON decoder (`DisallowUnknownFields`) will fail on type mismatch.
 
 **Handler logic:**
 
@@ -228,6 +235,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 `status` string values map from `state.RunStatus` constants: `"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`.
 
+> **Note (MI-01 — step timestamps):** RFC 0001's `StepState` struct includes `StartedAt time.Time` and `FinishedAt time.Time` fields. These are omitted from the v0.1 API response because no step execution occurs until RFC 0003 (Scheduler/Executor) is implemented — all steps remain in `"pending"` status with zero-value timestamps. When RFC 0003 adds step lifecycle transitions, the status response should be extended to include `started_at` and `finished_at` per step.
+
 > **Note (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require either (a) explicit `json:"run_id"` struct tags on `state.WorkflowRun` (document as an RFC 0001 amendment) or (b) dedicated response DTOs in `internal/server/` with their own `json:` tags. Without either approach, `encoding/json` would produce PascalCase keys (`ID`, `WorkflowID`, `StartedAt`). Option (b) — separate API DTOs — is the cleaner long-term pattern as it decouples the storage model from the wire format.
 
 #### `GET /api/v1/workflows`
@@ -239,6 +248,7 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 #### `DELETE /api/v1/workflows/{id}`
 
 - Call `store.GetRun(ctx, id)` to check current status.
+- On `state.ErrRunNotFound`: return `404 NOT_FOUND`.
 - If `run.Status == state.RunRunning`: return `409 CONFLICT` with `"error": "cannot delete a running workflow run"`. This enforces the API-layer protection noted in RFC 0001 — the store permits deletion of any run regardless of status, but the HTTP layer must refuse running runs.
 - Otherwise: call `store.DeleteRun(ctx, id)`.
 - Return `204 No Content`.
@@ -263,7 +273,18 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 > **Note (B4 fix):** `model` is absent from this request body. `registry.AgentInfo` (defined in RFC 0001) has no `Model` field. Adding it here without amending `AgentInfo` would either silently drop the value (request DTO) or cause a compile error (direct struct mapping). Deferred: a future RFC may add `Model string` to `AgentInfo`.
 
-Handler validates `Content-Type: application/json` (same `requireJSON` helper used in the workflow-run handler) before decoding the body. It constructs `registry.AgentInfo` and calls `registry.Register(ctx, info)`.  
+> **Note (M-03 — Name/Role divergence):** `registry.AgentInfo` has `Name string` and `Role string` fields, and `schemas/agent.schema.json` marks `name`, `role`, and `model` as **required** for statically configured agents. Runtime-registered agents (via this endpoint) have empty `Name` and `Role` — gRPC agents self-identify by `ID` and `Capabilities` only. This is an intentional v0.1 divergence: static config provides rich metadata for UI and scheduling, while runtime registration provides the minimum needed for gRPC dispatch. See also [Spec Deviations](#spec-deviations).
+
+Handler validates `Content-Type: application/json` (same `requireJSON` helper used in the workflow-run handler) before decoding the body. It constructs `registry.AgentInfo` with `Status: registry.StatusHealthy` (a freshly registered agent is assumed reachable until the first health check fails; the Go zero value `StatusUnknown` would be misleading) and calls `registry.Register(ctx, info)`:
+
+```go
+info := registry.AgentInfo{
+    ID:           req.ID,
+    Address:      req.Address,
+    Capabilities: req.Capabilities,
+    Status:       registry.StatusHealthy, // reachable until first health check fails
+}
+```  
 On `registry.ErrAgentAlreadyRegistered`: return `409 CONFLICT`.  
 Return `201 Created` with the registered agent JSON.
 
@@ -306,31 +327,46 @@ Update `cmd/orchestrator/main.go` to:
    ```
    Using `--http-bind` (default `127.0.0.1`) instead of binding directly to `0.0.0.0` is the primary mitigation for the unauthenticated v0.1 server (see §No Authentication in v0.1).
 
-2. Instantiate the server, passing both `--http-bind` and `--workflows-dir`:
+2. Instantiate the server (see step 3 snippet for the combined `New` + goroutine code). `New` returns an error when `workflowsDir` is inaccessible or not a directory, surfacing misconfiguration at startup.
+
+   > **Note (MI-04 — logger consistency):** The existing `main.go` uses the sugar logger (`log.Infow(...)`) while this RFC's Phase 4 snippets use structured zap (`logger.Info(..., zap.String(...))`) which is the project convention per `go-orchestrator.instructions.md`. The Phase 4 implementation should migrate the existing `main.go` sugar logger calls to structured zap for consistency. The `log := logger.Sugar()` line and all `log.Infow(...)` calls should be replaced with direct `logger.Info(...)` calls with typed fields.
+
+3. Launch `srv.Start(ctx)` in a goroutine. The error path must call `cancel()` to propagate the failure to the root context so the orchestrator shuts down cleanly — without this, a failed HTTP server (e.g. port already bound) goes unnoticed while the rest of the orchestrator continues running with no HTTP endpoint:
    ```go
-   // TODO(security): no auth in v0.1; listener is restricted to loopback by default via --http-bind.
-   srv, err := server.New(fmt.Sprintf("%s:%d", *httpBind, *httpPort), *workflowsDir, store, reg, pl, logger)
+   listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
+   srv, err := server.New(listenAddr, *workflowsDir, store, reg, pl, logger)
    if err != nil {
        logger.Fatal("failed to create HTTP server", zap.Error(err))
    }
+   go func() {
+       if err := srv.Start(ctx); err != nil {
+           logger.Error("HTTP server terminated with error", zap.Error(err))
+           cancel() // propagate to root context so orchestrator can shutdown cleanly
+       }
+   }()
    ```
-   `New` returns an error when `workflowsDir` is inaccessible, surfacing misconfiguration at startup.
-
-3. Launch `srv.Start(ctx)` in a goroutine, logging any non-`http.ErrServerClosed` errors.
 
 4. Log `"HTTP server listening"` with the bound address:
    ```go
-   logger.Info("HTTP server listening", zap.String("addr", fmt.Sprintf("%s:%d", *httpBind, *httpPort)))
+   logger.Info("HTTP server listening", zap.String("addr", listenAddr))
    ```
+   Note: the `listenAddr` variable from step 3 eliminates the duplicated `fmt.Sprintf` call that would otherwise appear in both the `server.New` and `logger.Info` call sites.
 
 This satisfies TODO step 11 ("Start HTTP server") in `main.go`. The existing graceful-shutdown context propagates to `Start`.
 
 ### Request ID Middleware
 
-All requests receive a `X-Request-ID` response header with a UUID for log correlation:
+All requests receive a `X-Request-ID` response header with a server-generated UUID for log correlation. The middleware **always generates a new UUID server-side** and **ignores** any `X-Request-ID` header present in the incoming request. Accepting client-provided IDs would enable log injection attacks — a malicious client could flood logs with forged request IDs, poisoning log aggregators or correlation systems.
 
 ```go
-func requestIDMiddleware(next http.Handler) http.Handler
+func requestIDMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        id := uuid.NewString() // always server-generated; never r.Header.Get("X-Request-ID")
+        w.Header().Set("X-Request-ID", id)
+        ctx := context.WithValue(r.Context(), requestIDKey, id)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
 ```
 
 The UUID is also added to the `zap.Logger` context for that request using `logger.With(zap.String("request_id", id))` and passed via `context.WithValue` to downstream handlers. This is essential for correlating orchestrator logs with CLI output and agent logs once RFC 0003 is in place.
@@ -361,6 +397,8 @@ func recoveryMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
     })
 }
 ```
+
+> **Limitation (M-05 — partial response write):** If a handler panics after already writing HTTP headers (via `w.WriteHeader()` or `w.Write()`), the `writeError` call in the recover block cannot send a `500` error response — Go's `http.ResponseWriter` silently ignores the second `WriteHeader` call, and the client receives a truncated or corrupt response body with no error indication. In v0.1, this is acceptable because all responses are short JSON objects written atomically (no streaming handlers). The panic is still logged via zap for operator visibility. Operators should monitor for abrupt connection resets in server logs.
 
 Both `recoveryMiddleware` and `requestIDMiddleware` are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
 
@@ -510,7 +548,10 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 - **JSON body size limit**: send a 1 MiB + 1 byte body to `POST /api/v1/workflows/run` — must return `400 BAD_REQUEST`.
 - **Unknown fields**: send a request body with an unrecognized field — must return `400 BAD_REQUEST` (strict decoder).
 - **Content-Type enforcement**: send `POST /api/v1/workflows/run` with `Content-Type: text/plain` — must return `400 BAD_REQUEST`.
-- **Request ID header**: every response must include `X-Request-ID` header with a non-empty UUID.
+- **Request ID header**: every response must include `X-Request-ID` header with a server-generated UUID. Sending a client-provided `X-Request-ID` header must **not** cause the response to echo it back — the server always generates a fresh UUID (see MA-01 security rationale).
+- **Input type enforcement**: `POST /api/v1/workflows/run` with `inputs: {"key": 42}` (non-string value) → `400 BAD_REQUEST`.
+- **Initial agent status**: after `POST /api/v1/agents/register`, the returned agent must have `status` corresponding to `StatusHealthy` (not `StatusUnknown`).
+- **Start error propagation**: call `Start(ctx)` on an already-bound port → the goroutine must log the error and cancel the root context.
 - **Graceful shutdown test**: start the server with `Start(ctx)`, cancel the context, verify `Start` returns without error within 1 second.
 - **Workflow run lifecycle (v0.1)**: POST run → `201` with `run_id`; GET status with that ID → `200` with `status: "pending"`; DELETE → `204`; GET again → `404`.
 - **Running-status delete protection**: manually set a run's status to `RunRunning` via `store.UpdateRunStatus`, then DELETE → `409 CONFLICT`.
