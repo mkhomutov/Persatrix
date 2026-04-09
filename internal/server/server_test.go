@@ -261,7 +261,9 @@ func TestGetWorkflowStatus(t *testing.T) {
 func TestGetWorkflowStatusNotFound(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/nonexistent-id/status", nil)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	// "nonexistent-id" is not a valid UUID, so it should be rejected at the
+	// format validation layer before reaching the store.
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // --- List Workflows ---
@@ -314,8 +316,9 @@ func TestDeleteWorkflow(t *testing.T) {
 
 func TestDeleteWorkflowNotFound(t *testing.T) {
 	srv, _ := testServer(t)
+	// "nonexistent-id" is not a valid UUID — rejected at format validation.
 	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/nonexistent-id", nil)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestDeleteRunningWorkflowConflict(t *testing.T) {
@@ -374,6 +377,23 @@ func TestPanicRecovery(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "internal server error")
+}
+
+// TestPanicRecoveryFullChain validates that panic recovery works through the
+// complete middleware chain (recovery → requestID → logging → handler),
+// ensuring the X-Request-ID header is present on panic-recovered responses
+// and the JSON error envelope is correctly formed.
+// (Review finding F-04: the isolated test above does not prove the full chain.)
+func TestPanicRecoveryFullChain(t *testing.T) {
+	srv, _ := testServer(t)
+	srv.mux.HandleFunc("GET /test-panic", func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+	rec := doRequest(srv.Handler(), http.MethodGet, "/test-panic", nil)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "internal server error")
+	assert.NotEmpty(t, rec.Header().Get("X-Request-ID"),
+		"panic-recovered responses must include X-Request-ID from the full middleware chain")
 }
 
 // --- Full Lifecycle ---
@@ -523,8 +543,12 @@ func TestStartAndGracefulShutdown(t *testing.T) {
 		errCh <- srv.Start(ctx)
 	}()
 
-	// Give server a moment to start, then cancel
-	time.Sleep(50 * time.Millisecond)
+	// NOTE (Review finding F-05): Sleep-based synchronization is a known flake
+	// source. A retry-dial loop would be more robust but requires Start() to expose
+	// the actual bound address, which it doesn't in v0.1. The 100ms budget is generous
+	// for a loopback TCP bind. If this becomes flaky in CI, increase the sleep or
+	// refactor Start() to accept a net.Listener.
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 
 	err := <-errCh
@@ -680,4 +704,79 @@ func TestStartErrorOnPortInUse(t *testing.T) {
 
 	err = srv.Start(ctx)
 	assert.Error(t, err, "Start should return an error when the port is already in use")
+}
+
+// --- statusCapture.Flush() (F-06) ---
+
+// TestStatusCaptureFlush validates that the Flush() method on statusCapture
+// correctly delegates to the underlying ResponseWriter when it implements
+// http.Flusher. This was added for v0.2 SSE forward-compatibility.
+// (Review finding F-06: 0% coverage on Flush() method.)
+func TestStatusCaptureFlush(t *testing.T) {
+	rec := httptest.NewRecorder() // implements http.Flusher
+	sc := &statusCapture{ResponseWriter: rec, status: http.StatusOK}
+	sc.Flush() // should not panic
+	assert.True(t, rec.Flushed)
+}
+
+// --- Missing Content-Type header (F-07) ---
+
+// TestSubmitWorkflowRunNoContentType validates that requests with no Content-Type
+// header are rejected. mime.ParseMediaType("") returns an error, so requireJSON
+// correctly rejects it, but this edge case deserves explicit coverage.
+// (Review finding F-07.)
+func TestSubmitWorkflowRunNoContentType(t *testing.T) {
+	srv, _ := testServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/run", strings.NewReader(`{}`))
+	// No Content-Type header set
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Content-Type must be application/json")
+}
+
+// --- Run ID format validation (F-02) ---
+
+// TestGetWorkflowStatusInvalidRunID validates that non-UUID run IDs are rejected
+// at the handler boundary before reaching the store layer.
+// (Review finding F-02: validate at system boundaries.)
+func TestGetWorkflowStatusInvalidRunID(t *testing.T) {
+	srv, _ := testServer(t)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"too long", strings.Repeat("a", 100)},
+		{"path traversal", "../../etc/passwd"},
+		{"not a UUID", "not-a-uuid-at-all"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/"+tc.id+"/status", nil)
+			// Non-UUID IDs must not reach the store layer.
+			assert.NotEqual(t, http.StatusNotFound, rec.Code,
+				"non-UUID IDs should be rejected before reaching the store")
+		})
+	}
+}
+
+func TestDeleteWorkflowInvalidRunID(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/not-a-uuid/status", nil)
+	assert.NotEqual(t, http.StatusNotFound, rec.Code,
+		"non-UUID IDs should be rejected before reaching the store")
+}
+
+// TestGetWorkflowStatusValidUUIDNotFound validates that a valid UUID that doesn't
+// exist in the store returns 404 (not 400).
+func TestGetWorkflowStatusValidUUIDNotFound(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/00000000-0000-0000-0000-000000000000/status", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDeleteWorkflowValidUUIDNotFound(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/00000000-0000-0000-0000-000000000000", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

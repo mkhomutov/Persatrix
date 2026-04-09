@@ -5,6 +5,8 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // writeJSON marshals v to JSON and writes it with the given status code.
@@ -29,6 +31,20 @@ func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 	mediaType, _, err := mime.ParseMediaType(ct)
 	if err != nil || mediaType != "application/json" {
 		writeError(w, "BAD_REQUEST", "Content-Type must be application/json", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// validateRunID checks that the path parameter is a valid UUID (the format generated
+// by state.CreateRun). Returns the validated ID and true, or writes a 400 error and
+// returns false. This prevents arbitrary strings (long inputs, special characters,
+// null bytes) from reaching the store layer — defense-in-depth for the v0.2 SQLite
+// migration where unvalidated IDs could cause unexpected behavior.
+// (Review finding F-02: validate at system boundaries.)
+func validateRunID(w http.ResponseWriter, id string) bool {
+	if _, err := uuid.Parse(id); err != nil {
+		writeError(w, "BAD_REQUEST", "invalid run ID format", http.StatusBadRequest)
 		return false
 	}
 	return true

@@ -102,6 +102,9 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 // handleGetWorkflowStatus handles GET /api/v1/workflows/{id}/status.
 func (s *Server) handleGetWorkflowStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !validateRunID(w, id) {
+		return
+	}
 	run, err := s.store.GetRun(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, state.ErrRunNotFound) {
@@ -136,6 +139,9 @@ func (s *Server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 // handleDeleteWorkflow handles DELETE /api/v1/workflows/{id}.
 func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !validateRunID(w, id) {
+		return
+	}
 
 	run, err := s.store.GetRun(r.Context(), id)
 	if err != nil {
@@ -154,6 +160,11 @@ func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO(v0.3): atomic check-and-delete or store-level status guard
+	// NOTE (Review finding F-01): TOCTOU race — if a concurrent request deletes the
+	// run between GetRun and DeleteRun, DeleteRun returns ErrRunNotFound and the
+	// client receives 404 despite having confirmed the run existed. This is
+	// acceptable in v0.1: 404 is semantically correct (run no longer exists),
+	// and the race is dormant with a single-server in-memory store.
 	if err := s.store.DeleteRun(r.Context(), id); err != nil {
 		if errors.Is(err, state.ErrRunNotFound) {
 			writeError(w, "NOT_FOUND", "run not found", http.StatusNotFound)
@@ -175,6 +186,7 @@ func (s *Server) resolveWorkflowPath(workflowID string) (string, error) {
 		return "", ErrInvalidWorkflowID
 	}
 
+	// Only .yaml extension is supported (consistent with project convention).
 	candidate := filepath.Join(s.workflowsDir, workflowID+".yaml")
 
 	resolved, err := filepath.EvalSymlinks(candidate)

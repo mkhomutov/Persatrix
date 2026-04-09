@@ -69,6 +69,12 @@ func (sc *statusCapture) Flush() {
 
 // loggingMiddleware logs method, path, status code, latency, and request ID
 // for every completed request.
+// NOTE (Review finding F-03): panicked requests are logged by recoveryMiddleware,
+// not by this access logger. The access log fires after next.ServeHTTP returns
+// normally, which is skipped during panic unwinding. A defer-based refactor would
+// fix this but requires recoveryMiddleware to write through statusCapture for
+// accurate status capture. Accepted as-is for v0.1; operator visibility into panics
+// is provided by recoveryMiddleware's Error-level log entry.
 func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
