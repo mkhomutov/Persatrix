@@ -67,6 +67,13 @@ func (sc *statusCapture) Flush() {
 	}
 }
 
+// Unwrap returns the underlying ResponseWriter so that Go 1.20+
+// http.ResponseController can discover optional interfaces (http.Flusher,
+// http.Hijacker) via the standard unwrapping protocol.
+func (sc *statusCapture) Unwrap() http.ResponseWriter {
+	return sc.ResponseWriter
+}
+
 // loggingMiddleware logs method, path, status code, latency, and request ID
 // for every completed request.
 // NOTE (Review finding F-03): panicked requests are logged by recoveryMiddleware,

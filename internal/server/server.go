@@ -110,7 +110,18 @@ func (s *Server) Handler() http.Handler {
 // ListenAndServe failed immediately, because the shutdown goroutine blocked
 // on <-ctx.Done() forever. This select-based approach ensures no leak.)
 func (s *Server) Start(ctx context.Context) error {
-	srv := &http.Server{Addr: s.addr, Handler: s.Handler()}
+	srv := &http.Server{
+		Addr:    s.addr,
+		Handler: s.Handler(),
+		// Transport-level timeouts to mitigate Slow Loris and idle-connection
+		// resource exhaustion (gosec G112). These are independent of RFC 0002 H3's
+		// per-request handler timeouts (deferred to v0.2).
+		// WriteTimeout is intentionally omitted — it would break v0.2 SSE streaming;
+		// per-handler write deadlines should use http.ResponseController instead.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.ListenAndServe()

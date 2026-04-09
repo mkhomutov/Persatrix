@@ -742,29 +742,34 @@ func TestSubmitWorkflowRunNoContentType(t *testing.T) {
 // (Review finding F-02: validate at system boundaries.)
 func TestGetWorkflowStatusInvalidRunID(t *testing.T) {
 	srv, _ := testServer(t)
+	// Review finding F-07: assert the exact expected status (400) instead of
+	// only checking "not 404". The path traversal case is omitted because
+	// ServeMux cleans the double-dot segments before routing, so the request
+	// never reaches handleGetWorkflowStatus — it tests mux normalization,
+	// not validateRunID.
 	tests := []struct {
 		name string
 		id   string
 	}{
 		{"too long", strings.Repeat("a", 100)},
-		{"path traversal", "../../etc/passwd"},
 		{"not a UUID", "not-a-uuid-at-all"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/"+tc.id+"/status", nil)
-			// Non-UUID IDs must not reach the store layer.
-			assert.NotEqual(t, http.StatusNotFound, rec.Code,
-				"non-UUID IDs should be rejected before reaching the store")
+			assert.Equal(t, http.StatusBadRequest, rec.Code,
+				"non-UUID IDs should be rejected with 400 before reaching the store")
 		})
 	}
 }
 
 func TestDeleteWorkflowInvalidRunID(t *testing.T) {
 	srv, _ := testServer(t)
-	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/not-a-uuid/status", nil)
-	assert.NotEqual(t, http.StatusNotFound, rec.Code,
-		"non-UUID IDs should be rejected before reaching the store")
+	// Review finding F-02: previous test used /api/v1/workflows/not-a-uuid/status
+	// which hit the GET status route with wrong method (405), not the DELETE handler.
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/workflows/not-a-uuid", nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"non-UUID IDs should be rejected with 400 before reaching the store")
 }
 
 // TestGetWorkflowStatusValidUUIDNotFound validates that a valid UUID that doesn't

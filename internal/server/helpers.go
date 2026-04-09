@@ -10,6 +10,11 @@ import (
 )
 
 // writeJSON marshals v to JSON and writes it with the given status code.
+// The encode error is intentionally discarded: at this point the status code and
+// Content-Type header have already been written, so the caller cannot recover or
+// change the response. In v0.1 all response types are simple DTOs that always
+// marshal successfully; if a future change introduces an unmarshalable type, the
+// client will receive an empty body — add server-side logging here to debug.
 func writeJSON(w http.ResponseWriter, v any, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
