@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0001 defines ~780 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. The planner phase alone is estimated at ~350–400 LOC implementation + ~300–500 LOC tests, which will exceed 500 lines. This plan splits the work into **5 PRs**: phases 1, 2, and 4 each get one PR, while phase 3 (planner) is split into two PRs at a natural boundary (Parse+DAG+Plan vs. ResolveInputs).
+RFC 0001 defines ~780 LOC across 4 phases. The project's PR size limit is <500 lines of meaningful change. The planner phase alone is estimated at ~350–400 LOC implementation + ~300–500 LOC tests, which will exceed 500 lines. This plan splits the work into **6 PRs**: phases 1, 2, and 4 each get one PR, phase 3 (planner) is split into two PRs at a natural boundary (Parse+DAG+Plan vs. ResolveInputs), and a final follow-up PR addresses accumulated review findings.
 
 Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
@@ -301,10 +301,84 @@ Actionable follow-ups for **PR 5 (wiring)** or later:
 
 #### PR checklist
 
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] `go vet ./cmd/orchestrator/...` clean
+- [x] Component initialization logged on startup (3 `logger.Info` calls)
+- [x] No unused variable compiler errors (blank assignments)
+- [x] 59 lines changed (within 500-line limit)
+
+#### Post-merge review findings (PR #10)
+
+PR #10 was submitted as 59 lines (22 `main.go` + 4 `planner.go` + 33 `resolve_test.go`), well within the 500-line limit. Full review: [`docs/pr-reviews/pr-010-deep-review.md`](../../docs/pr-reviews/pr-010-deep-review.md).
+
+PR #9 follow-up items addressed:
+
+| PR #9 Finding | Status |
+|--------------|--------|
+| F-01: Nil-logger guard in `ResolveInputs` | ✅ Resolved — guard + `TestResolveInputs_NilLogger` |
+| F-03: Adjacent templates test | ✅ Resolved — `TestResolveInputs_AdjacentTemplates` |
+| F-04: Empty-string substitution test | ✅ Resolved — `TestResolveInputs_EmptyStringSubstitution` |
+
+Actionable follow-ups for **PR 6 (followup)**:
+
+| Finding | Severity | Action | Disposition |
+|---------|----------|--------|-------------|
+| F-01: Mixed logging style (sugared vs structured) in `main.go` | Low | Migrate `log.Infow` to `logger.Info` when extending startup (RFC 0002) | Defer to RFC 0002 |
+| F-02: Blank identifier assignments instead of struct grouping | Low | Consider struct grouping when wiring consumers | Defer to RFC 0003 |
+| F-03: `RunStatus.String()` and `AgentStatus.String()` missing | Medium | Add both `String()` methods + tests | Address in PR 6 |
+| F-04: `cap` variable shadows built-in in `FindByCapability` | Low | Rename to `capName` | Address in PR 6 |
+| F-05: Nil-logger test only covers happy path | Low | Add suspicious-pattern variant | Address in PR 6 |
+| F-06: Variable-reference errors lack `step.ID` context | Low | Add `step.ID` to error format string | Address in PR 6 |
+| F-07: No automated startup/shutdown test | Info | Defer to RFC 0002 health-check endpoint | Defer to RFC 0002 |
+
+---
+
+### PR 6: `feature/v01-rfc0001-followup` — Review findings cleanup
+
+**Depends on**: PR 5 merged
+**Branch**: `feature/v01-rfc0001-followup`
+**Estimated size**: ~40–60 lines
+
+This PR sweeps all outstanding low-severity review findings accumulated across PRs #6–#10, closing out RFC 0001.
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/state/state.go` | Add `RunStatus.String()` method (~12 lines) |
+| `internal/registry/registry.go` | Add `AgentStatus.String()` method (~10 lines); rename `cap` → `capName` loop variable in `FindByCapability` (~1 line); add comment in `Register` documenting agent ID validation is caller's responsibility (deferred to RFC 0002) |
+| `internal/planner/planner.go` | Add `step.ID` to variable-reference error message in `ResolveInputs` for executor-level debugging (~1 line) |
+| `internal/planner/resolve_test.go` | Add `TestResolveInputs_NilLoggerWithSuspiciousPattern` (~6 lines) |
+| `internal/state/state_test.go` | Add `TestRunStatusString` (~10 lines) |
+| `internal/registry/registry_test.go` | Add `TestAgentStatusString` (~8 lines) |
+
+#### Key implementation details
+
+- **`RunStatus.String()`**: Switch on all 5 constants (Pending/Running/Completed/Failed/Cancelled), default returns `fmt.Sprintf("RunStatus(%d)", int(s))` for forward compatibility.
+- **`AgentStatus.String()`**: Switch on all 4 constants (Unknown/Healthy/Degraded/Offline), same default pattern.
+- **`cap` rename**: `for _, cap := range` → `for _, capName := range` in `FindByCapability` to avoid shadowing Go's built-in `cap()` function.
+- **Agent ID validation comment**: Document in `Register`'s godoc that format validation (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) is enforced at the REST API layer (RFC 0002), not in the registry.
+- **Variable-reference error**: Change `fmt.Errorf("unresolved variable reference: %s ...", varName)` to include `step.ID` for debugging context.
+- **Nil-logger suspicious-path test**: Exercises `ResolveInputs` with `nil` logger and a malformed template pattern to confirm the nil guard covers the `warnSuspicious` code path.
+
+#### Outstanding findings addressed
+
+| Source | Finding | Severity |
+|--------|---------|----------|
+| PR #6 F-04 | `RunStatus` has no `String()` method | Low |
+| PR #7 F-05 | `AgentStatus` has no `String()` method | Low |
+| PR #7 F-01 | No agent ID validation comment in `Register` | Medium |
+| PR #7 F-02 | `cap` variable shadows built-in `cap()` | Low |
+| PR #9 F-02 | Step ID missing from variable-reference error messages | Low |
+| PR #10 F-05 | Nil-logger test only covers happy path | Low |
+
+#### PR checklist
+
+- [ ] `go test ./internal/... -v -cover` passes
+- [ ] `go vet ./...` clean
 - [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] `go vet ./cmd/orchestrator/...` clean
-- [ ] Component initialization logged on startup
-- [ ] No unused variable compiler errors
+- [ ] All `String()` methods have test coverage
+- [ ] No remaining carry-forward findings from RFC 0001 reviews
 
 ---
 
@@ -312,11 +386,11 @@ Actionable follow-ups for **PR 5 (wiring)** or later:
 
 ```
 PR 1 (state)  ──────────────────────────────────────┐
-PR 2 (registry) ──────────────────────────────────┼──→ PR 5 (wiring)
+PR 2 (registry) ──────────────────────────────────┼──→ PR 5 (wiring) ──→ PR 6 (followup)
 PR 3a (planner parse+dag+plan) ──→ PR 3b (resolve) ──┘
 ```
 
-PRs 1, 2, and 3a have no import dependencies between their packages. However, PR 1 should land first because it promotes `testify` from indirect to direct in `go.mod` and adds `google/uuid`, which avoids `go.mod` merge conflicts in subsequent PRs. PRs 2 and 3a can proceed in parallel after PR 1. PR 3b depends on PR 3a. PR 5 (wiring) depends on all others being merged.
+PRs 1, 2, and 3a have no import dependencies between their packages. However, PR 1 should land first because it promotes `testify` from indirect to direct in `go.mod` and adds `google/uuid`, which avoids `go.mod` merge conflicts in subsequent PRs. PRs 2 and 3a can proceed in parallel after PR 1. PR 3b depends on PR 3a. PR 5 (wiring) depends on all others being merged. PR 6 (follow-up) depends on PR 5 and closes all outstanding review findings from RFC 0001.
 
 ## CI Validation
 
@@ -345,3 +419,4 @@ Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 | PR 3b review findings need follow-up | Medium: nil-logger guard in `ResolveInputs` (F-01, address in PR 5). Low: step ID in error messages (F-02), adjacent template test (F-03), empty substitution test (F-04). Tracked in PR plan. |
 | `UpdateRunStatus` has no timestamp management | Design gap documented for RFC 0003 — Scheduler will need `UpdateRun`/`PatchRun` or expanded `UpdateRunStatus` signature |
 | `-race` flag requires CGO on Windows | CI (Linux) runs `-race`; local Windows testing uses `-cover` only. Concurrency correctness verified via code inspection and CI. |
+| PR 5 review findings need follow-up | 5 of 8 carry-forward items not addressed in PR #10 (2× `String()` methods, `cap` shadow, agent ID validation comment, nil-logger suspicious-path test). All Low severity. Tracked in PR 6. See [review](../../docs/pr-reviews/pr-010-deep-review.md). |
