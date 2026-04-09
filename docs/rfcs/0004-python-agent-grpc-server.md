@@ -108,16 +108,7 @@ proto/task.proto  ──grpc_tools.protoc──►  agents/generated/task_pb2.py
                                           agents/generated/__init__.py
 ```
 
-The `Makefile` `proto` target is extended to generate Python stubs alongside Go stubs:
-
-```makefile
-proto-python:
-	python -m grpc_tools.protoc \
-		-I proto/ \
-		--python_out=agents/generated \
-		--grpc_python_out=agents/generated \
-		proto/task.proto
-```
+The existing `Makefile` `proto` target already generates both Go and Python stubs in a single `protoc` invocation (`--python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT)`). No new Makefile target is needed — Phase 1 only needs to ensure the `agents/generated/` output directory exists (already handled by `@mkdir -p $(PROTO_PY_OUT)`) and add `agents/generated/__init__.py`.
 
 Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration) and `anthropic >= 0.40.0` (for LLM client). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
 
@@ -282,7 +273,7 @@ def load_agent(agent_id: str, config_path: str) -> BaseAgent:
 
     agent_configs = {a["id"]: a for a in config.get("agents", [])}
     if agent_id not in agent_configs:
-        raise ValueError(f"Agent {agent_id!r} not found in {config_path}")
+        raise SystemExit(f"Agent {agent_id!r} not found in {config_path}")
 
     agent_config = agent_configs[agent_id]
     agent_type = _resolve_agent_type(agent_config)
@@ -298,7 +289,9 @@ Agent type resolution uses capabilities and config to map to the correct class:
 | `code-writer` | `CoderAgent` | `"code_generation" in capabilities` |
 | `code-reviewer` | `ReviewerAgent` | `"code_review" in capabilities and "code_generation" not in capabilities` |
 
-A `type` field in `agents.yaml` would be cleaner; the capability-based heuristic is a v0.1 pragmatic choice since adding a `type` field requires a schema change and config migration. A `# TODO(v0.2): add explicit 'type' field to agent config` comment marks this. If no rule matches, the function raises `ValueError(f"Cannot determine agent type for {agent_id} from capabilities: {caps}")` so that misconfigured agents fail loudly at startup rather than silently falling through. (Review-fix D3)
+A `type` field in `agents.yaml` would be cleaner; the capability-based heuristic is a v0.1 pragmatic choice since adding a `type` field requires a schema change and config migration. A `# TODO(v0.2): add explicit 'type' field to agent config` comment marks this. If no rule matches, the function raises `SystemExit(f"Cannot determine agent type for {agent_id} from capabilities: {caps}")` so that misconfigured agents fail loudly at startup rather than silently falling through. All `load_agent` error paths use `SystemExit` consistently for clean operator-facing error messages without tracebacks. (Review-fix D3, deep-review d3)
+
+**Capabilities source:** Agent type resolution uses the `capabilities` list from `agents.yaml` config, **not** the `capabilities` property on the `BaseAgent` subclass. The class-level `capabilities` property (e.g., `CoderAgent.capabilities` returning `["code_generation", "code_review", "unit_testing"]`) exists as a static declaration for introspection and is not used during agent loading. During implementation, the class property should either be removed in favor of config-driven capabilities, or made to return `self.config.get("capabilities", [])` so both sources agree. (Deep-review d5)
 
 ### Task Agent Implementation
 
@@ -315,7 +308,7 @@ When the LLM returns multiple tool calls in a single response, tools are execute
 
 #### `_execute_tools` Method
 
-The `_execute_tools` helper parses Anthropic `ToolUseBlock` objects from the response content, dispatches each to the tool registry, enforces permissions, and formats results back into the Anthropic tool-result message format. (Review-fix M3)
+The `_execute_tools` helper parses Anthropic `ToolUseBlock` objects from the response content, dispatches each to the tool registry, enforces permissions, and formats results back into the Anthropic tool-result message format.
 
 ```python
 async def _execute_tools(self, content: list) -> list[dict]:
@@ -461,6 +454,10 @@ All tools enforce permissions before execution via `PermissionGate.check()`. All
 async def file_read(path: str) -> ToolResult:
     validated_path = path_validator.validate(path, mode="read")
     content = validated_path.read_text(encoding="utf-8")
+    # Deep-review: cap output to prevent blowing gRPC 4MB default message
+    # size limit and wasting LLM context window tokens.
+    if len(content) > MAX_OUTPUT_BYTES:
+        content = content[:MAX_OUTPUT_BYTES] + f"\n... (truncated at {MAX_OUTPUT_BYTES} bytes)"
     return ToolResult(success=True, data=content)
 ```
 
@@ -507,12 +504,22 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
             await proc.wait()
         return ToolResult(success=False, error=f"Command timed out after {timeout}s", error_type="transient")
 
+    stdout_str = stdout.decode(errors="replace")
+    stderr_str = stderr.decode(errors="replace")
+    # Deep-review: cap output to prevent blowing gRPC message size limit.
+    if len(stdout_str) > MAX_OUTPUT_BYTES:
+        stdout_str = stdout_str[:MAX_OUTPUT_BYTES] + f"\n... (truncated at {MAX_OUTPUT_BYTES} bytes)"
+    if len(stderr_str) > MAX_OUTPUT_BYTES:
+        stderr_str = stderr_str[:MAX_OUTPUT_BYTES] + f"\n... (truncated at {MAX_OUTPUT_BYTES} bytes)"
+
     return ToolResult(
         success=proc.returncode == 0,
-        data=stdout.decode(errors="replace"),
-        error=stderr.decode(errors="replace") if proc.returncode != 0 else None,
+        data=stdout_str,
+        error=stderr_str if proc.returncode != 0 else None,
     )
 ```
+
+`MAX_OUTPUT_BYTES` is a module-level constant defaulting to `102_400` (100 KB). This prevents large file reads or verbose commands from exceeding gRPC's default 4 MB message size limit or wasting LLM context window tokens. The full `OutputSizeLimiter` class (v0.2) will provide per-tool configurable limits; this is a minimal safety cap. (Deep-review)
 
 **Security:** Commands are executed via `create_subprocess_exec` (not `shell=True`), are split with `shlex.split`, and must match the `allowed_commands` list from the agent's `permissions.shell` config. The allowlist supports multi-word entries (e.g., `"git diff"`) by comparing progressively longer prefixes of the parsed command against the list — so `"git diff"` matches `["git diff"]` and also `["git"]`, but `"git push"` would **not** match `["git diff"]`. Arguments beyond the matched prefix are unrestricted. A `# TODO(v0.2): argument pattern matching for shell commands` marks this gap (see also [Security Considerations: Shell Command Argument Injection](#shell-command-argument-injection)).
 
@@ -535,11 +542,15 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
     if not permission_gate.is_domain_allowed(parsed.hostname):
         return ToolResult(success=False, error=f"Domain not allowed: {parsed.hostname}", error_type="permanent")
 
-    # Use aiohttp for async HTTP
-    async with aiohttp.ClientSession() as session:
-        async with session.request(method, url, data=body if body else None, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            text = await resp.text()
-            return ToolResult(success=resp.status < 400, data=text, error=text if resp.status >= 400 else None)
+    # Deep-review D4: use agent's shared aiohttp session instead of creating
+    # one per request.  aiohttp strongly discourages per-request sessions
+    # (prevents connection pooling, risks resource leaks).  The shared session
+    # is created at agent startup and closed in agent.shutdown().
+    async with http_session.request(method, url, data=body if body else None, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        text = await resp.text()
+        if len(text) > MAX_OUTPUT_BYTES:
+            text = text[:MAX_OUTPUT_BYTES] + f"\n... (truncated at {MAX_OUTPUT_BYTES} bytes)"
+        return ToolResult(success=resp.status < 400, data=text, error=text if resp.status >= 400 else None)
 ```
 
 ### Permission Gate
@@ -654,7 +665,7 @@ The `main()` function in `agents/server.py`:
 6. Bind to `host:port` with insecure port (no TLS in v0.1; `# TODO(security): enable TLS`).
 7. Start serving with graceful shutdown on `SIGTERM` / `SIGINT`.
 
-Single-agent-per-process model: Each agent process registers with the orchestrator via `POST /api/v1/agents/register` at startup (or is pre-registered in `docker-compose.yaml` env). The registration includes the agent's `host:port` address for the Executor to dial.
+**Single-agent-per-process model (v0.1):** Each agent process loads exactly one agent via `--agent <id>` and registers with the orchestrator via `POST /api/v1/agents/register` at startup (or is pre-registered in `docker-compose.yaml` env). The registration includes the agent's `host:port` address for the Executor to dial. The `AgentServiceServicer` constructor accepts `dict[str, BaseAgent]` (plural) and performs `self._agents.get(request.agent_id)` lookup — this infrastructure supports multi-agent hosting in v0.2 without a servicer rewrite. In v0.1, `main()` always loads a single agent into a single-entry dict. (Deep-review D2)
 
 #### Graceful Shutdown Sequence
 
@@ -663,7 +674,7 @@ On `SIGTERM` or `SIGINT` the server follows this sequence (PR-review B5):
 1. **Stop accepting new RPCs.** Call `server.stop(grace=30)` — gRPC stops accepting new connections but lets in-flight RPCs finish.
 2. **Wait for in-flight tasks.** In-flight `ExecuteTask` RPCs have up to 30 seconds to complete. If they finish within the window, their responses are sent normally.
 3. **Cancel remaining RPCs.** After the 30-second grace period, any still-running RPCs are cancelled by gRPC. The Go Executor will see a transport error and may retry (subject to RFC 0003's retry policy).
-4. **Call agent shutdown hooks.** Invoke `await agent.shutdown()` for the loaded agent, allowing cleanup of resources (e.g., open aiohttp sessions).
+4. **Call agent shutdown hooks.** Invoke `await agent.shutdown()` for the loaded agent, allowing cleanup of resources (e.g., closing the shared `aiohttp.ClientSession`).
 5. **De-register from orchestrator.** Send `DELETE /api/v1/agents/{id}` to the orchestrator URL (best-effort; failure is logged at WARNING). This prevents the Executor from dispatching new tasks to a stopped agent.
 6. **Exit.**
 
@@ -673,26 +684,29 @@ The 30-second grace period is chosen to match the default `shell_exec` timeout, 
 
 After the gRPC server starts, the agent process registers itself with the orchestrator's REST API:
 
+The agent creates a shared `aiohttp.ClientSession` at startup, used by both `http_request` tool invocations and self-registration. The session is closed in `agent.shutdown()` during the graceful shutdown sequence. This follows `aiohttp` best practices (one session per application, not per request) and enables connection pooling. (Deep-review D4)
+
 ```python
 async def _self_register(self, orchestrator_url: str, agent_id: str, host: str, port: int) -> None:
     """Register this agent with the orchestrator."""
-    async with aiohttp.ClientSession() as session:
-        await session.post(
-            f"{orchestrator_url}/api/v1/agents/register",
-            json={
-                "id": agent_id,
-                # PR-review m7: include name and role to satisfy RFC 0002's
-                # AgentInfo contract (RFC 0001).  Without these the registry
-                # stores an agent with empty Name/Role fields.
-                "name": self.agents[agent_id].name,
-                "role": self.agents[agent_id].role,
-                "address": f"{host}:{port}",
-                "capabilities": self.agents[agent_id].capabilities,
-                # Review-fix P1: "status" removed — RFC 0002 sets
-                # status=healthy server-side on registration; sending
-                # it here violates the API contract.
-            },
-        )
+    async with self._http_session.post(
+        f"{orchestrator_url}/api/v1/agents/register",
+        json={
+            "id": agent_id,
+            # PR-review m7: include name and role to satisfy RFC 0002's
+            # AgentInfo contract (RFC 0001).  Without these the registry
+            # stores an agent with empty Name/Role fields.
+            "name": self.agents[agent_id].name,
+            "role": self.agents[agent_id].role,
+            "address": f"{host}:{port}",
+            "capabilities": self.agents[agent_id].capabilities,
+            # Review-fix P1: "status" removed — RFC 0002 sets
+            # status=healthy server-side on registration; sending
+            # it here violates the API contract.
+        },
+    ) as resp:
+        if resp.status >= 400:
+            logger.warning("Self-registration failed (HTTP %d): %s", resp.status, await resp.text())
 ```
 
 The `--orchestrator-url` CLI flag (default: `http://127.0.0.1:8080`) configures the target. Self-registration is best-effort — if the orchestrator is unreachable, the agent logs a warning and continues serving. The orchestrator admin can manually register agents via the REST API.
@@ -743,12 +757,11 @@ Summary: Generate Python gRPC stubs from `proto/task.proto`.
 1. `agents/generated/__init__.py` — package marker.
 2. `agents/generated/task_pb2.py` — generated protobuf message types.
 3. `agents/generated/task_pb2_grpc.py` — generated gRPC service stubs.
-4. `Makefile` — add `proto-python` target.
-5. `pyproject.toml` — add `grpcio`, `grpcio-tools`, `protobuf` dependencies.
+4. `pyproject.toml` — add `grpcio`, `grpcio-tools`, `protobuf` dependencies (existing `Makefile` `proto` target already generates Python stubs).
 
 **Dependencies:** None (proto files exist).
 
-**Git policy:** Generated Python stubs (`agents/generated/*.py`) are committed to the repository, consistent with Go generated stubs in `internal/generated/`. This avoids requiring `grpcio-tools` at deployment time and keeps CI reproducible. (Review-fix M4)
+**Git policy:** Generated Python stubs (`agents/generated/*.py`) are committed to the repository, consistent with Go generated stubs in `internal/generated/`. This avoids requiring `grpcio-tools` at deployment time and keeps CI reproducible. (Review-fix M4) Note: the existing `Makefile` `proto` target generates stubs from all `$(PROTO_DIR)/*.proto` files, which includes both `task.proto` and `agent_message.proto`. The `agent_message_pb2.py` stubs will be generated and committed alongside `task_pb2.py`, even though they are unused in v0.1. (Deep-review n4)
 
 ### Phase 2: Permission Gate + Path Validator (~200 LOC)
 
@@ -794,7 +807,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 2. `tests/unit/python/test_server.py` — server tests with in-process gRPC client.
 3. `tests/integration/test_agent_server.py` — integration test: submit task via gRPC, verify response.
 
-**Dependencies:** Phase 1 (Python gRPC stubs), Phase 4 (task agents).
+**Dependencies:** Phase 1 (Python gRPC stubs), Phase 2 (permission gate, path validator — needed for agent initialization), Phase 4 (task agents).
 
 **Total estimated scope:** ~1,130 LOC implementation + tests (generated proto output not counted).
 
@@ -818,9 +831,9 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 | Tests | `tests/unit/python/test_server.py` | New — gRPC server unit tests |
 | Tests | `tests/unit/python/test_tools.py` | Extended — built-in tool tests |
 | Tests | `tests/integration/test_agent_server.py` | New — end-to-end gRPC integration test |
-| Build | `Makefile` | Add `proto-python` target |
+| Build | `Makefile` | No changes needed — existing `proto` target already generates Python stubs |
 | Python config | `agents/pyproject.toml` | Add `grpcio`, `grpcio-tools`, `protobuf`, `anthropic`, `aiohttp`, `pyyaml` |
-| Docker | `Dockerfile.agent` | Update to install proto deps and run `make proto-python` |
+| Docker | `Dockerfile.agent` | Update to install proto deps and run `make proto` |
 
 ## Test Strategy
 
@@ -835,6 +848,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 - **Command allowlist**: allowed command → `True`; unlisted command → `False`.
 - **Multi-word command allowlist**: `"git diff"` in allowlist, `args=["git", "diff", "f.py"]` → `True`; `args=["git", "push"]` → `False`. (Review-fix B1)
 - **Domain allowlist**: allowed domain → `True`; wildcard deny with specific allow → `True`; deny all → `False`.
+- **Missing permission category**: agent with no `filesystem` config attempts `filesystem:read` → `False` (deny by default). (Deep-review d7)
 
 ### Path Validator Tests
 
@@ -871,12 +885,12 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 - **`HealthCheck`**: loaded agent healthy → `SERVING`; agent `health_check()` returns `False` → `NOT_SERVING`.
 - **`ExecuteTaskStream`**: → `UNIMPLEMENTED`.
 - **Graceful shutdown**: signal → server stops cleanly.
-- **Agent loading**: valid YAML → correct agent type instantiated; missing agent ID → `ValueError`.
+- **Agent loading**: valid YAML → correct agent type instantiated; missing agent ID → `SystemExit`.
 
 ### Integration Tests
 
 - **End-to-end task execution**: start agent server in-process, send `TaskRequest` via gRPC client, verify `TaskResponse` with expected output from mock LLM.
-- **Build smoke test**: `pip install -e ".[dev]"` succeeds, `make proto-python` succeeds.
+- **Build smoke test**: `pip install -e ".[dev]"` succeeds, `make proto` succeeds.
 
 ## Open Questions
 
@@ -884,7 +898,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 2. **Agent config `type` field**: Current resolution uses capability-based heuristics. Should `config/agents.yaml` add an explicit `type: task | persona` field? Requires schema change.
 
-3. **Workspace root**: Built-in tools need a workspace root path for sandbox validation. Should this be a CLI flag (`--workspace /path`), derived from the orchestrator's `--workflows-dir`, or hardcoded to `/workspace` for Docker? *Resolved: `--workspace` CLI flag (default: `/workspace` for Docker, CWD for local dev). Used by both `PathValidator` and `shell_exec` CWD. (Review-fix D5)*
+3. ~~**Workspace root**: Built-in tools need a workspace root path for sandbox validation. Should this be a CLI flag (`--workspace /path`), derived from the orchestrator's `--workflows-dir`, or hardcoded to `/workspace` for Docker?~~ **Resolved**: `--workspace` CLI flag (default: `/workspace` for Docker, CWD for local dev). Used by both `PathValidator` and `shell_exec` CWD. Note: the PathValidator globs in `agents.yaml` use absolute Docker paths (e.g., `/workspace/src/**`). For local dev, either override via environment-specific config or make globs relative to `--workspace`. (Review-fix D5, deep-review d2)
 
 4. **`aiohttp` dependency**: `http_request` tool and self-registration use `aiohttp`. Is this acceptable or should we use the stdlib `urllib` (sync, wrapped in `asyncio.to_thread`)? `aiohttp` is a more natural fit for the async-first architecture.
 
