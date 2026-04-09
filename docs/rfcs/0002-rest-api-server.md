@@ -77,6 +77,7 @@ If we do nothing, the orchestrator remains unreachable from the CLI or any HTTP 
 - **TLS.** HTTP only for v0.1 (development/docker-compose use case). TLS termination is expected at the reverse-proxy layer in staging/production.
 - **Workflow execution.** `POST /api/v1/workflows/run` creates the `WorkflowRun` and returns the run ID but does **not** execute it — the Scheduler (RFC 0003) owns execution. The run is left in `Pending` status for RFC 0003 to pick up.
 - **gRPC server.** The gRPC server (main.go TODO step 10) is a separate concern and a separate RFC.
+- **Health/readiness endpoints.** `GET /healthz` and `GET /readyz` are not defined in this RFC. They are tracked as TODO step 12 in `main.go` and should be added in a follow-up PR or as part of Docker/Kubernetes deployment hardening. Deployers relying on `docker-compose` health checks should use a TCP port check until these endpoints exist.
 - **Persistent storage.** In-memory only; RFC 0001 established the `Store` interface for future SQLite migration.
 
 ### Spec Deviations
@@ -200,14 +201,14 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 **Handler logic:**
 
-1. Decode and validate request body (reject unknown content types; require `Content-Type: application/json`).
+1. Decode and validate request body. The `requireJSON` helper enforces `Content-Type: application/json` — this check applies only to handlers that expect a request body (POST endpoints). GET and DELETE handlers do not enforce Content-Type.
 2. Validate `workflow_id` format with the canonical regex.
 3. **Path traversal protection** (see [Security Considerations](#security-considerations)).
 4. Call `s.planner.Parse(r.Context(), resolvedPath)` → returns `*planner.Workflow` or error; return `422 UNPROCESSABLE` on parse failure.
-5. Call `s.planner.ValidateDAG(r.Context(), workflow)` → return `422 UNPROCESSABLE` on cycle.
+5. Call `s.planner.ValidateDAG(r.Context(), workflow)` → return `422 UNPROCESSABLE` on cycle. Note: `s.planner.Plan()` is **not** called at submission time — computing the `ExecutionPlan` (topological stages) is deferred to RFC 0003, where the Scheduler picks up pending runs and plans execution.
 6. Construct `state.WorkflowRun{WorkflowID: req.WorkflowID, Inputs: req.Inputs, Status: state.RunPending, StartedAt: time.Now()}`.
 7. Generate a UUID run ID if not provided; call `store.CreateRun(ctx, &run)`.
-8. Return `201 Created` with body `{"run_id": "<uuid>", "status": "pending"}`.
+8. Return `201 Created` with body `{"run_id": "<uuid>", "workflow_id": "<workflow_id>", "status": "pending"}`. Including `workflow_id` in the response saves clients a round-trip GET for display purposes (e.g., the Rust CLI showing "Submitted run abc123 for workflow feature-builder").
 
 **Note:** The run is created in `Pending` state. RFC 0003 (Scheduler) will watch for pending runs and advance them through execution. In v0.1, before RFC 0003 is implemented, the run ID can be queried but the run will remain `Pending` indefinitely — this is expected and documented.
 
@@ -227,17 +228,17 @@ func writeJSON(w http.ResponseWriter, v any, status int)
   "status":      "pending",
   "started_at":  "2026-04-09T12:00:00Z",
   "finished_at": null,
-  "steps": {
-    "plan": { "status": "pending", "output": "", "error": "" }
-  }
+  "steps":       {}
 }
 ```
+
+> **Note (L2 — v0.1 steps):** The `steps` map is empty at creation time because no step execution occurs until RFC 0003 (Scheduler/Executor). The example above reflects v0.1 reality. Once RFC 0003 populates `WorkflowRun.Steps`, responses will include per-step status objects.
 
 `status` string values map from `state.RunStatus` constants: `"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`.
 
 > **Note (MI-01 — step timestamps):** RFC 0001's `StepState` struct includes `StartedAt time.Time` and `FinishedAt time.Time` fields. These are omitted from the v0.1 API response because no step execution occurs until RFC 0003 (Scheduler/Executor) is implemented — all steps remain in `"pending"` status with zero-value timestamps. When RFC 0003 adds step lifecycle transitions, the status response should be extended to include `started_at` and `finished_at` per step.
 
-> **Note (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require either (a) explicit `json:"run_id"` struct tags on `state.WorkflowRun` (document as an RFC 0001 amendment) or (b) dedicated response DTOs in `internal/server/` with their own `json:` tags. Without either approach, `encoding/json` would produce PascalCase keys (`ID`, `WorkflowID`, `StartedAt`). Option (b) — separate API DTOs — is the cleaner long-term pattern as it decouples the storage model from the wire format.
+> **Decision (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require a mapping layer between domain types and wire format. **Option (b) — dedicated response DTOs in `internal/server/types.go`** — is adopted. This decouples the storage model from the wire format, avoids amending RFC 0001's domain types with HTTP-specific struct tags, and allows the API response shape to evolve independently. A `types.go` file containing request/response structs with explicit `json:` tags is added to Phase 1 deliverables and the Files Touched table.
 
 #### `GET /api/v1/workflows`
 
@@ -252,6 +253,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 - If `run.Status == state.RunRunning`: return `409 CONFLICT` with `"error": "cannot delete a running workflow run"`. This enforces the API-layer protection noted in RFC 0001 — the store permits deletion of any run regardless of status, but the HTTP layer must refuse running runs.
 - Otherwise: call `store.DeleteRun(ctx, id)`.
 - Return `204 No Content`.
+
+> **Known issue (H1 — TOCTOU race):** The `GetRun` → status check → `DeleteRun` sequence is not atomic. A concurrent Scheduler (RFC 0003) could advance a run from `Pending` → `Running` between the check and the delete, allowing deletion of a running run. In v0.1, this race is dormant because no component transitions runs to `Running`. When RFC 0003 introduces the Scheduler, this must be addressed — either by adding a `DeleteRunIfNotRunning(ctx, runID)` atomic method to the `Store` interface or by acquiring a run-level lock. Implementation should include a `// TODO(v0.3): atomic check-and-delete or store-level status guard` comment.
 
 ### Phase 2: Agent Registry Endpoints
 
@@ -327,9 +330,11 @@ Update `cmd/orchestrator/main.go` to:
    ```
    Using `--http-bind` (default `127.0.0.1`) instead of binding directly to `0.0.0.0` is the primary mitigation for the unauthenticated v0.1 server (see §No Authentication in v0.1).
 
+   > **Note (M3 — Docker networking):** The `127.0.0.1` default is correct for host-native development but makes the orchestrator unreachable from other containers in a `docker-compose` network. The `Dockerfile.orchestrator` or `docker-compose.yaml` must pass `--http-bind 0.0.0.0` explicitly. Document this in `config/environments/development.yaml` as well.
+
 2. Instantiate the server (see step 3 snippet for the combined `New` + goroutine code). `New` returns an error when `workflowsDir` is inaccessible or not a directory, surfacing misconfiguration at startup.
 
-   > **Note (MI-04 — logger consistency):** The existing `main.go` uses the sugar logger (`log.Infow(...)`) while this RFC's Phase 4 snippets use structured zap (`logger.Info(..., zap.String(...))`) which is the project convention per `go-orchestrator.instructions.md`. The Phase 4 implementation should migrate the existing `main.go` sugar logger calls to structured zap for consistency. The `log := logger.Sugar()` line and all `log.Infow(...)` calls should be replaced with direct `logger.Info(...)` calls with typed fields.
+   > **Note (MI-04 — logger consistency):** The existing `main.go` uses the sugar logger (`log.Infow(...)`) while this RFC's Phase 4 snippets use structured zap (`logger.Info(..., zap.String(...))`) which is the project convention per `go-orchestrator.instructions.md`. Phase 4 should use structured zap for all **new** code added by this RFC but must **not** migrate existing sugar logger calls in the same PR — mixing refactoring with feature addition inflates the diff and makes the PR harder to review. The sugar-to-structured migration should be done in a separate cleanup PR tracked as `// TODO(cleanup): migrate main.go sugar logger to structured zap`.
 
 3. Launch `srv.Start(ctx)` in a goroutine. The error path must call `cancel()` to propagate the failure to the root context so the orchestrator shuts down cleanly — without this, a failed HTTP server (e.g. port already bound) goes unnoticed while the rest of the orchestrator continues running with no HTTP endpoint:
    ```go
@@ -400,7 +405,21 @@ func recoveryMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 
 > **Limitation (M-05 — partial response write):** If a handler panics after already writing HTTP headers (via `w.WriteHeader()` or `w.Write()`), the `writeError` call in the recover block cannot send a `500` error response — Go's `http.ResponseWriter` silently ignores the second `WriteHeader` call, and the client receives a truncated or corrupt response body with no error indication. In v0.1, this is acceptable because all responses are short JSON objects written atomically (no streaming handlers). The panic is still logged via zap for operator visibility. Operators should monitor for abrupt connection resets in server logs.
 
-Both `recoveryMiddleware` and `requestIDMiddleware` are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
+Both `recoveryMiddleware`, `requestIDMiddleware`, and `loggingMiddleware` are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
+
+### Access Logging Middleware
+
+> **Addition (M2 — access logging):** The RFC originally defined only `requestIDMiddleware` and `recoveryMiddleware` but omitted access logging. Without it, operators have no visibility into request patterns, error rates, or slow endpoints. A `loggingMiddleware` is added to Phase 1:
+>
+> ```go
+> func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler
+> ```
+>
+> This wraps the `ResponseWriter` to capture the status code and logs method, path, status code, latency, and request ID on completion (~20 LOC). Composition order: recovery → logging → requestID → mux.
+
+### Per-Request Timeout
+
+> **TODO (H3 — request timeout):** Individual handler requests currently have no timeout. A pathological workflow YAML file (e.g. deeply nested, 1 MiB) could cause `planner.Parse` to block a handler goroutine for an extended period. `MaxBytesReader` limits the HTTP body size but does not protect against slow filesystem reads. A per-request timeout middleware (e.g., `http.TimeoutHandler` wrapping the mux, or `context.WithTimeout` in each handler) with a configurable default (e.g. 30s) should be added in Phase 1 implementation. If deferred, add a `// TODO(v0.2): per-request timeout middleware` marker and document the residual risk.
 
 ### Workflow Directory Configuration
 
@@ -449,7 +468,7 @@ This approach supersedes the `filepath.Clean`-only defense noted in RFC 0001 §S
 
 ### Running-Run Deletion Protection
 
-As noted in RFC 0001, `state.Store.DeleteRun` permits deletion of any run. The `DELETE /api/v1/workflows/{id}` handler enforces the restriction at the API layer: a `409 CONFLICT` is returned when `run.Status == state.RunRunning`. This is the v0.1 mitigation; RFC 0003 will add lifecycle ownership at the Scheduler layer.
+As noted in RFC 0001, `state.Store.DeleteRun` permits deletion of any run. The `DELETE /api/v1/workflows/{id}` handler enforces the restriction at the API layer: a `409 CONFLICT` is returned when `run.Status == state.RunRunning`. This is the v0.1 mitigation; RFC 0003 will add lifecycle ownership at the Scheduler layer. Note: this check-then-delete sequence has a TOCTOU race window — see the [H1 note in the DELETE handler](#delete-apiv1workflowsid) for details and the planned resolution.
 
 ### No Authentication in v0.1
 
@@ -484,18 +503,19 @@ Both are validated against their respective regexes before use in log fields, st
 
 ## Phased Implementation Plan
 
-### Phase 1: Server scaffolding + workflow run endpoints (~200 LOC, ~1 day)
+### Phase 1: Server scaffolding + workflow run endpoints (~250 LOC, ~1 day)
 
 Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workflow run CRUD.
 
 **Deliverables:**
 1. `internal/server/server.go` — `Server` struct, `New`, `Handler`, `Start`.
-2. `internal/server/middleware.go` — `requestIDMiddleware`.
-3. `internal/server/helpers.go` — `writeJSON`, `writeError`.
-4. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run.
-5. `internal/server/server_test.go` — handler tests using `httptest`.
+2. `internal/server/types.go` — request/response DTOs with `json:` struct tags (P3 decision).
+3. `internal/server/middleware.go` — `requestIDMiddleware`, `loggingMiddleware` (M2).
+4. `internal/server/helpers.go` — `writeJSON`, `writeError`.
+5. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run.
+6. `internal/server/server_test.go` — handler tests using `httptest`.
 
-**Dependencies:** RFC 0001 (state, registry, planner implementations). RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
+**Dependencies:** RFC 0001 (state, registry, planner implementations). **New dependency:** `github.com/google/uuid` for server-generated request IDs (`uuid.NewString()` in `requestIDMiddleware`); must be added to `go.mod`. RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
 - `state.ErrRunNotFound`
 - `state.ErrRunAlreadyExists`
 - `registry.ErrAgentAlreadyRegistered`
@@ -525,14 +545,15 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 **Deliverables:**
 1. Updated `cmd/orchestrator/main.go` — wire server, add `--http-bind`, `--workflows-dir` flags.
 
-**Total estimated scope:** ~370 LOC implementation + tests. 2 days.
+**Total estimated scope:** ~420 LOC implementation + tests. 2 days.
 
 ## Files Touched (Estimated)
 
 | Component | Files | Change |
 |-----------|-------|--------|
 | Go orchestrator | `internal/server/server.go` | New — `Server` struct, `New`, `Handler`, `Start`, route registration |
-| Go orchestrator | `internal/server/middleware.go` | New — `requestIDMiddleware` |
+| Go orchestrator | `internal/server/types.go` | New — request/response DTOs with `json:` struct tags (P3 decision) |
+| Go orchestrator | `internal/server/middleware.go` | New — `requestIDMiddleware`, `loggingMiddleware` (M2) |
 | Go orchestrator | `internal/server/helpers.go` | New — `writeJSON`, `writeError`, `resolveWorkflowPath` |
 | Go orchestrator | `internal/server/workflow_handlers.go` | New — workflow run CRUD handlers |
 | Go orchestrator | `internal/server/agent_handlers.go` | New — agent registry CRUD handlers |
@@ -556,6 +577,10 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 - **Workflow run lifecycle (v0.1)**: POST run → `201` with `run_id`; GET status with that ID → `200` with `status: "pending"`; DELETE → `204`; GET again → `404`.
 - **Running-status delete protection**: manually set a run's status to `RunRunning` via `store.UpdateRunStatus`, then DELETE → `409 CONFLICT`.
 - **Stub endpoints**: `GET /api/v1/executions/any-id/logs` → `501`; `GET /api/v1/cost/summary` → `501`.
+- **Malformed JSON body**: send `{invalid}` to `POST /api/v1/workflows/run` → `400 BAD_REQUEST`.
+- **Empty request body**: send empty body to POST endpoints → `400 BAD_REQUEST`.
+- **Method Not Allowed**: send unsupported methods (e.g. `PUT /api/v1/workflows/run`) → `405`. Go 1.22+ `ServeMux` returns `405 Method Not Allowed` automatically for method-specific patterns; confirm the response uses the JSON error envelope or document that `405` responses are plain text (Go default).
+- **Concurrent access**: multiple goroutines hitting endpoints simultaneously to validate the `sync.RWMutex`-backed stores under contention. Run with `-race`.
 - **Race detector**: all tests run with `-race` (already enforced in CI/Makefile).
 - **Build smoke test**: `go build ./cmd/orchestrator` after wiring; `go vet ./internal/server/...`.
 
@@ -567,6 +592,8 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
    > *Use lowercase strings (`"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`) in JSON responses. A `runStatusString` helper maps `RunStatus` → `string`. The integer representation is internal only.*
 3. **Workflow list endpoint URL**: The spec defines `GET /api/v1/workflows/{id}/status` for a single run. Should the run list live at `GET /api/v1/workflows/runs` (resource-oriented) or `GET /api/v1/workflows` (flat)? The spec does not define a list endpoint explicitly.
    > *Use `GET /api/v1/workflows` returning an array of run status objects for v0.1. This can be revised when pagination is added.*
+   >
+   > **Naming collision risk (H2):** `GET /api/v1/workflows` currently returns **workflow runs** (execution instances), not **workflow definitions**. When v0.2 adds workflow management endpoints (CRUD for workflow YAML files), this URL will collide. The cleanest migration path is to rename to `GET /api/v1/workflows/runs` (and `DELETE /api/v1/workflows/runs/{id}`) in the same RFC that introduces definition management. Accept the v0.1 naming as-is since no definition endpoints exist yet, but avoid building CLI UX that hard-codes the current path — the Rust CLI should use a named constant for the endpoint URL.
 
 ## Decision / Next Steps
 
