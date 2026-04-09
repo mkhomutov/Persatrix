@@ -90,6 +90,10 @@ The core spec (`ai-agents-orchestration-spec.md` §8.3) defines exactly eight v0
 
 Both are deliberate additions to support the operational lifecycle of runs. They are not unintentional omissions from the spec; the spec should be updated in a follow-up documentation PR to reflect these additions. Track this via a `// TODO(spec-sync): update ai-agents-orchestration-spec.md §8.3 to include GET /api/v1/workflows and DELETE /api/v1/workflows/{id}` comment in the router registration.
 
+A third addition not in the spec is:
+
+- `GET /healthz` — minimal health endpoint returning `{"status": "ok"}`, required by the existing `docker-compose.yaml` healthcheck (see Non-Goals, C-02). This performs no dependency checks and is intentionally trivial.
+
 Additionally, the runtime agent registration API (`POST /api/v1/agents/register`) diverges from `schemas/agent.schema.json`, which marks `name`, `role`, and `model` as **required** properties for statically configured agents. Runtime-registered agents provide only `id`, `address`, and `capabilities`. This is intentional: static config serves UI and scheduling metadata, while runtime registration provides the minimum needed for gRPC dispatch. See the [Phase 2 registration handler](#post-apiv1agentsregister) for details.
 
 ## Design / Implementation
@@ -118,7 +122,7 @@ func (s *Server) Handler() http.Handler
 func (s *Server) Start(ctx context.Context) error
 ```
 
-- `New` validates `workflowsDir`, builds the `ServeMux`, and registers all routes. It returns `(*Server, error)` so that a missing, inaccessible, or non-directory workflows path is caught at startup rather than silently producing errors on every workflow submission:
+- `New` validates and **canonicalizes** `workflowsDir`, builds the `ServeMux`, and registers all routes. It returns `(*Server, error)` so that a missing, inaccessible, or non-directory workflows path is caught at startup rather than silently producing errors on every workflow submission:
   ```go
   fi, err := os.Stat(workflowsDir)
   if err != nil {
@@ -127,8 +131,25 @@ func (s *Server) Start(ctx context.Context) error
   if !fi.IsDir() {
       return nil, fmt.Errorf("workflows directory %q is not a directory", workflowsDir)
   }
+  // Canonicalize once at startup: resolve to absolute path and follow symlinks.
+  // This avoids repeated filepath.EvalSymlinks syscalls on every request in
+  // resolveWorkflowPath, and eliminates a theoretical correctness issue where
+  // a relative workflowsDir could resolve differently if the process cwd
+  // changed between requests. (Review finding CS-02)
+  absDir, err := filepath.Abs(workflowsDir)
+  if err != nil {
+      return nil, fmt.Errorf("workflows directory %q: failed to resolve absolute path: %w", workflowsDir, err)
+  }
+  canonicalDir, err := filepath.EvalSymlinks(absDir)
+  if err != nil {
+      return nil, fmt.Errorf("workflows directory %q: failed to resolve symlinks: %w", workflowsDir, err)
+  }
+  // Store canonicalDir as s.workflowsDir — all downstream path checks
+  // use this pre-resolved value.
   ```
   The `fi.IsDir()` check is necessary because `os.Stat` succeeds for any path type (regular file, symlink target, device node). Without it, passing a file path (e.g. `--workflows-dir workflows/feature-builder.yaml`) would pass startup validation but fail at runtime when `filepath.Join` produces invalid paths.
+
+  The `filepath.Abs` + `filepath.EvalSymlinks` canonicalization is performed once at construction time so that `resolveWorkflowPath` can compare against the stored canonical root without repeating the syscall on every request.
 - `Handler()` returns the composed `http.Handler` for use in tests (avoids `httptest.NewServer` binding to a real port).
 - `Start(ctx)` calls `http.ListenAndServe`, respects context cancellation for graceful shutdown via `http.Server.Shutdown`.
 - The `addr` field is set from `--http-bind` and `--http-port` formatted as `"127.0.0.1:8080"` (see Phase 4).
@@ -142,7 +163,12 @@ func (s *Server) Start(ctx context.Context) error {
         <-ctx.Done()
         shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
         defer cancel()
-        _ = srv.Shutdown(shutdownCtx)
+        // Log shutdown errors (e.g. context deadline exceeded) rather than
+        // discarding them — operators need visibility into unclean shutdowns.
+        // (Review finding CS-01)
+        if err := srv.Shutdown(shutdownCtx); err != nil {
+            s.logger.Error("HTTP server shutdown error", zap.Error(err))
+        }
     }()
     if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
         return err
@@ -241,8 +267,10 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 > **Note (MI-01 — step timestamps):** RFC 0001's `StepState` struct includes `StartedAt time.Time` and `FinishedAt time.Time` fields. These are omitted from the v0.1 API response because no step execution occurs until RFC 0003 (Scheduler/Executor) is implemented — all steps remain in `"pending"` status with zero-value timestamps. When RFC 0003 adds step lifecycle transitions, the status response should be extended to include `started_at` and `finished_at` per step.
 
-> **Decision (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require a mapping layer between domain types and wire format. **Option (b) — dedicated response DTOs in `internal/server/types.go`** — is adopted. This decouples the storage model from the wire format, avoids amending RFC 0001's domain types with HTTP-specific struct tags, and allows the API response shape to evolve independently. A `types.go` file containing request/response structs with explicit `json:` tags is added to Phase 1 deliverables and the Files Touched table.>
+> **Decision (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require a mapping layer between domain types and wire format. **Option (b) — dedicated response DTOs in `internal/server/types.go`** — is adopted. This decouples the storage model from the wire format, avoids amending RFC 0001's domain types with HTTP-specific struct tags, and allows the API response shape to evolve independently. A `types.go` file containing request/response structs with explicit `json:` tags is added to Phase 1 deliverables and the Files Touched table.
+
 > **Note (M-07 — `null` vs zero-value timestamps):** The example above shows `"finished_at": null`. Go’s `time.Time` zero value serializes to `"0001-01-01T00:00:00Z"`, not `null`. To produce `null` for unfinished runs, the response DTO must use `*time.Time` (pointer) for `FinishedAt` (and potentially `StartedAt` for future use when runs haven’t started yet). The `types.go` deliverable must use pointer types for nullable timestamp fields.
+
 #### `GET /api/v1/workflows`
 
 - Call `store.ListRuns(ctx)`.
@@ -360,6 +388,8 @@ Update `cmd/orchestrator/main.go` to:
    ```
    Note: the `listenAddr` variable from step 3 eliminates the duplicated `fmt.Sprintf` call that would otherwise appear in both the `server.New` and `logger.Info` call sites.
 
+> **Limitation (D-01 — exit code on async Start failure):** Because `Start` runs in a goroutine, a listen failure (e.g. port already bound) results in `logger.Error` + `cancel()` but the process still exits with code 0 (success). The existing `main.go` shutdown path only logs "Orchestr8 Server stopped" on `ctx.Done()` — it does not distinguish a clean shutdown from an error-triggered cancellation. For v0.1 this is acceptable. A future improvement is to propagate the error back to `main` via an `errCh chan error` and call `os.Exit(1)` on receive. Note: `logger.Fatal` is deliberately avoided in the goroutine because it calls `os.Exit(1)` immediately, bypassing deferred cleanup. Implementation should include a `// TODO(v0.2): propagate Start error via errCh for non-zero exit code` comment.
+
 This satisfies TODO step 11 ("Start HTTP server") in `main.go`. The existing graceful-shutdown context propagates to `Start`.
 
 ### Request ID Middleware
@@ -411,7 +441,7 @@ func recoveryMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 
 > **Limitation (M-05 — partial response write):** If a handler panics after already writing HTTP headers (via `w.WriteHeader()` or `w.Write()`), the `writeError` call in the recover block cannot send a `500` error response — Go's `http.ResponseWriter` silently ignores the second `WriteHeader` call, and the client receives a truncated or corrupt response body with no error indication. In v0.1, this is acceptable because all responses are short JSON objects written atomically (no streaming handlers). The panic is still logged via zap for operator visibility. Operators should monitor for abrupt connection resets in server logs.
 
-Both `recoveryMiddleware`, `requestIDMiddleware`, and `loggingMiddleware` are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
+All three (`recoveryMiddleware`, `requestIDMiddleware`, and `loggingMiddleware`) are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
 
 ### Access Logging Middleware
 
@@ -449,11 +479,10 @@ func (s *Server) resolveWorkflowPath(workflowID string) (string, error) {
     }
     // 2. Construct the candidate path.
     candidate := filepath.Join(s.workflowsDir, workflowID+".yaml")
-    // 3. Canonicalize the workflows root (resolves symlinks).
-    root, err := filepath.EvalSymlinks(s.workflowsDir)
-    if err != nil {
-        return "", err
-    }
+    // 3. Use the pre-canonicalized workflows root stored by New().
+    //    (s.workflowsDir was resolved via filepath.Abs + filepath.EvalSymlinks
+    //    at construction time — see CS-02.)
+    root := s.workflowsDir
     // 4. Canonicalize the candidate path.
     resolved, err := filepath.EvalSymlinks(candidate)
     if err != nil {
@@ -517,7 +546,7 @@ Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workf
 1. `internal/server/server.go` — `Server` struct, `New`, `Handler`, `Start`, minimal `GET /healthz` handler (C-02: satisfies existing `docker-compose.yaml` healthcheck).
 2. `internal/server/types.go` — request/response DTOs with `json:` struct tags (P3 decision).
 3. `internal/server/middleware.go` — `recoveryMiddleware` (imports `runtime/debug` for `debug.Stack()` — I-04), `requestIDMiddleware`, `loggingMiddleware` (M2).
-4. `internal/server/helpers.go` — `writeJSON`, `writeError`.
+4. `internal/server/helpers.go` — `writeJSON`, `writeError`, `requireJSON` (Content-Type enforcement helper used by POST handlers).
 5. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run, `resolveWorkflowPath` (M-05).
 6. `internal/server/server_test.go` — handler tests using `httptest`.
 
@@ -591,6 +620,10 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 - **Method Not Allowed**: send unsupported methods (e.g. `PUT /api/v1/workflows/run`) → `405`. Go 1.22+ `ServeMux` returns `405 Method Not Allowed` automatically for method-specific patterns. **Design decision (I-02):** `405` and `404` responses from the router use Go’s default plain-text body, not the JSON error envelope. The JSON envelope applies to application-level errors returned by handlers. This is the pragmatic choice for v0.1 — intercepting and converting router-level rejections adds complexity for minimal benefit. Document this in the handler code with a `// NOTE: 405/404 from ServeMux are plain text (see RFC 0002 I-02)` comment.
 - **Concurrent access**: multiple goroutines hitting endpoints simultaneously to validate the `sync.RWMutex`-backed stores under contention. Run with `-race`.
 - **Race detector**: all tests run with `-race` (already enforced in CI/Makefile).
+- **Empty workflow ID**: `POST /api/v1/workflows/run` with `"workflow_id": ""` → `400 BAD_REQUEST`. The regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` rejects empty strings, but this should be an explicit test case for clarity. (Review finding T-01)
+- **Empty agent address**: `POST /api/v1/agents/register` with `"address": ""` → `400 BAD_REQUEST`. The handler requires a non-empty address; verify this is enforced. (Review finding T-02)
+- **Non-existent workflow file**: `POST /api/v1/workflows/run` with a validly-formatted `workflow_id` (e.g. `"no-such-workflow"`) where no corresponding YAML file exists on disk → `404 NOT_FOUND` (not `500`). `filepath.EvalSymlinks` returns an error for non-existent paths; the handler must map this to the workflow-not-found path. (Review finding T-04)
+- **Empty workflow list**: `GET /api/v1/workflows` when no runs exist → `200` with `[]` (empty JSON array), not `404` or `null`. (Review finding T-06)
 - **Build smoke test**: `go build ./cmd/orchestrator` after wiring; `go vet ./internal/server/...`.
 
 ## Open Questions
