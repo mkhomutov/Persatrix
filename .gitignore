@@ -42,3 +42,6 @@ htmlcov/
 
 # Logs
 *.log
+
+# PR review reports (local analysis artifacts)
+docs/pr-reviews/
