@@ -9,6 +9,10 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
+
+	"github.com/orchestr8/orchestr8/internal/planner"
+	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/orchestr8/orchestr8/internal/state"
 )
 
 var (
@@ -47,16 +51,33 @@ func main() {
 	// TODO: Initialize components in order:
 	// 1. Load and validate configuration
 	// 2. Initialize telemetry (OTEL tracer + metrics)
+
 	// 3. Initialize state store
+	store := state.NewInMemoryStore(logger)
+	logger.Info("state store initialized", zap.String("type", "in-memory"))
+
 	// 4. Initialize security (permission gate, rate limiter, audit logger)
 	// 5. Initialize resilience (circuit breakers)
+
 	// 6. Initialize agent registry
+	reg := registry.NewInMemoryRegistry(logger)
+	logger.Info("agent registry initialized", zap.String("type", "in-memory"))
+
 	// 7. Initialize tool system + MCP client
-	// 8. Initialize workflow planner + scheduler
+
+	// 8. Initialize workflow planner (scheduler deferred to RFC 0003)
+	plan := planner.NewYAMLPlanner(logger)
+	logger.Info("workflow planner initialized", zap.String("type", "yaml"))
+
 	// 9. Initialize cost tracker
 	// 10. Start gRPC server (agent communication)
 	// 11. Start HTTP server (REST API + SSE streaming)
 	// 12. Start health check endpoints
+
+	// Prevent unused-variable errors until downstream consumers are wired.
+	_ = store
+	_ = reg
+	_ = plan
 
 	// Graceful shutdown on SIGTERM/SIGINT
 	ctx, cancel := context.WithCancel(context.Background())
