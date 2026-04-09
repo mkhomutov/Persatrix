@@ -16,15 +16,17 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 **Prerequisite**: All RFC 0001 PRs merged (state, registry, planner). ✅ Confirmed — `internal/state/`, `internal/registry/`, `internal/planner/` have full implementations. `github.com/google/uuid` already in `go.mod`.
 
+> **Plan deviation**: PRs 1 and 2 were combined into a single PR #14 (`feature/v01-rest-api-phase1`). The scaffold, middleware, helpers, and workflow handlers were developed together because testing the server scaffold in isolation with 501 placeholder handlers provided minimal value — the real coverage comes from handler integration tests. Combined size (1,453 lines, 55% tests) is documented below with waiver rationale.
+
 ---
 
 ## PR Sequence
 
-### PR 1: `feature/v01-server-scaffold` — Server Scaffolding + Middleware + Helpers
+### ~~PR 1~~ + ~~PR 2~~ → PR #14: `feature/v01-rest-api-phase1` — Server Scaffolding + Middleware + Workflow Handlers
 
 **Depends on**: RFC 0001 fully merged (all 5 PRs)
-**Branch**: `feature/v01-server-scaffold`
-**Estimated size**: ~600–800 lines (implementation + tests)
+**Branch**: `feature/v01-rest-api-phase1` (combined PRs 1+2 from original plan)
+**Actual size**: 1,453 lines (654 implementation + 799 tests)
 
 > **Estimate calibration (F-03)**: RFC 0001 PRs consistently exceeded estimates by 73–138% (e.g. state: 350–450 est → 781 actual, planner: 350–450 est → 1,071 actual). Sizes in this plan are calibrated to ~1.7× of naive estimates. If PR 1 still exceeds 500 lines, apply the escape valve in the Risk Mitigation table.
 
@@ -66,20 +68,49 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `go vet ./internal/server/...` clean
-- [ ] `go build ./cmd/orchestrator` succeeds (no import of `server` yet — that's PR 4)
-- [ ] Path traversal tests cover `../`, symlink escape, valid resolution
-- [ ] `X-Request-ID` always server-generated (never echoed from client)
+- [x] `go test ./internal/server/... -v -cover` passes (48/48 tests, 86.5% coverage)
+- [x] Coverage ≥ 80% (achieved: 86.5%)
+- [x] `go vet ./internal/server/...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] Path traversal tests cover `../`, symlink escape, valid resolution
+- [x] `X-Request-ID` always server-generated (never echoed from client)
+- [x] JSON error envelope consistent across all error responses
+- [x] Transport-level timeouts configured (ReadHeader 10s, Read 30s, Idle 120s)
+- [x] Run ID UUID format validation on GET/DELETE endpoints
+- [x] Error messages sanitized (no filesystem paths, step IDs, or struct names leaked)
+
+#### Post-merge review findings (PR #14)
+
+PR #14 was submitted as 1,453 lines (654 implementation + 799 tests), exceeding the 500-line limit. Size waiver justified: PRs 1+2 were combined because handler integration tests require the scaffold, and 55% of lines are tests. Single-package, single-author scope. Full review: [`docs/pr-reviews/pr-14-deep-review-round2.md`](../../docs/pr-reviews/pr-14-deep-review-round2.md).
+
+The PR went through 5 rounds of review fixes (commits `3783703` through `efae02d`) addressing all must-fix and should-fix findings from the initial deep review.
+
+**Should Fix findings (carry-forward):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-01: Store internal-error paths untested | Medium | `handleGetWorkflowStatus` (75%), `handleListWorkflows` (66.7%), `handleDeleteWorkflow` (59.1%) have `500 INTERNAL` branches for non-sentinel store errors. In-memory store never returns these, but they represent v0.2 SQLite failure mode. | Address in PR 3 or PR 4 — introduce a `failingStore` wrapper to test 500 paths |
+| F-02: No mixed concurrent stress test | Medium | `TestConcurrentAccess` only exercises POST (20 goroutines). No concurrent submit+read+delete test. | Address in PR 4 (wiring) — add mixed-operation concurrent test |
+| F-03: Duplicate log field construction | Low | `loggingMiddleware` has 12 lines of near-identical code in Warn/Info branches. | Address in PR 4 (wiring) or follow-up |
+
+**Consider findings (no immediate action required):**
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-04: Empty Steps map allocation per response | Low | `make(map[string]any)` always empty in v0.1 | No action — becomes necessary with RFC 0003 |
+| F-05: Sleep-based sync in shutdown test | Low | 100ms sleep is documented flake risk | Track for v0.2 (`Start()` → accept `net.Listener`) |
+| F-06: No post-Shutdown timeout on `<-errCh` | Low | Blocks forever if `ListenAndServe` doesn't return | Non-issue in practice — `Shutdown` closes listener |
+| F-07: No `created_at` field in DTOs | Low | `started_at` carries "submitted at" semantics | Documented in RFC 0002 I-03; defer to RFC 0003 |
+| F-08: Regex pattern exposed in error message | Low | Validation rule visible to API callers | Acceptable for v0.1 developer experience |
+| F-09: Redundant regex check in `resolveWorkflowPath` | Low | Defense-in-depth (handler already validates) | Correct — keep for security-critical code |
+| F-10: No Flush() test with non-Flusher writer | Low | Only tested with `httptest.NewRecorder` | Address in PR 3 or follow-up |
+| F-11: Phases 2–4 follow-up tracking | Low | Ensure remaining phases tracked | ✅ Tracked in this plan |
 
 ---
 
-### PR 2: `feature/v01-workflow-handlers` — Workflow Run Endpoints
+### ~~PR 2~~ (merged into PR #14 above)
 
-**Depends on**: PR 1 merged
-**Branch**: `feature/v01-workflow-handlers`
-**Estimated size**: ~550–800 lines (implementation + tests)
+Original plan for workflow handlers was combined into PR #14. See above.
 
 > **Note**: If this PR exceeds 500 lines during implementation, the `DELETE` handler and its running-status protection tests can be split into a follow-up PR within the same branch.
 
@@ -117,21 +148,17 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] Path traversal protection active on `POST /api/v1/workflows/run`
-- [ ] JSON error envelope consistent across all error responses
-- [ ] `go vet ./internal/server/...` clean
-- [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] Test fixtures in `internal/server/testdata/`
+✅ All items completed — merged into PR #14 (see above).
 
 ---
 
 ### PR 3: `feature/v01-agent-handlers` — Agent Registry Endpoints
 
-**Depends on**: PR 1 merged (PR 2 not required — agent handlers are independent). Uses `helpers.go` and agent response DTOs from PR 1 (F-07).
+**Depends on**: PR #14 merged. Uses `helpers.go` and agent response DTOs from PR #14.
 **Branch**: `feature/v01-agent-handlers`
 **Estimated size**: ~400–550 lines (implementation + tests)
+
+> **PR #14 carry-forward items for PR 3**: (1) Add `failingStore` test wrapper for 500-path coverage on workflow handlers (F-01, optional — can defer to PR 4). (2) Add test for `statusCapture.Flush()` with non-Flusher writer (F-10, optional).
 
 #### Scope
 
@@ -174,9 +201,11 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 ### PR 4: `feature/v01-server-wiring` — Stub Endpoints + Wire into main.go + Docker Fix
 
-**Depends on**: PRs 1, 2, 3 merged
+**Depends on**: PR #14 and PR 3 merged
 **Branch**: `feature/v01-server-wiring`
 **Estimated size**: ~250–400 lines (implementation + tests)
+
+> **PR #14 carry-forward items for PR 4**: (1) Add `failingStore` wrapper and test 500 paths for `handleGetWorkflowStatus`, `handleListWorkflows`, `handleDeleteWorkflow` (F-01, Medium — biggest coverage gap, raises `handleDeleteWorkflow` from 59.1% to ~90%+). (2) Add mixed concurrent stress test: submit + read + delete simultaneously with `-race` (F-02, Medium). (3) Deduplicate log field construction in `loggingMiddleware` (F-03, Low).
 
 #### Scope
 
@@ -220,13 +249,18 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 ## Dependency Graph
 
 ```
-PR 1 (scaffold + middleware)
-    ├──→ PR 2 (workflow handlers) ──┐
-    └──→ PR 3 (agent handlers)   ──┼──→ PR 4 (stubs + wiring + docker)
-                                    │
+Original plan:
+  PR 1 (scaffold + middleware)
+      ├──→ PR 2 (workflow handlers) ──┐
+      └──→ PR 3 (agent handlers)   ──┼──→ PR 4 (stubs + wiring + docker)
+
+Actual execution:
+  PR #14 (scaffold + middleware + workflow handlers)  ──┐
+                                                        ├──→ PR 4 (stubs + wiring + docker)
+  PR 3 (agent handlers)  ───────────────────────────────┘
 ```
 
-PR 1 must land first — it creates the `internal/server/` package and all shared infrastructure. PRs 2 and 3 can proceed in parallel after PR 1 (workflow handlers and agent handlers have no dependencies on each other). PR 4 depends on all others being merged.
+PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR 3 (agent handlers) can proceed independently. PR 4 depends on both PR #14 and PR 3 being merged.
 
 ---
 
@@ -247,17 +281,19 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 
 ## Risk Mitigation
 
-| Risk | Mitigation |
-|------|------------|
-| PR 1 (scaffold) exceeds 500 lines with middleware + helper tests | Split: middleware + helpers + server core in PR 1; all handler logic in PRs 2–3. If still over, move `resolveWorkflowPath` + tests to PR 2, or split into PR 1a (server + types + middleware) and PR 1b (helpers + path resolution + healthz + tests). RFC 0001 showed 73–138% overrun on PRs with tests (F-03); PR 1 is the highest-risk PR for size. |
-| PR 2 (workflow handlers) exceeds 500 lines | Split DELETE handler + running-status tests into a follow-up PR 2b if needed. RFC 0001 pattern suggests this PR will likely reach 550–800 lines (F-03). |
-| Path traversal logic requires filesystem fixtures in tests | Use `t.TempDir()` for test workflow directories — clean, hermetic, no repo-path dependency. |
-| `resolveWorkflowPath` symlink test requires OS support | Use `os.Symlink` in test; skip on platforms where symlinks are unsupported (`t.Skip`). |
-| `docker-compose.yaml` change in PR 4 requires coordination | Change is additive (`command:` field); no conflict with parallel work. |
-| PRs 2 and 3 both modify `server_test.go` | Merge PR 2 before PR 3 (or vice versa); second PR rebases. Minimal conflict since test functions are independent (workflow tests vs agent tests). |
-| `main.go` has sugar logger but RFC convention requires structured zap | New code in PR 4 uses structured zap; existing sugar calls left untouched per MI-04. No mixing within the same log call. |
-| Empty `ListRuns` / `List` returns `null` JSON instead of `[]` | DTO conversion must initialize slices: `result := make([]RunStatusResponse, 0, len(runs))` to produce `[]` in JSON. Test explicitly. |
-| `go.mod` conflicts if RFC 0002 PRs interleave with other work | No new `go.mod` dependencies expected — `google/uuid` already present from RFC 0001. Minimal conflict risk. |
+| Risk | Mitigation | Status |
+|------|------------|--------|
+| PR 1 (scaffold) exceeds 500 lines with middleware + helper tests | Split: middleware + helpers + server core in PR 1; all handler logic in PRs 2–3. If still over, move `resolveWorkflowPath` + tests to PR 2, or split into PR 1a (server + types + middleware) and PR 1b (helpers + path resolution + healthz + tests). RFC 0001 showed 73–138% overrun on PRs with tests (F-03); PR 1 is the highest-risk PR for size. | ✅ Resolved — PRs 1+2 combined into PR #14 (1,453 lines; waiver accepted — 55% tests) |
+| PR 2 (workflow handlers) exceeds 500 lines | Split DELETE handler + running-status tests into a follow-up PR 2b if needed. RFC 0001 pattern suggests this PR will likely reach 550–800 lines (F-03). | ✅ Resolved — combined into PR #14 |
+| Path traversal logic requires filesystem fixtures in tests | Use `t.TempDir()` for test workflow directories — clean, hermetic, no repo-path dependency. | ✅ Done in PR #14 |
+| `resolveWorkflowPath` symlink test requires OS support | Use `os.Symlink` in test; skip on platforms where symlinks are unsupported (`t.Skip`). | ✅ Done in PR #14 |
+| `docker-compose.yaml` change in PR 4 requires coordination | Change is additive (`command:` field); no conflict with parallel work. | Pending (PR 4) |
+| PRs 2 and 3 both modify `server_test.go` | Merge PR 2 before PR 3 (or vice versa); second PR rebases. Minimal conflict since test functions are independent (workflow tests vs agent tests). | ✅ Resolved — PR 2 merged into PR #14; PR 3 rebases on PR #14 |
+| `main.go` has sugar logger but RFC convention requires structured zap | New code in PR 4 uses structured zap; existing sugar calls left untouched per MI-04. No mixing within the same log call. | Pending (PR 4) |
+| Empty `ListRuns` / `List` returns `null` JSON instead of `[]` | DTO conversion must initialize slices: `result := make([]RunStatusResponse, 0, len(runs))` to produce `[]` in JSON. Test explicitly. | ✅ Done in PR #14 |
+| `go.mod` conflicts if RFC 0002 PRs interleave with other work | No new `go.mod` dependencies expected — `google/uuid` already present from RFC 0001. Minimal conflict risk. | ✅ Confirmed — no new deps in PR #14 |
+| PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | Address in PR 3 or PR 4 |
+| PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | Address in PR 4 |
 
 ---
 
