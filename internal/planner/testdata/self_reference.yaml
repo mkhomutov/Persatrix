@@ -1,0 +1,12 @@
+schema_version: "0.1"
+
+workflow:
+  id: "self-ref"
+  name: "Self Reference"
+  trigger: "manual"
+
+  steps:
+    - id: "loop"
+      agent: "planner"
+      input: "infinite"
+      depends_on: ["loop"]

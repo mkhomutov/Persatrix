@@ -1,0 +1,19 @@
+schema_version: "0.1"
+
+workflow:
+  id: "parallel-work"
+  name: "Parallel Workflow"
+  trigger: "manual"
+
+  steps:
+    - id: "task-a"
+      agent: "worker-a"
+      input: "do A"
+
+    - id: "task-b"
+      agent: "worker-b"
+      input: "do B"
+
+    - id: "task-c"
+      agent: "worker-c"
+      input: "do C"

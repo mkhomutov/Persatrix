@@ -1,0 +1,17 @@
+schema_version: "0.1"
+
+workflow:
+  id: "cycle-simple"
+  name: "Simple Cycle"
+  trigger: "manual"
+
+  steps:
+    - id: "aa"
+      agent: "planner"
+      input: "start"
+      depends_on: ["bb"]
+
+    - id: "bb"
+      agent: "planner"
+      input: "loop"
+      depends_on: ["aa"]

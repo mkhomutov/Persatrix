@@ -1,0 +1,11 @@
+schema_version: "0.1"
+
+workflow:
+  id: "single-step"
+  name: "Single Step Workflow"
+  trigger: "manual"
+
+  steps:
+    - id: "do"
+      agent: "planner"
+      input: "hello"

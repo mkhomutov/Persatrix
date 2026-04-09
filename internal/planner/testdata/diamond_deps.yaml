@@ -1,0 +1,26 @@
+schema_version: "0.1"
+
+workflow:
+  id: "diamond-flow"
+  name: "Diamond Dependency"
+  trigger: "manual"
+
+  steps:
+    - id: "start"
+      agent: "planner"
+      input: "begin"
+
+    - id: "left"
+      agent: "worker-a"
+      input: "left path"
+      depends_on: ["start"]
+
+    - id: "right"
+      agent: "worker-b"
+      input: "right path"
+      depends_on: ["start"]
+
+    - id: "merge"
+      agent: "planner"
+      input: "merge results"
+      depends_on: ["left", "right"]

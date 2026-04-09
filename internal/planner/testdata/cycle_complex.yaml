@@ -1,0 +1,26 @@
+schema_version: "0.1"
+
+workflow:
+  id: "cycle-complex"
+  name: "Complex Cycle"
+  trigger: "manual"
+
+  steps:
+    - id: "aa"
+      agent: "planner"
+      input: "start"
+
+    - id: "bb"
+      agent: "planner"
+      input: "middle"
+      depends_on: ["aa"]
+
+    - id: "cc"
+      agent: "planner"
+      input: "loop back"
+      depends_on: ["bb", "aa"]
+
+    - id: "aa2"
+      agent: "planner"
+      input: "depends on cycle"
+      depends_on: ["cc", "bb"]
