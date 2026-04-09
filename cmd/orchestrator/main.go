@@ -49,7 +49,11 @@ func main() {
 		logger, err = zap.NewProduction()
 	}
 	if err != nil {
-		panic("failed to initialise logger: " + err.Error())
+		// PR #18 F-01: use fmt+os.Exit instead of panic for consistent startup
+		// error handling — produces a clean single-line message without a
+		// goroutine stack trace, matching the --env validation pattern above.
+		fmt.Fprintln(os.Stderr, "failed to initialise logger: "+err.Error())
+		os.Exit(1)
 	}
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()

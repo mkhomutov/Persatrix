@@ -38,7 +38,11 @@ const maxYAMLSize = 1 << 20
 // visible names.
 var (
 	ResourceIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
-	agentIDRegex    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+	// PR #18 F-02: share the compiled regex instance since the pattern is
+	// identical. Separate variable names are retained for clearer error
+	// messages in validation call sites; separate compilation is unnecessary
+	// and risks future divergence if one pattern is updated but not the other.
+	agentIDRegex = ResourceIDRegex
 	stepIDRegex     = regexp.MustCompile(`^` + stepIDPattern + `$`)
 	outputKeyRegex  = regexp.MustCompile(`^` + stepIDPattern + `$`)
 )

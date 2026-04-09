@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     # NOTE(review-F02): Docker 'command' replaces Dockerfile CMD entirely.
     # All required flags must be listed here, not just the override.
-    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--port", "9090", "--workflows-dir", "/app/workflows/"]
+    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development"]
     ports:
       - "9090:9090"   # gRPC
       - "8080:8080"   # HTTP REST + SSE
