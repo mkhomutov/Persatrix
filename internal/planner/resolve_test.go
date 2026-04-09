@@ -160,7 +160,7 @@ func TestResolveInputs_MalformedPatternsPassthrough(t *testing.T) {
 	}{
 		{"empty braces", "{{ }}"},
 		{"incomplete step ref", "{{ steps. }}"},
-		{"no spaces", "{{no-spaces}}"},
+		{"hyphen in variable name", "{{no-spaces}}"},
 		{"expression in condition", "{{ steps.review.output.approved == false }}"},
 	}
 

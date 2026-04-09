@@ -18,7 +18,8 @@ import (
 
 // stepIDPattern is the canonical step ID format pattern, shared between
 // Parse validation and ResolveInputs template capture group.
-const stepIDPattern = `[a-z0-9]([a-z0-9_-]*[a-z0-9])?`
+// Uses non-capturing (?:...) to avoid creating an extra capture group in templateRegex.
+const stepIDPattern = `[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?`
 
 // maxYAMLSize is the maximum allowed YAML file size (1 MB).
 const maxYAMLSize = 1 << 20
@@ -346,7 +347,8 @@ func (p *YAMLPlanner) Plan(_ context.Context, workflow *Workflow) (*ExecutionPla
 
 // templateRegex matches {{ steps.<id>.output }} and {{ variable }} patterns.
 // Group 2 captures the step ID for output references; group 3 captures plain variable names.
-// The step ID sub-pattern reuses stepIDPattern to stay consistent with Parse validation.
+// The step ID sub-pattern reuses stepIDPattern (with non-capturing group) to stay
+// consistent with Parse validation without introducing extra capture groups.
 var templateRegex = regexp.MustCompile(
 	`\{\{\s*(steps\.(` + stepIDPattern + `)\.output|([a-z_][a-z0-9_]*))\s*\}\}`,
 )
@@ -367,7 +369,7 @@ func ResolveInputs(step Step, outputs map[string]string, vars map[string]string,
 	matches := templateRegex.FindAllStringSubmatchIndex(input, -1)
 	if len(matches) == 0 {
 		// No templates found — check for suspicious patterns before returning.
-		warnSuspicious(input, nil, logger)
+		warnSuspicious(input, logger)
 		return input, nil
 	}
 
@@ -375,16 +377,11 @@ func ResolveInputs(step Step, outputs map[string]string, vars map[string]string,
 	b.Grow(len(input))
 	lastEnd := 0
 
-	// Track matched ranges for suspicious-pattern detection.
-	matchedRanges := make([][2]int, 0, len(matches))
-
 	for _, loc := range matches {
 		// loc indices: [0]=full match start, [1]=full match end,
 		// [2]=group1 start, [3]=group1 end (full inner match),
 		// [4]=group2 start, [5]=group2 end (step ID — may be -1),
-		// [6]=group3 start, [7]=group3 end (step ID inner group — may be -1),
-		// [8]=group4 start, [9]=group4 end (variable name — may be -1).
-		matchedRanges = append(matchedRanges, [2]int{loc[0], loc[1]})
+		// [6]=group3 start, [7]=group3 end (variable name — may be -1).
 
 		// Write literal text before this match.
 		b.WriteString(input[lastEnd:loc[0]])
@@ -397,9 +394,9 @@ func ResolveInputs(step Step, outputs map[string]string, vars map[string]string,
 				return "", fmt.Errorf("unresolved step output reference: steps.%s.output (step %q not in outputs map)", stepID, stepID)
 			}
 			b.WriteString(val)
-		} else if loc[8] >= 0 {
-			// {{ variable }} — group 4 is the variable name.
-			varName := input[loc[8]:loc[9]]
+		} else if loc[6] >= 0 {
+			// {{ variable }} — group 3 is the variable name.
+			varName := input[loc[6]:loc[7]]
 			val, ok := vars[varName]
 			if !ok {
 				return "", fmt.Errorf("unresolved variable reference: %s (not in vars map)", varName)
@@ -416,18 +413,17 @@ func ResolveInputs(step Step, outputs map[string]string, vars map[string]string,
 	result := b.String()
 
 	// Warn about suspicious patterns that were not matched.
-	warnSuspicious(result, matchedRanges, logger)
+	warnSuspicious(result, logger)
 
 	return result, nil
 }
 
 // warnSuspicious emits logger.Warn for {{ ... }} patterns in text that were not
-// matched by templateRegex. The skipRanges parameter (relative to the original
-// input, before substitution) is unused here — we scan the final result string
-// for any remaining {{ ... }} occurrences since substituted values are not
-// re-scanned (single-pass guarantee means any {{ }} in the result is either
-// from unmatched original patterns or from substituted output values).
-func warnSuspicious(text string, _ [][2]int, logger *zap.Logger) {
+// matched by templateRegex. It scans the final result string for any remaining
+// {{ ... }} occurrences since substituted values are not re-scanned (single-pass
+// guarantee means any {{ }} in the result is either from unmatched original
+// patterns or from substituted output values).
+func warnSuspicious(text string, logger *zap.Logger) {
 	for _, loc := range suspiciousRegex.FindAllStringIndex(text, -1) {
 		logger.Warn("suspicious unresolved template pattern in step input",
 			zap.String("pattern", text[loc[0]:loc[1]]),
