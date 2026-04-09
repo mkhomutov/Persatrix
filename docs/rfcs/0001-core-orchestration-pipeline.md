@@ -61,6 +61,7 @@ If we do nothing, the project remains a well-documented skeleton with no executa
 - Scheduler or Executor logic (next step after this RFC).
 - Persistent storage (SQLite is v0.2+; in-memory only for now).
 - Condition expression evaluation (`{{ steps.review.output.approved == false }}`). Parse and store condition strings but defer evaluation to the Scheduler/Executor RFC.
+- Approval gates. The `approval_required` and `approval_timeout` step fields defined in `workflow.schema.json` are not parsed or stored in v0.1. Approval gate logic is deferred to the Scheduler/Executor RFC (0003), which will add these fields to the `Step` struct at that time.
 - MCP bridge, cost tracking, telemetry, security gates (independent packages that follow this RFC).
 
 ## Design / Implementation
@@ -79,6 +80,7 @@ type WorkflowRun struct {
     WorkflowID string
     Status     RunStatus           // Pending, Running, Completed, Failed, Cancelled
     Steps      map[string]StepState
+    Error      string              // summarized failure reason (empty if not failed)
     StartedAt  time.Time
     FinishedAt time.Time
     Inputs     map[string]string   // user-provided variables (e.g. user_request)
@@ -103,7 +105,7 @@ const (
 )
 ```
 
-> **Note:** `RunStatus` intentionally omits `RETRYING` (present in `proto/task.proto` as `TaskStatus.RETRYING = 5`). Retry logic is a Scheduler concern and will be addressed in the Scheduler/Executor RFC (`0003`). The `RunStatus` enum may be extended at that point to align with the protobuf definition.
+> **Note:** `RunStatus` intentionally omits `RETRYING` (present in `proto/task.proto` as `TaskStatus.RETRYING = 5`). Retry logic is a Scheduler concern and will be addressed in the Scheduler/Executor RFC (`0003`). The `RunStatus` enum may be extended at that point to align with the protobuf definition. Note also that the inline proto in `ai-agents-orchestration-spec.md` §4.3 omits `RETRYING` — the canonical source is `proto/task.proto`. RFC 0003 should reconcile all three (spec, proto, Go enum).
 
 #### Interface (add to existing)
 
@@ -203,10 +205,19 @@ The planner receives a logger (consistent with project conventions) and implemen
 
 ### Phase 4: Wire into main.go
 
+#### Constructor Signatures
+
+```go
+func NewInMemoryStore(logger *zap.Logger) *InMemoryStore
+func NewInMemoryRegistry(logger *zap.Logger) *InMemoryRegistry
+```
+
+Both constructors accept a logger for consistency with the project's structured logging convention (`NewYAMLPlanner` in Phase 3 follows the same pattern).
+
 Update `cmd/orchestrator/main.go` to:
 
-1. Create `state.NewInMemoryStore()`.
-2. Create `registry.NewInMemoryRegistry()`.
+1. Create `state.NewInMemoryStore(logger)`.
+2. Create `registry.NewInMemoryRegistry(logger)`.
 3. Create `planner.NewYAMLPlanner(logger)`.
 4. Log successful initialization of each component.
 5. Keep the existing graceful-shutdown logic; no behavioral change to startup/shutdown flow yet.
@@ -219,7 +230,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 
 - **No new attack surface.** These components are internal-only; no network listeners are added.
 - **State store concurrency.** `sync.RWMutex` prevents data races; CI runs `go test -race`.
-- **YAML parsing.** Use `gopkg.in/yaml.v3` (or `encoding/json` for schemas); limit file size to prevent DoS from malformed input. Reject YAML files > 1 MB.
+- **YAML parsing.** Use `gopkg.in/yaml.v3` (or `encoding/json` for schemas); limit file size to prevent DoS from malformed input. Reject YAML files > 1 MB. Enforce via `io.LimitReader` in `Parse()` before unmarshaling — a post-read size check is insufficient because the full content would already be in memory.
 - **YAML anchor/alias expansion.** Defend against YAML "billion laughs" attacks (exponential expansion via nested anchors/aliases). While `gopkg.in/yaml.v3` provides some built-in protection, consider explicit alias depth limits or disabling anchors in workflow YAML as defense-in-depth.
 - **Template injection.** `ResolveInputs` does simple string substitution, not expression evaluation. Step outputs are treated as opaque strings, never executed. Condition evaluation is deferred.
 - **Agent ID validation.** Enforced at parse time to prevent injection via agent IDs in downstream components (gRPC addresses, file paths, etc.).
@@ -282,7 +293,8 @@ This phase is minimal wiring — the components exist but aren't serving traffic
    **Resolved**: Use `gopkg.in/yaml.v3`. The project has no Kubernetes YAML or JSON round-trip requirement, so the standard library is the appropriate choice. It is also the most widely used and best-maintained Go YAML package. (2026-04-09)
 2. ~~**Workflow schema version**: `feature-builder.yaml` declares `schema_version: "0.1"`. Should the planner enforce this and reject unknown versions?~~
    **Resolved**: Yes — validate `SchemaVersion == "0.1"` and reject unknown versions. Phase 3a already proposes a `WorkflowFile` wrapper that parses `schema_version`, and `workflow.schema.json` declares it as required. Parsing the field without enforcing it would silently accept incompatible schemas. (2026-04-09)
-3. **Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?
+3. ~~**Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?~~
+   **Resolved**: v0.1 supports only the raw output string (`{{ steps.X.output }}`). Dotted field access (e.g. `{{ steps.X.output.field }}`) requires structured output parsing (JSON/YAML) and is deferred to a dedicated templating RFC or RFC 0003. The `feature-builder.yaml` fixture uses `{{ steps.review.output.approved == false }}` in a `condition` field, which is already out of scope for `ResolveInputs` per the Non-Goals and Phase 3d design. (2026-04-09)
 4. ~~**State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?~~
    **Resolved**: Use `google/uuid`. It is the de facto standard for UUID generation in Go, produces RFC 4122-compliant identifiers that observability and logging tools expect, and adds only a single minimal dependency. (2026-04-09)
 
