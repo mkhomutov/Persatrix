@@ -107,7 +107,9 @@ const (
 
 > **Note:** `RunStatus` intentionally omits `RETRYING` (present in `proto/task.proto` as `TaskStatus.RETRYING = 5`). Retry logic is a Scheduler concern and will be addressed in the Scheduler/Executor RFC (`0003`). The `RunStatus` enum may be extended at that point to align with the protobuf definition. Note also that the inline proto in `ai-agents-orchestration-spec.md` §4.3 omits `RETRYING` — the canonical source is `proto/task.proto`. RFC 0003 should reconcile all three (spec, proto, Go enum).
 
-#### Interface (add to existing)
+#### Interface (replace TODO stubs in existing file)
+
+The current `internal/state/state.go` contains only a package declaration and TODO comments — no existing types or interfaces. This phase replaces those stubs entirely with the types and interface below.
 
 ```go
 type Store interface {
@@ -127,6 +129,7 @@ type Store interface {
 - `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.) Deep copy is implemented via manual field copy; the `Steps` map must be reconstructed with new `StepState` values — a simple map assignment would share the underlying map reference, creating a subtle concurrency hazard.
 - `UpdateStepState` merges into the existing run's `Steps` map. It returns an error if the `runID` does not exist. If the `StepID` is not already present in the run's `Steps` map, it is added — this allows the Scheduler to initialize step state on first execution without requiring pre-population.
 - Like `GetRun`, `ListRuns` returns deep copies of all runs to prevent concurrent mutation — the Scheduler and REST API will both call `ListRuns`, and without copies, callers could corrupt the store's internal state. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
+- **State transition validation**: `UpdateRunStatus` does not validate state transitions in v0.1 — any transition is allowed (e.g., `Completed → Running` would succeed). Defining and enforcing a valid state machine (e.g., `Pending → Running → {Completed, Failed, Cancelled}`) is deferred to RFC 0003 (Scheduler/Executor), which owns the execution lifecycle and will be the primary caller of `UpdateRunStatus`.
 
 ### Phase 2: InMemoryRegistry
 
@@ -162,7 +165,7 @@ The planner is the most complex component in this RFC. It has three responsibili
   The `Parse` method unmarshals into `WorkflowFile`, validates `SchemaVersion`, then returns the inner `Workflow`. Without this wrapper, `yaml.Unmarshal` will fail on the actual fixture files.
 - Validate required fields: `id`, `name`, at least one step, each step has `id`, `agent`, and `input` (all three are required per `workflow.schema.json`).
 - Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. This regex requires a minimum of 2 characters, so single-character agent IDs are invalid. This aligns with `agent.schema.json`.
-- The existing `Workflow` struct includes a `Trigger` field (parsed from YAML, e.g. `"manual"`). This field is preserved in the parsed struct but not acted upon in v0.1 — trigger evaluation is a Scheduler concern (RFC 0003).
+- The existing `Workflow` struct includes a `Trigger` field (parsed from YAML, e.g. `"manual"`). This field is preserved in the parsed struct but not acted upon in v0.1 — trigger evaluation is a Scheduler concern (RFC 0003). The `Trigger` field is not validated by the planner; JSON Schema validation (via `make validate`) is the canonical enforcement point for the `enum: ["manual", "schedule", "event"]` constraint defined in `workflow.schema.json`. The planner treats it as an opaque string.
 - Validate that `depends_on` references point to existing step IDs.
 
 #### 3b. ValidateDAG — Cycle detection
@@ -173,6 +176,7 @@ The planner is the most complex component in this RFC. It has three responsibili
 
 #### 3c. Plan — Topological sort into parallel stages
 
+- **Precondition**: `Plan` assumes the workflow has passed `ValidateDAG`. If called on an invalid (cyclic) DAG, Kahn's algorithm will silently drop nodes involved in cycles, producing an incomplete plan without error. Callers must call `ValidateDAG` before `Plan`. Both `ValidateDAG` (DFS) and Kahn's algorithm detect cycles, but `ValidateDAG` is the canonical cycle detector that returns a descriptive error; Kahn's implicit detection in `Plan` is defense-in-depth only.
 - Kahn's algorithm (BFS topological sort) to produce layers.
 - Each layer is a group of steps whose dependencies are all satisfied by prior layers.
 - Output: `ExecutionPlan{ Stages: [][]Step }`.
@@ -189,7 +193,7 @@ The planner is the most complex component in this RFC. It has three responsibili
 - Provide a `ResolveInputs(step Step, outputs map[string]string, vars map[string]string) (string, error)` helper that the Scheduler/Executor will call at runtime to substitute actual values.
 - `ResolveInputs` returns an error if a template references a step ID not present in the `outputs` map or a variable not present in the `vars` map. Fail-fast prevents silent data loss from typos or misordered execution.
 - Template resolution is **single-pass** — output values substituted into an input string are NOT re-scanned for template patterns. This prevents second-order template injection if a step's output happens to contain `{{ }}` patterns.
-- **Scope**: `ResolveInputs` operates on `Step.Input` only, NOT on `Step.Condition`. Condition strings (e.g., `{{ steps.review.output.approved == false }}`) are opaque to this RFC — they resemble template patterns but contain expressions that the Scheduler/Executor RFC will evaluate. Passing a condition string to `ResolveInputs` would produce incorrect results because `.approved == false` is not a valid step ID or variable name.
+- **Scope**: `ResolveInputs` operates on `Step.Input` only, NOT on `Step.Condition`. Condition strings (e.g., `{{ steps.review.output.approved == false }}`) are opaque to this RFC — they resemble template patterns but contain expressions that the Scheduler/Executor RFC will evaluate. Passing a condition string to `ResolveInputs` would produce incorrect results because `.approved == false` is not a valid step ID or variable name. Note: the Scheduler/Executor RFC (0003) must handle both variable resolution *and* expression evaluation inside conditions — a condition like `{{ steps.review.output.approved == false }}` requires the step output value to be resolved before the boolean expression can be evaluated.
 - Note that `Step.Input` can contain multiple template references interleaved with literal text in a single string (e.g., `"{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"`). `ResolveInputs` replaces all occurrences via regexp global substitution, not just the first match.
 - Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
 - **Malformed patterns** (empty braces `{{ }}`, incomplete references `{{ steps. }}`, missing whitespace delimiters `{{no-spaces}}`) are left as-is in the output string — they are not substituted and do not cause an error. This is intentional: condition expressions like `{{ steps.review.output.approved == false }}` coexist in the same YAML file and must not be rejected by `ResolveInputs`.
@@ -236,6 +240,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **YAML anchor/alias expansion.** Defend against YAML "billion laughs" attacks (exponential expansion via nested anchors/aliases). While `gopkg.in/yaml.v3` provides some built-in protection, consider explicit alias depth limits or disabling anchors in workflow YAML as defense-in-depth.
 - **Template injection.** `ResolveInputs` does simple string substitution, not expression evaluation. Step outputs are treated as opaque strings, never executed. Condition evaluation is deferred.
 - **Agent ID validation.** Enforced at parse time to prevent injection via agent IDs in downstream components (gRPC addresses, file paths, etc.).
+- **Path traversal in `Parse()`.** The `yamlPath` parameter is internal-only in this RFC (no network exposure). When RFC 0002 exposes workflow submission via REST API, the submitted path must be validated against a configured workflows directory (canonicalized via `filepath.EvalSymlinks`, then prefix-checked) to prevent directory traversal attacks (e.g., `../../etc/passwd`). Symbolic link traversal must also be blocked.
 
 ## Phased Implementation Plan
 
@@ -285,6 +290,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update.
 - **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
+- **Pipeline integration test**: Call `Parse` → `ValidateDAG` → `Plan` as a single pipeline on `feature-builder.yaml` and assert: no error from any stage, 4 stages with correct step grouping. This end-to-end test catches integration issues between the three stages that unit tests on individual methods would miss.
 - **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), and confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d).
 - **Schema version validation**: reject unknown schema versions (e.g., `schema_version: "0.2"`, `schema_version: ""`), confirm `schema_version: "0.1"` is accepted. This covers the behavior resolved in Open Question 2.
 - **YAML file size limit**: reject YAML files exceeding 1 MB (per Security Considerations). This is a security-critical behavior that must have explicit test coverage.
@@ -320,3 +326,4 @@ Once this RFC is accepted:
 - [BRANCHING.md](../BRANCHING.md) — Branch naming and PR size guidelines
 - Existing stubs: `internal/planner/planner.go`, `internal/state/state.go`, `internal/registry/registry.go`
 - Workflow fixture: `workflows/feature-builder.yaml`
+- Partially addresses spec audit findings: #24 (schema versioning — now enforced at parse time via `SchemaVersion` validation) and #39 (execution state — in-memory store for v0.1, `Store` interface designed for SQLite migration in v0.2)
