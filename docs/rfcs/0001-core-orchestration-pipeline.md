@@ -104,6 +104,8 @@ const (
 )
 ```
 
+> **Note:** `RunStatus` intentionally omits `RETRYING` (present in `proto/task.proto` as `TaskStatus.RETRYING = 5`). Retry logic is a Scheduler concern and will be addressed in the Scheduler/Executor RFC (`0003`). The `RunStatus` enum may be extended at that point to align with the protobuf definition.
+
 #### Interface (add to existing)
 
 ```go
@@ -123,6 +125,7 @@ type Store interface {
 - `CreateRun` generates a UUID if `run.ID` is empty.
 - `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.)
 - `UpdateStepState` merges into the existing run's `Steps` map.
+- `ListRuns` returns all runs. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
 
 ### Phase 2: InMemoryRegistry
 
@@ -184,6 +187,8 @@ The planner is the most complex component in this RFC. It has three responsibili
 - Provide a `ResolveInputs(step Step, outputs map[string]string, vars map[string]string) (string, error)` helper that the Scheduler/Executor will call at runtime to substitute actual values.
 - `ResolveInputs` returns an error if a template references a step ID not present in the `outputs` map or a variable not present in the `vars` map. Fail-fast prevents silent data loss from typos or misordered execution.
 - Template resolution is **single-pass** — output values substituted into an input string are NOT re-scanned for template patterns. This prevents second-order template injection if a step's output happens to contain `{{ }}` patterns.
+- **Scope**: `ResolveInputs` operates on `Step.Input` only, NOT on `Step.Condition`. Condition strings (e.g., `{{ steps.review.output.approved == false }}`) are opaque to this RFC — they resemble template patterns but contain expressions that the Scheduler/Executor RFC will evaluate. Passing a condition string to `ResolveInputs` would produce incorrect results because `.approved == false` is not a valid step ID or variable name.
+- Note that `Step.Input` can contain multiple template references interleaved with literal text in a single string (e.g., `"{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"`). `ResolveInputs` replaces all occurrences via regexp global substitution, not just the first match.
 - Use `regexp` for pattern matching — no Jinja2 engine in Go. Support only the two patterns above for v0.1.
 
 #### Constructor
@@ -211,6 +216,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **No new attack surface.** These components are internal-only; no network listeners are added.
 - **State store concurrency.** `sync.RWMutex` prevents data races; CI runs `go test -race`.
 - **YAML parsing.** Use `gopkg.in/yaml.v3` (or `encoding/json` for schemas); limit file size to prevent DoS from malformed input. Reject YAML files > 1 MB.
+- **YAML anchor/alias expansion.** Defend against YAML "billion laughs" attacks (exponential expansion via nested anchors/aliases). While `gopkg.in/yaml.v3` provides some built-in protection, consider explicit alias depth limits or disabling anchors in workflow YAML as defense-in-depth.
 - **Template injection.** `ResolveInputs` does simple string substitution, not expression evaluation. Step outputs are treated as opaque strings, never executed. Condition evaluation is deferred.
 - **Agent ID validation.** Enforced at parse time to prevent injection via agent IDs in downstream components (gRPC addresses, file paths, etc.).
 
@@ -260,13 +266,16 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Topological sort tests**: linear chain, diamond dependency, fully parallel (no deps), single step.
 - **State store tests**: CRUD operations, concurrent read/write with goroutines, status transitions.
 - **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update.
+- **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
+- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, and verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection).
 - **Race detector**: all tests run with `-race` flag (already enforced in CI/Makefile).
 
 ## Open Questions
 
 1. **YAML library choice**: `gopkg.in/yaml.v3` is the standard Go YAML library. Any reason to prefer `sigs.k8s.io/yaml` (JSON-compatible subset)?
-2. **Workflow schema version**: `feature-builder.yaml` declares `schema_version: "0.1"`. Should the planner enforce this and reject unknown versions?
+2. ~~**Workflow schema version**: `feature-builder.yaml` declares `schema_version: "0.1"`. Should the planner enforce this and reject unknown versions?~~
+   **Resolved**: Yes — validate `SchemaVersion == "0.1"` and reject unknown versions. Phase 3a already proposes a `WorkflowFile` wrapper that parses `schema_version`, and `workflow.schema.json` declares it as required. Parsing the field without enforcing it would silently accept incompatible schemas. (2026-04-09)
 3. **Template syntax**: Current convention is `{{ steps.X.output }}`. Should we also support `{{ steps.X.output_key_name }}` or keep it to the raw output string only?
 4. **State store ID generation**: Use `google/uuid` package or a simpler approach (e.g. `crypto/rand` hex string)?
 
