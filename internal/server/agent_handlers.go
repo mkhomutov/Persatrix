@@ -37,6 +37,10 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// (PR #16 carry-forward F-01): Enforce max length to prevent registry pollution
 	// and log bloat. 253 aligns with DNS hostname max length (RFC 1035).
+	// NOTE(review-F05): len() measures bytes, not runes. This is intentional —
+	// v0.1 addresses are ASCII host:port strings where bytes == characters, and
+	// byte-based enforcement provides defense-in-depth against oversized payloads
+	// regardless of encoding.
 	if len(req.Address) > 253 {
 		writeError(w, "BAD_REQUEST", "address exceeds maximum length of 253 characters", http.StatusBadRequest)
 		return

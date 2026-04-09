@@ -1282,6 +1282,21 @@ func TestGetCostSummaryStub(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
 }
 
+// NOTE(review-F09): Wrong-method tests document the HTTP method contract for
+// stub endpoints. Go 1.22+ ServeMux pattern routing handles 405 automatically.
+
+func TestLogsStubWrongMethod(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/executions/any-id/logs", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestCostSummaryStubWrongMethod(t *testing.T) {
+	srv, _ := testServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/cost/summary", nil)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
 // =============================================================================
 // Failing Store Tests (PR #14 carry-forward F-01)
 // =============================================================================
@@ -1319,6 +1334,25 @@ func (f *failingStore) CreateRun(ctx context.Context, run *state.WorkflowRun) er
 		return errors.New("simulated db error")
 	}
 	return f.Store.CreateRun(ctx, run)
+}
+
+// NOTE(review-F06): UpdateRunStatus and UpdateStepState are not called by any
+// v0.1 handler, but without explicit stubs the embedded interface's nil method
+// values would panic at runtime if RFC 0003 Scheduler/Executor handlers call
+// them before the stubs are replaced with real implementations.
+
+func (f *failingStore) UpdateRunStatus(ctx context.Context, runID string, status state.RunStatus) error {
+	if f.failOn == "UpdateRunStatus" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.UpdateRunStatus(ctx, runID, status)
+}
+
+func (f *failingStore) UpdateStepState(ctx context.Context, runID string, step state.StepState) error {
+	if f.failOn == "UpdateStepState" {
+		return errors.New("simulated db error")
+	}
+	return f.Store.UpdateStepState(ctx, runID, step)
 }
 
 // testServerWithStore creates a Server using the provided store instead of
@@ -1424,6 +1458,9 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 		runIDs = append(runIDs, cr.RunID)
 	}
 
+	// NOTE(review-F04): goroutines assert status codes to verify correctness,
+	// not just absence of panics/deadlocks. Failures are collected via t.Errorf
+	// which is goroutine-safe.
 	done := make(chan struct{}, 30)
 
 	// 10 goroutines submit new runs
@@ -1431,7 +1468,10 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "concurrent-wf"})
-			doRequest(h, http.MethodPost, "/api/v1/workflows/run", body)
+			rec := doRequest(h, http.MethodPost, "/api/v1/workflows/run", body)
+			if rec.Code != http.StatusCreated {
+				t.Errorf("concurrent submit: got %d, want %d", rec.Code, http.StatusCreated)
+			}
 		}()
 	}
 
@@ -1439,7 +1479,10 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(id string) {
 			defer func() { done <- struct{}{} }()
-			doRequest(h, http.MethodGet, "/api/v1/workflows/"+id+"/status", nil)
+			rec := doRequest(h, http.MethodGet, "/api/v1/workflows/"+id+"/status", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
 		}(runIDs[i])
 	}
 
@@ -1447,7 +1490,10 @@ func TestMixedConcurrentWorkflowAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			doRequest(h, http.MethodGet, "/api/v1/workflows", nil)
+			rec := doRequest(h, http.MethodGet, "/api/v1/workflows", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent list: got %d, want %d", rec.Code, http.StatusOK)
+			}
 		}()
 	}
 
@@ -1468,6 +1514,8 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 		require.Equal(t, http.StatusCreated, rec.Code)
 	}
 
+	// NOTE(review-F04): goroutines assert status codes to verify correctness,
+	// not just absence of panics/deadlocks.
 	done := make(chan struct{}, 30)
 
 	// 10 goroutines register new agents
@@ -1476,7 +1524,10 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 			defer func() { done <- struct{}{} }()
 			id := fmt.Sprintf("new-agent-%02d", n)
 			body, _ := json.Marshal(registerAgentRequest{ID: id, Address: "localhost:50052"})
-			doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+			rec := doRequest(h, http.MethodPost, "/api/v1/agents/register", body)
+			if rec.Code != http.StatusCreated {
+				t.Errorf("concurrent register %s: got %d, want %d", id, rec.Code, http.StatusCreated)
+			}
 		}(i)
 	}
 
@@ -1485,7 +1536,10 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 		go func(n int) {
 			defer func() { done <- struct{}{} }()
 			id := fmt.Sprintf("pre-agent-%02d", n)
-			doRequest(h, http.MethodGet, "/api/v1/agents/"+id, nil)
+			rec := doRequest(h, http.MethodGet, "/api/v1/agents/"+id, nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent get %s: got %d, want %d", id, rec.Code, http.StatusOK)
+			}
 		}(i)
 	}
 
@@ -1493,7 +1547,10 @@ func TestMixedConcurrentAgentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+			rec := doRequest(h, http.MethodGet, "/api/v1/agents", nil)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent list: got %d, want %d", rec.Code, http.StatusOK)
+			}
 		}()
 	}
 

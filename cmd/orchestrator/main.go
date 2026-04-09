@@ -103,7 +103,10 @@ func main() {
 			cancel() // propagate to root context so orchestrator can shutdown cleanly
 		}
 	}()
-	logger.Info("HTTP server listening", zap.String("addr", listenAddr))
+	// NOTE(review-F01): message says "starting" not "listening" because the
+	// goroutine has not yet completed net.Listen at this point. Asserting
+	// readiness here would mislead operators and CI health-check scripts.
+	logger.Info("HTTP server starting", zap.String("addr", listenAddr))
 
 	// 12. Start health check endpoints
 

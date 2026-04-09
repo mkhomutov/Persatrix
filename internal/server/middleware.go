@@ -95,7 +95,10 @@ func loggingMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
 			zap.Duration("latency", time.Since(start)),
 			zap.String("request_id", reqID),
 		}
-		// (Review finding F-06): Log 5xx responses at Warn level for operator alerting;
+		// Shared fields slice avoids duplicating zap.Field construction across
+		// the Warn/Info branches.
+		//
+		// Log 5xx responses at Warn level for operator alerting;
 		// all other responses at Info level.
 		if sc.status >= 500 {
 			logger.Warn("http request", fields...)
