@@ -403,7 +403,7 @@ func ResolveInputs(step Step, outputs map[string]string, vars map[string]string,
 			varName := input[loc[6]:loc[7]]
 			val, ok := vars[varName]
 			if !ok {
-				return "", fmt.Errorf("unresolved variable reference: %s (not in vars map)", varName)
+				return "", fmt.Errorf("unresolved variable reference: %s in step %q (not in vars map)", varName, step.ID)
 			}
 			b.WriteString(val)
 		}

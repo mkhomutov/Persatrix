@@ -4,6 +4,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -66,6 +67,10 @@ func NewInMemoryRegistry(logger *zap.Logger) *InMemoryRegistry {
 // Register adds a new agent to the registry. Returns ErrAgentAlreadyRegistered
 // if an agent with the same ID is already registered. Re-registration requires
 // calling Unregister first (non-atomic; see RFC 0001 Phase 2 notes).
+//
+// Agent ID format validation (^[a-z0-9][a-z0-9-]*[a-z0-9]$) is enforced at the
+// REST API layer (RFC 0002), not in the registry. The registry accepts any non-empty
+// string ID to avoid coupling to a specific format convention.
 func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -149,14 +154,16 @@ func (r *InMemoryRegistry) UpdateStatus(_ context.Context, agentID string, statu
 }
 
 // FindByCapability returns deep copies of all agents that have the specified capability.
+// Returns an empty non-nil slice (not nil) when no agents match, ensuring consistent
+// JSON serialization as [] rather than null (PR #12 review F-07, consistent with List).
 func (r *InMemoryRegistry) FindByCapability(_ context.Context, capability string) ([]AgentInfo, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []AgentInfo
+	result := make([]AgentInfo, 0)
 	for _, agent := range r.agents {
-		for _, cap := range agent.Capabilities {
-			if cap == capability {
+		for _, capName := range agent.Capabilities {
+			if capName == capability {
 				result = append(result, *deepCopyAgent(agent))
 				break
 			}
@@ -179,6 +186,22 @@ func deepCopyAgent(agent *AgentInfo) *AgentInfo {
 	cp.Capabilities = make([]string, len(agent.Capabilities))
 	copy(cp.Capabilities, agent.Capabilities)
 	return cp
+}
+
+// String returns a human-readable representation of AgentStatus for logging.
+func (s AgentStatus) String() string {
+	switch s {
+	case StatusUnknown:
+		return "Unknown"
+	case StatusHealthy:
+		return "Healthy"
+	case StatusDegraded:
+		return "Degraded"
+	case StatusOffline:
+		return "Offline"
+	default:
+		return fmt.Sprintf("AgentStatus(%d)", int(s))
+	}
 }
 
 // TODO: Implement health check loop

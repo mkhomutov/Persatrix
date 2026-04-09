@@ -337,6 +337,15 @@ func TestResolveInputs_NilLogger(t *testing.T) {
 	assert.Equal(t, "the plan", result)
 }
 
+func TestResolveInputs_NilLoggerWithSuspiciousPattern(t *testing.T) {
+	step := Step{ID: "test", Input: "{{ steps.plan.output }} and {{ BAD_PATTERN }}"}
+	outputs := map[string]string{"plan": "the plan"}
+
+	result, err := ResolveInputs(step, outputs, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "the plan and {{ BAD_PATTERN }}", result)
+}
+
 // --- ResolveInputs: adjacent templates ---
 
 func TestResolveInputs_AdjacentTemplates(t *testing.T) {

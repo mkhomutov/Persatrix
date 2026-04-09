@@ -25,6 +25,14 @@ var (
 func main() {
 	flag.Parse()
 
+	// PR #12 review (F-06): validate --env flag at startup instead of silently
+	// falling through to production logger on typos like --env=test.
+	switch *env {
+	case "development", "staging", "production":
+	default:
+		panic("invalid --env value: " + *env + " (must be development|staging|production)")
+	}
+
 	// PR review: development logger (DPanic panics, verbose stacktraces) was
 	// hardcoded regardless of --env flag. Use production logger for non-dev
 	// environments to get JSON output, appropriate log levels, and no DPanic.
