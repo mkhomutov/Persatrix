@@ -77,7 +77,8 @@ If we do nothing, the orchestrator remains unreachable from the CLI or any HTTP 
 - **TLS.** HTTP only for v0.1 (development/docker-compose use case). TLS termination is expected at the reverse-proxy layer in staging/production.
 - **Workflow execution.** `POST /api/v1/workflows/run` creates the `WorkflowRun` and returns the run ID but does **not** execute it — the Scheduler (RFC 0003) owns execution. The run is left in `Pending` status for RFC 0003 to pick up.
 - **gRPC server.** The gRPC server (main.go TODO step 10) is a separate concern and a separate RFC.
-- **Health/readiness endpoints.** `GET /healthz` and `GET /readyz` are not defined in this RFC. They are tracked as TODO step 12 in `main.go` and should be added in a follow-up PR or as part of Docker/Kubernetes deployment hardening. Deployers relying on `docker-compose` health checks should use a TCP port check until these endpoints exist.
+- **Health/readiness endpoints.** Full `GET /healthz` (with dependency checks) and `GET /readyz` are not defined in this RFC. They are tracked as TODO step 12 in `main.go` and should be expanded in a follow-up PR or as part of Docker/Kubernetes deployment hardening. However, a **minimal `GET /healthz`** returning `200 OK` with `{"status": "ok"}` is included in Phase 1 to satisfy the existing `docker-compose.yaml` healthcheck (which already references `http://localhost:8080/healthz`). Without this, deploying via `docker compose` after this RFC would result in the orchestrator being marked `unhealthy` and potentially restart-looped. The minimal endpoint performs no dependency checks and is intentionally trivial.
+- **CORS.** No CORS headers are set in v0.1. If the REST API is called from a browser in the future (e.g. admin dashboard, local dev tooling), CORS middleware will need to be added. Deferred.
 - **Persistent storage.** In-memory only; RFC 0001 established the `Store` interface for future SQLite migration.
 
 ### Spec Deviations
@@ -87,7 +88,7 @@ The core spec (`ai-agents-orchestration-spec.md` §8.3) defines exactly eight v0
 - `GET /api/v1/workflows` — list all workflow runs.
 - `DELETE /api/v1/workflows/{id}` — delete a workflow run.
 
-Both are deliberate additions to support the operational lifecycle of runs. They are not unintentional omissions from the spec; the spec should be updated in a follow-up documentation PR to reflect these additions.
+Both are deliberate additions to support the operational lifecycle of runs. They are not unintentional omissions from the spec; the spec should be updated in a follow-up documentation PR to reflect these additions. Track this via a `// TODO(spec-sync): update ai-agents-orchestration-spec.md §8.3 to include GET /api/v1/workflows and DELETE /api/v1/workflows/{id}` comment in the router registration.
 
 Additionally, the runtime agent registration API (`POST /api/v1/agents/register`) diverges from `schemas/agent.schema.json`, which marks `name`, `role`, and `model` as **required** properties for statically configured agents. Runtime-registered agents provide only `id`, `address`, and `capabilities`. This is intentional: static config serves UI and scheduling metadata, while runtime registration provides the minimum needed for gRPC dispatch. See the [Phase 2 registration handler](#post-apiv1agentsregister) for details.
 
@@ -207,6 +208,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 4. Call `s.planner.Parse(r.Context(), resolvedPath)` → returns `*planner.Workflow` or error; return `422 UNPROCESSABLE` on parse failure.
 5. Call `s.planner.ValidateDAG(r.Context(), workflow)` → return `422 UNPROCESSABLE` on cycle. Note: `s.planner.Plan()` is **not** called at submission time — computing the `ExecutionPlan` (topological stages) is deferred to RFC 0003, where the Scheduler picks up pending runs and plans execution.
 6. Construct `state.WorkflowRun{WorkflowID: req.WorkflowID, Inputs: req.Inputs, Status: state.RunPending, StartedAt: time.Now()}`.
+
+   > **Note (I-03 — `StartedAt` semantics):** `StartedAt` is set at submission time even though the run is in `Pending` status. Semantically this is "submitted at," not "execution started." In v0.1 this is acceptable because no execution occurs (RFC 0003 deferred). The response DTO (P3 decision) maps this to `started_at` in the JSON wire format. A future RFC should add a dedicated `CreatedAt` field to `WorkflowRun` and reset `StartedAt` to zero until the Scheduler transitions the run to `Running`.
 7. Generate a UUID run ID if not provided; call `store.CreateRun(ctx, &run)`.
 8. Return `201 Created` with body `{"run_id": "<uuid>", "workflow_id": "<workflow_id>", "status": "pending"}`. Including `workflow_id` in the response saves clients a round-trip GET for display purposes (e.g., the Rust CLI showing "Submitted run abc123 for workflow feature-builder").
 
@@ -238,8 +241,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 > **Note (MI-01 — step timestamps):** RFC 0001's `StepState` struct includes `StartedAt time.Time` and `FinishedAt time.Time` fields. These are omitted from the v0.1 API response because no step execution occurs until RFC 0003 (Scheduler/Executor) is implemented — all steps remain in `"pending"` status with zero-value timestamps. When RFC 0003 adds step lifecycle transitions, the status response should be extended to include `started_at` and `finished_at` per step.
 
-> **Decision (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require a mapping layer between domain types and wire format. **Option (b) — dedicated response DTOs in `internal/server/types.go`** — is adopted. This decouples the storage model from the wire format, avoids amending RFC 0001's domain types with HTTP-specific struct tags, and allows the API response shape to evolve independently. A `types.go` file containing request/response structs with explicit `json:` tags is added to Phase 1 deliverables and the Files Touched table.
-
+> **Decision (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require a mapping layer between domain types and wire format. **Option (b) — dedicated response DTOs in `internal/server/types.go`** — is adopted. This decouples the storage model from the wire format, avoids amending RFC 0001's domain types with HTTP-specific struct tags, and allows the API response shape to evolve independently. A `types.go` file containing request/response structs with explicit `json:` tags is added to Phase 1 deliverables and the Files Touched table.>
+> **Note (M-07 — `null` vs zero-value timestamps):** The example above shows `"finished_at": null`. Go’s `time.Time` zero value serializes to `"0001-01-01T00:00:00Z"`, not `null`. To produce `null` for unfinished runs, the response DTO must use `*time.Time` (pointer) for `FinishedAt` (and potentially `StartedAt` for future use when runs haven’t started yet). The `types.go` deliverable must use pointer types for nullable timestamp fields.
 #### `GET /api/v1/workflows`
 
 - Call `store.ListRuns(ctx)`.
@@ -394,7 +397,10 @@ func recoveryMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         defer func() {
             if rec := recover(); rec != nil {
-                logger.Error("handler panic", zap.Any("panic", rec))
+                logger.Error("handler panic",
+                    zap.Any("panic", rec),
+                    zap.String("stack", string(debug.Stack())),
+                )
                 writeError(w, "INTERNAL", "internal server error", http.StatusInternalServerError)
             }
         }()
@@ -419,7 +425,7 @@ Both `recoveryMiddleware`, `requestIDMiddleware`, and `loggingMiddleware` are co
 
 ### Per-Request Timeout
 
-> **TODO (H3 — request timeout):** Individual handler requests currently have no timeout. A pathological workflow YAML file (e.g. deeply nested, 1 MiB) could cause `planner.Parse` to block a handler goroutine for an extended period. `MaxBytesReader` limits the HTTP body size but does not protect against slow filesystem reads. A per-request timeout middleware (e.g., `http.TimeoutHandler` wrapping the mux, or `context.WithTimeout` in each handler) with a configurable default (e.g. 30s) should be added in Phase 1 implementation. If deferred, add a `// TODO(v0.2): per-request timeout middleware` marker and document the residual risk.
+> **TODO (H3 — request timeout):** Individual handler requests currently have no timeout. A pathological workflow YAML file (e.g. deeply nested, 1 MiB) could cause `planner.Parse` to block a handler goroutine for an extended period. `MaxBytesReader` limits the HTTP body size but does not protect against slow filesystem reads. A per-request timeout middleware (e.g., `http.TimeoutHandler` wrapping the mux, or `context.WithTimeout` in each handler) with a configurable default (e.g. 30s) is **deferred to a follow-up PR**. Implementation should add a `// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3` marker. **Residual risk:** without a per-request timeout, slow filesystem I/O or a large YAML file can block a handler goroutine indefinitely. This is acceptable in v0.1 where the server is not exposed to untrusted clients.
 
 ### Workflow Directory Configuration
 
@@ -481,7 +487,7 @@ A dedicated security RFC will add Bearer token authentication, per-agent API key
 
 ### JSON Input Size Limit
 
-All handlers that read a request body wrap `r.Body` with `http.MaxBytesReader(w, r.Body, 1<<20)` (1 MiB) to prevent memory exhaustion from oversized payloads. Requests exceeding this limit must return `400 BAD_REQUEST`.
+All handlers that read a request body — specifically `POST /api/v1/workflows/run` and `POST /api/v1/agents/register` — wrap `r.Body` with `http.MaxBytesReader(w, r.Body, 1<<20)` (1 MiB) to prevent memory exhaustion from oversized payloads. Requests exceeding this limit must return `400 BAD_REQUEST`.
 
 When the limit is exceeded, `json.Decode` returns an error that wraps `*http.MaxBytesError`, not a `*json.SyntaxError`. Without an explicit `errors.As` check, the error falls through to the generic `500 INTERNAL` path — the opposite of the documented behaviour. The shared body-decoding helper must check for this type **before** the generic decode-error path:
 
@@ -508,11 +514,11 @@ Both are validated against their respective regexes before use in log fields, st
 Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workflow run CRUD.
 
 **Deliverables:**
-1. `internal/server/server.go` — `Server` struct, `New`, `Handler`, `Start`.
+1. `internal/server/server.go` — `Server` struct, `New`, `Handler`, `Start`, minimal `GET /healthz` handler (C-02: satisfies existing `docker-compose.yaml` healthcheck).
 2. `internal/server/types.go` — request/response DTOs with `json:` struct tags (P3 decision).
-3. `internal/server/middleware.go` — `requestIDMiddleware`, `loggingMiddleware` (M2).
+3. `internal/server/middleware.go` — `recoveryMiddleware` (imports `runtime/debug` for `debug.Stack()` — I-04), `requestIDMiddleware`, `loggingMiddleware` (M2).
 4. `internal/server/helpers.go` — `writeJSON`, `writeError`.
-5. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run.
+5. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run, `resolveWorkflowPath` (M-05).
 6. `internal/server/server_test.go` — handler tests using `httptest`.
 
 **Dependencies:** RFC 0001 (state, registry, planner implementations). **New dependency:** `github.com/google/uuid` for server-generated request IDs (`uuid.NewString()` in `requestIDMiddleware`); must be added to `go.mod`. RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
@@ -538,12 +544,13 @@ Summary: Register stub handlers for the two deferred endpoints.
 **Deliverables:**
 1. `internal/server/stub_handlers.go` — logs and cost stubs.
 
-### Phase 4: Wire into main.go + CLI flags (~40 LOC, ~0.5 day)
+### Phase 4: Wire into main.go + CLI flags + Docker fix (~40 LOC, ~0.5 day)
 
-Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into the orchestrator startup sequence (TODO step 11).
+Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into the orchestrator startup sequence (TODO step 11). Update `docker-compose.yaml` so the orchestrator is reachable from agent containers.
 
 **Deliverables:**
 1. Updated `cmd/orchestrator/main.go` — wire server, add `--http-bind`, `--workflows-dir` flags.
+2. Updated `docker-compose.yaml` — pass `--http-bind 0.0.0.0` to the orchestrator service command so that agent containers can reach the REST API over the Docker network. Without this, the default `127.0.0.1` bind makes the orchestrator unreachable from other containers.
 
 **Total estimated scope:** ~420 LOC implementation + tests. 2 days.
 
@@ -551,15 +558,17 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/server/server.go` | New — `Server` struct, `New`, `Handler`, `Start`, route registration |
-| Go orchestrator | `internal/server/types.go` | New — request/response DTOs with `json:` struct tags (P3 decision) |
-| Go orchestrator | `internal/server/middleware.go` | New — `requestIDMiddleware`, `loggingMiddleware` (M2) |
-| Go orchestrator | `internal/server/helpers.go` | New — `writeJSON`, `writeError`, `resolveWorkflowPath` |
-| Go orchestrator | `internal/server/workflow_handlers.go` | New — workflow run CRUD handlers |
+| Go orchestrator | `internal/server/server.go` | New — `Server` struct, `New`, `Handler`, `Start`, route registration, minimal `/healthz` |
+| Go orchestrator | `internal/server/types.go` | New — request/response DTOs with `json:` struct tags (P3 decision); `*time.Time` for nullable timestamps (M-07) |
+| Go orchestrator | `internal/server/middleware.go` | New — `recoveryMiddleware` (with `debug.Stack()`), `requestIDMiddleware`, `loggingMiddleware` |
+| Go orchestrator | `internal/server/helpers.go` | New — `writeJSON`, `writeError` |
+| Go orchestrator | `internal/server/workflow_handlers.go` | New — workflow run CRUD handlers, `resolveWorkflowPath` (security-critical path traversal logic kept with its only caller rather than in generic helpers — review finding M-05) |
 | Go orchestrator | `internal/server/agent_handlers.go` | New — agent registry CRUD handlers |
 | Go orchestrator | `internal/server/stub_handlers.go` | New — `501` stubs for logs and cost endpoints |
 | Go orchestrator | `internal/server/server_test.go` | New — handler tests via `httptest.NewRecorder` |
 | Go orchestrator | `cmd/orchestrator/main.go` | Add `--http-bind`, `--workflows-dir` flags; wire `server.New`; launch in goroutine |
+| Go dependency | `go.mod`, `go.sum` | Add `github.com/google/uuid` (used by `requestIDMiddleware`) |
+| Docker | `docker-compose.yaml` | Pass `--http-bind 0.0.0.0` to orchestrator service command (C-01) |
 
 ## Test Strategy
 
@@ -579,7 +588,7 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 - **Stub endpoints**: `GET /api/v1/executions/any-id/logs` → `501`; `GET /api/v1/cost/summary` → `501`.
 - **Malformed JSON body**: send `{invalid}` to `POST /api/v1/workflows/run` → `400 BAD_REQUEST`.
 - **Empty request body**: send empty body to POST endpoints → `400 BAD_REQUEST`.
-- **Method Not Allowed**: send unsupported methods (e.g. `PUT /api/v1/workflows/run`) → `405`. Go 1.22+ `ServeMux` returns `405 Method Not Allowed` automatically for method-specific patterns; confirm the response uses the JSON error envelope or document that `405` responses are plain text (Go default).
+- **Method Not Allowed**: send unsupported methods (e.g. `PUT /api/v1/workflows/run`) → `405`. Go 1.22+ `ServeMux` returns `405 Method Not Allowed` automatically for method-specific patterns. **Design decision (I-02):** `405` and `404` responses from the router use Go’s default plain-text body, not the JSON error envelope. The JSON envelope applies to application-level errors returned by handlers. This is the pragmatic choice for v0.1 — intercepting and converting router-level rejections adds complexity for minimal benefit. Document this in the handler code with a `// NOTE: 405/404 from ServeMux are plain text (see RFC 0002 I-02)` comment.
 - **Concurrent access**: multiple goroutines hitting endpoints simultaneously to validate the `sync.RWMutex`-backed stores under contention. Run with `-race`.
 - **Race detector**: all tests run with `-race` (already enforced in CI/Makefile).
 - **Build smoke test**: `go build ./cmd/orchestrator` after wiring; `go vet ./internal/server/...`.
@@ -593,7 +602,7 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 3. **Workflow list endpoint URL**: The spec defines `GET /api/v1/workflows/{id}/status` for a single run. Should the run list live at `GET /api/v1/workflows/runs` (resource-oriented) or `GET /api/v1/workflows` (flat)? The spec does not define a list endpoint explicitly.
    > *Use `GET /api/v1/workflows` returning an array of run status objects for v0.1. This can be revised when pagination is added.*
    >
-   > **Naming collision risk (H2):** `GET /api/v1/workflows` currently returns **workflow runs** (execution instances), not **workflow definitions**. When v0.2 adds workflow management endpoints (CRUD for workflow YAML files), this URL will collide. The cleanest migration path is to rename to `GET /api/v1/workflows/runs` (and `DELETE /api/v1/workflows/runs/{id}`) in the same RFC that introduces definition management. Accept the v0.1 naming as-is since no definition endpoints exist yet, but avoid building CLI UX that hard-codes the current path — the Rust CLI should use a named constant for the endpoint URL.
+   > **Naming collision risk (H2):** `GET /api/v1/workflows` currently returns **workflow runs** (execution instances), not **workflow definitions**. When v0.2 adds workflow management endpoints (CRUD for workflow YAML files), this URL will collide. The cleanest migration path is to rename to `GET /api/v1/workflows/runs` (and `DELETE /api/v1/workflows/runs/{id}`) in the same RFC that introduces definition management. Accept the v0.1 naming as-is since no definition endpoints exist yet, but avoid building CLI UX that hard-codes the current path — the Rust CLI should use a named constant for the endpoint URL. Implementation should include a `// TODO(v0.2): rename /api/v1/workflows to /api/v1/workflows/runs when definition endpoints are added` comment in the router registration.
 
 ## Decision / Next Steps
 
