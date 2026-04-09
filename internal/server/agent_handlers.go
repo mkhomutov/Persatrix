@@ -29,10 +29,16 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
 		return
 	}
-	// TODO(v0.2): validate address format (host:port or URI scheme) and enforce
-	// max length. Currently any non-empty string is accepted per RFC 0002 v0.1 scope.
+	// TODO(v0.2): validate address format (host:port or URI scheme).
+	// Currently any non-empty string up to 253 characters is accepted per RFC 0002 v0.1 scope.
 	if req.Address == "" {
 		writeError(w, "BAD_REQUEST", "address is required", http.StatusBadRequest)
+		return
+	}
+	// (PR #16 carry-forward F-01): Enforce max length to prevent registry pollution
+	// and log bloat. 253 aligns with DNS hostname max length (RFC 1035).
+	if len(req.Address) > 253 {
+		writeError(w, "BAD_REQUEST", "address exceeds maximum length of 253 characters", http.StatusBadRequest)
 		return
 	}
 

@@ -8,6 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile.orchestrator
     restart: unless-stopped
+    command: ["--http-bind", "0.0.0.0"]
     ports:
       - "9090:9090"   # gRPC
       - "8080:8080"   # HTTP REST + SSE
