@@ -94,6 +94,7 @@ If we do nothing, the project has a well-tested orchestrator that orchestrates n
 - **`store_get` / `store_set` tools.** Task-scoped key-value store tools are deferred. The four core tools (`file_read`, `file_write`, `shell_exec`, `http_request`) are sufficient for v0.1 workflows.
 - **Config validation.** `agents/validate.py` is a separate concern. This RFC does not implement JSON Schema validation of `agents.yaml`.
 - **Per-task tool restriction.** `TaskConfig.allowed_tools` allows the orchestrator to restrict tools per-task. Enforcing this filter is deferred to v0.2; in v0.1 the agent uses its full configured tool set for every task. (Review-fix D2)
+- **`ResourceLimiter` / `OutputSizeLimiter` stubs.** The existing `agents/tools/sandbox.py` has TODO stubs for `ResourceLimiter` and `OutputSizeLimiter` alongside `PathValidator`. This RFC only implements `PathValidator`; the other two stubs are preserved as-is for v0.2. (PR-review m8)
 
 ## Design / Implementation
 
@@ -118,7 +119,38 @@ proto-python:
 		proto/task.proto
 ```
 
-Dependencies added to `pyproject.toml`: `grpcio >= 1.62`, `grpcio-tools >= 1.62`, `protobuf >= 5.26`.
+Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration) and `anthropic >= 0.40.0` (for LLM client). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
+
+### TaskInputConfig Dataclass
+
+**File:** `agents/base.py`
+
+The existing `TaskInput` dataclass is extended with a `config` field carrying per-task configuration from `TaskConfig` in the proto. A new `TaskInputConfig` dataclass is defined alongside `TaskInput`:
+
+```python
+@dataclass
+class TaskInputConfig:
+    """Per-task configuration overrides from TaskConfig proto message."""
+
+    max_llm_calls: int = 0  # 0 means "use agent default"
+    max_tokens: int = 0     # 0 means "use agent default"
+    # PR-review B2: carry allowed_tools from proto even though enforcement
+    # is deferred to v0.2, so the field is available to wire up later.
+    allowed_tools: list[str] = field(default_factory=list)  # TODO(v0.2): enforce allowed_tools filter in agent handle()
+
+
+@dataclass
+class TaskInput:
+    """Input to an agent for task execution."""
+
+    task_id: str
+    workflow_id: str
+    payload: str
+    context: dict[str, str] = field(default_factory=dict)
+    config: TaskInputConfig = field(default_factory=TaskInputConfig)  # Review-fix D1
+```
+
+The `config` field has a default so that existing tests and callers that construct `TaskInput` without config continue to work.
 
 ### AgentService Servicer
 
@@ -155,6 +187,9 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             config=TaskInputConfig(
                 max_llm_calls=request.config.max_llm_calls or 0,
                 max_tokens=request.config.max_tokens or 0,
+                # PR-review B2: carry allowed_tools even though enforcement
+                # is deferred to v0.2 — avoids silently discarding proto fields.
+                allowed_tools=list(request.config.allowed_tools),
             ),
         )
 
@@ -203,8 +238,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request: task_pb2.HealthCheckRequest,
         context: grpc.aio.ServicerContext,
     ) -> task_pb2.HealthCheckResponse:
+        # PR-review B4: delegate to agent.health_check() so agents can
+        # report unhealthy state (e.g. LLM API key missing, workspace
+        # not mounted) instead of hardcoding SERVING.
+        agent = self._agents.get(request.service) if request.service else None
+        if agent is not None:
+            healthy = await agent.health_check()
+        else:
+            # No specific agent requested — report healthy if any agent is loaded.
+            healthy = len(self._agents) > 0
         return task_pb2.HealthCheckResponse(
-            status=task_pb2.SERVING,
+            status=task_pb2.SERVING if healthy else task_pb2.NOT_SERVING,
         )
 
     async def ExecuteTaskStream(
@@ -217,7 +261,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         context.set_details("Streaming execution not implemented in v0.1")
 ```
 
-The servicer catches all exceptions from `agent.handle()` and converts them to `FAILED` `TaskResponse` — the gRPC call itself never fails with an application error, which prevents the Go Executor from retrying a task that legitimately failed (as opposed to a transient gRPC transport error).
+The servicer catches all exceptions from `agent.handle()` and converts them to `FAILED` `TaskResponse` — the gRPC call itself never fails with an application error, which prevents the Go Executor from retrying a task that legitimately failed (as opposed to a transient gRPC transport error). Agents only return terminal statuses (`COMPLETED` or `FAILED`) in `TaskResponse.status`. The `RUNNING`, `PENDING`, `RETRYING`, and `CANCELLED` statuses are managed by the orchestrator's state store (RFC 0001) and are never set by agents. (PR-review m1)
 
 ### Agent Loading
 
@@ -226,8 +270,15 @@ The servicer catches all exceptions from `agent.handle()` and converts them to `
 ```python
 def load_agent(agent_id: str, config_path: str) -> BaseAgent:
     """Load an agent by ID from YAML config."""
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    # PR-review m5: surface clear errors at startup for operator experience
+    # rather than raw tracebacks from missing files or malformed YAML.
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        raise SystemExit(f"Agent config not found: {config_path}")
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"Invalid YAML in {config_path}: {exc}")
 
     agent_configs = {a["id"]: a for a in config.get("agents", [])}
     if agent_id not in agent_configs:
@@ -299,6 +350,18 @@ async def _execute_tools(self, content: list) -> list[dict]:
                 "type": "tool_result",
                 "tool_use_id": block.id,
                 "content": str(exc),
+                "is_error": True,
+            })
+        # PR-review M2: catch all exceptions, not just PermissionError.
+        # Other tool errors (FileNotFoundError, aiohttp.ClientError, OSError)
+        # should be returned as structured tool-error results so the LLM
+        # can decide how to proceed, rather than bubbling up as an opaque
+        # task failure via the generic except in ExecuteTask.
+        except Exception as exc:
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": f"Tool error ({type(exc).__name__}): {exc}",
                 "is_error": True,
             })
     return results
@@ -433,7 +496,15 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
-        proc.kill()
+        # PR-review M6: send SIGTERM first for graceful cleanup, then
+        # SIGKILL after a short grace period if the process doesn't exit.
+        # Always await proc.wait() to reap the child and avoid zombies.
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
         return ToolResult(success=False, error=f"Command timed out after {timeout}s", error_type="transient")
 
     return ToolResult(
@@ -512,7 +583,24 @@ class PermissionGate:
         return False
 
     def is_domain_allowed(self, domain: str) -> bool:
-        """Check domain against network allow/deny lists."""
+        """Check domain against network allow/deny lists.
+
+        Semantics: allow overrides deny ("default-deny allowlist" pattern).
+        This intentionally differs from PathValidator's "deny always wins"
+        semantics because the standard network config uses deny: ["*"] as
+        a blanket default with specific allow entries (e.g.
+        allow: ["api.anthropic.com"]).  If deny took unconditional
+        precedence, deny: ["*"] would block everything including the
+        LLM API, making the allow list useless.
+
+        PathValidator does not use wildcard denies — its deny list contains
+        specific sensitive paths (.env, .git/**) that must never be accessed
+        regardless of allow patterns.  The two models serve different
+        use cases and the semantic difference is intentional.
+        (PR-review B3: documented rather than changing the logic, because
+        the reviewer's proposed fix would break deny:["*"]+allow:[specific]
+        configs used by all agents in agents.yaml.)
+        """
         net = self._permissions.get("network", {})
         deny = net.get("deny", [])
         allow = net.get("allow", [])
@@ -568,6 +656,19 @@ The `main()` function in `agents/server.py`:
 
 Single-agent-per-process model: Each agent process registers with the orchestrator via `POST /api/v1/agents/register` at startup (or is pre-registered in `docker-compose.yaml` env). The registration includes the agent's `host:port` address for the Executor to dial.
 
+#### Graceful Shutdown Sequence
+
+On `SIGTERM` or `SIGINT` the server follows this sequence (PR-review B5):
+
+1. **Stop accepting new RPCs.** Call `server.stop(grace=30)` — gRPC stops accepting new connections but lets in-flight RPCs finish.
+2. **Wait for in-flight tasks.** In-flight `ExecuteTask` RPCs have up to 30 seconds to complete. If they finish within the window, their responses are sent normally.
+3. **Cancel remaining RPCs.** After the 30-second grace period, any still-running RPCs are cancelled by gRPC. The Go Executor will see a transport error and may retry (subject to RFC 0003's retry policy).
+4. **Call agent shutdown hooks.** Invoke `await agent.shutdown()` for the loaded agent, allowing cleanup of resources (e.g., open aiohttp sessions).
+5. **De-register from orchestrator.** Send `DELETE /api/v1/agents/{id}` to the orchestrator URL (best-effort; failure is logged at WARNING). This prevents the Executor from dispatching new tasks to a stopped agent.
+6. **Exit.**
+
+The 30-second grace period is chosen to match the default `shell_exec` timeout, giving the most common tool operation time to finish. It is configurable via `--shutdown-grace` CLI flag.
+
 ### Agent Self-Registration
 
 After the gRPC server starts, the agent process registers itself with the orchestrator's REST API:
@@ -580,6 +681,11 @@ async def _self_register(self, orchestrator_url: str, agent_id: str, host: str, 
             f"{orchestrator_url}/api/v1/agents/register",
             json={
                 "id": agent_id,
+                # PR-review m7: include name and role to satisfy RFC 0002's
+                # AgentInfo contract (RFC 0001).  Without these the registry
+                # stores an agent with empty Name/Role fields.
+                "name": self.agents[agent_id].name,
+                "role": self.agents[agent_id].role,
                 "address": f"{host}:{port}",
                 "capabilities": self.agents[agent_id].capabilities,
                 # Review-fix P1: "status" removed — RFC 0002 sets
@@ -724,7 +830,8 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 - **Granted permission**: filesystem:read with matching glob → `True`.
 - **Denied permission (default)**: no permission config → `False`.
-- **Deny overrides allow**: path matches both deny and allow → denied.
+- **Deny overrides allow (paths)**: path matches both deny and allow → denied.
+- **Allow overrides deny (network)**: domain matches both deny and allow → allowed (see `is_domain_allowed` docstring for rationale). (PR-review B3)
 - **Command allowlist**: allowed command → `True`; unlisted command → `False`.
 - **Multi-word command allowlist**: `"git diff"` in allowlist, `args=["git", "diff", "f.py"]` → `True`; `args=["git", "push"]` → `False`. (Review-fix B1)
 - **Domain allowlist**: allowed domain → `True`; wildcard deny with specific allow → `True`; deny all → `False`.
@@ -761,7 +868,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 - **`ExecuteTask` agent not found**: unknown agent ID → `NOT_FOUND` gRPC status.
 - **`ExecuteTask` timeout**: blocking agent → `DEADLINE_EXCEEDED`.
 - **`ExecuteTask` agent failure**: agent raises exception → `FAILED` response (not gRPC error).
-- **`HealthCheck`**: → `SERVING`.
+- **`HealthCheck`**: loaded agent healthy → `SERVING`; agent `health_check()` returns `False` → `NOT_SERVING`.
 - **`ExecuteTaskStream`**: → `UNIMPLEMENTED`.
 - **Graceful shutdown**: signal → server stops cleanly.
 - **Agent loading**: valid YAML → correct agent type instantiated; missing agent ID → `ValueError`.
