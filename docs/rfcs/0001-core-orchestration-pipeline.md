@@ -125,10 +125,11 @@ type Store interface {
 
 - `InMemoryStore` backed by `sync.RWMutex` + `map[string]*WorkflowRun`.
 - All methods are goroutine-safe.
-- `CreateRun` generates a UUID if `run.ID` is empty.
+- `CreateRun` generates a UUID if `run.ID` is empty. If a run with the given ID already exists, `CreateRun` returns an error (parallel to the Registry's `ErrAgentAlreadyRegistered` behavior). A corresponding `ErrRunAlreadyExists` sentinel error is defined for this case.
 - `GetRun` returns a deep copy of the `WorkflowRun` to prevent callers from mutating internal state. (Same rationale as the Registry's `List` snapshot — without this, concurrent callers like the Scheduler and REST API could corrupt the store.) Deep copy is implemented via manual field copy; the `Steps` map must be reconstructed with new `StepState` values — a simple map assignment would share the underlying map reference, creating a subtle concurrency hazard.
 - `UpdateStepState` merges into the existing run's `Steps` map. It returns an error if the `runID` does not exist. If the `StepID` is not already present in the run's `Steps` map, it is added — this allows the Scheduler to initialize step state on first execution without requiring pre-population.
 - Like `GetRun`, `ListRuns` returns deep copies of all runs to prevent concurrent mutation — the Scheduler and REST API will both call `ListRuns`, and without copies, callers could corrupt the store's internal state. This is acceptable for the in-memory v0.1 backend, but the interface signature may need pagination parameters (e.g., `offset`/`limit` or cursor-based) when a persistent SQLite backend is added in v0.2+, to avoid unbounded result sets.
+- `UpdateRunStatus` returns an error if the `runID` does not exist (consistent with `UpdateStepState` behavior below).
 - **State transition validation**: `UpdateRunStatus` does not validate state transitions in v0.1 — any transition is allowed (e.g., `Completed → Running` would succeed). Defining and enforcing a valid state machine (e.g., `Pending → Running → {Completed, Failed, Cancelled}`) is deferred to RFC 0003 (Scheduler/Executor), which owns the execution lifecycle and will be the primary caller of `UpdateRunStatus`.
 
 ### Phase 2: InMemoryRegistry
@@ -136,6 +137,8 @@ type Store interface {
 **Package:** `internal/registry/`
 
 Implements the existing `Registry` interface with an in-memory map.
+
+> **Note:** The `AgentStatus` type and its constants (`StatusUnknown`, `StatusHealthy`, `StatusDegraded`, `StatusOffline`) are already defined in `internal/registry/registry.go`. The implementation must reuse these existing constants rather than redefining them.
 
 #### Implementation
 
@@ -165,6 +168,7 @@ The planner is the most complex component in this RFC. It has three responsibili
   The `Parse` method unmarshals into `WorkflowFile`, validates `SchemaVersion`, then returns the inner `Workflow`. Without this wrapper, `yaml.Unmarshal` will fail on the actual fixture files.
 - Validate required fields: `id`, `name`, at least one step, each step has `id`, `agent`, and `input` (all three are required per `workflow.schema.json`).
 - Validate agent ID format: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. This regex requires a minimum of 2 characters, so single-character agent IDs are invalid. This aligns with `agent.schema.json`.
+- Validate `SchemaVersion == "0.1"` and reject unknown versions. This is intentionally stricter than `workflow.schema.json`, which only enforces `"type": "string"` without an enum constraint. The schema validates structure; the planner validates compatibility. This asymmetry means a workflow YAML can pass JSON Schema validation (`make validate`) but still be rejected by the planner if its schema version is unsupported.
 - The existing `Workflow` struct includes a `Trigger` field (parsed from YAML, e.g. `"manual"`). This field is preserved in the parsed struct but not acted upon in v0.1 — trigger evaluation is a Scheduler concern (RFC 0003). The `Trigger` field is not validated by the planner; JSON Schema validation (via `make validate`) is the canonical enforcement point for the `enum: ["manual", "schedule", "event"]` constraint defined in `workflow.schema.json`. The planner treats it as an opaque string.
 - Validate that `depends_on` references point to existing step IDs.
 
@@ -278,7 +282,7 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 | Go orchestrator | `internal/planner/planner.go` | Add `YAMLPlanner` implementation (parse, DAG validate, plan, resolve) |
 | Go orchestrator | `internal/planner/planner_test.go` | New — unit tests (valid workflow, cycles, missing deps, template vars) |
 | Go orchestrator | `cmd/orchestrator/main.go` | Wire state store, registry, planner initialization |
-| Go orchestrator | `go.mod` / `go.sum` | Add `gopkg.in/yaml.v3` dependency |
+| Go orchestrator | `go.mod` / `go.sum` | Add `gopkg.in/yaml.v3` and `github.com/google/uuid` dependencies |
 
 ## Test Strategy
 
@@ -287,11 +291,11 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Cycle detection tests**: no-cycle graph, simple cycle (A→B→A), complex cycle (A→B→C→A), self-referencing step.
 - **Topological sort tests**: linear chain, diamond dependency, fully parallel (no deps), single step.
 - **State store tests**: CRUD operations, concurrent read/write with goroutines, status transitions.
-- **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update.
+- **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update, re-registration flow (register → unregister → register with same ID succeeds).
 - **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
 - **Pipeline integration test**: Call `Parse` → `ValidateDAG` → `Plan` as a single pipeline on `feature-builder.yaml` and assert: no error from any stage, 4 stages with correct step grouping. This end-to-end test catches integration issues between the three stages that unit tests on individual methods would miss.
-- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), and confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d).
+- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d), empty `outputs` map, empty `vars` map, `nil` maps, input with no template references (passthrough), and input that is entirely a single template reference.
 - **Schema version validation**: reject unknown schema versions (e.g., `schema_version: "0.2"`, `schema_version: ""`), confirm `schema_version: "0.1"` is accepted. This covers the behavior resolved in Open Question 2.
 - **YAML file size limit**: reject YAML files exceeding 1 MB (per Security Considerations). This is a security-critical behavior that must have explicit test coverage.
 - **Phase 4 smoke test**: build the binary (`go build ./cmd/orchestrator`) and verify it starts and shuts down cleanly with SIGINT. This validates that the wiring compiles and the component initialization doesn't panic.
