@@ -482,6 +482,76 @@ func TestValidateDAG_NoDeps(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// --- Fixture-based ValidateDAG tests (PR 3a F-02) ---
+
+func TestValidateDAG_FixtureCycleSimple(t *testing.T) {
+	p := newTestPlanner()
+	wf, err := p.Parse(context.Background(), filepath.Join("testdata", "cycle_simple.yaml"))
+	require.NoError(t, err)
+
+	err = p.ValidateDAG(context.Background(), wf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle detected")
+}
+
+func TestValidateDAG_FixtureCycleComplex(t *testing.T) {
+	p := newTestPlanner()
+	wf, err := p.Parse(context.Background(), filepath.Join("testdata", "cycle_complex.yaml"))
+	require.NoError(t, err)
+
+	err = p.ValidateDAG(context.Background(), wf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle detected")
+}
+
+func TestValidateDAG_FixtureSelfReference(t *testing.T) {
+	p := newTestPlanner()
+	// self_reference.yaml has depends_on: ["loop"] on step "loop",
+	// which is now caught by validate() as self-dependency.
+	_, err := p.Parse(context.Background(), filepath.Join("testdata", "self_reference.yaml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "depends_on references itself")
+}
+
+// --- Parse: self-dependency check (PR 3a F-05) ---
+
+func TestParse_SelfDependency(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Self dep"
+  steps:
+    - id: "s1"
+      agent: "planner"
+      input: "hello"
+      depends_on: ["s1"]
+`
+	p := newTestPlanner()
+	_, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "depends_on references itself")
+}
+
+// --- Parse: malformed YAML syntax (PR 3a F-08) ---
+
+func TestParse_MalformedYAML(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Bad YAML
+  steps:
+    - id: "s1"
+      agent: "planner"
+      input: "hello"
+`
+	p := newTestPlanner()
+	_, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal YAML")
+}
+
 // --- Plan tests ---
 
 func TestPlan_LinearChain(t *testing.T) {

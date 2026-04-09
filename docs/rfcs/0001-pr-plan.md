@@ -231,10 +231,46 @@ Actionable follow-ups for **PR 3b** or subsequent PRs:
 
 #### PR checklist
 
-- [ ] `go test ./internal/planner/... -v -race -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `stepIDPattern` reused from PR 3a (no duplication)
-- [ ] Total PR ≤ 500 lines
+- [x] `go test ./internal/planner/... -v -cover` passes (62/62, 98.8% coverage)
+- [x] Coverage ≥ 80% (achieved: 98.8%)
+- [x] `stepIDPattern` reused from PR 3a (no duplication)
+- [x] Total PR: 500 lines (at limit)
+- [x] `go vet ./internal/planner/...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] All internal tests pass (state 98.4%, registry 100%, planner 98.8%)
+
+> **Note**: `-race` requires CGO (unavailable on Windows dev environment). CI (Linux) validates with `-race`.
+
+#### Post-merge review findings (PR #9)
+
+PR #9 was submitted as ~480 lines (79 `planner.go` new + 339 `resolve_test.go` + 62 carry-forward tests in `planner_test.go`), within the 500-line limit. Full review: [`docs/pr-reviews/pr-009-deep-review.md`](../../docs/pr-reviews/pr-009-deep-review.md).
+
+All 4 carry-forward items from PR #8 were addressed:
+
+| PR #8 Finding | Status |
+|--------------|--------|
+| F-01: Regex divergence comment | ✅ Resolved — comment at `planner.go` L27–31 |
+| F-02: Unused testdata fixtures | ✅ Resolved — 3 fixture-based tests + `cycle_complex.yaml` fixed |
+| F-05: Self-dependency check | ✅ Resolved — check in `validate()` + `TestParse_SelfDependency` |
+| F-08: Malformed YAML test | ✅ Resolved — `TestParse_MalformedYAML` added |
+
+Post-review fix commit addressed F-01 through F-04 from PR #9 review:
+
+| Finding | Severity | Action | Disposition |
+|---------|----------|--------|-------------|
+| F-01: godoc capture group numbering off by one | Low | Resolved naturally by F-03 non-capturing group change | ✅ Fixed |
+| F-02: Dead `matchedRanges` allocation and unused `warnSuspicious` parameter | Low | Removed allocation, removed unused `_ [][2]int` parameter | ✅ Fixed |
+| F-03: `stepIDPattern` capturing group inflates `templateRegex` to 4 groups | Medium | Changed to non-capturing `(?:...)` — reduces to 3 capture groups, eliminates unused group | ✅ Fixed |
+| F-04: Test case name "no spaces" misleading | Low | Renamed to "hyphen in variable name" — passthrough is due to hyphen not matching `[a-z_][a-z0-9_]*` | ✅ Fixed |
+
+Actionable follow-ups for **PR 5 (wiring)** or later:
+
+| Finding | Severity | Action | Disposition |
+|---------|----------|--------|-------------|
+| F-01: No nil-logger guard in `ResolveInputs` | Medium | Add `if logger == nil { logger = zap.NewNop() }` guard + test (inconsistent with `NewYAMLPlanner`, `NewInMemoryStore`, `NewInMemoryRegistry`) | Address in PR 5 |
+| F-02: Step ID missing from resolve error messages | Low | Add `step.ID` to error format strings for executor-level debugging | Address in PR 5 or defer |
+| F-03: No test for adjacent templates (`{{ a }}{{ b }}`) | Low | Add test to verify `lastEnd` index tracking with zero-length literal segments | Address in PR 5 or defer |
+| F-04: No test for empty-string substitution value | Low | Add test for `outputs[k] = ""` resolving cleanly | Address in PR 5 or defer |
 
 ---
 
@@ -306,5 +342,6 @@ Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 | PR 2 review findings need follow-up | Medium: no agent ID validation (F-01, defer to RFC 0002). Low: `cap` builtin shadow (F-02), nil/empty slice inconsistency (F-03), no `AgentStatus.String()` (F-05). Tracked in PR plan. |
 | PR 3a (planner) exceeds 500 lines | **Resolved**: PR #8 submitted at 1,071 lines; size waiver accepted (single-package, 97.7% coverage, 143 lines testdata YAML). See [review](../../docs/pr-reviews/pr-008-planner-yaml-review.md). |
 | PR 3a review findings need follow-up | Medium: unused testdata fixtures (F-02, address in PR 3b), regex comment (F-01, PR 3b). Low: self-dep check (F-05), malformed YAML test (F-08). Tracked in PR plan. |
+| PR 3b review findings need follow-up | Medium: nil-logger guard in `ResolveInputs` (F-01, address in PR 5). Low: step ID in error messages (F-02), adjacent template test (F-03), empty substitution test (F-04). Tracked in PR plan. |
 | `UpdateRunStatus` has no timestamp management | Design gap documented for RFC 0003 — Scheduler will need `UpdateRun`/`PatchRun` or expanded `UpdateRunStatus` signature |
 | `-race` flag requires CGO on Windows | CI (Linux) runs `-race`; local Windows testing uses `-cover` only. Concurrency correctness verified via code inspection and CI. |
