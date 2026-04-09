@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **5 PRs**, one per phase. Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
+RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **6 PRs** (one per phase, with the scheduler phase split into 3a/3b per review finding B-05). Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
 > **Estimate calibration**: RFC 0001 PRs consistently exceeded estimates by 73–138%. Sizes in this plan are calibrated to ~1.7× of naive estimates.
 
@@ -70,7 +70,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - `Executor` interface with `ExecuteTask(ctx, ExecuteRequest) (*ExecuteResult, error)` and `Close() error`.
 - `GRPCExecutor` creates a per-task gRPC connection (no pooling in v0.1). `// TODO(v0.2): connection pooling` comment.
 - Retry loop with exponential backoff: `100ms * 2^attempt`, max 3 retries.
-- `isTransient` classifies gRPC status codes: `Unavailable`, `DeadlineExceeded`, `ResourceExhausted`, `Aborted` → transient; all others → permanent.
+- `isTransient` classifies gRPC status codes: `Unavailable`, `ResourceExhausted`, `Aborted` → transient; `DeadlineExceeded` and all others → permanent (review S-04: retrying after timeout with the same timeout is unlikely to succeed).
 - Functional options: `WithTimeout(d)`, `WithMaxRetries(n)`.
 - `grpc.WithTransportCredentials(insecure.NewCredentials())` with `// TODO(security): enable mTLS` comment.
 - Agent health status check before dial: `StatusHealthy` required, else error.
@@ -98,34 +98,33 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ---
 
-### PR 3: `feature/v01-scheduler` — WorkflowScheduler
+### PR 3a: `feature/v01-scheduler-core` — WorkflowScheduler Core
 
 **Depends on**: PR 2 merged (Executor interface), PR 4 merged (`SetRunTimestamps`, `RunRetrying`)
-**Branch**: `feature/v01-scheduler`
-**Estimated size**: ~600–900 lines (implementation + tests)
+**Branch**: `feature/v01-scheduler-core`
+**Estimated size**: ~400–550 lines (implementation + core tests)
 
-> **Note**: If this PR exceeds 500 lines, the step-level execution and template resolution tests can be split into a follow-up PR.
+> **Note (review B-05)**: RFC 0001 PRs consistently exceeded estimates by 73–138%. An original single-PR estimate of 600–900 lines would likely land at 1000–1200 lines, well above the 500-line limit. Pre-splitting into 3a/3b is the default plan (not a fallback), mirroring RFC 0001’s successful PR 3a/3b split.
 
 #### Scope
 
 | File | Change |
 |------|--------|
-| `internal/scheduler/scheduler.go` | Replace TODO stubs — `Scheduler` interface, `WorkflowScheduler`, polling loop, stage/step execution, outputs map with mutex, state transitions |
-| `internal/scheduler/scheduler_test.go` | New — unit tests with mock Executor, Store, Planner |
+| `internal/scheduler/scheduler.go` | Replace TODO stubs — `Scheduler` interface, `WorkflowScheduler`, polling loop, stage execution (parallel fan-out/barrier), `executeRun`, `failRun`, outputs map with mutex, state transitions |
+| `internal/scheduler/scheduler_test.go` | Core tests: single-step e2e, multi-stage sequential, parallel stage, step failure, poll loop, graceful shutdown, concurrent run limit, empty poll, parse failure, DAG failure |
 
 #### Key implementation details
 
 - `Scheduler` interface with `Run(ctx) error`.
 - `WorkflowScheduler` constructor takes `store`, `registry`, `planner`, `executor`, `logger`, `workflowsDir`.
 - Polling loop: `time.Ticker` with configurable `pollInterval` (default 1s).
-- Semaphore for max concurrent runs (default 10): `chan struct{}`.
+- Semaphore for max concurrent runs (default 10): `chan struct{}`. Acquisition inside spawned goroutine (review S-07) to avoid blocking the polling loop.
 - `resolveWorkflowPath`: simple `filepath.Join(workflowsDir, id+".yaml")` — no traversal check (pre-validated by REST API).
 - `executeRun`: Parse → ValidateDAG → Plan → stages loop → state transitions.
-- `executeStage`: `sync.WaitGroup` + error channel for parallel fan-out/barrier.
-- `outputs` map protected by `sync.Mutex` for concurrent step writes.
-- `executeStep`: `planner.ResolveInputs` → `executor.ExecuteTask` → update `StepState`.
+- `executeStage`: `sync.WaitGroup` + `sync.Mutex` + error channel for parallel fan-out/barrier. Mutex protects `outputs` map writes (review B-02).
+- `executeStep`: `planner.ResolveInputs` → `executor.ExecuteTask` → update `StepState`. All `UpdateStepState` errors logged (review B-03).
 - All steps execute unconditionally in v0.1. `// TODO(v0.2): evaluate step conditions` comment.
-- `failRun` helper: sets `RunFailed` + error message + `FinishedAt`.
+- `failRun` helper: sets `RunFailed` + error message + `FinishedAt` via `SetRunTimestamps`.
 
 #### Tests
 
@@ -133,8 +132,6 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **Multi-stage sequential**: 3 stages → correct order.
 - **Parallel stage**: 2 concurrent steps → both dispatched.
 - **Step failure fails run**: executor error → `RunFailed`.
-- **Template resolution**: `{{ user_request }}` and `{{ steps.<id>.output }}` resolved.
-- **Resolution failure**: missing var → `RunFailed`.
 - **Poll loop**: pending run picked up within 2× interval.
 - **Graceful shutdown**: cancel ctx → `context.Canceled`.
 - **Concurrent run limit**: excess runs queued.
@@ -153,27 +150,55 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ---
 
+### PR 3b: `feature/v01-scheduler-templates` — Step Execution & Template Resolution Tests
+
+**Depends on**: PR 3a merged
+**Branch**: `feature/v01-scheduler-templates`
+**Estimated size**: ~200–350 lines (additional tests + any helper refinements)
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/scheduler/scheduler_test.go` | Extended — template resolution tests, resolution failure tests, step-level state transition verification |
+
+#### Tests
+
+- **Template resolution**: `{{ user_request }}` and `{{ steps.<id>.output }}` resolved.
+- **Resolution failure**: missing var → `RunFailed`.
+- **Step state transitions**: verify `StepState` progression through `Running` → `Completed` and `Running` → `Failed`.
+- **Multi-stage template chaining**: output from stage N used as input in stage N+1.
+- Race detector (`-race`).
+
+#### PR checklist
+
+- [ ] `go test ./internal/scheduler/... -v -cover` passes
+- [ ] Combined coverage (3a + 3b) ≥ 80%
+- [ ] `go vet ./internal/scheduler/...` clean
+
+---
+
 ### PR 4: `feature/v01-state-extension` — Store Extension + RunRetrying
 
 **Depends on**: RFC 0001 (existing Store implementation) — independent of PRs 2–3
 **Branch**: `feature/v01-state-extension`
 **Estimated size**: ~200–300 lines (implementation + tests)
 
-> **Note**: PR 3 (scheduler) has a compile-time dependency on `SetRunTimestamps` and
-> `RunRetrying` introduced here. PR 4 must merge **before** PR 3, not after.
+> **Note**: PR 3a (scheduler core) has a compile-time dependency on `SetRunTimestamps` and
+> `RunRetrying` introduced here. PR 4 must merge **before** PR 3a, not after.
 
 #### Scope
 
 | File | Change |
 |------|--------|
-| `internal/state/state.go` | Add `RunRetrying RunStatus = 5`, `SetRunTimestamps` to `Store` interface, implement in `InMemoryStore`, add `String()` method on `RunStatus` |
+| `internal/state/state.go` | Add `RunRetrying RunStatus = 5`, `SetRunTimestamps` to `Store` interface, implement in `InMemoryStore`, extend existing `RunStatus.String()` with `RunRetrying` case |
 | `internal/state/state_test.go` | Extended — tests for `SetRunTimestamps`, `RunRetrying`, `String()` |
 
 #### Key implementation details
 
 - `RunRetrying RunStatus = 5` — explicit integer, aligned with `proto/task.proto` `RETRYING = 5`.
 - `SetRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` — nil pointer means "leave unchanged".
-- `RunStatus.String()` method: maps each constant to lowercase string (`"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`, `"retrying"`).
+- `RunStatus.String()` method: extend the existing method (covers values 0–4) with `case RunRetrying: return "retrying"`. Do NOT add a new method — one already exists in `state.go`.
 - Deep-copy semantics maintained for timestamp fields.
 
 #### Tests
@@ -197,7 +222,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ### PR 5: `feature/v01-scheduler-wiring` — Wire into main.go
 
-**Depends on**: PRs 1–4 merged
+**Depends on**: PRs 1–4 merged. **Prerequisite (review B-01):** The `--workflows-dir` flag must exist in `main.go`. This flag is specified in RFC 0002 Phase 4 (wiring). If the RFC 0002 wiring PR has not merged by the time this PR is ready, declare `--workflows-dir` (default: `"workflows/"`) directly in this PR with a comment: `// NOTE: may be superseded by RFC 0002 wiring PR if it merges first`.
 **Branch**: `feature/v01-scheduler-wiring`
 **Estimated size**: ~100–150 lines
 
@@ -231,7 +256,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| PR 3 (scheduler) exceeds 500 lines | Review burden | Split step-level tests into follow-up PR |
+| PR 3 (scheduler) exceeds 500 lines | Review burden | Pre-split into PR 3a (core) + PR 3b (template tests) per B-05 |
 | Proto generation toolchain issues | Blocks all PRs | PR 1 validates toolchain early; generated files committed |
 | gRPC dependency tree large | `go.mod` bloat | Acceptable for v0.1; prune unused transitive deps in cleanup PR |
 | Mock gRPC server complexity | Test maintenance | Use `bufconn` for in-process server; keep mock implementations minimal |
@@ -248,7 +273,9 @@ PR 1 (proto-gen)       PR 4 (state-extension)
 PR 2 (executor)             │
     │                       │
     ▼                       ▼
-PR 3 (scheduler) ──────────────────────► PR 5 (wiring)
+PR 3a (scheduler-core) ──► PR 3b (scheduler-templates) ──► PR 5 (wiring)
 ```
 
-PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently. However, PR 3 (scheduler) depends on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). PR 5 (wiring) depends on all prior PRs.
+PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently. However, PR 3a (scheduler core) depends on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). PR 3b extends PR 3a with template resolution tests. PR 5 (wiring) depends on all prior PRs.
+
+> **Recommended implementation order (review S-08):** PR numbering does not imply execution order. The recommended merge sequence is: **PR 1 ‖ PR 4** (parallel) → **PR 2** → **PR 3a** → **PR 3b** → **PR 5**. PR 4 must merge before PR 3a despite its higher number.

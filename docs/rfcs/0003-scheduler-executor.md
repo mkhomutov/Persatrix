@@ -78,7 +78,7 @@ If we do nothing, the system remains non-functional from the user's perspective 
 - **Circuit breaker.** `internal/resilience/` is a stub. Basic retry logic is included inline in the Executor; circuit breaker integration is deferred.
 - **Dead letter queue.** Failed tasks are recorded in the state store but not queued for retry/inspection beyond the inline retry loop.
 - **Cost tracking.** Token usage from `TaskResponse.metadata` is logged but not aggregated. `internal/cost/` integration is deferred.
-- **Health check polling.** The Executor calls `HealthCheck` only as a connection verification before task dispatch, not as a periodic background poll.
+- **Health check polling.** The Executor does NOT call the `HealthCheck` RPC in v0.1. Agent health is determined by the cached `Status` field in the Registry (set at registration time). If an agent crashes after registration, its status remains `StatusHealthy` until manually updated — the Executor relies on gRPC connection errors + retry logic to handle unavailable agents. Periodic health polling or pre-dispatch `HealthCheck` calls are deferred to a future RFC.
 - **Connection pooling.** v0.1 creates a new gRPC connection per task dispatch. Connection reuse/pooling is deferred to a performance optimization RFC.
 - **Approval gates.** `approval_required` and `approval_timeout` step fields are not evaluated.
 - **State transition validation.** `UpdateRunStatus` accepts any transition in v0.1 (per RFC 0001). A formal state machine is deferred.
@@ -184,6 +184,17 @@ func (s *WorkflowScheduler) Run(ctx context.Context) error {
 
 The maximum concurrent workflow runs is capped via a semaphore (`chan struct{}`), defaulting to 10. This prevents a burst of pending runs from overwhelming the executor or agents.
 
+**Semaphore acquisition pattern:** The semaphore is acquired **inside** the spawned goroutine, not in `pollAndExecute`. This ensures the polling loop is never blocked by a full semaphore — new pending runs are still discovered on schedule, they simply wait for a semaphore slot in their own goroutine:
+
+```go
+// Inside pollAndExecute, for each pending run:
+go func(r *state.WorkflowRun) {
+    s.sem <- struct{}{}        // block here, not in pollAndExecute
+    defer func() { <-s.sem }() // release slot when done
+    s.executeRun(ctx, r)
+}(run)
+```
+
 > **Note:** The polling model is chosen for v0.1 simplicity. A future RFC may replace polling with an event-driven approach (e.g., the REST API handler signals the scheduler directly via a channel when a new run is created). The `Store` interface would need a `Watch` method or the server would push to a scheduler channel.
 
 #### Run Execution Flow
@@ -194,6 +205,12 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
     //    The workflow file path is resolved using the same workflowsDir
     //    that the server uses. The scheduler receives workflowsDir at construction.
     workflowPath := s.resolveWorkflowPath(run.WorkflowID)
+    // NOTE(S-05): The workflow is re-parsed from disk at execution time, not
+    // cached from submission. This means a modified or deleted workflow file
+    // between submission and execution produces different behavior than what
+    // was validated at submission (TOCTOU). Acceptable for v0.1 in-memory
+    // store; consider caching the parsed Workflow in WorkflowRun at submission
+    // time in v0.2 for consistency.
     workflow, err := s.planner.Parse(ctx, workflowPath)
     if err != nil {
         s.failRun(ctx, run.ID, "workflow parse error: "+err.Error())
@@ -219,6 +236,11 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
         return
     }
 
+    // TODO(S-09): validate that all {{ variable }} templates in the workflow have
+    // corresponding entries in run.Inputs. Fail early with a descriptive
+    // "missing required workflow inputs" error rather than letting ResolveInputs
+    // produce a confusing "unresolved variable reference" error per-step.
+
     // 5. Execute stages sequentially.
     outputs := make(map[string]string) // step ID → output
     for stageIdx, stage := range plan.Stages {
@@ -228,17 +250,22 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
         }
     }
 
-    // 6. Transition to Completed.
+    // 6. Transition to Completed and record FinishedAt.
     if err := s.store.UpdateRunStatus(ctx, run.ID, state.RunCompleted); err != nil {
         s.logger.Error("failed to update run status to completed",
             zap.String("run_id", run.ID), zap.Error(err))
     }
     now := time.Now()
-    _ = now // TODO(phase 4): use SetRunTimestamps to record FinishedAt
+    if err := s.store.SetRunTimestamps(ctx, run.ID, nil, &now); err != nil {
+        s.logger.Error("failed to set run finished timestamp",
+            zap.String("run_id", run.ID), zap.Error(err))
+    }
 }
 ```
 
-> **Note (F-05 from RFC 0001 review):** The current `Store` interface has no method to set `WorkflowRun.FinishedAt`. This RFC adds `UpdateRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` to the `Store` interface, or extends `UpdateRunStatus` with optional timestamp parameters. See Phase 1 for details.
+> **Note (F-05 from RFC 0001 review):** The current `Store` interface has no method to set `WorkflowRun.FinishedAt`. This RFC adds `SetRunTimestamps(ctx, runID, startedAt, finishedAt *time.Time)` to the `Store` interface. See Phase 4 for details. The `failRun` helper (not shown above) must also call `SetRunTimestamps` to record `FinishedAt` on failure.
+>
+> **Per-run timeout (review S-02):** This design enforces per-step timeouts via `executor.timeout` but does not enforce a per-run timeout. A workflow with many stages could run indefinitely. For v0.1 this is acceptable given single-node, low-volume operation. v0.2 should add a `maxRunDuration` option to `WorkflowScheduler` (recommended default: 30 minutes) using `context.WithTimeout` wrapping the entire `executeRun` call.
 
 #### Stage Execution (Parallel Fan-Out / Barrier)
 
@@ -252,14 +279,17 @@ func (s *WorkflowScheduler) executeStage(
     steps []planner.Step,
     outputs map[string]string,
 ) error {
-    var wg sync.WaitGroup
+    var (
+        wg sync.WaitGroup
+        mu sync.Mutex // protects concurrent writes to outputs map
+    )
     errCh := make(chan error, len(steps))
 
     for _, step := range steps {
         wg.Add(1)
         go func(st planner.Step) {
             defer wg.Done()
-            if err := s.executeStep(ctx, run, st, outputs); err != nil {
+            if err := s.executeStep(ctx, run, st, outputs, &mu); err != nil {
                 errCh <- fmt.Errorf("step %s: %w", st.ID, err)
             }
         }(step)
@@ -282,7 +312,7 @@ func (s *WorkflowScheduler) executeStage(
 }
 ```
 
-> **Concurrency safety for `outputs` map:** The `outputs` map is written by `executeStep` after each step completes. Steps within a stage execute in parallel, but each step writes a **unique** key (its own step ID). Concurrent writes to distinct keys in a Go map are still a data race. The fix is to use a `sync.Mutex` (not `sync.RWMutex` — writes only during execution, reads only after the stage barrier) protecting `outputs` writes, or collect results via a result channel and merge after the barrier.
+> **Concurrency safety for `outputs` map:** The `outputs` map is written by `executeStep` after each step completes. Steps within a stage execute in parallel, but each step writes a **unique** key (its own step ID). Concurrent writes to distinct keys in a Go map are still a data race. A `sync.Mutex` is declared in `executeStage` and passed to `executeStep` to protect all writes. `sync.RWMutex` is unnecessary — writes occur during execution, reads only after the stage barrier.
 
 #### Step Execution
 
@@ -292,13 +322,17 @@ func (s *WorkflowScheduler) executeStep(
     run *state.WorkflowRun,
     step planner.Step,
     outputs map[string]string,
+    mu *sync.Mutex, // protects outputs map writes
 ) error {
     // 1. Update step state to Running.
-    s.store.UpdateStepState(ctx, run.ID, state.StepState{
+    if err := s.store.UpdateStepState(ctx, run.ID, state.StepState{
         StepID:    step.ID,
         Status:    state.RunRunning,
         StartedAt: time.Now(),
-    })
+    }); err != nil {
+        s.logger.Error("failed to set step state to running",
+            zap.String("run_id", run.ID), zap.String("step_id", step.ID), zap.Error(err))
+    }
 
     // 2. Resolve template variables in step input.
     //    Prerequisite: WorkflowRun.Inputs must be populated by RFC 0002's
@@ -306,12 +340,15 @@ func (s *WorkflowScheduler) executeStep(
     //    If Inputs is nil, ResolveInputs will fail on {{ user_request }} templates.
     resolvedInput, err := planner.ResolveInputs(step, outputs, run.Inputs, s.logger)
     if err != nil {
-        s.store.UpdateStepState(ctx, run.ID, state.StepState{
+        if storeErr := s.store.UpdateStepState(ctx, run.ID, state.StepState{
             StepID:     step.ID,
             Status:     state.RunFailed,
             Error:      err.Error(),
             FinishedAt: time.Now(),
-        })
+        }); storeErr != nil {
+            s.logger.Error("failed to set step state to failed",
+                zap.String("run_id", run.ID), zap.String("step_id", step.ID), zap.Error(storeErr))
+        }
         return fmt.Errorf("resolve inputs: %w", err)
     }
 
@@ -324,23 +361,31 @@ func (s *WorkflowScheduler) executeStep(
         Context:    outputs, // prior step outputs as context
     })
     if err != nil {
-        s.store.UpdateStepState(ctx, run.ID, state.StepState{
+        if storeErr := s.store.UpdateStepState(ctx, run.ID, state.StepState{
             StepID:     step.ID,
             Status:     state.RunFailed,
             Error:      err.Error(),
             FinishedAt: time.Now(),
-        })
+        }); storeErr != nil {
+            s.logger.Error("failed to set step state to failed",
+                zap.String("run_id", run.ID), zap.String("step_id", step.ID), zap.Error(storeErr))
+        }
         return fmt.Errorf("execute task: %w", err)
     }
 
     // 4. Store output and update step state to Completed.
-    outputs[step.ID] = result.Output // protected by mutex (see stage execution)
-    s.store.UpdateStepState(ctx, run.ID, state.StepState{
+    mu.Lock()
+    outputs[step.ID] = result.Output
+    mu.Unlock()
+    if err := s.store.UpdateStepState(ctx, run.ID, state.StepState{
         StepID:     step.ID,
         Status:     state.RunCompleted,
         Output:     result.Output,
         FinishedAt: time.Now(),
-    })
+    }); err != nil {
+        s.logger.Error("failed to set step state to completed",
+            zap.String("run_id", run.ID), zap.String("step_id", step.ID), zap.Error(err))
+    }
 
     s.logger.Info("step completed",
         zap.String("run_id", run.ID),
@@ -355,6 +400,8 @@ func (s *WorkflowScheduler) executeStep(
 ### Executor Interface
 
 **Package:** `internal/executor/`
+
+> **Design decision (review B-04):** Go convention places interfaces in the consumer package, not the implementor package. The `Scheduler` consumes `Executor`, so the interface could live in `internal/scheduler/`. For v0.1 simplicity, the interface is co-located with its sole implementation in `internal/executor/`. This avoids creating a separate types package for a single interface. If a second implementation is added (e.g., `MockExecutor` in integration tests, `LocalExecutor` for in-process agents), the interface and request/result types should be extracted to `internal/executor/types.go` (no gRPC imports) or moved to the consumer package. `// TODO(v0.2): consider moving Executor interface to consumer package if multiple implementations emerge`.
 
 ```go
 // Executor dispatches tasks to agents and returns results.
@@ -453,8 +500,9 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
         if err == nil {
             break
         }
-        // Classify gRPC error: retry on Unavailable, DeadlineExceeded (transient);
-        // fail immediately on InvalidArgument, NotFound, PermissionDenied (permanent).
+        // Classify gRPC error: retry on Unavailable, ResourceExhausted, Aborted
+        // (transient); fail immediately on DeadlineExceeded, InvalidArgument,
+        // NotFound, PermissionDenied (permanent). See §Transient Error Classification.
         if !isTransient(err) {
             return nil, fmt.Errorf("permanent gRPC error from agent %q: %w", agent.ID, err)
         }
@@ -505,7 +553,7 @@ func isTransient(err error) bool {
         return false
     }
     switch st.Code() {
-    case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted:
+    case codes.Unavailable, codes.ResourceExhausted, codes.Aborted:
         return true
     default:
         return false
@@ -513,7 +561,9 @@ func isTransient(err error) bool {
 }
 ```
 
-`Unavailable` covers agent restart, network blip, and load-balancer draining. `DeadlineExceeded` covers slow agent responses that may succeed on retry. `ResourceExhausted` covers agent-side rate limiting. `Aborted` covers transient concurrency conflicts. All other codes (`InvalidArgument`, `NotFound`, `PermissionDenied`, `Internal`, `Unimplemented`) are treated as permanent.
+`Unavailable` covers agent restart, network blip, and load-balancer draining. `ResourceExhausted` covers agent-side rate limiting. `Aborted` covers transient concurrency conflicts. All other codes (`InvalidArgument`, `NotFound`, `PermissionDenied`, `Internal`, `Unimplemented`) are treated as permanent.
+
+> **Design decision (review S-04):** `DeadlineExceeded` is **not** classified as transient. When a task exceeds its timeout, retrying with the same timeout is unlikely to succeed — the agent is presumably still processing a similarly slow request. The gRPC `DeadlineExceeded` code can come from a client-side context deadline or server-side timeout; neither case benefits from retry. `Unavailable` (network blip) is clearly transient; `DeadlineExceeded` is effectively permanent for the same input and timeout configuration.
 
 ### gRPC Proto Compilation
 
@@ -554,7 +604,9 @@ RFC 0001 reserved `RunStatus = 5` for alignment with `proto/task.proto`'s `TaskS
 RunRetrying RunStatus = 5
 ```
 
-This value is set on a step's `StepState.Status` when the Executor retries a transient gRPC failure. It is transitional — the step moves to `RunCompleted` on success or `RunFailed` when retries are exhausted. The run-level status never becomes `RunRetrying`; it remains `RunRunning` during step retries.
+This value is reserved for step-level retry observability. In v0.1, the Executor's retry loop is internal to `GRPCExecutor.ExecuteTask` — it returns either a final success or a final error, so the Scheduler never observes intermediate retry states. No code path in v0.1 sets `RunRetrying` on a `StepState.Status`. The constant is defined now for proto alignment (`RETRYING = 5`) and will be set by a future retry-observability enhancement (e.g., a callback/hook from the Executor reporting retry attempts, allowing the Scheduler to set step status to `RunRetrying` between attempts). The run-level status never becomes `RunRetrying`; it remains `RunRunning` during step retries.
+
+> `// TODO(v0.2): hook Executor retry attempts into StepState to set RunRetrying between retries`
 
 > **Spec reconciliation:** `proto/task.proto` defines `RETRYING = 5`, Go now has `RunRetrying = 5`. The inline proto in `ai-agents-orchestration-spec.md` §4.3 omits `RETRYING` — it should be updated in a follow-up documentation PR.
 
@@ -579,7 +631,7 @@ Update `cmd/orchestrator/main.go` to:
 1. Generate gRPC stubs (build-time, via `make proto`).
 2. Create `executor.NewGRPCExecutor(reg, logger)`.
 3. `defer exec.Close()` — no-op in v0.1 (no persistent connections), wired for interface compliance and forward compatibility with connection pooling.
-4. Create `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, workflowsDir)` with `workflowsDir` from the existing `--workflows-dir` flag.
+4. Create `scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, workflowsDir)` with `workflowsDir` from the `--workflows-dir` flag introduced by RFC 0002's wiring PR. If RFC 0002 wiring has not yet merged, this PR must declare the `--workflows-dir` flag itself (default: `"workflows/"`).
 5. Launch `sched.Run(ctx)` in a goroutine with error propagation via `cancel()`.
 6. Log `"scheduler started"`.
 
@@ -650,8 +702,10 @@ Summary: Implement `WorkflowScheduler` with polling loop, parallel stage executi
 Summary: Extend `Store` interface with `SetRunTimestamps`, add `RunRetrying` status, implement in `InMemoryStore`.
 
 **Deliverables:**
-1. `internal/state/state.go` — add `SetRunTimestamps` method, `RunRetrying` constant.
+1. `internal/state/state.go` — add `SetRunTimestamps` method, `RunRetrying` constant, extend existing `RunStatus.String()` with `RunRetrying` case.
 2. `internal/state/state_test.go` — tests for new method and status.
+
+> **Note (M-09):** `RunStatus.String()` already exists in `state.go` (covers values 0–4). Phase 4 only needs to add the `case RunRetrying` branch — not a new method.
 
 **Dependencies:** RFC 0001 (existing Store implementation). Independent of Phases 2–3; must complete before Phase 3 (scheduler needs `SetRunTimestamps` and `RunRetrying`).
 
