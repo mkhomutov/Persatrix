@@ -97,11 +97,11 @@ type StepState struct {
 
 type RunStatus int
 const (
-    RunPending RunStatus = iota
-    RunRunning
-    RunCompleted
-    RunFailed
-    RunCancelled
+    RunPending   RunStatus = 0
+    RunRunning   RunStatus = 1
+    RunCompleted RunStatus = 2
+    RunFailed    RunStatus = 3
+    RunCancelled RunStatus = 4
 )
 ```
 
@@ -121,6 +121,8 @@ type Store interface {
     DeleteRun(ctx context.Context, runID string) error
 }
 ```
+
+> **Note on `context.Context`:** All interface methods accept `ctx context.Context` for forward compatibility with the SQLite backend planned in v0.2, where context cancellation and timeouts become meaningful for I/O operations. The in-memory v0.1 implementations may reasonably ignore the context parameter — adding `ctx.Done()` checks to purely in-memory operations would be unnecessary boilerplate. This applies equally to the `Registry` interface in Phase 2.
 
 #### Implementation
 
@@ -213,6 +215,17 @@ The planner is the most complex component in this RFC. It has three responsibili
 - **Output lookup key**: `ResolveInputs` resolves `{{ steps.<id>.output }}` by looking up `outputs[<id>]` where `<id>` is the step's `ID` field, not `OutputKey`. The `OutputKey` field is a downstream concern for how the Scheduler stores results externally; the `outputs` map parameter is keyed by step ID. In `feature-builder.yaml`, `id` and `output_key` happen to have the same values (e.g., both `"plan"`), which masks this distinction — implementations must use `Step.ID` as the canonical key.
 - **Interface placement**: `ResolveInputs` is an exported standalone function on `YAMLPlanner`, not a method on the `Planner` interface. It is a utility the Scheduler/Executor will call at runtime and does not fit the parse/plan/validate lifecycle that the interface represents. This avoids premature interface expansion.
 
+#### ResolveInputs Signature
+
+```go
+// ResolveInputs substitutes template variables in step.Input with actual values.
+// It resolves {{ steps.<id>.output }} from the outputs map and {{ variable }}
+// from the vars map. Returns the resolved input string or an error if any
+// referenced step ID or variable is missing. Resolution is single-pass —
+// substituted values are not re-scanned for template patterns.
+func (p *YAMLPlanner) ResolveInputs(step Step, outputs map[string]string, vars map[string]string) (string, error)
+```
+
 #### Constructor
 
 ```go
@@ -243,6 +256,18 @@ Update `cmd/orchestrator/main.go` to:
 This partially addresses `main.go` TODO step 8 ("Initialize workflow planner + scheduler") — only the planner is wired here. The scheduler portion is deferred to RFC 0003.
 
 This phase is minimal wiring — the components exist but aren't serving traffic yet (that requires the REST API, which is the next RFC).
+
+### Sentinel Error Catalog
+
+All sentinel errors defined across the three packages, consolidated for implementer reference:
+
+| Package | Error | Returned by | Trigger |
+|---------|-------|-------------|---------|
+| `state` | `ErrRunAlreadyExists` | `CreateRun` | Run with the given ID already exists |
+| `state` | `ErrRunNotFound` | `GetRun`, `UpdateRunStatus`, `UpdateStepState`, `DeleteRun` | Run ID does not exist in the store |
+| `registry` | `ErrAgentAlreadyRegistered` | `Register` | Agent with the given ID is already registered |
+| `registry` | `ErrAgentNotFound` | `Get`, `Unregister`, `UpdateStatus` | Agent ID does not exist in the registry |
+| `planner` | *(validation errors)* | `Parse`, `ValidateDAG` | Missing required fields, invalid IDs, unknown schema version, cycle detection, missing `depends_on` targets, duplicate step IDs |
 
 ## Security Considerations
 
@@ -298,15 +323,16 @@ This phase is minimal wiring — the components exist but aren't serving traffic
 - **Table-driven tests** for planner parsing (valid, invalid YAML, missing fields, bad agent IDs, bad step IDs per format regex, duplicate step IDs, empty steps array).
 - **Cycle detection tests**: no-cycle graph, simple cycle (A→B→A), complex cycle (A→B→C→A), self-referencing step.
 - **Topological sort tests**: linear chain, diamond dependency, fully parallel (no deps), single step.
-- **State store tests**: CRUD operations, concurrent read/write with goroutines, status transitions, `UpdateRunStatus` on nonexistent run ID (returns error), `DeleteRun` on existing and nonexistent IDs, `ListRuns` deep copy verification (modifying a returned run must not affect store state).
+- **State store tests**: CRUD operations, concurrent read/write with goroutines, status transitions, `UpdateRunStatus` on nonexistent run ID (returns error), `DeleteRun` on existing and nonexistent IDs, `ListRuns` deep copy verification (modifying a returned run must not affect store state), `UpdateStepState` adding a new step ID not pre-populated in the run's `Steps` map (should succeed per Phase 1 design — verifies the Scheduler can initialize step state on first execution).
 - **Registry tests**: register/unregister, duplicate ID rejection, capability search, status update, re-registration flow (register → unregister → register with same ID succeeds).
 - **Registry concurrent tests**: goroutine-based concurrent register/get/list operations (mirrors state store concurrency tests; both use `sync.RWMutex`).
 - **Fixture-based test**: parse `workflows/feature-builder.yaml` and assert the expected 4-stage plan.
 - **Pipeline integration test**: Call `Parse` → `ValidateDAG` → `Plan` as a single pipeline on `feature-builder.yaml` and assert: no error from any stage, 4 stages with correct step grouping. This end-to-end test catches integration issues between the three stages that unit tests on individual methods would miss.
-- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d), empty `outputs` map, empty `vars` map, `nil` maps, input with no template references (passthrough), input that is entirely a single template reference, and multi-line YAML input strings using block scalar syntax (`|`, `>`) to verify the parser and `ResolveInputs` handle embedded newlines correctly — `feature-builder.yaml` uses inline `\n` but real-world workflows may use YAML block scalars.
+- **Template resolution edge cases**: malformed patterns (`{{ }}`, `{{ steps. }}`, `{{no-spaces}}`), input containing multiple template references with interleaved literal text, verification that single-pass resolution does NOT re-scan substituted output (prevents second-order template injection), confirmation that suspicious patterns in `Step.Input` emit a warning log (per Phase 3d), empty `outputs` map, empty `vars` map, `nil` maps, input with no template references (passthrough), input that is entirely a single template reference, `outputs` map containing extra keys not referenced by any template (should succeed without error — unused outputs are ignored), negative test confirming `Step.Condition` is NOT passed to `ResolveInputs` (documents the boundary between template resolution and condition evaluation per Phase 3d), and multi-line YAML input strings using block scalar syntax (`|`, `>`) to verify the parser and `ResolveInputs` handle embedded newlines correctly — `feature-builder.yaml` uses inline `\n` but real-world workflows may use YAML block scalars.
 - **Schema version validation**: reject unknown schema versions (e.g., `schema_version: "0.2"`, `schema_version: ""`), confirm `schema_version: "0.1"` is accepted. This covers the behavior resolved in Open Question 2.
 - **YAML file size limit**: reject YAML files exceeding 1 MB (per Security Considerations). This is a security-critical behavior that must have explicit test coverage.
 - **YAML anchor/alias rejection**: verify that YAML documents containing anchors/aliases are rejected or limited per Security Considerations. Test with a minimal billion-laughs-style document to confirm the defense is effective.
+- **Path traversal defense**: verify that `Parse()` applies `filepath.Clean` on the input path — test with paths containing `..` segments, double slashes, and trailing dots to confirm normalization.
 - **Phase 4 smoke test**: build the binary (`go build ./cmd/orchestrator`) and verify it starts and shuts down cleanly with SIGINT. This validates that the wiring compiles and the component initialization doesn't panic.
 - **Race detector**: all tests run with `-race` flag (already enforced in CI/Makefile).
 
