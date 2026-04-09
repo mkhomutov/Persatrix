@@ -1,0 +1,32 @@
+# Valid workflow matching feature-builder.yaml structure
+schema_version: "0.1"
+
+workflow:
+  id: "feature-builder"
+  name: "Build a Feature End-to-End"
+  trigger: "manual"
+
+  steps:
+    - id: "plan"
+      agent: "planner"
+      input: "{{ user_request }}"
+      output_key: "plan"
+
+    - id: "implement"
+      agent: "code-writer"
+      input: "{{ steps.plan.output }}"
+      output_key: "code"
+      depends_on: ["plan"]
+
+    - id: "review"
+      agent: "code-reviewer"
+      input: "{{ steps.implement.output }}"
+      output_key: "review"
+      depends_on: ["implement"]
+
+    - id: "revise"
+      agent: "code-writer"
+      input: "{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"
+      output_key: "final_code"
+      depends_on: ["review"]
+      condition: "{{ steps.review.output.approved == false }}"
