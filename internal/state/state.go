@@ -75,6 +75,9 @@ type InMemoryStore struct {
 
 // NewInMemoryStore creates a new in-memory state store.
 func NewInMemoryStore(logger *zap.Logger) *InMemoryStore {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &InMemoryStore{
 		runs:   make(map[string]*WorkflowRun),
 		logger: logger,
