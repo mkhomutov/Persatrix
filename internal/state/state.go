@@ -1,7 +1,228 @@
 // Package state manages execution state, checkpoints, and persistence.
 package state
 
-// TODO: Implement InMemoryStore (v0.1)
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+)
+
+// Sentinel errors for state store operations.
+var (
+	ErrRunAlreadyExists = errors.New("run already exists")
+	ErrRunNotFound      = errors.New("run not found")
+)
+
+// RunStatus represents the execution status of a workflow run or step.
+// Values are explicit integers aligned with proto/task.proto TaskStatus (0–4).
+// Do NOT use iota — inserting intermediate values silently renumbers constants.
+type RunStatus int
+
+const (
+	RunPending   RunStatus = 0
+	RunRunning   RunStatus = 1
+	RunCompleted RunStatus = 2
+	RunFailed    RunStatus = 3
+	RunCancelled RunStatus = 4
+)
+
+// WorkflowRun tracks the state of a single workflow execution.
+type WorkflowRun struct {
+	ID         string
+	WorkflowID string
+	Status     RunStatus
+	Steps      map[string]StepState
+	Error      string
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Inputs     map[string]string
+}
+
+// StepState tracks the state of a single step within a workflow run.
+type StepState struct {
+	StepID     string
+	Status     RunStatus
+	Output     string
+	Error      string
+	StartedAt  time.Time
+	FinishedAt time.Time
+}
+
+// Store defines the interface for workflow run state persistence.
+// All methods accept context.Context for forward compatibility with
+// persistent backends (SQLite in v0.2). In-memory implementations
+// may ignore the context parameter.
+type Store interface {
+	CreateRun(ctx context.Context, run *WorkflowRun) error
+	GetRun(ctx context.Context, runID string) (*WorkflowRun, error)
+	ListRuns(ctx context.Context) ([]*WorkflowRun, error)
+	UpdateRunStatus(ctx context.Context, runID string, status RunStatus) error
+	UpdateStepState(ctx context.Context, runID string, step StepState) error
+	DeleteRun(ctx context.Context, runID string) error
+}
+
+// InMemoryStore is a goroutine-safe in-memory implementation of Store.
+// All state is lost on process restart.
+type InMemoryStore struct {
+	mu     sync.RWMutex
+	runs   map[string]*WorkflowRun
+	logger *zap.Logger
+}
+
+// NewInMemoryStore creates a new in-memory state store.
+func NewInMemoryStore(logger *zap.Logger) *InMemoryStore {
+	return &InMemoryStore{
+		runs:   make(map[string]*WorkflowRun),
+		logger: logger,
+	}
+}
+
+// CreateRun adds a new workflow run to the store. If run.ID is empty, a UUIDv4
+// is generated. Returns ErrRunAlreadyExists if a run with the same ID exists.
+func (s *InMemoryStore) CreateRun(_ context.Context, run *WorkflowRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if run.ID == "" {
+		run.ID = uuid.New().String()
+	}
+
+	if _, exists := s.runs[run.ID]; exists {
+		return ErrRunAlreadyExists
+	}
+
+	// Deep copy to prevent caller from mutating internal state.
+	stored := &WorkflowRun{
+		ID:         run.ID,
+		WorkflowID: run.WorkflowID,
+		Status:     run.Status,
+		Error:      run.Error,
+		StartedAt:  run.StartedAt,
+		FinishedAt: run.FinishedAt,
+	}
+
+	// Initialize Steps map (prevent nil-map panics on subsequent writes).
+	stored.Steps = make(map[string]StepState, len(run.Steps))
+	for k, v := range run.Steps {
+		stored.Steps[k] = v
+	}
+
+	stored.Inputs = make(map[string]string, len(run.Inputs))
+	for k, v := range run.Inputs {
+		stored.Inputs[k] = v
+	}
+
+	s.runs[run.ID] = stored
+	s.logger.Debug("run created", zap.String("runID", run.ID), zap.String("workflowID", run.WorkflowID))
+	return nil
+}
+
+// GetRun retrieves a workflow run by ID. Returns a deep copy to prevent
+// callers from mutating internal state. Returns ErrRunNotFound on miss.
+func (s *InMemoryStore) GetRun(_ context.Context, runID string) (*WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return nil, ErrRunNotFound
+	}
+
+	return deepCopyRun(run), nil
+}
+
+// ListRuns returns deep copies of all workflow runs.
+func (s *InMemoryStore) ListRuns(_ context.Context) ([]*WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*WorkflowRun, 0, len(s.runs))
+	for _, run := range s.runs {
+		result = append(result, deepCopyRun(run))
+	}
+	return result, nil
+}
+
+// UpdateRunStatus updates the status of a workflow run.
+// Returns ErrRunNotFound if the run does not exist.
+// No state transition validation in v0.1 — any transition is allowed.
+func (s *InMemoryStore) UpdateRunStatus(_ context.Context, runID string, status RunStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return ErrRunNotFound
+	}
+
+	run.Status = status
+	s.logger.Debug("run status updated", zap.String("runID", runID), zap.Int("status", int(status)))
+	return nil
+}
+
+// UpdateStepState merges step state into the run's Steps map.
+// If the step ID is not already present, it is added (supports Scheduler
+// initializing step state on first execution without pre-population).
+// Returns ErrRunNotFound if the run does not exist.
+func (s *InMemoryStore) UpdateStepState(_ context.Context, runID string, step StepState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return ErrRunNotFound
+	}
+
+	run.Steps[step.StepID] = step
+	s.logger.Debug("step state updated", zap.String("runID", runID), zap.String("stepID", step.StepID))
+	return nil
+}
+
+// DeleteRun removes a workflow run from the store.
+// Accepts any run status in v0.1 (status restriction deferred to RFC 0003).
+// Returns ErrRunNotFound if the run does not exist.
+func (s *InMemoryStore) DeleteRun(_ context.Context, runID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.runs[runID]; !exists {
+		return ErrRunNotFound
+	}
+
+	delete(s.runs, runID)
+	s.logger.Debug("run deleted", zap.String("runID", runID))
+	return nil
+}
+
+// deepCopyRun creates a deep copy of a WorkflowRun, reconstructing both the
+// Steps and Inputs maps to prevent shared backing-reference mutation.
+func deepCopyRun(run *WorkflowRun) *WorkflowRun {
+	cp := &WorkflowRun{
+		ID:         run.ID,
+		WorkflowID: run.WorkflowID,
+		Status:     run.Status,
+		Error:      run.Error,
+		StartedAt:  run.StartedAt,
+		FinishedAt: run.FinishedAt,
+	}
+
+	cp.Steps = make(map[string]StepState, len(run.Steps))
+	for k, v := range run.Steps {
+		cp.Steps[k] = v
+	}
+
+	cp.Inputs = make(map[string]string, len(run.Inputs))
+	for k, v := range run.Inputs {
+		cp.Inputs[k] = v
+	}
+
+	return cp
+}
+
 // TODO: Implement SQLiteStore (v0.2+)
 // TODO: Implement checkpoint/restore
 // TODO: Implement export/import
