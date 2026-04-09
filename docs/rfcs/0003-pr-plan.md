@@ -10,11 +10,15 @@
 
 ## Overview
 
-RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **6 PRs** (one per phase, with the scheduler phase split into 3a/3b per review finding B-05). Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
+RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **7 PRs** (one per phase, with both the executor and scheduler phases pre-split into a/b per calibration data showing RFC 0001 PRs exceeded estimates by 73–138%). Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
 > **Estimate calibration**: RFC 0001 PRs consistently exceeded estimates by 73–138%. Sizes in this plan are calibrated to ~1.7× of naive estimates.
 
 **Prerequisite**: All RFC 0001 PRs merged (state, registry, planner) ✅. RFC 0002 PRs merged (server, workflow/agent handlers, wiring) — required for pending runs to exist as the scheduler's input queue.
+
+> **⚠️ RFC 0002 merge gate:** All RFC 0002 implementation PRs must be merged before PR 5 (wiring) can proceed. PRs 1–4 are independent of RFC 0002 and can begin immediately. If RFC 0002 wiring has not landed by the time PR 5 is ready, PR 5 declares `--workflows-dir` locally (see PR 5 scope).
+
+**Recommended merge order:** **PR 1 ‖ PR 4** (parallel) → **PR 2a** → **PR 2b** → **PR 3a** → **PR 3b** → **PR 5**. PR numbering does not imply execution order — see [Dependency Graph](#dependency-graph) for details.
 
 ---
 
@@ -53,55 +57,75 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ---
 
-### PR 2: `feature/v01-executor` — GRPCExecutor
+### PR 2a: `feature/v01-executor-core` — GRPCExecutor Core
 
 **Depends on**: PR 1 merged (generated stubs)
-**Branch**: `feature/v01-executor`
-**Estimated size**: ~500–700 lines (implementation + tests)
+**Branch**: `feature/v01-executor-core`
+**Estimated size**: ~350–500 lines (implementation + core tests)
 
-> **Fallback split plan (review P-02):** If the executor PR exceeds 500 lines,
-> split into PR 2a (`executor.go` + core tests: successful dispatch, agent not
-> found, agent unhealthy, timeout, FAILED status, context cancellation) and
-> PR 2b (`isTransient` table-driven tests + retry edge cases: transient retry
-> success, permanent failure, retry exhaustion). The `bufconn` mock server setup
-> is the most verbose part; keeping it in 2a with the core tests avoids
-> duplicating the setup across PRs.
+> **Note (review S-01)**: RFC 0001 PRs consistently exceeded estimates by 73–138%. An original single-PR estimate of 500–700 lines would likely land at 850–1000 lines, well above the 500-line limit. Pre-splitting into 2a/2b is the default plan (not a fallback), mirroring the successful PR 3a/3b pre-split strategy.
 
 #### Scope
 
 | File | Change |
 |------|--------|
 | `internal/executor/executor.go` | Replace TODO stubs — `Executor` interface, `ExecuteRequest`, `ExecuteResult`, `GRPCExecutor`, `isTransient`, `NewGRPCExecutor`, functional options |
-| `internal/executor/executor_test.go` | New — unit tests with mock gRPC server via `google.golang.org/grpc/test/bufconn` |
+| `internal/executor/executor_test.go` | New — core tests with mock gRPC server via `google.golang.org/grpc/test/bufconn` |
 
 #### Key implementation details
 
 - `Executor` interface with `ExecuteTask(ctx, ExecuteRequest) (*ExecuteResult, error)` and `Close() error`.
+- `GRPCExecutor.Close()` returns `nil` in v0.1 (no persistent connections). Wired for interface compliance and forward compatibility with connection pooling.
 - `GRPCExecutor` creates a per-task gRPC connection (no pooling in v0.1). `// TODO(v0.2): connection pooling` comment.
-- Retry loop with exponential backoff: `100ms * 2^attempt`, max 3 retries.
+- Retry loop with exponential backoff + ±25% jitter: `base = 100ms * 2^attempt`, `jitter ∈ [0.75, 1.25)`, max 3 retries.
 - `isTransient` classifies gRPC status codes: `Unavailable`, `ResourceExhausted`, `Aborted` → transient; `DeadlineExceeded` and all others → permanent (review S-04: retrying after timeout with the same timeout is unlikely to succeed). Non-gRPC errors (DNS, connection refused) default to transient (review B-03: these are the most common transient failures for per-task connections).
 - Functional options: `WithTimeout(d)`, `WithMaxRetries(n)`.
 - `grpc.WithTransportCredentials(insecure.NewCredentials())` with `// TODO(security): enable mTLS` comment.
 - Agent health status check before dial: `StatusHealthy` required, else error.
+- Uses existing `github.com/google/uuid` dependency for task ID generation (no new dependency required).
 
-#### Tests
+#### Tests (core)
 
 - **Successful dispatch**: mock gRPC server → `COMPLETED` response → `ExecuteResult`.
 - **Agent not found**: `ErrAgentNotFound` → error.
 - **Agent unhealthy**: `StatusOffline` → error before dial.
-- **Transient retry success**: `Unavailable` × 2 → success on 3rd → result returned.
-- **Permanent failure**: `InvalidArgument` → no retry, immediate error.
-- **Retry exhaustion**: `Unavailable` × (maxRetries+1) → error.
 - **Timeout**: blocking mock → `DeadlineExceeded`.
 - **FAILED status**: `TaskResponse{Status: FAILED}` → error.
 - **Context cancellation**: cancel mid-retry → `context.Canceled`.
+- Race detector (`-race`).
+
+#### PR checklist
+
+- [ ] `go test ./internal/executor/... -v -cover` passes
+- [ ] `go vet ./internal/executor/...` clean
+- [ ] No real network connections in tests (bufconn only)
+
+---
+
+### PR 2b: `feature/v01-executor-retry` — Retry Logic & Error Classification Tests
+
+**Depends on**: PR 2a merged
+**Branch**: `feature/v01-executor-retry`
+**Estimated size**: ~200–350 lines (additional tests)
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/executor/executor_test.go` | Extended — `isTransient` table-driven tests + retry edge cases |
+
+#### Tests
+
+- **Transient retry success**: `Unavailable` × 2 → success on 3rd → result returned.
+- **Permanent failure**: `InvalidArgument` → no retry, immediate error.
+- **Retry exhaustion**: `Unavailable` × (maxRetries+1) → error.
 - **`isTransient` table-driven**: every `codes.*` value → expected bool.
 - Race detector (`-race`).
 
 #### PR checklist
 
 - [ ] `go test ./internal/executor/... -v -cover` passes
-- [ ] Coverage ≥ 80%
+- [ ] Combined coverage (2a + 2b) ≥ 80%
 - [ ] `go vet ./internal/executor/...` clean
 - [ ] No real network connections in tests (bufconn only)
 
@@ -109,7 +133,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 ### PR 3a: `feature/v01-scheduler-core` — WorkflowScheduler Core
 
-**Depends on**: PR 2 merged (Executor interface), PR 4 merged (`SetRunTimestamps`, `RunRetrying`)
+**Depends on**: PR 2a merged (Executor interface), PR 4 merged (`SetRunTimestamps`, `RunRetrying`)
 **Branch**: `feature/v01-scheduler-core`
 **Estimated size**: ~400–550 lines (implementation + core tests)
 
@@ -146,7 +170,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **Graceful shutdown**: cancel ctx → `context.Canceled`.
 - **Graceful shutdown with blocked goroutines**: cancel ctx while goroutines wait on semaphore → goroutines exit cleanly (review B-01).
 - **Concurrent run limit**: excess runs queued.
-- **Duplicate run prevention**: same pending run across two poll cycles → executed once (review B-02).
+- **Duplicate run prevention**: same pending run across two poll cycles → executed once (review B-02). Test by calling `pollAndExecute` twice with the same pending run still in `Pending` status in the store (the goroutine from the first poll hasn't transitioned it yet).
 - **Empty poll cycle**: no pending runs → no-op.
 - **Parse failure**: bad YAML → `RunFailed`.
 - **DAG failure**: cycle → `RunFailed`.
@@ -250,7 +274,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 | File | Change |
 |------|--------|
 | `cmd/orchestrator/main.go` | Import `internal/executor`, `internal/scheduler`. Create `GRPCExecutor` and `WorkflowScheduler`. Launch `sched.Run(ctx)` in goroutine. Remove `_ = store`, `_ = reg`, `_ = plan` placeholders. Add structured log messages. |
-| `tests/integration/scheduler_executor_test.go` | New — Scheduler + Executor integration test (review P-05): real `InMemoryStore`, real `YAMLPlanner`, in-process mock gRPC server via `bufconn`, `feature-builder.yaml` fixture. Verifies end-to-end run completion with correct step ordering. |
+| `tests/integration/scheduler_executor_test.go` | New — Scheduler + Executor integration test (review P-05): real `InMemoryStore`, real `YAMLPlanner`, in-process mock gRPC server via `bufconn`, `feature-builder.yaml` fixture. Pre-register 3 agents (`planner`, `code-writer`, `code-reviewer`) in the mock registry — the `revise` step reuses `code-writer`. Verifies end-to-end run completion with correct step ordering. |
 
 #### Key implementation details
 
@@ -260,7 +284,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - Goroutine: `go func() { if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) { logger.Error(...); cancel() } }()`.
 - Log `"scheduler started"` and `"executor initialized"`.
 - Remove all `_ = ...` suppression lines — variables now consumed.
-- Uses structured zap logger (not sugar) for new code per project convention.
+- Uses structured zap logger (not sugar) for new code per project convention. Existing `log.Infow` startup messages are not migrated in this PR.
 
 #### PR checklist
 
@@ -276,7 +300,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
+| PR 2 (executor) exceeds 500 lines | Review burden | Pre-split into PR 2a (core) + PR 2b (retry tests) per calibration data |
 | PR 3 (scheduler) exceeds 500 lines | Review burden | Pre-split into PR 3a (core) + PR 3b (template tests) per B-05 |
+| RFC 0002 not merged when PR 5 ready | Blocks wiring | PRs 1–4 independent; PR 5 declares `--workflows-dir` locally if needed |
 | Proto generation toolchain issues | Blocks all PRs | PR 1 validates toolchain early; generated files committed |
 | gRPC dependency tree large | `go.mod` bloat | Acceptable for v0.1; prune unused transitive deps in cleanup PR |
 | Mock gRPC server complexity | Test maintenance | Use `bufconn` for in-process server; keep mock implementations minimal |
@@ -289,7 +315,10 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 ```
 PR 1 (proto-gen) ──────┐  PR 4 (state-extension) ──┐
                         ▼                            │
-                   PR 2 (executor)                   │
+                   PR 2a (executor-core)             │
+                        │                            │
+                        ▼                            │
+                   PR 2b (executor-retry)            │
                         │                            │
                         ▼                            ▼
                    PR 3a (scheduler-core) ◄──── BOTH required
@@ -301,8 +330,10 @@ PR 1 (proto-gen) ──────┐  PR 4 (state-extension) ──┐
                    PR 5 (wiring)
 ```
 
-> **⚠️ GATE (review B-05):** PR 3a has a **compile-time** dependency on both PR 2 (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). Neither can be skipped. PR 4 must merge **before** PR 3a despite its higher number.
+> **⚠️ GATE (review B-05):** PR 3a has a **compile-time** dependency on both PR 2a (Executor interface) and PR 4 (`SetRunTimestamps`, `RunRetrying`). Neither can be skipped. PR 4 must merge **before** PR 3a despite its higher number.
+>
+> **⚠️ RFC 0002 GATE:** PRs 1–4 are independent of RFC 0002. PR 5 (wiring) requires RFC 0002 implementation PRs to be merged (for `--workflows-dir` flag and HTTP server). If RFC 0002 has not landed, PR 5 declares `--workflows-dir` locally.
 
 PR 4 (state extension) can proceed in parallel with PRs 1–2 since it modifies `internal/state/` independently.
 
-> **Recommended implementation order (review S-08):** PR numbering does not imply execution order. The recommended merge sequence is: **PR 1 ‖ PR 4** (parallel) → **PR 2** → **PR 3a** → **PR 3b** → **PR 5**. PR 4 must merge before PR 3a despite its higher number.
+> **Recommended implementation order (review S-08):** PR numbering does not imply execution order. The recommended merge sequence is: **PR 1 ‖ PR 4** (parallel) → **PR 2a** → **PR 2b** → **PR 3a** → **PR 3b** → **PR 5**. PR 4 must merge before PR 3a despite its higher number.

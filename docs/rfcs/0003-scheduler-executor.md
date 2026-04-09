@@ -74,7 +74,7 @@ If we do nothing, the system remains non-functional from the user's perspective 
 - **Agent-side implementation.** Python agent gRPC server (`agents/server.py`) is a separate RFC. This RFC only implements the Go client side. Tests use a mock gRPC server.
 - **Streaming execution (`ExecuteTaskStream`).** v0.1 uses unary `ExecuteTask` only. Streaming progress via `TaskProgress` is deferred to v0.2.
 - **SSE streaming to CLI.** `GET /api/v1/stream/events` is v0.2. The CLI polls `GET /api/v1/workflows/{id}/status` in v0.1.
-- **Condition evaluation.** Step conditions (`{{ steps.review.output.approved == false }}`) are parsed and stored but deferred to a follow-up. All steps in the DAG execute unconditionally in v0.1. A `// TODO(v0.2): evaluate step conditions before dispatch` comment marks the integration point.
+- **Condition evaluation.** Step conditions (`{{ steps.review.output.approved == false }}`) are parsed and stored but deferred to a follow-up. All steps in the DAG execute unconditionally in v0.1 — including the `revise` step in `feature-builder.yaml`, which will always execute regardless of review outcome. A `// TODO(v0.2): evaluate step conditions before dispatch` comment marks the integration point.
 - **Circuit breaker.** `internal/resilience/` is a stub. Basic retry logic is included inline in the Executor; circuit breaker integration is deferred.
 - **Dead letter queue.** Failed tasks are recorded in the state store but not queued for retry/inspection beyond the inline retry loop.
 - **Cost tracking.** Token usage from `TaskResponse.metadata` is logged but not aggregated. `internal/cost/` integration is deferred.
@@ -240,6 +240,10 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, run *state.WorkflowR
     }
 
     // 4. Transition to Running and record actual execution start time (review B-06).
+    //    NOTE: This overwrites the StartedAt value set at submission time by
+    //    RFC 0002's REST API. StartedAt is redefined from "submission time" to
+    //    "execution start time". A future RFC should add a separate CreatedAt
+    //    field to preserve both timestamps.
     now := time.Now()
     if err := s.store.UpdateRunStatus(ctx, run.ID, state.RunRunning); err != nil {
         s.logger.Error("failed to update run status", zap.String("run_id", run.ID), zap.Error(err))
@@ -372,6 +376,10 @@ func (s *WorkflowScheduler) executeStep(
     outputs map[string]string,
     mu *sync.Mutex, // protects outputs map writes
 ) error {
+    // TODO(v0.2): evaluate step conditions before dispatch. In v0.1, all
+    // steps execute unconditionally — including steps with condition fields
+    // like the "revise" step in feature-builder.yaml.
+
     // 1. Update step state to Running.
     if err := s.store.UpdateStepState(ctx, run.ID, state.StepState{
         StepID:    step.ID,
@@ -409,6 +417,9 @@ func (s *WorkflowScheduler) executeStep(
     }
 
     // 3. Dispatch to agent via Executor.
+    //    NOTE(v0.2): Context sends ALL prior step outputs to every agent.
+    //    For workflows with many steps, this accumulates data. A future
+    //    optimization could scope context to only depends_on outputs.
     result, err := s.executor.ExecuteTask(ctx, ExecuteRequest{
         RunID:      run.ID,
         WorkflowID: run.WorkflowID,
@@ -509,6 +520,8 @@ func WithTimeout(d time.Duration) ExecutorOption
 func WithMaxRetries(n int) ExecutorOption
 ```
 
+`GRPCExecutor.Close()` returns `nil` in v0.1 (no persistent connections to close). The method exists for interface compliance and forward compatibility with connection pooling in v0.2.
+
 #### Task Dispatch Flow
 
 ```go
@@ -528,6 +541,10 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
     ctx, cancel := context.WithTimeout(ctx, e.timeout)
     defer cancel()
 
+    // NOTE: grpc.NewClient uses lazy connection establishment — the actual
+    // TCP connection is not made until the first RPC call. Connection errors
+    // surface at RPC time, not dial time. This is intentional: the retry loop
+    // handles connection-time failures via isTransient.
     conn, err := grpc.NewClient(agent.Address,
         grpc.WithTransportCredentials(insecure.NewCredentials()),
     )
@@ -539,7 +556,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
     // 4. Build TaskRequest.
     client := pb.NewAgentServiceClient(conn)
     taskReq := &pb.TaskRequest{
-        TaskId:     uuid.NewString(),
+        TaskId:     uuid.NewString(), // uses existing github.com/google/uuid dependency
         WorkflowId: req.WorkflowID,
         AgentId:    req.Step.AgentID,
         Payload:    req.Input,
@@ -563,12 +580,11 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
             return nil, fmt.Errorf("permanent gRPC error from agent %q: %w", agent.ID, err)
         }
         if attempt < e.maxRetries {
-            // NOTE(review D-02): Deterministic exponential backoff creates a
-            // thundering-herd risk when multiple steps retry against the same
-            // recovering agent. The implementation should add ±25% jitter:
-            //   jitter := 0.75 + rand.Float64()*0.5  // [0.75, 1.25)
-            //   backoff = time.Duration(float64(backoff) * jitter)
-            backoff := time.Duration(1<<uint(attempt)) * 100 * time.Millisecond
+            // Exponential backoff with ±25% jitter to avoid thundering-herd
+            // when multiple steps retry against the same recovering agent.
+            base := time.Duration(1<<uint(attempt)) * 100 * time.Millisecond
+            jitter := 0.75 + rand.Float64()*0.5 // [0.75, 1.25)
+            backoff := time.Duration(float64(base) * jitter)
             e.logger.Warn("retrying transient gRPC error",
                 zap.String("agent_id", agent.ID),
                 zap.Int("attempt", attempt+1),
@@ -650,6 +666,7 @@ The generated files live in `internal/generated/taskpb/` — matching the existi
 RFC 0001's `Store` interface lacks facilities for:
 1. Setting `WorkflowRun.FinishedAt` when a run completes or fails.
 2. Setting `WorkflowRun.StartedAt` to the actual execution start (currently set at submission time per RFC 0002).
+3. Setting `WorkflowRun.Error` to persist failure reasons through the `Store` interface (the field exists on the struct but has no setter method).
 
 This RFC extends the `Store` interface with two additional methods:
 
@@ -863,9 +880,10 @@ Summary: Instantiate Executor and Scheduler in `main.go`, launch scheduler loop.
 2. ~~**Connection pooling**: Should the Executor maintain a pool of gRPC connections per agent?~~
    **Resolved**: No pooling in v0.1 — create a new connection per task dispatch, close after response. Connection pooling is a performance optimization for v0.2 when agents handle concurrent tasks. The overhead of per-task connection setup is negligible for v0.1 run volumes. (2026-04-09)
 
-### Open
+3. ~~**Condition evaluation**: How should `{{ steps.review.output.approved == false }}` be evaluated?~~
+   **Resolved**: Deferred to v0.2. All steps execute unconditionally in v0.1 (including the `revise` step in `feature-builder.yaml`). A `// TODO(v0.2): evaluate step conditions before dispatch` comment marks the integration point. Expression evaluation requires parsing step output as JSON/YAML and evaluating boolean expressions — design to be specified in a dedicated follow-up RFC. (2026-04-09)
 
-3. **Condition evaluation**: How should `{{ steps.review.output.approved == false }}` be evaluated? This requires parsing the step output as JSON/YAML and evaluating a boolean expression. Deferred — all steps execute unconditionally in v0.1.
+### Open
 
 4. **Scheduler restart recovery**: If the process restarts, all `Running` runs in the in-memory store are lost. Should the scheduler detect orphaned `Running` runs? Not applicable in v0.1 (in-memory store loses all state). Relevant for v0.2 persistent store.
 
