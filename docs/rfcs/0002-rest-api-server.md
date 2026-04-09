@@ -550,7 +550,7 @@ Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workf
 5. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run, `resolveWorkflowPath` (M-05).
 6. `internal/server/server_test.go` — handler tests using `httptest`.
 
-**Dependencies:** RFC 0001 (state, registry, planner implementations). **New dependency:** `github.com/google/uuid` for server-generated request IDs (`uuid.NewString()` in `requestIDMiddleware`); must be added to `go.mod`. RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
+**Dependencies:** RFC 0001 (state, registry, planner implementations). **Existing dependency:** `github.com/google/uuid` (already in `go.mod` from RFC 0001) is reused for server-generated request IDs (`uuid.NewString()` in `requestIDMiddleware`). RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
 - `state.ErrRunNotFound`
 - `state.ErrRunAlreadyExists`
 - `registry.ErrAgentAlreadyRegistered`
@@ -596,7 +596,7 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 | Go orchestrator | `internal/server/stub_handlers.go` | New — `501` stubs for logs and cost endpoints |
 | Go orchestrator | `internal/server/server_test.go` | New — handler tests via `httptest.NewRecorder` |
 | Go orchestrator | `cmd/orchestrator/main.go` | Add `--http-bind`, `--workflows-dir` flags; wire `server.New`; launch in goroutine |
-| Go dependency | `go.mod`, `go.sum` | Add `github.com/google/uuid` (used by `requestIDMiddleware`) |
+| Go dependency | `go.mod`, `go.sum` | Uses existing `github.com/google/uuid` dependency (added by RFC 0001 for `state.CreateRun`) |
 | Docker | `docker-compose.yaml` | Pass `--http-bind 0.0.0.0` to orchestrator service command (C-01) |
 
 ## Test Strategy
@@ -639,7 +639,7 @@ Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into t
 
 ## Decision / Next Steps
 
-Feature branch `feature/v01-rest-api-server` was created ahead of review and is currently under review (PR #4).
+Feature branch `feature/v01-rest-api-server` will be created for implementation.
 
 1. Implement in phase order (scaffolding → workflow handlers → agent handlers → stubs + wiring).
 2. PR < 500 lines per phase if needed; squash merge to `main`.

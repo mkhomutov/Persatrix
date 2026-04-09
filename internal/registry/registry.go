@@ -154,11 +154,13 @@ func (r *InMemoryRegistry) UpdateStatus(_ context.Context, agentID string, statu
 }
 
 // FindByCapability returns deep copies of all agents that have the specified capability.
+// Returns an empty non-nil slice (not nil) when no agents match, ensuring consistent
+// JSON serialization as [] rather than null (PR #12 review F-07, consistent with List).
 func (r *InMemoryRegistry) FindByCapability(_ context.Context, capability string) ([]AgentInfo, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []AgentInfo
+	result := make([]AgentInfo, 0)
 	for _, agent := range r.agents {
 		for _, capName := range agent.Capabilities {
 			if capName == capability {
