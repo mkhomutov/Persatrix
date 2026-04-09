@@ -1,7 +1,7 @@
 # RFC 0002 — REST API Server (HTTP Layer + Workflow Submission)
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: � In Review
 **Author**: Orchestr8 team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
@@ -79,6 +79,15 @@ If we do nothing, the orchestrator remains unreachable from the CLI or any HTTP 
 - **gRPC server.** The gRPC server (main.go TODO step 10) is a separate concern and a separate RFC.
 - **Persistent storage.** In-memory only; RFC 0001 established the `Store` interface for future SQLite migration.
 
+### Spec Deviations
+
+The core spec (`ai-agents-orchestration-spec.md` §8.3) defines exactly eight v0.1 endpoints. This RFC adds two endpoints not present in the spec:
+
+- `GET /api/v1/workflows` — list all workflow runs.
+- `DELETE /api/v1/workflows/{id}` — delete a workflow run.
+
+Both are deliberate additions to support the operational lifecycle of runs. They are not unintentional omissions from the spec; the spec should be updated in a follow-up documentation PR to reflect these additions.
+
 ## Design / Implementation
 
 ### Router and Server Structure
@@ -89,23 +98,31 @@ Use Go 1.22+ `net/http` enhanced pattern routing (`{id}` wildcards) rather than 
 
 ```go
 type Server struct {
-    addr     string
-    store    state.Store
-    registry registry.Registry
-    planner  planner.Planner
-    logger   *zap.Logger
-    mux      *http.ServeMux
+    addr         string
+    workflowsDir string // root directory for workflow YAML files; validated at construction
+    store        state.Store
+    registry     registry.Registry
+    planner      planner.Planner
+    logger       *zap.Logger
+    mux          *http.ServeMux
 }
 
-func New(addr string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger) *Server
+// New validates that workflowsDir is accessible (via os.Stat) and returns an error if not,
+// so misconfiguration is caught at startup rather than on the first workflow request.
+func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger) (*Server, error)
 func (s *Server) Handler() http.Handler
 func (s *Server) Start(ctx context.Context) error
 ```
 
-- `New` builds the `ServeMux` and registers all routes.
+- `New` validates `workflowsDir`, builds the `ServeMux`, and registers all routes. It returns `(*Server, error)` so that a missing or inaccessible workflows directory is caught at startup rather than silently producing `404` errors on every workflow submission:
+  ```go
+  if _, err := os.Stat(workflowsDir); err != nil {
+      return nil, fmt.Errorf("workflows directory %q not accessible: %w", workflowsDir, err)
+  }
+  ```
 - `Handler()` returns the composed `http.Handler` for use in tests (avoids `httptest.NewServer` binding to a real port).
 - `Start(ctx)` calls `http.ListenAndServe`, respects context cancellation for graceful shutdown via `http.Server.Shutdown`.
-- The `addr` field is passed the `--http-port` flag value formatted as `":8080"`.
+- The `addr` field is set from `--http-bind` and `--http-port` formatted as `"127.0.0.1:8080"` (see Phase 4).
 
 #### Graceful Shutdown
 
@@ -156,6 +173,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 
 ### Phase 1: Workflow Run Endpoints
 
+> **URL semantics:** `{id}` in all `/api/v1/workflows/{id}/...` paths is a **run UUID** generated at submission time — it is not the `workflow_id` (the YAML filename). A `workflow_id` always matches `^[a-z0-9][a-z0-9-]*[a-z0-9]$`; a run `{id}` is a UUID e.g. `3f7a1c2d-...`. These are distinct values.
+
 #### `POST /api/v1/workflows/run`
 
 **Request body:**
@@ -177,13 +196,15 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 1. Decode and validate request body (reject unknown content types; require `Content-Type: application/json`).
 2. Validate `workflow_id` format with the canonical regex.
 3. **Path traversal protection** (see [Security Considerations](#security-considerations)).
-4. Call `planner.Parse(resolvedPath)` → returns `*planner.Workflow` or error.
-5. Call `planner.ValidateDAG(workflow)` → error on cycle.
+4. Call `s.planner.Parse(r.Context(), resolvedPath)` → returns `*planner.Workflow` or error; return `422 UNPROCESSABLE` on parse failure.
+5. Call `s.planner.ValidateDAG(r.Context(), workflow)` → return `422 UNPROCESSABLE` on cycle.
 6. Construct `state.WorkflowRun{WorkflowID: req.WorkflowID, Inputs: req.Inputs, Status: state.RunPending, StartedAt: time.Now()}`.
 7. Generate a UUID run ID if not provided; call `store.CreateRun(ctx, &run)`.
 8. Return `201 Created` with body `{"run_id": "<uuid>", "status": "pending"}`.
 
 **Note:** The run is created in `Pending` state. RFC 0003 (Scheduler) will watch for pending runs and advance them through execution. In v0.1, before RFC 0003 is implemented, the run ID can be queried but the run will remain `Pending` indefinitely — this is expected and documented.
+
+**Idempotency:** v0.1 has no client-side idempotency key. Retried submissions (e.g. a network timeout in the Rust CLI) create separate `WorkflowRun` entries with new UUIDs. This is acceptable for v0.1. A future RFC may add an optional `X-Idempotency-Key` header to deduplicate submissions.
 
 #### `GET /api/v1/workflows/{id}/status`
 
@@ -206,6 +227,8 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 ```
 
 `status` string values map from `state.RunStatus` constants: `"pending"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`.
+
+> **Note (P3 — JSON serialization):** The snake_case field names above (`run_id`, `workflow_id`, `started_at`) require either (a) explicit `json:"run_id"` struct tags on `state.WorkflowRun` (document as an RFC 0001 amendment) or (b) dedicated response DTOs in `internal/server/` with their own `json:` tags. Without either approach, `encoding/json` would produce PascalCase keys (`ID`, `WorkflowID`, `StartedAt`). Option (b) — separate API DTOs — is the cleaner long-term pattern as it decouples the storage model from the wire format.
 
 #### `GET /api/v1/workflows`
 
@@ -230,17 +253,17 @@ func writeJSON(w http.ResponseWriter, v any, status int)
 {
   "id":           "code-writer",
   "address":      "localhost:50051",
-  "capabilities": ["code_generation", "code_review"],
-  "model":        "gpt-4o"
+  "capabilities": ["code_generation", "code_review"]
 }
 ```
 
 - `id`: required, validated with agent ID regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
 - `address`: required, non-empty.
 - `capabilities`: optional list of strings.
-- `model`: optional.
 
-Handler constructs `registry.AgentInfo` and calls `registry.Register(ctx, info)`.  
+> **Note (B4 fix):** `model` is absent from this request body. `registry.AgentInfo` (defined in RFC 0001) has no `Model` field. Adding it here without amending `AgentInfo` would either silently drop the value (request DTO) or cause a compile error (direct struct mapping). Deferred: a future RFC may add `Model string` to `AgentInfo`.
+
+Handler validates `Content-Type: application/json` (same `requireJSON` helper used in the workflow-run handler) before decoding the body. It constructs `registry.AgentInfo` and calls `registry.Register(ctx, info)`.  
 On `registry.ErrAgentAlreadyRegistered`: return `409 CONFLICT`.  
 Return `201 Created` with the registered agent JSON.
 
@@ -276,10 +299,29 @@ Both stubs are registered in the router and return a consistent `501 Not Impleme
 
 Update `cmd/orchestrator/main.go` to:
 
-1. Instantiate `server.New(fmt.Sprintf(":%d", *httpPort), store, reg, pl, logger)`.
-2. Launch `s.Start(ctx)` in a goroutine, logging any non-`http.ErrServerClosed` errors.
-3. Log `"HTTP server listening"` with the address field.
-4. Add a `// TODO(security): no auth in v0.1` comment at the `server.New` call site.
+1. Declare `--http-bind` and `--workflows-dir` flags alongside the existing `--http-port` flag:
+   ```go
+   httpBind     = flag.String("http-bind",      "127.0.0.1", "HTTP listen address (default: loopback only)")
+   workflowsDir = flag.String("workflows-dir",  "workflows/", "Directory containing workflow YAML files")
+   ```
+   Using `--http-bind` (default `127.0.0.1`) instead of binding directly to `0.0.0.0` is the primary mitigation for the unauthenticated v0.1 server (see §No Authentication in v0.1).
+
+2. Instantiate the server, passing both `--http-bind` and `--workflows-dir`:
+   ```go
+   // TODO(security): no auth in v0.1; listener is restricted to loopback by default via --http-bind.
+   srv, err := server.New(fmt.Sprintf("%s:%d", *httpBind, *httpPort), *workflowsDir, store, reg, pl, logger)
+   if err != nil {
+       logger.Fatal("failed to create HTTP server", zap.Error(err))
+   }
+   ```
+   `New` returns an error when `workflowsDir` is inaccessible, surfacing misconfiguration at startup.
+
+3. Launch `srv.Start(ctx)` in a goroutine, logging any non-`http.ErrServerClosed` errors.
+
+4. Log `"HTTP server listening"` with the bound address:
+   ```go
+   logger.Info("HTTP server listening", zap.String("addr", fmt.Sprintf("%s:%d", *httpBind, *httpPort)))
+   ```
 
 This satisfies TODO step 11 ("Start HTTP server") in `main.go`. The existing graceful-shutdown context propagates to `Start`.
 
@@ -293,9 +335,40 @@ func requestIDMiddleware(next http.Handler) http.Handler
 
 The UUID is also added to the `zap.Logger` context for that request using `logger.With(zap.String("request_id", id))` and passed via `context.WithValue` to downstream handlers. This is essential for correlating orchestrator logs with CLI output and agent logs once RFC 0003 is in place.
 
+To avoid the `staticcheck SA1029` warning (plain `string` context keys can be shadowed by any other package), declare an unexported type for the key:
+
+```go
+type contextKey string
+const requestIDKey contextKey = "request_id"
+```
+
+Use `context.WithValue(r.Context(), requestIDKey, id)` to store and `r.Context().Value(requestIDKey).(string)` to retrieve.
+
+### Panic Recovery Middleware
+
+A `recoveryMiddleware` wraps all handlers to catch unhandled panics, log them via zap, and return a structured `500 INTERNAL` response instead of propagating the panic to the Go runtime (which closes the connection with plain text output):
+
+```go
+func recoveryMiddleware(logger *zap.Logger, next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if rec := recover(); rec != nil {
+                logger.Error("handler panic", zap.Any("panic", rec))
+                writeError(w, "INTERNAL", "internal server error", http.StatusInternalServerError)
+            }
+        }()
+        next.ServeHTTP(w, r)
+    })
+}
+```
+
+Both `recoveryMiddleware` and `requestIDMiddleware` are composed in `Handler()`. Recovery must be the outermost wrapper so that panics in any inner middleware are also caught.
+
 ### Workflow Directory Configuration
 
 A `--workflows-dir` flag (default: `"workflows/"`) is added to `cmd/orchestrator/main.go`. The server uses this directory as the root for loading workflow YAML files by ID. See [Security Considerations](#security-considerations) for the path traversal protection logic applied to this directory.
+
+> **Warning (P7 — relative default):** The default `"workflows/"` is a relative path resolved against the process working directory (`cwd`) at startup. If the binary is launched from a directory other than the repository root (e.g. `./bin/orchestr8-server`), the path resolves to `./bin/workflows/` and all workflow submissions return `404`. Production and staging deployments should always pass an absolute `--workflows-dir` path. In development, run the binary from the repository root or set the flag explicitly.
 
 ## Security Considerations
 
@@ -321,7 +394,10 @@ func (s *Server) resolveWorkflowPath(workflowID string) (string, error) {
     // 4. Canonicalize the candidate path.
     resolved, err := filepath.EvalSymlinks(candidate)
     if err != nil {
-        return "", ErrWorkflowNotFound
+        // Log at Debug so operators can distinguish permission errors or I/O failures
+        // from genuine not-found, without leaking path details to the HTTP response.
+        s.logger.Debug("EvalSymlinks failed", zap.String("workflow_id", workflowID), zap.Error(err))
+        return "", ErrWorkflowNotFound // do NOT reveal the reason to the caller
     }
     // 5. Prefix-check: resolved path must be inside root.
     if !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
@@ -348,7 +424,17 @@ A dedicated security RFC will add Bearer token authentication, per-agent API key
 
 ### JSON Input Size Limit
 
-All handlers that read a request body wrap `r.Body` with `http.MaxBytesReader(w, r.Body, 1<<20)` (1 MiB) to prevent memory exhaustion from oversized payloads. Requests exceeding this limit receive `400 BAD_REQUEST`.
+All handlers that read a request body wrap `r.Body` with `http.MaxBytesReader(w, r.Body, 1<<20)` (1 MiB) to prevent memory exhaustion from oversized payloads. Requests exceeding this limit must return `400 BAD_REQUEST`.
+
+When the limit is exceeded, `json.Decode` returns an error that wraps `*http.MaxBytesError`, not a `*json.SyntaxError`. Without an explicit `errors.As` check, the error falls through to the generic `500 INTERNAL` path — the opposite of the documented behaviour. The shared body-decoding helper must check for this type **before** the generic decode-error path:
+
+```go
+var maxBytesErr *http.MaxBytesError
+if errors.As(err, &maxBytesErr) {
+    writeError(w, "BAD_REQUEST", "request body too large", http.StatusBadRequest)
+    return
+}
+```
 
 ### JSON Decoder Strictness
 
@@ -371,7 +457,13 @@ Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workf
 4. `internal/server/workflow_handlers.go` — POST run, GET status, GET list, DELETE run.
 5. `internal/server/server_test.go` — handler tests using `httptest`.
 
-**Dependencies:** RFC 0001 (state, registry, planner implementations).
+**Dependencies:** RFC 0001 (state, registry, planner implementations). RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
+- `state.ErrRunNotFound`
+- `state.ErrRunAlreadyExists`
+- `registry.ErrAgentAlreadyRegistered`
+- `registry.ErrAgentNotFound`
+
+If these sentinels are absent from the RFC 0001 merged implementation, RFC 0002 cannot be implemented without brittle string-matching. Track as a blocker on PR #3.
 
 ### Phase 2: Agent registry endpoints (~120 LOC, ~0.5 day)
 
@@ -381,13 +473,19 @@ Summary: Agent CRUD endpoints backed by the in-memory registry.
 1. `internal/server/agent_handlers.go` — POST register, GET list, GET by ID, DELETE.
 2. Extended `server_test.go` with agent handler tests.
 
-### Phase 3: Stub endpoints + `--http-bind` flag (~50 LOC, ~0.5 day)
+### Phase 3: Stub endpoints (~30 LOC, ~0.5 day)
 
-Summary: Register stub handlers; add `--http-bind` flag and `--workflows-dir` flag to main.
+Summary: Register stub handlers for the two deferred endpoints.
 
 **Deliverables:**
 1. `internal/server/stub_handlers.go` — logs and cost stubs.
-2. Updated `cmd/orchestrator/main.go` — wire server, add `--http-bind`, `--workflows-dir`.
+
+### Phase 4: Wire into main.go + CLI flags (~40 LOC, ~0.5 day)
+
+Summary: Add `--http-bind` and `--workflows-dir` flags; wire `server.New` into the orchestrator startup sequence (TODO step 11).
+
+**Deliverables:**
+1. Updated `cmd/orchestrator/main.go` — wire server, add `--http-bind`, `--workflows-dir` flags.
 
 **Total estimated scope:** ~370 LOC implementation + tests. 2 days.
 
@@ -431,12 +529,11 @@ Summary: Register stub handlers; add `--http-bind` flag and `--workflows-dir` fl
 
 ## Decision / Next Steps
 
-Once this RFC is accepted:
+Feature branch `feature/v01-rest-api-server` was created ahead of review and is currently under review (PR #4).
 
-1. Create feature branch `feature/v01-rest-api-server`.
-2. Implement in phase order (scaffolding → workflow handlers → agent handlers → stubs + wiring).
-3. PR < 500 lines per phase if needed; squash merge to `main`.
-4. **Next RFC**: `0003-scheduler-executor.md` — parallel stage execution, gRPC task dispatch to agents, and step-level state transitions. Depends on RFC 0001 and RFC 0002 (uses the REST API's pending runs as the execution queue entry point).
+1. Implement in phase order (scaffolding → workflow handlers → agent handlers → stubs + wiring).
+2. PR < 500 lines per phase if needed; squash merge to `main`.
+3. **Next RFC**: `0003-scheduler-executor.md` — parallel stage execution, gRPC task dispatch to agents, and step-level state transitions. Depends on RFC 0001 and RFC 0002 (uses the REST API's pending runs as the execution queue entry point).
 
 ## Related Documentation
 
