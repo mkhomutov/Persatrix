@@ -158,6 +158,16 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		return
 	}
 
+	// Guard against TOCTOU: the run may have been cancelled via REST API between
+	// the time pollAndExecute filtered for RunPending and now.
+	if run.Status != state.RunPending {
+		s.logger.Info("run no longer pending, skipping",
+			zap.String("runID", runID),
+			zap.String("status", run.Status.String()),
+		)
+		return
+	}
+
 	s.logger.Info("executing run",
 		zap.String("runID", runID),
 		zap.String("workflowID", run.WorkflowID),
@@ -241,11 +251,16 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	}
 
 	// All stages completed — mark run as completed.
-	if err := s.store.UpdateRunStatus(ctx, runID, state.RunCompleted); err != nil {
+	// Use context.WithoutCancel so state persistence succeeds even if the parent
+	// context is cancelled between the last stage completing and these calls
+	// (mirrors failRun's cleanup pattern). Without this, a well-timed shutdown
+	// leaves the run stuck in Running with all steps Completed.
+	cleanupCtx := context.WithoutCancel(ctx)
+	if err := s.store.UpdateRunStatus(cleanupCtx, runID, state.RunCompleted); err != nil {
 		s.logger.Error("failed to set run status to completed", zap.String("runID", runID), zap.Error(err))
 	}
 	finished := time.Now()
-	if err := s.store.SetRunTimestamps(ctx, runID, nil, &finished); err != nil {
+	if err := s.store.SetRunTimestamps(cleanupCtx, runID, nil, &finished); err != nil {
 		s.logger.Error("failed to set run finish time", zap.String("runID", runID), zap.Error(err))
 	}
 

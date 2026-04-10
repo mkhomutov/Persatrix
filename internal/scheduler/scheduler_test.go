@@ -658,3 +658,39 @@ func TestFailRunWithCancelledContext(t *testing.T) {
 	assert.NotEmpty(t, run.Error, "run error should be recorded despite cancelled context")
 	assert.False(t, run.FinishedAt.IsZero(), "FinishedAt should be set despite cancelled context")
 }
+
+func TestSuccessPathContextCancellation(t *testing.T) {
+	// G-01 / F-01 regression: Verify that the success-path state persistence
+	// uses context.WithoutCancel, so a well-timed shutdown after all stages
+	// complete does NOT leave the run stuck in Running.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+
+	stepDone := make(chan struct{})
+	exec := &mockExecutor{handler: func(_ context.Context, _ executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		// Signal that the step completed, then give the test goroutine a
+		// moment to cancel the context before executeRun reaches the
+		// success-path UpdateRunStatus call.
+		close(stepDone)
+		time.Sleep(50 * time.Millisecond)
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "success-cancel", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go sched.Run(ctx)
+
+	// Cancel the context right after the executor finishes but before
+	// the scheduler persists the Completed status.
+	<-stepDone
+	cancel()
+
+	// The run must reach Completed (not remain stuck at Running).
+	run := waitForRunStatus(t, store, "success-cancel", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, state.RunCompleted, run.Status)
+	assert.False(t, run.FinishedAt.IsZero(), "FinishedAt should be set despite cancelled context")
+}
