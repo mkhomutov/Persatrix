@@ -111,6 +111,15 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] `go vet ./internal/executor/...` clean
 - [ ] No real network connections in tests (bufconn only)
 
+#### Post-merge findings
+
+- **N-06 (Dial options bypass)**: When `e.dialOpts` is non-empty, insecure credentials are skipped entirely (`dispatch()` L195–202). Custom dial options must independently include transport credentials. The test `setupTestEnv` correctly passes `insecure.NewCredentials()` in the bufconn dialer, but this coupling is fragile — future callers using `WithDialOptions` for non-test purposes (e.g., custom interceptors) must also remember to include transport credentials. **Should fix**: Make dial options additive — always append insecure creds (or future mTLS creds) as the base, then append caller-provided options. *(Review pr-022, Medium #1)*
+- **N-07 (StatusUnknown not tested)**: `StatusUnknown` (the zero value of `AgentStatus`) is not explicitly tested. The health check `agent.Status != registry.StatusHealthy` would reject it, but an explicit test provides regression coverage. Add to PR 2b. *(Review pr-022, Coverage Gap #4)*
+- **N-08 (Concurrent dispatch test)**: `ExecuteTask` will be called concurrently by the scheduler. The implementation is stateless per-call so concurrency is inherently safe, but a `sync.WaitGroup` + multiple goroutines test would provide race detector validation. Add to PR 2b. *(Review pr-022, Coverage Gap #5)*
+- **N-09 (Per-dispatch timeout divergence)**: `context.WithTimeout` is created inside `dispatch()`, so each retry attempt gets a fresh timeout. This diverges from the RFC (which wraps the entire retry loop in a single timeout). The implementation is **better** — each attempt gets the full timeout window, and the outer `ctx` still governs total lifetime. Documented inline with comment. No action needed. *(Review pr-022, Info)*
+- **N-10 (Simplified ExecuteRequest)**: Implementation uses flat fields (`TaskID`, `WorkflowID`, `AgentID`, `Payload`, `Context`) instead of the RFC's embedded `planner.Step`. This **improves** decoupling — the executor is independently testable without importing planner types. The scheduler (PR 3a) maps `planner.Step` → `ExecuteRequest` at the natural boundary. No action needed. *(Review pr-022, Info)*
+- **N-11 (Generic Metadata)**: `ExecuteResult.Metadata map[string]string` instead of RFC's typed `TokensUsed int64` and `DurationMs int64`. More flexible and forward-compatible, but consumers must do string parsing. Acceptable for v0.1 where metadata is logged but not aggregated. No action needed. *(Review pr-022, Info)*
+
 ---
 
 ### PR 2b: `feature/v01-executor-retry` — Retry Logic & Error Classification Tests
@@ -131,6 +140,8 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **Permanent failure**: `InvalidArgument` → no retry, immediate error.
 - **Retry exhaustion**: `Unavailable` × (maxRetries+1) → error.
 - **`isTransient` table-driven**: every `codes.*` value → expected bool.
+- **StatusUnknown rejected**: Agent with zero-value status → `ErrAgentNotReady`. *(Review pr-022, N-07)*
+- **Concurrent dispatch**: Multiple goroutines call `ExecuteTask` simultaneously → all succeed, race detector clean. *(Review pr-022, N-08)*
 - Race detector (`-race`).
 
 #### PR checklist
@@ -139,6 +150,8 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] Combined coverage (2a + 2b) ≥ 80%
 - [ ] `go vet ./internal/executor/...` clean
 - [ ] No real network connections in tests (bufconn only)
+- [ ] `StatusUnknown` explicitly tested (N-07)
+- [ ] Concurrent dispatch race-tested (N-08)
 
 ---
 
