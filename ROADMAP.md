@@ -28,7 +28,7 @@ This document tracks development progress across all phases. Update it when merg
 |-----|-------|--------|-----|--------|
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
-| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 📋 Proposed | 7 | 0/7 |
+| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | � Implementing | 7 | 0/7 |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 📋 Proposed | 7 | 0/7 |
 
 ### Dependency Chain
@@ -38,7 +38,7 @@ RFC 0001 (State, Registry, Planner)           ✅ Done
     ↓
 RFC 0002 (REST API Server)                    ✅ Done
     ↓
-RFC 0003 (Scheduler + Executor + gRPC)        📋 Next up
+RFC 0003 (Scheduler + Executor + gRPC)        � In Progress
     ↓
 RFC 0004 (Python Agent Server + Tools)        📋 Blocked on RFC 0003
     ↓
