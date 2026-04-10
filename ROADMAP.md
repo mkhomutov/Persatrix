@@ -174,6 +174,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#25](https://github.com/mkhomutov/Orchestr8/pull/25) | feat(scheduler): WorkflowScheduler core with polling, parallel stages, dedup | 0003 (5/7) | 2026-04-10 |
 | [#26](https://github.com/mkhomutov/Orchestr8/pull/26) | test(scheduler): step execution, template resolution, error path coverage | 0003 (6/7) | 2026-04-10 |
 | [#27](https://github.com/mkhomutov/Orchestr8/pull/27) | feat(orchestrator): wire scheduler + executor into main.go | 0003 (7/7) | 2026-04-10 |
+| [#31](https://github.com/mkhomutov/Orchestr8/pull/31) | fix(executor): additive dial options, cancellation & concurrent retry tests | 0003 follow-up (1/4) | 2026-04-10 |
 
 ---
 
