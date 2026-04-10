@@ -185,11 +185,13 @@ func TestMultiStageSequential(t *testing.T) {
 	store := state.NewInMemoryStore(zap.NewNop())
 
 	var order []string
+	payloads := make(map[string]string) // agentID → resolved payload
 	var orderMu sync.Mutex
 
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
 		orderMu.Lock()
 		order = append(order, req.AgentID)
+		payloads[req.AgentID] = req.Payload
 		orderMu.Unlock()
 		return &executor.ExecuteResult{
 			TaskID: "t1",
@@ -213,6 +215,10 @@ func TestMultiStageSequential(t *testing.T) {
 	assert.Equal(t, "agent-a", order[0])
 	assert.Equal(t, "agent-b", order[1])
 	assert.Equal(t, "agent-c", order[2])
+
+	// Verify template resolution: agent-b receives agent-a's output via {{ steps.out1.output }}.
+	assert.Equal(t, "output from agent-a", payloads["agent-b"], "agent-b should receive resolved template from agent-a output")
+	assert.Equal(t, "output from agent-b", payloads["agent-c"], "agent-c should receive resolved template from agent-b output")
 }
 
 func TestParallelStage(t *testing.T) {
