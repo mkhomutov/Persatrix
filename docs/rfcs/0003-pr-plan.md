@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **7 PRs** (one per phase, with both the executor and scheduler phases pre-split into a/b per calibration data showing RFC 0001 PRs exceeded estimates by 73–138%). Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
+RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **7 implementation PRs** (one per phase, with both the executor and scheduler phases pre-split into a/b per calibration data showing RFC 0001 PRs exceeded estimates by 73–138%) plus **4 follow-up PRs** addressing post-merge review findings. Each PR is independently mergeable and leaves the codebase in a compilable, test-passing state.
 
 > **Estimate calibration**: RFC 0001 PRs consistently exceeded estimates by 73–138%. Sizes in this plan are calibrated to ~1.7× of naive estimates.
 
@@ -18,7 +18,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 > **⚠️ RFC 0002 merge gate:** All RFC 0002 implementation PRs must be merged before PR 5 (wiring) can proceed. PRs 1–4 are independent of RFC 0002 and can begin immediately. If RFC 0002 wiring has not landed by the time PR 5 is ready, PR 5 declares `--workflows-dir` locally (see PR 5 scope).
 
-**Recommended merge order:** **PR 1 ‖ PR 4** (parallel) → **PR 2a** → **PR 2b** → **PR 3a** → **PR 3b** → **PR 5**. PR numbering does not imply execution order — see [Dependency Graph](#dependency-graph) for details.
+**Recommended merge order:** **PR 1 ‖ PR 4** (parallel) → **PR 2a** → **PR 2b** → **PR 3a** → **PR 3b** → **PR 5**. PR numbering does not imply execution order — see [Dependency Graph](#dependency-graph) for details. Follow-up PRs 6–9 are all independent and can proceed in any order after PR 5.
 
 ---
 
@@ -382,6 +382,147 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **N-53 (Payload verification in mock)**: `mockAgentServer.ExecuteTask` returns a static response regardless of input. Recording received payloads and asserting template resolution (`{{ steps.<key>.output }}`) reached the mock correctly would strengthen confidence. Nice to have. *(Review pr-027, Nice to Have #4)*
 - **N-54 (`//nolint:errcheck` on `exec.Close()`)**: Justified for v0.1 no-op, but should be removed when connection pooling is implemented in v0.2. Track for cleanup. *(Review pr-027, Note)*
 - **N-55 (Status hygiene updates)**: After merge: add PR #27 to ROADMAP merged PR history, transition RFC 0003 to `✅ Implemented` (7/7 merged), update `internal/scheduler/` component status to `✅ Complete`, update "What Works Today" section. *(Review pr-027, Note)*
+
+---
+
+## Follow-up PRs (Post-merge Findings)
+
+All 7 implementation PRs are merged. The following PRs address "Should Fix" post-merge findings accumulated during reviews. These are grouped by component to stay within the <500-line limit.
+
+> **Already resolved**: N-18, N-19, N-23, N-37 were addressed during the implementation PRs (verified in merged code). They do not require follow-up PRs.
+
+### PR 6: `feature/v01-executor-hardening` — Executor Hardening
+
+**Depends on**: PR 5 merged (all implementation PRs complete)
+**Branch**: `feature/v01-executor-hardening`
+**Estimated size**: ~100–200 lines
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/executor/executor.go` | N-06: Make dial options additive — always append insecure credentials (or future mTLS) as the base, then append caller-provided `dialOpts`. Prevents callers from accidentally omitting transport credentials. |
+| `internal/executor/executor_test.go` | N-12: Context cancellation mid-dispatch test — cancel `ctx` during active `dispatch()` gRPC call, verify error surfaces as `context.Canceled` (not masked as `"permanent failure ... Canceled"`). |
+| `internal/executor/executor_test.go` | N-13: Concurrent retry stress test — multiple goroutines all encounter transient errors and retry. Use `sync/atomic` counter per goroutine to track per-goroutine attempt count. Exercises the backoff `select`/timer path under `-race`. |
+
+#### Findings addressed
+
+- **N-06** (Review pr-022, Medium #1): Dial options bypass — custom `dialOpts` skip insecure credentials entirely.
+- **N-12** (Review pr-023, Should Fix #1): Context cancellation mid-dispatch — `codes.Canceled` classified as permanent.
+- **N-13** (Review pr-023, Should Fix #2): Concurrent retry path untested under `-race`.
+
+#### PR checklist
+
+- [ ] `go test ./internal/executor/... -v -race -cover` passes
+- [ ] `WithDialOptions` callers always get transport credentials
+- [ ] Cancellation mid-dispatch test documents observed behavior
+- [ ] Concurrent retry stress test exercises backoff path under `-race`
+
+---
+
+### PR 7: `feature/v01-test-observability` — Test Observability & Coverage Gaps
+
+**Depends on**: PR 5 merged (all implementation PRs complete)
+**Branch**: `feature/v01-test-observability`
+**Estimated size**: ~100–200 lines
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/state/state_test.go` | N-20: Add `TestConcurrentTimestampsAndErrors` — exercise `SetRunTimestamps` and `SetRunError` under `-race` with concurrent goroutines, matching the pattern of existing concurrent tests for `Create/Get/UpdateStatus/UpdateStep/Delete/List`. |
+| `internal/scheduler/scheduler_test.go` | N-35: Extend `TestResolutionFailureMissingStepOutput` — add step-level assertions (`step.Status == RunFailed`, `step.Error` contains expected text), matching the sibling test `TestResolutionFailureMissingVariable`. |
+| `internal/scheduler/scheduler_test.go` | N-36: Replace `zap.NewNop()` with `zap.NewExample()` or `zaptest/observer` in `TestListRunsErrorPath` — assert an error-level log entry containing `"failed to list runs"` was emitted. Prevents test from passing if the logging line is accidentally deleted. |
+| `tests/integration/scheduler_executor_test.go` | N-48: Replace `zap.NewNop()` with `zaptest.NewLogger(t)` — surface diagnostic output on integration test failure. |
+
+#### Findings addressed
+
+- **N-20** (Review pr-024, F-03): No concurrent test for `SetRunTimestamps`/`SetRunError`.
+- **N-35** (Review pr-026, Should Fix #1): Missing step-level assertion in `TestResolutionFailureMissingStepOutput`.
+- **N-36** (Review pr-026, Should Fix #2): `TestListRunsErrorPath` uses `zap.NewNop()`, can't verify logging.
+- **N-48** (Review pr-027, Should Fix #3): Integration test uses `zap.NewNop()`, swallows errors.
+
+#### PR checklist
+
+- [ ] `go test ./internal/state/... -v -race -cover` passes
+- [ ] `go test ./internal/scheduler/... -v -race -cover` passes
+- [ ] `go test ./tests/integration/... -v -race` passes
+- [ ] `TestListRunsErrorPath` asserts error log emission
+- [ ] Integration test surfaces diagnostic output on failure
+
+---
+
+### PR 8: `feature/v01-graceful-shutdown` — Graceful Shutdown & Path Resolution
+
+**Depends on**: PR 5 merged (all implementation PRs complete)
+**Branch**: `feature/v01-graceful-shutdown`
+**Estimated size**: ~80–150 lines
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `cmd/orchestrator/main.go` | N-46: Add shutdown drain mechanism — use `errgroup.Group` or `sync.WaitGroup` to track the scheduler and HTTP server goroutines. After `cancel()`, call `wg.Wait()` with a timeout (e.g., 10s) before exiting. Prevents race with `exec.Close()` when connection pooling is added in v0.2. |
+| `cmd/orchestrator/main.go` | N-47: Resolve `*workflowsDir` to an absolute path once via `filepath.Abs()` before passing to both the scheduler and the HTTP server. Eliminates CWD-relative vs canonical path divergence. |
+| `cmd/orchestrator/main.go` | N-49: Manually verify `go build ./cmd/orchestrator && ./orchestr8-server --workflows-dir workflows/` starts cleanly and responds to `SIGINT`. Check both unchecked PR 5 checklist items. |
+
+#### Findings addressed
+
+- **N-46** (Review pr-027, Should Fix #1): No shutdown drain — `main()` exits immediately after `cancel()`.
+- **N-47** (Review pr-027, Should Fix #2): `workflowsDir` path inconsistency between server and scheduler.
+- **N-49** (Review pr-027, Should Fix #4): Two unchecked manual verification items from PR 5.
+
+#### PR checklist
+
+- [ ] `go build ./cmd/orchestrator` succeeds
+- [ ] `go vet ./cmd/orchestrator/...` clean
+- [ ] Binary starts cleanly with `--workflows-dir workflows/`
+- [ ] Graceful shutdown via SIGINT drains in-flight work
+- [ ] `*workflowsDir` resolved to absolute path before passing to components
+
+---
+
+### PR 9 (optional): `feature/v01-proto-tooling` — Proto Build Tooling
+
+**Depends on**: PR 1 merged
+**Branch**: `feature/v01-proto-tooling`
+**Estimated size**: ~30–60 lines
+
+> **Note**: This PR is optional for closing RFC 0003 — the findings are quality-of-life improvements for the build system. Can be deferred to a general tooling sprint.
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `Makefile` | N-03: Split `make proto` into `make proto-go` (Go stubs only) and `make proto-python` (Python stubs only), with `make proto` calling both. Decouples Go development from the Python gRPC toolchain. |
+| `.github/workflows/ci.yml` | N-02: Add CI staleness check — `make proto-go && git diff --exit-code internal/generated/` to detect when `.proto` changes are committed without regenerating stubs. |
+
+#### Findings addressed
+
+- **N-02** (Review pr-021, Should Fix #1): No CI check for proto↔stub drift.
+- **N-03** (Review pr-021, Should Fix #2): `make proto` requires both Go and Python gRPC toolchains.
+
+#### PR checklist
+
+- [ ] `make proto-go` generates Go stubs without Python gRPC toolchain
+- [ ] `make proto-python` generates Python stubs independently
+- [ ] `make proto` calls both targets
+- [ ] CI check detects stale generated code
+
+---
+
+## Follow-up Dependency Graph
+
+```
+PR 5 (wiring) ✅ merged
+       │
+       ├──► PR 6 (executor-hardening)
+       ├──► PR 7 (test-observability)
+       ├──► PR 8 (graceful-shutdown)
+       └──► PR 9 (proto-tooling, optional)
+```
+
+All four follow-up PRs are independent and can proceed in parallel.
 
 ---
 
