@@ -198,7 +198,9 @@ func TestExecuteTask_Timeout(t *testing.T) {
 }
 
 func TestExecuteTask_FailedStatus(t *testing.T) {
+	callCount := 0
 	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		callCount++
 		return &taskpb.TaskResponse{
 			TaskId:       req.TaskId,
 			Status:       taskpb.TaskStatus_FAILED,
@@ -216,10 +218,14 @@ func TestExecuteTask_FailedStatus(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTaskFailed))
 	assert.Contains(t, err.Error(), "LLM rate limit exceeded")
+	// FAILED is a permanent agent-side failure — must not be retried.
+	assert.Equal(t, 1, callCount, "FAILED response should not be retried")
 }
 
 func TestExecuteTask_FailedStatus_EmptyErrorMessage(t *testing.T) {
+	callCount := 0
 	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		callCount++
 		return &taskpb.TaskResponse{
 			TaskId: req.TaskId,
 			Status: taskpb.TaskStatus_FAILED,
@@ -235,6 +241,7 @@ func TestExecuteTask_FailedStatus_EmptyErrorMessage(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTaskFailed))
 	assert.Contains(t, err.Error(), "unknown error")
+	assert.Equal(t, 1, callCount, "FAILED response should not be retried")
 }
 
 func TestExecuteTask_ContextCancellation(t *testing.T) {
@@ -382,7 +389,9 @@ func TestExecuteTask_UnexpectedStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			callCount := 0
 			env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+				callCount++
 				return &taskpb.TaskResponse{
 					TaskId: req.TaskId,
 					Status: tt.status,
@@ -399,6 +408,8 @@ func TestExecuteTask_UnexpectedStatus(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "unexpected task status from agent")
+			// Unexpected status is permanent — should not be retried.
+			assert.Equal(t, 1, callCount, "unexpected status should not be retried")
 		})
 	}
 }

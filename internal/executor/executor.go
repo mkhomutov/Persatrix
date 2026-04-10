@@ -21,9 +21,10 @@ import (
 
 // Sentinel errors for executor operations.
 var (
-	ErrAgentNotFound = errors.New("agent not found in registry")
-	ErrAgentNotReady = errors.New("agent is not healthy")
-	ErrTaskFailed    = errors.New("task execution failed")
+	ErrAgentNotFound    = errors.New("agent not found in registry")
+	ErrAgentNotReady    = errors.New("agent is not healthy")
+	ErrTaskFailed       = errors.New("task execution failed")
+	ErrUnexpectedStatus = errors.New("unexpected task status from agent")
 )
 
 // ExecuteRequest contains the parameters for a task dispatch.
@@ -209,7 +210,8 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 
 	client := taskpb.NewAgentServiceClient(conn)
 
-	// Apply per-task timeout.
+	// Apply per-task timeout. Intentionally scoped per-dispatch (not wrapping
+	// the entire retry loop) so each attempt gets a fresh timeout window.
 	callCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
@@ -229,7 +231,7 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 		return nil, fmt.Errorf("%w: %s", ErrTaskFailed, errMsg)
 	}
 	if resp.Status != taskpb.TaskStatus_COMPLETED {
-		return nil, fmt.Errorf("unexpected task status from agent: %s", resp.Status)
+		return nil, fmt.Errorf("%w: %s", ErrUnexpectedStatus, resp.Status)
 	}
 
 	return &ExecuteResult{
@@ -243,7 +245,15 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 // gRPC Unavailable, ResourceExhausted, and Aborted are transient.
 // DeadlineExceeded is permanent (retrying with the same timeout won't help).
 // Non-gRPC errors (DNS, connection refused, etc.) are treated as transient.
+// Application-level permanent errors (ErrTaskFailed, ErrUnexpectedStatus) from
+// dispatch are explicitly excluded — these indicate the agent processed the
+// request and returned a terminal failure, so retrying is wasteful.
 func isTransient(err error) bool {
+	// Agent returned an explicit failure or non-terminal status — permanent.
+	if errors.Is(err, ErrTaskFailed) || errors.Is(err, ErrUnexpectedStatus) {
+		return false
+	}
+
 	st, ok := status.FromError(err)
 	if !ok {
 		// Non-gRPC error (DNS failure, connection refused, etc.) — transient.
