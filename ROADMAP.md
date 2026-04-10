@@ -11,7 +11,7 @@ This document tracks development progress across all phases. Update it when merg
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | 🔨 Building |
+| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | � In Progress |
 | **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | 📋 Planned |
 | **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |
@@ -27,7 +27,7 @@ This document tracks development progress across all phases. Update it when merg
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
-| [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 5 | 5/5 |
+| [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 📋 Proposed | 7 | 0/7 |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 📋 Proposed | 7 | 0/7 |
 
@@ -163,10 +163,10 @@ v0.1 Complete ─ end-to-end execution working
 | [#9](https://github.com/mkhomutov/Orchestr8/pull/9) | feat(planner): ResolveInputs template resolution | 0001 (4/6) | 2026-04-08 |
 | [#10](https://github.com/mkhomutov/Orchestr8/pull/10) | feat(orchestrator): wire into main.go | 0001 (5/6) | 2026-04-08 |
 | [#12](https://github.com/mkhomutov/Orchestr8/pull/12) | fix: review findings follow-up | 0001 (6/6) | 2026-04-09 |
-| [#14](https://github.com/mkhomutov/Orchestr8/pull/14) | feat(server): HTTP scaffolding + workflow handlers | 0002 (1/5) | 2026-04-09 |
-| [#16](https://github.com/mkhomutov/Orchestr8/pull/16) | feat(server): agent registry endpoints | 0002 (2/5) | 2026-04-09 |
-| [#17](https://github.com/mkhomutov/Orchestr8/pull/17) | feat(server): stub endpoints + main.go wiring | 0002 (3/5) | 2026-04-09 |
-| [#18](https://github.com/mkhomutov/Orchestr8/pull/18) | fix: review findings follow-up | 0002 (5/5) | 2026-04-10 |
+| [#14](https://github.com/mkhomutov/Orchestr8/pull/14) | feat(server): HTTP scaffolding + workflow handlers | 0002 (1/4) | 2026-04-09 |
+| [#16](https://github.com/mkhomutov/Orchestr8/pull/16) | feat(server): agent registry endpoints | 0002 (2/4) | 2026-04-09 |
+| [#17](https://github.com/mkhomutov/Orchestr8/pull/17) | feat(server): stub endpoints + main.go wiring | 0002 (3/4) | 2026-04-09 |
+| [#18](https://github.com/mkhomutov/Orchestr8/pull/18) | fix: review findings follow-up | 0002 (4/4) | 2026-04-10 |
 
 ---
 

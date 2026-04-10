@@ -44,9 +44,21 @@ LEGACY_MARKERS = [
     "\u274c **Missing**",      # ❌
 ]
 
+# Common non-standard emojis that may be mistakenly used as status markers.
+# Including them here ensures they are detected and flagged rather than
+# silently passing because they aren't in the regex at all.
+_EXTRA_EMOJIS = (
+    r"\U0001f528"  # 🔨 (sometimes used for "Building")
+    r"|\u2b50"     # ⭐
+    r"|\U0001f6d1" # 🛑
+    r"|\U0001f7e0" # 🟠
+    r"|\u2615"     # ☕
+)
+
 _STATUS_RE = re.compile(
     r"(\u2705|\U0001f680|\U0001f6a7|\u26a0\ufe0f|\U0001f4cb|\U0001f52e"
-    r"|\U0001f4dd|\u274c|\U0001f7e2|\U0001f7e1|\U0001f534)"
+    r"|\U0001f4dd|\u274c|\U0001f7e2|\U0001f7e1|\U0001f534"
+    r"|" + _EXTRA_EMOJIS + r")"
     r"\s*\*\*([^*]+)\*\*"
 )
 
