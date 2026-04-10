@@ -359,7 +359,7 @@ This PR sweeps all outstanding low-severity review findings accumulated across P
 - **`cap` rename**: `for _, cap := range` → `for _, capName := range` in `FindByCapability` to avoid shadowing Go's built-in `cap()` function.
 - **Agent ID validation comment**: Document in `Register`'s godoc that format validation (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) is enforced at the REST API layer (RFC 0002), not in the registry.
 - **`CreateRun` mutation comment**: The existing `CreateRun` godoc ("If run.ID is empty, a UUIDv4 is generated") documents the behavior. No additional caller-guidance comment was added — the implicit mutation is clear from the godoc and the deep-copy that follows.
-- **~~Concurrent test ID fix~~**: _Not applied in PR #12._ `string(rune('a'+i))` remains at 4 locations in `state_test.go`. Only `TestConcurrentCreateAndDelete` (runs=30, i∈[26,29]) produces non-standard characters (`{|}~`); the other two uses stay within `a`–`z`. Low impact — the state store does not enforce ID format. Tracked as a carry-forward item below.
+- **Concurrent test ID fix**: Replaced `string(rune('a'+i))` with `fmt.Sprintf` at all 4 locations in `state_test.go`. `TestConcurrentCreateAndDelete` (runs=30, i∈[26,29]) previously produced non-standard characters (`{|}~`); now uses numeric IDs. Addressed in PR #30.
 - **`FindByCapability` nil-vs-empty slice**: Initialize `result` as `[]AgentInfo{}` instead of `var result []AgentInfo` so JSON marshaling produces `[]` instead of `null` when no agents match.
 - **Variable-reference error**: Change `fmt.Errorf("unresolved variable reference: %s ...", varName)` to include `step.ID` for debugging context.
 - **Nil-logger suspicious-path test**: Exercises `ResolveInputs` with `nil` logger and a malformed template pattern to confirm the nil guard covers the `warnSuspicious` code path.
@@ -379,9 +379,7 @@ This PR sweeps all outstanding low-severity review findings accumulated across P
 
 #### Findings not addressed in PR #12
 
-| Source | Finding | Severity | Notes |
-|--------|---------|----------|-------|
-| PR #6 F-06 | Non-printable rune IDs in concurrent tests (`string(rune('a'+i))` with i > 25) | Low | Planned but not applied. Only `TestConcurrentCreateAndDelete` (runs=30) exceeds `a`–`z`. Low impact — state store does not enforce ID format. Candidate for future cleanup PR. |
+_All findings now addressed._ PR #6 F-06 (concurrent test IDs) was fixed in PR #30.
 
 #### Findings deferred to other RFCs
 
@@ -400,7 +398,7 @@ These findings are out-of-scope for RFC 0001. They are tracked here for visibili
 - [x] `go vet ./...` clean
 - [x] `go build ./cmd/orchestrator` succeeds
 - [x] All `String()` methods have test coverage
-- [ ] No remaining carry-forward findings from RFC 0001 reviews — **F-06 (concurrent test IDs) not addressed**; see "Findings not addressed" above
+- [x] No remaining carry-forward findings from RFC 0001 reviews
 
 ---
 
