@@ -141,6 +141,8 @@ Detailed specs and design decisions live in `docs/`. Refer to these rather than 
 
 **When completing work**: Update [ROADMAP.md](../ROADMAP.md) with the merged PR, component status changes, and RFC status transitions. Follow the instructions at the bottom of ROADMAP.md.
 
+**PR review reports are local-only artifacts.** Never reference, link to, or mention review report files (e.g. `docs/pr-reviews/*.md`) in committed documents such as PR plans, RFCs, or ROADMAP.md. Review reports are generated for local consumption and are not committed to the repository.
+
 ## Status Hygiene
 
 Progress is tracked in multiple places. **Before and after every task** (not just at completion), review and update all documents whose status may have changed:
