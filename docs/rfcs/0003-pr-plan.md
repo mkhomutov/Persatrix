@@ -262,12 +262,26 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/scheduler/... -v -cover` passes
-- [ ] Combined coverage (3a + 3b) ≥ 80%
-- [ ] `go vet ./internal/scheduler/...` clean
-- [ ] TOCTOU branch exercised (N-24)
-- [ ] `Plan()` error path tested (N-25)
-- [ ] `ListRuns` error path tested (N-26)
+- [x] `go test ./internal/scheduler/... -v -cover` passes
+- [x] Combined coverage (3a + 3b) ≥ 80% (87.3%)
+- [x] `go vet ./internal/scheduler/...` clean
+- [x] TOCTOU branch exercised (N-24)
+- [x] `Plan()` error path tested (N-25)
+- [x] `ListRuns` error path tested (N-26)
+
+#### Post-merge findings
+
+- **N-35 (`TestResolutionFailureMissingStepOutput` missing step-level assertion)**: Only asserts run-level error (`run.Error` contains `"nonexistent"`). Does **not** verify `step.Status == RunFailed` or `step.Error`, unlike the sibling test `TestResolutionFailureMissingVariable` which checks both. Template resolution failures go through `markStepFailed` — asserting step state confirms that path. **Should fix** in a follow-up. *(Review pr-026, Should Fix #1)*
+- **N-36 (`TestListRunsErrorPath` uses `zap.NewNop()`)**: The test verifies no dispatch occurs but cannot confirm the error was actually logged. Since the code path under test is `logger.Error("failed to list runs") + return`, using `zap.NewNop()` means the test passes even if the logging line is accidentally deleted. **Should fix** in a follow-up: use `zaptest.NewLogger(t)` or `zap/observer` to assert an error-level log entry containing `"failed to list runs"` was emitted. *(Review pr-026, Should Fix #2)*
+- **N-37 (`TestStepStateTransitionsFailure` missing `midRunStepHasStartedAt`)**: Does not assert `midRunStepHasStartedAt` during intermediate state (unlike the success variant `TestStepStateTransitionsSuccess`). Minor inconsistency — the success test already covers this, but symmetry would improve confidence. **Should fix** in a follow-up. *(Review pr-026, Should Fix #3)*
+- **N-38 (`mockStore` nil-panic risk)**: Embedded `state.Store` interface means nil-panic if `Store` field is not set. Future tests copying the pattern could misuse it. Nice to have: add a constructor `newMockStore(real state.Store, listErr error)` or a comment documenting the requirement. *(Review pr-026, Nice to Have #1)*
+- **N-39 (Observed-logger test for `failRun`)**: A test with `zap/observer` that verifies `failRun` emits expected structured log fields (`runID`, `error`) would provide regression coverage for error reporting quality. Nice to have. *(Review pr-026, Nice to Have #2)*
+- **N-40 (Multi-template-in-single-input test)**: A step with `input: "{{ user_request }} using {{ steps.prev.output }}"` — both `{{ variable }}` and `{{ steps.<id>.output }}` in a single input string — would exercise the single-pass multi-match path in `ResolveInputs`. Nice to have. *(Review pr-026, Nice to Have #3)*
+- **N-41 (`UpdateStepState` failure coverage)**: `UpdateStepState` failures during `executeStep` (scheduler.go L328–335, L373–382) are logged but don't abort execution. A test with a failing mock store would verify this logging-only behavior. Nice to have. *(Review pr-026, Nice to Have #4, related to N-30)*
+- **N-42 (`SetRunTimestamps` failure in success path)**: `SetRunTimestamps` failure on the success/completion path (scheduler.go L261–264) is logged but doesn't prevent run completion. A test documenting this behavior would prevent regressions. Nice to have. *(Review pr-026, Nice to Have #5, related to N-31)*
+- **N-43 (Duplicate `OutputKey` in parallel stage)**: Two steps with same `output_key` → verify last-write-wins or add warning. Nice to have. *(Review pr-026, Nice to Have #6, related to N-29)*
+- **N-44 (Concurrent template resolution >2 parallel steps)**: Only 2 parallel steps tested reading outputs. 3+ parallel steps depending on prior stage outputs would provide stronger race detector validation. Nice to have. *(Review pr-026, Nice to Have #7, related to N-33)*
+- **N-45 (`SetRunTimestamps` failure in `failRun`)**: Verify failure logging doesn't prevent error/status persistence. Not previously tracked. Nice to have. *(Review pr-026, Nice to Have #8)*
 
 ---
 
