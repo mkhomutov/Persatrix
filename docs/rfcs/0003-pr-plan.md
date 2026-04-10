@@ -289,10 +289,19 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/state/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `RunRetrying = 5` (explicit, no `iota`)
-- [ ] `go vet ./internal/state/...` clean
+- [x] `go test ./internal/state/... -v -cover` passes
+- [x] Coverage ≥ 80%
+- [x] `RunRetrying = 5` (explicit, no `iota`)
+- [x] `go vet ./internal/state/...` clean
+
+#### Post-merge findings
+
+- **N-18 (`runStatusString()` missing `RunRetrying`)**: `runStatusString()` in `internal/server/workflow_handlers.go` (L229–243) has no `case state.RunRetrying` — the new status renders as `"unknown"` in REST API JSON responses. No v0.1 code path sets `RunRetrying` yet, but **should fix** proactively: add `case state.RunRetrying: return "retrying"` and extend `TestRunStatusString` in `server_test.go`. Can be done in PR 3a (scheduler) or a standalone fix. *(Review pr-024, F-01)*
+- **N-19 (`TestDeleteRunAnyStatus` incomplete)**: Existing `TestDeleteRunAnyStatus` (L354–365) iterates `{RunPending, RunRunning, RunCompleted, RunFailed, RunCancelled}` but not `RunRetrying`. Trivial one-line fix: add `RunRetrying` to the `statuses` slice. **Should fix** in PR 3a or standalone. *(Review pr-024, F-02)*
+- **N-20 (No concurrent test for new methods)**: `SetRunTimestamps` and `SetRunError` are not exercised under `-race` concurrently. Existing concurrent tests cover `Create/Get/UpdateStatus/UpdateStep/Delete/List` but skip the new methods. Adding a `TestConcurrentTimestampsAndErrors` (~20 lines) would provide race detector validation. **Should fix** in a follow-up. *(Review pr-024, F-03)*
+- **N-21 (Both-nil `SetRunTimestamps` untested)**: Calling `SetRunTimestamps` with both pointers `nil` is a no-op. A test documenting this behavior prevents regressions if someone adds nil validation. Nice to have. *(Review pr-024, F-04)*
+- **N-22 (Empty-string `SetRunError` untested)**: Calling `SetRunError` with `""` effectively clears the error field. Documenting this expected behavior prevents ambiguity. Nice to have. *(Review pr-024, F-05)*
+- **N-23 (`workflowRunResponse` missing `Error` field)**: `workflowRunResponse` DTO in `internal/server/types.go` has no `Error` field. With `SetRunError` now in the `Store` interface, the Scheduler (PR 3a) will persist error messages invisible to REST API consumers. Track for follow-up — likely RFC 0002 patch or PR 3a scope. *(Review pr-024, F-06)*
 
 ---
 

@@ -28,7 +28,7 @@ This document tracks development progress across all phases. Update it when merg
 |-----|-------|--------|-----|--------|
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
-| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 🚧 Implementing | 7 | 3/7 |
+| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 🚧 Implementing | 7 | 4/7 |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 📋 Proposed | 7 | 0/7 |
 
 ### Dependency Chain
@@ -169,6 +169,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#18](https://github.com/mkhomutov/Orchestr8/pull/18) | fix: review findings follow-up | 0002 (4/4) | 2026-04-10 |
 | [#21](https://github.com/mkhomutov/Orchestr8/pull/21) | feat(generated): protobuf Go code generation | 0003 (1/7) | 2026-04-10 |
 | [#22](https://github.com/mkhomutov/Orchestr8/pull/22) | feat(executor): GRPCExecutor core with retry logic | 0003 (2/7) | 2026-04-10 |
+| [#23](https://github.com/mkhomutov/Orchestr8/pull/23) | test(executor): retry logic & error classification tests | 0003 (3/7) | 2026-04-10 |
 
 ---
 
