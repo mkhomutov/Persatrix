@@ -444,11 +444,11 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 #### PR checklist
 
-- [ ] `go test ./internal/state/... -v -race -cover` passes
-- [ ] `go test ./internal/scheduler/... -v -race -cover` passes
-- [ ] `go test ./tests/integration/... -v -race` passes
-- [ ] `TestListRunsErrorPath` asserts error log emission
-- [ ] Integration test surfaces diagnostic output on failure
+- [x] `go test ./internal/state/... -v -race -cover` passes
+- [x] `go test ./internal/scheduler/... -v -race -cover` passes
+- [x] `go test ./tests/integration/... -v -race` passes
+- [x] `TestListRunsErrorPath` asserts error log emission
+- [x] Integration test surfaces diagnostic output on failure
 
 ---
 

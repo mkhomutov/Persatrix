@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -45,7 +45,8 @@ func TestSchedulerExecutorIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	logger := zap.NewNop()
+	// N-48: Use zaptest.NewLogger to surface diagnostic output on test failure.
+	logger := zaptest.NewLogger(t)
 
 	// --- Infrastructure ---
 	store := state.NewInMemoryStore(logger)

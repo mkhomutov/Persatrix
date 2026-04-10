@@ -482,6 +482,62 @@ func TestConcurrentCreateAndDelete(t *testing.T) {
 	assert.Empty(t, remaining)
 }
 
+func TestConcurrentTimestampsAndErrors(t *testing.T) {
+	// N-20: Exercise SetRunTimestamps and SetRunError under -race with concurrent goroutines.
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	const runs = 20
+	for i := 0; i < runs; i++ {
+		id := fmt.Sprintf("cte-%d", i)
+		require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: id, WorkflowID: "wf-1"}))
+	}
+
+	var wg sync.WaitGroup
+
+	// Concurrent SetRunTimestamps writers.
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		id := fmt.Sprintf("cte-%d", i)
+		go func(runID string) {
+			defer wg.Done()
+			now := time.Now()
+			_ = store.SetRunTimestamps(ctx, runID, &now, nil)
+		}(id)
+	}
+
+	// Concurrent SetRunError writers.
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		id := fmt.Sprintf("cte-%d", i)
+		go func(runID string) {
+			defer wg.Done()
+			_ = store.SetRunError(ctx, runID, "concurrent error for "+runID)
+		}(id)
+	}
+
+	// Concurrent readers interleaved with writers.
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		id := fmt.Sprintf("cte-%d", i)
+		go func(runID string) {
+			defer wg.Done()
+			_, _ = store.GetRun(ctx, runID)
+		}(id)
+	}
+
+	wg.Wait()
+
+	// Verify all runs have timestamps and errors set.
+	for i := 0; i < runs; i++ {
+		id := fmt.Sprintf("cte-%d", i)
+		got, err := store.GetRun(ctx, id)
+		require.NoError(t, err)
+		assert.False(t, got.StartedAt.IsZero(), "run %s should have StartedAt set", id)
+		assert.Equal(t, "concurrent error for "+id, got.Error, "run %s should have error set", id)
+	}
+}
+
 func TestCRUDFullLifecycle(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

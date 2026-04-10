@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/orchestr8/orchestr8/internal/executor"
 	"github.com/orchestr8/orchestr8/internal/planner"
@@ -803,6 +804,12 @@ workflow:
 	run := waitForRunStatus(t, store, "missing-step-run", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
 	assert.Contains(t, run.Error, "nonexistent", "error should mention the missing step ID")
+
+	// N-35: Step-level assertions — verify step is marked failed with resolution error.
+	step, ok := run.Steps["s1"]
+	require.True(t, ok, "step s1 should exist")
+	assert.Equal(t, state.RunFailed, step.Status)
+	assert.Contains(t, step.Error, "nonexistent", "step error should mention the missing step ID")
 }
 
 func TestStepStateTransitionsSuccess(t *testing.T) {
@@ -865,6 +872,7 @@ func TestStepStateTransitionsFailure(t *testing.T) {
 	store := state.NewInMemoryStore(zap.NewNop())
 
 	var midRunStepStatus state.RunStatus
+	var midRunStepHasStartedAt bool
 	stepExecuting := make(chan struct{})
 	stepContinue := make(chan struct{})
 
@@ -887,14 +895,16 @@ func TestStepStateTransitionsFailure(t *testing.T) {
 	require.NoError(t, err)
 	if step, ok := run.Steps["step1"]; ok {
 		midRunStepStatus = step.Status
+		midRunStepHasStartedAt = !step.StartedAt.IsZero()
 	}
 	close(stepContinue)
 
 	// Wait for run failure.
 	run = waitForRunStatus(t, store, "fail-trans", state.RunFailed, 5*time.Second)
 
-	// Mid-execution: step was Running.
+	// Mid-execution: step was Running with StartedAt set (symmetry with success variant).
 	assert.Equal(t, state.RunRunning, midRunStepStatus, "step should be Running during execution")
+	assert.True(t, midRunStepHasStartedAt, "step StartedAt should be set during execution")
 
 	// Post-failure: step is Failed with error and both timestamps.
 	step, ok := run.Steps["step1"]
@@ -1026,6 +1036,7 @@ func TestPlanErrorPath(t *testing.T) {
 
 func TestListRunsErrorPath(t *testing.T) {
 	// N-26: Store.ListRuns() returns error → logged, no runs dispatched.
+	// N-36: Use zap/observer to assert the error is actually logged.
 	dir := t.TempDir()
 
 	realStore := state.NewInMemoryStore(zap.NewNop())
@@ -1039,7 +1050,13 @@ func TestListRunsErrorPath(t *testing.T) {
 		return nil, nil
 	}}
 
-	sched := NewWorkflowScheduler(ms, nil, planner.NewYAMLPlanner(zap.NewNop()), exec, zap.NewNop(), dir, WithPollInterval(50*time.Millisecond))
+	// N-36: Use DebugLevel observer so the entry.Level assertion below
+	// actually validates that production code logs at Error (not Warn/Info).
+	// With ErrorLevel filter the level check would be tautologically true.
+	core, logs := observer.New(zap.DebugLevel)
+	observedLogger := zap.New(core)
+
+	sched := NewWorkflowScheduler(ms, nil, planner.NewYAMLPlanner(zap.NewNop()), exec, observedLogger, dir, WithPollInterval(50*time.Millisecond))
 
 	ctx := context.Background()
 	sem := make(chan struct{}, 10)
@@ -1048,4 +1065,17 @@ func TestListRunsErrorPath(t *testing.T) {
 	sched.pollAndExecute(ctx, sem)
 
 	assert.Equal(t, int64(0), exec.calls.Load(), "executor should not be called on ListRuns error")
+
+	// Verify the error was actually logged (prevents silent deletion of the log line).
+	require.Equal(t, 1, logs.Len(), "expected exactly one error log entry")
+	entry := logs.All()[0]
+	assert.Equal(t, "failed to list runs", entry.Message)
+	assert.Equal(t, zap.ErrorLevel, entry.Level)
+
+	// Verify the structured zap.Error(err) field propagates the error value.
+	// This detects regressions where the zap.Error(err) field is accidentally
+	// removed from the log call but the message string remains.
+	errVal, ok := entry.ContextMap()["error"]
+	require.True(t, ok, "log entry should contain 'error' field from zap.Error()")
+	assert.Contains(t, fmt.Sprintf("%v", errVal), "database connection lost")
 }
