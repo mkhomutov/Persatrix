@@ -146,12 +146,12 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/... -v -cover` passes
-- [ ] Combined coverage (2a + 2b) ≥ 80%
-- [ ] `go vet ./internal/executor/...` clean
-- [ ] No real network connections in tests (bufconn only)
-- [ ] `StatusUnknown` explicitly tested (N-07)
-- [ ] Concurrent dispatch race-tested (N-08)
+- [x] `go test ./internal/executor/... -v -cover` passes
+- [x] Combined coverage (2a + 2b) ≥ 80%
+- [x] `go vet ./internal/executor/...` clean
+- [x] No real network connections in tests (bufconn only)
+- [x] `StatusUnknown` explicitly tested (N-07)
+- [x] Concurrent dispatch race-tested (N-08)
 
 ---
 

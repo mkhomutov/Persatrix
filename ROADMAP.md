@@ -28,7 +28,7 @@ This document tracks development progress across all phases. Update it when merg
 |-----|-------|--------|-----|--------|
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
-| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 🚧 Implementing | 7 | 1/7 |
+| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | 🚧 Implementing | 7 | 3/7 |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 📋 Proposed | 7 | 0/7 |
 
 ### Dependency Chain
@@ -56,7 +56,7 @@ v0.1 Complete ─ end-to-end execution working
 | `internal/planner/` | YAML parsing, DAG validation, topological sort | ✅ Complete (100% coverage) |
 | `internal/server/` | REST API (11 endpoints, middleware, graceful shutdown) | ✅ Complete (86.5% coverage) |
 | `internal/scheduler/` | Workflow scheduling (pick up pending runs, drive stages) | 🔲 TODO stub (RFC 0003) |
-| `internal/executor/` | gRPC task dispatch to agents | � In Progress (RFC 0003) |
+| `internal/executor/` | gRPC task dispatch to agents | ✅ Complete (96.1% coverage) |
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.2+) |
@@ -168,6 +168,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#17](https://github.com/mkhomutov/Orchestr8/pull/17) | feat(server): stub endpoints + main.go wiring | 0002 (3/4) | 2026-04-09 |
 | [#18](https://github.com/mkhomutov/Orchestr8/pull/18) | fix: review findings follow-up | 0002 (4/4) | 2026-04-10 |
 | [#21](https://github.com/mkhomutov/Orchestr8/pull/21) | feat(generated): protobuf Go code generation | 0003 (1/7) | 2026-04-10 |
+| [#22](https://github.com/mkhomutov/Orchestr8/pull/22) | feat(executor): GRPCExecutor core with retry logic | 0003 (2/7) | 2026-04-10 |
 
 ---
 

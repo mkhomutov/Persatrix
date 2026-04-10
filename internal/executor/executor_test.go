@@ -3,7 +3,9 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -433,4 +435,259 @@ func TestWithTimeout_NegativeClamped(t *testing.T) {
 	exec := NewGRPCExecutor(reg, zap.NewNop(), WithTimeout(-5*time.Second))
 
 	assert.Equal(t, time.Second, exec.timeout)
+}
+
+// --- PR 2b: isTransient table-driven tests, retry edge cases ---
+
+func TestIsTransient_TableDriven(t *testing.T) {
+	tests := []struct {
+		code     codes.Code
+		expected bool
+	}{
+		{codes.OK, false},
+		{codes.Canceled, false},
+		{codes.Unknown, false},
+		{codes.InvalidArgument, false},
+		{codes.DeadlineExceeded, false},
+		{codes.NotFound, false},
+		{codes.AlreadyExists, false},
+		{codes.PermissionDenied, false},
+		{codes.ResourceExhausted, true},
+		{codes.FailedPrecondition, false},
+		{codes.Aborted, true},
+		{codes.OutOfRange, false},
+		{codes.Unimplemented, false},
+		{codes.Internal, false},
+		{codes.Unavailable, true},
+		{codes.DataLoss, false},
+		{codes.Unauthenticated, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.code.String(), func(t *testing.T) {
+			err := status.Error(tt.code, "test error")
+			assert.Equal(t, tt.expected, isTransient(err),
+				"isTransient(%s) should be %v", tt.code, tt.expected)
+		})
+	}
+}
+
+func TestIsTransient_NonGRPCError(t *testing.T) {
+	// Non-gRPC errors (DNS, connection refused) should be transient.
+	err := errors.New("dial tcp: connection refused")
+	assert.True(t, isTransient(err))
+}
+
+func TestIsTransient_TaskFailed(t *testing.T) {
+	// Application-level ErrTaskFailed should NOT be transient.
+	err := fmt.Errorf("agent error: %w", ErrTaskFailed)
+	assert.False(t, isTransient(err))
+}
+
+func TestIsTransient_UnexpectedStatus(t *testing.T) {
+	// Application-level ErrUnexpectedStatus should NOT be transient.
+	err := fmt.Errorf("bad status: %w", ErrUnexpectedStatus)
+	assert.False(t, isTransient(err))
+}
+
+func TestExecuteTask_TransientRetrySuccess(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount <= 2 {
+				return nil, status.Error(codes.Unavailable, "temporarily unavailable")
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "recovered",
+			}, nil
+		},
+		WithMaxRetries(3),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "flaky-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "flaky-agent",
+		Payload: "will recover",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", result.Output)
+	assert.Equal(t, 3, callCount, "should succeed on 3rd attempt after 2 transient failures")
+}
+
+func TestExecuteTask_PermanentFailureNoRetry(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			return nil, status.Error(codes.InvalidArgument, "bad request")
+		},
+		WithMaxRetries(3),
+	)
+
+	registerHealthyAgent(t, env.reg, "strict-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "strict-agent",
+		Payload: "invalid",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permanent failure")
+	assert.Equal(t, 1, callCount, "permanent failure should not be retried")
+}
+
+func TestExecuteTask_RetryExhaustion(t *testing.T) {
+	callCount := 0
+	maxRetries := 2
+	env := setupTestEnv(t,
+		func(_ context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			return nil, status.Error(codes.Unavailable, "still unavailable")
+		},
+		WithMaxRetries(maxRetries),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "down-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "down-agent",
+		Payload: "keep failing",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "retries exhausted")
+	assert.Contains(t, err.Error(), fmt.Sprintf("%d attempts", maxRetries+1))
+	assert.Equal(t, maxRetries+1, callCount, "should attempt initial + maxRetries calls")
+}
+
+func TestExecuteTask_ResourceExhaustedRetry(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.ResourceExhausted, "rate limited")
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "ok after rate limit",
+			}, nil
+		},
+		WithMaxRetries(2),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "busy-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "busy-agent",
+		Payload: "rate limited",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok after rate limit", result.Output)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestExecuteTask_AbortedRetry(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.Aborted, "transaction aborted")
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "ok after abort",
+			}, nil
+		},
+		WithMaxRetries(2),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "aborting-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "aborting-agent",
+		Payload: "aborted",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok after abort", result.Output)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestExecuteTask_StatusUnknownRejected(t *testing.T) {
+	env := setupTestEnv(t, nil) // handler never called
+
+	// Register agent with zero-value status (StatusUnknown).
+	err := env.reg.Register(context.Background(), registry.AgentInfo{
+		ID:      "unknown-agent",
+		Name:    "unknown-agent",
+		Address: "passthrough:///bufconn",
+		Status:  registry.StatusUnknown,
+	})
+	require.NoError(t, err)
+
+	_, err = env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "unknown-agent",
+		Payload: "should be rejected",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAgentNotReady))
+	assert.Contains(t, err.Error(), "Unknown")
+}
+
+func TestExecuteTask_ConcurrentDispatch(t *testing.T) {
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "concurrent-" + req.TaskId,
+			}, nil
+		},
+		WithTimeout(5*time.Second),
+		WithMaxRetries(0),
+	)
+
+	registerHealthyAgent(t, env.reg, "concurrent-agent")
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	results := make([]*ExecuteResult, numGoroutines)
+	errs := make([]error, numGoroutines)
+
+	for i := range numGoroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = env.executor.ExecuteTask(
+				context.Background(),
+				ExecuteRequest{
+					TaskID:  fmt.Sprintf("task-%d", idx),
+					AgentID: "concurrent-agent",
+					Payload: fmt.Sprintf("payload-%d", idx),
+				},
+			)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range numGoroutines {
+		require.NoError(t, errs[i], "goroutine %d should not error", i)
+		assert.Equal(t, fmt.Sprintf("concurrent-task-%d", i), results[i].Output)
+	}
 }
