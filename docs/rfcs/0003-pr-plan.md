@@ -413,10 +413,10 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/... -v -race -cover` passes
-- [ ] `WithDialOptions` callers always get transport credentials
-- [ ] Cancellation mid-dispatch test documents observed behavior
-- [ ] Concurrent retry stress test exercises backoff path under `-race`
+- [x] `go test ./internal/executor/... -v -race -cover` passes (33 tests, 97.4% coverage)
+- [x] `WithDialOptions` callers always get transport credentials
+- [x] Cancellation mid-dispatch test documents observed behavior
+- [x] Concurrent retry stress test exercises backoff path under `-race`
 
 ---
 
