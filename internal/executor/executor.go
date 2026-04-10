@@ -52,15 +52,25 @@ type Executor interface {
 type Option func(*GRPCExecutor)
 
 // WithTimeout sets the per-task gRPC call timeout.
+// A zero or negative duration is clamped to 1 second to prevent
+// immediately-expired contexts on every dispatch.
 func WithTimeout(d time.Duration) Option {
 	return func(e *GRPCExecutor) {
+		if d <= 0 {
+			d = time.Second
+		}
 		e.timeout = d
 	}
 }
 
 // WithMaxRetries sets the maximum number of retries for transient failures.
+// A negative value is clamped to 0 (no retries) to prevent silent no-op
+// from `range 0` producing zero loop iterations and skipping dispatch entirely.
 func WithMaxRetries(n int) Option {
 	return func(e *GRPCExecutor) {
+		if n < 0 {
+			n = 0
+		}
 		e.maxRetries = n
 	}
 }
@@ -208,13 +218,18 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 		return nil, err
 	}
 
-	// Check response status.
+	// Check response status — only COMPLETED is a successful outcome.
+	// PENDING (proto default = 0), RUNNING, CANCELLED, and RETRYING are rejected
+	// as unexpected because agents must return a terminal status.
 	if resp.Status == taskpb.TaskStatus_FAILED {
 		errMsg := resp.ErrorMessage
 		if errMsg == "" {
 			errMsg = "unknown error"
 		}
 		return nil, fmt.Errorf("%w: %s", ErrTaskFailed, errMsg)
+	}
+	if resp.Status != taskpb.TaskStatus_COMPLETED {
+		return nil, fmt.Errorf("unexpected task status from agent: %s", resp.Status)
 	}
 
 	return &ExecuteResult{
@@ -248,5 +263,3 @@ func isTransient(err error) bool {
 func (e *GRPCExecutor) Close() error {
 	return nil
 }
-
-// TODO: Implement connection pooling

@@ -368,3 +368,58 @@ func TestGRPCExecutor_Close(t *testing.T) {
 	err := exec.Close()
 	assert.NoError(t, err)
 }
+
+func TestExecuteTask_UnexpectedStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status taskpb.TaskStatus
+	}{
+		{"PENDING (proto default)", taskpb.TaskStatus_PENDING},
+		{"RUNNING", taskpb.TaskStatus_RUNNING},
+		{"CANCELLED", taskpb.TaskStatus_CANCELLED},
+		{"RETRYING", taskpb.TaskStatus_RETRYING},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+				return &taskpb.TaskResponse{
+					TaskId: req.TaskId,
+					Status: tt.status,
+					Result: "should be ignored",
+				}, nil
+			})
+
+			registerHealthyAgent(t, env.reg, "test-agent")
+
+			_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+				AgentID: "test-agent",
+				Payload: "test",
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unexpected task status from agent")
+		})
+	}
+}
+
+func TestWithMaxRetries_NegativeClamped(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithMaxRetries(-1))
+
+	assert.Equal(t, 0, exec.maxRetries)
+}
+
+func TestWithTimeout_ZeroClamped(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithTimeout(0))
+
+	assert.Equal(t, time.Second, exec.timeout)
+}
+
+func TestWithTimeout_NegativeClamped(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithTimeout(-5*time.Second))
+
+	assert.Equal(t, time.Second, exec.timeout)
+}
