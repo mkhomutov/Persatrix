@@ -52,11 +52,15 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `make proto` succeeds
-- [ ] `go build ./internal/generated/...` compiles
-- [ ] Generated files committed to repo
-- [ ] `go mod tidy` run and `go.sum` clean (review N-10)
-- [ ] `go vet ./internal/generated/...` clean
+- [x] `make proto` succeeds
+- [x] `go build ./internal/generated/...` compiles
+- [x] Generated files committed to repo
+- [x] `go mod tidy` run and `go.sum` clean (review N-10)
+- [x] `go vet ./internal/generated/...` clean
+
+#### Post-merge findings
+
+- **N-01 (Python stub generation)**: `make proto` includes `--python_out` and `--grpc_python_out` flags (Makefile line 26). Python stubs are gitignored (`agents/generated/`). Running `make proto` without the Python gRPC plugin (`grpcio-tools`) installed will fail. RFC 0004 PR 1 should decide whether to (a) un-gitignore and commit Python stubs, or (b) generate them at `pip install` time. Consider adding a `make proto-go` target for Go-only generation until RFC 0004 lands.
 
 ---
 
