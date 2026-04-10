@@ -872,6 +872,7 @@ func TestStepStateTransitionsFailure(t *testing.T) {
 	store := state.NewInMemoryStore(zap.NewNop())
 
 	var midRunStepStatus state.RunStatus
+	var midRunStepHasStartedAt bool
 	stepExecuting := make(chan struct{})
 	stepContinue := make(chan struct{})
 
@@ -894,14 +895,16 @@ func TestStepStateTransitionsFailure(t *testing.T) {
 	require.NoError(t, err)
 	if step, ok := run.Steps["step1"]; ok {
 		midRunStepStatus = step.Status
+		midRunStepHasStartedAt = !step.StartedAt.IsZero()
 	}
 	close(stepContinue)
 
 	// Wait for run failure.
 	run = waitForRunStatus(t, store, "fail-trans", state.RunFailed, 5*time.Second)
 
-	// Mid-execution: step was Running.
+	// Mid-execution: step was Running with StartedAt set (symmetry with success variant).
 	assert.Equal(t, state.RunRunning, midRunStepStatus, "step should be Running during execution")
+	assert.True(t, midRunStepHasStartedAt, "step StartedAt should be set during execution")
 
 	// Post-failure: step is Failed with error and both timestamps.
 	step, ok := run.Steps["step1"]
@@ -1065,4 +1068,11 @@ func TestListRunsErrorPath(t *testing.T) {
 	entry := logs.All()[0]
 	assert.Equal(t, "failed to list runs", entry.Message)
 	assert.Equal(t, zap.ErrorLevel, entry.Level)
+
+	// Verify the structured zap.Error(err) field propagates the error value.
+	// This detects regressions where the zap.Error(err) field is accidentally
+	// removed from the log call but the message string remains.
+	errVal, ok := entry.ContextMap()["error"]
+	require.True(t, ok, "log entry should contain 'error' field from zap.Error()")
+	assert.Contains(t, fmt.Sprintf("%v", errVal), "database connection lost")
 }
