@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
 from contextlib import redirect_stdout
 import io
 
@@ -61,7 +61,7 @@ class AuditReport:
     elapsed_secs: float = 0.0
 
 
-def _safe_run(fn: Any, name: str, verbose: bool = False) -> CheckResult:
+def _safe_run(fn: Callable[..., CheckResult], name: str, verbose: bool = False) -> CheckResult:
     try:
         return fn(verbose=verbose)
     except Exception as exc:
