@@ -1050,7 +1050,10 @@ func TestListRunsErrorPath(t *testing.T) {
 		return nil, nil
 	}}
 
-	core, logs := observer.New(zap.ErrorLevel)
+	// N-36: Use DebugLevel observer so the entry.Level assertion below
+	// actually validates that production code logs at Error (not Warn/Info).
+	// With ErrorLevel filter the level check would be tautologically true.
+	core, logs := observer.New(zap.DebugLevel)
 	observedLogger := zap.New(core)
 
 	sched := NewWorkflowScheduler(ms, nil, planner.NewYAMLPlanner(zap.NewNop()), exec, observedLogger, dir, WithPollInterval(50*time.Millisecond))
