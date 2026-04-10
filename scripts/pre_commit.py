@@ -10,6 +10,7 @@ Checks executed:
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
   4. Doc links check
+  5. Doc status markers check
 
 Usage::
 
@@ -37,10 +38,11 @@ from scripts.checks import ensure_utf8_streams  # noqa: E402
 _FMT_LABELS = {"go fmt", "cargo fmt"}
 
 _CHECKS: list[tuple[str, list[str]]] = [
-    ("go fmt", ["go", "fmt", "-l", "./internal/...", "./cmd/..."]),
+    ("go fmt", ["gofmt", "-l", "./internal/", "./cmd/"]),
     ("ruff check", ["{python}", "-m", "ruff", "check", "agents/"]),
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
+    ("doc status", ["{python}", "scripts/checks/doc_status_markers.py"]),
 ]
 
 
@@ -80,11 +82,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Always regenerate the file map first (and stage it).
-    _update_filemap()
+    # Track result in summary so failures are visible.
+    filemap_t0 = time.monotonic()
+    filemap_ok = _update_filemap()
+    filemap_elapsed = time.monotonic() - filemap_t0
 
     checks = _CHECKS if not args.skip_fmt else [c for c in _CHECKS if c[0] not in _FMT_LABELS]
 
-    results: list[tuple[str, bool, float]] = []
+    results: list[tuple[str, bool, float]] = [("filemap", filemap_ok, filemap_elapsed)]
     print("=" * 60)
     print("Pre-commit checks")
     print("=" * 60)
@@ -94,14 +99,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n▶ {label}")
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(cmd, cwd=REPO_ROOT)
+            proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=(label == "go fmt"))
         except FileNotFoundError:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  (command not found: {cmd[0]})")
             results.append((label, False, elapsed))
             continue
         elapsed = time.monotonic() - t0
-        passed = proc.returncode == 0
+        # gofmt -l returns 0 even with unformatted files; check stdout instead.
+        if label == "go fmt":
+            unformatted = proc.stdout.decode().strip() if proc.stdout else ""
+            passed = proc.returncode == 0 and not unformatted
+            if unformatted:
+                print(unformatted)
+        else:
+            passed = proc.returncode == 0
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"  {status}  ({elapsed:.1f}s)")
         results.append((label, passed, elapsed))

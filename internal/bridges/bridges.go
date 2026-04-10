@@ -8,4 +8,3 @@ package bridges
 // TODO: Implement TelegramBridge (Bot API)
 // TODO: Implement WebhookBridge (generic HTTP)
 // TODO: Implement BridgeSecurity (content filter, PII detection, rate limiting)
-

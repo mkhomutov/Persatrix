@@ -10,8 +10,9 @@ Tools are typed functions that agents can invoke. Three tiers:
 import functools
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,11 @@ def tool(
         params = {}
         for param_name, param in sig.parameters.items():
             param_type = "string"  # default
-            if param.annotation == int:
+            if param.annotation is int:
                 param_type = "integer"
-            elif param.annotation == float:
+            elif param.annotation is float:
                 param_type = "number"
-            elif param.annotation == bool:
+            elif param.annotation is bool:
                 param_type = "boolean"
 
             params[param_name] = {

@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from collections import defaultdict
-from datetime import date, timezone
+from datetime import date
 from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

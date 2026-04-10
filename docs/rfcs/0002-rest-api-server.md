@@ -1,7 +1,7 @@
 # RFC 0002 — REST API Server (HTTP Layer + Workflow Submission)
 
 **Type**: architecture
-**Status**: � In Review
+**Status**: ✅ Implemented
 **Author**: Orchestr8 team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)

@@ -1,7 +1,7 @@
 # RFC 0001 — Core Orchestration Pipeline (Planner + State + Registry)
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: ✅ Implemented  
 **Author**: Orchestr8 team  
 **Date**: 2026-04-08  
 **Target**: v0.1 (MVP)  

@@ -5,4 +5,3 @@ package cost
 // TODO: Implement BudgetEnforcer (per-agent, per-workflow, global limits)
 // TODO: Implement CostReporter (attribution by agent/workflow/model)
 // TODO: Implement AlertManager (threshold-based cost alerts)
-

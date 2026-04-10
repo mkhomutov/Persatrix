@@ -5,4 +5,3 @@ package protocols
 // TODO: Implement StandupProtocol
 // TODO: Implement DebateProtocol
 // TODO: Implement ConsensusProtocol
-

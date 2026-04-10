@@ -27,9 +27,12 @@ from scripts.checks import ensure_utf8_stdout  # noqa: E402
 ALLOWED_MARKERS = [
     "\u2705 **Implemented**",    # ✅
     "\U0001f680 **Stable**",     # 🚀
-    "\U0001f6a7 **In Progress**", # 🚧
+    "\U0001f6a7 **In Progress**", # 🚧  (phase-level status)
+    "\U0001f6a7 **Implementing**", # 🚧  (RFC lifecycle, per docs/rfcs/README.md)
     "\u26a0\ufe0f **Partial**",   # ⚠️
+    "\u26a0\ufe0f **Partially Implemented**",  # ⚠️  (RFC lifecycle)
     "\U0001f4cb **Planned**",     # 📋
+    "\U0001f4cb **Proposed**",    # 📋  (RFC lifecycle)
     "\U0001f52e **Future**",      # 🔮
 ]
 
@@ -44,9 +47,21 @@ LEGACY_MARKERS = [
     "\u274c **Missing**",      # ❌
 ]
 
+# Common non-standard emojis that may be mistakenly used as status markers.
+# Including them here ensures they are detected and flagged rather than
+# silently passing because they aren't in the regex at all.
+_EXTRA_EMOJIS = (
+    r"\U0001f528"  # 🔨 (sometimes used for "Building")
+    r"|\u2b50"     # ⭐
+    r"|\U0001f6d1" # 🛑
+    r"|\U0001f7e0" # 🟠
+    r"|\u2615"     # ☕
+)
+
 _STATUS_RE = re.compile(
     r"(\u2705|\U0001f680|\U0001f6a7|\u26a0\ufe0f|\U0001f4cb|\U0001f52e"
-    r"|\U0001f4dd|\u274c|\U0001f7e2|\U0001f7e1|\U0001f534)"
+    r"|\U0001f4dd|\u274c|\U0001f7e2|\U0001f7e1|\U0001f534"
+    r"|" + _EXTRA_EMOJIS + r")"
     r"\s*\*\*([^*]+)\*\*"
 )
 
@@ -70,6 +85,12 @@ def check_status_markers(
     """Scan docs/ for status markers. Returns (failures, warnings)."""
     docs_dir = repo_root / "docs"
     md_files = sorted(docs_dir.rglob("*.md")) if docs_dir.is_dir() else []
+
+    # ROADMAP.md lives at the repo root and is the primary status-tracking
+    # document.  Include it so its markers are validated too.
+    roadmap = repo_root / "ROADMAP.md"
+    if roadmap.is_file() and roadmap not in md_files:
+        md_files.append(roadmap)
 
     failures: list[MarkerIssue] = []
     warnings: list[MarkerIssue] = []

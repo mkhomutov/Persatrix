@@ -13,7 +13,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 
-
 # ─── Events that a persona agent can receive ───────────────
 
 class EventType(Enum):

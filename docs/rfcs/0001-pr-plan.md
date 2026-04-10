@@ -64,7 +64,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 #### Post-merge review findings (PR #6)
 
-PR #6 was submitted as 781 lines (228 `state.go` + 545 `state_test.go` + `go.mod`/`go.sum`), exceeding the 500-line limit. The size waiver is acceptable given single-package, single-author scope and 100% test coverage. Full review: [`docs/pr-reviews/pr-006-state-inmemory-review.md`](../../docs/pr-reviews/pr-006-state-inmemory-review.md).
+PR #6 was submitted as 781 lines (228 `state.go` + 545 `state_test.go` + `go.mod`/`go.sum`), exceeding the 500-line limit. The size waiver is acceptable given single-package, single-author scope and 100% test coverage. Full review: `docs/pr-reviews/pr-006-state-inmemory-review.md` (not committed).
 
 Actionable follow-ups for a **PR 1b follow-up** (`feature/v01-state-followup`) or folded into PR 2:
 
@@ -127,7 +127,7 @@ Actionable follow-ups for a **PR 1b follow-up** (`feature/v01-state-followup`) o
 
 #### Post-merge review findings (PR #7)
 
-PR #7 was submitted as 637 lines (151 `registry.go` + 483 `registry_test.go` + 3 `state.go`), exceeding the 500-line limit. Same waiver rationale as PR #6 — 76% test lines. Full review: [`docs/pr-reviews/pr-007-registry-inmemory-review.md`](../../docs/pr-reviews/pr-007-registry-inmemory-review.md).
+PR #7 was submitted as 637 lines (151 `registry.go` + 483 `registry_test.go` + 3 `state.go`), exceeding the 500-line limit. Same waiver rationale as PR #6 — 76% test lines. Full review: `docs/pr-reviews/pr-007-registry-inmemory-review.md` (not committed).
 
 PR 1 follow-up F-03 (nil-logger guard in `NewInMemoryStore`) was addressed in this PR.
 
@@ -189,7 +189,7 @@ Actionable follow-ups for a **PR 2b follow-up** or folded into subsequent PRs:
 
 #### Post-merge review findings (PR #8)
 
-PR #8 was submitted as 1,071 lines (305 `planner.go` + 624 `planner_test.go` + 143 testdata YAML), exceeding the 500-line limit. Same waiver rationale as PRs #6 and #7 — single-package, high test coverage (97.7%), testdata YAML fixtures inflate line count. Full review: [`docs/pr-reviews/pr-008-planner-yaml-review.md`](../../docs/pr-reviews/pr-008-planner-yaml-review.md).
+PR #8 was submitted as 1,071 lines (305 `planner.go` + 624 `planner_test.go` + 143 testdata YAML), exceeding the 500-line limit. Same waiver rationale as PRs #6 and #7 — single-package, high test coverage (97.7%), testdata YAML fixtures inflate line count. Full review: `docs/pr-reviews/pr-008-planner-yaml-review.md` (not committed).
 
 Actionable follow-ups for **PR 3b** or subsequent PRs:
 
@@ -243,7 +243,7 @@ Actionable follow-ups for **PR 3b** or subsequent PRs:
 
 #### Post-merge review findings (PR #9)
 
-PR #9 was submitted as ~480 lines (79 `planner.go` new + 339 `resolve_test.go` + 62 carry-forward tests in `planner_test.go`), within the 500-line limit. Full review: [`docs/pr-reviews/pr-009-deep-review.md`](../../docs/pr-reviews/pr-009-deep-review.md).
+PR #9 was submitted as ~480 lines (79 `planner.go` new + 339 `resolve_test.go` + 62 carry-forward tests in `planner_test.go`), within the 500-line limit. Full review: `docs/pr-reviews/pr-009-deep-review.md` (not committed).
 
 All 4 carry-forward items from PR #8 were addressed:
 
@@ -309,7 +309,7 @@ Actionable follow-ups for **PR 5 (wiring)** or later:
 
 #### Post-merge review findings (PR #10)
 
-PR #10 was submitted as 59 lines (22 `main.go` + 4 `planner.go` + 33 `resolve_test.go`), well within the 500-line limit. Full review: [`docs/pr-reviews/pr-010-deep-review.md`](../../docs/pr-reviews/pr-010-deep-review.md).
+PR #10 was submitted as 59 lines (22 `main.go` + 4 `planner.go` + 33 `resolve_test.go`), well within the 500-line limit. Full review: `docs/pr-reviews/pr-010-deep-review.md` (not committed).
 
 PR #9 follow-up items addressed:
 
@@ -405,18 +405,18 @@ Each PR must pass the full CI pipeline (`.github/workflows/ci.yml`):
 
 | Risk | Mitigation |
 |------|------------|
-| PR 1 (state) exceeds 500 lines with concurrent tests | **Resolved**: PR #6 submitted at 781 lines; size waiver accepted (single-package, 100% coverage). See [review](../../docs/pr-reviews/pr-006-state-inmemory-review.md). |
+| PR 1 (state) exceeds 500 lines with concurrent tests | **Resolved**: PR #6 submitted at 781 lines; size waiver accepted (single-package, 100% coverage). Review: `pr-006-state-inmemory-review.md` (not committed). |
 | PR 3a (planner) exceeds 500 lines | **Resolved via mandatory split + size waiver**: PR 3a (Parse+DAG+Plan) and PR 3b (ResolveInputs). PR #8 at 1,071 lines was accepted. |
 | `go.mod` merge conflicts between parallel PRs | Land PR 1 first; PRs 2 and 3a rebase on updated `main` |
 | Planner tests depend on fixture YAML files | Fixtures stored in `internal/planner/testdata/`; `go test` CWD is package directory, so repo-root relative paths would not resolve |
 | `gopkg.in/yaml.v3` anchor/alias behavior | Decode to `yaml.Node` tree, walk and reject `yaml.AliasNode` types, then decode node to struct (2-pass); pin exact version in `go.mod` |
 | Fixture path resolution fails in CI | Using `testdata/` within the package (standard Go convention); no repo-root path dependency |
 | PR 1 review findings need follow-up | Low-severity items (F-02 through F-06) tracked in PR plan; address in PR 1b or fold into subsequent PRs |
-| PR 2 (registry) exceeds 500 lines | **Resolved**: PR #7 submitted at 637 lines; size waiver accepted (76% tests, single-package, 100% coverage). See [review](../../docs/pr-reviews/pr-007-registry-inmemory-review.md). |
+| PR 2 (registry) exceeds 500 lines | **Resolved**: PR #7 submitted at 637 lines; size waiver accepted (76% tests, single-package, 100% coverage). Review: `pr-007-registry-inmemory-review.md` (not committed). |
 | PR 2 review findings need follow-up | Medium: no agent ID validation (F-01, defer to RFC 0002). Low: `cap` builtin shadow (F-02), nil/empty slice inconsistency (F-03), no `AgentStatus.String()` (F-05). Tracked in PR plan. |
-| PR 3a (planner) exceeds 500 lines | **Resolved**: PR #8 submitted at 1,071 lines; size waiver accepted (single-package, 97.7% coverage, 143 lines testdata YAML). See [review](../../docs/pr-reviews/pr-008-planner-yaml-review.md). |
+| PR 3a (planner) exceeds 500 lines | **Resolved**: PR #8 submitted at 1,071 lines; size waiver accepted (single-package, 97.7% coverage, 143 lines testdata YAML). Review: `pr-008-planner-yaml-review.md` (not committed). |
 | PR 3a review findings need follow-up | Medium: unused testdata fixtures (F-02, address in PR 3b), regex comment (F-01, PR 3b). Low: self-dep check (F-05), malformed YAML test (F-08). Tracked in PR plan. |
 | PR 3b review findings need follow-up | Medium: nil-logger guard in `ResolveInputs` (F-01, address in PR 5). Low: step ID in error messages (F-02), adjacent template test (F-03), empty substitution test (F-04). Tracked in PR plan. |
 | `UpdateRunStatus` has no timestamp management | Design gap documented for RFC 0003 — Scheduler will need `UpdateRun`/`PatchRun` or expanded `UpdateRunStatus` signature |
 | `-race` flag requires CGO on Windows | CI (Linux) runs `-race`; local Windows testing uses `-cover` only. Concurrency correctness verified via code inspection and CI. |
-| PR 5 review findings need follow-up | 5 of 8 carry-forward items not addressed in PR #10 (2× `String()` methods, `cap` shadow, agent ID validation comment, nil-logger suspicious-path test). All Low severity. Tracked in PR 6. See [review](../../docs/pr-reviews/pr-010-deep-review.md). |
+| PR 5 review findings need follow-up | 5 of 8 carry-forward items not addressed in PR #10 (2× `String()` methods, `cap` shadow, agent ID validation comment, nil-logger suspicious-path test). All Low severity. Tracked in PR 6. Review: `pr-010-deep-review.md` (not committed). |

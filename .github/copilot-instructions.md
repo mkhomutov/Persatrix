@@ -133,10 +133,33 @@ CI runs on every PR: Go build+test, Python lint+test, Rust build+clippy, config 
 
 Detailed specs and design decisions live in `docs/`. Refer to these rather than duplicating content:
 
+- [ROADMAP.md](../ROADMAP.md) — Development progress, RFC status, component completion, merged PR history
 - [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md) — Core MVP specification (agents, orchestrator, tasks, workflows, REST API)
 - [orchestr8-extension-spec.md](../docs/orchestr8-extension-spec.md) — Extension spec (personas, channels, bridges, memory, autonomy, blueprints)
 - [orchestr8-spec-audit.md](../docs/orchestr8-spec-audit.md) — Audit of 45 resolved spec gaps
 - [BRANCHING.md](../docs/BRANCHING.md) — Trunk-based branching strategy, naming conventions, PR size limits (<500 lines)
+
+**When completing work**: Update [ROADMAP.md](../ROADMAP.md) with the merged PR, component status changes, and RFC status transitions. Follow the instructions at the bottom of ROADMAP.md.
+
+**PR review reports are local-only artifacts.** Never reference, link to, or mention review report files (e.g. `docs/pr-reviews/*.md`) in committed documents such as PR plans, RFCs, or ROADMAP.md. Review reports are generated for local consumption and are not committed to the repository.
+
+## Status Hygiene
+
+Progress is tracked in multiple places. **Before and after every task** (not just at completion), review and update all documents whose status may have changed:
+
+| Document | What to check |
+|----------|---------------|
+| RFC file (`docs/rfcs/NNNN-*.md`) | `Status:` field matches actual state (Proposed → Implementing → Implemented, etc.). Use the lifecycle markers from [RFC README](../docs/rfcs/README.md). |
+| PR plan (`docs/rfcs/NNNN-pr-plan.md`) | Checklist items (`- [x]` / `- [ ]`) reflect completed work. |
+| [ROADMAP.md](../ROADMAP.md) | RFC Tracker table (merged count, status), Component Status tables, Merged PR History. |
+
+**Rules:**
+1. When starting implementation of an RFC, transition its status to `🚧 Implementing` in both the RFC file and ROADMAP.
+2. When a PR is merged, update the PR plan checklist, ROADMAP merged-PR table and RFC merged count immediately.
+3. When all PRs for an RFC are merged, transition status to `✅ Implemented` in the RFC file and ROADMAP.
+4. When a component moves from stub to working, update the Component Status table in ROADMAP.
+5. Never leave a stale status — if you touch a file governed by an RFC, verify that RFC's status is current.
+6. When creating a new RFC, add it to the ROADMAP RFC Tracker table.
 
 ## Branching
 
