@@ -262,12 +262,12 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/scheduler/... -v -cover` passes
-- [ ] Combined coverage (3a + 3b) ≥ 80%
-- [ ] `go vet ./internal/scheduler/...` clean
-- [ ] TOCTOU branch exercised (N-24)
-- [ ] `Plan()` error path tested (N-25)
-- [ ] `ListRuns` error path tested (N-26)
+- [x] `go test ./internal/scheduler/... -v -cover` passes
+- [x] Combined coverage (3a + 3b) ≥ 80% (87.3%)
+- [x] `go vet ./internal/scheduler/...` clean
+- [x] TOCTOU branch exercised (N-24)
+- [x] `Plan()` error path tested (N-25)
+- [x] `ListRuns` error path tested (N-26)
 
 ---
 
