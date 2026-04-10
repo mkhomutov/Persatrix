@@ -520,6 +520,36 @@ func TestExecuteTask_TransientRetrySuccess(t *testing.T) {
 	assert.Equal(t, 3, callCount, "should succeed on 3rd attempt after 2 transient failures")
 }
 
+// TestExecuteTask_TransientThenPermanent verifies that a permanent error mid-retry
+// aborts immediately without further attempts. Covers the !isTransient(err) check
+// inside the retry loop (executor.go ExecuteTask).
+func TestExecuteTask_TransientThenPermanent(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.Unavailable, "temporarily unavailable")
+			}
+			// Second attempt returns permanent error — should stop immediately.
+			return nil, status.Error(codes.InvalidArgument, "bad request")
+		},
+		WithMaxRetries(3),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "mixed-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "mixed-agent",
+		Payload: "transient then permanent",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permanent failure")
+	assert.Equal(t, 2, callCount, "should stop after transient (attempt 1) + permanent (attempt 2), no 3rd attempt")
+}
+
 func TestExecuteTask_PermanentFailureNoRetry(t *testing.T) {
 	callCount := 0
 	env := setupTestEnv(t,
@@ -564,6 +594,9 @@ func TestExecuteTask_RetryExhaustion(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "retries exhausted")
 	assert.Contains(t, err.Error(), fmt.Sprintf("%d attempts", maxRetries+1))
+	// Verify the last transient error is preserved in the wrapped error chain,
+	// so callers can inspect the root cause.
+	assert.Contains(t, err.Error(), "Unavailable")
 	assert.Equal(t, maxRetries+1, callCount, "should attempt initial + maxRetries calls")
 }
 
