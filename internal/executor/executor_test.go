@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,7 +15,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -65,12 +65,12 @@ func setupTestEnv(t *testing.T, handler func(context.Context, *taskpb.TaskReques
 	reg := registry.NewInMemoryRegistry(zap.NewNop())
 	logger := zap.NewNop()
 
-	// Bufconn dialer option.
+	// Bufconn dialer option. Transport credentials are provided by the executor
+	// base (N-06 additive dial options), so only the context dialer is needed here.
 	bufDialer := WithDialOptions(
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 
 	allOpts := append([]Option{bufDialer}, opts...)
@@ -723,4 +723,137 @@ func TestExecuteTask_ConcurrentDispatch(t *testing.T) {
 		require.NoError(t, errs[i], "goroutine %d should not error", i)
 		assert.Equal(t, fmt.Sprintf("concurrent-task-%d", i), results[i].Output)
 	}
+}
+
+// --- PR 6: Executor Hardening (N-06, N-12, N-13) ---
+
+// TestExecuteTask_ContextCancellationMidDispatch verifies behavior when the context
+// is cancelled during an active gRPC dispatch (not during backoff sleep). The gRPC
+// layer returns codes.Canceled which isTransient classifies as permanent. This test
+// documents that the error surfaces as "permanent failure ... Canceled" rather than
+// a bare context.Canceled. (N-12)
+func TestExecuteTask_ContextCancellationMidDispatch(t *testing.T) {
+	var callCount int32
+	env := setupTestEnv(t,
+		func(ctx context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			atomic.AddInt32(&callCount, 1)
+			// Block until the context is cancelled — simulates a slow agent.
+			<-ctx.Done()
+			return nil, status.Error(codes.Canceled, "context canceled")
+		},
+		WithMaxRetries(3),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "slow-agent")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after a brief delay so the dispatch is in-flight.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := env.executor.ExecuteTask(ctx, ExecuteRequest{
+		AgentID: "slow-agent",
+		Payload: "will be cancelled mid-dispatch",
+	})
+
+	require.Error(t, err)
+	// codes.Canceled is classified as permanent by isTransient, so the error
+	// surfaces as "permanent failure" rather than context.Canceled.
+	assert.Contains(t, err.Error(), "permanent failure")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&callCount), "should not retry after codes.Canceled")
+}
+
+// TestExecuteTask_ConcurrentRetryStress exercises the backoff/retry path under the
+// race detector by having multiple goroutines all encounter transient errors before
+// eventually succeeding. This validates that the per-dispatch timer/select/backoff
+// is safe under concurrent use. (N-13)
+func TestExecuteTask_ConcurrentRetryStress(t *testing.T) {
+	var totalAttempts sync.Map // goroutine index → attempt count
+
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			// Track per-task attempts via the totalAttempts map.
+			key := req.TaskId
+			val, _ := totalAttempts.LoadOrStore(key, new(int32))
+			count := val.(*int32)
+			attempt := atomic.AddInt32(count, 1)
+
+			// First attempt always fails with transient error.
+			if attempt <= 1 {
+				return nil, status.Error(codes.Unavailable, "temporarily unavailable")
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "recovered-" + req.TaskId,
+			}, nil
+		},
+		WithMaxRetries(3),
+		WithTimeout(5*time.Second),
+	)
+
+	registerHealthyAgent(t, env.reg, "retry-agent")
+
+	const numGoroutines = 8
+	var wg sync.WaitGroup
+	results := make([]*ExecuteResult, numGoroutines)
+	errs := make([]error, numGoroutines)
+
+	for i := range numGoroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = env.executor.ExecuteTask(
+				context.Background(),
+				ExecuteRequest{
+					TaskID:  fmt.Sprintf("stress-%d", idx),
+					AgentID: "retry-agent",
+					Payload: fmt.Sprintf("stress-payload-%d", idx),
+				},
+			)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range numGoroutines {
+		require.NoError(t, errs[i], "goroutine %d should not error", i)
+		assert.Equal(t, fmt.Sprintf("recovered-stress-%d", i), results[i].Output)
+
+		// Verify each goroutine retried at least once.
+		key := fmt.Sprintf("stress-%d", i)
+		val, ok := totalAttempts.Load(key)
+		require.True(t, ok, "attempt counter should exist for %s", key)
+		assert.Equal(t, int32(2), *val.(*int32), "goroutine %d should have made exactly 2 attempts", i)
+	}
+}
+
+// TestDialOptions_Additive verifies that caller-provided dial options are additive
+// with the base transport credentials, not a replacement. (N-06)
+func TestDialOptions_Additive(t *testing.T) {
+	// This test verifies the fix works end-to-end: even when WithDialOptions is
+	// used (as in setupTestEnv for bufconn), transport credentials are still
+	// included by the executor. If they weren't, gRPC would refuse to dial.
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "additive-ok",
+			}, nil
+		},
+	)
+
+	registerHealthyAgent(t, env.reg, "additive-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "additive-agent",
+		Payload: "verify additive dial options",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "additive-ok", result.Output)
 }

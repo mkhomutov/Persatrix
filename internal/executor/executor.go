@@ -192,14 +192,13 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 
 // dispatch performs a single gRPC ExecuteTask call to the agent at the given address.
 func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb.TaskRequest) (*ExecuteResult, error) {
-	// Build dial options.
+	// Build dial options. Transport credentials are always included as the base
+	// so callers using WithDialOptions (e.g., custom interceptors) don't need to
+	// independently remember to supply credentials. (N-06)
+	// TODO(security): enable mTLS — replace insecure credentials here.
 	opts := make([]grpc.DialOption, 0, len(e.dialOpts)+1)
-	if len(e.dialOpts) > 0 {
-		opts = append(opts, e.dialOpts...)
-	} else {
-		// TODO(security): enable mTLS
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	opts = append(opts, e.dialOpts...)
 
 	// TODO(v0.2): connection pooling — reuse connections across tasks.
 	conn, err := grpc.NewClient(address, opts...)
@@ -244,6 +243,7 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 // isTransient classifies whether an error is transient and eligible for retry.
 // gRPC Unavailable, ResourceExhausted, and Aborted are transient.
 // DeadlineExceeded is permanent (retrying with the same timeout won't help).
+// Canceled is permanent (retrying with a cancelled context always fails — see N-12 test).
 // Non-gRPC errors (DNS, connection refused, etc.) are treated as transient.
 // Application-level permanent errors (ErrTaskFailed, ErrUnexpectedStatus) from
 // dispatch are explicitly excluded — these indicate the agent processed the
