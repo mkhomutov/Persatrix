@@ -29,6 +29,11 @@ from scripts.checks import ensure_utf8_stdout  # noqa: E402
 # Markdown link pattern: [text](path) or [text](path#anchor)
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]*)(#[^)]+)?\)")
 
+# Patterns to strip before scanning for links (code blocks and inline code
+# can contain bracket/paren sequences that look like markdown links).
+_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
+
 
 class BrokenLink(NamedTuple):
     file: str
@@ -83,9 +88,36 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
         if not content.strip():
             continue
 
+        # Strip code blocks and inline code to avoid false positives
+        # from regex patterns like [a-z0-9] being parsed as links.
+        # Only strip backtick content OUTSIDE of markdown link text brackets.
+        stripped = _CODE_BLOCK_RE.sub("", content)
+
+        # Strip inline code, but preserve content inside [link text](...) brackets.
+        # Process per-line to avoid cross-line matching issues.
+        def _strip_inline_code_outside_links(text: str) -> str:
+            """Remove backtick spans that are not part of markdown link text."""
+            # First, identify markdown link text positions [text](url)
+            link_positions: set[int] = set()
+            for lm in _LINK_RE.finditer(text):
+                for pos in range(lm.start(), lm.end()):
+                    link_positions.add(pos)
+            # Strip inline code only outside link positions
+            result: list[str] = []
+            last = 0
+            for cm in _INLINE_CODE_RE.finditer(text):
+                if cm.start() in link_positions:
+                    continue  # inside a link — keep it
+                result.append(text[last:cm.start()])
+                last = cm.end()
+            result.append(text[last:])
+            return "".join(result)
+
+        stripped = _strip_inline_code_outside_links(stripped)
+
         file_dir = md_file.parent
 
-        for match in _LINK_RE.finditer(content):
+        for match in _LINK_RE.finditer(stripped):
             link_path = match.group(2)
             anchor = match.group(3) or ""
             full_link = link_path + anchor
@@ -93,6 +125,9 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
             if re.match(r"^https?://", link_path) or link_path.startswith("mailto:"):
                 continue
             if re.match(r"^[a-z]+://", link_path):
+                continue
+            # Skip regex-like targets that leaked through backtick stripping.
+            if re.search(r"[*+?^$|\\]", link_path):
                 continue
             if not link_path.strip() and anchor:
                 continue

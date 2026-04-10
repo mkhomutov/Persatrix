@@ -108,8 +108,11 @@ orchestr8/
 | v0.3    | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | v0.4+   | Autonomous agents, memory, simulation controls, web dashboard | 📋 Future |
 
+See [ROADMAP.md](ROADMAP.md) for detailed progress tracking, RFC status, and component completion.
+
 ## Documentation
 
+- [Roadmap & Progress](ROADMAP.md)
 - [MVP Specification](docs/ai-agents-orchestration-spec.md)
 - [Extension Specification](docs/orchestr8-extension-spec.md)
 - [Audit Report](docs/orchestr8-spec-audit.md)

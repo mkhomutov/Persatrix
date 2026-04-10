@@ -5,11 +5,8 @@ Validates all YAML configs against JSON schemas.
 Usage: python -m orchestr8_agents.validate config/
 """
 
-import json
 import sys
 from pathlib import Path
-
-import yaml
 
 # TODO: Implement JSON Schema validation using jsonschema library
 # TODO: Load schemas from schemas/ directory

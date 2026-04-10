@@ -37,7 +37,7 @@ from scripts.checks import ensure_utf8_streams  # noqa: E402
 _FMT_LABELS = {"go fmt", "cargo fmt"}
 
 _CHECKS: list[tuple[str, list[str]]] = [
-    ("go fmt", ["go", "fmt", "-l", "./internal/...", "./cmd/..."]),
+    ("go fmt", ["gofmt", "-l", "./internal/", "./cmd/"]),
     ("ruff check", ["{python}", "-m", "ruff", "check", "agents/"]),
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
@@ -94,14 +94,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n▶ {label}")
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(cmd, cwd=REPO_ROOT)
+            proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=(label == "go fmt"))
         except FileNotFoundError:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  (command not found: {cmd[0]})")
             results.append((label, False, elapsed))
             continue
         elapsed = time.monotonic() - t0
-        passed = proc.returncode == 0
+        # gofmt -l returns 0 even with unformatted files; check stdout instead.
+        if label == "go fmt":
+            unformatted = proc.stdout.decode().strip() if proc.stdout else ""
+            passed = proc.returncode == 0 and not unformatted
+            if unformatted:
+                print(unformatted)
+        else:
+            passed = proc.returncode == 0
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"  {status}  ({elapsed:.1f}s)")
         results.append((label, passed, elapsed))

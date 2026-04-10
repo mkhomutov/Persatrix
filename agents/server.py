@@ -65,7 +65,10 @@ def main():
     parser = argparse.ArgumentParser(description="Orchestr8 Agent Server")
     parser.add_argument("--agent", required=True, help="Agent ID to run")
     parser.add_argument("--port", type=int, default=50051, help="gRPC port")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind address (use 0.0.0.0 in containers)")
+    parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address (use 0.0.0.0 in containers)",
+    )
     parser.add_argument("--config", default="../config/agents.yaml", help="Agent config path")
     args = parser.parse_args()
 

@@ -22,8 +22,8 @@ type AgentInfo struct {
 	Name         string
 	Role         string
 	Capabilities []string
-	Address      string      // gRPC address (host:port)
-	NodeID       string      // empty for local deployment
+	Address      string // gRPC address (host:port)
+	NodeID       string // empty for local deployment
 	Status       AgentStatus
 }
 

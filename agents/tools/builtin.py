@@ -4,7 +4,7 @@ Built-in tools bundled with the framework.
 These tools are always available and require no external dependencies.
 """
 
-from .registry import tool, ToolResult
+from .registry import ToolResult, tool
 
 
 @tool(name="file_read", description="Read the contents of a file", permissions=["filesystem:read"])

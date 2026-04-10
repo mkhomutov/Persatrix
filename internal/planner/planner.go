@@ -42,9 +42,9 @@ var (
 	// identical. Separate variable names are retained for clearer error
 	// messages in validation call sites; separate compilation is unnecessary
 	// and risks future divergence if one pattern is updated but not the other.
-	agentIDRegex = ResourceIDRegex
-	stepIDRegex     = regexp.MustCompile(`^` + stepIDPattern + `$`)
-	outputKeyRegex  = regexp.MustCompile(`^` + stepIDPattern + `$`)
+	agentIDRegex   = ResourceIDRegex
+	stepIDRegex    = regexp.MustCompile(`^` + stepIDPattern + `$`)
+	outputKeyRegex = regexp.MustCompile(`^` + stepIDPattern + `$`)
 )
 
 // Workflow represents a parsed workflow definition.

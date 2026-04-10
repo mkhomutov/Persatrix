@@ -6,4 +6,3 @@ package mesh
 // TODO: Implement MessageRouter (hub-and-spoke, latency-aware)
 // TODO: Implement PartitionHandler (queue messages for offline nodes)
 // TODO: Implement AgentMigrator (state transfer between nodes)
-
