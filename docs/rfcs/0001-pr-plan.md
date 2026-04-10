@@ -337,7 +337,7 @@ Actionable follow-ups for **PR 6 (followup)**:
 
 **Depends on**: PR 5 merged
 **Branch**: `feature/v01-rfc0001-followup`
-**Estimated size**: ~40–60 lines
+**Estimated size**: ~60–90 lines
 
 This PR sweeps all outstanding low-severity review findings accumulated across PRs #6–#10, closing out RFC 0001.
 
@@ -345,12 +345,12 @@ This PR sweeps all outstanding low-severity review findings accumulated across P
 
 | File | Change |
 |------|--------|
-| `internal/state/state.go` | Add `RunStatus.String()` method (~12 lines) |
-| `internal/registry/registry.go` | Add `AgentStatus.String()` method (~10 lines); rename `cap` → `capName` loop variable in `FindByCapability` (~1 line); add comment in `Register` documenting agent ID validation is caller's responsibility (deferred to RFC 0002) |
+| `internal/state/state.go` | Add `RunStatus.String()` method (~12 lines); add documenting comment on `CreateRun` noting it mutates `run.ID` when empty (PR #6 F-02) |
+| `internal/state/state_test.go` | Add `TestRunStatusString` (~10 lines) |
+| `internal/registry/registry.go` | Add `AgentStatus.String()` method (~10 lines); rename `cap` → `capName` loop variable in `FindByCapability` (~1 line); add comment in `Register` documenting agent ID validation is caller's responsibility (deferred to RFC 0002); initialize `result` slice in `FindByCapability` for consistent JSON marshaling (PR #7 F-03) |
+| `internal/registry/registry_test.go` | Add `TestAgentStatusString` (~8 lines) |
 | `internal/planner/planner.go` | Add `step.ID` to variable-reference error message in `ResolveInputs` for executor-level debugging (~1 line) |
 | `internal/planner/resolve_test.go` | Add `TestResolveInputs_NilLoggerWithSuspiciousPattern` (~6 lines) |
-| `internal/state/state_test.go` | Add `TestRunStatusString` (~10 lines) |
-| `internal/registry/registry_test.go` | Add `TestAgentStatusString` (~8 lines) |
 
 #### Key implementation details
 
@@ -358,6 +358,9 @@ This PR sweeps all outstanding low-severity review findings accumulated across P
 - **`AgentStatus.String()`**: Switch on all 4 constants (Unknown/Healthy/Degraded/Offline), same default pattern.
 - **`cap` rename**: `for _, cap := range` → `for _, capName := range` in `FindByCapability` to avoid shadowing Go's built-in `cap()` function.
 - **Agent ID validation comment**: Document in `Register`'s godoc that format validation (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) is enforced at the REST API layer (RFC 0002), not in the registry.
+- **`CreateRun` mutation comment**: The existing `CreateRun` godoc ("If run.ID is empty, a UUIDv4 is generated") documents the behavior. No additional caller-guidance comment was added — the implicit mutation is clear from the godoc and the deep-copy that follows.
+- **~~Concurrent test ID fix~~**: _Not applied in PR #12._ `string(rune('a'+i))` remains at 4 locations in `state_test.go`. Only `TestConcurrentCreateAndDelete` (runs=30, i∈[26,29]) produces non-standard characters (`{|}~`); the other two uses stay within `a`–`z`. Low impact — the state store does not enforce ID format. Tracked as a carry-forward item below.
+- **`FindByCapability` nil-vs-empty slice**: Initialize `result` as `[]AgentInfo{}` instead of `var result []AgentInfo` so JSON marshaling produces `[]` instead of `null` when no agents match.
 - **Variable-reference error**: Change `fmt.Errorf("unresolved variable reference: %s ...", varName)` to include `step.ID` for debugging context.
 - **Nil-logger suspicious-path test**: Exercises `ResolveInputs` with `nil` logger and a malformed template pattern to confirm the nil guard covers the `warnSuspicious` code path.
 
@@ -365,20 +368,39 @@ This PR sweeps all outstanding low-severity review findings accumulated across P
 
 | Source | Finding | Severity |
 |--------|---------|----------|
+| PR #6 F-02 | `CreateRun` mutates caller's `run.ID` — existing godoc adequate (see implementation details) | Low |
 | PR #6 F-04 | `RunStatus` has no `String()` method | Low |
-| PR #7 F-05 | `AgentStatus` has no `String()` method | Low |
 | PR #7 F-01 | No agent ID validation comment in `Register` | Medium |
 | PR #7 F-02 | `cap` variable shadows built-in `cap()` | Low |
+| PR #7 F-03 | nil vs empty slice inconsistency in `FindByCapability` | Low |
+| PR #7 F-05 | `AgentStatus` has no `String()` method | Low |
 | PR #9 F-02 | Step ID missing from variable-reference error messages | Low |
 | PR #10 F-05 | Nil-logger test only covers happy path | Low |
 
+#### Findings not addressed in PR #12
+
+| Source | Finding | Severity | Notes |
+|--------|---------|----------|-------|
+| PR #6 F-06 | Non-printable rune IDs in concurrent tests (`string(rune('a'+i))` with i > 25) | Low | Planned but not applied. Only `TestConcurrentCreateAndDelete` (runs=30) exceeds `a`–`z`. Low impact — state store does not enforce ID format. Candidate for future cleanup PR. |
+
+#### Findings deferred to other RFCs
+
+These findings are out-of-scope for RFC 0001. They are tracked here for visibility and will be addressed when their target RFC is implemented.
+
+| Source | Finding | Severity | Deferred to |
+|--------|---------|----------|-------------|
+| PR #6 F-05 | No timestamp management in `UpdateRunStatus` (`StartedAt`/`FinishedAt`) | Low | RFC 0003 (Scheduler) |
+| PR #10 F-01 | Mixed logging style (`log.Infow` vs `logger.Info`) in `main.go` | Low | RFC 0002 (REST API) |
+| PR #10 F-02 | Blank identifier assignments instead of struct grouping in `main.go` | Low | RFC 0003 (Scheduler wiring) |
+| PR #10 F-07 | No automated startup/shutdown test | Info | RFC 0002 (health-check endpoint) |
+
 #### PR checklist
 
-- [ ] `go test ./internal/... -v -cover` passes
-- [ ] `go vet ./...` clean
-- [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] All `String()` methods have test coverage
-- [ ] No remaining carry-forward findings from RFC 0001 reviews
+- [x] `go test ./internal/... -v -cover` passes
+- [x] `go vet ./...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] All `String()` methods have test coverage
+- [ ] No remaining carry-forward findings from RFC 0001 reviews — **F-06 (concurrent test IDs) not addressed**; see "Findings not addressed" above
 
 ---
 
