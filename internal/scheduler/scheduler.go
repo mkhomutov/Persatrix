@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -287,12 +288,15 @@ func (s *WorkflowScheduler) executeStage(
 	wg.Wait()
 	close(errCh)
 
-	// Return the first error only. When multiple parallel steps fail, subsequent
-	// errors are not surfaced at the run level. Individual step failures are always
-	// recorded via markStepFailed, so per-step error detail is preserved in the
-	// state store regardless.
+	// Collect all errors from parallel steps so the run-level error message
+	// describes every failure, not just the first one (RFC 0003 §executeStage).
+	// Individual step failures are also recorded via markStepFailed.
+	var errs []error
 	for err := range errCh {
-		return err
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }

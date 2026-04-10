@@ -522,8 +522,8 @@ func TestResolveWorkflowPath_InvalidID(t *testing.T) {
 }
 
 func TestParallelStepFailures(t *testing.T) {
-	// When 2 parallel steps both fail, only the first error is propagated at the
-	// run level, but each individual step records its own error in the store.
+	// When 2 parallel steps both fail, all errors are joined at the run level
+	// (RFC 0003 §executeStage). Individual steps also record their own errors.
 	dir := t.TempDir()
 	writeWorkflow(t, dir, "parallel-wf", parallelStageYAML)
 
