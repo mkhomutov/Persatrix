@@ -520,3 +520,59 @@ func TestResolveWorkflowPath_InvalidID(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid workflow ID format")
 }
+
+func TestParallelStepFailures(t *testing.T) {
+	// When 2 parallel steps both fail, only the first error is propagated at the
+	// run level, but each individual step records its own error in the store.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "parallel-wf", parallelStageYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return nil, fmt.Errorf("%s failed", req.AgentID)
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "par-fail", "parallel-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sched.Run(ctx)
+
+	run := waitForRunStatus(t, store, "par-fail", state.RunFailed, 5*time.Second)
+	assert.Equal(t, state.RunFailed, run.Status)
+	assert.NotEmpty(t, run.Error, "run-level error should be set")
+
+	// Both individual steps should be marked as failed with their own errors.
+	stepA, okA := run.Steps["a"]
+	stepB, okB := run.Steps["b"]
+	require.True(t, okA, "step a should exist")
+	require.True(t, okB, "step b should exist")
+	assert.Equal(t, state.RunFailed, stepA.Status)
+	assert.Equal(t, state.RunFailed, stepB.Status)
+	assert.Contains(t, stepA.Error, "agent-x failed")
+	assert.Contains(t, stepB.Error, "agent-y failed")
+}
+
+func TestExecuteStepPassesWorkflowID(t *testing.T) {
+	// Verify the executor receives the workflow ID (e.g., "test-wf"), not the run UUID.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	var receivedWorkflowID string
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		receivedWorkflowID = req.WorkflowID
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "wfid-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sched.Run(ctx)
+
+	waitForRunStatus(t, store, "wfid-run", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, "test-wf", receivedWorkflowID, "executor should receive workflow ID, not run UUID")
+}

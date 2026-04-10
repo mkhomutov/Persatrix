@@ -26,7 +26,10 @@ type Scheduler interface {
 // through stages — parsing the workflow YAML, planning stages, fanning out
 // parallel steps, and collecting results.
 type WorkflowScheduler struct {
-	store         state.Store
+	store state.Store
+	// NOTE: registry is accepted for forward compatibility — the scheduler does not
+	// currently resolve agents directly (the executor owns that), but v0.2 scheduler
+	// health-checks and cost-aware routing will need direct registry access.
 	registry      registry.Registry
 	planner       planner.Planner
 	executor      executor.Executor
@@ -187,6 +190,11 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	}
 
 	// Transition to Running and set StartedAt.
+	// NOTE: if UpdateRunStatus fails (e.g., run deleted between poll and execution),
+	// the run remains in-flight until the goroutine exits and inFlight.Delete() fires
+	// in pollAndExecute's deferred cleanup. The run stays Pending in the store but
+	// won't be re-polled while in-flight. Acceptable for v0.1 — a persistent store
+	// backend should surface this via monitoring.
 	if err := s.store.UpdateRunStatus(ctx, runID, state.RunRunning); err != nil {
 		s.logger.Error("failed to set run status to running", zap.String("runID", runID), zap.Error(err))
 		return
@@ -201,6 +209,9 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	outputs := make(map[string]string)
 
 	// Copy run inputs for template variable resolution.
+	// NOTE: vars is read-only during stage execution — populated once here before
+	// the stages loop. No lock is needed for concurrent reads in executeStep, but
+	// DO NOT write to vars from step goroutines without adding synchronization.
 	vars := make(map[string]string, len(run.Inputs))
 	for k, v := range run.Inputs {
 		vars[k] = v
@@ -222,7 +233,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 			zap.Int("steps", len(stage)),
 		)
 
-		if err := s.executeStage(ctx, runID, stage, outputs, vars, &mu); err != nil {
+		if err := s.executeStage(ctx, runID, run.WorkflowID, stage, outputs, vars, &mu); err != nil {
 			s.failRun(ctx, runID, fmt.Sprintf("stage %d: %v", stageIdx, err))
 			return
 		}
@@ -244,6 +255,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 func (s *WorkflowScheduler) executeStage(
 	ctx context.Context,
 	runID string,
+	workflowID string,
 	steps []planner.Step,
 	outputs map[string]string,
 	vars map[string]string,
@@ -257,7 +269,7 @@ func (s *WorkflowScheduler) executeStage(
 		go func(step planner.Step) {
 			defer wg.Done()
 
-			output, err := s.executeStep(ctx, runID, step, outputs, vars, mu)
+			output, err := s.executeStep(ctx, runID, workflowID, step, outputs, vars, mu)
 			if err != nil {
 				errCh <- fmt.Errorf("step %q: %w", step.ID, err)
 				return
@@ -289,6 +301,7 @@ func (s *WorkflowScheduler) executeStage(
 func (s *WorkflowScheduler) executeStep(
 	ctx context.Context,
 	runID string,
+	workflowID string,
 	step planner.Step,
 	outputs map[string]string,
 	vars map[string]string,
@@ -325,7 +338,7 @@ func (s *WorkflowScheduler) executeStep(
 	// Dispatch to executor.
 	// TODO(v0.2): evaluate step conditions
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
-		WorkflowID: runID,
+		WorkflowID: workflowID,
 		AgentID:    step.AgentID,
 		Payload:    resolved,
 	})
