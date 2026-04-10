@@ -364,9 +364,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] `go vet ./cmd/orchestrator/...` clean
-- [ ] No `_ = ...` unused-variable suppressions remain
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] `go vet ./cmd/orchestrator/...` clean
+- [x] No `_ = ...` unused-variable suppressions remain
 - [ ] Binary starts cleanly with `--workflows-dir workflows/`
 - [ ] Graceful shutdown via SIGINT
 

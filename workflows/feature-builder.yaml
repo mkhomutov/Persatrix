@@ -20,13 +20,13 @@ workflow:
 
     - id: "review"
       agent: "code-reviewer"
-      input: "{{ steps.implement.output }}"
+      input: "{{ steps.code.output }}"
       output_key: "review"
       depends_on: ["implement"]
 
     - id: "revise"
       agent: "code-writer"
-      input: "{{ steps.implement.output }}\nFeedback: {{ steps.review.output }}"
+      input: "{{ steps.code.output }}\nFeedback: {{ steps.review.output }}"
       output_key: "final_code"
       depends_on: ["review"]
       condition: "{{ steps.review.output.approved == false }}"
