@@ -475,6 +475,7 @@ func TestRunStatusString(t *testing.T) {
 		{state.RunCompleted, "completed"},
 		{state.RunFailed, "failed"},
 		{state.RunCancelled, "cancelled"},
+		{state.RunRetrying, "retrying"},
 		{state.RunStatus(99), "unknown"},
 	}
 	for _, tc := range tests {

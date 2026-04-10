@@ -211,15 +211,15 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/scheduler/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `go vet ./internal/scheduler/...` clean
-- [ ] Parallel step execution verified (not just sequential)
-- [ ] `outputs` map access is mutex-protected
-- [ ] Semaphore acquisition uses `select`/`ctx.Done()` (review B-01)
-- [ ] In-flight run deduplication verified (review B-02)
-- [ ] `StartedAt` set when transitioning to `RunRunning` (review B-06)
-- [ ] Cancellation check present between stages (review B-04)
+- [x] `go test ./internal/scheduler/... -v -cover` passes
+- [x] Coverage ≥ 80%
+- [x] `go vet ./internal/scheduler/...` clean
+- [x] Parallel step execution verified (not just sequential)
+- [x] `outputs` map access is mutex-protected
+- [x] Semaphore acquisition uses `select`/`ctx.Done()` (review B-01)
+- [x] In-flight run deduplication verified (review B-02)
+- [x] `StartedAt` set when transitioning to `RunRunning` (review B-06)
+- [x] Cancellation check present between stages (review B-04)
 
 ---
 

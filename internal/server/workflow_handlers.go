@@ -238,6 +238,8 @@ func runStatusString(s state.RunStatus) string {
 		return "failed"
 	case state.RunCancelled:
 		return "cancelled"
+	case state.RunRetrying:
+		return "retrying"
 	default:
 		return "unknown"
 	}

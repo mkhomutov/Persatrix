@@ -55,7 +55,7 @@ v0.1 Complete ─ end-to-end execution working
 | `internal/registry/` | Agent registration and lookup | ✅ Complete (~95% coverage) |
 | `internal/planner/` | YAML parsing, DAG validation, topological sort | ✅ Complete (100% coverage) |
 | `internal/server/` | REST API (11 endpoints, middleware, graceful shutdown) | ✅ Complete (86.5% coverage) |
-| `internal/scheduler/` | Workflow scheduling (pick up pending runs, drive stages) | 🔲 TODO stub (RFC 0003) |
+| `internal/scheduler/` | Workflow scheduling (pick up pending runs, drive stages) | � In Progress (RFC 0003) |
 | `internal/executor/` | gRPC task dispatch to agents | ✅ Complete (96.1% coverage) |
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
