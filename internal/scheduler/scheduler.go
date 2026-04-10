@@ -160,7 +160,11 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	)
 
 	// Resolve workflow file path.
-	yamlPath := resolveWorkflowPath(s.workflowsDir, run.WorkflowID)
+	yamlPath, err := resolveWorkflowPath(s.workflowsDir, run.WorkflowID)
+	if err != nil {
+		s.failRun(ctx, runID, fmt.Sprintf("resolve workflow path: %v", err))
+		return
+	}
 
 	// Parse workflow YAML.
 	wf, err := s.planner.Parse(ctx, yamlPath)
@@ -271,7 +275,10 @@ func (s *WorkflowScheduler) executeStage(
 	wg.Wait()
 	close(errCh)
 
-	// Return the first error (if any).
+	// Return the first error only. When multiple parallel steps fail, subsequent
+	// errors are not surfaced at the run level. Individual step failures are always
+	// recorded via markStepFailed, so per-step error detail is preserved in the
+	// state store regardless.
 	for err := range errCh {
 		return err
 	}
@@ -361,25 +368,35 @@ func (s *WorkflowScheduler) markStepFailed(ctx context.Context, runID, stepID, e
 }
 
 // failRun marks a workflow run as failed with the given error message and sets FinishedAt.
+// It uses context.WithoutCancel so that cleanup store operations succeed even when
+// the parent context is already cancelled (e.g., during graceful shutdown).
 func (s *WorkflowScheduler) failRun(ctx context.Context, runID string, errMsg string) {
 	s.logger.Error("run failed", zap.String("runID", runID), zap.String("error", errMsg))
 
-	if err := s.store.UpdateRunStatus(ctx, runID, state.RunFailed); err != nil {
+	// Detach from parent cancellation — we must persist failure state regardless.
+	cleanupCtx := context.WithoutCancel(ctx)
+
+	if err := s.store.UpdateRunStatus(cleanupCtx, runID, state.RunFailed); err != nil {
 		s.logger.Error("failed to set run status to failed", zap.String("runID", runID), zap.Error(err))
 	}
-	if err := s.store.SetRunError(ctx, runID, errMsg); err != nil {
+	if err := s.store.SetRunError(cleanupCtx, runID, errMsg); err != nil {
 		s.logger.Error("failed to set run error", zap.String("runID", runID), zap.Error(err))
 	}
 	finished := time.Now()
-	if err := s.store.SetRunTimestamps(ctx, runID, nil, &finished); err != nil {
+	if err := s.store.SetRunTimestamps(cleanupCtx, runID, nil, &finished); err != nil {
 		s.logger.Error("failed to set run finish time", zap.String("runID", runID), zap.Error(err))
 	}
 }
 
 // resolveWorkflowPath constructs the filesystem path for a workflow YAML file.
-// The workflowID comes from the REST API layer which validates the format.
-func resolveWorkflowPath(workflowsDir, workflowID string) string {
-	return filepath.Join(workflowsDir, workflowID+".yaml")
+// Defense-in-depth: validates workflowID format even though the REST API layer
+// also validates it. This prevents path traversal if the scheduler is ever
+// invoked from a code path that bypasses REST validation.
+func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
+	if !planner.ResourceIDRegex.MatchString(workflowID) {
+		return "", fmt.Errorf("invalid workflow ID format: %q", workflowID)
+	}
+	return filepath.Join(workflowsDir, workflowID+".yaml"), nil
 }
 
 // TODO: Implement retry logic with circuit breaker integration (post-v0.1)

@@ -508,8 +508,15 @@ func TestDAGCycleFailure(t *testing.T) {
 }
 
 func TestResolveWorkflowPath(t *testing.T) {
-	got := resolveWorkflowPath("/workflows", "my-feature")
+	got, err := resolveWorkflowPath("/workflows", "my-feature")
+	require.NoError(t, err)
 	// Use filepath.Join to get OS-appropriate separator.
 	expected := filepath.Join("/workflows", "my-feature.yaml")
 	assert.Equal(t, expected, got)
+}
+
+func TestResolveWorkflowPath_InvalidID(t *testing.T) {
+	_, err := resolveWorkflowPath("/workflows", "../etc/passwd")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid workflow ID format")
 }
