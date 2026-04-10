@@ -348,7 +348,7 @@ func TestDeleteRunAnyStatus(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	statuses := []RunStatus{RunPending, RunRunning, RunCompleted, RunFailed, RunCancelled}
+	statuses := []RunStatus{RunPending, RunRunning, RunCompleted, RunFailed, RunCancelled, RunRetrying}
 	for i, status := range statuses {
 		id := "del-status-" + string(rune('a'+i))
 		require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: id, WorkflowID: "wf-1", Status: status}))

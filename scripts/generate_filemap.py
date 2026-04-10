@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     OUTPUT_FILE.write_text(content, encoding="utf-8", newline="\n")
-    print(f"✓ FILEMAP.md updated ({len(content)} bytes)")
+    print(f"[OK] FILEMAP.md updated ({len(content)} bytes)")
     return 0
 
 

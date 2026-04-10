@@ -21,8 +21,9 @@ type workflowRunResponse struct {
 	RunID      string         `json:"run_id"`
 	WorkflowID string         `json:"workflow_id"`
 	Status     string         `json:"status"`
-	StartedAt  *time.Time     `json:"started_at"`  // *time.Time → null when zero (M-07)
-	FinishedAt *time.Time     `json:"finished_at"` // *time.Time → null when zero (M-07)
+	Error      string         `json:"error,omitempty"` // Non-empty when Status == "failed" (N-23)
+	StartedAt  *time.Time     `json:"started_at"`      // *time.Time → null when zero (M-07)
+	FinishedAt *time.Time     `json:"finished_at"`     // *time.Time → null when zero (M-07)
 	Steps      map[string]any `json:"steps"`
 }
 

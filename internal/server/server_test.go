@@ -475,6 +475,7 @@ func TestRunStatusString(t *testing.T) {
 		{state.RunCompleted, "completed"},
 		{state.RunFailed, "failed"},
 		{state.RunCancelled, "cancelled"},
+		{state.RunRetrying, "retrying"},
 		{state.RunStatus(99), "unknown"},
 	}
 	for _, tc := range tests {
@@ -560,7 +561,8 @@ func TestStartAndGracefulShutdown(t *testing.T) {
 // --- DeleteWorkflow: delete completed/failed/cancelled statuses ---
 
 func TestDeleteNonRunningStatuses(t *testing.T) {
-	statuses := []state.RunStatus{state.RunCompleted, state.RunFailed, state.RunCancelled}
+	// RunRetrying included for parity with state-level TestDeleteRunAnyStatus (N-19).
+	statuses := []state.RunStatus{state.RunCompleted, state.RunFailed, state.RunCancelled, state.RunRetrying}
 	for _, status := range statuses {
 		t.Run(runStatusString(status), func(t *testing.T) {
 			srv, dir := testServer(t)

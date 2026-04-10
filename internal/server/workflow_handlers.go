@@ -209,7 +209,10 @@ func runToResponse(run *state.WorkflowRun) workflowRunResponse {
 		RunID:      run.ID,
 		WorkflowID: run.WorkflowID,
 		Status:     runStatusString(run.Status),
-		// TODO(v0.3): populate from run.Steps when Scheduler/Executor is implemented (RFC 0003)
+		Error:      run.Error,
+		// TODO(v0.2): populate from run.Steps — step state data is now written by
+		// the Scheduler (RFC 0003), but the wire format for per-step status/output
+		// needs to be defined before exposing it.
 		Steps: make(map[string]any),
 	}
 
@@ -238,6 +241,8 @@ func runStatusString(s state.RunStatus) string {
 		return "failed"
 	case state.RunCancelled:
 		return "cancelled"
+	case state.RunRetrying:
+		return "retrying"
 	default:
 		return "unknown"
 	}

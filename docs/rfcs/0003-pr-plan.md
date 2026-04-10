@@ -211,15 +211,29 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/scheduler/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `go vet ./internal/scheduler/...` clean
-- [ ] Parallel step execution verified (not just sequential)
-- [ ] `outputs` map access is mutex-protected
-- [ ] Semaphore acquisition uses `select`/`ctx.Done()` (review B-01)
-- [ ] In-flight run deduplication verified (review B-02)
-- [ ] `StartedAt` set when transitioning to `RunRunning` (review B-06)
-- [ ] Cancellation check present between stages (review B-04)
+- [x] `go test ./internal/scheduler/... -v -cover` passes
+- [x] Coverage ≥ 80%
+- [x] `go vet ./internal/scheduler/...` clean
+- [x] Parallel step execution verified (not just sequential)
+- [x] `outputs` map access is mutex-protected
+- [x] Semaphore acquisition uses `select`/`ctx.Done()` (review B-01)
+- [x] In-flight run deduplication verified (review B-02)
+- [x] `StartedAt` set when transitioning to `RunRunning` (review B-06)
+- [x] Cancellation check present between stages (review B-04)
+
+#### Post-merge findings
+
+- **N-24 (TOCTOU branch untested)**: The TOCTOU guard at `executeRun()` L166–172 re-reads the run from the store and checks it's still `Pending` before proceeding. This branch exists but is never exercised by any test. **Should fix** in PR 3b: create a run as `RunPending`, update to `RunCancelled` before `executeRun` re-reads, verify no execution occurs. *(Review pr-025, Coverage Gap)*
+- **N-25 (`Plan()` error path untested)**: If `planner.Plan()` returns an error (L199–202), the run transitions to `RunFailed`. This path is structurally similar to parse/DAG failures but not tested independently — `Plan()` errors could differ from parse errors (e.g., unsupported step types). **Should fix** in PR 3b: inject a planner that returns error from `Plan()`, verify `RunFailed` with appropriate error message. *(Review pr-025, Coverage Gap)*
+- **N-26 (`ListRuns` error path untested)**: `pollAndExecute()` L121–124 logs and returns on `ListRuns` error but this path has no test coverage. **Should fix** in PR 3b: use a store mock that fails `ListRuns`, verify the error is logged and no runs are dispatched. *(Review pr-025, Coverage Gap)*
+- **N-27 (`ListRuns` full scan on every poll)**: `ListRuns` fetches all runs and filters client-side for `RunPending` (O(N) across all historical runs). Acceptable for v0.1 in-memory store but will be a performance bottleneck with persistent storage. Track for v0.2: add `ListPendingRuns` or `ListRunsByStatus` to the `Store` interface. *(Review pr-025, Medium)*
+- **N-28 (`UpdateRunStatus` failure silent abandon)**: If `UpdateRunStatus(RunRunning)` fails because the run was deleted between poll and execution, the run is silently abandoned. The inline comment acknowledges this. The `inFlight` entry is correctly cleaned up via `defer`, so the run won't be stuck — but no error is propagated to the caller. Acceptable for v0.1 (retry on next poll if the run still exists). *(Review pr-025, Medium)*
+- **N-29 (Duplicate `OutputKey` no validation)**: If two parallel steps have the same `output_key`, the second write silently overwrites the first (L296–299). Planner DAG validation should prevent this, but no assertion exists in `executeStage`. Nice to have: add a warning log or error if duplicate output keys are detected. *(Review pr-025, Nice to Have)*
+- **N-30 (`UpdateStepState` failure only logs)**: `UpdateStepState` failures during `executeStep` (L331–336, L376–382) are logged but don't abort execution. A test with a failing mock store would verify this logging-only behavior. Nice to have in PR 3b. *(Review pr-025, Nice to Have)*
+- **N-31 (`SetRunTimestamps` failure in success path)**: `SetRunTimestamps` failure on the success/completion path (L262–264) is logged but doesn't prevent run completion. A test documenting this behavior would prevent regressions. Nice to have in PR 3b. *(Review pr-025, Nice to Have)*
+- **N-32 (Per-run timeout)**: A workflow with many stages can run indefinitely — no per-run timeout exists. RFC notes this as acceptable for v0.1 (S-02). Track for v0.2: add `WithRunTimeout(d)` option to `WorkflowScheduler`. *(Review pr-025, Nice to Have)*
+- **N-33 (Concurrent template resolution stress test)**: Only 2 parallel steps are tested reading `outputs`. A test with >2 parallel steps all depending on prior stage outputs would provide stronger race detector validation for the outputs copy-under-lock pattern. Nice to have in PR 3b. *(Review pr-025, Nice to Have)*
+- **N-34 (RFC divergences — all improvements)**: All 7 RFC spec divergences in the implementation are assessed as improvements: outputs copy under lock (extra safety), `runID` parameter instead of `*WorkflowRun` (enables TOCTOU guard), step return value (cleaner separation), `errors.Join` for all parallel errors (better diagnostics), `context.WithoutCancel` for cleanup (prevents stuck runs), `vars` map copy (prevents store mutation). No harmful divergences. *(Review pr-025, Info)*
 
 ---
 
@@ -233,7 +247,7 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 | File | Change |
 |------|--------|
-| `internal/scheduler/scheduler_test.go` | Extended — template resolution tests, resolution failure tests, step-level state transition verification |
+| `internal/scheduler/scheduler_test.go` | Extended — template resolution tests, resolution failure tests, step-level state transition verification, review follow-up tests |
 
 #### Tests
 
@@ -241,6 +255,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - **Resolution failure**: missing var → `RunFailed`.
 - **Step state transitions**: verify `StepState` progression through `Running` → `Completed` and `Running` → `Failed`.
 - **Multi-stage template chaining**: output from stage N used as input in stage N+1.
+- **TOCTOU branch**: run changed to `RunCancelled` between poll and `executeRun` re-read → no execution. *(N-24)*
+- **`Plan()` error path**: planner returns error → `RunFailed` with error message. *(N-25)*
+- **`ListRuns` error path**: store fails on `ListRuns` → error logged, no dispatch. *(N-26)*
 - Race detector (`-race`).
 
 #### PR checklist
@@ -248,6 +265,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] `go test ./internal/scheduler/... -v -cover` passes
 - [ ] Combined coverage (3a + 3b) ≥ 80%
 - [ ] `go vet ./internal/scheduler/...` clean
+- [ ] TOCTOU branch exercised (N-24)
+- [ ] `Plan()` error path tested (N-25)
+- [ ] `ListRuns` error path tested (N-26)
 
 ---
 
