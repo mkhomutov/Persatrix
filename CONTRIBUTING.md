@@ -47,7 +47,7 @@ python scripts/pre_commit.py               # run manually (same checks the hook 
 
 ### Prerequisites
 
-- **Go 1.23+** — Orchestrator
+- **Go 1.24+** — Orchestrator
 - **Python 3.11+** — Agents
 - **Rust 2021 edition** — CLI
 - **protoc** — Protocol buffer compiler (for gRPC codegen)

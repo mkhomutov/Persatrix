@@ -1,7 +1,7 @@
 # RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
 
 **Type**: architecture
-**Status**: � Implementing
+**Status**: 🚧 Implementing
 **Author**: Orchestr8 team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)

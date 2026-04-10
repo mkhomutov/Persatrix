@@ -6,7 +6,7 @@ A general-purpose **agent society engine** — a runtime for creating, connectin
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.24+
 - Python 3.11+
 - Rust 1.80+ (for CLI)
 - Protobuf compiler (`protoc`)
