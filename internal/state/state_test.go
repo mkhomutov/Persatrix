@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -350,7 +351,7 @@ func TestDeleteRunAnyStatus(t *testing.T) {
 
 	statuses := []RunStatus{RunPending, RunRunning, RunCompleted, RunFailed, RunCancelled, RunRetrying}
 	for i, status := range statuses {
-		id := "del-status-" + string(rune('a'+i))
+		id := fmt.Sprintf("del-status-%d", i)
 		require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: id, WorkflowID: "wf-1", Status: status}))
 
 		err := store.DeleteRun(ctx, id)
@@ -426,7 +427,7 @@ func TestConcurrentUpdateStepStateSameRun(t *testing.T) {
 	// different step IDs on the same run concurrently.
 	for i := 0; i < steps; i++ {
 		wg.Add(1)
-		stepID := "step-" + string(rune('a'+i))
+		stepID := fmt.Sprintf("step-%d", i)
 		go func(sid string) {
 			defer wg.Done()
 			err := store.UpdateStepState(ctx, "css-1", StepState{
@@ -457,7 +458,7 @@ func TestConcurrentCreateAndDelete(t *testing.T) {
 	// Create many runs concurrently.
 	for i := 0; i < runs; i++ {
 		wg.Add(1)
-		id := "ccd-" + string(rune('a'+i))
+		id := fmt.Sprintf("ccd-%d", i)
 		go func(runID string) {
 			defer wg.Done()
 			_ = store.CreateRun(ctx, &WorkflowRun{ID: runID, WorkflowID: "wf-1"})
@@ -468,7 +469,7 @@ func TestConcurrentCreateAndDelete(t *testing.T) {
 	// Delete them all concurrently.
 	for i := 0; i < runs; i++ {
 		wg.Add(1)
-		id := "ccd-" + string(rune('a'+i))
+		id := fmt.Sprintf("ccd-%d", i)
 		go func(runID string) {
 			defer wg.Done()
 			_ = store.DeleteRun(ctx, runID)
