@@ -21,7 +21,8 @@ help: ## Show this help
 proto: ## Generate Go + Python code from protobuf definitions
 	@echo "→ Generating protobuf stubs..."
 	@mkdir -p $(PROTO_GO_OUT) $(PROTO_PY_OUT)
-	protoc --go_out=$(PROTO_GO_OUT) --go-grpc_out=$(PROTO_GO_OUT) \
+	protoc --go_out=. --go-grpc_out=. \
+		--go_opt=module=$(GO_MODULE) --go-grpc_opt=module=$(GO_MODULE) \
 		--python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
 		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto
 	@echo "✓ Protobuf stubs generated"

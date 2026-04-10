@@ -35,8 +35,11 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 | File | Change |
 |------|--------|
 | `proto/task.proto` | `go_package` already set to `"github.com/orchestr8/orchestr8/internal/generated/taskpb"` — no change needed |
+| `proto/agent_message.proto` | `go_package` already set to `"github.com/orchestr8/orchestr8/internal/generated/msgpb"` — no change needed |
 | `internal/generated/taskpb/task.pb.go` | Generated — protobuf message types |
 | `internal/generated/taskpb/task_grpc.pb.go` | Generated — gRPC service client/server stubs |
+| `internal/generated/msgpb/agent_message.pb.go` | Generated — protobuf message types (ChannelService, v0.2 schema; generated now for consistency since `make proto` compiles all `.proto` files) |
+| `internal/generated/msgpb/agent_message_grpc.pb.go` | Generated — gRPC service client/server stubs (ChannelService) |
 | `Makefile` | Existing `proto` target already generates Go stubs via `PROTO_GO_OUT := internal/generated` — no change needed |
 | `go.mod` / `go.sum` | Add `google.golang.org/grpc`, `google.golang.org/protobuf` |
 
@@ -49,11 +52,19 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `make proto` succeeds
-- [ ] `go build ./internal/generated/...` compiles
-- [ ] Generated files committed to repo
-- [ ] `go mod tidy` run and `go.sum` clean (review N-10)
-- [ ] `go vet ./internal/generated/...` clean
+- [x] `make proto` succeeds
+- [x] `go build ./internal/generated/...` compiles
+- [x] Generated files committed to repo
+- [x] `go mod tidy` run and `go.sum` clean (review N-10)
+- [x] `go vet ./internal/generated/...` clean
+
+#### Post-merge findings
+
+- **N-01 (Python stub generation)**: `make proto` includes `--python_out` and `--grpc_python_out` flags (Makefile line 26). Python stubs are gitignored (`agents/generated/`). Running `make proto` without the Python gRPC plugin (`grpcio-tools`) installed will fail. RFC 0004 PR 1 should decide whether to (a) un-gitignore and commit Python stubs, or (b) generate them at `pip install` time. Consider adding a `make proto-go` target for Go-only generation until RFC 0004 lands.
+- **N-02 (CI staleness check)**: No automated check verifies that generated Go stubs stay in sync with `.proto` files. Add a CI step: `make proto && git diff --exit-code internal/generated/` to detect when `.proto` changes are committed without regenerating stubs. Prevents silent proto↔stub drift. *(Review pr-021, Should Fix #1)*
+- **N-03 (`make proto-go` target)**: Split `make proto` into `make proto-go` (Go stubs only) and `make proto-python` (Python stubs only), with `make proto` calling both. Decouples Go development from the Python gRPC toolchain. Aligns with N-01 disposition. *(Review pr-021, Should Fix #2)*
+- **N-04 (Proto linting)**: Consider adding `buf lint` or `protoc-gen-validate` to CI for enforcing naming conventions, field numbering rules, and style consistency. Low priority with only 2 proto files. *(Review pr-021, Nice to Have)*
+- **N-05 (Proto breaking change detection)**: `buf breaking` can detect backward-incompatible proto changes (removed fields, changed types). Useful as more services are defined. *(Review pr-021, Nice to Have)*
 
 ---
 

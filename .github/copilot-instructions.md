@@ -14,7 +14,7 @@ CLI (Rust)  ←──REST──→  Orchestrator (Go)  ←──gRPC──→  A
 
 | Layer | Language | Entry point | Key dirs |
 |-------|----------|-------------|----------|
-| Orchestrator | Go 1.23 | `cmd/orchestrator/main.go` | `internal/` (planner, scheduler, executor, registry, security, state, cost, telemetry, mcp, resilience) |
+| Orchestrator | Go 1.24 | `cmd/orchestrator/main.go` | `internal/` (planner, scheduler, executor, registry, security, state, cost, telemetry, mcp, resilience) |
 | Agents | Python ≥3.11 | `agents/server.py` | `agents/` (base, coder, reviewer, planner, persona), `agents/memory/`, `agents/tools/`, `agents/sub_agents/` |
 | CLI | Rust 2021 | `cli/src/main.rs` | `cli/` |
 | Protos | Protobuf | `proto/task.proto`, `proto/agent_message.proto` | `proto/` |
