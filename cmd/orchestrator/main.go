@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,8 +12,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/orchestr8/orchestr8/internal/executor"
 	"github.com/orchestr8/orchestr8/internal/planner"
 	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/orchestr8/orchestr8/internal/scheduler"
 	"github.com/orchestr8/orchestr8/internal/server"
 	"github.com/orchestr8/orchestr8/internal/state"
 )
@@ -84,9 +87,18 @@ func main() {
 
 	// 7. Initialize tool system + MCP client
 
-	// 8. Initialize workflow planner (scheduler deferred to RFC 0003)
+	// 8. Initialize workflow planner
 	plan := planner.NewYAMLPlanner(logger)
 	logger.Info("workflow planner initialized", zap.String("type", "yaml"))
+
+	// 8b. Initialize executor (gRPC task dispatch to agents)
+	exec := executor.NewGRPCExecutor(reg, logger)
+	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
+	logger.Info("executor initialized")
+
+	// 8c. Initialize scheduler (workflow run polling + execution)
+	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, *workflowsDir)
+	logger.Info("scheduler initialized", zap.String("workflowsDir", *workflowsDir))
 
 	// 9. Initialize cost tracker
 	// 10. Start gRPC server (agent communication)
@@ -112,6 +124,15 @@ func main() {
 	// goroutine has not yet completed net.Listen at this point. Asserting
 	// readiness here would mislead operators and CI health-check scripts.
 	logger.Info("HTTP server starting", zap.String("addr", listenAddr))
+
+	// Start scheduler polling loop
+	go func() {
+		if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("scheduler terminated with error", zap.Error(err))
+			cancel()
+		}
+	}()
+	logger.Info("scheduler started")
 
 	// 12. Start health check endpoints
 
