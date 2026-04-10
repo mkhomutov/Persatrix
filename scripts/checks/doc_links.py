@@ -35,6 +35,28 @@ _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
 
 
+def _strip_inline_code_outside_links(text: str) -> str:
+    """Remove backtick spans that are not part of markdown link text.
+
+    Inline code like ``[a-z0-9]`` looks like a markdown link after backtick
+    stripping.  This function removes backtick content only when it appears
+    *outside* of ``[text](url)`` link syntax, so real link text is preserved.
+    """
+    link_positions: set[int] = set()
+    for lm in _LINK_RE.finditer(text):
+        for pos in range(lm.start(), lm.end()):
+            link_positions.add(pos)
+    result: list[str] = []
+    last = 0
+    for cm in _INLINE_CODE_RE.finditer(text):
+        if cm.start() in link_positions:
+            continue  # inside a link — keep it
+        result.append(text[last:cm.start()])
+        last = cm.end()
+    result.append(text[last:])
+    return "".join(result)
+
+
 class BrokenLink(NamedTuple):
     file: str
     link: str
@@ -92,27 +114,6 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
         # from regex patterns like [a-z0-9] being parsed as links.
         # Only strip backtick content OUTSIDE of markdown link text brackets.
         stripped = _CODE_BLOCK_RE.sub("", content)
-
-        # Strip inline code, but preserve content inside [link text](...) brackets.
-        # Process per-line to avoid cross-line matching issues.
-        def _strip_inline_code_outside_links(text: str) -> str:
-            """Remove backtick spans that are not part of markdown link text."""
-            # First, identify markdown link text positions [text](url)
-            link_positions: set[int] = set()
-            for lm in _LINK_RE.finditer(text):
-                for pos in range(lm.start(), lm.end()):
-                    link_positions.add(pos)
-            # Strip inline code only outside link positions
-            result: list[str] = []
-            last = 0
-            for cm in _INLINE_CODE_RE.finditer(text):
-                if cm.start() in link_positions:
-                    continue  # inside a link — keep it
-                result.append(text[last:cm.start()])
-                last = cm.end()
-            result.append(text[last:])
-            return "".join(result)
-
         stripped = _strip_inline_code_outside_links(stripped)
 
         file_dir = md_file.parent

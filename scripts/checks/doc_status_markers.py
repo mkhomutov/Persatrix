@@ -27,9 +27,12 @@ from scripts.checks import ensure_utf8_stdout  # noqa: E402
 ALLOWED_MARKERS = [
     "\u2705 **Implemented**",    # ✅
     "\U0001f680 **Stable**",     # 🚀
-    "\U0001f6a7 **In Progress**", # 🚧
+    "\U0001f6a7 **In Progress**", # 🚧  (phase-level status)
+    "\U0001f6a7 **Implementing**", # 🚧  (RFC lifecycle, per docs/rfcs/README.md)
     "\u26a0\ufe0f **Partial**",   # ⚠️
+    "\u26a0\ufe0f **Partially Implemented**",  # ⚠️  (RFC lifecycle)
     "\U0001f4cb **Planned**",     # 📋
+    "\U0001f4cb **Proposed**",    # 📋  (RFC lifecycle)
     "\U0001f52e **Future**",      # 🔮
 ]
 
@@ -82,6 +85,12 @@ def check_status_markers(
     """Scan docs/ for status markers. Returns (failures, warnings)."""
     docs_dir = repo_root / "docs"
     md_files = sorted(docs_dir.rglob("*.md")) if docs_dir.is_dir() else []
+
+    # ROADMAP.md lives at the repo root and is the primary status-tracking
+    # document.  Include it so its markers are validated too.
+    roadmap = repo_root / "ROADMAP.md"
+    if roadmap.is_file() and roadmap not in md_files:
+        md_files.append(roadmap)
 
     failures: list[MarkerIssue] = []
     warnings: list[MarkerIssue] = []
