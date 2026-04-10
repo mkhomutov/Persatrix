@@ -107,9 +107,9 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/... -v -cover` passes
-- [ ] `go vet ./internal/executor/...` clean
-- [ ] No real network connections in tests (bufconn only)
+- [x] `go test ./internal/executor/... -v -cover` passes
+- [x] `go vet ./internal/executor/...` clean
+- [x] No real network connections in tests (bufconn only)
 
 #### Post-merge findings
 
