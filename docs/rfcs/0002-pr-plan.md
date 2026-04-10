@@ -330,13 +330,12 @@ The PR went through 1 round of review fixes (commit `5691916`) addressing high a
 
 ---
 
-### PR 5: `feature/v01-rfc0002-followup` — Review Findings Cleanup
+### ~~PR 5~~ (superseded — all items addressed in PRs #17 and #18)
 
-**Depends on**: PR #17 merged
-**Branch**: `feature/v01-rfc0002-followup`
+> **Disposition**: All cleanup items originally planned for a standalone PR 5 were addressed incrementally during the PR #17 and #18 review-fix cycles. No separate follow-up PR was needed. RFC 0002 is fully closed.
+
+**Original plan**: `feature/v01-rfc0002-followup`
 **Estimated size**: ~80–120 lines (implementation + tests)
-
-This is the final cleanup PR that addresses all accumulated should-fix and low-severity findings from PRs #14, #16, and #17. Closes out RFC 0002 with no carry-forward items remaining.
 
 #### Scope
 
@@ -368,27 +367,27 @@ This is the final cleanup PR that addresses all accumulated should-fix and low-s
 
 #### PR checklist
 
-- [ ] `go test ./internal/... -v -cover` passes
-- [ ] `go vet ./... ` clean
-- [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] `--env invalid` produces clean single-line error (no stack trace)
-- [ ] Mixed concurrent tests include DELETE goroutines
-- [ ] `WorkflowIDRegex` → `ResourceIDRegex` rename compiles across all packages
-- [ ] `docker-compose.yaml` has explicit port flags and no unused env vars
-- [ ] Branch: `feature/v01-rfc0002-followup`
-- [ ] Squash-merge ready
+- [x] `go test ./internal/... -v -cover` passes
+- [x] `go vet ./... ` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] `--env invalid` produces clean single-line error (no stack trace)
+- [x] Mixed concurrent tests include DELETE goroutines
+- [x] `WorkflowIDRegex` → `ResourceIDRegex` rename compiles across all packages
+- [x] `docker-compose.yaml` has explicit port flags and no unused env vars
+- [x] ~~Branch: `feature/v01-rfc0002-followup`~~ (superseded — addressed in PRs #17/#18)
+- [x] ~~Squash-merge ready~~ (superseded)
 
 #### Findings addressed
 
-| Source | Finding | Severity | Action |
-|--------|---------|----------|--------|
-| PR #17 F-01 | `panic()` for `--env` validation | Medium | Replace with `fmt.Fprintln` + `os.Exit(1)` |
-| PR #17 F-04 | Mixed concurrent tests lack DELETE | Medium | Add DELETE goroutine groups |
-| PR #16 F-04 | `workflowIDRegex` name misleading | Low | Rename to `ResourceIDRegex` |
-| PR #17 F-05 | `ENVIRONMENT` env var unused | Low | Remove from docker-compose |
-| PR #17 F-06 | Docker port flags implicit | Low | Add explicit `--http-port`/`--port` |
-| PR #17 F-07 | Stub handlers ignore `{id}` format | Low | Add TODO comment for v0.3 |
-| PR #14 F-10 | `statusCapture.Flush()` non-Flusher | Low | Deferred — defense-in-depth; `httptest.NewRecorder` implements `Flusher` |
+| Source | Finding | Severity | Action | Status |
+|--------|---------|----------|--------|--------|
+| PR #17 F-01 | `panic()` for `--env` validation | Medium | Replace with `fmt.Fprintln` + `os.Exit(1)` | ✅ Done in PR #18 |
+| PR #17 F-04 | Mixed concurrent tests lack DELETE | Medium | Add DELETE goroutine groups | ✅ Done in PR #17 review fixes |
+| PR #16 F-04 | `workflowIDRegex` name misleading | Low | Rename to `ResourceIDRegex` | ✅ Done in PR #18 |
+| PR #17 F-05 | `ENVIRONMENT` env var unused | Low | Remove from docker-compose | ✅ Done in PR #17 review fixes |
+| PR #17 F-06 | Docker port flags implicit | Low | Add explicit `--http-port`/`--port` | ✅ Done in PR #17 review fixes |
+| PR #17 F-07 | Stub handlers ignore `{id}` format | Low | Add TODO comment for v0.3 | ✅ Done in PR #17 |
+| PR #14 F-10 | `statusCapture.Flush()` non-Flusher | Low | Deferred — defense-in-depth; `httptest.NewRecorder` implements `Flusher` | Accepted — no action needed |
 
 ---
 
@@ -398,19 +397,19 @@ This is the final cleanup PR that addresses all accumulated should-fix and low-s
 Original plan:
   PR 1 (scaffold + middleware)
       ├──→ PR 2 (workflow handlers) ──┐
-      └──→ PR 3 (agent handlers)   ──┼──→ PR 4 (stubs + wiring + docker)
+      └──→ PR 3 (agent handlers)   ──┼──→ PR 4 (stubs + wiring + docker) ──→ PR 5 (cleanup)
 
 Actual execution:
   PR #14 (scaffold + middleware + workflow handlers)  ──┐
                                                         ├──→ PR #17 (stubs + wiring + docker)  ✅
   PR #16 (agent handlers)  ─────────────────────────────┘
                                                               │
-                                                              └──→ PR 5 (review findings cleanup)
+                                                              └──→ ~~PR 5~~ (superseded — items folded into #17/#18)
 ```
 
-PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR #16 (agent handlers) builds on PR #14's helpers, middleware, and test patterns. PR #17 depends on both PR #14 and PR #16 being merged. PR 5 sweeps all remaining review findings to close out RFC 0002.
+PR #14 (combined PRs 1+2) landed first, creating the `internal/server/` package with all shared infrastructure and workflow handlers. PR #16 (agent handlers) builds on PR #14's helpers, middleware, and test patterns. PR #17 depends on both PR #14 and PR #16 being merged. All cleanup items originally planned for PR 5 were addressed incrementally during review-fix cycles of PRs #17 and #18, making a standalone follow-up PR unnecessary.
 
-**RFC 0002 endpoint implementation is complete.** All 11 endpoints registered, `main.go` TODO step 11 satisfied, Docker networking fixed. Total: 90 server tests, 96.7% coverage. PR 5 addresses accumulated code quality findings only — no new functionality.
+**RFC 0002 is fully closed.** All 11 endpoints registered, `main.go` TODO step 11 satisfied, Docker networking fixed. Total: 90 server tests, 96.7% coverage. All carry-forward findings resolved — no remaining items.
 
 ---
 
@@ -445,9 +444,9 @@ These findings from RFC 0001 PR reviews are addressed or relevant within RFC 000
 | PR #14 F-01: Store internal-error paths (500) untested | Introduce a `failingStore` wrapper that returns `errors.New("db error")` for specific methods; verify 500 JSON envelope | ✅ Addressed in PR #17 — `failingStore` covers 5 handler 500-paths |
 | PR #14 F-02: No mixed concurrent stress test | Add test with ~30 goroutines: submit + read + delete concurrently with `-race` | ✅ Addressed in PR #17 — `TestMixedConcurrentWorkflowAccess` (30 goroutines, create+read+list) |
 | PR #16 F-01: Address max-length validation missing | `handleRegisterAgent` accepts arbitrarily long address strings. Add `len(req.Address) > 253` check. | ✅ Addressed in PR #17 |
-| PR #16 F-04: `workflowIDRegex` name misleading | Shared regex used for both workflow and agent IDs; name suggests workflow-only. Rename to `ResourceIDRegex`. | PR 5 (follow-up) |
-| PR #17 F-01: `panic()` for `--env` validation | `panic()` produces stack trace. Use `fmt.Fprintln + os.Exit(1)` for clean error output. | PR 5 (follow-up) |
-| PR #17 F-04: Mixed concurrent tests lack DELETE | TOCTOU delete path untested under concurrency. Add DELETE goroutine group. | PR 5 (follow-up) |
+| PR #16 F-04: `workflowIDRegex` name misleading | Shared regex used for both workflow and agent IDs; name suggests workflow-only. Rename to `ResourceIDRegex`. | ✅ Done in PR #18 |
+| PR #17 F-01: `panic()` for `--env` validation | `panic()` produces stack trace. Use `fmt.Fprintln + os.Exit(1)` for clean error output. | ✅ Done in PR #18 |
+| PR #17 F-04: Mixed concurrent tests lack DELETE | TOCTOU delete path untested under concurrency. Add DELETE goroutine group. | ✅ Done in PR #17 review fixes |
 
 ---
 
