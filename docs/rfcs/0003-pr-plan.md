@@ -153,6 +153,15 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [x] `StatusUnknown` explicitly tested (N-07)
 - [x] Concurrent dispatch race-tested (N-08)
 
+#### Post-merge findings
+
+- **N-12 (Context cancellation mid-dispatch)**: The existing `TestExecuteTask_ContextCancellation` (PR 2a) only covers cancellation during the backoff `select`. If `ctx` is cancelled during `dispatch()`, the gRPC layer returns `codes.Canceled` which `isTransient` classifies as permanent — the error surfaces as `"permanent failure ... Canceled"` rather than `context.Canceled`. A test that cancels mid-dispatch would document this behavior and prevent regressions if `codes.Canceled` is accidentally added to the transient set. **Should fix** in a follow-up. *(Review pr-023, Should Fix #1)*
+- **N-13 (Concurrent retry stress test)**: `TestExecuteTask_ConcurrentDispatch` uses `WithMaxRetries(0)`, so the concurrent timer/select/backoff path is untested under concurrency. A variant where multiple goroutines all encounter transient errors and retry would exercise the backoff path under `-race`. Use `sync/atomic` counter per goroutine to track per-goroutine attempt count. **Should fix** in a follow-up. *(Review pr-023, Should Fix #2)*
+- **N-14 (`isTransient(nil)` documentation test)**: `status.FromError(nil)` returns `(OK, true)`, so `isTransient(nil)` → `false`. While `nil` never reaches `isTransient` in current code, a one-line assertion documents the behavior defensively. Nice to have. *(Review pr-023, Nice to Have #1)*
+- **N-15 (Wrapped non-gRPC error coverage)**: `TestIsTransient_NonGRPCError` only tests a single non-gRPC error string. Adding a wrapped error case (`fmt.Errorf("outer: %w", plainErr)`) would validate that `status.FromError` correctly returns `ok=false` for wrapped non-gRPC chains. Nice to have. *(Review pr-023, Nice to Have #2)*
+- **N-16 (`codes.Internal` rationale comment)**: `codes.Internal` is classified as permanent, but some `Internal` errors can be transient (e.g., gRPC transport layer errors sometimes surface as `Internal`). The classification is defensible but a comment in `isTransient()` in `executor.go` would document the rationale. Nice to have — follow-up cleanup PR. *(Review pr-023, Nice to Have #3)*
+- **N-17 (Backoff timing validation)**: No test validates actual delay ranges. The jitter formula `0.75 + rand.Float64()*0.5` produces `[0.75, 1.25)` — difficult to test without mocking `rand`. Not needed for v0.1. *(Review pr-023, Nice to Have #4)*
+
 ---
 
 ### PR 3a: `feature/v01-scheduler-core` — WorkflowScheduler Core
