@@ -289,10 +289,10 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 
 #### PR checklist
 
-- [ ] `go test ./internal/state/... -v -cover` passes
-- [ ] Coverage ≥ 80%
-- [ ] `RunRetrying = 5` (explicit, no `iota`)
-- [ ] `go vet ./internal/state/...` clean
+- [x] `go test ./internal/state/... -v -cover` passes
+- [x] Coverage ≥ 80%
+- [x] `RunRetrying = 5` (explicit, no `iota`)
+- [x] `go vet ./internal/state/...` clean
 
 ---
 

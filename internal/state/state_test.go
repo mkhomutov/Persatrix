@@ -369,15 +369,6 @@ func TestDeleteRunThenUpdateStepReturnsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrRunNotFound)
 }
 
-func TestRunStatusValues(t *testing.T) {
-	// Verify explicit integer assignments match proto/task.proto alignment.
-	assert.Equal(t, RunStatus(0), RunPending)
-	assert.Equal(t, RunStatus(1), RunRunning)
-	assert.Equal(t, RunStatus(2), RunCompleted)
-	assert.Equal(t, RunStatus(3), RunFailed)
-	assert.Equal(t, RunStatus(4), RunCancelled)
-}
-
 func TestStoreInterface(t *testing.T) {
 	// Compile-time check that InMemoryStore implements Store.
 	var _ Store = (*InMemoryStore)(nil)
@@ -554,9 +545,124 @@ func TestRunStatusString(t *testing.T) {
 		{RunCompleted, "Completed"},
 		{RunFailed, "Failed"},
 		{RunCancelled, "Cancelled"},
+		{RunRetrying, "Retrying"},
 		{RunStatus(99), "RunStatus(99)"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, tt.status.String())
 	}
+}
+
+func TestRunRetryingStatus(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	// RunRetrying = 5, explicit integer aligned with proto/task.proto RETRYING = 5.
+	assert.Equal(t, RunStatus(5), RunRetrying)
+
+	// Create a run with RunRetrying status and retrieve it.
+	run := &WorkflowRun{ID: "retry-1", WorkflowID: "wf-1", Status: RunRetrying}
+	require.NoError(t, store.CreateRun(ctx, run))
+
+	got, err := store.GetRun(ctx, "retry-1")
+	require.NoError(t, err)
+	assert.Equal(t, RunRetrying, got.Status)
+}
+
+func TestSetRunTimestampsBoth(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: "ts-1", WorkflowID: "wf-1"}))
+
+	started := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	finished := time.Date(2026, 4, 10, 12, 5, 0, 0, time.UTC)
+
+	err := store.SetRunTimestamps(ctx, "ts-1", &started, &finished)
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "ts-1")
+	require.NoError(t, err)
+	assert.Equal(t, started, got.StartedAt)
+	assert.Equal(t, finished, got.FinishedAt)
+}
+
+func TestSetRunTimestampsOnlyStartedAt(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: "ts-2", WorkflowID: "wf-1"}))
+
+	started := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+
+	err := store.SetRunTimestamps(ctx, "ts-2", &started, nil)
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "ts-2")
+	require.NoError(t, err)
+	assert.Equal(t, started, got.StartedAt)
+	assert.True(t, got.FinishedAt.IsZero(), "FinishedAt should remain zero")
+}
+
+func TestSetRunTimestampsOnlyFinishedAt(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	started := time.Date(2026, 4, 10, 11, 0, 0, 0, time.UTC)
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{
+		ID:         "ts-3",
+		WorkflowID: "wf-1",
+		StartedAt:  started,
+	}))
+
+	finished := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+
+	err := store.SetRunTimestamps(ctx, "ts-3", nil, &finished)
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "ts-3")
+	require.NoError(t, err)
+	assert.Equal(t, started, got.StartedAt, "StartedAt should remain unchanged")
+	assert.Equal(t, finished, got.FinishedAt)
+}
+
+func TestSetRunTimestampsNotFound(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	started := time.Now()
+	err := store.SetRunTimestamps(ctx, "nonexistent", &started, nil)
+	assert.ErrorIs(t, err, ErrRunNotFound)
+}
+
+func TestSetRunError(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: "err-1", WorkflowID: "wf-1"}))
+
+	err := store.SetRunError(ctx, "err-1", "step 'plan' failed: agent timeout")
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "err-1")
+	require.NoError(t, err)
+	assert.Equal(t, "step 'plan' failed: agent timeout", got.Error)
+}
+
+func TestSetRunErrorNotFound(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	err := store.SetRunError(ctx, "nonexistent", "some error")
+	assert.ErrorIs(t, err, ErrRunNotFound)
+}
+
+func TestRunStatusValues(t *testing.T) {
+	// Verify explicit integer assignments match proto/task.proto alignment.
+	assert.Equal(t, RunStatus(0), RunPending)
+	assert.Equal(t, RunStatus(1), RunRunning)
+	assert.Equal(t, RunStatus(2), RunCompleted)
+	assert.Equal(t, RunStatus(3), RunFailed)
+	assert.Equal(t, RunStatus(4), RunCancelled)
+	assert.Equal(t, RunStatus(5), RunRetrying)
 }

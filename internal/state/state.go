@@ -29,6 +29,7 @@ const (
 	RunCompleted RunStatus = 2
 	RunFailed    RunStatus = 3
 	RunCancelled RunStatus = 4
+	RunRetrying  RunStatus = 5
 )
 
 // WorkflowRun tracks the state of a single workflow execution.
@@ -64,6 +65,8 @@ type Store interface {
 	UpdateRunStatus(ctx context.Context, runID string, status RunStatus) error
 	UpdateStepState(ctx context.Context, runID string, step StepState) error
 	DeleteRun(ctx context.Context, runID string) error
+	SetRunTimestamps(ctx context.Context, runID string, startedAt, finishedAt *time.Time) error
+	SetRunError(ctx context.Context, runID string, errMsg string) error
 }
 
 // InMemoryStore is a goroutine-safe in-memory implementation of Store.
@@ -202,6 +205,47 @@ func (s *InMemoryStore) DeleteRun(_ context.Context, runID string) error {
 	return nil
 }
 
+// SetRunTimestamps updates the StartedAt and/or FinishedAt timestamps on a
+// workflow run. A nil pointer means "leave unchanged". Deep-copy semantics
+// are maintained for timestamp fields.
+// Returns ErrRunNotFound if the run does not exist.
+func (s *InMemoryStore) SetRunTimestamps(_ context.Context, runID string, startedAt, finishedAt *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return ErrRunNotFound
+	}
+
+	if startedAt != nil {
+		run.StartedAt = *startedAt
+	}
+	if finishedAt != nil {
+		run.FinishedAt = *finishedAt
+	}
+
+	s.logger.Debug("run timestamps updated", zap.String("runID", runID))
+	return nil
+}
+
+// SetRunError sets the Error field on a workflow run. Used by the scheduler's
+// failRun helper to persist failure reasons.
+// Returns ErrRunNotFound if the run does not exist.
+func (s *InMemoryStore) SetRunError(_ context.Context, runID string, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return ErrRunNotFound
+	}
+
+	run.Error = errMsg
+	s.logger.Debug("run error set", zap.String("runID", runID), zap.String("error", errMsg))
+	return nil
+}
+
 // deepCopyRun creates a deep copy of a WorkflowRun, reconstructing both the
 // Steps and Inputs maps to prevent shared backing-reference mutation.
 func deepCopyRun(run *WorkflowRun) *WorkflowRun {
@@ -240,6 +284,8 @@ func (s RunStatus) String() string {
 		return "Failed"
 	case RunCancelled:
 		return "Cancelled"
+	case RunRetrying:
+		return "Retrying"
 	default:
 		return fmt.Sprintf("RunStatus(%d)", int(s))
 	}
