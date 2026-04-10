@@ -370,6 +370,19 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [ ] Binary starts cleanly with `--workflows-dir workflows/`
 - [ ] Graceful shutdown via SIGINT
 
+#### Post-merge findings
+
+- **N-46 (No shutdown drain mechanism)**: `cancel()` signals goroutines to stop, but `main()` exits immediately — no `sync.WaitGroup` or channel to wait for in-flight scheduler runs to complete. `defer exec.Close()` may race with active gRPC connections in v0.2 when connection pooling is added. **Should fix** in a follow-up: use `errgroup.Group` or `sync.WaitGroup` to track the scheduler and HTTP server goroutines; after `cancel()`, call `wg.Wait()` with a timeout before exiting. *(Review pr-027, Should Fix #1)*
+- **N-47 (`workflowsDir` path inconsistency)**: Both server and scheduler receive `*workflowsDir`. The server canonicalizes it to an absolute path with symlink resolution (in `server.New()`), but the scheduler stores the raw CLI value. If `--workflows-dir` is relative (the default `"workflows/"`), the scheduler resolves paths relative to CWD while the server uses the canonical absolute path. **Should fix** in a follow-up: resolve `*workflowsDir` to an absolute path once in `main()` via `filepath.Abs()` before passing to both components. *(Review pr-027, Should Fix #2)*
+- **N-48 (`zap.NewNop()` in integration test)**: `tests/integration/scheduler_executor_test.go` L63 uses no-op logger. Errors during execution are silently swallowed. Using `zaptest.NewLogger(t)` would surface diagnostic output on test failure. **Should fix** in a follow-up. *(Review pr-027, Should Fix #3)*
+- **N-49 (Two unchecked PR plan items)**: `Binary starts cleanly with --workflows-dir workflows/` and `Graceful shutdown via SIGINT` remain unverified. These require manual runtime verification: `go build ./cmd/orchestrator && ./orchestr8-server --workflows-dir workflows/` and `kill -INT <pid>`. **Should fix**: verify and check boxes. *(Review pr-027, Should Fix #4)*
+- **N-50 (Mixed logging styles)**: New code uses structured `logger.Info(...)` with `zap.String(...)` fields, but `log.Infow(...)` (Sugar logger) is used for startup and shutdown messages. Consistent within PR scope ("existing messages not migrated"), but the two styles coexist in `main()`. Nice to have: migrate Sugar calls to structured logger in a cleanup PR. *(Review pr-027, Nice to Have #1)*
+- **N-51 (Error-path integration test)**: No integration test for agent failure scenarios. What happens when an agent is unreachable or returns `FAILED`? Unit tests in `scheduler_test.go` cover these, but an integration-level failure test would validate the full error propagation chain. Nice to have. *(Review pr-027, Nice to Have #2)*
+- **N-52 (Step ordering assertion)**: `TestSchedulerExecutorIntegration` verifies all 4 steps completed but doesn't assert execution ordering (e.g., `plan.FinishedAt < implement.StartedAt`). Step timestamps could validate sequential stage execution. Nice to have. *(Review pr-027, Nice to Have #3)*
+- **N-53 (Payload verification in mock)**: `mockAgentServer.ExecuteTask` returns a static response regardless of input. Recording received payloads and asserting template resolution (`{{ steps.<key>.output }}`) reached the mock correctly would strengthen confidence. Nice to have. *(Review pr-027, Nice to Have #4)*
+- **N-54 (`//nolint:errcheck` on `exec.Close()`)**: Justified for v0.1 no-op, but should be removed when connection pooling is implemented in v0.2. Track for cleanup. *(Review pr-027, Note)*
+- **N-55 (Status hygiene updates)**: After merge: add PR #27 to ROADMAP merged PR history, transition RFC 0003 to `✅ Implemented` (7/7 merged), update `internal/scheduler/` component status to `✅ Complete`, update "What Works Today" section. *(Review pr-027, Note)*
+
 ---
 
 ## Risk Mitigation
