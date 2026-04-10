@@ -176,6 +176,10 @@ func TestSingleStepEndToEnd(t *testing.T) {
 	require.True(t, ok, "step1 should exist in steps map")
 	assert.Equal(t, state.RunCompleted, step.Status)
 	assert.Equal(t, "completed output", step.Output)
+	assert.False(t, step.StartedAt.IsZero(), "step StartedAt should be set")
+	assert.False(t, step.FinishedAt.IsZero(), "step FinishedAt should be set")
+	assert.True(t, step.FinishedAt.After(step.StartedAt) || step.FinishedAt.Equal(step.StartedAt),
+		"step FinishedAt should be >= StartedAt")
 }
 
 func TestMultiStageSequential(t *testing.T) {
@@ -285,6 +289,8 @@ func TestStepFailureFailsRun(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, state.RunFailed, step.Status)
 	assert.Contains(t, step.Error, "agent exploded")
+	assert.False(t, step.StartedAt.IsZero(), "step StartedAt should be preserved on failure")
+	assert.False(t, step.FinishedAt.IsZero(), "step FinishedAt should be set on failure")
 }
 
 func TestPollLoopPicksUpPendingRun(t *testing.T) {
@@ -581,4 +587,74 @@ func TestExecuteStepPassesWorkflowID(t *testing.T) {
 
 	waitForRunStatus(t, store, "wfid-run", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, "test-wf", receivedWorkflowID, "executor should receive workflow ID, not run UUID")
+}
+
+func TestInputsTemplateResolution(t *testing.T) {
+	// G-02: Verify that {{ variable }} templates are resolved from run.Inputs (the vars map).
+	const inputsYAML = `schema_version: "0.1"
+workflow:
+  id: "inputs-wf"
+  name: "Inputs Workflow"
+  trigger: "manual"
+  steps:
+    - id: "s1"
+      agent: "test-agent"
+      input: "build: {{ user_request }}"
+      output_key: "result"
+`
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "inputs-wf", inputsYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	var receivedPayload string
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		receivedPayload = req.Payload
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "inputs-run", "inputs-wf", map[string]string{
+		"user_request": "a REST API",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sched.Run(ctx)
+
+	waitForRunStatus(t, store, "inputs-run", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, "build: a REST API", receivedPayload,
+		"{{ user_request }} should be resolved from run.Inputs")
+}
+
+func TestFailRunWithCancelledContext(t *testing.T) {
+	// G-03: Verify that failRun persists state even after the parent context is cancelled,
+	// thanks to context.WithoutCancel. A long-running executor is cancelled mid-flight,
+	// and the failure state should still be recorded.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+
+	stepStarted := make(chan struct{})
+	exec := &mockExecutor{handler: func(ctx context.Context, _ executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		close(stepStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "cancel-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go sched.Run(ctx)
+
+	// Wait until the executor is actually running, then cancel.
+	<-stepStarted
+	cancel()
+
+	// The run should reach Failed — failRun uses context.WithoutCancel to persist state.
+	run := waitForRunStatus(t, store, "cancel-run", state.RunFailed, 5*time.Second)
+	assert.Equal(t, state.RunFailed, run.Status)
+	assert.NotEmpty(t, run.Error, "run error should be recorded despite cancelled context")
+	assert.False(t, run.FinishedAt.IsZero(), "FinishedAt should be set despite cancelled context")
 }

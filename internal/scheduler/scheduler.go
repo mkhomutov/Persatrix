@@ -311,11 +311,15 @@ func (s *WorkflowScheduler) executeStep(
 	vars map[string]string,
 	mu *sync.Mutex,
 ) (string, error) {
+	// Track start time locally so subsequent UpdateStepState calls (which do
+	// full replacement) preserve the value. See state.InMemoryStore.UpdateStepState.
+	startedAt := time.Now()
+
 	// Mark step as running.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
 		StepID:    step.ID,
 		Status:    state.RunRunning,
-		StartedAt: time.Now(),
+		StartedAt: startedAt,
 	}); err != nil {
 		s.logger.Error("failed to update step state to running",
 			zap.String("runID", runID),
@@ -335,7 +339,7 @@ func (s *WorkflowScheduler) executeStep(
 
 	resolved, err := planner.ResolveInputs(step, outputsCopy, vars, s.logger)
 	if err != nil {
-		s.markStepFailed(ctx, runID, step.ID, err.Error())
+		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
 
@@ -345,9 +349,10 @@ func (s *WorkflowScheduler) executeStep(
 		WorkflowID: workflowID,
 		AgentID:    step.AgentID,
 		Payload:    resolved,
+		Context:    outputsCopy,
 	})
 	if err != nil {
-		s.markStepFailed(ctx, runID, step.ID, err.Error())
+		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
 
@@ -356,6 +361,7 @@ func (s *WorkflowScheduler) executeStep(
 		StepID:     step.ID,
 		Status:     state.RunCompleted,
 		Output:     result.Output,
+		StartedAt:  startedAt,
 		FinishedAt: time.Now(),
 	}); err != nil {
 		s.logger.Error("failed to update step state to completed",
@@ -369,11 +375,14 @@ func (s *WorkflowScheduler) executeStep(
 }
 
 // markStepFailed updates the step state to failed with the given error message.
-func (s *WorkflowScheduler) markStepFailed(ctx context.Context, runID, stepID, errMsg string) {
+// startedAt is passed explicitly because UpdateStepState does full replacement
+// and would otherwise zero out the start time recorded when the step began.
+func (s *WorkflowScheduler) markStepFailed(ctx context.Context, runID, stepID string, startedAt time.Time, errMsg string) {
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
 		StepID:     stepID,
 		Status:     state.RunFailed,
 		Error:      errMsg,
+		StartedAt:  startedAt,
 		FinishedAt: time.Now(),
 	}); err != nil {
 		s.logger.Error("failed to update step state to failed",
@@ -416,5 +425,5 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 	return filepath.Join(workflowsDir, workflowID+".yaml"), nil
 }
 
-// TODO: Implement retry logic with circuit breaker integration (post-v0.1)
-// TODO: Implement dead letter queue for failed tasks (post-v0.1)
+// TODO(post-v0.1): Implement retry logic with circuit breaker integration
+// TODO(post-v0.1): Implement dead letter queue for failed tasks
