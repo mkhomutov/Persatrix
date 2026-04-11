@@ -369,7 +369,9 @@ class EpisodicMemory:
         *,
         limit: int = 10,
         min_importance: float = 0.0,
-    ) -> list[Episode]: ...
+    ) -> list[Episode]:
+        """Retrieve relevant episodes. Increments access_count on returned entries."""
+        ...
 
     async def summarize_old_episodes(
         self,
@@ -390,8 +392,10 @@ CREATE TABLE IF NOT EXISTS episodes (
     context_json TEXT,          -- JSON blob of structured context
     outcome TEXT,
     importance REAL DEFAULT 0.5,
-    created_at REAL NOT NULL,   -- Unix timestamp
-    compressed_at REAL,         -- when last summarized
+    access_count INTEGER DEFAULT 0,  -- incremented on each recall() hit
+    last_accessed_at REAL,           -- updated on each recall() hit
+    created_at REAL NOT NULL,        -- Unix timestamp
+    compressed_at REAL,              -- when last summarized
     compression_level INTEGER DEFAULT 0  -- 0=raw, 1=summarized, 2=distilled
 );
 
@@ -910,11 +914,15 @@ LIMIT ?;
 
 *Composite scoring formula:*
 
-$$\text{score} = \text{BM25}(query, episode) \times \text{importance} \times \frac{1}{1 + \text{age\_days}}$$
+$$\text{score} = \text{BM25}(query, episode) \times \text{importance} \times (1 + \ln(1 + \text{access\_count})) \times \frac{1}{1 + \text{age\_days}}$$
 
-When no query text is provided (e.g., tick loop context loading), fall back to `importance × recency` only.
+The `access_count` factor gives a mild boost to frequently retrieved memories (logarithmic to avoid runaway dominance). Each `recall()` hit increments `access_count` and updates `last_accessed_at` on returned episodes.
 
-*Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not.
+When no query text is provided (e.g., tick loop context loading), fall back to `importance × (1 + ln(1 + access_count)) × recency` only.
+
+*Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not. Every `recall()` call updates `access_count` and `last_accessed_at` for returned rows.
+
+*Future enhancement — Ebbinghaus forgetting curve:* The `access_count` and `last_accessed_at` columns capture the data needed to implement retrieval-strengthened exponential decay ($R = e^{-t/S}$ where strength $S$ grows with each retrieval). This is a post-MVP upgrade path — swap the hyperbolic `1/(1 + age_days)` decay for exponential decay where the time constant is a function of `access_count`. Requires empirical tuning of decay rate and strengthening factor against real agent interaction data, so it is deferred until the system is running and producing observable memory access patterns.
 
 ---
 
