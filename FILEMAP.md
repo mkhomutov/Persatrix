@@ -10,8 +10,8 @@
 | `internal/` | 40 |
 | `agents/` | 30 |
 | `tests/` | 19 |
+| `docs/` | 18 |
 | `(root)` | 17 |
-| `docs/` | 17 |
 | `scripts/` | 12 |
 | `.github/` | 11 |
 | `config/` | 9 |
@@ -28,7 +28,7 @@
 |-----------|-------|
 | `.py` | 58 |
 | `.go` | 35 |
-| `.md` | 30 |
+| `.md` | 31 |
 | `.yaml` | 22 |
 | `(no extension)` | 4 |
 | `.toml` | 4 |
@@ -155,8 +155,9 @@
 │   │   ├── 0004-python-agent-grpc-server.md
 │   │   ├── README.md
 │   │   └── RFC_TEMPLATE.md
-│   └── templates/
-│       └── MANUAL_TEST_TEMPLATE.md
+│   ├── templates/
+│   │   └── MANUAL_TEST_TEMPLATE.md
+│   └── v0.1-release-checklist.md
 ├── evaluators/
 │   └── conversation_scorer.py
 ├── go.mod
