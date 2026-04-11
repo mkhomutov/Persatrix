@@ -4,7 +4,6 @@ Tests for agent self-registration and de-registration with orchestrator.
 All tests use mock HTTP — no real network calls.
 """
 
-import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp

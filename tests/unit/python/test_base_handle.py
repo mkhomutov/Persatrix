@@ -18,7 +18,6 @@ from agents.base import (
 from agents.llm_client import (
     LLMClient,
     LLMResponse,
-    LLMToolResult,
     StopReason,
     ToolCall,
     Usage,
