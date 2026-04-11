@@ -1,7 +1,7 @@
 # RFC 0004 — Python Agent gRPC Server (AgentService Implementation)
 
 **Type**: architecture
-**Status**: � Accepted
+**Status**: 👍 Accepted
 **Author**: Orchestr8 team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
@@ -308,20 +308,22 @@ When the LLM returns multiple tool calls in a single response, tools are execute
 
 #### `_execute_tools` Method
 
-The `_execute_tools` helper takes `ToolCall` objects from the normalized `LLMResponse`, dispatches each to the tool registry, enforces permissions, and returns provider-agnostic tool results. The `LLMProvider` implementations are responsible for translating these results back into their native format when building the next message.
+The `_execute_tools` helper takes `ToolCall` objects from the normalized `LLMResponse`, dispatches each to the tool registry, enforces permissions, and returns `LLMToolResult` objects. Tool functions return `registry.ToolResult` (with `success`/`data`/`error` fields); this method converts them to `LLMToolResult` (with `tool_call_id`/`content`/`is_error` fields) for the LLM conversation. The naming distinction avoids import confusion between the two result types (review-fix D1).
 
 ```python
-async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
+async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
     """Execute tool calls from normalized LLM response sequentially.
 
     Takes ToolCall objects, dispatches through the tool registry
-    with permission checks, and returns provider-agnostic tool results.
+    with permission checks, and returns LLMToolResult objects for
+    the LLM conversation. Tool functions return registry.ToolResult;
+    this method converts them to the LLM-facing LLMToolResult type.
     """
     results = []
     for call in tool_calls:
         tool_fn = self._tool_registry.get(call.name)
         if tool_fn is None:
-            results.append(ToolResult(
+            results.append(LLMToolResult(
                 tool_call_id=call.id,
                 content=f"Unknown tool: {call.name}",
                 is_error=True,
@@ -329,13 +331,13 @@ async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
             continue
         try:
             result = await tool_fn(**call.input)
-            results.append(ToolResult(
+            results.append(LLMToolResult(
                 tool_call_id=call.id,
                 content=result.data if result.success else result.error,
                 is_error=not result.success,
             ))
         except PermissionError as exc:
-            results.append(ToolResult(
+            results.append(LLMToolResult(
                 tool_call_id=call.id,
                 content=str(exc),
                 is_error=True,
@@ -346,7 +348,7 @@ async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
         # can decide how to proceed, rather than bubbling up as an opaque
         # task failure via the generic except in ExecuteTask.
         except Exception as exc:
-            results.append(ToolResult(
+            results.append(LLMToolResult(
                 tool_call_id=call.id,
                 content=f"Tool error ({type(exc).__name__}): {exc}",
                 is_error=True,
@@ -440,6 +442,19 @@ class Usage:
 
 
 @dataclass
+class LLMToolResult:
+    """Provider-agnostic tool result for LLM message building.
+
+    Not to be confused with tools.registry.ToolResult which represents
+    the raw result from a tool function (success/data/error/error_type).
+    This type is the normalized form sent back to the LLM provider.
+    """
+    tool_call_id: str
+    content: str
+    is_error: bool
+
+
+@dataclass
 class LLMResponse:
     """Normalized response from any LLM provider."""
     text: str | None
@@ -462,8 +477,15 @@ class AnthropicProvider:
         import anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
-    async def create_message(self, **kwargs) -> LLMResponse:
-        response = await self._client.messages.create(**kwargs)
+    async def create_message(
+        self, *, model: str, messages: list, system: str,
+        tools: list, max_tokens: int, temperature: float,
+    ) -> LLMResponse:
+        # Review-fix D5: match LLMProvider protocol typed signature
+        response = await self._client.messages.create(
+            model=model, messages=messages, system=system,
+            tools=tools, max_tokens=max_tokens, temperature=temperature,
+        )
         return self._normalize(response)
 
     def _normalize(self, response) -> LLMResponse:
@@ -481,9 +503,17 @@ class OpenAIProvider:
         import openai
         self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
 
-    async def create_message(self, **kwargs) -> LLMResponse:
-        # Translate kwargs to OpenAI format (system→first message, tools→functions)
-        response = await self._client.chat.completions.create(...)
+    async def create_message(
+        self, *, model: str, messages: list, system: str,
+        tools: list, max_tokens: int, temperature: float,
+    ) -> LLMResponse:
+        # Review-fix D5: match LLMProvider protocol typed signature
+        # Review-fix D2: OpenAI uses 'tools' param (not deprecated 'functions')
+        # Translate system→first message, keyword args→OpenAI format
+        response = await self._client.chat.completions.create(
+            model=model, messages=[{"role": "system", "content": system}, *messages],
+            tools=tools, max_tokens=max_tokens, temperature=temperature,
+        )
         return self._normalize(response)
 
     def _normalize(self, response) -> LLMResponse:
@@ -498,6 +528,23 @@ class LLMClient:
 
     async def create_message(self, **kwargs) -> LLMResponse:
         return await self._provider.create_message(**kwargs)
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        """Build the next message list after a tool-use round.
+
+        Review-fix B2: this method was called in the handle() loop but
+        had no pseudocode definition. Appends the assistant's response
+        (including tool_calls) and the tool results to the conversation,
+        using the provider's native message format.
+        """
+        # Append assistant response with tool calls
+        messages = [*messages, {"role": "assistant", "content": response.text, "tool_calls": response.tool_calls}]
+        # Append each tool result as a tool-role message
+        for result in tool_results:
+            messages.append({"role": "tool", "tool_call_id": result.tool_call_id, "content": result.content})
+        return messages
 ```
 
 Provider is resolved from agent config at startup:
@@ -518,6 +565,10 @@ def _create_provider(agent_config: dict) -> LLMProvider:
 def _infer_provider(model: str) -> str:
     if model.startswith("claude"):
         return "anthropic"
+    # Review-fix D4: warn on fallback so operators notice misconfigured models
+    # rather than silently sending requests to the wrong provider.
+    import logging
+    logging.getLogger(__name__).warning("Unknown model prefix %r, defaulting to openai provider", model)
     return "openai"  # Default — covers GPT, O1, and OpenAI-compatible endpoints
 ```
 

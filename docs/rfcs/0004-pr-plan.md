@@ -168,7 +168,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 | File | Change |
 |------|--------|
-| `agents/llm_client.py` | New — `LLMProvider` protocol, `AnthropicProvider`, `OpenAIProvider`, normalized types (`LLMResponse`, `ToolCall`, `ToolResult`, `StopReason`, `Usage`), `LLMClient` facade, `_create_provider()` factory |
+| `agents/llm_client.py` | New — `LLMProvider` protocol, `AnthropicProvider`, `OpenAIProvider`, normalized types (`LLMResponse`, `ToolCall`, `LLMToolResult`, `StopReason`, `Usage`), `LLMClient` facade, `_create_provider()` factory |
 | `agents/base.py` | Add `TaskInputConfig` dataclass, add `config` field to `TaskInput` (review-fix D1), add `_run_llm_loop()` shared handle method, add `_execute_tools()` helper method (uses normalized `ToolCall` objects), add `_build_tool_definitions()` |
 | `tests/unit/python/test_llm_client.py` | New — LLM client tests with mock (both providers) |
 | `tests/unit/python/test_base_handle.py` | New — base handle loop tests |
@@ -178,13 +178,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - **`LLMProvider` protocol**: `async def create_message(...) -> LLMResponse` — implemented by `AnthropicProvider` and `OpenAIProvider`.
 - **`AnthropicProvider`**: wraps `anthropic.AsyncAnthropic`. Translates Anthropic `ToolUseBlock` → `ToolCall`, string `stop_reason` → `StopReason` enum. API key from `ANTHROPIC_API_KEY` env var.
 - **`OpenAIProvider`**: wraps `openai.AsyncOpenAI`. Translates OpenAI `function` tool calls → `ToolCall`, `finish_reason` → `StopReason` enum. Supports `base_url` override for OpenAI-compatible APIs (Ollama, vLLM, Together, Groq, LM Studio).
-- **Normalized types**: `LLMResponse(text, tool_calls, stop_reason, usage)`, `ToolCall(id, name, input)`, `ToolResult(tool_call_id, content, is_error)`, `StopReason` enum (`END_TURN`, `TOOL_USE`, `MAX_TOKENS`), `Usage(input_tokens, output_tokens)`.
+- **Normalized types**: `LLMResponse(text, tool_calls, stop_reason, usage)`, `ToolCall(id, name, input)`, `LLMToolResult(tool_call_id, content, is_error)` (renamed from `ToolResult` to avoid collision with `tools.registry.ToolResult` — review-fix D1), `StopReason` enum (`END_TURN`, `TOOL_USE`, `MAX_TOKENS`), `Usage(input_tokens, output_tokens)`.
 - **`LLMClient`**: facade that delegates to a concrete `LLMProvider`. Also provides `append_tool_round(messages, response, tool_results)` to build the next message list in provider-agnostic format.
 - **`_create_provider(agent_config)`**: factory that resolves provider from `agent_config["provider"]` or infers from model prefix (`claude*` → anthropic, else → openai). Reads `provider_config` for `base_url` overrides.
 - **Dependency note**: both `anthropic>=0.40.0,<1` and `openai>=1.50.0,<2` already present in `agents/pyproject.toml` — no additions needed.
 - **`TaskInputConfig`**: `max_llm_calls: int = 0`, `max_tokens: int = 0`, `allowed_tools: list[str] = field(default_factory=list)` (PR-review B2: carried from proto, enforcement deferred to v0.2).
 - **`TaskInput.config`**: `config: TaskInputConfig = field(default_factory=TaskInputConfig)` — default so existing callers work.
-- **`_execute_tools(tool_calls: list[ToolCall]) -> list[ToolResult]`**: sequential tool dispatch. Takes normalized `ToolCall` objects, dispatches through tool registry, catches `PermissionError` and generic `Exception` (PR-review M2), returns `ToolResult` objects.
+- **`_execute_tools(tool_calls: list[ToolCall]) -> list[LLMToolResult]`**: sequential tool dispatch. Takes normalized `ToolCall` objects, dispatches through tool registry, catches `PermissionError` and generic `Exception` (PR-review M2), returns `LLMToolResult` objects.
 - **`handle()` loop on `BaseAgent`**: not directly on BaseAgent (it's ABC), but a shared `_run_llm_loop()` method that subclasses call. Implements the core loop: LLM call → check `stop_reason` (`StopReason.END_TURN` → COMPLETED, `StopReason.MAX_TOKENS` → FAILED, `StopReason.TOOL_USE` → dispatch tools and continue) → max iterations → FAILED.
 - Per-task config overrides take precedence over YAML config: `task.config.max_llm_calls or self.config.get("max_llm_calls", 10)`.
 
@@ -193,7 +193,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - **AnthropicProvider**: mock `AsyncAnthropic` → `create_message` normalizes `ToolUseBlock` → `ToolCall`, string `stop_reason` → `StopReason` enum, `Usage` extracted correctly.
 - **OpenAIProvider**: mock `AsyncOpenAI` → `create_message` normalizes function tool calls → `ToolCall`, `finish_reason` → `StopReason` enum, `base_url` passed through.
 - **`_create_provider` factory**: `model="claude-sonnet-4-20250514"` → `AnthropicProvider`; `model="gpt-4o"` → `OpenAIProvider`; explicit `provider="openai"` with `base_url` → `OpenAIProvider` with custom URL; unknown provider → `SystemExit`.
-- **Tool dispatch**: mock LLM returns `ToolCall` → tool executed → `ToolResult` returned; unknown tool → error result; permission denied → error result; generic exception → error result (PR-review M2).
+- **Tool dispatch**: mock LLM returns `ToolCall` → tool executed → `LLMToolResult` returned; unknown tool → error result; permission denied → error result; generic exception → error result (PR-review M2).
 - **Handle loop — END_TURN**: mock returns text → `TaskOutput(status=COMPLETED)`.
 - **Handle loop — TOOL_USE**: mock returns tool call then text → tools dispatched, final result returned.
 - **Handle loop — MAX_TOKENS**: mock returns `StopReason.MAX_TOKENS` → `TaskOutput(status=FAILED)` (review-fix B2).
