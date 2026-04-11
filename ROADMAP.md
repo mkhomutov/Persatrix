@@ -11,7 +11,7 @@ This document tracks development progress across all phases. Update it when merg
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | 🚧 In Progress |
+| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete |
 | **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | 📋 Planned |
 | **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |

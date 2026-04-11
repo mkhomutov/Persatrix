@@ -551,13 +551,15 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_registration.py -v` passes
-- [ ] `ruff check agents/server.py` clean
-- [ ] PR 5b follow-up S-19: `"name": agent.name` added to `_self_register()` payload
-- [ ] PR 5b follow-up S-20: HTTP 200 success path tested explicitly
-- [ ] PR 5b follow-up S-21: `# TODO(v0.2)` comment on hardcoded address
-- [ ] RFC 0004 status updated to ✅ Implemented
-- [ ] ROADMAP updated: RFC 0004 status, merged PR history
+- [x] `pytest tests/unit/python/test_registration.py -v` passes
+- [x] `ruff check agents/server.py` clean
+- [x] PR 5b follow-up S-19: `"name": agent.name` added to `_self_register()` payload
+- [x] PR 5b follow-up S-20: HTTP 200 success path tested explicitly
+- [x] PR 5b follow-up S-21: `# TODO(v0.2)` comment on hardcoded address
+- [x] RFC 0004 status updated to ✅ Implemented
+- [x] ROADMAP updated: RFC 0004 status, merged PR history
+
+> **Status: ✅ Merged (#42)**
 
 ---
 

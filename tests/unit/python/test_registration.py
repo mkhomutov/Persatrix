@@ -4,6 +4,7 @@ Tests for agent self-registration and de-registration with orchestrator.
 All tests use mock HTTP — no real network calls.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -85,9 +86,16 @@ class TestSelfRegistration:
         server._session = mock_session
         server.port = 50051
 
-        await server._self_register()
+        # S-01: verify success branch logs INFO, not just that method doesn't crash
+        with patch("agents.server.logger") as mock_logger:
+            await server._self_register()
 
         mock_session.post.assert_called_once()
+        mock_logger.info.assert_any_call(
+            "Registered agent %s with orchestrator at %s",
+            "test-agent",
+            "http://127.0.0.1:8080",
+        )
 
     async def test_registration_conflict_409(self):
         """Agent already registered (409) is handled gracefully."""
