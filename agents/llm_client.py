@@ -385,12 +385,17 @@ class LLMClient:
 # ─── Provider Factory ────────────────────────────────────────
 
 
+# S-14: Separate exact matches from prefix matches for o-series models.
+# ``startswith("o1")`` would match "o10", "o100" etc. Instead, use exact
+# matches for bare model names and prefix matches for versioned names.
+_OPENAI_EXACT_MODELS: frozenset[str] = frozenset({"o1", "o3", "o4"})
+_OPENAI_PREFIX_MODELS: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
+
+
 def _infer_provider(model: str) -> str:
     if model.startswith("claude"):
         return "anthropic"
-    # S-10: Explicitly enumerate known OpenAI o-series model prefixes to
-    # avoid false-matching future non-OpenAI models (e.g. "o100-*").
-    if model.startswith(("gpt-", "o1-", "o1", "o3-", "o3", "o4-", "o4")):
+    if model in _OPENAI_EXACT_MODELS or model.startswith(_OPENAI_PREFIX_MODELS):
         return "openai"
     logger.warning(
         "Unknown model prefix %r, defaulting to openai provider", model
@@ -407,20 +412,35 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
     provider_config = agent_config.get("provider_config", {})
 
     if provider == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        # S-09: Warn at startup if API key is unset for non-local providers
+        # so operators get a clear message instead of a confusing auth error
+        # on the first task.
+        if not api_key:
+            logger.warning(
+                "ANTHROPIC_API_KEY not set — Anthropic provider will fail on first request"
+            )
         # PR-review SF1: Surface a clear install instruction instead of a
         # raw ImportError traceback when the SDK package is missing.
         try:
-            return AnthropicProvider(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            return AnthropicProvider(api_key=api_key)
         except ImportError:
             raise SystemExit(
                 "Provider 'anthropic' requires package 'anthropic'. "
                 "Install with: pip install 'anthropic>=0.40.0'"
             )
     elif provider == "openai":
+        base_url = provider_config.get("base_url")
+        api_key = os.environ.get("OPENAI_API_KEY")
+        # S-09: Only warn for non-local providers (base_url implies local/custom).
+        if not api_key and not base_url:
+            logger.warning(
+                "OPENAI_API_KEY not set — OpenAI provider will fail on first request"
+            )
         try:
             return OpenAIProvider(
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                base_url=provider_config.get("base_url"),
+                api_key=api_key,
+                base_url=base_url,
             )
         except ImportError:
             raise SystemExit(

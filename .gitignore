@@ -1,7 +1,8 @@
 # Build artifacts
 bin/
 cli/target/
-agents/generated/
+# agents/generated/ is committed for reproducible builds (consistent with
+# internal/generated/ for Go stubs). See RFC 0004 PR 1 rationale.
 
 # Dependencies
 vendor/

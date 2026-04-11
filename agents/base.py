@@ -117,9 +117,19 @@ class BaseAgent(ABC):
     # ─── Shared LLM Loop ────────────────────────────────────
 
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
-        """Build normalized tool definitions from the tool registry."""
+        """Build normalized tool definitions from the tool registry.
+
+        S-12: Filters to only tools listed in agent's ``tools`` config.
+        An empty list means no tools are exposed (e.g. PlannerAgent).
+        """
+        allowed = self.config.get("tools", [])
         defs: list[dict[str, Any]] = []
         for td in list_tools():
+            if allowed and td.name not in allowed:
+                continue
+            if not allowed:
+                # No tools configured — expose nothing.
+                continue
             defs.append(
                 {
                     "name": td.name,
@@ -248,9 +258,11 @@ class BaseAgent(ABC):
                 logger.error(
                     "LLM provider error in agent %s: %s", self.agent_id, exc,
                 )
+                # S-11: Return generic message — SDK exceptions could contain
+                # internal URLs or partial auth tokens.
                 return TaskOutput(
                     status=TaskStatus.FAILED,
-                    result=f"LLM provider error ({type(exc).__name__}): {exc}",
+                    result="LLM provider error",
                     metadata={
                         "tokens_used": str(total_tokens),
                         "tool_calls": str(tool_calls_count),

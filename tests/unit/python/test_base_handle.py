@@ -265,7 +265,8 @@ class TestLlmProviderError:
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
         assert "LLM provider error" in output.result
-        assert "rate limited" in output.result
+        # S-11: raw exception message should NOT leak into result
+        assert "rate limited" not in output.result
 
     async def test_provider_error_preserves_partial_tokens(self):
         @tool(name="err_tool", description="Tool for error test")
@@ -284,7 +285,8 @@ class TestLlmProviderError:
         )
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
-        assert "network down" in output.result
+        # S-11: raw exception message should NOT leak into result
+        assert output.result == "LLM provider error"
         # Partial token count from first successful round
         assert int(output.metadata["tokens_used"]) == 75
 
@@ -418,7 +420,8 @@ class TestBuildToolDefinitions:
         async def my_tool(path: str) -> ToolResult:
             return ToolResult(success=True, data="ok")
 
-        agent = _TestableAgent(agent_id="t", config={})
+        # S-12: agent must have the tool in its config to expose it
+        agent = _TestableAgent(agent_id="t", config={"tools": ["my_tool"]})
         defs = agent._build_tool_definitions()
         assert len(defs) == 1
         assert defs[0]["name"] == "my_tool"
@@ -427,5 +430,15 @@ class TestBuildToolDefinitions:
 
     def test_empty_registry(self):
         agent = _TestableAgent(agent_id="t", config={})
+        defs = agent._build_tool_definitions()
+        assert defs == []
+
+    def test_empty_tools_config_exposes_nothing(self):
+        """S-12: empty tools list means no tools exposed."""
+        @tool(name="hidden_tool", description="Should not appear")
+        async def hidden_tool() -> ToolResult:
+            return ToolResult(success=True, data="ok")
+
+        agent = _TestableAgent(agent_id="t", config={"tools": []})
         defs = agent._build_tool_definitions()
         assert defs == []

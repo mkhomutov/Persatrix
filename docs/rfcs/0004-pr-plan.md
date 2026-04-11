@@ -49,10 +49,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `make proto` succeeds
-- [ ] `python -c "from agents.generated import task_pb2"` imports cleanly
-- [ ] Generated files committed to repo
-- [ ] `agents/generated/__init__.py` exists
+- [x] `make proto` succeeds
+- [x] `python -c "from agents.generated import task_pb2"` imports cleanly
+- [x] Generated files committed to repo
+- [x] `agents/generated/__init__.py` exists
+
+> **Status: folded into PR 5a (#40)** — proto stubs included in the gRPC server PR since they had no standalone value.
 
 ---
 
@@ -409,17 +411,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_server.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/server.py`
-- [ ] `ruff check agents/server.py` clean
-- [ ] `python -m agents.server --help` shows all CLI flags
-- [ ] Signal handler guarded with `sys.platform != "win32"`
-- [ ] No TLS (v0.1) with `# TODO(security)` comment
-- [ ] `ExecuteTaskStream` returns `UNIMPLEMENTED`
-- [ ] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
-- [ ] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
-- [ ] PR 4b follow-up S-12: `_build_tool_definitions()` filters tools by `self.config.get("tools", [])` — empty list = no tools
-- [ ] PR 4b follow-up S-14: `_infer_provider()` uses separate exact matches and prefix matches for o-series models
+- [x] `pytest tests/unit/python/test_server.py -v` passes (31 tests)
+- [x] Coverage ≥ 80% for `agents/server.py`
+- [x] `ruff check agents/server.py` clean
+- [x] `python -m agents.server --help` shows all CLI flags
+- [x] Signal handler guarded with `sys.platform != "win32"`
+- [x] No TLS (v0.1) with `# TODO(security)` comment
+- [x] `ExecuteTaskStream` returns `UNIMPLEMENTED`
+- [x] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
+- [x] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
+- [x] PR 4b follow-up S-12: `_build_tool_definitions()` filters tools by `self.config.get("tools", [])` — empty list = no tools
+- [x] PR 4b follow-up S-14: `_infer_provider()` uses separate exact matches and prefix matches for o-series models
+- [x] Python gRPC stubs generated and committed (PR 1 folded in)
+
+> **Status: ✅ Merged (#40)**
 
 ---
 
@@ -492,7 +497,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ## Dependency Graph
 
 ```
-PR 1 (py-proto-gen) ────────────────────────────┐
+PR 1 (py-proto-gen) ─── folded into PR 5a ─────┐
                                                  │
 PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Merged (#37)
                                                    │
@@ -502,7 +507,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
                                                    ├──► PR 4b (task-agents + PR 4a S-08, S-10) ✅ Merged (#39) ──┐
                                                    │                                                               │
                                                    ▼                                                               │
-                                              PR 5a (grpc-server + PR 4a S-09, S-11 + PR 4b S-12, S-14) ◄── PR 1  │
+                                              PR 5a (grpc-server + proto stubs + PR 4a S-09, S-11 + PR 4b S-12, S-14) ✅ Merged (#40)
                                                    │                                                               │
                                                    ▼                                                               ▼
                                               PR 5b (agent-registration + PR 4b S-13) ◄────────────────────── PR 4b
@@ -520,12 +525,12 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 
 | PR | Phase | Naive LOC | Calibrated (×1.7) | Status |
 |----|-------|-----------|-------------------|--------|
-| PR 1 | Phase 1 | ~50 | ~85 | Not started |
+| PR 1 | Phase 1 | ~50 | ~85 | Folded into PR 5a |
 | PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
 | PR 3 | Phase 3 | ~500 | ~500¹ | ✅ Merged (#37) |
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
-| PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |
+| PR 5a | Phase 5 (server) | ~350 | ~500¹ | ✅ Merged (#40) |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |
 
 ¹ Capped at ~500 line target. If calibrated estimate exceeds 500, see Risk Mitigation escape valves.
