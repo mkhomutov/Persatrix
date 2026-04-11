@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,6 +21,16 @@ import (
 	"github.com/orchestr8/orchestr8/internal/scheduler"
 	"github.com/orchestr8/orchestr8/internal/server"
 	"github.com/orchestr8/orchestr8/internal/state"
+)
+
+const (
+	// shutdownDrainTimeout is the maximum time to wait for in-flight goroutines
+	// (HTTP server, scheduler) to finish after receiving a shutdown signal.
+	// Extracted from inline magic number per PR #33 review F-02.
+	// Must exceed the HTTP server's internal shutdown timeout (10s in server.go)
+	// to avoid a spurious "drain timed out" warning when the server is still
+	// gracefully draining connections. (PR #33 review S-01)
+	shutdownDrainTimeout = 12 * time.Second
 )
 
 var (
@@ -61,12 +74,28 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
+	// N-47: Resolve workflowsDir to a fully canonical path once, so both
+	// the server and scheduler see the same path regardless of CWD or symlinks.
+	// Without EvalSymlinks, server.New() internally canonicalizes further via
+	// filepath.EvalSymlinks, producing a different path than the scheduler stores.
+	// (PR #33 review F-01)
+	absWorkflowsDir, err := filepath.Abs(*workflowsDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir: "+err.Error())
+		os.Exit(1)
+	}
+	absWorkflowsDir, err = filepath.EvalSymlinks(absWorkflowsDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to canonicalize --workflows-dir: "+err.Error())
+		os.Exit(1)
+	}
+
 	log.Infow("Orchestr8 Server starting",
 		"config", *configDir,
 		"grpcPort", *port,
 		"httpPort", *httpPort,
 		"httpBind", *httpBind,
-		"workflowsDir", *workflowsDir,
+		"workflowsDir", absWorkflowsDir,
 		"env", *env,
 	)
 
@@ -97,8 +126,8 @@ func main() {
 	logger.Info("executor initialized")
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
-	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, *workflowsDir)
-	logger.Info("scheduler initialized", zap.String("workflowsDir", *workflowsDir))
+	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir)
+	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
 
 	// 9. Initialize cost tracker
 	// 10. Start gRPC server (agent communication)
@@ -109,12 +138,17 @@ func main() {
 
 	// 11. Start HTTP server (REST API + SSE streaming)
 	listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
-	srv, err := server.New(listenAddr, *workflowsDir, store, reg, plan, logger)
+	srv, err := server.New(listenAddr, absWorkflowsDir, store, reg, plan, logger)
 	if err != nil {
 		logger.Fatal("failed to create HTTP server", zap.Error(err))
 	}
+	// N-46: Track goroutines with WaitGroup so shutdown can drain in-flight work.
+	var wg sync.WaitGroup
+
 	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := srv.Start(ctx); err != nil {
 			logger.Error("HTTP server terminated with error", zap.Error(err))
 			cancel() // propagate to root context so orchestrator can shutdown cleanly
@@ -126,7 +160,9 @@ func main() {
 	logger.Info("HTTP server starting", zap.String("addr", listenAddr))
 
 	// Start scheduler polling loop
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("scheduler terminated with error", zap.Error(err))
 			cancel()
@@ -143,12 +179,28 @@ func main() {
 	case sig := <-sigCh:
 		log.Infow("Received signal, initiating graceful shutdown", "signal", sig)
 		cancel()
-		// TODO: Drain in-flight workflows
-		// TODO: Notify agents to wrap up
-		// TODO: Persist state
-		// TODO: Close connections
 	case <-ctx.Done():
 	}
+
+	// N-46: Wait for scheduler and HTTP server goroutines to finish.
+	// Use a timeout to prevent hanging if a goroutine is stuck.
+	drainDone := make(chan struct{})
+	// Note (PR #33 F-03): if the timeout fires, this goroutine remains blocked
+	// on wg.Wait() forever. This is benign — the process exits immediately after
+	// the select, so the goroutine is cleaned up by OS process teardown.
+	go func() {
+		wg.Wait()
+		close(drainDone)
+	}()
+	select {
+	case <-drainDone:
+		logger.Info("all goroutines drained cleanly")
+	case <-time.After(shutdownDrainTimeout):
+		logger.Warn("shutdown drain timed out, exiting", zap.Duration("timeout", shutdownDrainTimeout))
+	}
+
+	// TODO: Notify agents to wrap up
+	// TODO: Persist state
 
 	log.Info("Orchestr8 Server stopped")
 }

@@ -38,7 +38,7 @@ RFC 0001 (State, Registry, Planner)           ✅ Done
     ↓
 RFC 0002 (REST API Server)                    ✅ Done
     ↓
-RFC 0003 (Scheduler + Executor + gRPC)        🚧 In Progress
+RFC 0003 (Scheduler + Executor + gRPC)        🚧 In Progress (follow-up 3/4)
     ↓
 RFC 0004 (Python Agent Server + Tools)        📋 Blocked on RFC 0003
     ↓
@@ -175,6 +175,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#26](https://github.com/mkhomutov/Orchestr8/pull/26) | test(scheduler): step execution, template resolution, error path coverage | 0003 (6/7) | 2026-04-10 |
 | [#27](https://github.com/mkhomutov/Orchestr8/pull/27) | feat(orchestrator): wire scheduler + executor into main.go | 0003 (7/7) | 2026-04-10 |
 | [#31](https://github.com/mkhomutov/Orchestr8/pull/31) | fix(executor): additive dial options, cancellation & concurrent retry tests | 0003 follow-up (1/4) | 2026-04-10 |
+| [#32](https://github.com/mkhomutov/Orchestr8/pull/32) | test: observability improvements — concurrent race tests, log assertions, zaptest logger | 0003 follow-up (2/4) | 2026-04-11 |
 
 ---
 
