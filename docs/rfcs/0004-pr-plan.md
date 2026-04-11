@@ -339,6 +339,23 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] PR 4a follow-up S-08: test for missing `model` config → `FAILED` with "missing required 'model' field"
 - [ ] PR 4a follow-up S-10: `_infer_provider()` prefix narrowed for o-series models (e.g., `"o1-"`, `"o3-"`)
 
+> **Status: 🔄 Pending (#39)**
+
+#### Review follow-up findings (PR #39 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-12 | Should Fix | base.py | `_build_tool_definitions()` exposes ALL registered tools globally, ignoring per-agent `tools` config list. PlannerAgent (`tools: []`) sees all builtins; LLM may waste tokens on unauthorized tool calls. Fix: filter by `self.config.get("tools", [])`, treating empty list as "no tools" | PR 5a |
+| S-13 | Should Fix | test_agents.py | No tool-use test for `ReviewerAgent` despite config granting `file_read` access and instructions referencing `file_read` usage — gap vs `CoderAgent` which has `test_handle_with_tool_use` | PR 5b |
+| S-14 | Should Fix | llm_client.py | `_infer_provider()` S-10 fix has redundant + overly-broad prefixes: `startswith("o1")` subsumes `startswith("o1-")` (redundant entries); also matches `"o10"`, `"o100"` etc. Fix: separate exact matches (`{"o1", "o3", "o4"}`) from prefix matches (`("gpt-", "o1-", "o3-", "o4-")`) | PR 5a |
+| C-10 | Consider | agents | Empty `role` config (default `""`) produces malformed system prompt `"Role: \n\nYou are a..."` — cosmetic but could affect prompt interpretation with weaker models | v0.2 |
+| C-11 | Consider | reviewer.py | No validation of LLM structured output format (`approved`/`issues`/`summary`) — unstructured text passes through silently. Acceptable for v0.1 (orchestrator treats output as opaque) | v0.2 |
+| C-12 | Consider | test_agents.py | Mock client factory `_make_client()` duplicated between `test_agents.py` and `test_base_handle.py` — extract to shared `tests/unit/python/conftest.py` fixture | v0.2 |
+| N-08 | Nit | planner_agent.py | Naming inconsistency: `planner_agent.py` vs `coder.py` / `reviewer.py` (inherited from project structure to avoid module collision with `planner` package) | v0.2 |
+| N-09 | Nit | test_agents.py | `"code" in output.result.lower()` assertion depends on mock response content, not agent behavior | v0.2 |
+
+**Strategy**: S-12 and S-14 are low-cost fixes bundled into PR 5a (which wires tool definitions into the server and touches `llm_client.py` for S-09). S-13 is bundled into PR 5b (which adds integration tests and can include the missing unit test). C-10 through C-12 and N-08/N-09 deferred to v0.2.
+
 ---
 
 ### PR 5a: `feature/v01-grpc-server` — AgentServiceServicer + Agent Loading
@@ -350,14 +367,16 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 > **Note**: Phase 5 naive estimate of ~600 LOC × 1.7 = ~1,020 LOC exceeds the 500-line limit. Split at the server/registration boundary: 5a implements the gRPC servicer and agent loading, 5b adds self-registration and integration tests.
 >
 > **Note**: This PR also addresses follow-up findings S-09 (API key warning at startup) and S-11 (sanitize exception messages in task results) from the PR #38 review (see PR 4a follow-up table above). S-09 is a startup log warning in `create_provider()`. S-11 replaces `str(exc)` with a generic message in `_run_llm_loop()` error path.
+>
+> **Note**: This PR also addresses follow-up findings S-12 (tool registry filtering by agent config) and S-14 (`_infer_provider` exact-vs-prefix matching) from the PR #39 review (see PR 4b follow-up table above).
 
 #### Scope
 
 | File | Change |
 |------|--------|
 | `agents/server.py` | Replace stubs — `AgentServiceServicer` (ExecuteTask, HealthCheck, ExecuteTaskStream), `load_agent()`, `AgentServer.start()` / `stop()`, CLI arg parsing (`--agent`, `--port`, `--host`, `--config`, `--workspace`, `--log-level`, `--shutdown-grace`), graceful shutdown |
-| `agents/llm_client.py` | Follow-up fix S-09: log warning when API key is `None` for non-local providers in `create_provider()` |
-| `agents/base.py` | Follow-up fix S-11: sanitize LLM exception messages in `_run_llm_loop()` error path — return generic message, keep details in ERROR log |
+| `agents/llm_client.py` | Follow-up fixes S-09 (log warning when API key is `None` for non-local providers in `create_provider()`), S-14 (separate exact matches from prefix matches in `_infer_provider()`) |
+| `agents/base.py` | Follow-up fixes S-11 (sanitize LLM exception messages in `_run_llm_loop()` error path), S-12 (filter `_build_tool_definitions()` by agent's configured `tools` list) |
 | `tests/unit/python/test_server.py` | New — server unit tests with in-process gRPC client |
 
 #### Key implementation details
@@ -399,6 +418,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] `ExecuteTaskStream` returns `UNIMPLEMENTED`
 - [ ] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
 - [ ] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
+- [ ] PR 4b follow-up S-12: `_build_tool_definitions()` filters tools by `self.config.get("tools", [])` — empty list = no tools
+- [ ] PR 4b follow-up S-14: `_infer_provider()` uses separate exact matches and prefix matches for o-series models
 
 ---
 
@@ -414,6 +435,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 |------|--------|
 | `agents/server.py` | Add self-registration (`_self_register()`), shared `aiohttp.ClientSession` lifecycle (create at startup, close in `shutdown()`), de-registration on shutdown |
 | `tests/unit/python/test_registration.py` | New — self-registration tests with mock HTTP |
+| `tests/unit/python/test_agents.py` | Extended — follow-up fix S-13: add `test_handle_with_tool_use` for `ReviewerAgent` (parity with `CoderAgent`) |
 | `tests/integration/test_agent_server.py` | New — end-to-end gRPC integration test |
 
 #### Key implementation details
@@ -447,6 +469,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] Registration payload does not include `status` field
 - [ ] De-registration is best-effort (failure logged, not raised)
 - [ ] Integration test uses mock LLM (no real API calls)
+- [ ] PR 4b follow-up S-13: `ReviewerAgent` tool-use test added (registers mock `file_read`, verifies tool dispatch)
 
 ---
 
@@ -474,15 +497,15 @@ PR 1 (py-proto-gen) ────────────────────
 PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Merged (#37)
                                                    │
                                                    ▼
-                                              PR 4a (llm-client-base + PR 3 follow-ups) ✅ Pending (#38)
+                                              PR 4a (llm-client-base + PR 3 follow-ups) ✅ Merged (#38)
                                                    │
-                                                   ├──► PR 4b (task-agents + PR 4a S-08, S-10) ──┐
-                                                   │                                               │
-                                                   ▼                                               │
-                                              PR 5a (grpc-server + PR 4a S-09, S-11) ◄── PR 1     │
-                                                   │                                               │
-                                                   ▼                                               ▼
-                                              PR 5b (agent-registration) ◄──────────────────── PR 4b
+                                                   ├──► PR 4b (task-agents + PR 4a S-08, S-10) 🔄 Pending (#39) ──┐
+                                                   │                                                               │
+                                                   ▼                                                               │
+                                              PR 5a (grpc-server + PR 4a S-09, S-11 + PR 4b S-12, S-14) ◄── PR 1  │
+                                                   │                                                               │
+                                                   ▼                                                               ▼
+                                              PR 5b (agent-registration + PR 4b S-13) ◄────────────────────── PR 4b
 ```
 
 > **PR 1 ‖ PR 2** can proceed in parallel — they are fully independent. This is the widest parallelism available.
@@ -500,8 +523,8 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 | PR 1 | Phase 1 | ~50 | ~85 | Not started |
 | PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
 | PR 3 | Phase 3 | ~500 | ~500¹ | ✅ Merged (#37) |
-| PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Pending (#38) |
-| PR 4b | Phase 4 (agents) | ~350 | ~500¹ | Not started |
+| PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
+| PR 4b | Phase 4 (agents) | ~350 | ~500¹ | 🔄 Pending (#39) |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |
 
