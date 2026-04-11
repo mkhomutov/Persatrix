@@ -330,16 +330,16 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_agents.py -v` passes
-- [ ] Coverage ≥ 80% for `coder.py`, `reviewer.py`, `planner_agent.py`
-- [ ] `ruff check agents/coder.py agents/reviewer.py agents/planner_agent.py` clean
-- [ ] System prompts use `self.config["role"]`
-- [ ] `capabilities` property aligned with config (deep-review d5)
-- [ ] No real LLM calls in tests
-- [ ] PR 4a follow-up S-08: test for missing `model` config → `FAILED` with "missing required 'model' field"
-- [ ] PR 4a follow-up S-10: `_infer_provider()` prefix narrowed for o-series models (e.g., `"o1-"`, `"o3-"`)
+- [x] `pytest tests/unit/python/test_agents.py -v` passes
+- [x] Coverage ≥ 80% for `coder.py`, `reviewer.py`, `planner_agent.py`
+- [x] `ruff check agents/coder.py agents/reviewer.py agents/planner_agent.py` clean
+- [x] System prompts use `self.config["role"]`
+- [x] `capabilities` property aligned with config (deep-review d5)
+- [x] No real LLM calls in tests
+- [x] PR 4a follow-up S-08: test for missing `model` config → `FAILED` with "missing required 'model' field"
+- [x] PR 4a follow-up S-10: `_infer_provider()` prefix narrowed for o-series models (e.g., `"o1-"`, `"o3-"`)
 
-> **Status: 🔄 Pending (#39)**
+> **Status: ✅ Merged (#39)**
 
 #### Review follow-up findings (PR #39 review)
 
@@ -499,7 +499,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
                                                    ▼
                                               PR 4a (llm-client-base + PR 3 follow-ups) ✅ Merged (#38)
                                                    │
-                                                   ├──► PR 4b (task-agents + PR 4a S-08, S-10) 🔄 Pending (#39) ──┐
+                                                   ├──► PR 4b (task-agents + PR 4a S-08, S-10) ✅ Merged (#39) ──┐
                                                    │                                                               │
                                                    ▼                                                               │
                                               PR 5a (grpc-server + PR 4a S-09, S-11 + PR 4b S-12, S-14) ◄── PR 1  │
@@ -524,7 +524,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 | PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
 | PR 3 | Phase 3 | ~500 | ~500¹ | ✅ Merged (#37) |
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
-| PR 4b | Phase 4 (agents) | ~350 | ~500¹ | 🔄 Pending (#39) |
+| PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |
 
