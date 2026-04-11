@@ -94,17 +94,20 @@ class BaseAgent(ABC):
     @property
     def capabilities(self) -> list[str]:
         """Declare what this agent can do (config-driven, deep-review d5)."""
-        return self.config.get("capabilities", [])
+        result: list[str] = self.config.get("capabilities", [])
+        return result
 
     @property
     def name(self) -> str:
         """Human-readable agent name."""
-        return self.config.get("name", self.agent_id)
+        result: str = self.config.get("name", self.agent_id)
+        return result
 
     @property
     def role(self) -> str:
         """Agent's role description."""
-        return self.config.get("role", "")
+        result: str = self.config.get("role", "")
+        return result
 
     async def health_check(self) -> bool:
         """Returns True if the agent is healthy and ready to accept tasks."""

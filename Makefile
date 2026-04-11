@@ -84,7 +84,7 @@ lint-go:
 	golangci-lint run ./...
 
 lint-python:
-	cd agents && ruff check . && mypy .
+	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
 
 lint-rust:
 	cd cli && $(CARGO) clippy -- -D warnings

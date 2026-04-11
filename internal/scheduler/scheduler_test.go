@@ -165,7 +165,7 @@ func TestSingleStepEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "run-1", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
@@ -209,7 +209,7 @@ func TestMultiStageSequential(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "run-2", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
@@ -257,7 +257,7 @@ func TestParallelStage(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "run-3", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
@@ -278,7 +278,7 @@ func TestStepFailureFailsRun(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "run-4", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
@@ -307,7 +307,7 @@ func TestPollLoopPicksUpPendingRun(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Create run after scheduler is running.
 	time.Sleep(100 * time.Millisecond)
@@ -409,7 +409,7 @@ func TestConcurrentRunLimit(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Wait for all runs to complete.
 	for i := 0; i < 5; i++ {
@@ -493,7 +493,7 @@ func TestParseFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "bad-run", state.RunFailed, 5*time.Second)
 	assert.Contains(t, run.Error, "parse workflow")
@@ -514,7 +514,7 @@ func TestDAGCycleFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "cycle-run", state.RunFailed, 5*time.Second)
 	assert.Contains(t, run.Error, "validate DAG")
@@ -550,7 +550,7 @@ func TestParallelStepFailures(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "par-fail", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
@@ -584,7 +584,7 @@ func TestExecuteStepPassesWorkflowID(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	waitForRunStatus(t, store, "wfid-run", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, "test-wf", receivedWorkflowID, "executor should receive workflow ID, not run UUID")
@@ -620,7 +620,7 @@ workflow:
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	waitForRunStatus(t, store, "inputs-run", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, "build: a REST API", receivedPayload,
@@ -647,7 +647,7 @@ func TestFailRunWithCancelledContext(t *testing.T) {
 	createPendingRun(t, store, "cancel-run", "test-wf", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Wait until the executor is actually running, then cancel.
 	<-stepStarted
@@ -683,7 +683,7 @@ func TestSuccessPathContextCancellation(t *testing.T) {
 	createPendingRun(t, store, "success-cancel", "test-wf", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Cancel the context right after the executor finishes but before
 	// the scheduler persists the Completed status.
@@ -759,7 +759,7 @@ workflow:
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "missing-run", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
@@ -799,7 +799,7 @@ workflow:
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "missing-step-run", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
@@ -836,7 +836,7 @@ func TestStepStateTransitionsSuccess(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Wait for executor to be called — step should be in Running state.
 	<-stepExecuting
@@ -887,7 +887,7 @@ func TestStepStateTransitionsFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	// Wait for executor to be called — step should be in Running state.
 	<-stepExecuting
@@ -962,7 +962,7 @@ workflow:
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "chain-run", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
@@ -1026,7 +1026,7 @@ func TestPlanErrorPath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go sched.Run(ctx)
+	go func() { _ = sched.Run(ctx) }()
 
 	run := waitForRunStatus(t, store, "plan-err-run", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)

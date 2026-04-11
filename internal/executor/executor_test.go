@@ -52,9 +52,7 @@ func setupTestEnv(t *testing.T, handler func(context.Context, *taskpb.TaskReques
 	taskpb.RegisterAgentServiceServer(srv, &mockAgentServer{handler: handler})
 
 	go func() {
-		if err := srv.Serve(lis); err != nil {
-			// Server was stopped — expected during cleanup.
-		}
+		_ = srv.Serve(lis) // error expected on GracefulStop
 	}()
 
 	t.Cleanup(func() {
