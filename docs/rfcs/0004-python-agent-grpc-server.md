@@ -1008,8 +1008,8 @@ Summary: Implement deny-by-default permission checks and filesystem sandboxing.
 **Deliverables:**
 1. `agents/tools/permissions.py` — `PermissionGate` class.
 2. `agents/tools/sandbox.py` — `PathValidator` class.
-3. `agents/tools/tests/test_permissions.py` — permission tests.
-4. `agents/tools/tests/test_sandbox.py` — path validation tests.
+3. `tests/unit/python/test_permissions.py` — permission tests.
+4. `tests/unit/python/test_sandbox.py` — path validation tests.
 
 **Dependencies:** None. Independent of proto stubs.
 
@@ -1034,7 +1034,7 @@ Summary: Implement the three task agents with LLM interaction loop and tool disp
 4. `agents/planner_agent.py` — implement `handle()`.
 5. `tests/unit/python/test_agents.py` — agent tests with mock LLM.
 
-**Dependencies:** Phase 3 (built-in tools for tool dispatch). `anthropic` SDK added to `pyproject.toml`.
+**Dependencies:** Phase 3 (built-in tools for tool dispatch). `anthropic` and `openai` SDKs already in `pyproject.toml` (no additions needed).
 
 ### Phase 5: gRPC Server + Agent Loading + Self-Registration (~300 LOC)
 
@@ -1058,7 +1058,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 | Python agents | `agents/coder.py` | Implement `handle()` — system prompt, LLM call, tool loop |
 | Python agents | `agents/reviewer.py` | Implement `handle()` — review prompt, LLM call, structured output |
 | Python agents | `agents/planner_agent.py` | Implement `handle()` — planning prompt, LLM call, plan output |
-| Python agents | `agents/llm_client.py` | New — `LLMClient` wrapper around Anthropic SDK |
+| Python agents | `agents/llm_client.py` | New — `LLMProvider` protocol, `AnthropicProvider`, `OpenAIProvider`, normalized types, `LLMClient` facade |
 | Python agents | `agents/tools/builtin.py` | Replace stubs — `file_read`, `file_write`, `shell_exec`, `http_request` |
 | Python agents | `agents/tools/permissions.py` | New — `PermissionGate` class |
 | Python agents | `agents/tools/sandbox.py` | New — `PathValidator` class |
@@ -1070,7 +1070,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 | Tests | `tests/unit/python/test_tools.py` | Extended — built-in tool tests |
 | Tests | `tests/integration/test_agent_server.py` | New — end-to-end gRPC integration test |
 | Build | `Makefile` | No changes needed — existing `proto` target already generates Python stubs |
-| Python config | `agents/pyproject.toml` | Add `grpcio`, `grpcio-tools`, `protobuf`, `anthropic`, `aiohttp`, `pyyaml` |
+| Python config | `agents/pyproject.toml` | Add `aiohttp` (remaining deps already present: `grpcio`, `grpcio-tools`, `protobuf`, `anthropic`, `openai`, `pyyaml`) |
 | Docker | `Dockerfile.agent` | Update to install proto deps and run `make proto` |
 
 ## Test Strategy
