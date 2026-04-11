@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import signal
 import sys
 import time
@@ -31,6 +32,10 @@ from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator
 
 logger = logging.getLogger("orchestr8.agent.server")
+
+# Agent IDs must match the cross-component contract shared with the Go
+# orchestrator registry.  Validated at load time to prevent routing mismatches.
+_AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 
 
 # ─── AgentServiceServicer ───────────────────────────────────
@@ -105,12 +110,15 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 status=task_pb2.FAILED,
                 error_message="Task execution timed out",
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("Task execution failed: %s", request.task_id)
+            # S-01: return fixed string — type(exc).__name__ leaked internal
+            # implementation details (e.g. "SSLError", "ConnectionResetError").
+            # Full exception details are already logged above for debugging.
             return task_pb2.TaskResponse(
                 task_id=request.task_id,
                 status=task_pb2.FAILED,
-                error_message=f"Internal error: {type(exc).__name__}",
+                error_message="Internal error",
             )
 
     async def HealthCheck(
@@ -124,6 +132,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             if agent is None:
                 # F-01: unknown agent ID must return NOT_SERVING so the
                 # orchestrator doesn't route tasks to a non-existent agent.
+                # N-01: log at debug level to help operators diagnose routing
+                # issues when the orchestrator probes a non-loaded agent.
+                logger.debug(
+                    "HealthCheck for unknown agent: %s", request.service
+                )
                 return task_pb2.HealthCheckResponse(
                     status=task_pb2.NOT_SERVING
                 )
@@ -155,6 +168,8 @@ def _resolve_agent_type(agent_config: dict[str, Any]) -> type[BaseAgent]:
     """
     caps = set(agent_config.get("capabilities", []))
 
+    # N-02: priority order — first match wins when an agent has multiple
+    # capabilities (e.g. planning + code_generation → PlannerAgent).
     if "planning" in caps:
         return PlannerAgent
     if "code_generation" in caps:
@@ -174,6 +189,14 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
     Returns a fully-initialized BaseAgent with LLM client, tools, and
     permission configuration wired.
     """
+    # MF-02: validate agent ID format against the cross-component contract
+    # (^[a-z0-9][a-z0-9-]*[a-z0-9]$) shared with Go orchestrator registry.
+    if not _AGENT_ID_PATTERN.match(agent_id):
+        raise SystemExit(
+            f"Invalid agent ID {agent_id!r}: "
+            f"must match {_AGENT_ID_PATTERN.pattern}"
+        )
+
     # PR-review m5: surface clear errors at startup
     try:
         with open(config_path) as f:
@@ -183,19 +206,36 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
     except yaml.YAMLError as exc:
         raise SystemExit(f"Invalid YAML in {config_path}: {exc}")
 
+    # S-02: validate that 'agents' value is a list before iteration.
+    # A malformed config like ``agents: "string"`` would otherwise fail
+    # with an unclear TypeError during enumeration.
+    agents_list = config.get("agents", [])
+    if not isinstance(agents_list, list):
+        raise SystemExit(
+            f"'agents' key in {config_path} must be a list, "
+            f"got {type(agents_list).__name__}"
+        )
+
     # F-03: validate 'id' field presence before dict comprehension to
     # surface a clear SystemExit instead of a raw KeyError.
-    for i, a in enumerate(config.get("agents", [])):
+    for i, a in enumerate(agents_list):
         if "id" not in a:
             raise SystemExit(
                 f"Agent config entry {i} missing required 'id' field"
             )
-    agent_configs = {a["id"]: a for a in config.get("agents", [])}
+    agent_configs = {a["id"]: a for a in agents_list}
     if agent_id not in agent_configs:
         raise SystemExit(f"Agent {agent_id!r} not found in {config_path}")
 
     agent_config = agent_configs[agent_id]
     agent_type = _resolve_agent_type(agent_config)
+
+    # SF-08: validate required 'model' field at startup so operators see a
+    # clear message instead of a raw KeyError from create_provider().
+    if "model" not in agent_config:
+        raise SystemExit(
+            f"Agent {agent_id!r} missing required 'model' field in config"
+        )
 
     # Create LLM client
     provider = create_provider(agent_config)
@@ -242,6 +282,15 @@ class AgentServer:
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
+        # S-03: v0.1 uses module-level state for tool permissions
+        # (builtin.permission_gate, builtin.path_validator), so loading
+        # multiple agents silently overwrites the first agent's security
+        # config.  Warn until per-agent DI is added in v0.2.
+        if self.agents:
+            logger.warning(
+                "v0.1 supports single-agent-per-process; tool permissions "
+                "apply to the last-loaded agent only"
+            )
         self.agents[agent.agent_id] = agent
         logger.info("Registered agent: %s (%s)", agent.agent_id, agent.name)
 
@@ -253,10 +302,13 @@ class AgentServer:
 
         bind_address = f"{self.host}:{self.port}"
         # TODO(security): enable TLS for production gRPC
-        self._server.add_insecure_port(bind_address)
+        # SF-05: store the actual port so logging is correct when port=0
+        # (dynamic allocation) and future self-registration uses the real port.
+        actual_port = self._server.add_insecure_port(bind_address)
+        self.port = actual_port
         await self._server.start()
 
-        logger.info("Agent server listening on %s", bind_address)
+        logger.info("Agent server listening on %s:%d", self.host, actual_port)
         logger.info(
             "Serving %d agent(s): %s",
             len(self.agents),
@@ -345,6 +397,10 @@ def main() -> None:
                 loop.add_signal_handler(sig, request_shutdown)
         else:
             signal.signal(signal.SIGINT, lambda s, f: request_shutdown())
+            # MF-01: SIGTERM is available on Windows in Python; registering a
+            # handler makes os.kill(pid, SIGTERM) trigger graceful shutdown
+            # instead of immediate process termination.
+            signal.signal(signal.SIGTERM, lambda s, f: request_shutdown())
 
         await server.start()
         await shutdown.wait()

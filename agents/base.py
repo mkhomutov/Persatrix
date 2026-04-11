@@ -127,6 +127,9 @@ class BaseAgent(ABC):
         allowed = self.config.get("tools", [])
         if not allowed:
             return []
+        # N-04: convert to set for O(1) membership checks (matters when
+        # the tool registry grows beyond the v0.1 built-in set of 4).
+        allowed_set = set(allowed)
         return [
             {
                 "name": td.name,
@@ -134,7 +137,7 @@ class BaseAgent(ABC):
                 "parameters": td.parameters,
             }
             for td in list_tools()
-            if td.name in allowed
+            if td.name in allowed_set
         ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
@@ -184,19 +187,23 @@ class BaseAgent(ABC):
                 # Defense-in-depth: normally unreachable because the @tool
                 # wrapper catches all exceptions.  Retained for MCP/custom
                 # tools that may bypass the decorator.
+                # SF-06: log full details but return generic message to the LLM
+                # (consistent with S-11 pattern for _run_llm_loop exceptions).
+                logger.warning("Permission denied in tool %s: %s", call.name, exc)
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
-                        content=str(exc),
+                        content="Permission denied",
                         is_error=True,
                     )
                 )
             except Exception as exc:
                 # Defense-in-depth: same rationale as PermissionError above.
+                logger.warning("Unexpected error in tool %s: %s", call.name, exc)
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
-                        content=f"Tool error ({type(exc).__name__}): {exc}",
+                        content="Internal tool error",
                         is_error=True,
                     )
                 )

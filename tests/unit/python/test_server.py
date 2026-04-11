@@ -157,7 +157,10 @@ class TestExecuteTask:
         assert resp.status == task_pb2.FAILED
         # S-11: exception message should NOT contain the raw str(exc)
         assert "kaboom" not in resp.error_message
-        assert "RuntimeError" in resp.error_message
+        # S-01: exception type name should NOT be leaked either —
+        # only a fixed "Internal error" string is returned.
+        assert "RuntimeError" not in resp.error_message
+        assert resp.error_message == "Internal error"
 
     async def test_metadata_json_serialization(self):
         """Non-string metadata values are serialized with json.dumps."""
@@ -235,6 +238,22 @@ class TestExecuteTask:
         assert received_config.max_llm_calls == 5
         assert received_config.max_tokens == 2048
         assert received_config.allowed_tools == ["file_read", "shell_exec"]
+
+
+    async def test_zero_timeout_means_no_timeout(self):
+        """SF-07: timeout_seconds=0 (proto default) must not impose a timeout.
+
+        ``0 or None`` evaluates to ``None``, so ``asyncio.wait_for(..., timeout=None)``
+        waits indefinitely.  If the code broke and passed ``timeout=0``, the task
+        would raise ``TimeoutError`` immediately.
+        """
+        agent = _StubAgent(agent_id="test-agent", config={"model": "test"})
+        servicer = AgentServiceServicer({"test-agent": agent})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        req = _task_request(timeout_seconds=0)
+        resp = await servicer.ExecuteTask(req, context)
+        assert resp.status == task_pb2.COMPLETED
 
 
 class TestHealthCheck:
@@ -417,6 +436,53 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="missing required 'id' field"):
                 load_agent("planner", config_path, tmp)
 
+    def test_invalid_agent_id_format(self):
+        """MF-02: agent IDs must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {"id": "Valid", "capabilities": ["planning"], "permissions": {}},
+            ])
+            with pytest.raises(SystemExit, match="Invalid agent ID"):
+                load_agent("UPPER_CASE", config_path, tmp)
+
+    def test_single_char_agent_id_rejected(self):
+        """MF-02: single character ID fails the regex (requires 2+ chars)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {"id": "a", "capabilities": ["planning"], "permissions": {}},
+            ])
+            with pytest.raises(SystemExit, match="Invalid agent ID"):
+                load_agent("a", config_path, tmp)
+
+    @patch("agents.server.create_provider")
+    def test_missing_model_field(self, mock_create):
+        """SF-08: missing 'model' key gives a clear SystemExit at startup."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "no-model",
+                    "name": "No Model Agent",
+                    "capabilities": ["planning"],
+                    "permissions": {},
+                },
+            ])
+            with pytest.raises(SystemExit, match="missing required 'model' field"):
+                load_agent("no-model", config_path, tmp)
+
+    def test_agents_key_not_a_list(self):
+        """S-02: 'agents' value that is not a list gives a clear SystemExit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "agents.yaml"
+            config_path.write_text(
+                "schema_version: '0.1'\nagents: not_a_list\n",
+                encoding="utf-8",
+            )
+            with pytest.raises(SystemExit, match="must be a list"):
+                load_agent("planner", str(config_path), tmp)
+
 
 class TestResolveAgentType:
     """Tests for _resolve_agent_type()."""
@@ -440,6 +506,17 @@ class TestResolveAgentType:
         with pytest.raises(SystemExit):
             _resolve_agent_type({"id": "x", "capabilities": ["unknown"]})
 
+    def test_empty_capabilities(self):
+        """T-02: empty capabilities list raises SystemExit."""
+        with pytest.raises(SystemExit, match="Cannot determine agent type"):
+            _resolve_agent_type({"id": "x", "capabilities": []})
+
+    def test_planning_beats_code_generation(self):
+        """T-03/N-02: planning capability takes priority over code_generation."""
+        assert _resolve_agent_type(
+            {"id": "x", "capabilities": ["planning", "code_generation"]}
+        ) == PlannerAgent
+
 
 # ─── AgentServer Tests ───────────────────────────────────────
 
@@ -455,6 +532,9 @@ class TestAgentServer:
 
         await server.start()
         assert server._server is not None
+        # SF-05: when port=0 is used, self.port must be updated to the
+        # actual allocated port (not 0).
+        assert server.port != 0
         await server.stop()
 
     async def test_register_agent(self):

@@ -19,6 +19,15 @@ from .sandbox import PathValidator
 
 logger = logging.getLogger(__name__)
 
+# SF-02: only forward safe response headers to the LLM. Headers like
+# Set-Cookie, Server, X-Powered-By can leak infrastructure details or
+# session tokens into LLM context.
+_SAFE_RESPONSE_HEADERS = frozenset({
+    "content-type", "content-length", "location", "date",
+    "cache-control", "etag", "last-modified",
+})
+
+
 # Maximum bytes returned from file reads, shell output, and HTTP responses.
 # Prevents gRPC 4 MB message size blowout and LLM context waste.
 MAX_OUTPUT_BYTES = 102_400  # 100 KB
@@ -55,7 +64,7 @@ def _truncate(text: str) -> str:
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= MAX_OUTPUT_BYTES:
         return text
-    truncated = encoded[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    truncated = encoded[:MAX_OUTPUT_BYTES].decode("utf-8", errors="ignore")
     return truncated + "\n... [truncated at 100 KB]"
 
 
@@ -286,12 +295,18 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             # redirect target after domain re-validation (review M-01).
             async with session.request(**kwargs, allow_redirects=False) as resp:
                 text = await resp.text()
+                # SF-02: filter to safe headers only — prevents leaking
+                # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
+                safe_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if k.lower() in _SAFE_RESPONSE_HEADERS
+                }
                 return ToolResult(
                     success=True,
                     data={
                         "status": resp.status,
                         "body": _truncate(text),
-                        "headers": dict(resp.headers),
+                        "headers": safe_headers,
                     },
                 )
     except aiohttp.ClientError as exc:
