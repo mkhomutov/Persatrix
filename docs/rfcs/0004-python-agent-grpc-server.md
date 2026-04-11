@@ -1052,7 +1052,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 ## Open Questions
 
-1. ~~**LLM SDK choice**: The Anthropic Python SDK is the default based on `config/agents.yaml` model references (`claude-sonnet-4-20250514`). Should the `LLMClient` abstraction support multiple providers (e.g., OpenAI, Ollama) in v0.1 or is Anthropic-only acceptable?~~ **Resolved**: Multi-provider in v0.1. The `LLMClient` abstraction uses a `LLMProvider` protocol with two implementations: `AnthropicProvider` and `OpenAIProvider`. Provider-specific types (tool call formats, stop reasons) are normalized into `LLMResponse`, `ToolCall`, and `StopReason` dataclasses. The OpenAI-compatible API also gives access to Ollama, vLLM, Together, Groq, and any local model server via `base_url` override. Provider is inferred from the model name (`claude-*` → Anthropic, `gpt-*`/`o1-*` → OpenAI) or set explicitly via `provider:` field in `agents.yaml`. See [Multi-Provider LLM Design](#multi-provider-llm-design). (2026-04-11)
+1. ~~**LLM SDK choice**: The Anthropic Python SDK is the default based on `config/agents.yaml` model references (`claude-sonnet-4-20250514`). Should the `LLMClient` abstraction support multiple providers (e.g., OpenAI, Ollama) in v0.1 or is Anthropic-only acceptable?~~ **Resolved**: Multi-provider in v0.1. The `LLMClient` abstraction uses a `LLMProvider` protocol with two implementations: `AnthropicProvider` and `OpenAIProvider`. Provider-specific types (tool call formats, stop reasons) are normalized into `LLMResponse`, `ToolCall`, and `StopReason` dataclasses. The OpenAI-compatible API also gives access to Ollama, vLLM, Together, Groq, and any local model server via `base_url` override. Provider is inferred from the model name (`claude-*` → Anthropic, `gpt-*`/`o1-*` → OpenAI) or set explicitly via `provider:` field in `agents.yaml`. See [LLM Client Abstraction](#llm-client-abstraction). (2026-04-11)
 
 2. ~~**Agent config `type` field**: Current resolution uses capability-based heuristics. Should `config/agents.yaml` add an explicit `type: task | persona` field? Requires schema change.~~ **Resolved**: Keep capability-based heuristic for v0.1. v0.1 has exactly 3 agents with non-overlapping capability signatures. `SystemExit` with a clear error message if no rule matches. Add `type: task | persona` in v0.2 when `PersonaAgent` arrives and capability overlap makes the heuristic ambiguous. `# TODO(v0.2): add explicit 'type' field to agent config` comment retained. (2026-04-11)
 
@@ -1083,6 +1083,8 @@ The following items identified during RFC 0004 design and review are explicitly 
 | `allowed_tools` enforcement on `TaskInputConfig` | PR-review B2 | Proto field carried through but not enforced. v0.2 adds tool filtering logic |
 | `ResourceLimiter` + `OutputSizeLimiter` in `sandbox.py` | PR-review m8 | Stubs preserved. Resource limiting is a v0.2 hardening concern |
 | MCP tool bridge (`agents/tools/mcp_bridge.py`) | Core spec §5.2 | MVP tools are built-in; MCP bridge adds external tool provider support in v0.2 |
+| Per-agent rate limiting on tool wrapper | Non-Goals | Scaffolded (`# TODO: Rate limit check`) but not implemented; enforcement deferred to v0.2 |
+| `store_get` / `store_set` task-scoped key-value tools | Non-Goals | Deferred; four core tools sufficient for v0.1 workflows |
 
 ### Server & Infrastructure
 
@@ -1101,6 +1103,8 @@ The following items identified during RFC 0004 design and review are explicitly 
 | Proto linting (buf lint) in CI | Review finding | Generated code works; linting prevents future proto style drift |
 | Per-run timeout separate from gRPC deadline | Deep-review v3 M2 | Double-enforcement documented; cleaner separation is a v0.2 improvement |
 | Structured cost tracking per agent/task | Core spec §8 | v0.1 tracks `tokens_used` in metadata; formal cost aggregation is v0.2 |
+| Telemetry / OTEL tool invocation spans | Non-Goals | Scaffolded but not wired; full observability is a v0.2 concern |
+| `agents/validate.py` JSON Schema config validation | Non-Goals | Separate concern from agent runtime; validates `agents.yaml` against `schemas/agent.schema.json` |
 
 ## Decision / Next Steps
 

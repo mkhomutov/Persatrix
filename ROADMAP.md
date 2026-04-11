@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-12  
+> **Last updated**: 2026-04-11  
 > **Current phase**: v0.1 (MVP) — ~70% complete
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
