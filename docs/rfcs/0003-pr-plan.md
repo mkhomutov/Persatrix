@@ -476,8 +476,8 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 - [x] `go build ./cmd/orchestrator` succeeds
 - [x] `go vet ./cmd/orchestrator/...` clean
-- [ ] Binary starts cleanly with `--workflows-dir workflows/`
-- [ ] Graceful shutdown via SIGINT drains in-flight work
+- [x] Binary starts cleanly with `--workflows-dir workflows/`
+- [x] Graceful shutdown via SIGINT drains in-flight work
 - [x] `*workflowsDir` resolved to absolute path before passing to components
 
 ---

@@ -23,6 +23,13 @@ import (
 	"github.com/orchestr8/orchestr8/internal/state"
 )
 
+const (
+	// shutdownDrainTimeout is the maximum time to wait for in-flight goroutines
+	// (HTTP server, scheduler) to finish after receiving a shutdown signal.
+	// Extracted from inline magic number per PR #33 review F-02.
+	shutdownDrainTimeout = 10 * time.Second
+)
+
 var (
 	configDir    = flag.String("config", "config/", "Path to configuration directory")
 	port         = flag.Int("port", 9090, "gRPC server port")
@@ -64,11 +71,19 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
-	// N-47: Resolve workflowsDir to an absolute path once, so both the
-	// server and scheduler see the same canonical path regardless of CWD.
+	// N-47: Resolve workflowsDir to a fully canonical path once, so both
+	// the server and scheduler see the same path regardless of CWD or symlinks.
+	// Without EvalSymlinks, server.New() internally canonicalizes further via
+	// filepath.EvalSymlinks, producing a different path than the scheduler stores.
+	// (PR #33 review F-01)
 	absWorkflowsDir, err := filepath.Abs(*workflowsDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir: "+err.Error())
+		os.Exit(1)
+	}
+	absWorkflowsDir, err = filepath.EvalSymlinks(absWorkflowsDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir symlinks: "+err.Error())
 		os.Exit(1)
 	}
 
@@ -167,6 +182,9 @@ func main() {
 	// N-46: Wait for scheduler and HTTP server goroutines to finish.
 	// Use a timeout to prevent hanging if a goroutine is stuck.
 	drainDone := make(chan struct{})
+	// Note (PR #33 F-03): if the timeout fires, this goroutine remains blocked
+	// on wg.Wait() forever. This is benign — the process exits immediately after
+	// the select, so the goroutine is cleaned up by OS process teardown.
 	go func() {
 		wg.Wait()
 		close(drainDone)
@@ -174,8 +192,8 @@ func main() {
 	select {
 	case <-drainDone:
 		logger.Info("all goroutines drained cleanly")
-	case <-time.After(10 * time.Second):
-		logger.Warn("shutdown drain timed out after 10s, exiting")
+	case <-time.After(shutdownDrainTimeout):
+		logger.Warn("shutdown drain timed out, exiting", zap.Duration("timeout", shutdownDrainTimeout))
 	}
 
 	// TODO: Notify agents to wrap up
