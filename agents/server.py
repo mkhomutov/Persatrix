@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import grpc
 import grpc.aio
 import yaml
@@ -223,6 +224,16 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
             raise SystemExit(
                 f"Agent config entry {i} missing required 'id' field"
             )
+    # S-17: detect duplicate agent IDs — dict comprehension silently takes
+    # the last entry, which may mask config errors.
+    seen_ids: set[str] = set()
+    for a in agents_list:
+        aid = a["id"]
+        if aid in seen_ids:
+            raise SystemExit(
+                f"Duplicate agent ID {aid!r} in {config_path}"
+            )
+        seen_ids.add(aid)
     agent_configs = {a["id"]: a for a in agents_list}
     if agent_id not in agent_configs:
         raise SystemExit(f"Agent {agent_id!r} not found in {config_path}")
@@ -273,12 +284,15 @@ class AgentServer:
         host: str = "127.0.0.1",
         port: int = 50051,
         shutdown_grace: int = 30,
+        orchestrator_url: str = "http://127.0.0.1:8080",
     ):
         self.host = host
         self.port = port
         self.shutdown_grace = shutdown_grace
+        self.orchestrator_url = orchestrator_url.rstrip("/")
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
+        self._session: aiohttp.ClientSession | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -315,9 +329,99 @@ class AgentServer:
             list(self.agents.keys()),
         )
 
+        # Deep-review D4: shared aiohttp session for self-registration and
+        # http_request tool (via builtin.http_session).
+        self._session = aiohttp.ClientSession()
+
+        # Self-register with orchestrator after gRPC server is listening.
+        await self._self_register()
+
+    async def _self_register(self) -> None:
+        """Register all hosted agents with the orchestrator (best-effort).
+
+        POST /api/v1/agents/register with id, address, capabilities.
+        Status is NOT sent — the orchestrator sets ``healthy`` on registration
+        (review-fix P1).
+        """
+        if self._session is None:
+            return
+        for agent_id, agent in self.agents.items():
+            address = f"{self.host}:{self.port}"
+            payload = {
+                "id": agent_id,
+                "address": address,
+                "capabilities": agent.capabilities,
+            }
+            url = f"{self.orchestrator_url}/api/v1/agents/register"
+            try:
+                async with self._session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status in (200, 201):
+                        logger.info(
+                            "Registered agent %s with orchestrator at %s",
+                            agent_id,
+                            self.orchestrator_url,
+                        )
+                    elif resp.status == 409:
+                        # Agent already registered (CONFLICT) — not an error,
+                        # may happen on restart.
+                        logger.info(
+                            "Agent %s already registered with orchestrator",
+                            agent_id,
+                        )
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            "Failed to register agent %s: HTTP %d — %s",
+                            agent_id,
+                            resp.status,
+                            body[:200],
+                        )
+            except Exception:
+                # Best-effort: log and continue serving even if orchestrator
+                # is unreachable.
+                logger.warning(
+                    "Could not reach orchestrator at %s for agent %s registration",
+                    self.orchestrator_url,
+                    agent_id,
+                )
+
+    async def _self_deregister(self) -> None:
+        """De-register all hosted agents from the orchestrator (best-effort).
+
+        DELETE /api/v1/agents/{id}. Failure logged at WARNING (PR-review B5).
+        """
+        if self._session is None:
+            return
+        for agent_id in self.agents:
+            url = f"{self.orchestrator_url}/api/v1/agents/{agent_id}"
+            try:
+                async with self._session.delete(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status in (200, 204):
+                        logger.info(
+                            "De-registered agent %s from orchestrator",
+                            agent_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to de-register agent %s: HTTP %d",
+                            agent_id,
+                            resp.status,
+                        )
+            except Exception:
+                logger.warning(
+                    "Could not reach orchestrator for agent %s de-registration",
+                    agent_id,
+                )
+
     async def stop(self) -> None:
         """Gracefully stop the server."""
         logger.info("Shutting down agent server...")
+        # De-register from orchestrator before stopping gRPC server.
+        await self._self_deregister()
         if self._server:
             await self._server.stop(grace=self.shutdown_grace)
         # F-02: isolate per-agent shutdown errors so one agent's failure
@@ -327,6 +431,10 @@ class AgentServer:
                 await agent.shutdown()
             except Exception:
                 logger.exception("Error shutting down agent %s", agent_id)
+        # Deep-review D4: close shared session after all agents are stopped.
+        if self._session:
+            await self._session.close()
+            self._session = None
         logger.info("Agent server stopped.")
 
 
@@ -381,6 +489,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         shutdown_grace=args.shutdown_grace,
+        orchestrator_url=args.orchestrator_url,
     )
     server.register_agent(agent)
 

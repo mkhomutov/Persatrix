@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.base import TaskInput, TaskInputConfig, TaskOutput, TaskStatus
+from agents.base import TaskInput, TaskStatus
 from agents.coder import CoderAgent
 from agents.llm_client import (
     LLMClient,
@@ -157,6 +157,42 @@ class TestReviewerAgent:
         config = {**_DEFAULT_CONFIG, "capabilities": ["code_review", "security_audit"]}
         agent = ReviewerAgent(agent_id="code-reviewer", config=config)
         assert agent.capabilities == ["code_review", "security_audit"]
+
+    async def test_handle_with_tool_use(self):
+        """S-13: ReviewerAgent tool-use test (parity with CoderAgent)."""
+
+        @tool(name="file_read", description="Read a file")
+        async def file_read(path: str) -> ToolResult:
+            return ToolResult(success=True, data="def add(a, b): return a + b")
+
+        tool_call = ToolCall(
+            id="tc1",
+            name="file_read",
+            input={"path": "main.py"},
+        )
+        responses = [
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(40, 20),
+            ),
+            LLMResponse(
+                text='{"approved": true, "issues": [], "summary": "Looks good."}',
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(50, 40),
+            ),
+        ]
+        config = {**_DEFAULT_CONFIG, "tools": ["file_read"]}
+        client = _make_client(responses=responses)
+        agent = ReviewerAgent(
+            agent_id="code-reviewer",
+            config=config,
+            llm_client=client,
+        )
+        output = await agent.handle(_task("Review main.py"))
+        assert output.status == TaskStatus.COMPLETED
+        assert output.metadata["tool_calls"] == "1"
 
 
 # ─── PlannerAgent Tests ─────────────────────────────────────
