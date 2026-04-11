@@ -1151,6 +1151,7 @@ The following items identified during RFC 0004 design and review are explicitly 
 | Item | Source | Rationale |
 |------|--------|-----------|
 | Explicit `type: task \| persona` field in `agents.yaml` schema | Deep-review d5, Open Q2 | v0.1 has 3 agents with non-overlapping capabilities. Heuristic suffices until `PersonaAgent` arrives in v0.2 |
+| Data-driven `TaskAgent` with YAML-configured system prompts | PR 4b observation | v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are structurally identical — a prompt constant + `_run_llm_loop()` call. Consolidate into a single `TaskAgent` class with an `instructions` field in `agents.yaml`. New task agent types become config-only changes. Natural to bundle with the `type` field addition |
 | `PersonaAgent` + event-driven `on_event()` / `on_tick()` | Core spec §4.2 | v0.2 scope per phased plan |
 | Sub-agent spawning with inherited permissions | Extension spec §5.3 | v0.2 scope per phased plan |
 | Three-tier memory (episodic, relationship, working) | Extension spec §6 | v0.2 scope per phased plan |

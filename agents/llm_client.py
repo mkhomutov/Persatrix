@@ -388,9 +388,9 @@ class LLMClient:
 def _infer_provider(model: str) -> str:
     if model.startswith("claude"):
         return "anthropic"
-    # PR-review SF3: Recognise common OpenAI model prefixes to avoid
-    # noisy warnings for legitimate configurations.
-    if model.startswith(("gpt-", "o1", "o3")):
+    # S-10: Explicitly enumerate known OpenAI o-series model prefixes to
+    # avoid false-matching future non-OpenAI models (e.g. "o100-*").
+    if model.startswith(("gpt-", "o1-", "o1", "o3-", "o3", "o4-", "o4")):
         return "openai"
     logger.warning(
         "Unknown model prefix %r, defaulting to openai provider", model
