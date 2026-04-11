@@ -31,7 +31,7 @@ proto-go: ## Generate Go gRPC stubs from protobuf definitions
 proto-python: ## Generate Python gRPC stubs from protobuf definitions
 	@echo "→ Generating Python protobuf stubs..."
 	@mkdir -p $(PROTO_PY_OUT)
-	protoc --python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
+	$(PYTHON) -m grpc_tools.protoc --python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
 		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto
 	@echo "✓ Python protobuf stubs generated"
 
@@ -84,7 +84,7 @@ lint-go:
 	golangci-lint run ./...
 
 lint-python:
-	cd agents && ruff check . && mypy .
+	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
 
 lint-rust:
 	cd cli && $(CARGO) clippy -- -D warnings

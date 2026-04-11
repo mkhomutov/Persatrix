@@ -103,7 +103,7 @@ orchestr8/
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| v0.1    | Core engine: workflows, tools, MCP, security, OTEL, testing | 🔨 Building |
+| v0.1    | Core engine: workflows, tools, MCP, security, OTEL, testing | ✅ Complete |
 | v0.2    | Agent societies: personas, channels, protocols, bridges, sub-agents | 📋 Planned |
 | v0.3    | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | v0.4+   | Autonomous agents, memory, simulation controls, web dashboard | 📋 Future |

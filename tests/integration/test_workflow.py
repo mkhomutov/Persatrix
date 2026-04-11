@@ -1,6 +1,5 @@
 """Integration tests for end-to-end workflow execution."""
 
-import pytest
 
 # TODO: Test sequential 3-agent workflow with mock LLM
 # TODO: Test parallel execution

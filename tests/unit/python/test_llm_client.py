@@ -19,7 +19,6 @@ from agents.llm_client import (
     OpenAIProvider,
     StopReason,
     ToolCall,
-    Usage,
     create_provider,
     _infer_provider,
 )

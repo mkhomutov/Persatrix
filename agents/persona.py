@@ -192,12 +192,14 @@ class PersonaAgent(BaseAgent):
     @property
     def persona(self) -> dict[str, Any]:
         """Static persona config (background, personality, goals)."""
-        return self.config.get("persona", {})
+        result: dict[str, Any] = self.config.get("persona", {})
+        return result
 
     @property
     def relationships(self) -> list[dict[str, Any]]:
         """Relationship definitions with other agents."""
-        return self.config.get("relationships", [])
+        result: list[dict[str, Any]] = self.config.get("relationships", [])
+        return result
 
     # ─── Sub-Agent Spawning ────────────────────────────
 
