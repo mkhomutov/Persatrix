@@ -500,6 +500,22 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] PR 5a follow-up S-17: validate or test duplicate agent ID handling in config (raise `SystemExit` or document last-wins)
 - [x] PR 5a follow-up S-18: empty model string guard in `create_provider()` before `_infer_provider()`
 
+> **Status: Open (#41)**
+
+#### Review follow-up findings (PR #41 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-19 | Should Fix | server.py | `_self_register()` payload sends `id`, `address`, `capabilities` but not `name`. The Go orchestrator's `/api/v1/agents/register` handler stores `name` — omitting it means agents appear with empty names in the registry, making operator debugging harder. Fix: add `"name": agent.name` to the payload dict | Follow-up |
+| S-20 | Should Fix | test_registration.py | `_self_register()` handles `resp.status in (200, 201)` but only 201 is tested for success. The HTTP 200 path is implicitly covered but an explicit test confirms the range check | Follow-up |
+| S-21 | Should Fix | server.py | `_self_register()` hardcodes `address = f"{self.host}:{self.port}"` — only reachable from localhost in containerized deployments (Docker, K8s). Add `# TODO(v0.2): support advertised address for container/K8s service discovery` comment | Follow-up |
+| C-15 | Consider | server.py / builtin.py | Shared `aiohttp.ClientSession` created at `start()` is not wired to `builtin.http_session` — the `http_request` tool still creates its own session per request. Complete the D4 design handoff to reduce connection overhead | v0.2 |
+| C-16 | Consider | test_agent_server.py | All 7 integration tests repeat gRPC server setup/teardown (~15 lines each). Extract `@pytest.fixture` yielding `(stub, server)` to reduce ~100 lines of boilerplate and lower missed-cleanup risk | v0.2 |
+| C-17 | Consider | server.py | `_self_register()` is single-shot fire-and-forget — no retry on transient failure (e.g., orchestrator restarting). A 2–3 retry with exponential backoff would handle orchestrator restarts during agent startup | v0.2 |
+| C-18 | Consider | server.py | `orchestrator_url` taken as-is with only `rstrip("/")` — no URL format validation. A malformed URL (missing scheme) produces a confusing `aiohttp` error on first registration attempt. Basic `urllib.parse.urlparse` scheme check would catch misconfiguration early | v0.2 |
+
+**Strategy**: S-19 through S-21 are low-cost fixes that can be bundled into a follow-up PR or addressed post-merge. C-15 through C-18 deferred to v0.2.
+
 ---
 
 ## Risk Mitigation
@@ -555,7 +571,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | ✅ Merged (#40) |
-| PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Submitted (#41) |
+| PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Open (#41) |
 
 ¹ Capped at ~500 line target. If calibrated estimate exceeds 500, see Risk Mitigation escape valves.
 
