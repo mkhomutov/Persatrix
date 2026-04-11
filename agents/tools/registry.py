@@ -51,9 +51,15 @@ def tool(
     name: str | None = None,
     description: str = "",
     permissions: list[str] | None = None,
+    tier: str = "custom",
 ) -> Callable:
     """
     Decorator to register a function as an agent tool.
+
+    Args:
+        tier: One of ``"builtin"``, ``"custom"``, ``"mcp"``. Defaults to
+              ``"custom"`` for user-defined tools; framework-bundled tools
+              in ``builtin.py`` pass ``tier="builtin"``.
 
     Usage:
         @tool(name="query_database", description="Run a read-only SQL query")
@@ -86,7 +92,7 @@ def tool(
             description=description or func.__doc__ or "",
             parameters=params,
             permissions=permissions or [],
-            tier="custom",
+            tier=tier,
             func=func,
         )
         _tool_registry[tool_name] = tool_def

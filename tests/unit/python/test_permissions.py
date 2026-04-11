@@ -199,3 +199,30 @@ class TestCodeWriterPermissions:
 
     def test_arbitrary_domain_denied(self, gate):
         assert gate.is_domain_allowed("malicious.com") is False
+
+
+class TestFollowUpFixes:
+    """Tests for PR 2 review follow-up findings."""
+
+    def test_case_insensitive_domain_matching(self):
+        """S-02: DNS is case-insensitive (RFC 4343)."""
+        gate = PermissionGate({
+            "network": {"allow": ["api.anthropic.com"], "deny": ["*"]}
+        })
+        assert gate.is_domain_allowed("API.ANTHROPIC.COM") is True
+        assert gate.is_domain_allowed("Api.Anthropic.Com") is True
+
+    def test_empty_args_returns_false(self):
+        """N-04: empty args list is explicitly denied."""
+        gate = PermissionGate({
+            "shell": {"allowed_commands": ["ls"]}
+        })
+        assert gate.is_command_allowed([]) is False
+
+    def test_non_wildcard_deny(self):
+        """Coverage gap: explicit domain in deny list (not wildcard)."""
+        gate = PermissionGate({
+            "network": {"allow": [], "deny": ["evil.com"]}
+        })
+        assert gate.is_domain_allowed("evil.com") is False
+        assert gate.is_domain_allowed("other.com") is False

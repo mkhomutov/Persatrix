@@ -54,6 +54,10 @@ class PermissionGate:
         Uses progressive prefix matching: ``"git diff"`` in the allowlist
         matches ``["git", "diff", "file.py"]`` but not ``["git", "push"]``.
         """
+        if not args:
+            logger.debug("Command denied (empty args)")
+            return False
+
         shell_config = self._permissions.get("shell")
         if shell_config is None:
             logger.debug("Command denied (no shell config): %s", args)
@@ -82,13 +86,15 @@ class PermissionGate:
         both the allow and deny lists, it is **allowed**.  This lets configs
         use ``deny: ["*"]`` as a blanket block with specific allow overrides.
         """
+        domain = domain.lower()
+
         net_config = self._permissions.get("network")
         if net_config is None:
             logger.debug("Domain denied (no network config): %s", domain)
             return False
 
-        allow_list: list[str] = net_config.get("allow", [])
-        deny_list: list[str] = net_config.get("deny", [])
+        allow_list: list[str] = [d.lower() for d in net_config.get("allow", [])]
+        deny_list: list[str] = [d.lower() for d in net_config.get("deny", [])]
 
         # Explicit allow takes priority (allow-overrides-deny).
         if domain in allow_list:
@@ -101,7 +107,7 @@ class PermissionGate:
             return False
 
         # Not in either list: deny by default when a deny list exists,
-        # allow when only an allow list exists and it's non-empty.
+        # deny when only an allow list exists and domain is not in it.
         if deny_list:
             logger.debug("Domain denied (not in allow, deny list present): %s", domain)
             return False

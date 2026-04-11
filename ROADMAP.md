@@ -29,7 +29,7 @@ This document tracks development progress across all phases. Update it when merg
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | ✅ Implemented | 7+4 | 11/11 |
-| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | � Implementing | 7 | 0/7 |
+| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 2/7 |
 
 ### Dependency Chain
 
@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        � Implementing (PR 2 in progress)
+RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 3 merged, 2/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
@@ -74,7 +74,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/planner_agent.py` | Task decomposition agent | 🔲 TODO (RFC 0004 PR 4b) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
-| `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | 🔲 TODO (RFC 0004 PR 3) |
+| `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | ✅ Complete (RFC 0004 PR 3) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
 | `agents/tools/sandbox.py` | Filesystem path restriction (PathValidator) | ✅ Complete (100% coverage) |
 | `agents/generated/` | Python gRPC generated stubs | 🔲 TODO (RFC 0004 PR 1) |
@@ -178,6 +178,8 @@ v0.1 Complete ─ end-to-end execution working
 | [#32](https://github.com/mkhomutov/Orchestr8/pull/32) | test: observability improvements — concurrent race tests, log assertions, zaptest logger | 0003 follow-up (2/4) | 2026-04-11 |
 | [#33](https://github.com/mkhomutov/Orchestr8/pull/33) | fix(orchestrator): graceful shutdown drain + absolute workflowsDir | 0003 follow-up (3/4) | 2026-04-11 |
 | [#34](https://github.com/mkhomutov/Orchestr8/pull/34) | build(proto): split make proto into go/python targets + CI staleness check | 0003 follow-up (4/4) | 2026-04-11 |
+| [#36](https://github.com/mkhomutov/Orchestr8/pull/36) | feat(agents): PermissionGate + PathValidator | 0004 (2/7) | 2026-04-11 |
+| [#37](https://github.com/mkhomutov/Orchestr8/pull/37) | feat(agents): built-in tools + PR 2 follow-up fixes | 0004 (3/7) | 2026-04-11 |
 
 ---
 

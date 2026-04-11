@@ -108,6 +108,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] `ResourceLimiter` / `OutputSizeLimiter` stubs preserved in `sandbox.py`
 - [x] No `shell=True` anywhere
 
+> **Status: ✅ Merged (#36)**
+
 #### Review follow-up findings (PR #36 review)
 
 | ID | Severity | Category | Description | Target |
@@ -169,20 +171,38 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_tools.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/tools/builtin.py`
-- [ ] `ruff check agents/tools/builtin.py` clean
-- [ ] No `shell=True` in subprocess calls
-- [ ] `shlex.split` used for command parsing
-- [ ] `MAX_OUTPUT_BYTES` enforced on all output paths
-- [ ] All tools use `PermissionGate.check()` before execution
-- [ ] PR 2 follow-up S-01: misleading comment fixed in `is_domain_allowed()`
-- [ ] PR 2 follow-up S-02: `domain = domain.lower()` added + test for mixed-case domain
-- [ ] PR 2 follow-up S-03: `fnmatch.fnmatchcase()` replaces `fnmatch.fnmatch()` in `PathValidator.validate()`
-- [ ] PR 2 follow-up S-04: `PermissionError` messages sanitized (no resolved paths or deny patterns)
-- [ ] PR 2 follow-up N-04: empty args guard in `is_command_allowed()`
-- [ ] PR 2 follow-up N-05: ROADMAP 🚧 emoji renders correctly (UTF-8)
-- [ ] `permissions.py` lines 106–107 coverage gap addressed (non-wildcard deny test)
+- [x] `pytest tests/unit/python/test_builtin_tools.py -v` passes (45+ tests)
+- [x] Coverage ≥ 80% for `agents/tools/builtin.py`
+- [x] `ruff check agents/tools/builtin.py` clean
+- [x] No `shell=True` in subprocess calls
+- [x] `shlex.split` used for command parsing
+- [x] `MAX_OUTPUT_BYTES` enforced on all output paths
+- [x] All tools use `PermissionGate.check()` before execution
+- [x] PR 2 follow-up S-01: misleading comment fixed in `is_domain_allowed()`
+- [x] PR 2 follow-up S-02: `domain = domain.lower()` added + test for mixed-case domain
+- [x] PR 2 follow-up S-03: `fnmatch.fnmatchcase()` replaces `fnmatch.fnmatch()` in `PathValidator.validate()`
+- [x] PR 2 follow-up S-04: `PermissionError` messages sanitized (no resolved paths or deny patterns)
+- [x] PR 2 follow-up N-04: empty args guard in `is_command_allowed()`
+- [x] PR 2 follow-up N-05: ROADMAP 🚧 emoji renders correctly (UTF-8)
+- [x] `permissions.py` lines 106–107 coverage gap addressed (non-wildcard deny test)
+
+> **Status: Pending merge (#37)**
+
+#### Review follow-up findings (PR #37 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-05 | Should Fix | builtin.py | `_truncate()` byte-slices at `MAX_OUTPUT_BYTES` which can split multi-byte UTF-8 characters (e.g., emoji), producing `\ufffd` replacement characters. Fix: use `errors='ignore'` instead of `errors='replace'` to drop incomplete sequences | PR 4a |
+| S-06 | Should Fix | builtin.py | `http_request()` returns full `dict(resp.headers)` to LLM — leaks potentially sensitive headers (`Set-Cookie`, `Server`, `X-Powered-By`, `X-Request-Id`). Fix: filter to safe subset (`Content-Type`, `Content-Length`, `Location`, `Date`) and log full headers at DEBUG | PR 4a |
+| S-07 | Should Fix | test_builtin_tools.py | No test for `_truncate()` with multi-byte characters at boundary — current tests use ASCII-only strings. Add emoji/CJK boundary test verifying no `\ufffd` in output | PR 4a |
+| C-01 | Consider | builtin.py | Extract `@tool` registration into explicit `register_builtins()` function to eliminate `importlib.reload()` in test fixtures and make registration explicit | v0.2 |
+| C-02 | Consider | builtin.py | Private IP detection for SSRF hardening — resolve hostname and reject RFC 1918/4193/loopback addresses before HTTP request. Mitigates DNS rebinding | v0.2 |
+| C-03 | Consider | builtin.py | Use `asyncio.timeout()` (Python 3.11+) instead of `asyncio.wait_for()` — modern idiom, native to minimum supported version | v0.2 |
+| C-04 | Consider | builtin.py | Rate limiting on tool invocations (`# TODO: Rate limit check` in `@tool` wrapper). Even basic max-N-per-task would prevent runaway tool-use loops | v0.2 |
+| N-06 | Nitpick | builtin.py | `http_request` `body` parameter: `body: str = ""` works but `body: str \| None = None` would be more semantically clear (no body vs empty body) | v0.2 |
+| N-07 | Nitpick | test_builtin_tools.py | `from agents.tools.builtin import _truncate` appears inside test methods rather than module-level — works around `importlib.reload()` but is inconsistent | v0.2 |
+
+**Strategy**: S-05 through S-07 are low-cost fixes bundled into PR 4a (which imports `builtin.py` for tool dispatch wiring). C-01 through C-04 and N-06/N-07 deferred to v0.2.
 
 ---
 
@@ -193,6 +213,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Estimated size**: ~300–450 lines (implementation + tests)
 
 > **Note**: Phase 4 is pre-split into 4a/4b. Phase 4 naive estimate of ~700 LOC × 1.7 = ~1,190 LOC exceeds the 500-line limit. The natural split point is the LLM client + shared handle pattern (4a) vs. agent-specific system prompts (4b).
+>
+> **Note**: This PR also addresses follow-up findings S-05 through S-07 from the PR #37 review of `builtin.py` (see PR 3 follow-up table above). These are small targeted fixes: `_truncate()` multi-byte safety, HTTP response header filtering, and a boundary test.
 
 #### Scope
 
@@ -245,6 +267,9 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] `_create_provider()` supports inference from model prefix and explicit `provider` config
 - [ ] No API keys logged or stored in config
 - [ ] All tests use mock LLM (no real API calls)
+- [ ] PR 3 follow-up S-05: `_truncate()` uses `errors='ignore'` (no `\ufffd` replacement chars at boundary)
+- [ ] PR 3 follow-up S-06: `http_request()` filters response headers to safe subset
+- [ ] PR 3 follow-up S-07: `_truncate()` multi-byte boundary test added (emoji at `MAX_OUTPUT_BYTES` boundary)
 
 ---
 
@@ -418,10 +443,10 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ```
 PR 1 (py-proto-gen) ────────────────────────────┐
                                                  │
-PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 follow-ups)
+PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Pending (#37)
                                                    │
                                                    ▼
-                                              PR 4a (llm-client-base)
+                                              PR 4a (llm-client-base + PR 3 follow-ups)
                                                    │
                                                    ├──► PR 4b (task-agents) ───┐
                                                    │                            │
@@ -445,8 +470,8 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 
 | PR | Phase | Naive LOC | Calibrated (×1.7) | Status |
 |----|-------|-----------|-------------------|--------|
 | PR 1 | Phase 1 | ~50 | ~85 | Not started |
-| PR 2 | Phase 2 | ~400 | ~680 | Not started |
-| PR 3 | Phase 3 | ~500 | ~500¹ | Not started |
+| PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
+| PR 3 | Phase 3 | ~500 | ~500¹ | Pending merge (#37) |
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | Not started |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | Not started |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |

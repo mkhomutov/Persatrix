@@ -10,6 +10,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Use fnmatchcase for deterministic cross-platform behavior.
+# fnmatch.fnmatch is case-insensitive on Windows but case-sensitive on
+# Linux — agents run in Linux containers per Dockerfile.agent, so we
+# enforce case-sensitive matching everywhere.
+_fnmatch = fnmatch.fnmatchcase
+
 
 class PathValidator:
     """Workspace-scoped path restriction for filesystem tools.
@@ -54,12 +60,12 @@ class PathValidator:
 
         # Deny list takes unconditional precedence.
         for pattern in self._deny:
-            if fnmatch.fnmatch(resolved_str, pattern):
+            if _fnmatch(resolved_str, pattern):
                 logger.warning(
                     "Path denied (deny list match %r): %s", pattern, resolved_str
                 )
                 raise PermissionError(
-                    f"Access denied: {path!r} matches deny pattern {pattern!r}"
+                    "Access denied: path is blocked by security policy"
                 )
 
         # Check allow list based on mode.
@@ -71,7 +77,7 @@ class PathValidator:
             )
 
         for pattern in allow_list:
-            if fnmatch.fnmatch(resolved_str, pattern):
+            if _fnmatch(resolved_str, pattern):
                 logger.debug(
                     "Path allowed (%s, pattern %r): %s", mode, pattern, resolved_str
                 )
@@ -79,7 +85,7 @@ class PathValidator:
 
         logger.warning("Path denied (no matching allow pattern): %s", resolved_str)
         raise PermissionError(
-            f"Access denied: {path!r} not in {mode} allow list"
+            f"Access denied: path is not in {mode} allow list"
         )
 
 
