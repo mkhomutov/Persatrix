@@ -201,14 +201,30 @@ class BaseAgent(ABC):
         max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
 
         for _ in range(max_llm_calls):
-            response: LLMResponse = await self._llm_client.create_message(
-                model=self.config["model"],
-                messages=messages,
-                system=system_prompt,
-                tools=tool_defs,
-                max_tokens=max_tokens,
-                temperature=self.config.get("temperature", 0.3),
-            )
+            # review-fix S1: catch provider SDK exceptions (rate limits, auth
+            # errors, network failures) so handle() always returns TaskOutput
+            # instead of propagating unhandled exceptions.
+            try:
+                response: LLMResponse = await self._llm_client.create_message(
+                    model=self.config["model"],
+                    messages=messages,
+                    system=system_prompt,
+                    tools=tool_defs,
+                    max_tokens=max_tokens,
+                    temperature=self.config.get("temperature", 0.3),
+                )
+            except Exception as exc:
+                logger.error(
+                    "LLM provider error in agent %s: %s", self.agent_id, exc,
+                )
+                return TaskOutput(
+                    status=TaskStatus.FAILED,
+                    result=f"LLM provider error ({type(exc).__name__}): {exc}",
+                    metadata={
+                        "tokens_used": str(total_tokens),
+                        "tool_calls": str(tool_calls_count),
+                    },
+                )
             total_tokens += response.usage.input_tokens + response.usage.output_tokens
 
             if response.stop_reason == StopReason.END_TURN:

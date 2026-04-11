@@ -28,38 +28,6 @@ from agents.llm_client import (
 # ─── Helpers ────────────────────────────────────────────────
 
 
-def _anthropic_response(
-    content: list | None = None,
-    stop_reason: str = "end_turn",
-    input_tokens: int = 100,
-    output_tokens: int = 50,
-):
-    """Build a mock Anthropic response object."""
-    if content is None:
-        content = [SimpleNamespace(type="text", text="Hello from Claude")]
-    return SimpleNamespace(
-        content=content,
-        stop_reason=stop_reason,
-        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
-    )
-
-
-def _openai_response(
-    content: str | None = "Hello from GPT",
-    tool_calls: list | None = None,
-    finish_reason: str = "stop",
-    prompt_tokens: int = 100,
-    completion_tokens: int = 50,
-):
-    """Build a mock OpenAI response object."""
-    message = SimpleNamespace(content=content, tool_calls=tool_calls)
-    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
-    usage = SimpleNamespace(
-        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
-    )
-    return SimpleNamespace(choices=[choice], usage=usage)
-
-
 def _make_anthropic_provider() -> AnthropicProvider:
     """Create an AnthropicProvider with a mocked SDK client."""
     mock_anthropic = MagicMock()
@@ -395,6 +363,29 @@ class TestOpenAIProvider:
         assert new_msgs[1]["tool_calls"][0]["type"] == "function"
         assert new_msgs[2]["role"] == "tool"
         assert new_msgs[2]["tool_call_id"] == "c1"
+
+    async def test_malformed_tool_call_json(self, provider):
+        """review-fix M2: Invalid JSON in tool call arguments → empty input fallback."""
+        tc = SimpleNamespace(
+            id="call_bad",
+            function=SimpleNamespace(
+                name="some_tool",
+                arguments="not valid json{{{",
+            ),
+        )
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=_openai_response(
+                content=None, tool_calls=[tc], finish_reason="tool_calls"
+            )
+        )
+        resp = await provider.create_message(
+            model="gpt-4o",
+            messages=[], system="", tools=[], max_tokens=1024, temperature=0.3,
+        )
+        assert resp.stop_reason == StopReason.TOOL_USE
+        assert len(resp.tool_calls) == 1
+        assert resp.tool_calls[0].name == "some_tool"
+        assert resp.tool_calls[0].input == {}
 
 
 # ─── LLMClient ──────────────────────────────────────────────

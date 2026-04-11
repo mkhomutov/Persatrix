@@ -242,6 +242,43 @@ class TestNoLlmClient:
         assert "LLM client not configured" in output.result
 
 
+class TestLlmProviderError:
+    """review-fix S1: Provider SDK exceptions return FAILED instead of raising."""
+
+    async def test_provider_exception_returns_failed(self):
+        agent = _make_agent(
+            responses=[LLMResponse(text="ok", stop_reason=StopReason.END_TURN)],
+        )
+        agent._llm_client._provider.create_message = AsyncMock(
+            side_effect=RuntimeError("rate limited"),
+        )
+        output = await agent.handle(_task())
+        assert output.status == TaskStatus.FAILED
+        assert "LLM provider error" in output.result
+        assert "rate limited" in output.result
+
+    async def test_provider_error_preserves_partial_tokens(self):
+        @tool(name="err_tool", description="Tool for error test")
+        async def err_tool() -> ToolResult:
+            return ToolResult(success=True, data="ok")
+
+        tool_call = ToolCall(id="tc1", name="err_tool", input={})
+        first_response = LLMResponse(
+            text=None, tool_calls=[tool_call],
+            stop_reason=StopReason.TOOL_USE, usage=Usage(50, 25),
+        )
+        agent = _make_agent(responses=[first_response])
+        # Second call fails
+        agent._llm_client._provider.create_message = AsyncMock(
+            side_effect=[first_response, ConnectionError("network down")],
+        )
+        output = await agent.handle(_task())
+        assert output.status == TaskStatus.FAILED
+        assert "network down" in output.result
+        # Partial token count from first successful round
+        assert int(output.metadata["tokens_used"]) == 75
+
+
 class TestTokenAccumulation:
     async def test_tokens_accumulate_across_rounds(self):
         @tool(name="acc_tool", description="Accumulation tool")

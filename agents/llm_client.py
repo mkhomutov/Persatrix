@@ -273,11 +273,23 @@ class OpenAIProvider:
         tool_calls: list[ToolCall] = []
         if message.tool_calls:
             for tc in message.tool_calls:
+                # review-fix M2: OpenAI occasionally returns invalid JSON in
+                # function.arguments (especially with complex schemas).
+                # Fallback to empty dict keeps the agent loop running.
+                try:
+                    input_args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Invalid JSON in tool call arguments for %s, "
+                        "falling back to empty input",
+                        tc.function.name,
+                    )
+                    input_args = {}
                 tool_calls.append(
                     ToolCall(
                         id=tc.id,
                         name=tc.function.name,
-                        input=json.loads(tc.function.arguments),
+                        input=input_args,
                     )
                 )
 
