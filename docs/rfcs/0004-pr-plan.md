@@ -108,6 +108,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] `ResourceLimiter` / `OutputSizeLimiter` stubs preserved in `sandbox.py`
 - [x] No `shell=True` anywhere
 
+> **Status: ✅ Merged (#36)**
+
 #### Review follow-up findings (PR #36 review)
 
 | ID | Severity | Category | Description | Target |
@@ -445,7 +447,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 
 | PR | Phase | Naive LOC | Calibrated (×1.7) | Status |
 |----|-------|-----------|-------------------|--------|
 | PR 1 | Phase 1 | ~50 | ~85 | Not started |
-| PR 2 | Phase 2 | ~400 | ~680 | Not started |
+| PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
 | PR 3 | Phase 3 | ~500 | ~500¹ | Not started |
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | Not started |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | Not started |

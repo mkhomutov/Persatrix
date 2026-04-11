@@ -71,7 +71,7 @@ class TestDenyList:
             allow_read=[str(tmp_path / "**")],
             deny=[str(tmp_path / ".env")],
         )
-        with pytest.raises(PermissionError, match="deny pattern"):
+        with pytest.raises(PermissionError, match="blocked by security policy"):
             validator.validate(str(env_file), mode="read")
 
     def test_deny_glob_pattern(self, tmp_path):
@@ -83,7 +83,7 @@ class TestDenyList:
             allow_read=[str(tmp_path / "**")],
             deny=[str(tmp_path / ".git" / "**")],
         )
-        with pytest.raises(PermissionError, match="deny pattern"):
+        with pytest.raises(PermissionError, match="blocked by security policy"):
             validator.validate(str(git_file), mode="read")
 
     def test_no_deny_match_allows(self, tmp_path):
@@ -216,10 +216,41 @@ class TestCodeWriterPaths:
 
     def test_deny_env(self, validator):
         v, ws = validator
-        with pytest.raises(PermissionError, match="deny pattern"):
+        with pytest.raises(PermissionError, match="blocked by security policy"):
             v.validate(str(ws / ".env"), mode="read")
 
     def test_deny_git(self, validator):
         v, ws = validator
-        with pytest.raises(PermissionError, match="deny pattern"):
+        with pytest.raises(PermissionError, match="blocked by security policy"):
             v.validate(str(ws / ".git" / "config"), mode="read")
+
+
+class TestFollowUpFixes:
+    """Tests for PR 2 review follow-up findings."""
+
+    def test_fnmatchcase_deterministic_deny(self, tmp_path):
+        """S-03: fnmatchcase gives cross-platform deterministic matching."""
+        # On Windows, fnmatch.fnmatch is case-insensitive.  We use
+        # fnmatchcase so deny patterns behave the same on all OSes.
+        target = tmp_path / "SECRET.env"
+        target.write_text("sensitive")
+
+        validator = PathValidator(
+            allow_read=[str(tmp_path / "**")],
+            deny=[str(tmp_path / "*.env")],
+        )
+        # Lowercase pattern should match lowercase extension
+        with pytest.raises(PermissionError, match="blocked by security policy"):
+            validator.validate(str(tmp_path / "config.env"), mode="read")
+
+    def test_sanitized_error_no_path_leak(self, tmp_path):
+        """S-04: error messages must not include resolved absolute paths."""
+        validator = PathValidator(
+            allow_read=[str(tmp_path / "src" / "**")],
+        )
+        with pytest.raises(PermissionError) as exc_info:
+            validator.validate(str(tmp_path / "secrets" / "key.pem"), mode="read")
+        # Error should NOT contain the resolved absolute path or pattern
+        msg = str(exc_info.value)
+        assert str(tmp_path) not in msg
+        assert "**" not in msg
