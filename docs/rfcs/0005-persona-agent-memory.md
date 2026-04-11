@@ -27,6 +27,7 @@
   - [Dynamic Persona State](#dynamic-persona-state)
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
   - [Config Schema Updates](#config-schema-updates)
+  - [CLI Command Wiring](#cli-command-wiring)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -72,6 +73,7 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 6. **Dynamic persona state**: Runtime mood, stress, goal progress, and relationship deltas injected into agent system prompts.
 7. **Agent type discrimination**: Explicit `type: task | persona` field in agent config, replacing capability heuristics.
 8. **Data-driven TaskAgent**: Single `TaskAgent` class driven by YAML `instructions` field, replacing `CoderAgent` / `ReviewerAgent` / `PlannerAgent`.
+9. **CLI command wiring**: Wire Rust CLI stubs to existing and new REST endpoints as each phase lands — `run`, `status`, `agent list/info`, `validate`, `test --persona`.
 
 ## Non-Goals
 
@@ -524,6 +526,55 @@ Update `schemas/agent.schema.json` to add:
 - `relationships` array
 - `memory` configuration object
 
+### CLI Command Wiring
+
+The Rust CLI (`cli/src/main.rs`) already defines command structures for all v0.2 features, but every handler is a stub. As each phase lands server-side features, the corresponding CLI commands get wired to REST endpoints.
+
+The CLI is a **thin client** — all business logic lives server-side. CLI work is not a standalone RFC; it tails each feature phase.
+
+#### Existing v0.1 endpoints (wire in Phase 1)
+
+These REST endpoints already exist but the CLI stubs print "not yet implemented":
+
+| CLI Command | REST Endpoint | Status |
+|-------------|--------------|--------|
+| `orch run <workflow>` | `POST /api/v1/workflows/run` | Stub → wire |
+| `orch status [id]` | `GET /api/v1/workflows/{id}/status` | Stub → wire |
+| `orch agent list` | `GET /api/v1/agents` | Stub → wire |
+| `orch agent info <id>` | `GET /api/v1/agents/{id}` | Stub → wire |
+| `orch logs <id>` | `GET /api/v1/executions/{id}/logs` | Stub → wire |
+
+#### New v0.2 endpoints (wire as phases land)
+
+| CLI Command | REST Endpoint | Wired in Phase |
+|-------------|--------------|----------------|
+| `orch validate <path>` | Local (calls Python validator or validates in-process) | Phase 6 |
+| `orch test --persona <id>` | New endpoint or local persona consistency check | Phase 5 |
+| `orch cost <period>` | `GET /api/v1/cost/summary` (exists as stub) | Future RFC |
+| `orch replay <session>` | New endpoint (observer mode) | Future RFC |
+
+#### Implementation pattern
+
+Each CLI command follows the same pattern — `reqwest` HTTP call, deserialize JSON, format output:
+
+```rust
+Commands::Run { workflow, input, profile } => {
+    let url = format!("{}/api/v1/workflows/run", cli.server);
+    let body = serde_json::json!({
+        "workflow_file": workflow,
+        "input": input.unwrap_or_default(),
+        "profile": profile,
+    });
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await?;
+    let result: serde_json::Value = resp.json().await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+}
+```
+
 ## Security Considerations
 
 ### Memory Data at Rest
@@ -564,9 +615,9 @@ The tick loop could cause runaway LLM calls if not bounded.
 
 ## Phased Implementation Plan
 
-### Phase 1: Agent Type System + Data-Driven TaskAgent
+### Phase 1: Agent Type System + Data-Driven TaskAgent + CLI Wiring
 
-**Summary**: Add `type` field to agent config, consolidate task agents into `TaskAgent`, update agent loader.
+**Summary**: Add `type` field to agent config, consolidate task agents into `TaskAgent`, update agent loader. Wire existing v0.1 CLI stubs to REST endpoints.
 
 **Deliverables**:
 1. Add `type` field to `schemas/agent.schema.json`
@@ -575,6 +626,8 @@ The tick loop could cause runaway LLM calls if not bounded.
 4. Migrate existing `agents.yaml` entries to use `type: task` + `instructions`
 5. Remove `CoderAgent`, `ReviewerAgent`, `PlannerAgent` classes (move instructions to YAML)
 6. Tests for `TaskAgent` and agent loading
+7. Wire CLI: `orch run`, `orch status`, `orch agent list`, `orch agent info`, `orch logs` → existing REST endpoints
+8. Add `reqwest` + `serde_json` + `tokio` dependencies to `cli/Cargo.toml`
 
 **Dependencies**: None (builds on v0.1 agent infrastructure)
 
@@ -629,6 +682,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 5. Wire into `server.py`: start tick loops for persona agents, route events
 6. Create a sample persona agent config for integration testing
 7. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle
+8. Wire CLI: `orch test --persona <id>` for persona consistency checks
 
 **Dependencies**: Phases 1-4
 
@@ -641,6 +695,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 2. Update `schemas/agent.schema.json` for persona fields
 3. Add `make validate` target that actually works
 4. Unit tests for validation pass/fail cases
+5. Wire CLI: `orch validate <path>` — invoke Python validator or implement JSON Schema validation in Rust
 
 **Dependencies**: Phase 1 (schema changes)
 
@@ -669,6 +724,8 @@ The tick loop could cause runaway LLM calls if not bounded.
 | Tests | `tests/unit/python/test_persona_runtime.py` | **New** — event dispatch, tick loop, action executor tests |
 | Tests | `tests/unit/python/test_validate.py` | **New** — config validation tests |
 | Tests | `tests/integration/test_persona_e2e.py` | **New** — persona agent end-to-end with mock LLM |
+| Rust CLI | `cli/src/main.rs` | Wire `run`, `status`, `agent list/info`, `logs`, `validate`, `test --persona` |
+| Rust CLI | `cli/Cargo.toml` | Add `reqwest`, `serde_json`, `serde` dependencies |
 
 ## Test Strategy
 
