@@ -117,17 +117,28 @@ class BaseAgent(ABC):
     # ─── Shared LLM Loop ────────────────────────────────────
 
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
-        """Build normalized tool definitions from the tool registry."""
-        defs: list[dict[str, Any]] = []
-        for td in list_tools():
-            defs.append(
-                {
-                    "name": td.name,
-                    "description": td.description,
-                    "parameters": td.parameters,
-                }
-            )
-        return defs
+        """Build normalized tool definitions from the tool registry.
+
+        S-12: Filters to only tools listed in agent's ``tools`` config.
+        An empty list means no tools are exposed (e.g. PlannerAgent).
+        """
+        # F-04: early return avoids iterating the full registry when no
+        # tools are configured for this agent.
+        allowed = self.config.get("tools", [])
+        if not allowed:
+            return []
+        # N-04: convert to set for O(1) membership checks (matters when
+        # the tool registry grows beyond the v0.1 built-in set of 4).
+        allowed_set = set(allowed)
+        return [
+            {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            }
+            for td in list_tools()
+            if td.name in allowed_set
+        ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
         """Execute tool calls sequentially, returning LLM-facing results.
@@ -176,19 +187,23 @@ class BaseAgent(ABC):
                 # Defense-in-depth: normally unreachable because the @tool
                 # wrapper catches all exceptions.  Retained for MCP/custom
                 # tools that may bypass the decorator.
+                # SF-06: log full details but return generic message to the LLM
+                # (consistent with S-11 pattern for _run_llm_loop exceptions).
+                logger.warning("Permission denied in tool %s: %s", call.name, exc)
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
-                        content=str(exc),
+                        content="Permission denied",
                         is_error=True,
                     )
                 )
             except Exception as exc:
                 # Defense-in-depth: same rationale as PermissionError above.
+                logger.warning("Unexpected error in tool %s: %s", call.name, exc)
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
-                        content=f"Tool error ({type(exc).__name__}): {exc}",
+                        content="Internal tool error",
                         is_error=True,
                     )
                 )
@@ -248,9 +263,11 @@ class BaseAgent(ABC):
                 logger.error(
                     "LLM provider error in agent %s: %s", self.agent_id, exc,
                 )
+                # S-11: Return generic message — SDK exceptions could contain
+                # internal URLs or partial auth tokens.
                 return TaskOutput(
                     status=TaskStatus.FAILED,
-                    result=f"LLM provider error ({type(exc).__name__}): {exc}",
+                    result="LLM provider error",
                     metadata={
                         "tokens_used": str(total_tokens),
                         "tool_calls": str(tool_calls_count),

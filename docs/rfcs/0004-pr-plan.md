@@ -49,10 +49,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `make proto` succeeds
-- [ ] `python -c "from agents.generated import task_pb2"` imports cleanly
-- [ ] Generated files committed to repo
-- [ ] `agents/generated/__init__.py` exists
+- [x] `make proto` succeeds
+- [x] `python -c "from agents.generated import task_pb2"` imports cleanly
+- [x] Generated files committed to repo
+- [x] `agents/generated/__init__.py` exists
+
+> **Status: folded into PR 5a (#40)** — proto stubs included in the gRPC server PR since they had no standalone value.
 
 ---
 
@@ -409,17 +411,36 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_server.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/server.py`
-- [ ] `ruff check agents/server.py` clean
-- [ ] `python -m agents.server --help` shows all CLI flags
-- [ ] Signal handler guarded with `sys.platform != "win32"`
-- [ ] No TLS (v0.1) with `# TODO(security)` comment
-- [ ] `ExecuteTaskStream` returns `UNIMPLEMENTED`
-- [ ] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
-- [ ] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
-- [ ] PR 4b follow-up S-12: `_build_tool_definitions()` filters tools by `self.config.get("tools", [])` — empty list = no tools
-- [ ] PR 4b follow-up S-14: `_infer_provider()` uses separate exact matches and prefix matches for o-series models
+- [x] `pytest tests/unit/python/test_server.py -v` passes (31 tests)
+- [x] Coverage ≥ 80% for `agents/server.py`
+- [x] `ruff check agents/server.py` clean
+- [x] `python -m agents.server --help` shows all CLI flags
+- [x] Signal handler guarded with `sys.platform != "win32"`
+- [x] No TLS (v0.1) with `# TODO(security)` comment
+- [x] `ExecuteTaskStream` returns `UNIMPLEMENTED`
+- [x] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
+- [x] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
+- [x] PR 4b follow-up S-12: `_build_tool_definitions()` filters tools by `self.config.get("tools", [])` — empty list = no tools
+- [x] PR 4b follow-up S-14: `_infer_provider()` uses separate exact matches and prefix matches for o-series models
+- [x] Python gRPC stubs generated and committed (PR 1 folded in)
+
+> **Status: ✅ Merged (#40)**
+
+#### Review follow-up findings (PR #40 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-15 | Should Fix | test_server.py | Missing direct unit test for `_build_tool_definitions()` filtering — S-12 fix (filter tools by agent config) is critical for security (PlannerAgent with `tools: []` should see no tools) but only tested indirectly through agent handle tests. Add test: `BaseAgent` subclass with `config={"tools": ["file_read"]}`, register multiple tools, verify `_build_tool_definitions()` returns only `file_read` | PR 5b |
+| S-16 | Should Fix | test_server.py | Missing test for `load_agent` permission wiring — `load_agent()` constructs `PermissionGate` and `PathValidator` from config but no test verifies parsed permissions reach `builtin.permission_gate`/`builtin.path_validator`. After `load_agent()`, assert both are not `None` | PR 5b |
+| S-17 | Should Fix | server.py | `load_agent` silently accepts duplicate agent IDs in config — dict comprehension `{a["id"]: a for a in agents_list}` takes last entry. Either add validation check that raises `SystemExit` on duplicate IDs, or add a test documenting last-wins behavior | PR 5b |
+| S-18 | Should Fix | llm_client.py | `_infer_provider()` should guard against empty model string — `""` falls through to `"openai"` fallback, causing confusing provider error downstream. Add early guard in `create_provider()`: `if not model: raise SystemExit("Agent config 'model' field is empty")` | PR 5b |
+| C-13 | Consider | server.py / builtin.py | Per-agent dependency injection for tool permissions — replace module-level `builtin.permission_gate`/`builtin.path_validator`/`builtin.workspace_root` with per-agent instances. Enables multi-agent hosting and eliminates shared mutable state security concern | v0.2 |
+| C-14 | Consider | base.py | `task.context` (outputs from prior workflow steps) is available on `TaskInput` but never threaded into LLM conversation messages by `_run_llm_loop()`. Agents must explicitly access `task.context` in system prompt construction. Verify this is intended orchestrator behavior or add context injection | v0.2 |
+| N-10 | Nit | server.py | Redundant `or 0` in TaskInput construction — `request.config.max_llm_calls or 0` is a no-op since proto3 int32 default is already 0. Communicates intent but adds noise | v0.2 |
+| N-11 | Nit | server.py | `_resolve_agent_type` error message exposes capabilities set in `SystemExit` — not a security issue (startup-only, operator-facing) but inconsistent with S-01 pattern of sanitizing error messages | v0.2 |
+| N-12 | Nit | server.py | Windows SIGTERM handler lambda `lambda s, f: request_shutdown()` — `s` and `f` parameters unused. Minor style nit | v0.2 |
+
+**Strategy**: S-15 through S-18 are low-cost fixes bundled into PR 5b (which adds integration tests and already carries S-13 from PR 4b). C-13/C-14 and N-10 through N-12 deferred to v0.2.
 
 ---
 
@@ -428,6 +449,10 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Depends on**: PR 5a merged (gRPC server), PR 4b merged (all three task agents)
 **Branch**: `feature/v01-agent-registration`
 **Estimated size**: ~200–350 lines (implementation + tests)
+
+> **Note**: This PR also addresses follow-up findings S-13 (ReviewerAgent tool-use test) from the PR #39 review (see PR 4b follow-up table above).
+>
+> **Note**: This PR also addresses follow-up findings S-15 (tool definition filtering test), S-16 (permission wiring test), S-17 (duplicate agent ID handling), and S-18 (empty model string guard) from the PR #40 review (see PR 5a follow-up table above).
 
 #### Scope
 
@@ -470,6 +495,10 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] De-registration is best-effort (failure logged, not raised)
 - [ ] Integration test uses mock LLM (no real API calls)
 - [ ] PR 4b follow-up S-13: `ReviewerAgent` tool-use test added (registers mock `file_read`, verifies tool dispatch)
+- [ ] PR 5a follow-up S-15: direct unit test for `_build_tool_definitions()` filtering by agent `tools` config list
+- [ ] PR 5a follow-up S-16: test `load_agent` permission wiring — verify `builtin.permission_gate` and `builtin.path_validator` are set after load
+- [ ] PR 5a follow-up S-17: validate or test duplicate agent ID handling in config (raise `SystemExit` or document last-wins)
+- [ ] PR 5a follow-up S-18: empty model string guard in `create_provider()` before `_infer_provider()`
 
 ---
 
@@ -492,7 +521,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ## Dependency Graph
 
 ```
-PR 1 (py-proto-gen) ────────────────────────────┐
+PR 1 (py-proto-gen) ─── folded into PR 5a ─────┐
                                                  │
 PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Merged (#37)
                                                    │
@@ -502,10 +531,10 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
                                                    ├──► PR 4b (task-agents + PR 4a S-08, S-10) ✅ Merged (#39) ──┐
                                                    │                                                               │
                                                    ▼                                                               │
-                                              PR 5a (grpc-server + PR 4a S-09, S-11 + PR 4b S-12, S-14) ◄── PR 1  │
+                                              PR 5a (grpc-server + proto stubs + PR 4a S-09, S-11 + PR 4b S-12, S-14) ✅ Merged (#40)
                                                    │                                                               │
                                                    ▼                                                               ▼
-                                              PR 5b (agent-registration + PR 4b S-13) ◄────────────────────── PR 4b
+                                              PR 5b (agent-registration + PR 4b S-13 + PR 5a S-15, S-16, S-17, S-18) ◄── PR 4b
 ```
 
 > **PR 1 ‖ PR 2** can proceed in parallel — they are fully independent. This is the widest parallelism available.
@@ -520,12 +549,12 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 
 | PR | Phase | Naive LOC | Calibrated (×1.7) | Status |
 |----|-------|-----------|-------------------|--------|
-| PR 1 | Phase 1 | ~50 | ~85 | Not started |
+| PR 1 | Phase 1 | ~50 | ~85 | Folded into PR 5a |
 | PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
 | PR 3 | Phase 3 | ~500 | ~500¹ | ✅ Merged (#37) |
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
-| PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |
+| PR 5a | Phase 5 (server) | ~350 | ~500¹ | ✅ Merged (#40) |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |
 
 ¹ Capped at ~500 line target. If calibrated estimate exceeds 500, see Risk Mitigation escape valves.

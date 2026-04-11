@@ -19,6 +19,15 @@ from .sandbox import PathValidator
 
 logger = logging.getLogger(__name__)
 
+# SF-02: only forward safe response headers to the LLM. Headers like
+# Set-Cookie, Server, X-Powered-By can leak infrastructure details or
+# session tokens into LLM context.
+_SAFE_RESPONSE_HEADERS = frozenset({
+    "content-type", "content-length", "location", "date",
+    "cache-control", "etag", "last-modified",
+})
+
+
 # Maximum bytes returned from file reads, shell output, and HTTP responses.
 # Prevents gRPC 4 MB message size blowout and LLM context waste.
 MAX_OUTPUT_BYTES = 102_400  # 100 KB
@@ -50,20 +59,8 @@ def _require_workspace() -> Path:
     return workspace_root
 
 
-# Headers safe to return to the LLM. Excludes potentially sensitive
-# headers like Set-Cookie, Server, X-Powered-By, X-Request-Id.
-_SAFE_RESPONSE_HEADERS = frozenset({
-    "content-type", "content-length", "location", "date",
-    "cache-control", "etag", "last-modified", "retry-after",
-})
-
-
 def _truncate(text: str) -> str:
-    """Truncate text to MAX_OUTPUT_BYTES with an indicator.
-
-    Uses errors='ignore' on decode to drop incomplete multi-byte sequences
-    at the boundary instead of producing \ufffd replacement characters (S-05).
-    """
+    """Truncate text to MAX_OUTPUT_BYTES with an indicator."""
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= MAX_OUTPUT_BYTES:
         return text
@@ -298,14 +295,12 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             # redirect target after domain re-validation (review M-01).
             async with session.request(**kwargs, allow_redirects=False) as resp:
                 text = await resp.text()
-                # S-06: filter to safe header subset to avoid leaking
-                # Set-Cookie, Server, X-Powered-By etc. to the LLM.
+                # SF-02: filter to safe headers only — prevents leaking
+                # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
                 safe_headers = {
-                    k: v
-                    for k, v in resp.headers.items()
+                    k: v for k, v in resp.headers.items()
                     if k.lower() in _SAFE_RESPONSE_HEADERS
                 }
-                logger.debug("Full response headers: %s", dict(resp.headers))
                 return ToolResult(
                     success=True,
                     data={
