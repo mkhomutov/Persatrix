@@ -13,13 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agents.tools import builtin
-from agents.tools.builtin import (
-    MAX_OUTPUT_BYTES,
-    file_read,
-    file_write,
-    http_request,
-    shell_exec,
-)
+from agents.tools.builtin import MAX_OUTPUT_BYTES
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
 from agents.tools.sandbox import PathValidator
@@ -212,6 +206,14 @@ class TestShellExec:
         assert result.error_type == "TimeoutError"
         assert "timed out" in result.error
 
+    async def test_empty_command_string(self, tmp_path):
+        """Empty string should return a clear error, not IndexError (B-01)."""
+        _setup_tools(tmp_path)
+        result = await builtin.shell_exec("")
+        assert result.success is False
+        assert result.error_type == "ValueError"
+        assert "Empty command" in result.error
+
     async def test_invalid_command_syntax(self, tmp_path):
         _setup_tools(tmp_path)
         result = await builtin.shell_exec("echo 'unterminated")
@@ -286,6 +288,33 @@ class TestHttpRequest:
         result = await builtin.http_request("https://")
         assert result.success is False
         assert "no hostname" in result.error
+
+    async def test_post_with_body(self, tmp_path):
+        """Verify body is forwarded for POST requests (S-03 coverage)."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 201
+        mock_resp.text = AsyncMock(return_value='{"created": true}')
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request(
+                "https://api.example.com/v1/items", method="POST", body='{"name": "test"}'
+            )
+
+        assert result.success is True
+        assert result.data["status"] == 201
+        # Verify body was passed as data kwarg
+        call_kwargs = mock_session.request.call_args
+        assert call_kwargs[1]["data"] == '{"name": "test"}'
+        assert call_kwargs[1]["method"] == "POST"
 
 
 # ─── Output truncation ──────────────────────────────────────

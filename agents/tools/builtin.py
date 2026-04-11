@@ -122,6 +122,13 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
             success=False, error=f"Invalid command syntax: {exc}", error_type="ValueError"
         )
 
+    if not args:
+        return ToolResult(
+            success=False,
+            error="Empty command",
+            error_type="ValueError",
+        )
+
     if not gate.is_command_allowed(args):
         return ToolResult(
             success=False,
@@ -211,7 +218,9 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
         )
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
             kwargs: dict = {"method": method, "url": url}
             if body and method.upper() in ("POST", "PUT", "PATCH"):
                 kwargs["data"] = body
