@@ -20,7 +20,7 @@
   - [Agent Type Discrimination](#agent-type-discrimination)
   - [Autonomous Tick Loop](#autonomous-tick-loop)
   - [Event Dispatch Framework](#event-dispatch-framework)
-  - [Three-Tier Memory System](#three-tier-memory-system)
+  - [Three-Tier Agent Memory System](#three-tier-agent-memory-system)
   - [Working Memory (Context Window Management)](#working-memory-context-window-management)
   - [Episodic Memory (Long-Term Storage)](#episodic-memory-long-term-storage)
   - [Relationship Memory (Trust & Interaction)](#relationship-memory-trust--interaction)
@@ -85,6 +85,7 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 - **Distributed state / agent migration** — v0.3 scope
 - **Full autonomous level** with goal planning — v0.2 delivers `passive`, `reactive`, and `semi-autonomous`; full `autonomous` and `supervisor` levels are a v0.2 follow-up
 - **Shared knowledge base** (org-wide document store) — deferred to later v0.2 RFC
+- **Task refusal behavior** (`can_refuse_tasks` from extension spec E2.1) — deferred to follow-up when full autonomous level is implemented
 - **Vector store / embeddings for memory retrieval** — MVP uses SQLite with text matching; vector search is post-MVP
 
 ## Design / Implementation
@@ -114,6 +115,12 @@ class ActionExecutor:
                     await self._spawn_sub_agent(agent, action.payload)
                 case ActionType.USE_TOOL:
                     await self._use_tool(agent, action.payload)
+                case ActionType.REQUEST_APPROVAL:
+                    pass  # TODO: v0.2 approval workflow
+                case ActionType.GRANT_APPROVAL:
+                    pass  # TODO: v0.2 approval workflow
+                case ActionType.DENY_APPROVAL:
+                    pass  # TODO: v0.2 approval workflow
                 case ActionType.DO_NOTHING:
                     pass
 ```
@@ -150,6 +157,8 @@ def _load_agent(agent_config: dict[str, Any]) -> BaseAgent:
         case "task":
             return TaskAgent(agent_config["id"], agent_config)
         case "persona":
+            # Factory that creates a concrete PersonaAgent subclass
+            # implementing on_event() with the LLM-powered decision loop.
             return create_persona_agent(agent_config["id"], agent_config)
         case _:
             raise ValueError(f"Unknown agent type: {agent_type}")
@@ -188,7 +197,15 @@ class TickScheduler:
     async def _loop(self) -> None:
         while True:
             await asyncio.sleep(self._interval)
-            actions = await self._agent.on_tick()
+            try:
+                actions = await self._agent.on_tick()
+            except Exception:
+                # Log and continue — an unhandled exception must not kill
+                # the tick loop permanently for this agent.
+                logger.exception(
+                    "Tick failed for agent %s", self._agent.agent_id
+                )
+                continue
             meaningful = [a for a in actions if a.action_type != ActionType.DO_NOTHING]
             if not meaningful:
                 self._idle_count += 1
@@ -239,7 +256,12 @@ class EventDispatcher:
         ...
 ```
 
-### Three-Tier Memory System
+### Three-Tier Agent Memory System
+
+> **Scope note:** The extension spec (E7.1) defines four memory tiers: Working, Episodic,
+> Shared Knowledge Base, and Relationship. This RFC implements three *agent-scoped* tiers.
+> The fourth tier (Shared Knowledge Base — org-wide document store) is deferred to a
+> separate v0.2 RFC (see [Non-Goals](#non-goals)).
 
 #### Architecture
 
@@ -251,6 +273,7 @@ PersonaAgent
   │   └── conversation summaries, decisions, outcomes
   └── RelationshipMemory (SQLite, per-agent-pair)
       └── trust scores, interaction patterns, history
+# Shared Knowledge Base — deferred to separate v0.2 RFC (see Non-Goals)
 ```
 
 All three tiers implement a common `MemoryStore` protocol:
@@ -586,6 +609,10 @@ Episodic and relationship memory are stored in SQLite. For v0.2 MVP, the databas
 - Memory entries do not store raw LLM API keys or credentials
 - Agent permission boundaries still apply — agents can only access their own memories
 
+### Memory Isolation (Shared Database)
+
+The shared SQLite database (Q1 decision) has no built-in row-level security. Application-level enforcement is **security-critical**: every query against the shared database must filter by `agent_id` to prevent cross-agent memory leakage. Integration tests must verify that agent A cannot retrieve agent B's episodes or relationship data through the shared database connection.
+
 ### Persona State Injection
 
 Dynamic persona state is injected into LLM prompts. Adversarial input in event payloads could attempt to manipulate the persona state section.
@@ -781,7 +808,10 @@ def estimate_tokens(text: str, *, accurate: bool = False) -> int:
     if accurate:
         try:
             import tiktoken
-            enc = tiktoken.encoding_for_model("claude-sonnet-4-20250514")
+            # tiktoken only knows OpenAI model names; use cl100k_base as a
+            # reasonable cross-model approximation. For precise Anthropic
+            # counting, use the `anthropic` SDK's token counting API instead.
+            enc = tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
         except ImportError:
             pass
