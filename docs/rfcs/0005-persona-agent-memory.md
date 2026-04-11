@@ -23,6 +23,7 @@
   - [Three-Tier Agent Memory System](#three-tier-agent-memory-system)
   - [Working Memory (Context Window Management)](#working-memory-context-window-management)
   - [Episodic Memory (Long-Term Storage)](#episodic-memory-long-term-storage)
+    - [Future Enhancement: Semantic Search via Vector Embeddings](#future-enhancement-semantic-search-via-vector-embeddings)
   - [Relationship Memory (Trust & Interaction)](#relationship-memory-trust--interaction)
   - [Dynamic Persona State](#dynamic-persona-state)
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
@@ -403,6 +404,41 @@ CREATE INDEX idx_episodes_agent ON episodes(agent_id);
 CREATE INDEX idx_episodes_importance ON episodes(importance DESC);
 CREATE INDEX idx_episodes_created ON episodes(created_at DESC);
 ```
+
+#### Future Enhancement: Semantic Search via Vector Embeddings
+
+> **Status:** Deferred to post-MVP. Tracked here so the upgrade path is clear when the time comes.
+> See also [Q5 decision](#q5-memory-retrieval-relevance-scoring) for the MVP scoring formula this replaces.
+
+MVP retrieval uses SQLite FTS5 (BM25 keyword matching). This misses semantic connections — e.g., an agent searching "billing dispute resolution" won't find an episode titled "payment disagreement" because no keywords overlap. Vector embeddings solve this.
+
+**Upgrade plan:**
+
+1. **Embedding model**: Use the same LLM provider's embedding endpoint (e.g., `text-embedding-3-small` for OpenAI, `voyage-3-lite` for Anthropic) or a local model via Ollama. Add an `EmbeddingProvider` protocol alongside `LLMProvider` from RFC 0004.
+
+2. **Storage**: Add a `embedding BLOB` column to `episodes` and `interactions` tables. SQLite doesn't have native vector indexing, so two options:
+   - **sqlite-vec** extension (pure SQLite, no external deps) — good for <100k episodes per agent
+   - **External vector store** (Qdrant, ChromaDB) — needed if episode counts grow large or if cross-agent semantic search is required
+
+3. **Schema migration**:
+   ```sql
+   ALTER TABLE episodes ADD COLUMN embedding BLOB;  -- float32 vector as bytes
+   ALTER TABLE episodes ADD COLUMN embedding_model TEXT;  -- track which model generated it
+   ```
+
+4. **Scoring formula update**: Replace BM25 with cosine similarity, keep the existing importance and recency factors:
+   $$\text{score} = \text{cosine\_sim}(query\_emb, episode\_emb) \times \text{importance} \times (1 + \ln(1 + \text{access\_count})) \times \frac{1}{1 + \text{age\_days}}$$
+
+5. **Hybrid retrieval**: Best results come from combining keyword (FTS5) and semantic (vector) scores. Retrieve top-K from each, merge with reciprocal rank fusion (RRF), then apply importance/recency weighting.
+
+6. **Backfill**: On first upgrade, batch-embed all existing episodes. Add a migration command: `orch memory embed --agent <id> --backfill`.
+
+7. **Cost considerations**: Embedding API calls add latency (~50ms) and cost per `store_episode()`. Cache embeddings and only re-embed on episode compression. Budget tracking in `config/optimization.yaml` should include embedding token costs.
+
+**Prerequisites before implementing:**
+- `EmbeddingProvider` protocol (extend RFC 0004's `LLMProvider` design)
+- Running system with observable memory access patterns (to validate that FTS5 is insufficient)
+- Cost/latency benchmarks comparing FTS5 vs vector vs hybrid on real agent interaction data
 
 ### Relationship Memory (Trust & Interaction)
 
@@ -921,6 +957,8 @@ The `access_count` factor gives a mild boost to frequently retrieved memories (l
 When no query text is provided (e.g., tick loop context loading), fall back to `importance × (1 + ln(1 + access_count)) × recency` only.
 
 *Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not. Every `recall()` call updates `access_count` and `last_accessed_at` for returned rows.
+
+See [Future Enhancement: Semantic Search via Vector Embeddings](#future-enhancement-semantic-search-via-vector-embeddings) for the full upgrade path from FTS5 keyword matching to vector-based semantic retrieval.
 
 *Future enhancement — Ebbinghaus forgetting curve:* The `access_count` and `last_accessed_at` columns capture the data needed to implement retrieval-strengthened exponential decay ($R = e^{-t/S}$ where strength $S$ grows with each retrieval). This is a post-MVP upgrade path — swap the hyperbolic `1/(1 + age_days)` decay for exponential decay where the time constant is a function of `access_count`. Requires empirical tuning of decay rate and strengthening factor against real agent interaction data, so it is deferred until the system is running and producing observable memory access patterns.
 
