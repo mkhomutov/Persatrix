@@ -367,8 +367,8 @@ RFC 0003 defines ~900 LOC across 5 phases (excluding generated proto output). Th
 - [x] `go build ./cmd/orchestrator` succeeds
 - [x] `go vet ./cmd/orchestrator/...` clean
 - [x] No `_ = ...` unused-variable suppressions remain
-- [ ] Binary starts cleanly with `--workflows-dir workflows/`
-- [ ] Graceful shutdown via SIGINT
+- [ ] Binary starts cleanly with `--workflows-dir workflows/` *(Resolved in PR 8 / #33)*
+- [ ] Graceful shutdown via SIGINT *(Resolved in PR 8 / #33)*
 
 #### Post-merge findings
 
@@ -519,10 +519,10 @@ PR 5 (wiring) ✅ merged
        ├──► PR 6 (executor-hardening) ✅ merged (#31)
        ├──► PR 7 (test-observability) ✅ merged (#32)
        ├──► PR 8 (graceful-shutdown) ✅ merged (#33)
-       └──► PR 9 (proto-tooling, optional)
+       └──► PR 9 (proto-tooling) ✅ merged (#34)
 ```
 
-All four follow-up PRs are independent and can proceed in parallel.
+All four follow-up PRs are merged. RFC 0003 is fully complete.
 
 ---
 

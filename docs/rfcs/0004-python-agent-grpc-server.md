@@ -1,7 +1,7 @@
 # RFC 0004 — Python Agent gRPC Server (AgentService Implementation)
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 👍 Accepted
 **Author**: Orchestr8 team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
@@ -110,7 +110,7 @@ proto/task.proto  ──grpc_tools.protoc──►  agents/generated/task_pb2.py
 
 The existing `Makefile` `proto` target already generates both Go and Python stubs in a single `protoc` invocation (`--python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT)`). No new Makefile target is needed — Phase 1 only needs to ensure the `agents/generated/` output directory exists (already handled by `@mkdir -p $(PROTO_PY_OUT)`) and add `agents/generated/__init__.py`.
 
-Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration) and `anthropic >= 0.40.0` (for LLM client). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
+Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration), `anthropic >= 0.40.0` (for Anthropic LLM provider), and `openai >= 1.50.0` (for OpenAI-compatible LLM provider). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
 
 ### TaskInputConfig Dataclass
 
@@ -308,62 +308,60 @@ When the LLM returns multiple tool calls in a single response, tools are execute
 
 #### `_execute_tools` Method
 
-The `_execute_tools` helper parses Anthropic `ToolUseBlock` objects from the response content, dispatches each to the tool registry, enforces permissions, and formats results back into the Anthropic tool-result message format.
+The `_execute_tools` helper takes `ToolCall` objects from the normalized `LLMResponse`, dispatches each to the tool registry, enforces permissions, and returns `LLMToolResult` objects. Tool functions return `registry.ToolResult` (with `success`/`data`/`error` fields); this method converts them to `LLMToolResult` (with `tool_call_id`/`content`/`is_error` fields) for the LLM conversation. The naming distinction avoids import confusion between the two result types (review-fix D1).
 
 ```python
-async def _execute_tools(self, content: list) -> list[dict]:
-    """Execute tool calls from LLM response content sequentially.
+async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
+    """Execute tool calls from normalized LLM response sequentially.
 
-    Parses ToolUseBlock objects, dispatches through the tool registry
-    with permission checks, and returns Anthropic-format tool results.
+    Takes ToolCall objects, dispatches through the tool registry
+    with permission checks, and returns LLMToolResult objects for
+    the LLM conversation. Tool functions return registry.ToolResult;
+    this method converts them to the LLM-facing LLMToolResult type.
     """
     results = []
-    for block in content:
-        if block.type != "tool_use":
-            continue
-        tool_fn = self._tool_registry.get(block.name)
+    for call in tool_calls:
+        tool_fn = self._tool_registry.get(call.name)
         if tool_fn is None:
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": f"Unknown tool: {block.name}",
-                "is_error": True,
-            })
+            results.append(LLMToolResult(
+                tool_call_id=call.id,
+                content=f"Unknown tool: {call.name}",
+                is_error=True,
+            ))
             continue
         try:
-            result = await tool_fn(**block.input)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": result.data if result.success else result.error,
-                "is_error": not result.success,
-            })
+            result = await tool_fn(**call.input)
+            results.append(LLMToolResult(
+                tool_call_id=call.id,
+                content=result.data if result.success else result.error,
+                is_error=not result.success,
+            ))
         except PermissionError as exc:
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": str(exc),
-                "is_error": True,
-            })
+            results.append(LLMToolResult(
+                tool_call_id=call.id,
+                content=str(exc),
+                is_error=True,
+            ))
         # PR-review M2: catch all exceptions, not just PermissionError.
         # Other tool errors (FileNotFoundError, aiohttp.ClientError, OSError)
         # should be returned as structured tool-error results so the LLM
         # can decide how to proceed, rather than bubbling up as an opaque
         # task failure via the generic except in ExecuteTask.
         except Exception as exc:
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": f"Tool error ({type(exc).__name__}): {exc}",
-                "is_error": True,
-            })
+            results.append(LLMToolResult(
+                tool_call_id=call.id,
+                content=f"Tool error ({type(exc).__name__}): {exc}",
+                is_error=True,
+            ))
     return results
 ```
 
 ```python
 async def handle(self, task: TaskInput) -> TaskOutput:
     messages = self._build_messages(task)
-    tools = self._get_tool_definitions()
+    # PR-review S2: _get_tool_definitions() returns normalized format;
+    # format_tool_definitions() translates to provider-specific schema.
+    tools = self._llm_client.format_tool_definitions(self._get_tool_definitions())
     total_tokens = 0
     tool_calls_count = 0
 
@@ -373,37 +371,37 @@ async def handle(self, task: TaskInput) -> TaskOutput:
     max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
 
     for _ in range(max_llm_calls):
-        response = await self._llm_client.create_message(
+        response: LLMResponse = await self._llm_client.create_message(
             model=self.config["model"],
             messages=messages,
+            system=self._build_system_prompt(),
             tools=tools,
             max_tokens=max_tokens,
             temperature=self.config.get("temperature", 0.3),
         )
         total_tokens += response.usage.input_tokens + response.usage.output_tokens
 
-        if response.stop_reason == "end_turn":
+        if response.stop_reason == StopReason.END_TURN:
             return TaskOutput(
                 status=TaskStatus.COMPLETED,
-                result=self._extract_text(response),
+                result=response.text or "",
                 metadata={"tokens_used": str(total_tokens), "tool_calls": str(tool_calls_count)},
             )
 
         # Review-fix B2: explicitly handle max_tokens truncation instead of
         # letting the loop continue and eventually producing a misleading
         # "Max LLM call iterations exceeded" failure.
-        if response.stop_reason == "max_tokens":
+        if response.stop_reason == StopReason.MAX_TOKENS:
             return TaskOutput(
                 status=TaskStatus.FAILED,
                 result="LLM response truncated: max_tokens limit reached",
                 metadata={"tokens_used": str(total_tokens), "tool_calls": str(tool_calls_count)},
             )
 
-        if response.stop_reason == "tool_use":
-            tool_results = await self._execute_tools(response.content)
+        if response.stop_reason == StopReason.TOOL_USE:
+            tool_results = await self._execute_tools(response.tool_calls)
             tool_calls_count += len(tool_results)
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
+            messages = self._llm_client.append_tool_round(messages, response, tool_results)
             continue
 
     return TaskOutput(
@@ -415,18 +413,258 @@ async def handle(self, task: TaskInput) -> TaskOutput:
 
 #### LLM Client Abstraction
 
-A thin `LLMClient` wrapper around the Anthropic Python SDK isolates the LLM interaction for testability:
+A multi-provider `LLMClient` normalizes different LLM SDK response formats into a common interface. Provider-specific types (Anthropic `ToolUseBlock`, OpenAI `function` tool calls, different `stop_reason`/`finish_reason` strings) are translated into normalized dataclasses.
 
 ```python
-class LLMClient:
-    """Wrapper around the Anthropic SDK for LLM calls."""
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
+
+class StopReason(Enum):
+    """Provider-agnostic stop reason.
+
+    Unmapped provider-specific stop reasons (e.g. Anthropic's stop_sequence,
+    OpenAI's content_filter) are mapped to END_TURN with a warning log.
+    This prevents undefined behavior in the handle() loop if the LLM
+    returns an unexpected stop reason.
+    (PR-review N1: documented fallback behavior for unmapped stop reasons.)
+    """
+    END_TURN = "end_turn"
+    TOOL_USE = "tool_use"
+    MAX_TOKENS = "max_tokens"
+
+
+@dataclass
+class ToolCall:
+    """Provider-agnostic tool call."""
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass
+class Usage:
+    """Token usage from LLM response."""
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass
+class LLMToolResult:
+    """Provider-agnostic tool result for LLM message building.
+
+    Not to be confused with tools.registry.ToolResult which represents
+    the raw result from a tool function (success/data/error/error_type).
+    This type is the normalized form sent back to the LLM provider.
+    """
+    tool_call_id: str
+    content: str
+    is_error: bool
+
+
+@dataclass
+class LLMResponse:
+    """Normalized response from any LLM provider."""
+    text: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    stop_reason: StopReason = StopReason.END_TURN
+    usage: Usage = field(default_factory=lambda: Usage(0, 0))
+
+
+class LLMProvider(Protocol):
+    """Protocol for LLM provider implementations.
+
+    Each provider owns its full message lifecycle: creating messages,
+    formatting tool definitions for its SDK, and building conversation
+    history after tool-use rounds.  This keeps provider-specific message
+    formats (Anthropic's content-block arrays vs OpenAI's role-based
+    messages) encapsulated behind the protocol boundary.
+    (PR-review S1: moved append_tool_round here so each provider builds
+    messages in its native format instead of a single OpenAI-specific
+    implementation on LLMClient.)
+    """
+    async def create_message(
+        self, *, model: str, messages: list, system: str,
+        tools: list, max_tokens: int, temperature: float,
+    ) -> LLMResponse: ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        """Translate normalized tool definitions to provider-specific format.
+
+        Normalized format (input):
+            {"name": ..., "description": ..., "parameters": {JSON Schema}}
+        Anthropic format:
+            {"name": ..., "description": ..., "input_schema": {JSON Schema}}
+        OpenAI format:
+            {"type": "function", "function": {"name": ..., "description": ..., "parameters": {JSON Schema}}}
+
+        (PR-review S2: tool definition schema differs between providers;
+        this method is the translation point.)
+        """
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        """Build the next message list after a tool-use round.
+
+        Each provider constructs messages in its native format:
+        - Anthropic: assistant content blocks + user message with tool_result blocks
+        - OpenAI: assistant message with tool_calls + tool-role messages
+
+        (PR-review S1: moved from LLMClient to protocol so each provider
+        owns its message format.)
+        """
+        ...
+
+
+class AnthropicProvider:
+    """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
     def __init__(self, api_key: str | None = None):
         import anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
-    async def create_message(self, **kwargs) -> Any:
-        return await self._client.messages.create(**kwargs)
+    async def create_message(
+        self, *, model: str, messages: list, system: str,
+        tools: list, max_tokens: int, temperature: float,
+    ) -> LLMResponse:
+        # Review-fix D5: match LLMProvider protocol typed signature
+        response = await self._client.messages.create(
+            model=model, messages=messages, system=system,
+            tools=tools, max_tokens=max_tokens, temperature=temperature,
+        )
+        return self._normalize(response)
+
+    def _normalize(self, response) -> LLMResponse:
+        # Map: ToolUseBlock → ToolCall, stop_reason string → StopReason enum,
+        # TextBlock → text, response.usage → Usage dataclass
+        ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        # Anthropic: {"name", "description", "input_schema"} — rename "parameters" → "input_schema"
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        # Anthropic format: assistant content blocks, then user message with tool_result blocks
+        # {"role": "assistant", "content": [TextBlock, ToolUseBlock, ...]}
+        # {"role": "user", "content": [{"type": "tool_result", "tool_use_id": ..., "content": ...}, ...]}
+        ...
+
+
+class OpenAIProvider:
+    """Wraps openai.AsyncOpenAI, translates to LLMResponse.
+
+    Also supports any OpenAI-compatible API (Ollama, vLLM, Together, Groq,
+    LM Studio) via base_url override.
+    """
+    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+        import openai
+        self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+    async def create_message(
+        self, *, model: str, messages: list, system: str,
+        tools: list, max_tokens: int, temperature: float,
+    ) -> LLMResponse:
+        # Review-fix D5: match LLMProvider protocol typed signature
+        # Review-fix D2: OpenAI uses 'tools' param (not deprecated 'functions')
+        # Translate system→first message, keyword args→OpenAI format
+        response = await self._client.chat.completions.create(
+            model=model, messages=[{"role": "system", "content": system}, *messages],
+            tools=tools, max_tokens=max_tokens, temperature=temperature,
+        )
+        return self._normalize(response)
+
+    def _normalize(self, response) -> LLMResponse:
+        # Map: function tool calls → ToolCall, finish_reason string → StopReason enum,
+        # message.content → text, response.usage → Usage dataclass
+        ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        # OpenAI: {"type": "function", "function": {"name", "description", "parameters"}}
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        # OpenAI format: assistant message with tool_calls, then tool-role messages
+        # {"role": "assistant", "content": ..., "tool_calls": [{"id": ..., "type": "function", "function": {...}}, ...]}
+        # {"role": "tool", "tool_call_id": ..., "content": ...}  (one per result)
+        ...
+
+
+class LLMClient:
+    """Provider-agnostic LLM client. Delegates to a concrete LLMProvider."""
+    def __init__(self, provider: LLMProvider):
+        self._provider = provider
+
+    async def create_message(self, **kwargs) -> LLMResponse:
+        return await self._provider.create_message(**kwargs)
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        """Translate normalized tool definitions to provider-specific format.
+
+        PR-review S2: `_get_tool_definitions()` returns a normalized format
+        (name/description/parameters). Each provider's `format_tool_definitions()`
+        translates to its SDK's expected schema before passing to `create_message()`.
+        """
+        return self._provider.format_tool_definitions(tools)
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        """Build the next message list after a tool-use round.
+
+        Review-fix B2: this method was called in the handle() loop but
+        had no pseudocode definition. Delegates to the provider so each
+        builds messages in its native format.
+        (PR-review S1: moved message construction to LLMProvider protocol
+        — Anthropic uses content-block arrays with tool_result type,
+        OpenAI uses tool-role messages with tool_call_id.)
+        """
+        return self._provider.append_tool_round(messages, response, tool_results)
+```
+
+Provider is resolved from agent config at startup:
+
+```python
+def _create_provider(agent_config: dict) -> LLMProvider:
+    provider = agent_config.get("provider") or _infer_provider(agent_config["model"])
+    provider_config = agent_config.get("provider_config", {})
+    if provider == "anthropic":
+        return AnthropicProvider(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    elif provider == "openai":
+        return OpenAIProvider(
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            base_url=provider_config.get("base_url"),
+        )
+    raise SystemExit(f"Unknown LLM provider: {provider!r}")
+
+def _infer_provider(model: str) -> str:
+    if model.startswith("claude"):
+        return "anthropic"
+    # Review-fix D4: warn on fallback so operators notice misconfigured models
+    # rather than silently sending requests to the wrong provider.
+    import logging
+    logging.getLogger(__name__).warning("Unknown model prefix %r, defaulting to openai provider", model)
+    return "openai"  # Default — covers GPT, O1, and OpenAI-compatible endpoints
+```
+
+Agent config supports both implicit and explicit provider selection:
+
+```yaml
+# Implicit — inferred from model name
+- id: "planner"
+  model: "claude-sonnet-4-20250514"  # → anthropic
+
+# Explicit — with provider_config for local models
+- id: "local-coder"
+  model: "qwen2.5-coder:32b"
+  provider: "openai"
+  provider_config:
+    base_url: "http://localhost:11434/v1"
 ```
 
 The LLM client is injected into agents via `BaseAgent.__init__`, enabling tests to substitute a mock client without patching. The API key is read from the `ANTHROPIC_API_KEY` environment variable (Anthropic SDK default behavior). No API key is stored in config files.
@@ -770,8 +1008,8 @@ Summary: Implement deny-by-default permission checks and filesystem sandboxing.
 **Deliverables:**
 1. `agents/tools/permissions.py` — `PermissionGate` class.
 2. `agents/tools/sandbox.py` — `PathValidator` class.
-3. `agents/tools/tests/test_permissions.py` — permission tests.
-4. `agents/tools/tests/test_sandbox.py` — path validation tests.
+3. `tests/unit/python/test_permissions.py` — permission tests.
+4. `tests/unit/python/test_sandbox.py` — path validation tests.
 
 **Dependencies:** None. Independent of proto stubs.
 
@@ -796,7 +1034,7 @@ Summary: Implement the three task agents with LLM interaction loop and tool disp
 4. `agents/planner_agent.py` — implement `handle()`.
 5. `tests/unit/python/test_agents.py` — agent tests with mock LLM.
 
-**Dependencies:** Phase 3 (built-in tools for tool dispatch). `anthropic` SDK added to `pyproject.toml`.
+**Dependencies:** Phase 3 (built-in tools for tool dispatch). `anthropic` and `openai` SDKs already in `pyproject.toml` (no additions needed).
 
 ### Phase 5: gRPC Server + Agent Loading + Self-Registration (~300 LOC)
 
@@ -820,7 +1058,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 | Python agents | `agents/coder.py` | Implement `handle()` — system prompt, LLM call, tool loop |
 | Python agents | `agents/reviewer.py` | Implement `handle()` — review prompt, LLM call, structured output |
 | Python agents | `agents/planner_agent.py` | Implement `handle()` — planning prompt, LLM call, plan output |
-| Python agents | `agents/llm_client.py` | New — `LLMClient` wrapper around Anthropic SDK |
+| Python agents | `agents/llm_client.py` | New — `LLMProvider` protocol, `AnthropicProvider`, `OpenAIProvider`, normalized types, `LLMClient` facade |
 | Python agents | `agents/tools/builtin.py` | Replace stubs — `file_read`, `file_write`, `shell_exec`, `http_request` |
 | Python agents | `agents/tools/permissions.py` | New — `PermissionGate` class |
 | Python agents | `agents/tools/sandbox.py` | New — `PathValidator` class |
@@ -832,7 +1070,7 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 | Tests | `tests/unit/python/test_tools.py` | Extended — built-in tool tests |
 | Tests | `tests/integration/test_agent_server.py` | New — end-to-end gRPC integration test |
 | Build | `Makefile` | No changes needed — existing `proto` target already generates Python stubs |
-| Python config | `agents/pyproject.toml` | Add `grpcio`, `grpcio-tools`, `protobuf`, `anthropic`, `aiohttp`, `pyyaml` |
+| Python config | `agents/pyproject.toml` | Add `aiohttp` (remaining deps already present: `grpcio`, `grpcio-tools`, `protobuf`, `anthropic`, `openai`, `pyyaml`) |
 | Docker | `Dockerfile.agent` | Update to install proto deps and run `make proto` |
 
 ## Test Strategy
@@ -894,15 +1132,61 @@ Summary: Implement `AgentServiceServicer`, agent loading from config, server sta
 
 ## Open Questions
 
-1. **LLM SDK choice**: The Anthropic Python SDK is the default based on `config/agents.yaml` model references (`claude-sonnet-4-20250514`). Should the `LLMClient` abstraction support multiple providers (e.g., OpenAI, Ollama) in v0.1 or is Anthropic-only acceptable?
+1. ~~**LLM SDK choice**: The Anthropic Python SDK is the default based on `config/agents.yaml` model references (`claude-sonnet-4-20250514`). Should the `LLMClient` abstraction support multiple providers (e.g., OpenAI, Ollama) in v0.1 or is Anthropic-only acceptable?~~ **Resolved**: Multi-provider in v0.1. The `LLMClient` abstraction uses a `LLMProvider` protocol with two implementations: `AnthropicProvider` and `OpenAIProvider`. Provider-specific types (tool call formats, stop reasons) are normalized into `LLMResponse`, `ToolCall`, and `StopReason` dataclasses. The OpenAI-compatible API also gives access to Ollama, vLLM, Together, Groq, and any local model server via `base_url` override. Provider is inferred from the model name (`claude-*` → Anthropic, `gpt-*`/`o1-*` → OpenAI) or set explicitly via `provider:` field in `agents.yaml`. See [LLM Client Abstraction](#llm-client-abstraction). (2026-04-11)
 
-2. **Agent config `type` field**: Current resolution uses capability-based heuristics. Should `config/agents.yaml` add an explicit `type: task | persona` field? Requires schema change.
+2. ~~**Agent config `type` field**: Current resolution uses capability-based heuristics. Should `config/agents.yaml` add an explicit `type: task | persona` field? Requires schema change.~~ **Resolved**: Keep capability-based heuristic for v0.1. v0.1 has exactly 3 agents with non-overlapping capability signatures. `SystemExit` with a clear error message if no rule matches. Add `type: task | persona` in v0.2 when `PersonaAgent` arrives and capability overlap makes the heuristic ambiguous. `# TODO(v0.2): add explicit 'type' field to agent config` comment retained. (2026-04-11)
 
 3. ~~**Workspace root**: Built-in tools need a workspace root path for sandbox validation. Should this be a CLI flag (`--workspace /path`), derived from the orchestrator's `--workflows-dir`, or hardcoded to `/workspace` for Docker?~~ **Resolved**: `--workspace` CLI flag (default: `/workspace` for Docker, CWD for local dev). Used by both `PathValidator` and `shell_exec` CWD. Note: the PathValidator globs in `agents.yaml` use absolute Docker paths (e.g., `/workspace/src/**`). For local dev, either override via environment-specific config or make globs relative to `--workspace`. (Review-fix D5, deep-review d2)
 
-4. **`aiohttp` dependency**: `http_request` tool and self-registration use `aiohttp`. Is this acceptable or should we use the stdlib `urllib` (sync, wrapped in `asyncio.to_thread`)? `aiohttp` is a more natural fit for the async-first architecture.
+4. ~~**`aiohttp` dependency**: `http_request` tool and self-registration use `aiohttp`. Is this acceptable or should we use the stdlib `urllib` (sync, wrapped in `asyncio.to_thread`)?~~ **Resolved**: Use `aiohttp`. The project is async-first; `urllib` is synchronous and would require `asyncio.to_thread` wrapping, defeating the async model. `aiohttp` provides native async context managers, connection pooling via shared `ClientSession`, and proper test utilities (`aiohttp.test_utils`). Used by both `http_request` tool and self-registration. (2026-04-11)
 
-5. **Self-registration timing**: The agent registers itself with the orchestrator after the gRPC server starts listening. If the orchestrator is not yet running, registration fails silently. Should the agent retry registration with backoff?
+5. ~~**Self-registration timing**: The agent registers itself with the orchestrator after the gRPC server starts listening. If the orchestrator is not yet running, registration fails silently. Should the agent retry registration with backoff?~~ **Resolved**: No retry. Keep fire-and-forget. The primary deployment model is Docker Compose with `depends_on` controlling startup order. Adding retry-with-backoff introduces background task complexity (tracking, cancellation, shutdown, idempotency) for an edge case. If the orchestrator is down, the admin can restart the agent or manually register via REST. Proper service discovery deferred to v0.2. (2026-04-11)
+
+## Items Deferred to v0.2
+
+The following items identified during RFC 0004 design and review are explicitly deferred to v0.2. Existing `TODO(v0.2)` comments in RFC 0004 and its implementation PRs mark these in code.
+
+### Agent Architecture
+
+| Item | Source | Rationale |
+|------|--------|-----------|
+| Explicit `type: task \| persona` field in `agents.yaml` schema | Deep-review d5, Open Q2 | v0.1 has 3 agents with non-overlapping capabilities. Heuristic suffices until `PersonaAgent` arrives in v0.2 |
+| `PersonaAgent` + event-driven `on_event()` / `on_tick()` | Core spec §4.2 | v0.2 scope per phased plan |
+| Sub-agent spawning with inherited permissions | Extension spec §5.3 | v0.2 scope per phased plan |
+| Three-tier memory (episodic, relationship, working) | Extension spec §6 | v0.2 scope per phased plan |
+
+### Tool System
+
+| Item | Source | Rationale |
+|------|--------|-----------|
+| Parallel tool execution with conflict detection | Review-fix D6 | Sequential execution is correct and safe for v0.1; parallel adds ordering/conflict complexity |
+| `allowed_tools` enforcement on `TaskInputConfig` | PR-review B2 | Proto field carried through but not enforced. v0.2 adds tool filtering logic |
+| `ResourceLimiter` + `OutputSizeLimiter` in `sandbox.py` | PR-review m8 | Stubs preserved. Resource limiting is a v0.2 hardening concern |
+| MCP tool bridge (`agents/tools/mcp_bridge.py`) | Core spec §5.2 | MVP tools are built-in; MCP bridge adds external tool provider support in v0.2 |
+| Per-agent rate limiting on tool wrapper | Non-Goals | Scaffolded (`# TODO: Rate limit check`) but not implemented; enforcement deferred to v0.2 |
+| `store_get` / `store_set` task-scoped key-value tools | Non-Goals | Deferred; four core tools sufficient for v0.1 workflows |
+| Shell command argument pattern matching | Review-fix S3, [Security §](#shell-command-argument-injection-known-risk) | v0.1 validates command name/prefix only; per-command argument regex deferred. Impact mitigated by Docker container isolation and `PathValidator` deny list |
+
+### Server & Infrastructure
+
+| Item | Source | Rationale |
+|------|--------|-----------|
+| `ExecuteTaskStream` — streaming task execution | Proto definition | Stub returns `UNIMPLEMENTED`. Needed for long-running tasks with progress reporting |
+| TLS for gRPC connections | Security | v0.1 uses insecure port. `# TODO(security): enable TLS` |
+| Multi-agent-per-process hosting | Deep-review D2 | v0.1 is single-agent-per-process. Servicer accepts `dict[str, BaseAgent]` for future expansion |
+| Service discovery / retry-based registration | Open Q5 | Fire-and-forget registration. Docker `depends_on` handles ordering; proper discovery for distributed deployment |
+| Shutdown drain (wait for in-flight tasks) | Review finding | `server.stop(grace=30)` handles it at the gRPC level; explicit task draining is a v0.2 hardening concern |
+| DNS rebinding hardening (resolve before connect, reject private IPs) | [Security §](#dns-rebinding-known-limitation) | Impact limited by default `deny: ["*"]` network policy; hardening deferred to v0.2 |
+
+### Observability & Quality
+
+| Item | Source | Rationale |
+|------|--------|-----------|
+| Proto linting (buf lint) in CI | Review finding | Generated code works; linting prevents future proto style drift |
+| Per-run timeout separate from gRPC deadline | Deep-review v3 M2 | Double-enforcement documented; cleaner separation is a v0.2 improvement |
+| Structured cost tracking per agent/task | Core spec §8 | v0.1 tracks `tokens_used` in metadata; formal cost aggregation is v0.2 |
+| Telemetry / OTEL tool invocation spans | Non-Goals | Scaffolded but not wired; full observability is a v0.2 concern |
+| `agents/validate.py` JSON Schema config validation | Non-Goals | Separate concern from agent runtime; validates `agents.yaml` against `schemas/agent.schema.json` |
 
 ## Decision / Next Steps
 
