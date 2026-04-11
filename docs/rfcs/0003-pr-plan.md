@@ -518,7 +518,7 @@ PR 5 (wiring) ✅ merged
        │
        ├──► PR 6 (executor-hardening) ✅ merged (#31)
        ├──► PR 7 (test-observability) ✅ merged (#32)
-       ├──► PR 8 (graceful-shutdown)
+       ├──► PR 8 (graceful-shutdown) ✅ merged (#33)
        └──► PR 9 (proto-tooling, optional)
 ```
 

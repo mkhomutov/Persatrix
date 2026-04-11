@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto clean test lint run validate help
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/orchestr8/orchestr8
@@ -18,14 +18,22 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ─── Protobuf ───────────────────────────────────────────
-proto: ## Generate Go + Python code from protobuf definitions
-	@echo "→ Generating protobuf stubs..."
-	@mkdir -p $(PROTO_GO_OUT) $(PROTO_PY_OUT)
+proto: proto-go proto-python ## Generate Go + Python code from protobuf definitions
+
+proto-go: ## Generate Go gRPC stubs from protobuf definitions
+	@echo "→ Generating Go protobuf stubs..."
+	@mkdir -p $(PROTO_GO_OUT)
 	protoc --go_out=. --go-grpc_out=. \
 		--go_opt=module=$(GO_MODULE) --go-grpc_opt=module=$(GO_MODULE) \
-		--python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
 		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto
-	@echo "✓ Protobuf stubs generated"
+	@echo "✓ Go protobuf stubs generated"
+
+proto-python: ## Generate Python gRPC stubs from protobuf definitions
+	@echo "→ Generating Python protobuf stubs..."
+	@mkdir -p $(PROTO_PY_OUT)
+	protoc --python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
+		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto
+	@echo "✓ Python protobuf stubs generated"
 
 # ─── Build ──────────────────────────────────────────────
 build: build-orchestrator build-cli ## Build all components
