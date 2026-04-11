@@ -179,7 +179,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - **`AnthropicProvider`**: wraps `anthropic.AsyncAnthropic`. Translates Anthropic `ToolUseBlock` → `ToolCall`, string `stop_reason` → `StopReason` enum. API key from `ANTHROPIC_API_KEY` env var.
 - **`OpenAIProvider`**: wraps `openai.AsyncOpenAI`. Translates OpenAI `function` tool calls → `ToolCall`, `finish_reason` → `StopReason` enum. Supports `base_url` override for OpenAI-compatible APIs (Ollama, vLLM, Together, Groq, LM Studio).
 - **Normalized types**: `LLMResponse(text, tool_calls, stop_reason, usage)`, `ToolCall(id, name, input)`, `LLMToolResult(tool_call_id, content, is_error)` (renamed from `ToolResult` to avoid collision with `tools.registry.ToolResult` — review-fix D1), `StopReason` enum (`END_TURN`, `TOOL_USE`, `MAX_TOKENS`), `Usage(input_tokens, output_tokens)`.
-- **`LLMClient`**: facade that delegates to a concrete `LLMProvider`. Also provides `append_tool_round(messages, response, tool_results)` to build the next message list in provider-agnostic format.
+- **`LLMClient`**: facade that delegates to a concrete `LLMProvider`. Provides `append_tool_round()` and `format_tool_definitions()` which delegate to the provider so each builds messages and tool schemas in its native format (PR-review S1, S2).
 - **`_create_provider(agent_config)`**: factory that resolves provider from `agent_config["provider"]` or infers from model prefix (`claude*` → anthropic, else → openai). Reads `provider_config` for `base_url` overrides.
 - **Dependency note**: both `anthropic>=0.40.0,<1` and `openai>=1.50.0,<2` already present in `agents/pyproject.toml` — no additions needed.
 - **`TaskInputConfig`**: `max_llm_calls: int = 0`, `max_tokens: int = 0`, `allowed_tools: list[str] = field(default_factory=list)` (PR-review B2: carried from proto, enforcement deferred to v0.2).
@@ -192,6 +192,9 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 - **AnthropicProvider**: mock `AsyncAnthropic` → `create_message` normalizes `ToolUseBlock` → `ToolCall`, string `stop_reason` → `StopReason` enum, `Usage` extracted correctly.
 - **OpenAIProvider**: mock `AsyncOpenAI` → `create_message` normalizes function tool calls → `ToolCall`, `finish_reason` → `StopReason` enum, `base_url` passed through.
+- **`append_tool_round` per provider**: `AnthropicProvider` builds content-block arrays with `tool_result` type; `OpenAIProvider` builds `tool`-role messages with `tool_call_id`. Verify each produces its native format (PR-review S1).
+- **`format_tool_definitions` per provider**: `AnthropicProvider` maps `parameters` → `input_schema`; `OpenAIProvider` wraps in `{"type": "function", "function": {...}}`. Verify normalized input → provider-specific output (PR-review S2).
+- **Unmapped stop reason**: provider returns unknown stop reason → mapped to `StopReason.END_TURN` with warning log (PR-review N1).
 - **`_create_provider` factory**: `model="claude-sonnet-4-20250514"` → `AnthropicProvider`; `model="gpt-4o"` → `OpenAIProvider`; explicit `provider="openai"` with `base_url` → `OpenAIProvider` with custom URL; unknown provider → `SystemExit`.
 - **Tool dispatch**: mock LLM returns `ToolCall` → tool executed → `LLMToolResult` returned; unknown tool → error result; permission denied → error result; generic exception → error result (PR-review M2).
 - **Handle loop — END_TURN**: mock returns text → `TaskOutput(status=COMPLETED)`.

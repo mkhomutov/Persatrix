@@ -110,7 +110,7 @@ proto/task.proto  ──grpc_tools.protoc──►  agents/generated/task_pb2.py
 
 The existing `Makefile` `proto` target already generates both Go and Python stubs in a single `protoc` invocation (`--python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT)`). No new Makefile target is needed — Phase 1 only needs to ensure the `agents/generated/` output directory exists (already handled by `@mkdir -p $(PROTO_PY_OUT)`) and add `agents/generated/__init__.py`.
 
-Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration) and `anthropic >= 0.40.0` (for LLM client). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
+Dependencies added to `pyproject.toml`: `grpcio >= 1.68.0`, `grpcio-tools >= 1.68.0`, `protobuf >= 5.28.0` (matching existing version pins in `pyproject.toml`). Additional new dependencies across all phases: `aiohttp >= 3.9.0` (for `http_request` tool and self-registration), `anthropic >= 0.40.0` (for Anthropic LLM provider), and `openai >= 1.50.0` (for OpenAI-compatible LLM provider). (PR-review N1: aligned version pins with pyproject.toml; PR-review M7: consolidated dependency list.)
 
 ### TaskInputConfig Dataclass
 
@@ -359,7 +359,9 @@ async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult
 ```python
 async def handle(self, task: TaskInput) -> TaskOutput:
     messages = self._build_messages(task)
-    tools = self._get_tool_definitions()
+    # PR-review S2: _get_tool_definitions() returns normalized format;
+    # format_tool_definitions() translates to provider-specific schema.
+    tools = self._llm_client.format_tool_definitions(self._get_tool_definitions())
     total_tokens = 0
     tool_calls_count = 0
 
@@ -420,7 +422,14 @@ from typing import Any, Protocol
 
 
 class StopReason(Enum):
-    """Provider-agnostic stop reason."""
+    """Provider-agnostic stop reason.
+
+    Unmapped provider-specific stop reasons (e.g. Anthropic's stop_sequence,
+    OpenAI's content_filter) are mapped to END_TURN with a warning log.
+    This prevents undefined behavior in the handle() loop if the LLM
+    returns an unexpected stop reason.
+    (PR-review N1: documented fallback behavior for unmapped stop reasons.)
+    """
     END_TURN = "end_turn"
     TOOL_USE = "tool_use"
     MAX_TOKENS = "max_tokens"
@@ -464,11 +473,50 @@ class LLMResponse:
 
 
 class LLMProvider(Protocol):
-    """Protocol for LLM provider implementations."""
+    """Protocol for LLM provider implementations.
+
+    Each provider owns its full message lifecycle: creating messages,
+    formatting tool definitions for its SDK, and building conversation
+    history after tool-use rounds.  This keeps provider-specific message
+    formats (Anthropic's content-block arrays vs OpenAI's role-based
+    messages) encapsulated behind the protocol boundary.
+    (PR-review S1: moved append_tool_round here so each provider builds
+    messages in its native format instead of a single OpenAI-specific
+    implementation on LLMClient.)
+    """
     async def create_message(
         self, *, model: str, messages: list, system: str,
         tools: list, max_tokens: int, temperature: float,
     ) -> LLMResponse: ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        """Translate normalized tool definitions to provider-specific format.
+
+        Normalized format (input):
+            {"name": ..., "description": ..., "parameters": {JSON Schema}}
+        Anthropic format:
+            {"name": ..., "description": ..., "input_schema": {JSON Schema}}
+        OpenAI format:
+            {"type": "function", "function": {"name": ..., "description": ..., "parameters": {JSON Schema}}}
+
+        (PR-review S2: tool definition schema differs between providers;
+        this method is the translation point.)
+        """
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        """Build the next message list after a tool-use round.
+
+        Each provider constructs messages in its native format:
+        - Anthropic: assistant content blocks + user message with tool_result blocks
+        - OpenAI: assistant message with tool_calls + tool-role messages
+
+        (PR-review S1: moved from LLMClient to protocol so each provider
+        owns its message format.)
+        """
+        ...
 
 
 class AnthropicProvider:
@@ -489,7 +537,20 @@ class AnthropicProvider:
         return self._normalize(response)
 
     def _normalize(self, response) -> LLMResponse:
-        # Translate ToolUseBlock → ToolCall, stop_reason strings → StopReason enum
+        # Map: ToolUseBlock → ToolCall, stop_reason string → StopReason enum,
+        # TextBlock → text, response.usage → Usage dataclass
+        ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        # Anthropic: {"name", "description", "input_schema"} — rename "parameters" → "input_schema"
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        # Anthropic format: assistant content blocks, then user message with tool_result blocks
+        # {"role": "assistant", "content": [TextBlock, ToolUseBlock, ...]}
+        # {"role": "user", "content": [{"type": "tool_result", "tool_use_id": ..., "content": ...}, ...]}
         ...
 
 
@@ -517,7 +578,20 @@ class OpenAIProvider:
         return self._normalize(response)
 
     def _normalize(self, response) -> LLMResponse:
-        # Translate function tool calls → ToolCall, finish_reason → StopReason
+        # Map: function tool calls → ToolCall, finish_reason string → StopReason enum,
+        # message.content → text, response.usage → Usage dataclass
+        ...
+
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        # OpenAI: {"type": "function", "function": {"name", "description", "parameters"}}
+        ...
+
+    def append_tool_round(
+        self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
+    ) -> list:
+        # OpenAI format: assistant message with tool_calls, then tool-role messages
+        # {"role": "assistant", "content": ..., "tool_calls": [{"id": ..., "type": "function", "function": {...}}, ...]}
+        # {"role": "tool", "tool_call_id": ..., "content": ...}  (one per result)
         ...
 
 
@@ -529,22 +603,28 @@ class LLMClient:
     async def create_message(self, **kwargs) -> LLMResponse:
         return await self._provider.create_message(**kwargs)
 
+    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
+        """Translate normalized tool definitions to provider-specific format.
+
+        PR-review S2: `_get_tool_definitions()` returns a normalized format
+        (name/description/parameters). Each provider's `format_tool_definitions()`
+        translates to its SDK's expected schema before passing to `create_message()`.
+        """
+        return self._provider.format_tool_definitions(tools)
+
     def append_tool_round(
         self, messages: list, response: LLMResponse, tool_results: list[LLMToolResult],
     ) -> list:
         """Build the next message list after a tool-use round.
 
         Review-fix B2: this method was called in the handle() loop but
-        had no pseudocode definition. Appends the assistant's response
-        (including tool_calls) and the tool results to the conversation,
-        using the provider's native message format.
+        had no pseudocode definition. Delegates to the provider so each
+        builds messages in its native format.
+        (PR-review S1: moved message construction to LLMProvider protocol
+        — Anthropic uses content-block arrays with tool_result type,
+        OpenAI uses tool-role messages with tool_call_id.)
         """
-        # Append assistant response with tool calls
-        messages = [*messages, {"role": "assistant", "content": response.text, "tool_calls": response.tool_calls}]
-        # Append each tool result as a tool-role message
-        for result in tool_results:
-            messages.append({"role": "tool", "tool_call_id": result.tool_call_id, "content": result.content})
-        return messages
+        return self._provider.append_tool_round(messages, response, tool_results)
 ```
 
 Provider is resolved from agent config at startup:
@@ -1085,6 +1165,7 @@ The following items identified during RFC 0004 design and review are explicitly 
 | MCP tool bridge (`agents/tools/mcp_bridge.py`) | Core spec §5.2 | MVP tools are built-in; MCP bridge adds external tool provider support in v0.2 |
 | Per-agent rate limiting on tool wrapper | Non-Goals | Scaffolded (`# TODO: Rate limit check`) but not implemented; enforcement deferred to v0.2 |
 | `store_get` / `store_set` task-scoped key-value tools | Non-Goals | Deferred; four core tools sufficient for v0.1 workflows |
+| Shell command argument pattern matching | Review-fix S3, [Security §](#shell-command-argument-injection-known-risk) | v0.1 validates command name/prefix only; per-command argument regex deferred. Impact mitigated by Docker container isolation and `PathValidator` deny list |
 
 ### Server & Infrastructure
 
@@ -1095,6 +1176,7 @@ The following items identified during RFC 0004 design and review are explicitly 
 | Multi-agent-per-process hosting | Deep-review D2 | v0.1 is single-agent-per-process. Servicer accepts `dict[str, BaseAgent]` for future expansion |
 | Service discovery / retry-based registration | Open Q5 | Fire-and-forget registration. Docker `depends_on` handles ordering; proper discovery for distributed deployment |
 | Shutdown drain (wait for in-flight tasks) | Review finding | `server.stop(grace=30)` handles it at the gRPC level; explicit task draining is a v0.2 hardening concern |
+| DNS rebinding hardening (resolve before connect, reject private IPs) | [Security §](#dns-rebinding-known-limitation) | Impact limited by default `deny: ["*"]` network policy; hardening deferred to v0.2 |
 
 ### Observability & Quality
 
