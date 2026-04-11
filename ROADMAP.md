@@ -29,7 +29,7 @@ This document tracks development progress across all phases. Update it when merg
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | ✅ Implemented | 7+4 | 11/11 |
-| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 2/7 |
+| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 3/7 |
 
 ### Dependency Chain
 
@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 3 merged, 2/7)
+RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 4a merged, 3/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
@@ -67,7 +67,8 @@ v0.1 Complete ─ end-to-end execution working
 
 | Module | Purpose | Status |
 |--------|---------|--------|
-| `agents/base.py` | BaseAgent ABC + dataclasses | ✅ Complete (interface) |
+| `agents/base.py` | BaseAgent ABC + dataclasses + LLM loop | ✅ Complete (RFC 0004 PR 4a) |
+| `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/server.py` | gRPC service entry point | 🔲 TODO (RFC 0004 PR 5a) |
 | `agents/coder.py` | Code generation task agent | 🔲 TODO (RFC 0004 PR 4b) |
 | `agents/reviewer.py` | Code review task agent | 🔲 TODO (RFC 0004 PR 4b) |

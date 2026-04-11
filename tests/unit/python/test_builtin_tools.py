@@ -548,3 +548,72 @@ class TestTruncation:
         result = _truncate(long_text)
         assert result.endswith("[truncated at 100 KB]")
         assert len(result) < len(long_text)
+
+    def test_multibyte_boundary_no_replacement_chars(self):
+        """S-07: Truncation at multi-byte character boundary must not produce
+        \\ufffd replacement characters. Uses errors='ignore' to drop incomplete
+        sequences instead."""
+        from agents.tools.builtin import _truncate
+
+        # Fill up to just below MAX_OUTPUT_BYTES with ASCII, then add emoji
+        # so the boundary falls in the middle of a multi-byte character.
+        padding = "A" * (MAX_OUTPUT_BYTES - 2)
+        emoji_suffix = "🌍🌍🌍"  # Each emoji is 4 UTF-8 bytes
+        text = padding + emoji_suffix
+        result = _truncate(text)
+        # No replacement characters should appear in the output
+        assert "\ufffd" not in result
+        assert result.endswith("[truncated at 100 KB]")
+
+    def test_cjk_boundary_no_replacement_chars(self):
+        """S-07: CJK characters (3-byte UTF-8) at boundary also safe."""
+        from agents.tools.builtin import _truncate
+
+        # CJK characters are 3 bytes each in UTF-8
+        padding = "A" * (MAX_OUTPUT_BYTES - 1)
+        cjk_suffix = "中文字符" * 10
+        text = padding + cjk_suffix
+        result = _truncate(text)
+        assert "\ufffd" not in result
+
+
+# ─── Response header filtering ──────────────────────────────
+
+
+class TestResponseHeaderFiltering:
+    async def test_safe_headers_returned(self, tmp_path):
+        """S-06: Only safe headers are returned to the LLM."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value="ok")
+        mock_resp.headers = {
+            "Content-Type": "application/json",
+            "Content-Length": "2",
+            "Date": "Fri, 11 Apr 2026 00:00:00 GMT",
+            "Set-Cookie": "session=abc123; HttpOnly",
+            "Server": "nginx/1.25.0",
+            "X-Powered-By": "Express",
+            "X-Request-Id": "req-12345",
+        }
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request("https://api.example.com/v1/data")
+
+        headers = result.data["headers"]
+        # Safe headers present
+        assert "Content-Type" in headers
+        assert "Content-Length" in headers
+        assert "Date" in headers
+        # Sensitive headers filtered out
+        assert "Set-Cookie" not in headers
+        assert "Server" not in headers
+        assert "X-Powered-By" not in headers
+        assert "X-Request-Id" not in headers

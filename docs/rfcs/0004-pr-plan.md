@@ -186,7 +186,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] PR 2 follow-up N-05: ROADMAP 🚧 emoji renders correctly (UTF-8)
 - [x] `permissions.py` lines 106–107 coverage gap addressed (non-wildcard deny test)
 
-> **Status: Pending merge (#37)**
+> **Status: ✅ Merged (#37)**
 
 #### Review follow-up findings (PR #37 review)
 
@@ -443,10 +443,10 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ```
 PR 1 (py-proto-gen) ────────────────────────────┐
                                                  │
-PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Pending (#37)
+PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Merged (#37)
                                                    │
                                                    ▼
-                                              PR 4a (llm-client-base + PR 3 follow-ups)
+                                              PR 4a (llm-client-base + PR 3 follow-ups) ✅ Pending (#38)
                                                    │
                                                    ├──► PR 4b (task-agents) ───┐
                                                    │                            │
