@@ -122,22 +122,20 @@ class BaseAgent(ABC):
         S-12: Filters to only tools listed in agent's ``tools`` config.
         An empty list means no tools are exposed (e.g. PlannerAgent).
         """
+        # F-04: early return avoids iterating the full registry when no
+        # tools are configured for this agent.
         allowed = self.config.get("tools", [])
-        defs: list[dict[str, Any]] = []
-        for td in list_tools():
-            if allowed and td.name not in allowed:
-                continue
-            if not allowed:
-                # No tools configured — expose nothing.
-                continue
-            defs.append(
-                {
-                    "name": td.name,
-                    "description": td.description,
-                    "parameters": td.parameters,
-                }
-            )
-        return defs
+        if not allowed:
+            return []
+        return [
+            {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            }
+            for td in list_tools()
+            if td.name in allowed
+        ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
         """Execute tool calls sequentially, returning LLM-facing results.

@@ -280,6 +280,17 @@ class TestHealthCheck:
         )
         assert resp.status == task_pb2.NOT_SERVING
 
+    async def test_unknown_agent_returns_not_serving(self):
+        """F-01: requesting health for an unloaded agent ID returns NOT_SERVING."""
+        agent = _StubAgent(agent_id="loaded-agent", config={})
+        servicer = AgentServiceServicer({"loaded-agent": agent})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        resp = await servicer.HealthCheck(
+            task_pb2.HealthCheckRequest(service="nonexistent"), context
+        )
+        assert resp.status == task_pb2.NOT_SERVING
+
 
 class TestExecuteTaskStream:
     """Tests for the unimplemented streaming RPC."""
@@ -396,6 +407,16 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="Cannot determine agent type"):
                 load_agent("mystery", config_path, tmp)
 
+    def test_agent_entry_missing_id_field(self):
+        """F-03: agent config entry without 'id' gives a clear SystemExit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {"name": "No ID Agent", "capabilities": ["planning"]},
+            ])
+            with pytest.raises(SystemExit, match="missing required 'id' field"):
+                load_agent("planner", config_path, tmp)
+
 
 class TestResolveAgentType:
     """Tests for _resolve_agent_type()."""
@@ -452,6 +473,24 @@ class TestAgentServer:
         await server.stop()
 
         agent.shutdown.assert_awaited_once()
+
+    async def test_shutdown_exception_does_not_block_siblings(self):
+        """F-02: one agent's shutdown() raising must not prevent others from cleaning up."""
+        server = AgentServer(host="127.0.0.1", port=0, shutdown_grace=1)
+
+        agent_a = _StubAgent(agent_id="agent-a", config={})
+        agent_a.shutdown = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+        agent_b = _StubAgent(agent_id="agent-b", config={})
+        agent_b.shutdown = AsyncMock()
+
+        server.register_agent(agent_a)
+        server.register_agent(agent_b)
+
+        await server.start()
+        await server.stop()
+
+        agent_a.shutdown.assert_awaited_once()
+        agent_b.shutdown.assert_awaited_once()
 
 
 # ─── In-Process gRPC Integration Tests ──────────────────────

@@ -119,8 +119,14 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> task_pb2.HealthCheckResponse:
         # PR-review B4: delegate to agent.health_check()
-        agent = self._agents.get(request.service) if request.service else None
-        if agent is not None:
+        if request.service:
+            agent = self._agents.get(request.service)
+            if agent is None:
+                # F-01: unknown agent ID must return NOT_SERVING so the
+                # orchestrator doesn't route tasks to a non-existent agent.
+                return task_pb2.HealthCheckResponse(
+                    status=task_pb2.NOT_SERVING
+                )
             healthy = await agent.health_check()
         else:
             healthy = len(self._agents) > 0
@@ -177,6 +183,13 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
     except yaml.YAMLError as exc:
         raise SystemExit(f"Invalid YAML in {config_path}: {exc}")
 
+    # F-03: validate 'id' field presence before dict comprehension to
+    # surface a clear SystemExit instead of a raw KeyError.
+    for i, a in enumerate(config.get("agents", [])):
+        if "id" not in a:
+            raise SystemExit(
+                f"Agent config entry {i} missing required 'id' field"
+            )
     agent_configs = {a["id"]: a for a in config.get("agents", [])}
     if agent_id not in agent_configs:
         raise SystemExit(f"Agent {agent_id!r} not found in {config_path}")
@@ -255,8 +268,13 @@ class AgentServer:
         logger.info("Shutting down agent server...")
         if self._server:
             await self._server.stop(grace=self.shutdown_grace)
-        for agent in self.agents.values():
-            await agent.shutdown()
+        # F-02: isolate per-agent shutdown errors so one agent's failure
+        # doesn't prevent cleanup of remaining agents.
+        for agent_id, agent in self.agents.items():
+            try:
+                await agent.shutdown()
+            except Exception:
+                logger.exception("Error shutting down agent %s", agent_id)
         logger.info("Agent server stopped.")
 
 

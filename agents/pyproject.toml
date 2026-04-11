@@ -9,8 +9,8 @@ license = {text = "Apache-2.0"}
 # Caps are set at the next major (or next minor for 0.x) version to allow
 # compatible updates while guarding against breaking API changes.
 dependencies = [
-    "grpcio>=1.68.0,<2",
-    "grpcio-tools>=1.68.0,<2",
+    "grpcio>=1.71.2,<2",
+    "grpcio-tools>=1.71.2,<2",
     "protobuf>=5.28.0,<6",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
