@@ -186,7 +186,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] PR 2 follow-up N-05: ROADMAP 🚧 emoji renders correctly (UTF-8)
 - [x] `permissions.py` lines 106–107 coverage gap addressed (non-wildcard deny test)
 
-> **Status: Pending merge (#37)**
+> **Status: ✅ Merged (#37)**
 
 #### Review follow-up findings (PR #37 review)
 
@@ -258,18 +258,36 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_llm_client.py tests/unit/python/test_base_handle.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/llm_client.py` and new methods in `agents/base.py`
-- [ ] `ruff check agents/llm_client.py agents/base.py` clean
-- [ ] `TaskInputConfig` uses `field(default_factory=list)` for mutable default
-- [ ] `LLMProvider` protocol implemented by both `AnthropicProvider` and `OpenAIProvider`
-- [ ] Normalized types (`LLMResponse`, `ToolCall`, `StopReason`) used in handle loop (no provider-specific types leak)
-- [ ] `_create_provider()` supports inference from model prefix and explicit `provider` config
-- [ ] No API keys logged or stored in config
-- [ ] All tests use mock LLM (no real API calls)
-- [ ] PR 3 follow-up S-05: `_truncate()` uses `errors='ignore'` (no `\ufffd` replacement chars at boundary)
-- [ ] PR 3 follow-up S-06: `http_request()` filters response headers to safe subset
-- [ ] PR 3 follow-up S-07: `_truncate()` multi-byte boundary test added (emoji at `MAX_OUTPUT_BYTES` boundary)
+- [x] `pytest tests/unit/python/test_llm_client.py tests/unit/python/test_base_handle.py -v` passes
+- [x] Coverage ≥ 80% for `agents/llm_client.py` and new methods in `agents/base.py`
+- [x] `ruff check agents/llm_client.py agents/base.py` clean
+- [x] `TaskInputConfig` uses `field(default_factory=list)` for mutable default
+- [x] `LLMProvider` protocol implemented by both `AnthropicProvider` and `OpenAIProvider`
+- [x] Normalized types (`LLMResponse`, `ToolCall`, `StopReason`) used in handle loop (no provider-specific types leak)
+- [x] `_create_provider()` supports inference from model prefix and explicit `provider` config
+- [x] No API keys logged or stored in config
+- [x] All tests use mock LLM (no real API calls)
+- [x] PR 3 follow-up S-05: `_truncate()` uses `errors='ignore'` (no `\ufffd` replacement chars at boundary)
+- [x] PR 3 follow-up S-06: `http_request()` filters response headers to safe subset
+- [x] PR 3 follow-up S-07: `_truncate()` multi-byte boundary test added (emoji at `MAX_OUTPUT_BYTES` boundary)
+
+#### Review follow-up findings (PR #38 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-08 | Should Fix | test_base_handle.py | Missing test for `_run_llm_loop()` fail-fast when `model` key is absent from agent config (review-fix SF2 guard). Simple `config={"max_llm_calls": 10}` with no `model` → `FAILED` with "missing required 'model' field" | PR 4b |
+| S-09 | Should Fix | llm_client.py | `create_provider()` passes `api_key=None` to SDK constructors when env var is unset — agent starts but fails on first task with a confusing auth error. Log warning at startup if key is `None` for non-local providers | PR 5a |
+| S-10 | Should Fix | llm_client.py | `_infer_provider()` prefix `model.startswith(("o1", "o3"))` is too broad — could false-match future non-OpenAI models. Change to `("o1-", "o1", "o3-", "o3", "o4")` or document the prefix convention | PR 4b |
+| S-11 | Should Fix | base.py | `_run_llm_loop()` exception handler puts `str(exc)` into task result — SDK exceptions could contain internal URLs or partial auth tokens. Return generic `"LLM provider error"` in result, keep full exception in ERROR log (already logged) | PR 5a |
+| C-05 | Consider | base.py | `_execute_tools()` has no per-tool timeout — a hanging tool blocks the entire loop iteration. `shell_exec` and `http_request` have their own timeouts, but custom/MCP tools may not. Add a per-tool `asyncio.timeout()` wrapper | v0.2 |
+| C-06 | Consider | base.py | `messages` list in `_run_llm_loop()` grows unbounded across tool rounds — no context window management. For long tool chains (8+ rounds) the array could exceed model context limits, causing a provider error rather than graceful degradation | v0.2 |
+| C-07 | Consider | llm_client.py | No retry logic for transient LLM provider errors (rate limits `429`, network timeouts, `5xx`). `LLMClient` facade is the ideal extension point for retry-with-backoff | v0.2 |
+| C-08 | Consider | base.py | `TaskInputConfig` has no validation for negative values — `max_llm_calls=-1` produces `range(-1)` which is safe (empty range) but semantically wrong. A `__post_init__` validator could clamp to `max(0, value)` | v0.2 |
+| C-09 | Consider | llm_client.py | `ToolCall`, `LLMToolResult`, `LLMResponse`, `Usage` dataclasses created frequently during tool-heavy workflows. Adding `__slots__=True` to `@dataclass` decorators reduces memory and improves attribute access ~25% | v0.2 |
+
+**Strategy**: S-08 and S-10 are low-cost fixes bundled into PR 4b (which exercises the handle loop with real agent prompts). S-09 and S-11 are bundled into PR 5a (server startup and error handling improvements). C-05 through C-09 deferred to v0.2.
+
+> **Status: ⏳ Pending (#38)**
 
 ---
 
@@ -278,6 +296,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Depends on**: PR 4a merged (LLM client, base handle loop)
 **Branch**: `feature/v01-task-agents`
 **Estimated size**: ~300–450 lines (implementation + tests)
+
+> **Note**: This PR also addresses follow-up findings S-08 (missing `model` config test) and S-10 (narrow `_infer_provider` prefixes) from the PR #38 review (see PR 4a follow-up table above). These are small targeted fixes: one new test case and a prefix string update.
 
 #### Scope
 
@@ -316,6 +336,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] System prompts use `self.config["role"]`
 - [ ] `capabilities` property aligned with config (deep-review d5)
 - [ ] No real LLM calls in tests
+- [ ] PR 4a follow-up S-08: test for missing `model` config → `FAILED` with "missing required 'model' field"
+- [ ] PR 4a follow-up S-10: `_infer_provider()` prefix narrowed for o-series models (e.g., `"o1-"`, `"o3-"`)
 
 ---
 
@@ -326,12 +348,16 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Estimated size**: ~350–500 lines (implementation + tests)
 
 > **Note**: Phase 5 naive estimate of ~600 LOC × 1.7 = ~1,020 LOC exceeds the 500-line limit. Split at the server/registration boundary: 5a implements the gRPC servicer and agent loading, 5b adds self-registration and integration tests.
+>
+> **Note**: This PR also addresses follow-up findings S-09 (API key warning at startup) and S-11 (sanitize exception messages in task results) from the PR #38 review (see PR 4a follow-up table above). S-09 is a startup log warning in `create_provider()`. S-11 replaces `str(exc)` with a generic message in `_run_llm_loop()` error path.
 
 #### Scope
 
 | File | Change |
 |------|--------|
 | `agents/server.py` | Replace stubs — `AgentServiceServicer` (ExecuteTask, HealthCheck, ExecuteTaskStream), `load_agent()`, `AgentServer.start()` / `stop()`, CLI arg parsing (`--agent`, `--port`, `--host`, `--config`, `--workspace`, `--log-level`, `--shutdown-grace`), graceful shutdown |
+| `agents/llm_client.py` | Follow-up fix S-09: log warning when API key is `None` for non-local providers in `create_provider()` |
+| `agents/base.py` | Follow-up fix S-11: sanitize LLM exception messages in `_run_llm_loop()` error path — return generic message, keep details in ERROR log |
 | `tests/unit/python/test_server.py` | New — server unit tests with in-process gRPC client |
 
 #### Key implementation details
@@ -371,6 +397,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] Signal handler guarded with `sys.platform != "win32"`
 - [ ] No TLS (v0.1) with `# TODO(security)` comment
 - [ ] `ExecuteTaskStream` returns `UNIMPLEMENTED`
+- [ ] PR 4a follow-up S-09: `create_provider()` logs warning when API key is `None` for non-local providers
+- [ ] PR 4a follow-up S-11: `_run_llm_loop()` exception returns generic `"LLM provider error"` message (no `str(exc)` in task result)
 
 ---
 
@@ -443,18 +471,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ```
 PR 1 (py-proto-gen) ────────────────────────────┐
                                                  │
-PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Pending (#37)
+PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow-ups) ✅ Merged (#37)
                                                    │
                                                    ▼
-                                              PR 4a (llm-client-base + PR 3 follow-ups)
+                                              PR 4a (llm-client-base + PR 3 follow-ups) ✅ Pending (#38)
                                                    │
-                                                   ├──► PR 4b (task-agents) ───┐
-                                                   │                            │
-                                                   ▼                            │
-                                              PR 5a (grpc-server) ◄── PR 1     │
-                                                   │                            │
-                                                   ▼                            ▼
-                                              PR 5b (agent-registration) ◄── PR 4b
+                                                   ├──► PR 4b (task-agents + PR 4a S-08, S-10) ──┐
+                                                   │                                               │
+                                                   ▼                                               │
+                                              PR 5a (grpc-server + PR 4a S-09, S-11) ◄── PR 1     │
+                                                   │                                               │
+                                                   ▼                                               ▼
+                                              PR 5b (agent-registration) ◄──────────────────── PR 4b
 ```
 
 > **PR 1 ‖ PR 2** can proceed in parallel — they are fully independent. This is the widest parallelism available.
@@ -471,8 +499,8 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 
 |----|-------|-----------|-------------------|--------|
 | PR 1 | Phase 1 | ~50 | ~85 | Not started |
 | PR 2 | Phase 2 | ~400 | ~680 | ✅ Merged (#36) |
-| PR 3 | Phase 3 | ~500 | ~500¹ | Pending merge (#37) |
-| PR 4a | Phase 4 (core) | ~350 | ~500¹ | Not started |
+| PR 3 | Phase 3 | ~500 | ~500¹ | ✅ Merged (#37) |
+| PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Pending (#38) |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | Not started |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | Not started |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |

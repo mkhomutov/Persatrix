@@ -6,10 +6,23 @@ Persona agents extend PersonaAgent (see persona.py) which adds
 event-driven communication, sub-agent spawning, and autonomy.
 """
 
+import json
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from .llm_client import (
+    LLMClient,
+    LLMResponse,
+    LLMToolResult,
+    StopReason,
+    ToolCall,
+)
+from .tools.registry import get_tool, list_tools
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
@@ -20,6 +33,17 @@ class TaskStatus(Enum):
 
 
 @dataclass
+class TaskInputConfig:
+    """Per-task configuration overrides from TaskConfig proto message."""
+
+    max_llm_calls: int = 0  # 0 means "use agent default"
+    max_tokens: int = 0  # 0 means "use agent default"
+    # PR-review B2: carry allowed_tools from proto even though enforcement
+    # is deferred to v0.2, so the field is available to wire up later.
+    allowed_tools: list[str] = field(default_factory=list)  # TODO(v0.2): enforce
+
+
+@dataclass
 class TaskInput:
     """Input to an agent for task execution."""
 
@@ -27,6 +51,7 @@ class TaskInput:
     workflow_id: str
     payload: str
     context: dict[str, str] = field(default_factory=dict)
+    config: TaskInputConfig = field(default_factory=TaskInputConfig)
 
 
 @dataclass
@@ -46,9 +71,15 @@ class BaseAgent(ABC):
     Persona agents: extend PersonaAgent instead (see persona.py).
     """
 
-    def __init__(self, agent_id: str, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        agent_id: str,
+        config: dict[str, Any] | None = None,
+        llm_client: LLMClient | None = None,
+    ):
         self.agent_id = agent_id
         self.config = config or {}
+        self._llm_client = llm_client
 
     @abstractmethod
     async def handle(self, task: TaskInput) -> TaskOutput:
@@ -61,10 +92,9 @@ class BaseAgent(ABC):
         ...
 
     @property
-    @abstractmethod
     def capabilities(self) -> list[str]:
-        """Declare what this agent can do (used for agent selection)."""
-        ...
+        """Declare what this agent can do (config-driven, deep-review d5)."""
+        return self.config.get("capabilities", [])
 
     @property
     def name(self) -> str:
@@ -83,3 +113,184 @@ class BaseAgent(ABC):
     async def shutdown(self) -> None:
         """Called during graceful shutdown. Override to clean up resources."""
         pass
+
+    # ─── Shared LLM Loop ────────────────────────────────────
+
+    def _build_tool_definitions(self) -> list[dict[str, Any]]:
+        """Build normalized tool definitions from the tool registry."""
+        defs: list[dict[str, Any]] = []
+        for td in list_tools():
+            defs.append(
+                {
+                    "name": td.name,
+                    "description": td.description,
+                    "parameters": td.parameters,
+                }
+            )
+        return defs
+
+    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
+        """Execute tool calls sequentially, returning LLM-facing results.
+
+        # TODO(v0.2): parallel tool execution with conflict detection
+        """
+        results: list[LLMToolResult] = []
+        for call in tool_calls:
+            tool_def = get_tool(call.name)
+            if tool_def is None or tool_def.func is None:
+                results.append(
+                    LLMToolResult(
+                        tool_call_id=call.id,
+                        content=f"Unknown tool: {call.name}",
+                        is_error=True,
+                    )
+                )
+                continue
+            try:
+                result = await tool_def.func(**call.input)
+                if result.success:
+                    # PR-review SF4: Use JSON for dict/list data so the LLM
+                    # sees {"key": true} instead of Python repr {'key': True}.
+                    content = (
+                        json.dumps(result.data)
+                        if isinstance(result.data, (dict, list))
+                        else str(result.data)
+                    )
+                else:
+                    error_msg = result.error or "Tool failed"
+                    # Include error_type when the @tool wrapper captured an
+                    # exception (e.g. PermissionError, ValueError) so the LLM
+                    # receives structured context about the failure category.
+                    if result.error_type:
+                        content = f"Tool error ({result.error_type}): {error_msg}"
+                    else:
+                        content = error_msg
+                results.append(
+                    LLMToolResult(
+                        tool_call_id=call.id,
+                        content=content,
+                        is_error=not result.success,
+                    )
+                )
+            except PermissionError as exc:
+                # Defense-in-depth: normally unreachable because the @tool
+                # wrapper catches all exceptions.  Retained for MCP/custom
+                # tools that may bypass the decorator.
+                results.append(
+                    LLMToolResult(
+                        tool_call_id=call.id,
+                        content=str(exc),
+                        is_error=True,
+                    )
+                )
+            except Exception as exc:
+                # Defense-in-depth: same rationale as PermissionError above.
+                results.append(
+                    LLMToolResult(
+                        tool_call_id=call.id,
+                        content=f"Tool error ({type(exc).__name__}): {exc}",
+                        is_error=True,
+                    )
+                )
+        return results
+
+    async def _run_llm_loop(
+        self,
+        task: TaskInput,
+        system_prompt: str,
+    ) -> TaskOutput:
+        """Shared handle loop: LLM call → tool dispatch → repeat.
+
+        Subclasses call this from handle() with their system prompt.
+        """
+        if self._llm_client is None:
+            return TaskOutput(
+                status=TaskStatus.FAILED,
+                result="LLM client not configured",
+            )
+
+        # PR-review SF2: Fail fast with a clear message instead of raising
+        # KeyError deep inside the provider call.
+        if "model" not in self.config:
+            return TaskOutput(
+                status=TaskStatus.FAILED,
+                result="Agent config missing required 'model' field",
+            )
+
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": task.payload},
+        ]
+        tool_defs = self._llm_client.format_tool_definitions(
+            self._build_tool_definitions()
+        )
+        total_tokens = 0
+        tool_calls_count = 0
+
+        # 0 is the sentinel for "not set" (falsy), so `or` falls through
+        # to the agent-level default.  See TaskInputConfig docstring.
+        max_llm_calls = task.config.max_llm_calls or self.config.get("max_llm_calls", 10)
+        max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
+
+        for _ in range(max_llm_calls):
+            # review-fix S1: catch provider SDK exceptions (rate limits, auth
+            # errors, network failures) so handle() always returns TaskOutput
+            # instead of propagating unhandled exceptions.
+            try:
+                response: LLMResponse = await self._llm_client.create_message(
+                    model=self.config["model"],
+                    messages=messages,
+                    system=system_prompt,
+                    tools=tool_defs,
+                    max_tokens=max_tokens,
+                    temperature=self.config.get("temperature", 0.3),
+                )
+            except Exception as exc:
+                logger.error(
+                    "LLM provider error in agent %s: %s", self.agent_id, exc,
+                )
+                return TaskOutput(
+                    status=TaskStatus.FAILED,
+                    result=f"LLM provider error ({type(exc).__name__}): {exc}",
+                    metadata={
+                        "tokens_used": str(total_tokens),
+                        "tool_calls": str(tool_calls_count),
+                    },
+                )
+            total_tokens += response.usage.input_tokens + response.usage.output_tokens
+
+            if response.stop_reason == StopReason.END_TURN:
+                return TaskOutput(
+                    status=TaskStatus.COMPLETED,
+                    result=response.text or "",
+                    metadata={
+                        "tokens_used": str(total_tokens),
+                        "tool_calls": str(tool_calls_count),
+                    },
+                )
+
+            if response.stop_reason == StopReason.MAX_TOKENS:
+                return TaskOutput(
+                    status=TaskStatus.FAILED,
+                    result="LLM response truncated: max_tokens limit reached",
+                    metadata={
+                        "tokens_used": str(total_tokens),
+                        "tool_calls": str(tool_calls_count),
+                    },
+                )
+
+            if response.stop_reason == StopReason.TOOL_USE:
+                tool_results = await self._execute_tools(response.tool_calls)
+                tool_calls_count += len(tool_results)
+                messages = self._llm_client.append_tool_round(
+                    messages, response, tool_results
+                )
+                continue
+
+        return TaskOutput(
+            status=TaskStatus.FAILED,
+            result="Max LLM call iterations exceeded",
+            metadata={
+                "tokens_used": str(total_tokens),
+                "tool_calls": str(tool_calls_count),
+            },
+        )

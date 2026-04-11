@@ -50,12 +50,24 @@ def _require_workspace() -> Path:
     return workspace_root
 
 
+# Headers safe to return to the LLM. Excludes potentially sensitive
+# headers like Set-Cookie, Server, X-Powered-By, X-Request-Id.
+_SAFE_RESPONSE_HEADERS = frozenset({
+    "content-type", "content-length", "location", "date",
+    "cache-control", "etag", "last-modified", "retry-after",
+})
+
+
 def _truncate(text: str) -> str:
-    """Truncate text to MAX_OUTPUT_BYTES with an indicator."""
+    """Truncate text to MAX_OUTPUT_BYTES with an indicator.
+
+    Uses errors='ignore' on decode to drop incomplete multi-byte sequences
+    at the boundary instead of producing \ufffd replacement characters (S-05).
+    """
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= MAX_OUTPUT_BYTES:
         return text
-    truncated = encoded[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    truncated = encoded[:MAX_OUTPUT_BYTES].decode("utf-8", errors="ignore")
     return truncated + "\n... [truncated at 100 KB]"
 
 
@@ -286,12 +298,20 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             # redirect target after domain re-validation (review M-01).
             async with session.request(**kwargs, allow_redirects=False) as resp:
                 text = await resp.text()
+                # S-06: filter to safe header subset to avoid leaking
+                # Set-Cookie, Server, X-Powered-By etc. to the LLM.
+                safe_headers = {
+                    k: v
+                    for k, v in resp.headers.items()
+                    if k.lower() in _SAFE_RESPONSE_HEADERS
+                }
+                logger.debug("Full response headers: %s", dict(resp.headers))
                 return ToolResult(
                     success=True,
                     data={
                         "status": resp.status,
                         "body": _truncate(text),
-                        "headers": dict(resp.headers),
+                        "headers": safe_headers,
                     },
                 )
     except aiohttp.ClientError as exc:

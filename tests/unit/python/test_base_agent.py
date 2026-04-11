@@ -8,7 +8,7 @@ importable, instantiable, and behave as documented.
 
 import pytest
 
-from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from agents.base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 
 
 # ─── Concrete subclass for testing the ABC ──────────────────
@@ -21,10 +21,6 @@ class StubAgent(BaseAgent):
             status=TaskStatus.COMPLETED,
             result=f"handled: {task.payload}",
         )
-
-    @property
-    def capabilities(self) -> list[str]:
-        return ["testing"]
 
 
 # ─── Tests ──────────────────────────────────────────────────
@@ -49,6 +45,18 @@ class TestTaskInput:
         ti = TaskInput(task_id="t1", workflow_id="w1", payload="x")
         assert ti.context == {}
 
+    def test_default_config(self):
+        ti = TaskInput(task_id="t1", workflow_id="w1", payload="x")
+        assert ti.config.max_llm_calls == 0
+        assert ti.config.max_tokens == 0
+        assert ti.config.allowed_tools == []
+
+    def test_config_override(self):
+        cfg = TaskInputConfig(max_llm_calls=5, max_tokens=2048, allowed_tools=["file_read"])
+        ti = TaskInput(task_id="t1", workflow_id="w1", payload="x", config=cfg)
+        assert ti.config.max_llm_calls == 5
+        assert ti.config.allowed_tools == ["file_read"]
+
 
 class TestTaskOutput:
     def test_construction(self):
@@ -66,7 +74,7 @@ class TestBaseAgent:
     def test_subclass_instantiation(self):
         agent = StubAgent("agent-1")
         assert agent.agent_id == "agent-1"
-        assert agent.capabilities == ["testing"]
+        assert agent.capabilities == []  # default from config-driven property
 
     def test_default_name_is_agent_id(self):
         agent = StubAgent("agent-1")
