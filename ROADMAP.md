@@ -188,6 +188,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | [#40](https://github.com/mkhomutov/Orchestr8/pull/40) | feat(agents): gRPC server + agent loading + proto stubs + follow-up fixes | 0004 (5a/7) | 2026-04-11 |
 | [#41](https://github.com/mkhomutov/Orchestr8/pull/41) | feat(agents): self-registration + integration tests + follow-up fixes | 0004 (5b/7) | 2026-04-11 |
 | [#42](https://github.com/mkhomutov/Orchestr8/pull/42) | fix(agents): registration follow-ups + RFC 0004 close | 0004 (6/7) | 2026-04-11 |
+| [#44](https://github.com/mkhomutov/Orchestr8/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
 
 ---
 
