@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 4a merged, 3/7)
+RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 4a pending (#38), 3/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
