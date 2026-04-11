@@ -6,7 +6,6 @@ All tests use in-process gRPC client and mock agents — no real API calls.
 
 import asyncio
 import json
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,6 +26,7 @@ from agents.server import (
 from agents.coder import CoderAgent
 from agents.planner_agent import PlannerAgent
 from agents.reviewer import ReviewerAgent
+from agents.tools import builtin
 
 
 # ─── Helpers ─────────────────────────────────────────────────
@@ -530,12 +530,14 @@ class TestAgentServer:
         agent = _StubAgent(agent_id="test-agent", config={})
         server.register_agent(agent)
 
-        await server.start()
+        with patch.object(server, "_self_register", new_callable=AsyncMock):
+            await server.start()
         assert server._server is not None
         # SF-05: when port=0 is used, self.port must be updated to the
         # actual allocated port (not 0).
         assert server.port != 0
-        await server.stop()
+        with patch.object(server, "_self_deregister", new_callable=AsyncMock):
+            await server.stop()
 
     async def test_register_agent(self):
         server = AgentServer()
@@ -549,8 +551,10 @@ class TestAgentServer:
         agent.shutdown = AsyncMock()
         server.register_agent(agent)
 
-        await server.start()
-        await server.stop()
+        with patch.object(server, "_self_register", new_callable=AsyncMock):
+            await server.start()
+        with patch.object(server, "_self_deregister", new_callable=AsyncMock):
+            await server.stop()
 
         agent.shutdown.assert_awaited_once()
 
@@ -566,8 +570,10 @@ class TestAgentServer:
         server.register_agent(agent_a)
         server.register_agent(agent_b)
 
-        await server.start()
-        await server.stop()
+        with patch.object(server, "_self_register", new_callable=AsyncMock):
+            await server.start()
+        with patch.object(server, "_self_deregister", new_callable=AsyncMock):
+            await server.stop()
 
         agent_a.shutdown.assert_awaited_once()
         agent_b.shutdown.assert_awaited_once()
@@ -650,3 +656,127 @@ class TestGRPCIntegration:
             await channel.close()
         finally:
             await server_obj.stop(grace=0)
+
+
+# ─── Follow-Up Finding Tests ────────────────────────────────
+
+
+class TestToolDefinitionFiltering:
+    """S-15: direct test for _build_tool_definitions() filtering by agent config."""
+
+    def test_filters_to_configured_tools(self):
+        """Agent with tools=['file_read'] only sees file_read, not other tools."""
+        from agents.tools.registry import clear_registry, tool, ToolResult
+
+        clear_registry()
+
+        @tool(name="file_read", description="Read a file")
+        async def file_read(path: str) -> ToolResult:
+            return ToolResult(success=True, data="content")
+
+        @tool(name="shell_exec", description="Run command")
+        async def shell_exec(command: str) -> ToolResult:
+            return ToolResult(success=True, data="output")
+
+        agent = _StubAgent(
+            agent_id="test-agent",
+            config={"tools": ["file_read"]},
+        )
+        defs = agent._build_tool_definitions()
+
+        assert len(defs) == 1
+        assert defs[0]["name"] == "file_read"
+
+        clear_registry()
+
+    def test_empty_tools_list_returns_no_tools(self):
+        """Agent with tools=[] (e.g. PlannerAgent) sees no tools."""
+        from agents.tools.registry import clear_registry, tool, ToolResult
+
+        clear_registry()
+
+        @tool(name="file_read", description="Read a file")
+        async def file_read(path: str) -> ToolResult:
+            return ToolResult(success=True, data="content")
+
+        agent = _StubAgent(
+            agent_id="test-agent",
+            config={"tools": []},
+        )
+        defs = agent._build_tool_definitions()
+        assert defs == []
+
+        clear_registry()
+
+    def test_no_tools_key_returns_no_tools(self):
+        """Agent without 'tools' key in config sees no tools."""
+        agent = _StubAgent(agent_id="test-agent", config={})
+        defs = agent._build_tool_definitions()
+        assert defs == []
+
+
+class TestPermissionWiring:
+    """S-16: verify load_agent wires permission_gate and path_validator."""
+
+    @patch("agents.server.create_provider")
+    def test_permissions_wired_after_load(self, mock_create):
+        """After load_agent(), builtin.permission_gate and builtin.path_validator are set."""
+        mock_create.return_value = MagicMock()
+
+        original_gate = builtin.permission_gate
+        original_validator = builtin.path_validator
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                config_path = _write_agent_config(tmp_path, [
+                    {
+                        "id": "code-writer",
+                        "name": "Code Writer",
+                        "model": "test-model",
+                        "capabilities": ["code_generation"],
+                        "tools": ["file_read"],
+                        "permissions": {
+                            "filesystem": {
+                                "read": ["/workspace/**"],
+                                "write": ["/workspace/**"],
+                                "deny": ["/etc/**"],
+                            },
+                            "network": {
+                                "allow": ["api.example.com"],
+                            },
+                        },
+                    },
+                ])
+                load_agent("code-writer", config_path, tmp)
+
+                assert builtin.permission_gate is not None
+                assert builtin.path_validator is not None
+        finally:
+            builtin.permission_gate = original_gate
+            builtin.path_validator = original_validator
+
+
+class TestDuplicateAgentId:
+    """S-17: duplicate agent IDs in config are detected."""
+
+    def test_duplicate_agent_id_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "code-writer",
+                    "name": "Code Writer",
+                    "model": "test-model",
+                    "capabilities": ["code_generation"],
+                    "permissions": {},
+                },
+                {
+                    "id": "code-writer",
+                    "name": "Code Writer Dupe",
+                    "model": "test-model",
+                    "capabilities": ["code_generation"],
+                    "permissions": {},
+                },
+            ])
+            with pytest.raises(SystemExit, match="Duplicate agent ID"):
+                load_agent("code-writer", config_path, tmp)

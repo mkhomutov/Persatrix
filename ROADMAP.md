@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 5b pending, 6/7)
+RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 5b submitted, 6/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
@@ -69,7 +69,7 @@ v0.1 Complete ─ end-to-end execution working
 |--------|---------|--------|
 | `agents/base.py` | BaseAgent ABC + dataclasses + LLM loop | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
-| `agents/server.py` | gRPC service entry point | ✅ Complete (RFC 0004 PR 5a) |
+| `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
 | `agents/coder.py` | Code generation task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
 | `agents/reviewer.py` | Code review task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
 | `agents/planner_agent.py` | Task decomposition agent | ✅ Complete (RFC 0004 PR 4b, #39) |
@@ -99,10 +99,10 @@ v0.1 Complete ─ end-to-end execution working
 
 ### What's Missing for v0.1
 
-1. **Self-registration** — agent registers with orchestrator at startup, de-registers on shutdown
-2. **Integration tests** — end-to-end gRPC task execution with mock LLM
+1. ~~**Self-registration**~~ — PR #41 submitted (agent registers with orchestrator at startup, de-registers on shutdown)
+2. ~~**Integration tests**~~ — PR #41 submitted (end-to-end gRPC task execution with mock LLM)
 
-> Submitted runs are now picked up by the scheduler and driven to completion (assuming agents are registered and reachable). All three task agents (CoderAgent, ReviewerAgent, PlannerAgent) are implemented with LLM integration. The gRPC server (AgentServiceServicer) is fully wired with agent loading from YAML config. Remaining: self-registration and integration tests.
+> Submitted runs are now picked up by the scheduler and driven to completion (assuming agents are registered and reachable). All three task agents (CoderAgent, ReviewerAgent, PlannerAgent) are implemented with LLM integration. The gRPC server (AgentServiceServicer) is fully wired with agent loading from YAML config. Self-registration and integration tests are in PR #41 (final RFC 0004 PR).
 
 ---
 

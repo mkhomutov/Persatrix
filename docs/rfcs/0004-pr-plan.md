@@ -487,18 +487,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_registration.py tests/integration/test_agent_server.py -v` passes
-- [ ] Coverage ≥ 80% for registration code
-- [ ] `ruff check agents/server.py` clean
-- [ ] `aiohttp.ClientSession` created once, shared, closed on shutdown
-- [ ] Registration payload does not include `status` field
-- [ ] De-registration is best-effort (failure logged, not raised)
-- [ ] Integration test uses mock LLM (no real API calls)
-- [ ] PR 4b follow-up S-13: `ReviewerAgent` tool-use test added (registers mock `file_read`, verifies tool dispatch)
-- [ ] PR 5a follow-up S-15: direct unit test for `_build_tool_definitions()` filtering by agent `tools` config list
-- [ ] PR 5a follow-up S-16: test `load_agent` permission wiring — verify `builtin.permission_gate` and `builtin.path_validator` are set after load
-- [ ] PR 5a follow-up S-17: validate or test duplicate agent ID handling in config (raise `SystemExit` or document last-wins)
-- [ ] PR 5a follow-up S-18: empty model string guard in `create_provider()` before `_infer_provider()`
+- [x] `pytest tests/unit/python/test_registration.py tests/integration/test_agent_server.py -v` passes
+- [x] Coverage ≥ 80% for registration code
+- [x] `ruff check agents/server.py` clean
+- [x] `aiohttp.ClientSession` created once, shared, closed on shutdown
+- [x] Registration payload does not include `status` field
+- [x] De-registration is best-effort (failure logged, not raised)
+- [x] Integration test uses mock LLM (no real API calls)
+- [x] PR 4b follow-up S-13: `ReviewerAgent` tool-use test added (registers mock `file_read`, verifies tool dispatch)
+- [x] PR 5a follow-up S-15: direct unit test for `_build_tool_definitions()` filtering by agent `tools` config list
+- [x] PR 5a follow-up S-16: test `load_agent` permission wiring — verify `builtin.permission_gate` and `builtin.path_validator` are set after load
+- [x] PR 5a follow-up S-17: validate or test duplicate agent ID handling in config (raise `SystemExit` or document last-wins)
+- [x] PR 5a follow-up S-18: empty model string guard in `create_provider()` before `_infer_provider()`
 
 ---
 
@@ -555,7 +555,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 | PR 4a | Phase 4 (core) | ~350 | ~500¹ | ✅ Merged (#38) |
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | ✅ Merged (#40) |
-| PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Not started |
+| PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Submitted (#41) |
 
 ¹ Capped at ~500 line target. If calibrated estimate exceeds 500, see Risk Mitigation escape valves.
 

@@ -408,7 +408,12 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
 
     Supports explicit ``provider`` field or inference from model prefix.
     """
-    provider = agent_config.get("provider") or _infer_provider(agent_config["model"])
+    model = agent_config["model"]
+    # S-18: guard against empty model string — "" falls through
+    # _infer_provider() to "openai" fallback, causing a confusing error.
+    if not model:
+        raise SystemExit("Agent config 'model' field is empty")
+    provider = agent_config.get("provider") or _infer_provider(model)
     provider_config = agent_config.get("provider_config", {})
 
     if provider == "anthropic":
