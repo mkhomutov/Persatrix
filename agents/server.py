@@ -346,9 +346,13 @@ class AgentServer:
         if self._session is None:
             return
         for agent_id, agent in self.agents.items():
+            # TODO(v0.2): support advertised address for container/K8s
+            # service discovery — bind address may differ from the address
+            # the orchestrator should use to reach this agent.
             address = f"{self.host}:{self.port}"
             payload = {
                 "id": agent_id,
+                "name": agent.name,
                 "address": address,
                 "capabilities": agent.capabilities,
             }

@@ -1,7 +1,7 @@
 # Orchestr8 Roadmap
 
 > **Last updated**: 2026-04-11  
-> **Current phase**: v0.1 (MVP) — ~85% complete
+> **Current phase**: v0.1 (MVP) — ✅ Complete (RFC 0001–0004 all implemented)
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -29,7 +29,7 @@ This document tracks development progress across all phases. Update it when merg
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | ✅ Implemented | 7+4 | 11/11 |
-| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 6/7 |
+| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | ✅ Implemented | 7 | 7/7 |
 
 ### Dependency Chain
 
@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 5b submitted, 6/7)
+RFC 0004 (Python Agent Server + Tools)        ✅ Done (7/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
@@ -99,10 +99,9 @@ v0.1 Complete ─ end-to-end execution working
 
 ### What's Missing for v0.1
 
-1. ~~**Self-registration**~~ — PR #41 submitted (agent registers with orchestrator at startup, de-registers on shutdown)
-2. ~~**Integration tests**~~ — PR #41 submitted (end-to-end gRPC task execution with mock LLM)
+Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
-> Submitted runs are now picked up by the scheduler and driven to completion (assuming agents are registered and reachable). All three task agents (CoderAgent, ReviewerAgent, PlannerAgent) are implemented with LLM integration. The gRPC server (AgentServiceServicer) is fully wired with agent loading from YAML config. Self-registration and integration tests are in PR #41 (final RFC 0004 PR).
+> Submitted runs are picked up by the scheduler and driven to completion. All three task agents (CoderAgent, ReviewerAgent, PlannerAgent) are implemented with LLM integration. The gRPC server (AgentServiceServicer) is fully wired with agent loading from YAML config. Agents self-register with the orchestrator at startup and de-register on shutdown. End-to-end gRPC integration tests pass with mock LLM.
 
 ---
 
@@ -183,6 +182,8 @@ v0.1 Complete ─ end-to-end execution working
 | [#38](https://github.com/mkhomutov/Orchestr8/pull/38) | feat(agents): LLM client + TaskInputConfig + base handle loop | 0004 (4a/7) | 2026-04-11 |
 | [#39](https://github.com/mkhomutov/Orchestr8/pull/39) | feat(agents): CoderAgent, ReviewerAgent, PlannerAgent | 0004 (4b/7) | 2026-04-11 |
 | [#40](https://github.com/mkhomutov/Orchestr8/pull/40) | feat(agents): gRPC server + agent loading + proto stubs + follow-up fixes | 0004 (5a/7) | 2026-04-11 |
+| [#41](https://github.com/mkhomutov/Orchestr8/pull/41) | feat(agents): self-registration + integration tests + follow-up fixes | 0004 (5b/7) | 2026-04-11 |
+| [#42](https://github.com/mkhomutov/Orchestr8/pull/42) | fix(agents): registration follow-ups + RFC 0004 close | 0004 (6/7) | 2026-04-11 |
 
 ---
 

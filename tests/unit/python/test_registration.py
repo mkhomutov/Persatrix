@@ -66,10 +66,28 @@ class TestSelfRegistration:
         assert call_kwargs[0][0] == "http://127.0.0.1:8080/api/v1/agents/register"
         payload = call_kwargs[1]["json"]
         assert payload["id"] == "test-agent"
+        assert payload["name"] == "test-agent"  # S-19: name included in payload
         assert payload["address"] == "127.0.0.1:50051"
         assert payload["capabilities"] == ["planning"]
         # P1: status is NOT sent in payload
         assert "status" not in payload
+
+    async def test_successful_registration_200(self):
+        """Registration succeeds on HTTP 200 (not just 201)."""
+        server = _make_server()
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(return_value=mock_resp)
+        server._session = mock_session
+        server.port = 50051
+
+        await server._self_register()
+
+        mock_session.post.assert_called_once()
 
     async def test_registration_conflict_409(self):
         """Agent already registered (409) is handled gracefully."""
