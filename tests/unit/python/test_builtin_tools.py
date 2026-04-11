@@ -6,10 +6,10 @@ permission enforcement, sandboxing, output truncation, and error handling.
 Uses autouse fixture for tool-module state isolation.
 """
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 
 from agents.tools import builtin
@@ -121,6 +121,16 @@ class TestFileRead:
         assert result.error_type == "RuntimeError"
         assert "permission_gate is None" in result.error
 
+    async def test_read_binary_file(self, tmp_path):
+        """Reading a binary file returns UnicodeDecodeError, not generic OSError."""
+        _setup_tools(tmp_path)
+        f = tmp_path / "image.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(range(256)))
+        result = await builtin.file_read(str(f))
+        assert result.success is False
+        assert result.error_type == "UnicodeDecodeError"
+        assert "Cannot read binary file" in result.error
+
 
 # ─── file_write tests ──────────────────────────────────────
 
@@ -154,6 +164,25 @@ class TestFileWrite:
         result = await builtin.file_write(str(tmp_path / "file.txt"), "data")
         assert result.success is False
         assert "Permission denied" in result.error
+
+    async def test_write_uninitialized_gate(self, tmp_path):
+        """Uninitialized permission_gate → RuntimeError (symmetric with file_read)."""
+        builtin.permission_gate = None
+        builtin.path_validator = PathValidator(allow_write=[str(tmp_path / "**")])
+        result = await builtin.file_write(str(tmp_path / "file.txt"), "data")
+        assert result.success is False
+        assert result.error_type == "RuntimeError"
+        assert "permission_gate is None" in result.error
+
+    async def test_write_multibyte_reports_byte_count(self, tmp_path):
+        """Verify byte count is accurate for multi-byte content (emoji, CJK)."""
+        _setup_tools(tmp_path)
+        target = tmp_path / "emoji.txt"
+        content = "hello 🌍"  # 🌍 is 4 UTF-8 bytes
+        result = await builtin.file_write(str(target), content)
+        assert result.success is True
+        expected_bytes = len(content.encode("utf-8"))  # 10, not 7
+        assert f"{expected_bytes} bytes" in result.data
 
 
 # ─── shell_exec tests ──────────────────────────────────────
@@ -226,6 +255,24 @@ class TestShellExec:
 
         source = inspect.getsource(builtin)
         assert "shell=True" not in source
+
+    async def test_large_stdout_truncated(self, tmp_path):
+        """Verify MAX_OUTPUT_BYTES truncation on large shell output."""
+        _setup_tools(tmp_path)
+        # Generate output exceeding MAX_OUTPUT_BYTES (100 KB)
+        result = await builtin.shell_exec(
+            'python -c "print(\'A\' * 200000)"'
+        )
+        assert result.success is True
+        assert result.data["stdout"].endswith("[truncated at 100 KB]")
+
+    async def test_timeout_clamped_to_bounds(self, tmp_path):
+        """Verify timeout is clamped to [1, MAX_TIMEOUT_SECONDS]."""
+        _setup_tools(tmp_path)
+        # timeout=0 should be clamped to 1, not cause immediate failure
+        result = await builtin.shell_exec('python -c "print(\'ok\')"', timeout=0)
+        assert result.success is True
+        assert "ok" in result.data["stdout"]
 
 
 # ─── http_request tests ──────────────────────────────────────
@@ -315,6 +362,91 @@ class TestHttpRequest:
         call_kwargs = mock_session.request.call_args
         assert call_kwargs[1]["data"] == '{"name": "test"}'
         assert call_kwargs[1]["method"] == "POST"
+
+    async def test_get_does_not_forward_body(self, tmp_path):
+        """Verify body is NOT forwarded for GET requests."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value="ok")
+        mock_resp.headers = {}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request(
+                "https://api.example.com/v1/data", method="GET", body="ignored"
+            )
+
+        assert result.success is True
+        call_kwargs = mock_session.request.call_args[1]
+        assert "data" not in call_kwargs
+
+    async def test_delete_method_rejected(self, tmp_path):
+        """DELETE method is not in ALLOWED_HTTP_METHODS (prevents data loss)."""
+        _setup_tools(tmp_path)
+        result = await builtin.http_request(
+            "https://api.example.com/v1/resource/123", method="DELETE"
+        )
+        assert result.success is False
+        assert "not allowed" in result.error
+        assert result.error_type == "ValueError"
+
+    async def test_client_connection_error(self, tmp_path):
+        """aiohttp.ClientError is caught and returned as ToolResult."""
+        _setup_tools(tmp_path)
+        with patch(
+            "agents.tools.builtin.aiohttp.ClientSession",
+            side_effect=aiohttp.ClientConnectionError("Connection refused"),
+        ):
+            result = await builtin.http_request("https://api.example.com/v1/data")
+
+        assert result.success is False
+        assert result.error_type == "ClientConnectionError"
+
+    async def test_http_timeout_error(self, tmp_path):
+        """HTTP timeout is caught and returned as ToolResult."""
+        _setup_tools(tmp_path)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.request = MagicMock(side_effect=TimeoutError("Request timed out"))
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request("https://api.example.com/v1/slow")
+
+        assert result.success is False
+        assert result.error_type == "TimeoutError"
+        assert "timed out" in result.error
+
+    async def test_large_response_truncated(self, tmp_path):
+        """Verify large HTTP response body is truncated via _truncate()."""
+        _setup_tools(tmp_path)
+        large_body = "B" * (MAX_OUTPUT_BYTES + 5000)
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=large_body)
+        mock_resp.headers = {"Content-Type": "text/plain"}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request("https://api.example.com/v1/large")
+
+        assert result.success is True
+        assert result.data["body"].endswith("[truncated at 100 KB]")
 
 
 # ─── Output truncation ──────────────────────────────────────

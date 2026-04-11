@@ -25,6 +25,8 @@ MAX_OUTPUT_BYTES = 102_400  # 100 KB
 
 # Module-level state set by the server at startup via direct assignment
 # (e.g. ``builtin.permission_gate = PermissionGate(...)``).
+# TODO(v0.2): refactor to dependency injection for multi-agent hosting
+# where each agent needs its own PermissionGate/PathValidator instance.
 permission_gate: PermissionGate | None = None
 path_validator: PathValidator | None = None
 workspace_root: Path | None = None
@@ -57,7 +59,12 @@ def _truncate(text: str) -> str:
     return truncated + "\n... [truncated at 100 KB]"
 
 
-@tool(name="file_read", description="Read the contents of a file", permissions=["filesystem:read"])
+@tool(
+    name="file_read",
+    description="Read the contents of a file",
+    permissions=["filesystem:read"],
+    tier="builtin",
+)
 async def file_read(path: str) -> ToolResult:
     """Read a file from the sandboxed workspace."""
     gate = _require_gate()
@@ -77,13 +84,22 @@ async def file_read(path: str) -> ToolResult:
         return ToolResult(
             success=False, error=f"File not found: {path}", error_type="FileNotFoundError"
         )
+    except UnicodeDecodeError:
+        return ToolResult(
+            success=False, error=f"Cannot read binary file: {path}", error_type="UnicodeDecodeError"
+        )
     except OSError as exc:
         return ToolResult(success=False, error=str(exc), error_type="OSError")
 
     return ToolResult(success=True, data=_truncate(content))
 
 
-@tool(name="file_write", description="Write content to a file", permissions=["filesystem:write"])
+@tool(
+    name="file_write",
+    description="Write content to a file",
+    permissions=["filesystem:write"],
+    tier="builtin",
+)
 async def file_write(path: str, content: str) -> ToolResult:
     """Write content to a file in the sandboxed workspace."""
     gate = _require_gate()
@@ -103,10 +119,20 @@ async def file_write(path: str, content: str) -> ToolResult:
     except OSError as exc:
         return ToolResult(success=False, error=str(exc), error_type="OSError")
 
-    return ToolResult(success=True, data=f"Wrote {len(content)} bytes to {path}")
+    return ToolResult(success=True, data=f"Wrote {len(content.encode('utf-8'))} bytes to {path}")
 
 
-@tool(name="shell_exec", description="Execute a shell command", permissions=["shell:exec"])
+# Maximum timeout in seconds for shell commands. Prevents LLM from
+# requesting effectively infinite timeouts via the exposed parameter.
+MAX_TIMEOUT_SECONDS = 300
+
+
+@tool(
+    name="shell_exec",
+    description="Execute a shell command",
+    permissions=["shell:exec"],
+    tier="builtin",
+)
 async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     """Execute an allowlisted shell command."""
     gate = _require_gate()
@@ -114,6 +140,10 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
 
     if not gate.check("shell:exec"):
         return ToolResult(success=False, error="Permission denied: shell:exec")
+
+    # Clamp timeout to [1, MAX_TIMEOUT_SECONDS] to prevent resource abuse.
+    # timeout=0 wastes a process spawn; large values create runaway processes.
+    timeout = max(1, min(timeout, MAX_TIMEOUT_SECONDS))
 
     try:
         args = shlex.split(command)
@@ -155,7 +185,7 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
             proc.communicate(), timeout=timeout
         )
     except TimeoutError:
-        # Graceful termination: terminate → 5s grace → kill → reap
+        # Three-phase shutdown: terminate → 5s grace period → kill → reap
         proc.terminate()
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5)
@@ -185,13 +215,30 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     )
 
 
-@tool(name="http_request", description="Make an HTTP request", permissions=["network:http"])
+# HTTP methods allowed for tool invocations. DELETE is excluded to prevent
+# accidental data loss on allowlisted API endpoints.
+ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH"})
+
+
+@tool(
+    name="http_request",
+    description="Make an HTTP request",
+    permissions=["network:http"],
+    tier="builtin",
+)
 async def http_request(url: str, method: str = "GET", body: str = "") -> ToolResult:
     """Make an HTTP request to an allowlisted domain."""
     gate = _require_gate()
 
     if not gate.check("network:http"):
         return ToolResult(success=False, error="Permission denied: network:http")
+
+    if method.upper() not in ALLOWED_HTTP_METHODS:
+        return ToolResult(
+            success=False,
+            error=f"HTTP method not allowed: {method!r} (allowed: GET, POST, PUT, PATCH)",
+            error_type="ValueError",
+        )
 
     # Validate URL scheme (only http/https allowed).
     try:
@@ -217,6 +264,8 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             error_type="PermissionError",
         )
 
+    # TODO(v0.2): reuse aiohttp session across tool invocations to avoid
+    # per-request connection setup overhead (~50ms) in sub-agent patterns.
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
