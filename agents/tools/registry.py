@@ -93,7 +93,7 @@ def tool(
             parameters=params,
             permissions=permissions or [],
             tier=tier,
-            func=func,
+            func=func,  # replaced with wrapper below
         )
         _tool_registry[tool_name] = tool_def
 
@@ -119,6 +119,12 @@ def tool(
                     error=str(e),
                     error_type=type(e).__name__,
                 )
+
+        # PR-review MF1: Store the wrapper (not the original function) so
+        # _execute_tools() goes through the decorator pipeline — permission
+        # checks, rate limiting, OTEL spans, and audit logging (v0.2 TODOs)
+        # are applied consistently whether calling via module name or registry.
+        tool_def.func = wrapper
 
         return wrapper
 

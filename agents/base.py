@@ -6,6 +6,7 @@ Persona agents extend PersonaAgent (see persona.py) which adds
 event-driven communication, sub-agent spawning, and autonomy.
 """
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -147,7 +148,23 @@ class BaseAgent(ABC):
                 continue
             try:
                 result = await tool_def.func(**call.input)
-                content = str(result.data) if result.success else (result.error or "Tool failed")
+                if result.success:
+                    # PR-review SF4: Use JSON for dict/list data so the LLM
+                    # sees {"key": true} instead of Python repr {'key': True}.
+                    content = (
+                        json.dumps(result.data)
+                        if isinstance(result.data, (dict, list))
+                        else str(result.data)
+                    )
+                else:
+                    error_msg = result.error or "Tool failed"
+                    # Include error_type when the @tool wrapper captured an
+                    # exception (e.g. PermissionError, ValueError) so the LLM
+                    # receives structured context about the failure category.
+                    if result.error_type:
+                        content = f"Tool error ({result.error_type}): {error_msg}"
+                    else:
+                        content = error_msg
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
@@ -156,6 +173,9 @@ class BaseAgent(ABC):
                     )
                 )
             except PermissionError as exc:
+                # Defense-in-depth: normally unreachable because the @tool
+                # wrapper catches all exceptions.  Retained for MCP/custom
+                # tools that may bypass the decorator.
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
@@ -164,6 +184,7 @@ class BaseAgent(ABC):
                     )
                 )
             except Exception as exc:
+                # Defense-in-depth: same rationale as PermissionError above.
                 results.append(
                     LLMToolResult(
                         tool_call_id=call.id,
@@ -188,6 +209,14 @@ class BaseAgent(ABC):
                 result="LLM client not configured",
             )
 
+        # PR-review SF2: Fail fast with a clear message instead of raising
+        # KeyError deep inside the provider call.
+        if "model" not in self.config:
+            return TaskOutput(
+                status=TaskStatus.FAILED,
+                result="Agent config missing required 'model' field",
+            )
+
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": task.payload},
         ]
@@ -197,6 +226,8 @@ class BaseAgent(ABC):
         total_tokens = 0
         tool_calls_count = 0
 
+        # 0 is the sentinel for "not set" (falsy), so `or` falls through
+        # to the agent-level default.  See TaskInputConfig docstring.
         max_llm_calls = task.config.max_llm_calls or self.config.get("max_llm_calls", 10)
         max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
 

@@ -388,6 +388,10 @@ class LLMClient:
 def _infer_provider(model: str) -> str:
     if model.startswith("claude"):
         return "anthropic"
+    # PR-review SF3: Recognise common OpenAI model prefixes to avoid
+    # noisy warnings for legitimate configurations.
+    if model.startswith(("gpt-", "o1", "o3")):
+        return "openai"
     logger.warning(
         "Unknown model prefix %r, defaulting to openai provider", model
     )
@@ -403,10 +407,24 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
     provider_config = agent_config.get("provider_config", {})
 
     if provider == "anthropic":
-        return AnthropicProvider(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        # PR-review SF1: Surface a clear install instruction instead of a
+        # raw ImportError traceback when the SDK package is missing.
+        try:
+            return AnthropicProvider(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        except ImportError:
+            raise SystemExit(
+                "Provider 'anthropic' requires package 'anthropic'. "
+                "Install with: pip install 'anthropic>=0.40.0'"
+            )
     elif provider == "openai":
-        return OpenAIProvider(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=provider_config.get("base_url"),
-        )
+        try:
+            return OpenAIProvider(
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                base_url=provider_config.get("base_url"),
+            )
+        except ImportError:
+            raise SystemExit(
+                "Provider 'openai' requires package 'openai'. "
+                "Install with: pip install 'openai>=1.50.0'"
+            )
     raise SystemExit(f"Unknown LLM provider: {provider!r}")
