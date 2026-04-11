@@ -474,11 +474,11 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 #### PR checklist
 
-- [ ] `go build ./cmd/orchestrator` succeeds
-- [ ] `go vet ./cmd/orchestrator/...` clean
+- [x] `go build ./cmd/orchestrator` succeeds
+- [x] `go vet ./cmd/orchestrator/...` clean
 - [ ] Binary starts cleanly with `--workflows-dir workflows/`
 - [ ] Graceful shutdown via SIGINT drains in-flight work
-- [ ] `*workflowsDir` resolved to absolute path before passing to components
+- [x] `*workflowsDir` resolved to absolute path before passing to components
 
 ---
 
@@ -516,8 +516,8 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 ```
 PR 5 (wiring) ✅ merged
        │
-       ├──► PR 6 (executor-hardening)
-       ├──► PR 7 (test-observability)
+       ├──► PR 6 (executor-hardening) ✅ merged (#31)
+       ├──► PR 7 (test-observability) ✅ merged (#32)
        ├──► PR 8 (graceful-shutdown)
        └──► PR 9 (proto-tooling, optional)
 ```

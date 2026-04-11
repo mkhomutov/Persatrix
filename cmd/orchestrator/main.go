@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -61,12 +64,20 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
+	// N-47: Resolve workflowsDir to an absolute path once, so both the
+	// server and scheduler see the same canonical path regardless of CWD.
+	absWorkflowsDir, err := filepath.Abs(*workflowsDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir: "+err.Error())
+		os.Exit(1)
+	}
+
 	log.Infow("Orchestr8 Server starting",
 		"config", *configDir,
 		"grpcPort", *port,
 		"httpPort", *httpPort,
 		"httpBind", *httpBind,
-		"workflowsDir", *workflowsDir,
+		"workflowsDir", absWorkflowsDir,
 		"env", *env,
 	)
 
@@ -97,8 +108,8 @@ func main() {
 	logger.Info("executor initialized")
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
-	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, *workflowsDir)
-	logger.Info("scheduler initialized", zap.String("workflowsDir", *workflowsDir))
+	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir)
+	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
 
 	// 9. Initialize cost tracker
 	// 10. Start gRPC server (agent communication)
@@ -109,12 +120,17 @@ func main() {
 
 	// 11. Start HTTP server (REST API + SSE streaming)
 	listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
-	srv, err := server.New(listenAddr, *workflowsDir, store, reg, plan, logger)
+	srv, err := server.New(listenAddr, absWorkflowsDir, store, reg, plan, logger)
 	if err != nil {
 		logger.Fatal("failed to create HTTP server", zap.Error(err))
 	}
+	// N-46: Track goroutines with WaitGroup so shutdown can drain in-flight work.
+	var wg sync.WaitGroup
+
 	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := srv.Start(ctx); err != nil {
 			logger.Error("HTTP server terminated with error", zap.Error(err))
 			cancel() // propagate to root context so orchestrator can shutdown cleanly
@@ -126,7 +142,9 @@ func main() {
 	logger.Info("HTTP server starting", zap.String("addr", listenAddr))
 
 	// Start scheduler polling loop
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("scheduler terminated with error", zap.Error(err))
 			cancel()
@@ -143,12 +161,25 @@ func main() {
 	case sig := <-sigCh:
 		log.Infow("Received signal, initiating graceful shutdown", "signal", sig)
 		cancel()
-		// TODO: Drain in-flight workflows
-		// TODO: Notify agents to wrap up
-		// TODO: Persist state
-		// TODO: Close connections
 	case <-ctx.Done():
 	}
+
+	// N-46: Wait for scheduler and HTTP server goroutines to finish.
+	// Use a timeout to prevent hanging if a goroutine is stuck.
+	drainDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(drainDone)
+	}()
+	select {
+	case <-drainDone:
+		logger.Info("all goroutines drained cleanly")
+	case <-time.After(10 * time.Second):
+		logger.Warn("shutdown drain timed out after 10s, exiting")
+	}
+
+	// TODO: Notify agents to wrap up
+	// TODO: Persist state
 
 	log.Info("Orchestr8 Server stopped")
 }
