@@ -1,7 +1,7 @@
 # Orchestr8 Roadmap
 
 > **Last updated**: 2026-04-11  
-> **Current phase**: v0.1 (MVP) — ~70% complete
+> **Current phase**: v0.1 (MVP) — ~75% complete
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -29,7 +29,7 @@ This document tracks development progress across all phases. Update it when merg
 | [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline (Planner + State + Registry) | ✅ Implemented | 6 | 6/6 |
 | [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server (HTTP Layer + Workflow Submission) | ✅ Implemented | 4 | 4/4 |
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor (Parallel Stage Execution + gRPC Dispatch) | ✅ Implemented | 7+4 | 11/11 |
-| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 3/7 |
+| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server (AgentService Implementation) | 🚧 Implementing | 7 | 4/7 |
 
 ### Dependency Chain
 
@@ -40,7 +40,7 @@ RFC 0002 (REST API Server)                    ✅ Done
     ↓
 RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 11/11)
     ↓
-RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 4a pending (#38), 3/7)
+RFC 0004 (Python Agent Server + Tools)        🚧 Implementing (PR 4b pending, 4/7)
     ↓
 v0.1 Complete ─ end-to-end execution working
 ```
@@ -70,9 +70,9 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/base.py` | BaseAgent ABC + dataclasses + LLM loop | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/server.py` | gRPC service entry point | 🔲 TODO (RFC 0004 PR 5a) |
-| `agents/coder.py` | Code generation task agent | 🔲 TODO (RFC 0004 PR 4b) |
-| `agents/reviewer.py` | Code review task agent | 🔲 TODO (RFC 0004 PR 4b) |
-| `agents/planner_agent.py` | Task decomposition agent | 🔲 TODO (RFC 0004 PR 4b) |
+| `agents/coder.py` | Code generation task agent | ✅ Complete (RFC 0004 PR 4b) |
+| `agents/reviewer.py` | Code review task agent | ✅ Complete (RFC 0004 PR 4b) |
+| `agents/planner_agent.py` | Task decomposition agent | ✅ Complete (RFC 0004 PR 4b) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | ✅ Complete (RFC 0004 PR 3) |
@@ -181,6 +181,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#34](https://github.com/mkhomutov/Orchestr8/pull/34) | build(proto): split make proto into go/python targets + CI staleness check | 0003 follow-up (4/4) | 2026-04-11 |
 | [#36](https://github.com/mkhomutov/Orchestr8/pull/36) | feat(agents): PermissionGate + PathValidator | 0004 (2/7) | 2026-04-11 |
 | [#37](https://github.com/mkhomutov/Orchestr8/pull/37) | feat(agents): built-in tools + PR 2 follow-up fixes | 0004 (3/7) | 2026-04-11 |
+| [#38](https://github.com/mkhomutov/Orchestr8/pull/38) | feat(agents): LLM client + TaskInputConfig + base handle loop | 0004 (4a/7) | 2026-04-11 |
 
 ---
 

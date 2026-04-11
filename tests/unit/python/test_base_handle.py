@@ -242,6 +242,16 @@ class TestNoLlmClient:
         assert "LLM client not configured" in output.result
 
 
+class TestMissingModelConfig:
+    """S-08: Fail fast when 'model' key absent from agent config."""
+
+    async def test_missing_model_returns_failed(self):
+        agent = _make_agent(config={"max_llm_calls": 10})
+        output = await agent.handle(_task())
+        assert output.status == TaskStatus.FAILED
+        assert "missing required 'model' field" in output.result
+
+
 class TestLlmProviderError:
     """review-fix S1: Provider SDK exceptions return FAILED instead of raising."""
 

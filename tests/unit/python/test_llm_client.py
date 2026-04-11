@@ -430,6 +430,16 @@ class TestCreateProvider:
         assert _infer_provider("gpt-4o") == "openai"
         assert _infer_provider("qwen2.5-coder") == "openai"
 
+    def test_infer_openai_o_series(self):
+        """S-10: o-series model prefixes should resolve to openai."""
+        assert _infer_provider("o1") == "openai"
+        assert _infer_provider("o1-preview") == "openai"
+        assert _infer_provider("o1-mini") == "openai"
+        assert _infer_provider("o3") == "openai"
+        assert _infer_provider("o3-mini") == "openai"
+        assert _infer_provider("o4-mini") == "openai"
+        assert _infer_provider("o4") == "openai"
+
     def test_explicit_anthropic_provider(self):
         mock_anthropic = MagicMock()
         mock_anthropic.AsyncAnthropic.return_value = AsyncMock()

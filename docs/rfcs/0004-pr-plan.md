@@ -287,13 +287,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Strategy**: S-08 and S-10 are low-cost fixes bundled into PR 4b (which exercises the handle loop with real agent prompts). S-09 and S-11 are bundled into PR 5a (server startup and error handling improvements). C-05 through C-09 deferred to v0.2.
 
-> **Status: ⏳ Pending (#38)**
+> **Status: ✅ Merged (#38)**
 
 ---
 
 ### PR 4b: `feature/v01-task-agents` — PlannerAgent, CoderAgent, ReviewerAgent
 
-**Depends on**: PR 4a merged (LLM client, base handle loop)
+**Depends on**: PR 4a merged ✅
 **Branch**: `feature/v01-task-agents`
 **Estimated size**: ~300–450 lines (implementation + tests)
 
