@@ -362,6 +362,10 @@ class TestHttpRequest:
         call_kwargs = mock_session.request.call_args
         assert call_kwargs[1]["data"] == '{"name": "test"}'
         assert call_kwargs[1]["method"] == "POST"
+        # Content-Type defaults to application/json for body requests (S-01)
+        assert call_kwargs[1]["headers"] == {"Content-Type": "application/json"}
+        # Redirects disabled to prevent SSRF (M-01)
+        assert call_kwargs[1]["allow_redirects"] is False
 
     async def test_get_does_not_forward_body(self, tmp_path):
         """Verify body is NOT forwarded for GET requests."""
@@ -447,6 +451,85 @@ class TestHttpRequest:
 
         assert result.success is True
         assert result.data["body"].endswith("[truncated at 100 KB]")
+
+    async def test_redirect_not_followed(self, tmp_path):
+        """Redirects are not followed to prevent SSRF via open-redirect on
+        allowlisted domains (M-01). The raw 3xx response is returned so the
+        LLM can re-issue a request to the redirect target after domain
+        re-validation."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 302
+        mock_resp.text = AsyncMock(return_value="")
+        mock_resp.headers = {"Location": "https://evil.internal/metadata"}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request("https://api.example.com/redirect")
+
+        assert result.success is True
+        assert result.data["status"] == 302
+        # Verify allow_redirects=False was passed to aiohttp
+        call_kwargs = mock_session.request.call_args[1]
+        assert call_kwargs["allow_redirects"] is False
+
+    async def test_put_with_body(self, tmp_path):
+        """Verify PUT method is accepted and body + Content-Type forwarded (S-04)."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value='{"updated": true}')
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request(
+                "https://api.example.com/v1/items/1", method="PUT", body='{"name": "updated"}'
+            )
+
+        assert result.success is True
+        call_kwargs = mock_session.request.call_args[1]
+        assert call_kwargs["method"] == "PUT"
+        assert call_kwargs["data"] == '{"name": "updated"}'
+        assert call_kwargs["headers"] == {"Content-Type": "application/json"}
+
+    async def test_patch_with_body(self, tmp_path):
+        """Verify PATCH method is accepted and body + Content-Type forwarded (S-04)."""
+        _setup_tools(tmp_path)
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value='{"patched": true}')
+        mock_resp.headers = {"Content-Type": "application/json"}
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request(
+                "https://api.example.com/v1/items/1", method="PATCH", body='{"status": "done"}'
+            )
+
+        assert result.success is True
+        call_kwargs = mock_session.request.call_args[1]
+        assert call_kwargs["method"] == "PATCH"
+        assert call_kwargs["data"] == '{"status": "done"}'
+        assert call_kwargs["headers"] == {"Content-Type": "application/json"}
 
 
 # ─── Output truncation ──────────────────────────────────────

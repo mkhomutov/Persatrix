@@ -169,6 +169,7 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.DEVNULL,  # M-02: prevent blocking on interactive prompts
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(ws),
@@ -233,7 +234,10 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
     if not gate.check("network:http"):
         return ToolResult(success=False, error="Permission denied: network:http")
 
-    if method.upper() not in ALLOWED_HTTP_METHODS:
+    # Normalize once to avoid repeated .upper() calls (review N-01).
+    method = method.upper()
+
+    if method not in ALLOWED_HTTP_METHODS:
         return ToolResult(
             success=False,
             error=f"HTTP method not allowed: {method!r} (allowed: GET, POST, PUT, PATCH)",
@@ -271,9 +275,16 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             timeout=aiohttp.ClientTimeout(total=30)
         ) as session:
             kwargs: dict = {"method": method, "url": url}
-            if body and method.upper() in ("POST", "PUT", "PATCH"):
+            if body and method in ("POST", "PUT", "PATCH"):
                 kwargs["data"] = body
-            async with session.request(**kwargs) as resp:
+                # Default to JSON since LLM-generated payloads are overwhelmingly
+                # JSON. v0.2 will add an optional ``headers`` parameter for full
+                # control (review S-01).
+                kwargs["headers"] = {"Content-Type": "application/json"}
+            # Disable redirect following to prevent SSRF via open-redirect on
+            # allowlisted domains. The LLM can re-issue a request to the
+            # redirect target after domain re-validation (review M-01).
+            async with session.request(**kwargs, allow_redirects=False) as resp:
                 text = await resp.text()
                 return ToolResult(
                     success=True,
