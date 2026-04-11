@@ -504,10 +504,10 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 #### PR checklist
 
-- [ ] `make proto-go` generates Go stubs without Python gRPC toolchain
-- [ ] `make proto-python` generates Python stubs independently
-- [ ] `make proto` calls both targets
-- [ ] CI check detects stale generated code
+- [x] `make proto-go` generates Go stubs without Python gRPC toolchain
+- [x] `make proto-python` generates Python stubs independently
+- [x] `make proto` calls both targets
+- [x] CI check detects stale generated code
 
 ---
 
@@ -518,7 +518,7 @@ PR 5 (wiring) ✅ merged
        │
        ├──► PR 6 (executor-hardening) ✅ merged (#31)
        ├──► PR 7 (test-observability) ✅ merged (#32)
-       ├──► PR 8 (graceful-shutdown)
+       ├──► PR 8 (graceful-shutdown) ✅ merged (#33)
        └──► PR 9 (proto-tooling, optional)
 ```
 

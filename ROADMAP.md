@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-10  
+> **Last updated**: 2026-04-11  
 > **Current phase**: v0.1 (MVP) — ~70% complete
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -38,7 +38,7 @@ RFC 0001 (State, Registry, Planner)           ✅ Done
     ↓
 RFC 0002 (REST API Server)                    ✅ Done
     ↓
-RFC 0003 (Scheduler + Executor + gRPC)        🚧 In Progress (follow-up 3/4)
+RFC 0003 (Scheduler + Executor + gRPC)        🚧 In Progress (follow-up 4/4)
     ↓
 RFC 0004 (Python Agent Server + Tools)        📋 Blocked on RFC 0003
     ↓
@@ -176,6 +176,7 @@ v0.1 Complete ─ end-to-end execution working
 | [#27](https://github.com/mkhomutov/Orchestr8/pull/27) | feat(orchestrator): wire scheduler + executor into main.go | 0003 (7/7) | 2026-04-10 |
 | [#31](https://github.com/mkhomutov/Orchestr8/pull/31) | fix(executor): additive dial options, cancellation & concurrent retry tests | 0003 follow-up (1/4) | 2026-04-10 |
 | [#32](https://github.com/mkhomutov/Orchestr8/pull/32) | test: observability improvements — concurrent race tests, log assertions, zaptest logger | 0003 follow-up (2/4) | 2026-04-11 |
+| [#33](https://github.com/mkhomutov/Orchestr8/pull/33) | fix(orchestrator): graceful shutdown drain + absolute workflowsDir | 0003 follow-up (3/4) | 2026-04-11 |
 
 ---
 
