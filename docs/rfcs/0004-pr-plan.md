@@ -10,7 +10,7 @@
 
 ## Overview
 
-RFC 0004 defines ~1,130 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **7 PRs**: Phase 1 is one PR, Phase 2 is one PR, Phase 3 is one PR, Phase 4 is pre-split into 4a (LLM client + base handle loop + `TaskInputConfig`) and 4b (three agent implementations), and Phase 5 is pre-split into 5a (gRPC server + agent loading) and 5b (self-registration + integration tests).
+RFC 0004 defines ~1,130 LOC across 5 phases (excluding generated proto output). The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **8 PRs**: Phase 1 is one PR (folded into 5a), Phase 2 is one PR, Phase 3 is one PR, Phase 4 is pre-split into 4a (LLM client + base handle loop + `TaskInputConfig`) and 4b (three agent implementations), Phase 5 is pre-split into 5a (gRPC server + agent loading) and 5b (self-registration + integration tests), and PR 6 bundles review follow-ups from PR 5b to close the RFC.
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -18,7 +18,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0003 PRs merged (state, registry, planner, REST API, scheduler, executor). The Go orchestrator's `GRPCExecutor` (RFC 0003) dispatches `TaskRequest` messages to agent addresses — this RFC implements the Python server that receives them.
 
-**Recommended merge order:** **PR 1 ‖ PR 2** (parallel) → **PR 3** → **PR 4a** → **PR 4b** → **PR 5a** → **PR 5b**. PR numbering implies execution order except where noted parallel.
+**Recommended merge order:** **PR 1 ‖ PR 2** (parallel) → **PR 3** → **PR 4a** → **PR 4b** → **PR 5a** → **PR 5b** → **PR 6**. PR numbering implies execution order except where noted parallel.
 
 ---
 
@@ -514,7 +514,50 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | C-17 | Consider | server.py | `_self_register()` is single-shot fire-and-forget — no retry on transient failure (e.g., orchestrator restarting). A 2–3 retry with exponential backoff would handle orchestrator restarts during agent startup | v0.2 |
 | C-18 | Consider | server.py | `orchestrator_url` taken as-is with only `rstrip("/")` — no URL format validation. A malformed URL (missing scheme) produces a confusing `aiohttp` error on first registration attempt. Basic `urllib.parse.urlparse` scheme check would catch misconfiguration early | v0.2 |
 
-**Strategy**: S-19 through S-21 are low-cost fixes that can be bundled into a follow-up PR or addressed post-merge. C-15 through C-18 deferred to v0.2.
+**Strategy**: S-19 through S-21 are low-cost fixes bundled into PR 6 (follow-up). C-15 through C-18 deferred to v0.2.
+
+---
+
+### PR 6: `feature/v01-agent-reg-followup` — Registration Follow-ups + RFC Close
+
+**Depends on**: PR 5b merged (self-registration)
+**Branch**: `feature/v01-agent-reg-followup`
+**Estimated size**: ~50–100 lines (fixes + tests + status updates)
+
+> **Note**: This is a small housekeeping PR that bundles the three "Should Fix" findings from the PR #41 review. Once merged, all RFC 0004 implementation and review follow-up work is complete. The RFC status transitions to ✅ Implemented.
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `agents/server.py` | Follow-up fix S-19: add `"name": agent.name` to `_self_register()` payload; Follow-up fix S-21: add `# TODO(v0.2): support advertised address for container/K8s service discovery` comment on hardcoded address line |
+| `tests/unit/python/test_registration.py` | Follow-up fix S-20: add `test_successful_registration_200` verifying HTTP 200 success path (not just 201); extend existing registration payload assertion to verify `name` field present (S-19) |
+| `docs/rfcs/0004-python-agent-grpc-server.md` | Status: 🚧 Implementing → ✅ Implemented |
+| `docs/rfcs/0004-pr-plan.md` | Mark PR 5b as merged, PR 6 as merged; update dependency graph |
+| `ROADMAP.md` | RFC 0004: 🚧 Implementing → ✅ Implemented (7/7 PRs merged); add PRs #41 and PR 6 to merged PR history |
+
+#### Key implementation details
+
+- **S-19 (`name` in registration payload)**: The Go orchestrator's `/api/v1/agents/register` handler stores the `name` field from the registration payload. Currently `_self_register()` sends `{id, address, capabilities}` but omits `name`, causing agents to appear with empty names in the registry. Fix: add `"name": agent.name` to the payload dict in `_self_register()`.
+- **S-20 (HTTP 200 test)**: `_self_register()` treats `resp.status in (200, 201)` as success, but only 201 is tested. Add an explicit test with `mock_resp.status = 200` to confirm the range check. This is a one-line test duplication with a status code change.
+- **S-21 (address TODO comment)**: `address = f"{self.host}:{self.port}"` only works for same-host/same-network deployments. In Docker/K8s the agent's bind address differs from the address the orchestrator should use. Add a `# TODO(v0.2)` comment documenting the advertised address gap for container/K8s service discovery.
+- **RFC status transition**: All 7 PRs (PR 1 folded into 5a, PRs 2–5b, PR 6) will be merged. RFC 0004 status transitions from 🚧 Implementing to ✅ Implemented in both the RFC file and ROADMAP.
+
+#### Tests
+
+- **S-19 payload verification**: existing `test_successful_registration` payload assertion updated — verify `"name"` key is present and equals `agent.name`.
+- **S-20 HTTP 200 path**: new `test_successful_registration_200` — duplicate of `test_successful_registration` with `mock_resp.status = 200` → success logged, no warning.
+- All existing registration tests continue to pass (no behavioral change to existing code paths).
+
+#### PR checklist
+
+- [ ] `pytest tests/unit/python/test_registration.py -v` passes
+- [ ] `ruff check agents/server.py` clean
+- [ ] PR 5b follow-up S-19: `"name": agent.name` added to `_self_register()` payload
+- [ ] PR 5b follow-up S-20: HTTP 200 success path tested explicitly
+- [ ] PR 5b follow-up S-21: `# TODO(v0.2)` comment on hardcoded address
+- [ ] RFC 0004 status updated to ✅ Implemented
+- [ ] ROADMAP updated: RFC 0004 status, merged PR history
 
 ---
 
@@ -551,6 +594,9 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
                                                    │                                                               │
                                                    ▼                                                               ▼
                                               PR 5b (agent-registration + PR 4b S-13 + PR 5a S-15, S-16, S-17, S-18) ◄── PR 4b
+                                                   │
+                                                   ▼
+                                              PR 6 (reg-followup + PR 5b S-19, S-20, S-21 + RFC close)
 ```
 
 > **PR 1 ‖ PR 2** can proceed in parallel — they are fully independent. This is the widest parallelism available.
@@ -572,6 +618,7 @@ PR 2 (permission-sandbox) ✅ Merged (#36) ► PR 3 (builtin-tools + PR 2 follow
 | PR 4b | Phase 4 (agents) | ~350 | ~500¹ | ✅ Merged (#39) |
 | PR 5a | Phase 5 (server) | ~350 | ~500¹ | ✅ Merged (#40) |
 | PR 5b | Phase 5 (reg+int) | ~200 | ~340 | Open (#41) |
+| PR 6 | Follow-up | ~50 | ~85 | Not started |
 
 ¹ Capped at ~500 line target. If calibrated estimate exceeds 500, see Risk Mitigation escape valves.
 
