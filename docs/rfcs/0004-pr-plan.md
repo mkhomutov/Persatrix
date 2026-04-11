@@ -102,11 +102,27 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_permissions.py tests/unit/python/test_sandbox.py -v` passes
-- [ ] Coverage ≥ 80% for `permissions.py` and `sandbox.py`
-- [ ] `ruff check agents/tools/permissions.py agents/tools/sandbox.py` clean
-- [ ] `ResourceLimiter` / `OutputSizeLimiter` stubs preserved in `sandbox.py`
-- [ ] No `shell=True` anywhere
+- [x] `pytest tests/unit/python/test_permissions.py tests/unit/python/test_sandbox.py -v` passes (48 passed, 2 skipped)
+- [x] Coverage ≥ 80% for `permissions.py` and `sandbox.py` (97% / 100%)
+- [x] `ruff check agents/tools/permissions.py agents/tools/sandbox.py` clean
+- [x] `ResourceLimiter` / `OutputSizeLimiter` stubs preserved in `sandbox.py`
+- [x] No `shell=True` anywhere
+
+#### Review follow-up findings (PR #36 review)
+
+| ID | Severity | Category | Description | Target |
+|----|----------|----------|-------------|--------|
+| S-01 | Should Fix | permissions.py | Misleading comment in `is_domain_allowed()` lines 103–104 says "allow when only an allow list exists" but code correctly denies — comment/code mismatch | PR 3 |
+| S-02 | Should Fix | permissions.py | Domain comparison in `is_domain_allowed()` is case-sensitive but DNS is case-insensitive (RFC 4343) — `"API.ANTHROPIC.COM"` would bypass `"api.anthropic.com"` in allow list. Fix: `domain = domain.lower()` at method entry | PR 3 |
+| S-03 | Should Fix | sandbox.py | `fnmatch.fnmatch()` is case-insensitive on Windows, case-sensitive on Linux — deny patterns behave differently per OS. Fix: use `fnmatch.fnmatchcase()` for deterministic cross-platform security behavior (agents run in Linux containers per `Dockerfile.agent`) | PR 3 |
+| S-04 | Should Fix | sandbox.py | `PermissionError` messages include resolved absolute path and deny pattern — potential path/config leakage in multi-tenant scenarios. Fix: generic exception messages, keep details in `logger.warning()` | PR 3 |
+| N-01 | Nitpick | permissions.py | `check()` accepts any truthy value (string `"yes"` → granted). Defer to config validation | v0.2 |
+| N-02 | Nitpick | permissions.py | No glob/wildcard support for domain allow/deny patterns (only `"*"` literal catch-all) — inconsistent with `PathValidator` `fnmatch` usage | v0.2 |
+| N-03 | Nitpick | sandbox.py | No validation that patterns are syntactically valid fnmatch globs at construction time | v0.2 |
+| N-04 | Nitpick | permissions.py | Empty `args=[]` not explicitly handled in `is_command_allowed()` — works safely (returns False) but explicit guard would be clearer | PR 3 |
+| N-05 | Nitpick | ROADMAP.md | `🚧` emoji renders as `�` in committed diff — possible UTF-8 encoding issue | PR 3 |
+
+**Strategy**: S-01 through S-04 and N-04/N-05 are low-cost fixes bundled into PR 3 alongside the built-in tools (which import and wire `PermissionGate`/`PathValidator`). N-01 through N-03 deferred to config validation work in v0.2.
 
 ---
 
@@ -116,13 +132,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Branch**: `feature/v01-py-builtin-tools`
 **Estimated size**: ~400–550 lines (implementation + tests)
 
+> **Note**: This PR also addresses follow-up findings S-01 through S-04, N-04, and N-05 from the PR #36 review of `permissions.py` and `sandbox.py` (see PR 2 follow-up table above). These are small targeted fixes to the files PR 3 imports and wires.
+
 #### Scope
 
 | File | Change |
 |------|--------|
 | `agents/tools/builtin.py` | Replace stubs — `file_read`, `file_write`, `shell_exec`, `http_request` with permission enforcement and sandboxing |
+| `agents/tools/permissions.py` | Follow-up fixes: S-01 (misleading comment), S-02 (domain case normalization), N-04 (empty args guard) |
+| `agents/tools/sandbox.py` | Follow-up fixes: S-03 (`fnmatchcase` for deterministic matching), S-04 (sanitize error messages) |
 | `agents/pyproject.toml` | Add `aiohttp>=3.9.0,<4` dependency (needed by `http_request` tool) |
+| `ROADMAP.md` | Follow-up fix N-05: verify UTF-8 encoding for 🚧 emoji |
 | `tests/unit/python/test_tools.py` | Extended — tool unit tests (existing file may have fixtures from tool registry tests) |
+| `tests/unit/python/test_permissions.py` | Extended — add test for case-insensitive domain matching (S-02), non-wildcard deny coverage gap (lines 106–107) |
+| `tests/unit/python/test_sandbox.py` | Extended — add test verifying `fnmatchcase` behavior (S-03) |
 
 #### Key implementation details
 
@@ -153,6 +176,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] `shlex.split` used for command parsing
 - [ ] `MAX_OUTPUT_BYTES` enforced on all output paths
 - [ ] All tools use `PermissionGate.check()` before execution
+- [ ] PR 2 follow-up S-01: misleading comment fixed in `is_domain_allowed()`
+- [ ] PR 2 follow-up S-02: `domain = domain.lower()` added + test for mixed-case domain
+- [ ] PR 2 follow-up S-03: `fnmatch.fnmatchcase()` replaces `fnmatch.fnmatch()` in `PathValidator.validate()`
+- [ ] PR 2 follow-up S-04: `PermissionError` messages sanitized (no resolved paths or deny patterns)
+- [ ] PR 2 follow-up N-04: empty args guard in `is_command_allowed()`
+- [ ] PR 2 follow-up N-05: ROADMAP 🚧 emoji renders correctly (UTF-8)
+- [ ] `permissions.py` lines 106–107 coverage gap addressed (non-wildcard deny test)
 
 ---
 
@@ -388,15 +418,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 ```
 PR 1 (py-proto-gen) ────────────────────────────┐
                                                  │
-PR 2 (permission-sandbox) ──► PR 3 (builtin-tools) ──► PR 4a (llm-client-base)
-                                                             │
-                                                             ├──► PR 4b (task-agents) ───┐
-                                                             │                            │
-                                                             ▼                            │
-                                                        PR 5a (grpc-server) ◄── PR 1     │
-                                                             │                            │
-                                                             ▼                            ▼
-                                                        PR 5b (agent-registration) ◄── PR 4b
+PR 2 (permission-sandbox) ✅ Merged (#36) ──► PR 3 (builtin-tools + PR 2 follow-ups)
+                                                   │
+                                                   ▼
+                                              PR 4a (llm-client-base)
+                                                   │
+                                                   ├──► PR 4b (task-agents) ───┐
+                                                   │                            │
+                                                   ▼                            │
+                                              PR 5a (grpc-server) ◄── PR 1     │
+                                                   │                            │
+                                                   ▼                            ▼
+                                              PR 5b (agent-registration) ◄── PR 4b
 ```
 
 > **PR 1 ‖ PR 2** can proceed in parallel — they are fully independent. This is the widest parallelism available.
