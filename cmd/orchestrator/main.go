@@ -27,7 +27,10 @@ const (
 	// shutdownDrainTimeout is the maximum time to wait for in-flight goroutines
 	// (HTTP server, scheduler) to finish after receiving a shutdown signal.
 	// Extracted from inline magic number per PR #33 review F-02.
-	shutdownDrainTimeout = 10 * time.Second
+	// Must exceed the HTTP server's internal shutdown timeout (10s in server.go)
+	// to avoid a spurious "drain timed out" warning when the server is still
+	// gracefully draining connections. (PR #33 review S-01)
+	shutdownDrainTimeout = 12 * time.Second
 )
 
 var (
@@ -83,7 +86,7 @@ func main() {
 	}
 	absWorkflowsDir, err = filepath.EvalSymlinks(absWorkflowsDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir symlinks: "+err.Error())
+		fmt.Fprintln(os.Stderr, "failed to canonicalize --workflows-dir: "+err.Error())
 		os.Exit(1)
 	}
 
