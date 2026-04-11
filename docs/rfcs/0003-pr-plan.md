@@ -519,10 +519,10 @@ PR 5 (wiring) ✅ merged
        ├──► PR 6 (executor-hardening) ✅ merged (#31)
        ├──► PR 7 (test-observability) ✅ merged (#32)
        ├──► PR 8 (graceful-shutdown) ✅ merged (#33)
-       └──► PR 9 (proto-tooling, optional)
+       └──► PR 9 (proto-tooling) ✅ merged (#34)
 ```
 
-All four follow-up PRs are independent and can proceed in parallel.
+All four follow-up PRs are merged. RFC 0003 is fully complete.
 
 ---
 
