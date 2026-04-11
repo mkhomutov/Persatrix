@@ -504,10 +504,10 @@ All 7 implementation PRs are merged. The following PRs address "Should Fix" post
 
 #### PR checklist
 
-- [ ] `make proto-go` generates Go stubs without Python gRPC toolchain
-- [ ] `make proto-python` generates Python stubs independently
-- [ ] `make proto` calls both targets
-- [ ] CI check detects stale generated code
+- [x] `make proto-go` generates Go stubs without Python gRPC toolchain
+- [x] `make proto-python` generates Python stubs independently
+- [x] `make proto` calls both targets
+- [x] CI check detects stale generated code
 
 ---
 
