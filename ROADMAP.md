@@ -109,7 +109,25 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 **Goal**: Persona-driven agents with autonomous behavior, multi-channel communication, organizational hierarchy, and persistent memory.
 
-**Design**: Fully specified in [orchestr8-extension-spec.md](docs/orchestr8-extension-spec.md). No RFCs written yet.
+**Design**: Fully specified in [orchestr8-extension-spec.md](docs/orchestr8-extension-spec.md).
+
+### RFC Tracker
+
+| RFC | Title | Status | PRs | Merged |
+|-----|-------|--------|-----|--------|
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 📋 Proposed | 0 | 0/0 |
+
+### Dependency Chain
+
+```
+RFC 0005 (PersonaAgent + Memory + TaskAgent)   📋 Proposed
+    ↓
+RFC 0006 (Sub-Agent Spawning)                  Not yet written
+    ↓
+RFC 0007 (Channels + Bridges)                  Not yet written
+    ↓
+RFC 0008 (Protocols + Organizations)            Not yet written
+```
 
 ### Planned Components
 
