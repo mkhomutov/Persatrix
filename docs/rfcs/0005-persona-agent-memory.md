@@ -736,28 +736,165 @@ The tick loop could cause runaway LLM calls if not bounded.
 
 ## Open Questions
 
-1. **Shared vs per-agent SQLite databases?**
-   Per-agent databases simplify concurrent access and cleanup. A single shared database simplifies deployment and cross-agent queries (e.g., "who does agent X trust most?"). Proposal: single shared DB with agent_id partitioning, using WAL mode for concurrent reads.
+### Q1: Shared vs per-agent SQLite databases?
 
-2. **Token estimation accuracy**
-   chars/4 is a rough approximation. Should we vendor tiktoken for accurate counts, or is the estimate sufficient for MVP? Proposal: chars/4 for MVP, add tiktoken as optional dependency.
+**Decision: Single shared database with agent_id partitioning (WAL mode).**
 
-3. **How should old CoderAgent/ReviewerAgent/PlannerAgent imports be handled?**
-   Existing integration tests import these classes directly. Options: (a) keep thin wrappers that subclass TaskAgent, (b) update all imports to TaskAgent, (c) keep the files as re-exports. Proposal: (b) clean break — update imports, remove old files.
+Per-agent databases simplify concurrent access and cleanup. A single shared database simplifies deployment and cross-agent queries (e.g., "who does agent X trust most?").
 
-4. **Should tick loop actions trigger new events?**
-   If a tick action sends a message, should that message arrival trigger a new `on_event()` for the recipient? This creates event chains. Proposal: yes, but with depth limiting (max 5 event cascades per tick).
+*Analysis:*
 
-5. **Memory retrieval relevance scoring**
-   MVP uses recency + importance weighting. Should we add keyword matching or defer to vector embeddings? Proposal: recency × importance for MVP, add keyword boost as a low-cost enhancement.
+| Factor | Per-Agent DB | Shared DB |
+|--------|-------------|-----------|
+| Concurrency | No contention by default | WAL mode handles concurrent reads; writes serialized per-connection |
+| Cross-agent queries | Requires opening multiple DBs, complex joins impossible | Natural — `SELECT * FROM relationships WHERE other_agent_id = ?` |
+| Deployment | N files to manage, backup, migrate | Single file |
+| Cleanup | Delete one file per agent | `DELETE WHERE agent_id = ?` |
+| Schema migration | Must migrate N databases | Migrate once |
+| Agent processes | v0.1 runs one agent per process; shared DB needs `aiosqlite` per-connection | Same |
+
+Relationship memory is inherently cross-agent (trust between agent pairs), making per-agent DBs awkward — trust records would need to live in one agent's DB or be duplicated. A shared DB with `agent_id` column in every table provides logical isolation with physical simplicity.
+
+WAL mode (`PRAGMA journal_mode=WAL`) supports concurrent readers with a single writer, which matches our access pattern (agents mostly read memories, writes happen after interactions). The MVP runs agents in a single Python process, so contention is minimal.
+
+*Implementation detail:* Default path `data/memory.db`, configurable via `memory.db_path` in agent config. One `aiosqlite` connection per agent instance, all pointing to the same file.
+
+### Q2: Token estimation accuracy
+
+**Decision: chars/4 for MVP, with tiktoken as an optional accuracy upgrade.**
+
+*Analysis:*
+
+The working memory's `compress_if_needed()` should trigger well before hitting the actual context limit — a 20% safety margin means we compress at ~80K tokens for a 100K window. At this headroom, chars/4 (which is ~85% accurate for English text with code) is sufficient to prevent overflow.
+
+| Approach | Accuracy | Latency | Dependencies |
+|----------|----------|---------|-------------|
+| chars/4 | ~85% | <1μs | None |
+| tiktoken | ~99% | ~1ms per call | `tiktoken` (~2MB, model-specific encodings) |
+
+The cost of over-estimating tokens is unnecessary compression (minor quality loss). The cost of under-estimating is context overflow (LLM error). chars/4 slightly over-estimates for code (more ASCII), which errs on the safe side.
+
+*Implementation:*
+
+```python
+def estimate_tokens(text: str, *, accurate: bool = False) -> int:
+    if accurate:
+        try:
+            import tiktoken
+            enc = tiktoken.encoding_for_model("claude-sonnet-4-20250514")
+            return len(enc.encode(text))
+        except ImportError:
+            pass
+    return len(text) // 4
+```
+
+Add `tiktoken` as an optional dependency in `pyproject.toml` (`pip install orchestr8-agents[tiktoken]`). The `accurate` flag defaults to `False`; callers opt in when precision matters (e.g., billing estimates).
+
+### Q3: How should old CoderAgent/ReviewerAgent/PlannerAgent imports be handled?
+
+**Decision: (b) Clean break — update all imports to TaskAgent, remove old files.**
+
+*Analysis:*
+
+The three classes are structurally identical: each defines a system prompt string and calls `_run_llm_loop()`. Only one test file ([tests/unit/python/test_agents.py](../../tests/unit/python/test_agents.py)) imports them directly. There are no external consumers.
+
+| Option | Effort | Maintenance Debt | Clean |
+|--------|--------|-----------------|-------|
+| (a) Thin wrappers subclassing TaskAgent | Low | 3 extra files that serve no purpose | No |
+| (b) Remove files, update imports | Medium | Zero | Yes |
+| (c) Re-export aliases | Low | Confusing for new contributors | No |
+
+Option (a) and (c) preserve backward compatibility for zero external consumers — pure maintenance debt. Option (b) is a clean break that aligns with the RFC's goal of consolidation.
+
+*Migration plan (Phase 1):*
+1. Create `TaskAgent` in `agents/task_agent.py`
+2. Move system prompts from `CoderAgent`/`ReviewerAgent`/`PlannerAgent` to `config/agents.yaml` as `instructions` fields
+3. Update `test_agents.py`: replace class-specific tests with parametrized `TaskAgent` tests that vary `agent_id` + `instructions`
+4. Update `server.py`: replace `_resolve_agent_type()` capability heuristic with `type` field dispatch
+5. Delete `agents/coder.py`, `agents/reviewer.py`, `agents/planner_agent.py`
+6. Update `agents/__init__.py` exports
+
+The `TestCrossAgent` parameterized tests in `test_agents.py` already validate shared behavior — these naturally map to `TaskAgent` parametrization.
+
+### Q4: Should tick loop actions trigger new events?
+
+**Decision: Yes, with cascade depth limiting (max 5) and per-tick token budget.**
+
+*Analysis:*
+
+Multi-agent interaction is the core value proposition of v0.2. If Agent A's tick sends a message to Agent B, Agent B must process it via `on_event()` — otherwise persona agents can't converse. But unbounded event cascading creates two risks:
+
+1. **Infinite loops**: Agent A messages Agent B, B responds to A, A responds to B, ...
+2. **Runaway costs**: Each cascade triggers LLM calls, consuming tokens and money
+
+*Safeguards (defense in depth):*
+
+| Layer | Mechanism | Default |
+|-------|-----------|---------|
+| Cascade depth | `EventDispatcher` tracks `cascade_depth` in event metadata; rejects events beyond limit | max 5 |
+| Per-tick token budget | Sum of tokens consumed by all LLM calls originating from one tick; stop when exceeded | From `optimization.yaml` agent budget |
+| Per-tick action limit | `max_actions_per_tick` already caps actions per cycle | 3 |
+| Idle detection | `idle_after_ticks` reduces tick frequency when nothing happens | 10 ticks |
+
+*Implementation:*
+
+The `EventDispatcher.dispatch()` method adds `cascade_depth` to the event metadata. When dispatching a tick-originated action that produces a new event, it increments the depth. If `depth >= max_cascade_depth`, the event is logged and dropped (not silently — the originating agent receives a `DO_NOTHING` with reason `"cascade_limit_reached"`).
+
+```python
+async def dispatch(self, agent_id: str, event: AgentEvent) -> list[AgentAction]:
+    depth = event.metadata.get("cascade_depth", 0)
+    if depth >= self._max_cascade_depth:
+        logger.warning("Cascade limit reached", agent_id=agent_id, depth=depth)
+        return []
+    # ... normal dispatch, child events get cascade_depth=depth+1
+```
+
+### Q5: Memory retrieval relevance scoring
+
+**Decision: recency × importance for MVP, plus SQLite FTS5 full-text search as a low-cost enhancement.**
+
+*Analysis:*
+
+| Approach | Relevance Quality | Latency | Dependencies | Effort |
+|----------|------------------|---------|-------------|--------|
+| recency × importance only | Low — ignores content | <1ms | None | Trivial |
+| + SQLite FTS5 | Medium — keyword matching | <5ms | Built into SQLite | Low |
+| + vector embeddings | High — semantic | ~50ms + API call | External embedding service | High |
+
+Vector embeddings are explicitly a non-goal for MVP. However, pure recency × importance returns memories in chronological order regardless of content relevance — an agent asking "what happened in the billing discussion?" gets the most recent memories, not billing-related ones.
+
+SQLite FTS5 is a **built-in** SQLite extension (available in Python's `sqlite3` module by default) that provides full-text search with BM25 ranking. It adds meaningful content relevance at near-zero cost:
+
+```sql
+-- Create virtual table alongside the regular table
+CREATE VIRTUAL TABLE episodes_fts USING fts5(summary, context_json, content=episodes, content_rowid=rowid);
+
+-- Query with BM25 ranking
+SELECT e.*, fts.rank
+FROM episodes_fts fts
+JOIN episodes e ON e.rowid = fts.rowid
+WHERE episodes_fts MATCH ?
+ORDER BY (fts.rank * -1) * e.importance * (1.0 / (1 + (julianday('now') - julianday(e.created_at, 'unixepoch'))))
+LIMIT ?;
+```
+
+*Composite scoring formula:*
+
+$$\text{score} = \text{BM25}(query, episode) \times \text{importance} \times \frac{1}{1 + \text{age\_days}}$$
+
+When no query text is provided (e.g., tick loop context loading), fall back to `importance × recency` only.
+
+*Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not.
+
+---
 
 ## Decision / Next Steps
 
-This RFC needs review and acceptance before implementation begins. Key decisions:
+All 5 open questions are now resolved. Remaining steps before implementation:
 
-1. Confirm the 6-phase implementation plan and PR ordering
-2. Resolve open questions (especially Q1 shared vs per-agent DB, Q3 migration strategy)
-3. Create `0005-pr-plan.md` with detailed PR breakdown once accepted
+1. Review and accept the RFC (status → 👍 Accepted)
+2. Confirm the 6-phase implementation plan and PR ordering
+3. Create `0005-pr-plan.md` with detailed PR breakdown
 
 ## Related Documentation
 
