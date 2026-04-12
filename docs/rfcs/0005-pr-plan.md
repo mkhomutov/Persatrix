@@ -347,6 +347,16 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] Only compressed episodes eligible for deletion
 - [x] LLM call mocked — no real API calls
 
+#### Review findings (PR #52 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-3c-1 | Low | `summarize_old_episodes()` stores raw `response.text` without stripping whitespace — emptiness check uses `.strip()` but the stored value retains leading/trailing whitespace from LLM | Store `summary.strip()` instead of raw `response.text` |
+| F-3c-2 | Low | `logger.info("Summarized episode ...")` fires outside `if rowcount > 0` guard — misleading log in race conditions where episode was deleted between SELECT and UPDATE | Move `logger.info` inside the `if update_cursor.rowcount > 0:` block |
+| F-3c-3 | Info | No concurrency guard for parallel invocations — concurrent callers can SELECT the same batch, causing duplicate LLM calls and wasted budget | Add docstring note: "Not concurrency-safe. External callers should ensure only one summarization run per agent at a time." |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: test FTS5 searchability after summarization UPDATE, composite index `(agent_id, compression_level, created_at)` for retention queries, `memory_episode_summarize_count` telemetry counter, document `older_than_days=0` edge case behavior.
+
 ---
 
 ### PR 4: `feature/v02-relationship-memory` — Relationship Memory
@@ -637,6 +647,16 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-3b-5 | `tests/unit/python/test_memory_tools.py` | Add `test_recall_fts5_malformed_query_fallback` — test notes FTS5 fallback with malformed queries like `"NOT"` or `"*"` |
 
 > Items deferred beyond PR 7 — nice-to-have improvements: split notes into separate `NoteStore` class, cap `limit` at tool layer, test `_prune_notes` with `max_notes=1`, negative test for `check_auto_reflect(auto_reflect_after=-1)`, `test_migration_idempotent` same-DB test.
+
+**From PR 3c (PR #52 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-3c-1 | `agents/memory/episodic.py` | Strip LLM summary before storing — change `summary = response.text` to `summary = response.text.strip() if response.text else response.text` in `summarize_old_episodes()` |
+| F-3c-2 | `agents/memory/episodic.py` | Move `logger.info("Summarized episode ...")` inside `if update_cursor.rowcount > 0:` block in `summarize_old_episodes()` |
+| F-3c-3 | `agents/memory/episodic.py` | Add concurrency note to `summarize_old_episodes()` docstring: "Not concurrency-safe. External callers should ensure only one summarization run per agent at a time." |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: FTS5 searchability test after summarization, composite retention index, summarization telemetry counter, `older_than_days=0` edge case documentation.
 
 #### Key implementation details
 
