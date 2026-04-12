@@ -43,7 +43,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | `agents/planner_agent.py` | **Remove** — instructions move to `config/agents.yaml` |
 | `agents/__init__.py` | Update exports — remove old agents, add `TaskAgent` |
 | `config/agents.yaml` | Add `type: task` and `instructions` field to all three agents |
-| `schemas/agent.schema.json` | Add `type` enum (`task` \| `persona`), `instructions` field |
+| `schemas/agent.schema.json` | Wire validation for `type` enum and `instructions` field (note: `type`, `persona`, `behavior`, `autonomy`, `memory`, and `relationships` definitions already exist in the schema from prior work — PR 1a focuses on wiring the `type`-based dispatch and `instructions` requirement, not creating schema from scratch) |
 | `tests/unit/python/test_task_agent.py` | **New** — parametrized TaskAgent tests |
 | `tests/unit/python/test_agents.py` | Update — replace class-specific tests with `TaskAgent` parametrization |
 
@@ -85,7 +85,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | File | Change |
 |------|--------|
 | `cli/src/main.rs` | Wire `run`, `status`, `agent list`, `agent info`, `logs` to existing REST endpoints |
-| `cli/Cargo.toml` | Add `reqwest`, `serde_json`, `serde` dependencies |
+| `cli/Cargo.toml` | No changes needed — `reqwest` (with `json` feature), `serde`, `serde_json`, and `tokio` are already present from prior PRs |
 
 #### Key implementation details
 
@@ -115,7 +115,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PR 2: `feature/v02-working-memory` — Working Memory + Token Estimation
 
-**Depends on**: PR 1a merged (TaskAgent must exist for integration)
+**Depends on**: PR 1a merged (soft dependency — `WorkingMemory` and `estimate_tokens()` are added to `BaseAgent`, not `TaskAgent`, so there is no hard code dependency; however, merging PR 1a first ensures the agent type system is stable before layering memory on top. If critical-path pressure arises, PR 2 can safely parallel with PR 1a.)
 **Branch**: `feature/v02-working-memory`
 **Estimated size**: ~350–500 lines (implementation + tests)
 
@@ -264,7 +264,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Branch**: `feature/v02-episode-summarization`
 **Estimated size**: ~200–350 lines (implementation + tests)
 
-> **RFC divergence note**: RFC Phase 3c lists a dependency on Phase 3b and includes the `auto_reflect_after` counter persistence test as deliverable #3. In this PR plan, the counter persistence test is moved to PR 3b (where the counter logic is implemented), allowing PR 3c to depend only on PR 3a and run in parallel with PR 3b.
+> **RFC divergence note**: RFC Phase 3c ("Phase 3c: Episode Auto-Summarization", line ~1602 of `0005-persona-agent-memory.md`) lists "Dependencies: Phase 3b" and includes deliverable #3: "`auto_reflect_after` counter persistence across restarts (round-trip test)". In this PR plan, the counter persistence test is moved to PR 3b (where the counter logic and `agent_state` table writes are implemented), allowing PR 3c to depend only on PR 3a and run in parallel with PR 3b. This reordering is tracked here rather than in the RFC itself to keep the RFC as the canonical design document.
 
 #### Scope
 
@@ -347,7 +347,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PR 5a: `feature/v02-persona-runtime` — PersonaAgent Runtime Core
 
-**Depends on**: PRs 2, 3a, 3b, 4 merged (all memory tiers required)
+**Depends on**: PRs 2, 3a, 3b, 4 merged (all memory tiers required). Note: PR 3c (Episode Auto-Summarization) is NOT required — summarization is invoked independently and is not needed for persona runtime core functionality. PR 3c can merge before or after PR 5a.
 **Branch**: `feature/v02-persona-runtime`
 **Estimated size**: ~400–500 lines (implementation + tests)
 
@@ -459,7 +459,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | File | Change |
 |------|--------|
 | `agents/validate.py` | **Implement** — `validate_config_dir()` using `jsonschema` library |
-| `schemas/agent.schema.json` | Full update: persona fields, behavioral dimensions (enum-constrained with defaults), memory config, autonomy config, relationships |
+| `schemas/agent.schema.json` | Validate and refine: most v0.2 definitions (`persona`, `behavior` dimensions, `autonomy`, `memory`, `relationships`) already exist from prior work. PR 6a focuses on ensuring conditional requirements (`type: task` → `instructions`, `type: persona` → `persona`), range validation, and wiring `make validate` — not creating the schema from scratch. Actual delta expected to be smaller than naive estimate. |
 | `agents/pyproject.toml` | Add `jsonschema>=4.0,<5` dependency |
 | `tests/unit/python/test_validate.py` | **New** — validation pass/fail tests |
 
