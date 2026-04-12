@@ -344,6 +344,13 @@ class TestRecordInteraction:
         with pytest.raises(ValueError, match="finite"):
             await memory.record_interaction("bob", "chat", sentiment=float("-inf"))
 
+    async def test_empty_interaction_type_rejected(self, memory):
+        """Empty or whitespace-only interaction_type is rejected (F-10)."""
+        with pytest.raises(ValueError, match="interaction_type"):
+            await memory.record_interaction("bob", "")
+        with pytest.raises(ValueError, match="interaction_type"):
+            await memory.record_interaction("bob", "   ")
+
 
 # ─── Relationship summary ───────────────────────────────────
 
@@ -400,6 +407,14 @@ class TestGetRelationshipSummary:
         assert summary.trust_score == pytest.approx(0.6, abs=0.001)
         assert summary.interaction_count == 1
         assert summary.notes == "good work"
+
+    async def test_summary_reflects_decayed_trust(self, memory):
+        """get_relationship_summary() returns trust after apply_decay() (F-17)."""
+        await memory.update_trust("bob", delta=0.2, reason="good")
+        await memory.apply_decay(decay_rate=0.1)
+        summary = await memory.get_relationship_summary("bob")
+        # 0.7 + 0.1 * (0.5 - 0.7) = 0.68
+        assert summary.trust_score == pytest.approx(0.68, abs=0.001)
 
 
 class TestGetAllRelationships:

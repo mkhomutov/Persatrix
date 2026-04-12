@@ -163,7 +163,10 @@ class RelationshipMemory:
         # The INSERT path sets last_interaction_at = NULL because a trust
         # update is not an interaction — only record_interaction() should
         # populate that field.
-        await db.execute(
+        # Use RETURNING to get the post-upsert trust_score in a single
+        # round-trip, avoiding a separate get_trust() SELECT.  Requires
+        # SQLite >= 3.35 (Python 3.11+ ships >= 3.39).
+        cursor = await db.execute(
             """
             INSERT INTO relationships
                 (agent_id, other_agent_id, trust_score, interaction_count,
@@ -172,6 +175,7 @@ class RelationshipMemory:
             ON CONFLICT(agent_id, other_agent_id) DO UPDATE SET
                 trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
                 notes = ?
+            RETURNING trust_score
             """,
             (
                 self._agent_id,
@@ -182,10 +186,10 @@ class RelationshipMemory:
                 reason,
             ),
         )
+        row = await cursor.fetchone()
         await db.commit()
 
-        # Read back the actual trust value after the atomic update.
-        new_trust = await self.get_trust(other_agent_id)
+        new_trust = row[0]
         logger.debug(
             "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
             self._agent_id,
@@ -250,6 +254,12 @@ class RelationshipMemory:
         Returns the generated interaction ID.
         """
         db = self._ensure_db()
+
+        # Reject empty interaction_type: it has no semantic value and would
+        # produce meaningless entries in get_relationship_summary() output
+        # injected into LLM prompts.
+        if not interaction_type or not interaction_type.strip():
+            raise ValueError("interaction_type must not be empty")
 
         # Clamp sentiment to [-1.0, 1.0] and reject NaN/Inf for consistency
         # with other bounded numeric fields (trust delta, decay rate).

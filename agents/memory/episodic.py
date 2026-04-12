@@ -174,10 +174,13 @@ MIGRATIONS: list[tuple[int, str, str]] = [
 
         CREATE INDEX IF NOT EXISTS idx_relationships_agent
             ON relationships(agent_id);
-        CREATE INDEX IF NOT EXISTS idx_interactions_agent
-            ON interactions(agent_id, other_agent_id);
-        CREATE INDEX IF NOT EXISTS idx_interactions_created
-            ON interactions(created_at DESC);
+        -- Composite covering index for get_relationship_summary() query:
+        -- WHERE agent_id=? AND other_agent_id=? ORDER BY created_at DESC LIMIT N
+        -- Replaces separate agent and created_at indexes; the composite
+        -- index satisfies both the WHERE filter and ORDER BY in a single
+        -- index scan, avoiding a temp sort.
+        CREATE INDEX IF NOT EXISTS idx_interactions_lookup
+            ON interactions(agent_id, other_agent_id, created_at DESC);
         """,
     ),
 ]
