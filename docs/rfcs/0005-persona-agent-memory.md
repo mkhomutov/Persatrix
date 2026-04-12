@@ -25,6 +25,7 @@
   - [Episodic Memory (Long-Term Storage)](#episodic-memory-long-term-storage)
     - [Future Enhancement: Semantic Search via Vector Embeddings](#future-enhancement-semantic-search-via-vector-embeddings)
   - [Relationship Memory (Trust & Interaction)](#relationship-memory-trust--interaction)
+  - [Agent-Initiated Memory Tools](#agent-initiated-memory-tools)
   - [Dynamic Persona State](#dynamic-persona-state)
   - [Behavioral Dimensions & Rendering](#behavioral-dimensions--rendering)
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
@@ -42,7 +43,7 @@
 
 ## Summary
 
-This RFC implements the PersonaAgent runtime and three-tier memory system as the foundational v0.2 feature. It activates the existing `PersonaAgent` class scaffold (currently abstract-only) with: (1) an autonomous tick loop for goal-driven agents, (2) an event dispatch framework that routes `AgentEvent`s to persona agents, (3) three-tier memory (working, episodic, relationship), and (4) dynamic persona state injection. As a bundled improvement, it consolidates the three structurally identical v0.1 task agents into a single data-driven `TaskAgent` class with YAML-configured instructions.
+This RFC implements the PersonaAgent runtime and three-tier memory system as the foundational v0.2 feature. It activates the existing `PersonaAgent` class scaffold (currently abstract-only) with: (1) an autonomous tick loop for goal-driven agents, (2) an event dispatch framework that routes `AgentEvent`s to persona agents, (3) three-tier memory (working, episodic, relationship), (4) dynamic persona state injection, and (5) agent-initiated memory tools (`store_note`, `recall_notes`, `update_note`) for deliberate knowledge capture. As a bundled improvement, it consolidates the three structurally identical v0.1 task agents into a single data-driven `TaskAgent` class with YAML-configured instructions.
 
 ## Motivation
 
@@ -77,6 +78,8 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 8. **Agent type discrimination**: Explicit `type: task | persona` field in agent config, replacing capability heuristics.
 9. **Data-driven TaskAgent**: Single `TaskAgent` class driven by YAML `instructions` field, replacing `CoderAgent` / `ReviewerAgent` / `PlannerAgent`.
 10. **CLI command wiring**: Wire Rust CLI stubs to existing and new REST endpoints as each phase lands — `run`, `status`, `agent list/info`, `validate`, `test --persona`.
+11. **Agent-initiated memory tools**: Built-in `store_note`, `recall_notes`, `update_note` tools that let agents deliberately capture structured knowledge (distinct from framework-managed automatic memory).
+12. **Configurable learning behavior**: Per-agent `memory.notes` config section controlling whether agents can self-direct note-taking, how many notes they retain, and auto-reflection triggers.
 
 ## Non-Goals
 
@@ -532,6 +535,132 @@ CREATE TABLE IF NOT EXISTS interactions (
 );
 ```
 
+### Agent-Initiated Memory Tools
+
+The three memory tiers (working, episodic, relationship) are **framework-managed** — the system automatically stores episodes after interactions and updates trust scores. The agent has no say in what gets remembered. This is insufficient: agents need to *deliberately* capture structured knowledge — "this API returns paginated results", "the PM prefers bullet-point status updates", "last time we used this approach it failed because of X".
+
+This is fundamentally an **agent action**, not a framework side-effect. It belongs in the tool layer, not the memory infrastructure.
+
+#### Why tools, not a skill or memory config
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Tool** (`@tool` decorator) | Fits existing architecture. Agent decides when to use it. Gets permission gating, auditing, budget tracking for free. LLMs understand tool-calling natively. | Agent must be prompted to use it (system prompt injection). |
+| **Skill** (system prompt only) | No new code needed — just tell the agent to "take notes". | No persistence mechanism. Notes vanish with the context window. LLM compliance is unreliable. |
+| **Automatic framework behavior** | Zero agent effort. | Can't know what the agent considers noteworthy. Over-stores noise or misses insights. |
+
+Tools are the right layer because note-taking is a **deliberate agent decision with side effects** (database write), which is exactly what the tool abstraction models.
+
+#### Tool Definitions
+
+Three built-in memory tools, registered in `agents/tools/builtin.py` alongside `file_read`, `file_write`, etc.:
+
+```python
+@tool(
+    name="store_note",
+    description="Save a structured note for future reference. Use this to remember important facts, decisions, patterns, or lessons learned.",
+    permissions=["memory:write"],
+)
+async def store_note(
+    topic: str,
+    content: str,
+    tags: list[str] | None = None,
+) -> ToolResult:
+    """Store a note in the agent's personal knowledge base."""
+    ...
+
+
+@tool(
+    name="recall_notes",
+    description="Search your saved notes by topic or keyword. Returns the most relevant notes.",
+    permissions=["memory:read"],
+)
+async def recall_notes(
+    query: str,
+    limit: int = 5,
+) -> ToolResult:
+    """Retrieve notes matching the query using FTS5 text search."""
+    ...
+
+
+@tool(
+    name="update_note",
+    description="Update or refine a previously saved note.",
+    permissions=["memory:write"],
+)
+async def update_note(
+    note_id: str,
+    content: str,
+) -> ToolResult:
+    """Replace the content of an existing note. Topic and tags are preserved."""
+    ...
+```
+
+#### Storage Schema
+
+Notes share the existing SQLite database (Q1 decision) with a new table:
+
+```sql
+CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags_json TEXT,              -- JSON array of string tags
+    access_count INTEGER DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE INDEX idx_notes_agent ON notes(agent_id);
+CREATE INDEX idx_notes_topic ON notes(topic);
+
+-- FTS5 for recall_notes search
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+    topic, content, tags_json,
+    content=notes, content_rowid=rowid
+);
+```
+
+Like `EpisodicMemory` and `RelationshipMemory`, notes are **agent-scoped** — every query is filtered by `agent_id`, fixed at the memory instance level. An agent cannot access another agent's notes without constructing a new instance (same isolation pattern as [Memory Isolation](#memory-isolation-shared-database)).
+
+#### Configurable Learning Behavior
+
+Note-taking ability is controlled per-agent in the `memory` config section. This is the **hard infrastructure gate** — tool permissions in `agents.yaml` control *whether* an agent can take notes, while the `memory.notes` config controls *how much* and *how often*.
+
+```yaml
+# config/agents.yaml — persona agent with note-taking enabled
+- id: "sarah-chen"
+  type: "persona"
+  memory:
+    db_path: "data/memory.db"
+    notes:
+      enabled: true              # default: true for persona agents, false for task agents
+      max_notes: 500             # per-agent cap; oldest low-access notes pruned when exceeded
+      auto_reflect_after: 5      # after N interactions, inject "consider what's worth noting" nudge
+      inject_recent_notes: 3     # include N most relevant notes in context per LLM call
+```
+
+**How `auto_reflect_after` works**: After every N interactions (configurable, default 5), the framework appends a one-line nudge to the system prompt: *"You have completed {N} interactions since your last note. Consider whether any patterns, decisions, or lessons are worth recording with `store_note`."* This is a **soft behavioral nudge**, not a forced action — the LLM decides whether to call the tool. Agents with `detail_focus: detail-focused` naturally respond to this nudge more often than `big-picture` agents, creating personality-consistent learning behavior without a dedicated "learning" dimension.
+
+**What about auto-extracting lessons?** A tempting alternative is framework-initiated reflection: after every interaction, the system calls the LLM asking "what should this agent remember?" and auto-stores the result. This is explicitly **not** done because:
+1. It doubles LLM costs (extra call per interaction)
+2. The framework can't know what the agent's persona would consider noteworthy
+3. It removes agency — the agent should decide what matters, not the framework
+4. Over-storage creates noise that degrades retrieval quality
+
+**Relationship to existing memory tiers:**
+
+| Concern | Episodic Memory | Agent Notes |
+|---------|----------------|-------------|
+| **Who decides to store** | Framework (automatic after interactions) | Agent (deliberate tool call) |
+| **Content type** | Conversation summaries, outcomes | Facts, patterns, lessons, structured knowledge |
+| **Granularity** | One episode per conversation/interaction | As granular as the agent wants |
+| **Lifecycle** | Auto-compressed over time (raw → summarized → distilled) | Persistent until explicitly updated or pruned by cap |
+| **Retrieval** | `recall()` by query relevance | `recall_notes()` by topic/keyword |
+
+Both use the same SQLite database. Episodic memory is the agent's autobiography; notes are the agent's personal knowledge base.
+
 ### Dynamic Persona State
 
 Runtime state injected into the system prompt before each LLM call. `mood` is constrained to an enum (not free-text) to prevent unpredictable drift when the framework auto-updates mood from interaction analysis. `energy` decays per action and recovers on idle, naturally pairing with the tick loop's `idle_after_ticks` mechanic.
@@ -713,7 +842,7 @@ Update `schemas/agent.schema.json` to add:
   - `knowledge` object (`domains`, `limitations`)
 - `autonomy` object with `level`, `tick_interval_seconds`, `max_actions_per_tick`, `idle_after_ticks`
 - `relationships` array
-- `memory` configuration object
+- `memory` configuration object with `db_path` (string), `notes` object (`enabled` bool, `max_notes` int, `auto_reflect_after` int, `inject_recent_notes` int)
 
 ### CLI Command Wiring
 
@@ -811,6 +940,17 @@ The tick loop could cause runaway LLM calls if not bounded.
 - `idle_after_ticks` reduces activity when nothing is happening
 - Per-agent token budgets (from `config/optimization.yaml`) apply to tick-initiated calls
 
+### Agent Note Storage Abuse
+
+Memory tools allow agents to write to the shared SQLite database. A compromised or misbehaving agent could flood the notes table with garbage data, consuming disk space and degrading FTS5 query performance.
+
+**Mitigations:**
+- `max_notes` per-agent cap (default 500) with automatic pruning of oldest low-access notes
+- `memory:write` permission required — deny-by-default; task agents don't get it unless explicitly configured
+- Note content size is bounded (configurable max, default 10KB per note)
+- Agent-scoped isolation (same pattern as episodic/relationship memory) — an agent can only write/read its own notes
+- Note writes are logged for audit
+
 ## Phased Implementation Plan
 
 ### Phase 1: Agent Type System + Data-Driven TaskAgent + CLI Wiring
@@ -842,16 +982,19 @@ The tick loop could cause runaway LLM calls if not bounded.
 
 **Dependencies**: Phase 1
 
-### Phase 3: Episodic Memory (SQLite)
+### Phase 3: Episodic Memory (SQLite) + Agent-Initiated Memory Tools
 
-**Summary**: Implement long-term episode storage with relevance-based retrieval.
+**Summary**: Implement long-term episode storage with relevance-based retrieval. Add `store_note`, `recall_notes`, `update_note` built-in tools for agent-initiated knowledge capture.
 
 **Deliverables**:
-1. SQLite schema and migration
+1. SQLite schema and migration (episodes + notes tables, FTS5 indexes)
 2. `EpisodicMemory` class with store/recall/summarize
 3. Auto-summarization of old episodes (LLM-based compression)
 4. Integration with persona event handling (store episode after each interaction)
-5. Unit tests for CRUD, retrieval ranking, compression
+5. `store_note`, `recall_notes`, `update_note` tools in `agents/tools/builtin.py`
+6. Notes pruning logic (oldest low-access notes removed when `max_notes` exceeded)
+7. `auto_reflect_after` nudge injection in working memory context builder
+8. Unit tests for CRUD, retrieval ranking, compression, note tools, note pruning
 
 **Dependencies**: Phase 2 (uses token estimation for compression)
 
@@ -909,7 +1052,8 @@ The tick loop could cause runaway LLM calls if not bounded.
 | Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema |
 | Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math |
 | Python agents | `agents/memory/__init__.py` | Export memory classes |
-| Python agents | `agents/server.py` | Update agent loader, add tick scheduler lifecycle |
+| Python agents | `agents/tools/builtin.py` | Add `store_note`, `recall_notes`, `update_note` built-in tools |
+| Python agents | `agents/server.py` | Update agent loader, add tick scheduler lifecycle, notes config |
 | Python agents | `agents/coder.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/reviewer.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/planner_agent.py` | **Remove** (instructions move to YAML) |
@@ -919,6 +1063,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 | Tests | `tests/unit/python/test_task_agent.py` | **New** — TaskAgent tests |
 | Tests | `tests/unit/python/test_working_memory.py` | **New** — working memory tests |
 | Tests | `tests/unit/python/test_episodic_memory.py` | **New** — episodic memory tests |
+| Tests | `tests/unit/python/test_memory_tools.py` | **New** — store_note, recall_notes, update_note tool tests |
 | Tests | `tests/unit/python/test_relationship_memory.py` | **New** — relationship memory tests |
 | Tests | `tests/unit/python/test_persona_runtime.py` | **New** — event dispatch, tick loop, action executor tests |
 | Tests | `tests/unit/python/test_validate.py` | **New** — config validation tests |
@@ -929,8 +1074,8 @@ The tick loop could cause runaway LLM calls if not bounded.
 
 ## Test Strategy
 
-- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values).
-- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle. Memory persistence across agent restarts (SQLite round-trip). Persona agent handling task via backward-compatible `handle()` path.
+- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes.
+- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle. Memory persistence across agent restarts (SQLite round-trip). Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → verify content).
 - **E2E / smoke tests**: Submit a workflow that routes to a persona agent configured in `agents.yaml`, verify completion. Not gated on this RFC — existing e2e tests cover task agent path.
 - **Manual tests**: Start a persona agent with `autonomy.level: semi-autonomous`, verify tick loop runs and logs actions. Verify `make validate` passes with updated configs.
 
@@ -1097,11 +1242,35 @@ See [Future Enhancement: Semantic Search via Vector Embeddings](#future-enhancem
 
 *Future enhancement — Ebbinghaus forgetting curve:* The `access_count` and `last_accessed_at` columns capture the data needed to implement retrieval-strengthened exponential decay ($R = e^{-t/S}$ where strength $S$ grows with each retrieval). This is a post-MVP upgrade path — swap the hyperbolic `1/(1 + age_days)` decay for exponential decay where the time constant is a function of `access_count`. Requires empirical tuning of decay rate and strengthening factor against real agent interaction data, so it is deferred until the system is running and producing observable memory access patterns.
 
+### Q6: Should agent-initiated note-taking use a dedicated "learning" behavioral dimension?
+
+**Decision: No — use existing dimensions + tool availability + config knobs instead.**
+
+*Analysis:*
+
+A dedicated `learning_style` dimension (e.g., `passive | reflective | active`) would directly control how much an agent self-reflects and takes notes. However:
+
+| Factor | Dedicated dimension | Existing dimensions + tool config |
+|--------|--------------------|------------------------------------|
+| LLM differentiability | Low — LLMs struggle to meaningfully vary "learning rate" behavior | High — `detail_focus` and `risk_tolerance` already influence note-taking naturally |
+| Configurability | Soft only (prompt nudge) | Hard + soft: `memory.notes.enabled` gates capability, `auto_reflect_after` controls frequency, `max_notes` caps storage |
+| Personality consistency | Awkward — "learning ability" is not a personality trait | Natural — detail-focused cautious agents take more notes than big-picture bold agents |
+| Dimensionality cost | 6th dimension, 729 profiles (3^6) — complexity for marginal return | Zero additional dimensions |
+
+The combination of:
+- `detail_focus: detail-focused` → agent naturally flags more things worth noting
+- `risk_tolerance: cautious` → agent wants to record decisions for future reference
+- `memory.notes.enabled: true` → hard gate on capability
+- `memory.notes.auto_reflect_after: 5` → configurable reflection frequency
+- Tool permission `memory:write` → deny-by-default access control
+
+...provides more precise, testable, and reliable control over learning behavior than a single behavioral enum could.
+
 ---
 
 ## Decision / Next Steps
 
-All 5 open questions are now resolved. Remaining steps before implementation:
+All 6 open questions are now resolved. Remaining steps before implementation:
 
 1. Review and accept the RFC (status → 👍 Accepted)
 2. Confirm the 6-phase implementation plan and PR ordering
