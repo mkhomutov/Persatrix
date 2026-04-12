@@ -10,9 +10,9 @@
 
 ## Overview
 
-RFC 0005 defines the PersonaAgent runtime, three-tier memory system (working, episodic, relationship), agent-initiated memory tools, behavioral dimensions, dynamic persona state, and data-driven TaskAgent consolidation. The RFC spans 6 implementation phases with an estimated ~3,500 LOC across Python agents, Rust CLI, YAML config, and JSON schemas.
+RFC 0005 defines the PersonaAgent runtime, three-tier memory system (working, episodic, relationship), agent-initiated memory tools, behavioral dimensions, dynamic persona state, and data-driven TaskAgent consolidation. The RFC spans 6 implementation phases with an estimated ~3,500–4,850 LOC (calibrated at 1.7×) across Python agents, Rust CLI, YAML config, and JSON schemas.
 
-The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **13 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), plus a final PR 7 for accumulated review follow-ups and RFC close.
+The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **12 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), plus a final PR 7 for accumulated review follow-ups and RFC close.
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -20,7 +20,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0004 fully merged (v0.1 complete). The v0.1 agent infrastructure (`BaseAgent`, `_run_llm_loop()`, `LLMClient`, `server.py` agent loader, permission gate, tool registry) is the foundation for all v0.2 work.
 
-**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** (can parallel with each other; both depend on PR 3a) → **PR 4** → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7**.
+**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7**.
 
 ---
 
@@ -263,6 +263,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 **Depends on**: PR 3a merged (uses `agent_state` table, episode infrastructure from PR 3a; can parallel with PR 3b — no dependency on notes or memory tools)
 **Branch**: `feature/v02-episode-summarization`
 **Estimated size**: ~200–350 lines (implementation + tests)
+
+> **RFC divergence note**: RFC Phase 3c lists a dependency on Phase 3b and includes the `auto_reflect_after` counter persistence test as deliverable #3. In this PR plan, the counter persistence test is moved to PR 3b (where the counter logic is implemented), allowing PR 3c to depend only on PR 3a and run in parallel with PR 3b.
 
 #### Scope
 
@@ -559,11 +561,11 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | PR | Phase | Branch | Est. Size | Depends On |
 |----|-------|--------|-----------|------------|
 | 1a | 1 | `feature/v02-task-agent-type` | 350–500 | — |
-| 1b | 1 | `feature/v02-cli-v1-wiring` | 250–400 | 1a (or parallel) |
+| 1b | 1 | `feature/v02-cli-v1-wiring` | 250–400 | — |
 | 2 | 2 | `feature/v02-working-memory` | 350–500 | 1a |
 | 3a | 3 | `feature/v02-schema-migration-episodic` | 400–500 | 2 |
 | 3b | 3 | `feature/v02-memory-tools` | 350–500 | 3a |
-| 3c | 3 | `feature/v02-episode-summarization` | 200–350 | 3b |
+| 3c | 3 | `feature/v02-episode-summarization` | 200–350 | 3a |
 | 4 | 4 | `feature/v02-relationship-memory` | 350–500 | 3a |
 | 5a | 5 | `feature/v02-persona-runtime` | 400–500 | 2, 3a, 3b, 4 |
 | 5b | 5 | `feature/v02-event-dispatch-tick` | 400–500 | 5a |
@@ -601,3 +603,12 @@ PR 1a (TaskAgent + type system)
 | SQLite concurrency under multi-agent load | PR 5b integration flaky | WAL mode + per-agent lock; single-process MVP limits contention |
 | Behavioral dimension rendering quality | Persona agents behave poorly | All 15 dimension/value combos tested with expected output; LLM testing is manual |
 | TaskAgent consolidation breaks existing tests | PR 1a regressions | Parametrized tests preserve existing coverage; old test patterns adapted |
+| PRs 3a, 4, 5a, 5b at 500-line boundary | PRs exceed size limit, require mid-implementation splits | Calibrated at 1.7×; PR 5a/5b already pre-split. Monitor during implementation and split further if needed |
+
+### Deferred to Follow-Up
+
+The following RFC 0005 items are **out of scope** for this PR plan and will be addressed in separate follow-up work:
+
+- **REST API Observability Endpoints** (Go orchestrator changes): `/api/v1/agents/{id}/state`, `/memory/episodes`, `/memory/notes`, `/memory/relationships`, `/{id}/tick`. These are Go-side changes outside the Python agent scope of this plan.
+- **Memory Observability Metrics**: The RFC defines structured log metrics (`memory_episode_store_duration_ms`, `memory_notes_count`, `memory_trust_update`, etc.). These should be added incrementally in each memory PR (episode metrics in PR 3a, notes metrics in PR 3b, trust metrics in PR 4, working memory metrics in PR 2) but are not tracked as explicit deliverables in this plan. Implementers should include basic `logger.info()`-level observability when implementing each memory tier.
+- **Go Orchestrator Impact**: Persona-aware scheduling, agent type routing, and orchestrator-side config changes are deferred to a separate Go-focused RFC/plan.
