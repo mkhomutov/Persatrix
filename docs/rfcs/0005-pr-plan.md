@@ -295,6 +295,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] `auto_reflect_after` counter persistence tested
 - [x] Note content size bounded (10KB default)
 
+#### Review findings (PR #51 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-3b-1 | Medium | `_prune_notes()` has TOCTOU race: SELECT count then DELETE is non-atomic across concurrent connections — stale overflow calculation possible when multiple `EpisodicMemory` instances share a DB file | Use atomic DELETE with subquery count: `DELETE FROM notes WHERE id IN (SELECT id FROM notes WHERE agent_id = ? ORDER BY access_count ASC, created_at ASC LIMIT MAX(0, (SELECT COUNT(*) FROM notes WHERE agent_id = ?) - ? + 1))`, or use `BEGIN IMMEDIATE` to acquire write lock before count |
+| F-3b-2 | Medium | `increment_interaction_count()` read-after-write race: separate SELECT after UPSERT+COMMIT could read stale/advanced count under concurrent access. SQLite 3.35+ supports `RETURNING` clause which would be both cleaner and atomic | Use `INSERT ... ON CONFLICT ... SET interaction_count = interaction_count + 1 RETURNING interaction_count` — eliminates the separate SELECT |
+| F-3b-3 | Medium | `note_id` from LLM passed to `update_note`/`delete_note` tool closures without format validation. Parameterized (no injection), but malformed IDs (extremely long strings, null bytes) cause wasted DB round-trips and unclear error messages | Add `UUID(note_id)` parse or regex check before calling memory layer |
+| F-3b-4 | Low | FTS5 fallback warning in `_recall_notes_fts5()` does not include the exception message — harder to diagnose specific FTS5 syntax issues | Capture `except sqlite3.OperationalError as exc` and log `"Notes FTS5 query failed for %r, falling back to LIKE: %s", query, exc` |
+| F-3b-5 | Low | No test for `recall_notes` with FTS5 malformed query fallback (e.g., `"NOT"` or `"*"`) — episodes have this tested in PR 3a, but notes FTS5 fallback path is not explicitly tested | Add `test_recall_fts5_malformed_query_fallback` to `TestRecallNotes` |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: split notes into separate `NoteStore` class (~800-line `EpisodicMemory` growing), cap `limit` parameter at tool layer, test `_prune_notes` with `max_notes=1`, negative test for `check_auto_reflect(auto_reflect_after=-1)`, `test_migration_idempotent` should use same DB file (not fresh `:memory:`).
+
 ---
 
 ### PR 3c: `feature/v02-episode-summarization` — Episode Auto-Summarization
@@ -613,6 +625,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-3a-4 | `agents/memory/__init__.py` | Define `MemoryLifecycle` protocol — PR plan scope specifies exporting `MemoryLifecycle` but it was not implemented. Add `class MemoryLifecycle(Protocol): async def initialize(self) -> None: ...; async def close(self) -> None: ...` |
 
 > Items deferred beyond PR 7 — nice-to-have improvements: softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`), async context manager (`__aenter__`/`__aexit__`), Unicode/large payload tests, query length validation cap, scoring formula inline docstring.
+
+**From PR 3b (PR #51 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-3b-1 | `agents/memory/episodic.py` | TOCTOU in `_prune_notes()` — SELECT count then DELETE is non-atomic. Use atomic DELETE with subquery count or `BEGIN IMMEDIATE` write lock before count |
+| F-3b-2 | `agents/memory/episodic.py` | Use `RETURNING` clause in `increment_interaction_count()` — separate SELECT after UPSERT+COMMIT is a read-after-write race. `INSERT ... ON CONFLICT ... SET interaction_count = interaction_count + 1 RETURNING interaction_count` eliminates the separate SELECT |
+| F-3b-3 | `agents/tools/builtin.py` | Add `note_id` format validation in `update_note`/`delete_note` tool closures — `UUID(note_id)` parse or regex check before calling memory layer |
+| F-3b-4 | `agents/memory/episodic.py` | Add exception message to FTS5 fallback warning in `_recall_notes_fts5()` — capture `except sqlite3.OperationalError as exc` and include `exc` in log message |
+| F-3b-5 | `tests/unit/python/test_memory_tools.py` | Add `test_recall_fts5_malformed_query_fallback` — test notes FTS5 fallback with malformed queries like `"NOT"` or `"*"` |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: split notes into separate `NoteStore` class, cap `limit` at tool layer, test `_prune_notes` with `max_notes=1`, negative test for `check_auto_reflect(auto_reflect_after=-1)`, `test_migration_idempotent` same-DB test.
 
 #### Key implementation details
 
