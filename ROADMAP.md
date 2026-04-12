@@ -114,12 +114,12 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 2/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 3/12 |
 
 ### Dependency Chain
 
 ```
-RFC 0005 (PersonaAgent + Memory + TaskAgent)   👍 Accepted
+RFC 0005 (PersonaAgent + Memory + TaskAgent)   � Implementing
     ↓
 RFC 0006 (Sub-Agent Spawning)                  Not yet written
     ↓
@@ -210,6 +210,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#46](https://github.com/mkhomutov/Orchestr8/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
 | [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/12) | 2026-04-12 |
 | [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/12) | 2026-04-12 |
+| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/12) | 2026-04-12 |
 
 ---
 
