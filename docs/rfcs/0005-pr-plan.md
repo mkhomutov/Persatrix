@@ -225,13 +225,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_episodic_memory.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/memory/episodic.py`
-- [ ] `ruff check agents/memory/` clean
-- [ ] Agent-scoped isolation verified by cross-agent test
-- [ ] WAL mode enabled
-- [ ] FTS5 fallback tested
-- [ ] Migration infrastructure tested for idempotency
+- [x] `pytest tests/unit/python/test_episodic_memory.py -v` passes
+- [x] Coverage ≥ 80% for `agents/memory/episodic.py`
+- [x] `ruff check agents/memory/` clean
+- [x] Agent-scoped isolation verified by cross-agent test
+- [x] WAL mode enabled
+- [x] FTS5 fallback tested
+- [x] Migration infrastructure tested for idempotency
 
 ---
 
