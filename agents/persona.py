@@ -620,14 +620,20 @@ class _LLMPersonaAgent(PersonaAgent):
         return list(defs_by_name.values())
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
-        """Execute tool calls, checking memory tools first then registry."""
+        """Execute tool calls, checking memory tools first then registry.
+
+        Registry lookups are restricted to tools in ``config["tools"]``
+        (F-5a-2: defense-in-depth against LLM hallucinating tool names
+        that exist in the global registry but weren't offered to this agent).
+        """
         memory_tool_map = {td.name: td for td in self._memory_tools}
+        allowed_tools = set(self.config.get("tools", []))
         results: list[LLMToolResult] = []
 
         for call in tool_calls:
-            # Check memory tools first
+            # Check memory tools first (always allowed)
             tool_def = memory_tool_map.get(call.name)
-            if tool_def is None:
+            if tool_def is None and call.name in allowed_tools:
                 tool_def = get_tool(call.name)
 
             if tool_def is None or tool_def.func is None:
@@ -920,8 +926,13 @@ def create_persona_agent(
 
     episodic_memory = EpisodicMemory(agent_id=agent_id, db_path=db_path)
     relationship_memory = RelationshipMemory(agent_id=agent_id, db_path=db_path)
+    # F-5a-1: Read working memory budget from memory config, not the agent's
+    # LLM completion limit (config["max_tokens"]).  These are distinct concerns:
+    # config["max_tokens"] caps LLM output tokens (e.g. 4096), while working
+    # memory needs the full context-window budget (typically 100k+).
+    working_config = memory_config.get("working", {})
     working_memory = WorkingMemory(
-        max_tokens=config.get("max_tokens", 100_000),
+        max_tokens=working_config.get("max_tokens", 100_000),
     )
 
     # Create memory tools with permission gate from agent config

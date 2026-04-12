@@ -710,6 +710,39 @@ class TestCreatePersonaAgent:
         )
         assert agent._working_memory.max_tokens == 100_000
 
+    async def test_working_memory_not_conflated_with_llm_max_tokens(self):
+        """F-5a-1: config['max_tokens'] is the LLM completion limit, not the
+        working memory budget. Working memory should read from
+        memory.working.max_tokens instead."""
+        config = {
+            **_PERSONA_CONFIG,
+            "max_tokens": 4096,  # LLM completion limit — must NOT affect working memory
+        }
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=config,
+            llm_client=_make_client(),
+        )
+        # Should be the default 100_000, NOT 4096
+        assert agent._working_memory.max_tokens == 100_000
+
+    async def test_working_memory_reads_from_memory_config(self):
+        """F-5a-1: Working memory budget is configured under memory.working.max_tokens."""
+        config = {
+            **_PERSONA_CONFIG,
+            "max_tokens": 4096,
+            "memory": {
+                **_PERSONA_CONFIG["memory"],
+                "working": {"max_tokens": 50_000},
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=config,
+            llm_client=_make_client(),
+        )
+        assert agent._working_memory.max_tokens == 50_000
+
 
 # ─── Lazy Energy Recovery Tests ────────────────────────────
 
@@ -1025,6 +1058,55 @@ class TestBuildToolDefinitionsWithRegistry:
         assert len(store_defs) == 1
         # The description should be from the memory tool, not the registry fake
         assert "WRONG" not in store_defs[0]["description"]
+        await agent.close_memory()
+
+    async def test_execute_tools_rejects_unlisted_registry_tool(self):
+        """F-5a-2: _execute_tools must not invoke a registry tool that is not
+        in the agent's config['tools'] list, even if the tool exists in the
+        global registry.  Defense-in-depth against LLM-hallucinated tool names."""
+        from agents.tools.registry import tool
+        from agents.tools.builtin import ToolResult
+
+        @tool(name="secret_admin_tool", description="Should not be callable")
+        async def secret_admin_tool() -> ToolResult:
+            return ToolResult(success=True, data="should not reach here")
+
+        # Agent config does NOT include "secret_admin_tool" in tools list
+        cfg = {**_PERSONA_CONFIG, "tools": ["code_search"]}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        results = await agent._execute_tools([
+            ToolCall(id="tc1", name="secret_admin_tool", input={}),
+        ])
+        assert len(results) == 1
+        assert results[0].is_error is True
+        assert "Unknown tool" in results[0].content
+        await agent.close_memory()
+
+    async def test_execute_tools_allows_listed_registry_tool(self):
+        """F-5a-2: Registry tools that ARE in config['tools'] should execute normally."""
+        from agents.tools.registry import tool
+        from agents.tools.builtin import ToolResult
+
+        @tool(name="allowed_tool", description="This one is allowed")
+        async def allowed_tool() -> ToolResult:
+            return ToolResult(success=True, data="executed")
+
+        cfg = {**_PERSONA_CONFIG, "tools": ["allowed_tool"]}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        results = await agent._execute_tools([
+            ToolCall(id="tc1", name="allowed_tool", input={}),
+        ])
+        assert len(results) == 1
+        assert results[0].is_error is False
+        assert results[0].content == "executed"
         await agent.close_memory()
 
 
