@@ -9,17 +9,13 @@ license = "Apache-2.0"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# PR review: serde_yaml is deprecated and unmaintained; serde_yml is the
-# maintained successor crate. Migrated before any code depends on the API.
-serde_yml = "0.0.12"
 # "full" pulls every Tokio sub-crate (io_uring, process, fs …).
 # A CLI only needs the async runtime and macros for #[tokio::main].
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-tonic = "0.12"                    # gRPC client
 reqwest = { version = "0.12", features = ["json"] }
 colored = "2"
 tabled = "0.16"                   # table output formatting
-indicatif = "0.17"                # progress bars
 
-# tonic-build removed: no build.rs exists to compile proto stubs.
-# Re-add together with a build.rs when the CLI needs generated gRPC types.
+# Removed in PR review: tonic (gRPC — not used, CLI uses REST via reqwest),
+# serde_yml (no YAML parsing yet), indicatif (no progress bars yet).
+# Re-add each when the corresponding feature is implemented.

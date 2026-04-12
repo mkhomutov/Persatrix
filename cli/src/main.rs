@@ -35,6 +35,8 @@ struct SubmitWorkflowResponse {
     status: String,
 }
 
+/// Response fields intentionally use `Option` and no `#[serde(deny_unknown_fields)]`
+/// so the CLI stays forward-compatible when the server adds new fields (e.g. `steps`).
 #[derive(Deserialize, Tabled)]
 struct WorkflowRunResponse {
     run_id: String,
@@ -87,6 +89,26 @@ async fn api_error_message(resp: reqwest::Response) -> String {
         Ok(e) => format!("{}: {}", status, e.error),
         Err(_) => format!("HTTP {status}"),
     }
+}
+
+/// Reject path parameters that could cause path-traversal or query-injection
+/// when interpolated into URLs. Defense-in-depth — the server also validates
+/// IDs, but failing fast here gives the user a clearer error message.
+fn validate_path_param(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{label} cannot be empty"));
+    }
+    if value.contains('/')
+        || value.contains('\\')
+        || value.contains("..")
+        || value.contains('?')
+        || value.contains('#')
+    {
+        return Err(format!(
+            "invalid {label}: contains characters not allowed in URL path"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -265,6 +287,7 @@ enum MeshCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let server = cli.server.trim_end_matches('/');
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))
@@ -283,21 +306,19 @@ async fn main() {
                     "warning: --profile is not yet supported by the server, ignored".yellow()
                 );
             }
-            cmd_run(&client, &cli.server, &workflow, input.as_deref()).await
+            cmd_run(&client, server, &workflow, input.as_deref()).await
         }
 
         Commands::Status { execution_id } => {
-            cmd_status(&client, &cli.server, execution_id.as_deref()).await
+            cmd_status(&client, server, execution_id.as_deref()).await
         }
 
         Commands::Agent(cmd) => match cmd {
-            AgentCommands::List => cmd_agent_list(&client, &cli.server).await,
-            AgentCommands::Info { agent_id } => {
-                cmd_agent_info(&client, &cli.server, &agent_id).await
-            }
+            AgentCommands::List => cmd_agent_list(&client, server).await,
+            AgentCommands::Info { agent_id } => cmd_agent_info(&client, server, &agent_id).await,
             AgentCommands::Reload {
                 agent_id: _,
-                config: _config,
+                config: _,
             } => {
                 println!("{}", "Agent reload not yet implemented".yellow());
                 Ok(())
@@ -321,7 +342,7 @@ async fn main() {
                     "warning: --agent filter is not yet supported, ignored".yellow()
                 );
             }
-            cmd_logs(&client, &cli.server, &execution_id).await
+            cmd_logs(&client, server, &execution_id).await
         }
 
         // Exhaustive match instead of catch-all `_ =>` so that adding a new
@@ -423,6 +444,7 @@ async fn cmd_status(
 ) -> Result<(), String> {
     match execution_id {
         Some(id) => {
+            validate_path_param(id, "execution ID")?;
             let resp = client
                 .get(format!("{server}/api/v1/workflows/{id}/status"))
                 .send()
@@ -506,6 +528,7 @@ async fn cmd_agent_info(
     server: &str,
     agent_id: &str,
 ) -> Result<(), String> {
+    validate_path_param(agent_id, "agent ID")?;
     let resp = client
         .get(format!("{server}/api/v1/agents/{agent_id}"))
         .send()
@@ -545,6 +568,7 @@ async fn cmd_logs(
     server: &str,
     execution_id: &str,
 ) -> Result<(), String> {
+    validate_path_param(execution_id, "execution ID")?;
     let resp = client
         .get(format!("{server}/api/v1/executions/{execution_id}/logs"))
         .send()
