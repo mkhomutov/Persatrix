@@ -12,7 +12,7 @@ This document tracks development progress across all phases. Update it when merg
 | Version | Scope | Status |
 |---------|-------|--------|
 | **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete |
-| **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | 📋 Planned |
+| **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | � In Progress |
 | **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |
 
@@ -113,7 +113,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | � Implementing | 12 | 0/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 1/12 |
 
 ### Dependency Chain
 
@@ -205,6 +205,9 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#41](https://github.com/mkhomutov/Orchestr8/pull/41) | feat(agents): self-registration + integration tests + follow-up fixes | 0004 (5b/7) | 2026-04-11 |
 | [#42](https://github.com/mkhomutov/Orchestr8/pull/42) | fix(agents): registration follow-ups + RFC 0004 close | 0004 (6/7) | 2026-04-11 |
 | [#44](https://github.com/mkhomutov/Orchestr8/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
+| [#45](https://github.com/mkhomutov/Orchestr8/pull/45) | docs(rfc): RFC 0005 — Persona Agent & Memory System | 0005 (RFC) | 2026-04-12 |
+| [#46](https://github.com/mkhomutov/Orchestr8/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
+| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/12) | 2026-04-12 |
 
 ---
 
