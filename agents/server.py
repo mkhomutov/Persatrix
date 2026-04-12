@@ -180,7 +180,7 @@ def _resolve_agent_type(agent_config: dict[str, Any]) -> type[BaseAgent]:
                 f"PersonaAgent is not yet implemented (v0.2 Phase 5)"
             )
         case _:
-            raise ValueError(
+            raise SystemExit(
                 f"Unknown agent type {agent_type!r} for agent "
                 f"{agent_config['id']!r}. Supported types: task, persona"
             )

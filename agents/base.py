@@ -123,7 +123,7 @@ class BaseAgent(ABC):
         """Build normalized tool definitions from the tool registry.
 
         S-12: Filters to only tools listed in agent's ``tools`` config.
-        An empty list means no tools are exposed (e.g. PlannerAgent).
+        An empty list means no tools are exposed (e.g. planner agent).
         """
         # F-04: early return avoids iterating the full registry when no
         # tools are configured for this agent.

@@ -70,9 +70,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/base.py` | BaseAgent ABC + dataclasses + LLM loop | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
-| `agents/coder.py` | Code generation task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
-| `agents/reviewer.py` | Code review task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
-| `agents/planner_agent.py` | Task decomposition agent | ✅ Complete (RFC 0004 PR 4b, #39) |
+| `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | ✅ Complete (RFC 0004 PR 3) |

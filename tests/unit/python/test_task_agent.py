@@ -299,8 +299,8 @@ class TestAgentLoaderDispatch:
         with pytest.raises(SystemExit, match="PersonaAgent is not yet implemented"):
             _resolve_agent_type({"id": "test", "type": "persona"})
 
-    def test_unknown_type_raises_value_error(self):
+    def test_unknown_type_raises_system_exit(self):
         from agents.server import _resolve_agent_type
 
-        with pytest.raises(ValueError, match="Unknown agent type"):
+        with pytest.raises(SystemExit, match="Unknown agent type"):
             _resolve_agent_type({"id": "test", "type": "invalid"})
