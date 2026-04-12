@@ -855,13 +855,11 @@ class TestSummarizeOldEpisodes:
         ep = await memory.get_episode(ep_id)
         assert ep.compression_level == 1
 
-    async def test_compression_level_transition_1_to_2(self, memory: EpisodicMemory):
-        """Re-summarizing a level-1 episode produces level 2 (distilled).
+    async def test_compression_level_0_to_1(self, memory: EpisodicMemory):
+        """Summarizing a raw (level-0) episode produces level 1.
 
-        This requires manually setting compression_level back to allow
-        selection (since summarize_old_episodes selects < 1), so we
-        test the upgrade by manipulating the DB to simulate a level-1
-        episode that needs further distillation.
+        Note: the 1→2 (distilled) transition is not yet reachable
+        because summarize_old_episodes() selects compression_level < 1.
         """
         db = memory._ensure_db()
         old_time = time.time() - 60 * 86400
@@ -1081,8 +1079,10 @@ class TestDeleteOldEpisodes:
     async def test_retention_boundary(self, memory: EpisodicMemory):
         """Episode exactly at the boundary is NOT deleted (< cutoff)."""
         db = memory._ensure_db()
-        # Episode created exactly 90 days ago (on the boundary)
-        boundary_time = time.time() - 90 * 86400
+
+        # Pin wall-clock so cutoff arithmetic is deterministic.
+        frozen_now = 1_000_000_000.0
+        boundary_time = frozen_now - 90 * 86400
 
         ep_id = await memory.store_episode(summary="Boundary episode", context={})
         await db.execute(
@@ -1092,8 +1092,12 @@ class TestDeleteOldEpisodes:
         )
         await db.commit()
 
-        # With 90-day retention, should NOT be deleted (boundary = equal)
-        deleted = await memory.delete_old_episodes(90)
-        # Due to time.time() advancing slightly between setup and delete,
-        # the episode is right at the edge; just verify no crash
-        assert deleted >= 0
+        # With 90-day retention and a frozen clock, cutoff == boundary_time.
+        # The SQL uses "created_at < cutoff" (strict), so the boundary
+        # episode must be preserved.
+        with patch("agents.memory.episodic.time") as mock_time:
+            mock_time.time.return_value = frozen_now
+            deleted = await memory.delete_old_episodes(90)
+
+        assert deleted == 0
+        assert await memory.get_episode(ep_id) is not None

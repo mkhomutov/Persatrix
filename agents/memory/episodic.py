@@ -538,6 +538,11 @@ class EpisodicMemory:
         db = self._ensure_db()
         cutoff = time.time() - older_than_days * 86400.0
 
+        # NOTE: compression_level < 1 intentionally limits selection to raw
+        # (level-0) episodes.  The 1→2 ("distilled") transition defined in
+        # the RFC is not yet reachable through this method.  A separate
+        # distill_old_episodes() (or a max_compression_level parameter) is
+        # planned for a future PR.
         async with db.execute(
             f"SELECT {_EPISODE_SELECT} FROM episodes "
             "WHERE agent_id = ? AND compression_level < 1 AND created_at < ?",
@@ -558,6 +563,8 @@ class EpisodicMemory:
             )
             if episode.outcome:
                 prompt += f"Outcome: {episode.outcome}\n"
+            if episode.tags:
+                prompt += f"Tags: {', '.join(episode.tags)}\n"
             if episode.context:
                 prompt += f"Context: {json.dumps(episode.context)}\n"
 
@@ -583,12 +590,13 @@ class EpisodicMemory:
 
                 now = time.time()
                 new_level = episode.compression_level + 1
-                await db.execute(
+                cursor = await db.execute(
                     "UPDATE episodes SET summary = ?, compression_level = ?, "
                     "compressed_at = ? WHERE id = ? AND agent_id = ?",
                     (summary, new_level, now, episode.id, self._agent_id),
                 )
-                summarized += 1
+                if cursor.rowcount > 0:
+                    summarized += 1
                 logger.info(
                     "Summarized episode %s: compression_level %d → %d",
                     episode.id,
