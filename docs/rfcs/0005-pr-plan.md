@@ -162,11 +162,26 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_working_memory.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/memory/working.py`
-- [ ] `ruff check agents/memory/` clean
-- [ ] Non-compressible sections are never summarized
-- [ ] Compression guard prevents double-compression
+- [x] `pytest tests/unit/python/test_working_memory.py -v` passes
+- [x] Coverage ≥ 80% for `agents/memory/working.py`
+- [x] `ruff check agents/memory/` clean
+- [x] Non-compressible sections are never summarized
+- [x] Compression guard prevents double-compression
+
+#### Review findings (PR #49 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-2-1 | Medium | `compress_if_needed()` uses `estimate_tokens(summary)` with default `accurate=False` for post-compression re-estimation. Short summaries have proportionally larger chars/4 error (20-char summary → 5 est. tokens vs 8–10 actual). Drift accumulates over multiple compressions. | Use `estimate_tokens(summary, accurate=True)` for post-compression token re-estimation |
+| F-2-2 | Low | No logging of total tokens before/after compression pass. Only individual section compression is logged. | Add `logger.info("Compression pass: %d → %d total tokens", original_total, self.total_tokens())` after the compression loop |
+| F-2-3 | Low | `build_context()` has no log of total context tokens used vs budget after constructing included sections. | Add `logger.debug("Context built: %d/%d tokens, %d/%d sections included", ...)` |
+| F-2-4 | Low | No test for `estimate_tokens(accurate=True)` when tiktoken IS available. `test_accurate_true_fallback` passes regardless of tiktoken installation. | Add conditional test: `pytest.importorskip("tiktoken")` → verify accurate path produces different count |
+| F-2-5 | Low | No test for `initialize()` — it's a no-op, but documenting it ensures `MemoryLifecycle` protocol contract is verified. | Add `async def test_initialize_is_noop()` |
+| F-2-6 | Info | No test for `build_context()` with zero-token sections or `add_section()` with empty content. | Add edge case tests for `token_count=0` and `content=""` |
+| F-2-7 | Info | No `__repr__` on `WorkingMemory` — REPL/log debugging shows default object repr. | Add `__repr__` returning section count and token usage |
+| F-2-8 | Info | No thread-safety docstring note. `WorkingMemory` uses plain `list` with no locks — correct for asyncio single-event-loop model but could mislead future contributors. | Add class docstring note: "Not thread-safe — designed for single-event-loop use" |
+
+> Items F-2-6 through F-2-8 are deferred beyond PR 7 — they are nice-to-have improvements, not review fixes.
 
 ---
 
@@ -562,6 +577,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-1b-4 | `cli/src/main.rs` | Case-insensitive server URL scheme check (`.to_lowercase()`) |
 
 > Items F-1b-5 and F-1b-6 are deferred beyond PR 7 — they require new features (`--steps` flag, env-based auth), not review fixes.
+
+**From PR 2 (PR #49 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-2-1 | `agents/memory/working.py` | Use `estimate_tokens(summary, accurate=True)` in `compress_if_needed()` for post-compression re-estimation — short summaries have proportionally larger chars/4 error |
+| F-2-2 | `agents/memory/working.py` | Add total tokens before/after log in `compress_if_needed()`: `"Compression pass: %d → %d total tokens"` |
+| F-2-3 | `agents/memory/working.py` | Add debug log in `build_context()`: `"Context built: %d/%d tokens, %d/%d sections included"` |
+| F-2-4 | `tests/unit/python/test_working_memory.py` | Add tiktoken-conditional test: `pytest.importorskip("tiktoken")` → verify accurate path produces different count than chars/4 |
+| F-2-5 | `tests/unit/python/test_working_memory.py` | Add `test_initialize_is_noop()` to verify `MemoryLifecycle` protocol contract |
+
+> Items F-2-6 through F-2-8 are deferred beyond PR 7 — nice-to-have improvements (zero-token edge case tests, `__repr__`, thread-safety docstring).
 
 #### Key implementation details
 
