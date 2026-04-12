@@ -65,12 +65,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `make validate` passes with updated `agents.yaml`
-- [ ] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
-- [ ] Agent loader uses `type` field dispatch
-- [ ] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `make validate` passes with updated `agents.yaml`
+- [x] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
+- [x] Agent loader uses `type` field dispatch
+- [x] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
 
 ---
 
