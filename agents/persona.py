@@ -345,7 +345,12 @@ class PersonaState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PersonaState:
-        """Deserialize from stored JSON. Unknown fields are ignored."""
+        """Deserialize from stored JSON. Unknown fields are ignored.
+
+        Clamps ``energy`` and ``stress_level`` to [0.0, 1.0] to guard
+        against corrupted or manually edited DB data (review finding:
+        out-of-range values would produce broken prompt sections).
+        """
         mood_str = data.get("mood", "neutral")
         try:
             mood = Mood(mood_str)
@@ -354,8 +359,8 @@ class PersonaState:
             mood = Mood.NEUTRAL
         return cls(
             mood=mood,
-            stress_level=float(data.get("stress_level", 0.0)),
-            energy=float(data.get("energy", 1.0)),
+            stress_level=min(1.0, max(0.0, float(data.get("stress_level", 0.0)))),
+            energy=min(1.0, max(0.0, float(data.get("energy", 1.0)))),
             goal_progress=data.get("goal_progress", {}),
         )
 
@@ -766,6 +771,23 @@ class _LLMPersonaAgent(PersonaAgent):
                 payload={"result": "No LLM response"},
             )]
 
+        # 3b. Detect max_llm_calls exhaustion: if the loop ended while
+        # the LLM was still requesting tool use, the budget was hit
+        # without a natural stop. Log a warning and set a descriptive
+        # fallback so callers can distinguish this from a normal empty
+        # completion (review finding: silent budget exhaustion).
+        if response.stop_reason == StopReason.TOOL_USE:
+            logger.warning(
+                "Agent %s exhausted max_llm_calls=%d without natural stop",
+                self.agent_id,
+                max_llm_calls,
+            )
+            response = LLMResponse(
+                text=f"Max LLM call budget exhausted after {max_llm_calls} iterations",
+                stop_reason=StopReason.END_TURN,
+                usage=response.usage,
+            )
+
         # 4. Parse actions
         actions = self._parse_actions(response)
 
@@ -784,7 +806,7 @@ class _LLMPersonaAgent(PersonaAgent):
                 context={"event": event.payload, "sender": event.sender_id},
             )
         except Exception:
-            logger.warning("Failed to store episode", exc_info=True)
+            logger.warning("Failed to store episode for agent %s", self.agent_id, exc_info=True)
 
         # 7. Persist state
         await self._persist_persona_state()
@@ -817,7 +839,11 @@ class _LLMPersonaAgent(PersonaAgent):
                 self.agent_id, state_json,
             )
         except Exception:
-            logger.warning("Failed to persist persona state", exc_info=True)
+            logger.warning(
+                "Failed to persist persona state for agent %s",
+                self.agent_id,
+                exc_info=True,
+            )
 
     async def _load_persona_state(self) -> PersonaState:
         """Load persona state from the agent_state table, or return defaults.
@@ -831,7 +857,11 @@ class _LLMPersonaAgent(PersonaAgent):
             if state_json:
                 return PersonaState.from_dict(json.loads(state_json))
         except Exception:
-            logger.warning("Failed to load persona state, using defaults", exc_info=True)
+            logger.warning(
+                "Failed to load persona state for agent %s, using defaults",
+                self.agent_id,
+                exc_info=True,
+            )
         return PersonaState()
 
     # ─── Memory lifecycle ──────────────────────────────

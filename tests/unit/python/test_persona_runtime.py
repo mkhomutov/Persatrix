@@ -92,7 +92,7 @@ _PERSONA_CONFIG: dict = {
         },
     },
     "permissions": {
-        "memory": ["memory:read", "memory:write"],
+        "memory": {"read": True, "write": True},
     },
     "memory": {
         "db_path": ":memory:",
@@ -600,9 +600,48 @@ class TestLLMPersonaAgent:
         await agent.close_memory()
 
     async def test_lock_serializes_concurrent_events(self):
-        """Verify the per-agent lock serializes on_event calls."""
+        """Verify the per-agent lock actually serializes concurrent on_event calls.
+
+        Uses asyncio.gather to run two events concurrently. A shared list
+        records enter/exit markers — if the lock works, one event fully
+        completes before the other starts (no interleaving).
+
+        Review finding: previous test only checked isinstance() which is
+        a no-op verification.
+        """
         agent = await self._make_agent()
-        assert isinstance(agent._lock, type(asyncio.Lock()))
+        order: list[str] = []
+        original_inner = agent._on_event_inner
+
+        async def _tracking_inner(event: AgentEvent) -> list:
+            label = event.payload.get("label", "?")
+            order.append(f"enter-{label}")
+            result = await original_inner(event)
+            order.append(f"exit-{label}")
+            return result
+
+        agent._on_event_inner = _tracking_inner  # type: ignore[assignment]
+
+        e1 = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "first", "label": "1"},
+            sender_id="a",
+        )
+        e2 = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "second", "label": "2"},
+            sender_id="b",
+        )
+        await asyncio.gather(agent.on_event(e1), agent.on_event(e2))
+
+        # With proper lock serialization, events must not interleave:
+        # either [enter-1, exit-1, enter-2, exit-2] or [enter-2, exit-2, enter-1, exit-1]
+        assert order[0].startswith("enter-")
+        assert order[1].startswith("exit-")
+        assert order[0][-1] == order[1][-1]  # same label = same event
+        assert order[2].startswith("enter-")
+        assert order[3].startswith("exit-")
+        assert order[2][-1] == order[3][-1]
         await agent.close_memory()
 
     async def test_close_memory_persists_state(self):
@@ -780,6 +819,87 @@ class TestMaxLLMCallsExhaustion:
         assert client._provider.create_message.call_count == max_calls
         # Should still return valid actions (parse_actions handles tool_use response)
         assert len(actions) >= 1
+        # Review finding fix: exhaustion now produces a descriptive result
+        # instead of an empty COMPLETE_TASK
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "Max LLM call budget exhausted" in actions[0].payload["result"]
         await agent.close_memory()
 
+
+# ─── Review follow-up: convenience method tests ─────────────
+
+
+class TestConvenienceMethods:
+    """Tests for PersonaAgent.message(), complete(), delegate_to() (review finding).
+
+    These action constructors are part of the public API. Verifying their
+    structure ensures downstream action executors receive correct payloads.
+    """
+
+    async def _make_agent(self) -> _LLMPersonaAgent:
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        return agent
+
+    async def test_message_action(self):
+        agent = await self._make_agent()
+        action = agent.message("ch-1", "Hello team", mentions=["mike"])
+        assert action.action_type == ActionType.SEND_MESSAGE
+        assert action.payload["channel_id"] == "ch-1"
+        assert action.payload["content"] == "Hello team"
+        assert action.payload["type"] == "TEXT"
+        assert action.payload["mentions"] == ["mike"]
+        await agent.close_memory()
+
+    async def test_complete_action(self):
+        agent = await self._make_agent()
+        action = agent.complete("task done", confidence=0.9)
+        assert action.action_type == ActionType.COMPLETE_TASK
+        assert action.payload["result"] == "task done"
+        assert action.payload["metadata"] == {"confidence": 0.9}
+        await agent.close_memory()
+
+    async def test_delegate_to_action(self):
+        agent = await self._make_agent()
+        action = agent.delegate_to("coder-agent", "Implement the feature")
+        assert action.action_type == ActionType.DELEGATE
+        assert action.payload["agent_id"] == "coder-agent"
+        assert action.payload["task"] == "Implement the feature"
+        await agent.close_memory()
+
+
+# ─── Review follow-up: from_dict clamping tests ─────────────
+
+
+class TestPersonaStateFromDictClamping:
+    """Verify from_dict clamps out-of-range values from corrupted data.
+
+    Review finding: corrupted DB data (energy: 5.0, stress: -1.0) would
+    produce broken prompt sections like 'Energy level: 5.0/1.0'.
+    """
+
+    def test_energy_clamped_above_one(self):
+        state = PersonaState.from_dict({"energy": 5.0})
+        assert state.energy == 1.0
+
+    def test_energy_clamped_below_zero(self):
+        state = PersonaState.from_dict({"energy": -3.0})
+        assert state.energy == 0.0
+
+    def test_stress_clamped_above_one(self):
+        state = PersonaState.from_dict({"stress_level": 999.0})
+        assert state.stress_level == 1.0
+
+    def test_stress_clamped_below_zero(self):
+        state = PersonaState.from_dict({"stress_level": -1.0})
+        assert state.stress_level == 0.0
+
+    def test_normal_values_unchanged(self):
+        state = PersonaState.from_dict({"energy": 0.7, "stress_level": 0.3})
+        assert state.energy == 0.7
+        assert state.stress_level == 0.3
 
