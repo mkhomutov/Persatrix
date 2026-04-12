@@ -18,15 +18,26 @@
     "agent": {
       "type": "object",
       "required": ["id", "name", "role", "model"],
+      "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
           "description": "Unique agent identifier (lowercase, hyphens allowed)"
         },
+        "type": {
+          "type": "string",
+          "enum": ["task", "persona"],
+          "default": "task",
+          "description": "Agent type: task (responds to assigned work) or persona (event-driven with autonomy)"
+        },
         "name": { "type": "string" },
         "role": { "type": "string" },
         "model": { "type": "string" },
+        "instructions": {
+          "type": "string",
+          "description": "System prompt instructions for task agents (required when type=task)"
+        },
         "temperature": {
           "type": "number", "minimum": 0, "maximum": 2, "default": 0.3
         },
@@ -45,11 +56,36 @@
         "permissions": { "$ref": "#/definitions/permissions" },
         "persona": { "$ref": "#/definitions/persona" },
         "autonomy": { "$ref": "#/definitions/autonomy" },
+        "memory": { "$ref": "#/definitions/memory" },
         "relationships": {
           "type": "array",
           "items": { "$ref": "#/definitions/relationship" }
         }
-      }
+      },
+      "allOf": [
+        {
+          "$comment": "Conditional validation: each if-block requires 'type' to be present (required: [type]) so that v0.1 agents — which omit the 'type' field entirely — skip these conditionals and pass validation without 'persona' or 'instructions'. This is intentional backward-compatibility: v0.1 and v0.2 agent entries coexist in the same agents.yaml.",
+          "if": {
+            "properties": { "type": { "const": "persona" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["persona"],
+            "properties": {
+              "persona": { "$ref": "#/definitions/persona" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "task" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["instructions"]
+          }
+        }
+      ]
     },
     "permissions": {
       "type": "object",
@@ -80,22 +116,53 @@
     },
     "persona": {
       "type": "object",
+      "required": ["title", "background", "behavior"],
       "properties": {
         "title": { "type": "string" },
         "background": { "type": "string" },
-        "personality": {
+        "behavior": {
           "type": "object",
+          "description": "Structured behavioral dimensions (RFC 0005). Replaces free-text personality.traits / communication_style / decision_making. Individual dimensions are optional — omitted dimensions default to their middle value.",
           "properties": {
-            "traits": { "type": "array", "items": { "type": "string" } },
-            "communication_style": { "type": "string" },
-            "decision_making": { "type": "string" }
-          }
+            "directness": {
+              "type": "string",
+              "enum": ["indirect", "balanced", "direct"],
+              "default": "balanced"
+            },
+            "detail_focus": {
+              "type": "string",
+              "enum": ["big-picture", "balanced", "detail-focused"],
+              "default": "balanced"
+            },
+            "formality": {
+              "type": "string",
+              "enum": ["casual", "professional", "formal"],
+              "default": "professional"
+            },
+            "risk_tolerance": {
+              "type": "string",
+              "enum": ["cautious", "moderate", "bold"],
+              "default": "moderate"
+            },
+            "expressiveness": {
+              "type": "string",
+              "enum": ["reserved", "moderate", "expressive"],
+              "default": "moderate"
+            }
+          },
+          "additionalProperties": false
+        },
+        "quirks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Free-text character voice and flavor"
         },
         "goals": {
           "type": "object",
           "properties": {
             "primary": { "type": "string" },
-            "secondary": { "type": "array", "items": { "type": "string" } }
+            "secondary": { "type": "array", "items": { "type": "string" } },
+            "hidden": { "type": "string" }
           }
         },
         "knowledge": {
@@ -114,11 +181,93 @@
           "type": "string",
           "enum": ["passive", "reactive", "semi-autonomous", "autonomous", "supervisor"]
         },
+        "tick_interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Seconds between autonomous tick cycles"
+        },
+        "max_actions_per_tick": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Maximum actions executed per tick cycle"
+        },
+        "idle_after_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "Reduce activity after this many consecutive idle ticks"
+        },
         "can_initiate_conversations": { "type": "boolean" },
         "can_delegate_tasks": { "type": "boolean" },
         "can_spawn_sub_agents": { "type": "boolean" },
         "requires_approval_for": {
           "type": "array", "items": { "type": "string" }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Memory configuration for persona agents (RFC 0005)",
+      "properties": {
+        "db_path": {
+          "type": "string",
+          "default": "data/memory.db",
+          "description": "Path to the shared SQLite memory database"
+        },
+        "notes": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether the agent can use memory tools (store_note, etc.)"
+            },
+            "max_notes": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 500,
+              "description": "Per-agent note cap; oldest low-access notes pruned when exceeded"
+            },
+            "auto_reflect_after": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5,
+              "description": "Inject reflection nudge after N interactions"
+            },
+            "inject_recent_notes": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 3,
+              "description": "Number of most relevant notes to include in context per LLM call"
+            }
+          }
+        },
+        "episodic": {
+          "type": "object",
+          "description": "Episodic memory configuration (extension spec E7.2)",
+          "properties": {
+            "retention_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 90,
+              "description": "Hard-delete compressed episodes older than this many days (per E7.2)"
+            }
+          }
+        },
+        "relationship": {
+          "type": "object",
+          "description": "Relationship memory configuration (extension spec E7.2)",
+          "properties": {
+            "decay_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.01,
+              "description": "Per-cycle trust decay rate toward neutral (0.5). Higher values cause faster trust erosion without reinforcement."
+            }
+          }
         }
       }
     },
