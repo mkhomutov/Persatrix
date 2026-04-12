@@ -8,15 +8,20 @@ Also provides agent-initiated note storage (migration v2) for
 structured knowledge the agent chooses to persist.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+
+if TYPE_CHECKING:
+    from ..llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +515,124 @@ class EpisodicMemory:
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else 0
+
+    # ─── Episode summarization & retention ──────────────────
+
+    async def summarize_old_episodes(
+        self,
+        older_than_days: float,
+        llm_client: LLMClient,
+        *,
+        compression_model: str = "claude-haiku-4",
+    ) -> int:
+        """Summarize raw episodes older than *older_than_days*.
+
+        Selects episodes with ``compression_level < 1`` whose ``created_at``
+        is older than the threshold, calls the LLM to produce a compressed
+        summary, then updates the episode in place.
+
+        Returns the number of episodes summarized.
+        """
+        if older_than_days < 0:
+            raise ValueError(f"older_than_days must be >= 0, got {older_than_days}")
+        db = self._ensure_db()
+        cutoff = time.time() - older_than_days * 86400.0
+
+        async with db.execute(
+            f"SELECT {_EPISODE_SELECT} FROM episodes "
+            "WHERE agent_id = ? AND compression_level < 1 AND created_at < ?",
+            (self._agent_id, cutoff),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        if not rows:
+            return 0
+
+        summarized = 0
+        for row in rows:
+            episode = self._row_to_episode(row)
+            prompt = (
+                f"Summarize the following episode concisely, preserving key facts "
+                f"and outcomes.\n\n"
+                f"Summary: {episode.summary}\n"
+            )
+            if episode.outcome:
+                prompt += f"Outcome: {episode.outcome}\n"
+            if episode.context:
+                prompt += f"Context: {json.dumps(episode.context)}\n"
+
+            try:
+                response = await llm_client.create_message(
+                    model=compression_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    system=(
+                        "You are a concise summarizer. "
+                        "Distill the episode into a brief summary."
+                    ),
+                    tools=[],
+                    max_tokens=256,
+                    temperature=0.2,
+                )
+                summary = response.text
+                if summary is None:
+                    logger.warning(
+                        "Summarization of episode %s returned no text, skipping",
+                        episode.id,
+                    )
+                    continue
+
+                now = time.time()
+                new_level = episode.compression_level + 1
+                await db.execute(
+                    "UPDATE episodes SET summary = ?, compression_level = ?, "
+                    "compressed_at = ? WHERE id = ? AND agent_id = ?",
+                    (summary, new_level, now, episode.id, self._agent_id),
+                )
+                summarized += 1
+                logger.info(
+                    "Summarized episode %s: compression_level %d → %d",
+                    episode.id,
+                    episode.compression_level,
+                    new_level,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to summarize episode %s", episode.id, exc_info=True,
+                )
+
+        if summarized:
+            await db.commit()
+        return summarized
+
+    async def delete_old_episodes(self, older_than_days: float) -> int:
+        """Delete compressed episodes older than *older_than_days*.
+
+        Only episodes with ``compression_level >= 1`` are eligible for
+        deletion.  Uncompressed (raw) episodes are never deleted — they
+        must be summarized first via :meth:`summarize_old_episodes`.
+
+        Returns the number of episodes deleted.
+        """
+        if older_than_days < 0:
+            raise ValueError(f"older_than_days must be >= 0, got {older_than_days}")
+        db = self._ensure_db()
+        cutoff = time.time() - older_than_days * 86400.0
+
+        cursor = await db.execute(
+            "DELETE FROM episodes "
+            "WHERE agent_id = ? AND compression_level >= 1 AND created_at < ?",
+            (self._agent_id, cutoff),
+        )
+        deleted = cursor.rowcount
+        if deleted:
+            await db.commit()
+            logger.info(
+                "Deleted %d compressed episodes older than %.1f days for agent %s",
+                deleted,
+                older_than_days,
+                self._agent_id,
+            )
+        return deleted
 
     # ─── Notes CRUD ─────────────────────────────────────────
 

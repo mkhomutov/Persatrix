@@ -341,11 +341,11 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_episodic_memory.py -v` passes
-- [ ] Coverage ≥ 80% for new methods
-- [ ] `ruff check agents/memory/` clean
-- [ ] Only compressed episodes eligible for deletion
-- [ ] LLM call mocked — no real API calls
+- [x] `pytest tests/unit/python/test_episodic_memory.py -v` passes
+- [x] Coverage ≥ 80% for new methods
+- [x] `ruff check agents/memory/` clean
+- [x] Only compressed episodes eligible for deletion
+- [x] LLM call mocked — no real API calls
 
 ---
 
