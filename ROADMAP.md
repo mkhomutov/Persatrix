@@ -115,7 +115,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 📋 Proposed | 0 | 0/0 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | � Accepted | 12 | 0/12 |
 
 ### Dependency Chain
 
