@@ -148,6 +148,38 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             ON notes(created_at DESC);
         """,
     ),
+    (
+        3,
+        "Relationships and interactions tables",
+        """
+        CREATE TABLE IF NOT EXISTS relationships (
+            agent_id TEXT NOT NULL,
+            other_agent_id TEXT NOT NULL,
+            trust_score REAL DEFAULT 0.5,
+            interaction_count INTEGER DEFAULT 0,
+            last_interaction_at REAL,
+            notes TEXT,
+            PRIMARY KEY (agent_id, other_agent_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS interactions (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            other_agent_id TEXT NOT NULL,
+            interaction_type TEXT NOT NULL,
+            outcome TEXT,
+            sentiment REAL DEFAULT 0.0,
+            created_at REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_relationships_agent
+            ON relationships(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_interactions_agent
+            ON interactions(agent_id, other_agent_id);
+        CREATE INDEX IF NOT EXISTS idx_interactions_created
+            ON interactions(created_at DESC);
+        """,
+    ),
 ]
 
 # FTS5 DDL — applied only when FTS5 is available.

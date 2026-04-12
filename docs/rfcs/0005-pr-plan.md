@@ -396,13 +396,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_relationship_memory.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/memory/relationship.py`
-- [ ] `ruff check agents/memory/` clean
-- [ ] Bidirectional decay tested
-- [ ] Trust bootstrapping from config tested
-- [ ] Agent isolation verified
-- [ ] Delta clamping tested
+- [x] `pytest tests/unit/python/test_relationship_memory.py -v` passes
+- [x] Coverage ≥ 80% for `agents/memory/relationship.py`
+- [x] `ruff check agents/memory/` clean
+- [x] Bidirectional decay tested
+- [x] Trust bootstrapping from config tested
+- [x] Agent isolation verified
+- [x] Delta clamping tested
 
 ---
 
