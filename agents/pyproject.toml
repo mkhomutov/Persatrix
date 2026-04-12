@@ -32,6 +32,9 @@ dev = [
     "types-PyYAML",
     "types-protobuf",
 ]
+accurate-tokens = [
+    "tiktoken>=0.7.0,<1",
+]
 
 [project.scripts]
 orchestr8-agent = "orchestr8_agents.server:main"

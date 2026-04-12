@@ -162,11 +162,11 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_working_memory.py -v` passes
-- [ ] Coverage ≥ 80% for `agents/memory/working.py`
-- [ ] `ruff check agents/memory/` clean
-- [ ] Non-compressible sections are never summarized
-- [ ] Compression guard prevents double-compression
+- [x] `pytest tests/unit/python/test_working_memory.py -v` passes
+- [x] Coverage ≥ 80% for `agents/memory/working.py`
+- [x] `ruff check agents/memory/` clean
+- [x] Non-compressible sections are never summarized
+- [x] Compression guard prevents double-compression
 
 ---
 

@@ -1,10 +1,186 @@
 """
 Working memory — context window management.
 
-Implements priority-weighted retention and automatic summarization.
+Implements priority-weighted retention and automatic summarization
+of low-priority sections when the token budget is exceeded.
 """
 
-# TODO: Implement ContextWindowManager
-# TODO: Implement priority scoring for context items
-# TODO: Implement automatic summarization of old history
-# TODO: Implement token counting per context section
+import asyncio
+import logging
+from dataclasses import dataclass
+
+from ..llm_client import LLMClient
+
+logger = logging.getLogger(__name__)
+
+
+def estimate_tokens(text: str, *, accurate: bool = False) -> int:
+    """Estimate token count for a string.
+
+    Default (``accurate=False``): chars/4, ~85% accurate for English prose.
+    When ``accurate=True``, uses tiktoken ``cl100k_base`` encoding if available,
+    falling back to chars/4 when tiktoken is not installed.
+    """
+    if accurate:
+        try:
+            import tiktoken  # type: ignore[import-untyped]
+
+            enc = tiktoken.get_encoding("cl100k_base")
+            return len(enc.encode(text))
+        except ImportError:
+            pass
+    return len(text) // 4
+
+
+@dataclass
+class ContextSection:
+    """A named section of the LLM context window."""
+
+    name: str  # e.g. "system", "persona", "memories", "conversation"
+    content: str
+    priority: int  # higher = kept longer (system=100, persona=90, ...)
+    token_count: int
+    compressible: bool = True  # False for system prompt
+
+
+class WorkingMemory:
+    """Context window manager with priority-weighted retention.
+
+    Tracks named sections of context, each with a priority and token count.
+    When total tokens exceed the budget, lowest-priority compressible
+    sections are summarized via LLM.
+    """
+
+    def __init__(self, max_tokens: int = 100_000) -> None:
+        self._max_tokens = max_tokens
+        self._sections: list[ContextSection] = []
+        self._compression_task: asyncio.Task[None] | None = None
+
+    @property
+    def max_tokens(self) -> int:
+        return self._max_tokens
+
+    def add_section(self, section: ContextSection) -> None:
+        """Add or replace a named section.
+
+        If a section with the same ``name`` already exists, it is replaced.
+        """
+        self._sections = [s for s in self._sections if s.name != section.name]
+        self._sections.append(section)
+
+    def remove_section(self, name: str) -> None:
+        """Remove a section by name. No-op if not found."""
+        self._sections = [s for s in self._sections if s.name != name]
+
+    def get_section(self, name: str) -> ContextSection | None:
+        """Return a section by name, or None."""
+        for s in self._sections:
+            if s.name == name:
+                return s
+        return None
+
+    def total_tokens(self) -> int:
+        """Total estimated tokens across all sections."""
+        return sum(s.token_count for s in self._sections)
+
+    def build_context(self) -> list[dict[str, str]]:
+        """Return ordered context messages for an LLM call.
+
+        Sections are sorted by priority (highest first). Sections whose
+        cumulative token count would exceed the budget are dropped,
+        starting from the lowest-priority end.
+        """
+        sorted_sections = sorted(self._sections, key=lambda s: s.priority, reverse=True)
+
+        # Include as many high-priority sections as fit
+        included: list[ContextSection] = []
+        running_total = 0
+        for section in sorted_sections:
+            if running_total + section.token_count <= self._max_tokens:
+                included.append(section)
+                running_total += section.token_count
+            else:
+                logger.debug(
+                    "Dropping section '%s' (%d tokens) — budget exhausted",
+                    section.name,
+                    section.token_count,
+                )
+
+        # Return in priority order (highest first)
+        return [{"role": s.name, "content": s.content} for s in included]
+
+    def try_start_compression(self, llm_client: LLMClient) -> None:
+        """Spawn a background compression task if none is in flight.
+
+        Idempotent — returns immediately if a compression task is already
+        running.
+        """
+        if self._compression_task is None or self._compression_task.done():
+            self._compression_task = asyncio.create_task(
+                self.compress_if_needed(llm_client)
+            )
+
+    async def await_pending_compression(self) -> None:
+        """Await the outstanding compression task, if any.
+
+        Used during shutdown to ensure compressed results are not lost.
+        """
+        if self._compression_task is not None:
+            try:
+                await self._compression_task
+            except Exception:
+                logger.warning("Compression task failed during shutdown")
+
+    async def compress_if_needed(self, llm_client: LLMClient) -> None:
+        """Summarize lowest-priority compressible sections when over budget.
+
+        Selects compressible sections in ascending priority order and
+        summarizes them via LLM until total tokens fit within the budget.
+        """
+        if self.total_tokens() <= self._max_tokens:
+            return
+
+        # Sort compressible sections by priority ascending (compress lowest first)
+        compressible = sorted(
+            [s for s in self._sections if s.compressible],
+            key=lambda s: s.priority,
+        )
+
+        for section in compressible:
+            if self.total_tokens() <= self._max_tokens:
+                break
+
+            try:
+                response = await llm_client.create_message(
+                    model="summarization-model",
+                    messages=[{"role": "user", "content": section.content}],
+                    system="Summarize the following content concisely, preserving key information.",
+                    tools=[],
+                    max_tokens=section.token_count // 2,
+                )
+                summary = response.text or section.content
+                new_token_count = estimate_tokens(summary)
+                self.add_section(
+                    ContextSection(
+                        name=section.name,
+                        content=summary,
+                        priority=section.priority,
+                        token_count=new_token_count,
+                        compressible=section.compressible,
+                    )
+                )
+                logger.info(
+                    "Compressed section '%s': %d → %d tokens",
+                    section.name,
+                    section.token_count,
+                    new_token_count,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to compress section '%s'", section.name, exc_info=True
+                )
+
+    async def close(self) -> None:
+        """Await outstanding compression and clear sections."""
+        await self.await_pending_compression()
+        self._sections.clear()
