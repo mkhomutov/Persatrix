@@ -11,6 +11,7 @@ import pytest
 
 from agents.memory.episodic import (
     MIGRATIONS,
+    _MAX_RECALL_LIMIT,
     Episode,
     EpisodicMemory,
     _apply_migrations,
@@ -639,3 +640,69 @@ class TestImportanceValidation:
         )
         assert (await memory.get_episode(ep_id_zero)).importance == 0.0
         assert (await memory.get_episode(ep_id_one)).importance == 1.0
+
+
+# ─── Summary validation ────────────────────────────────────
+
+
+class TestSummaryValidation:
+    """store_episode() rejects empty or whitespace-only summaries."""
+
+    async def test_empty_summary_rejected(self, memory: EpisodicMemory):
+        with pytest.raises(ValueError, match="summary must not be empty"):
+            await memory.store_episode(summary="", context={})
+
+    async def test_whitespace_only_summary_rejected(self, memory: EpisodicMemory):
+        with pytest.raises(ValueError, match="summary must not be empty"):
+            await memory.store_episode(summary="   \t\n  ", context={})
+
+    async def test_valid_summary_accepted(self, memory: EpisodicMemory):
+        ep_id = await memory.store_episode(summary="Valid summary", context={})
+        assert ep_id is not None
+
+
+# ─── Limit validation ──────────────────────────────────────
+
+
+class TestLimitValidation:
+    """recall() validates the limit parameter."""
+
+    async def test_negative_limit_raises(self, memory: EpisodicMemory):
+        with pytest.raises(ValueError, match="limit must be >= 1"):
+            await memory.recall("anything", limit=-1)
+
+    async def test_zero_limit_raises(self, memory: EpisodicMemory):
+        with pytest.raises(ValueError, match="limit must be >= 1"):
+            await memory.recall("anything", limit=0)
+
+    async def test_limit_above_max_is_capped(self, memory: EpisodicMemory):
+        """Limit exceeding _MAX_RECALL_LIMIT is silently capped."""
+        # Store a few episodes so we can verify the query still works
+        for i in range(3):
+            await memory.store_episode(summary=f"Limit cap episode {i}", context={})
+        results = await memory.recall("", limit=_MAX_RECALL_LIMIT + 50)
+        # Should return all 3 (below the cap), proving the query ran without error
+        assert len(results) == 3
+
+
+# ─── FTS5 context-based retrieval ───────────────────────────
+
+
+class TestFTS5ContextRetrieval:
+    """FTS5 index covers both summary and context_json — verify
+    that episodes can be found by terms appearing only in context."""
+
+    async def test_fts5_finds_episode_by_context_term(self, memory: EpisodicMemory):
+        """An episode with a distinctive term only in context (not summary)
+        should still be findable via FTS5 search."""
+        await memory.store_episode(
+            summary="Routine task completion",
+            context={"framework": "kubernetes", "cluster": "prod-east"},
+        )
+        await memory.store_episode(
+            summary="Unrelated episode about databases",
+            context={"type": "sql"},
+        )
+        results = await memory.recall("kubernetes")
+        assert len(results) == 1
+        assert results[0].context["framework"] == "kubernetes"

@@ -7,6 +7,7 @@ with FTS5 full-text search for relevance-ranked retrieval.
 
 import json
 import logging
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
@@ -36,6 +37,21 @@ class Episode:
     created_at: float
     compressed_at: float | None
     compression_level: int  # 0=raw, 1=summarized, 2=distilled
+
+
+# Column list for SELECT queries — keeps _row_to_episode() positional
+# mapping stable when future migrations add columns to the episodes table.
+_EPISODE_COLS = (
+    "id", "agent_id", "summary", "context_json", "outcome",
+    "importance", "access_count", "last_accessed_at",
+    "tags_json", "created_at", "compressed_at", "compression_level",
+)
+_EPISODE_SELECT = ", ".join(_EPISODE_COLS)
+_EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
+
+# Maximum number of episodes returned by recall() to prevent unbounded
+# result sets and resource exhaustion.
+_MAX_RECALL_LIMIT = 100
 
 
 # ─── Schema migrations ─────────────────────────────────────
@@ -117,6 +133,14 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
 
     for version, desc, sql in MIGRATIONS:
         if version > current:
+            # NOTE: executescript() implicitly calls COMMIT before executing,
+            # so the DDL and the version record below are NOT atomic.  If the
+            # process crashes between executescript() and the INSERT, the
+            # migration is applied but not recorded — causing a re-run on
+            # restart.  This is safe for v1 because all statements use
+            # IF NOT EXISTS guards.  Future non-idempotent migrations (ALTER
+            # TABLE, data transforms) MUST use individual db.execute() calls
+            # inside a manually managed transaction instead.
             await db.executescript(sql)
             await db.execute(
                 "INSERT INTO schema_version VALUES (?, ?, ?)",
@@ -196,6 +220,8 @@ class EpisodicMemory:
     ) -> str:
         """Store a new episode. Returns the generated episode ID."""
         db = self._ensure_db()
+        if not summary or not summary.strip():
+            raise ValueError("summary must not be empty")
         # Clamp importance to [0.0, 1.0] — the scoring formula assumes
         # non-negative values; negative importance would invert ranking.
         if not 0.0 <= importance <= 1.0:
@@ -239,6 +265,14 @@ class EpisodicMemory:
         Uses FTS5 BM25 when available, falls back to LIKE.
         Increments access_count on returned entries.
         """
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        if limit > _MAX_RECALL_LIMIT:
+            logger.warning(
+                "limit=%d exceeds maximum (%d), capping",
+                limit, _MAX_RECALL_LIMIT,
+            )
+            limit = _MAX_RECALL_LIMIT
         db = self._ensure_db()
 
         if query and self._fts5:
@@ -282,8 +316,8 @@ class EpisodicMemory:
         """
         try:
             async with db.execute(
-                """
-                SELECT e.*
+                f"""
+                SELECT {_EPISODE_SELECT_ALIASED}
                 FROM episodes_fts fts
                 JOIN episodes e ON e.rowid = fts.rowid
                 WHERE episodes_fts MATCH ?
@@ -300,7 +334,7 @@ class EpisodicMemory:
                 (query, self._agent_id, min_importance, time.time(), limit),
             ) as cursor:
                 return await cursor.fetchall()
-        except Exception:
+        except sqlite3.OperationalError:
             logger.warning(
                 "FTS5 query failed for %r, falling back to LIKE", query,
             )
@@ -321,8 +355,8 @@ class EpisodicMemory:
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         async with db.execute(
-            """
-            SELECT *
+            f"""
+            SELECT {_EPISODE_SELECT}
             FROM episodes
             WHERE agent_id = ?
               AND importance >= ?
@@ -346,8 +380,8 @@ class EpisodicMemory:
     ) -> list[aiosqlite.Row]:
         """No query text — rank by importance x access x recency only."""
         async with db.execute(
-            """
-            SELECT *
+            f"""
+            SELECT {_EPISODE_SELECT}
             FROM episodes
             WHERE agent_id = ?
               AND importance >= ?
@@ -383,7 +417,7 @@ class EpisodicMemory:
         """Retrieve a single episode by ID (agent-scoped)."""
         db = self._ensure_db()
         async with db.execute(
-            "SELECT * FROM episodes WHERE id = ? AND agent_id = ?",
+            f"SELECT {_EPISODE_SELECT} FROM episodes WHERE id = ? AND agent_id = ?",
             (episode_id, self._agent_id),
         ) as cursor:
             row = await cursor.fetchone()
