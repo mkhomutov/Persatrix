@@ -834,7 +834,11 @@ class TestSummarizeOldEpisodes:
         assert ep.compression_level == 0
 
     async def test_compression_level_transition_0_to_1(self, memory: EpisodicMemory):
-        """Compression level increments: 0 → 1."""
+        """Compression level increments: 0 → 1.
+
+        Note: the 1→2 (distilled) transition is not yet reachable
+        because summarize_old_episodes() selects compression_level < 1.
+        """
         db = memory._ensure_db()
         old_time = time.time() - 30 * 86400
         ep_id = await memory.store_episode(
@@ -855,18 +859,13 @@ class TestSummarizeOldEpisodes:
         ep = await memory.get_episode(ep_id)
         assert ep.compression_level == 1
 
-    async def test_compression_level_0_to_1(self, memory: EpisodicMemory):
-        """Summarizing a raw (level-0) episode produces level 1.
-
-        Note: the 1→2 (distilled) transition is not yet reachable
-        because summarize_old_episodes() selects compression_level < 1.
-        """
+    async def test_compression_model_forwarded_to_llm(self, memory: EpisodicMemory):
+        """The compression_model parameter is passed through to LLM client."""
         db = memory._ensure_db()
-        old_time = time.time() - 60 * 86400
+        old_time = time.time() - 30 * 86400
         ep_id = await memory.store_episode(
-            summary="Previously summarized episode", context={},
+            summary="Episode to compress", context={},
         )
-        # Set it to level 0 but far in the past — summarize once
         await db.execute(
             "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
         )
@@ -874,12 +873,52 @@ class TestSummarizeOldEpisodes:
 
         llm_client = AsyncMock()
         llm_client.create_message = AsyncMock(
-            return_value=_make_llm_response("Summary v1")
+            return_value=_make_llm_response("Compressed")
         )
-        await memory.summarize_old_episodes(7, llm_client)
 
-        ep = await memory.get_episode(ep_id)
-        assert ep.compression_level == 1
+        await memory.summarize_old_episodes(
+            7, llm_client, compression_model="custom-model-v2"
+        )
+        llm_client.create_message.assert_called_once()
+        call_kwargs = llm_client.create_message.call_args
+        assert call_kwargs.kwargs["model"] == "custom-model-v2"
+
+    async def test_partial_batch_failure(self, memory: EpisodicMemory):
+        """In a batch of 3 episodes, if the 2nd LLM call fails,
+        the 1st and 3rd are still summarized (count == 2)."""
+        db = memory._ensure_db()
+        old_time = time.time() - 30 * 86400
+
+        ids = []
+        for i in range(3):
+            ep_id = await memory.store_episode(
+                summary=f"Episode {i}", context={"idx": i},
+            )
+            await db.execute(
+                "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
+            )
+            ids.append(ep_id)
+        await db.commit()
+
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            side_effect=[
+                _make_llm_response("Compressed 1"),
+                RuntimeError("LLM transient failure"),
+                _make_llm_response("Compressed 3"),
+            ]
+        )
+
+        count = await memory.summarize_old_episodes(7, llm_client)
+        assert count == 2
+
+        # 1st and 3rd summarized, 2nd left at level 0
+        ep0 = await memory.get_episode(ids[0])
+        ep1 = await memory.get_episode(ids[1])
+        ep2 = await memory.get_episode(ids[2])
+        assert ep0.compression_level == 1
+        assert ep1.compression_level == 0
+        assert ep2.compression_level == 1
 
     async def test_agent_scoped_summarization(self, memory_pair):
         """Only the calling agent's episodes are summarized."""

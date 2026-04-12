@@ -518,21 +518,34 @@ class EpisodicMemory:
 
     # ─── Episode summarization & retention ──────────────────
 
+    # Maximum characters of serialised context to include in the
+    # summarization prompt.  Prevents arbitrarily large episode context
+    # dicts from blowing up LLM input size.
+    _MAX_CONTEXT_CHARS = 2000
+
     async def summarize_old_episodes(
         self,
         older_than_days: float,
         llm_client: LLMClient,
         *,
         compression_model: str = "claude-haiku-4",
+        batch_size: int = 50,
     ) -> int:
         """Summarize raw episodes older than *older_than_days*.
 
-        Selects episodes with ``compression_level < 1`` whose ``created_at``
-        is older than the threshold, calls the LLM to produce a compressed
-        summary, then updates the episode in place.
+        Selects up to *batch_size* episodes with ``compression_level < 1``
+        whose ``created_at`` is older than the threshold, calls the LLM to
+        produce a compressed summary, then updates each episode in place.
+        Each successful update is committed immediately so that progress is
+        not lost if the process crashes mid-batch.
 
-        Returns the number of episodes summarized.
+        Callers that need to process a full backlog should invoke this method
+        in a loop until it returns 0.
+
+        Returns the number of episodes summarized in this batch.
         """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         if older_than_days < 0:
             raise ValueError(f"older_than_days must be >= 0, got {older_than_days}")
         db = self._ensure_db()
@@ -543,10 +556,15 @@ class EpisodicMemory:
         # the RFC is not yet reachable through this method.  A separate
         # distill_old_episodes() (or a max_compression_level parameter) is
         # planned for a future PR.
+        #
+        # LIMIT bounds the batch to avoid unbounded serial LLM calls and
+        # memory usage for agents with large unsummarized backlogs.  Callers
+        # should loop until this method returns 0.
         async with db.execute(
             f"SELECT {_EPISODE_SELECT} FROM episodes "
-            "WHERE agent_id = ? AND compression_level < 1 AND created_at < ?",
-            (self._agent_id, cutoff),
+            "WHERE agent_id = ? AND compression_level < 1 AND created_at < ? "
+            "LIMIT ?",
+            (self._agent_id, cutoff, batch_size),
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -566,7 +584,10 @@ class EpisodicMemory:
             if episode.tags:
                 prompt += f"Tags: {', '.join(episode.tags)}\n"
             if episode.context:
-                prompt += f"Context: {json.dumps(episode.context)}\n"
+                ctx_str = json.dumps(episode.context)
+                if len(ctx_str) > self._MAX_CONTEXT_CHARS:
+                    ctx_str = ctx_str[: self._MAX_CONTEXT_CHARS] + "... [truncated]"
+                prompt += f"Context: {ctx_str}\n"
 
             try:
                 response = await llm_client.create_message(
@@ -581,6 +602,13 @@ class EpisodicMemory:
                     temperature=0.2,
                 )
                 summary = response.text
+                if response.usage:
+                    logger.debug(
+                        "Summarization tokens for episode %s: in=%d out=%d",
+                        episode.id,
+                        response.usage.input_tokens,
+                        response.usage.output_tokens,
+                    )
                 if summary is None:
                     logger.warning(
                         "Summarization of episode %s returned no text, skipping",
@@ -590,12 +618,15 @@ class EpisodicMemory:
 
                 now = time.time()
                 new_level = episode.compression_level + 1
-                cursor = await db.execute(
+                update_cursor = await db.execute(
                     "UPDATE episodes SET summary = ?, compression_level = ?, "
                     "compressed_at = ? WHERE id = ? AND agent_id = ?",
                     (summary, new_level, now, episode.id, self._agent_id),
                 )
-                if cursor.rowcount > 0:
+                if update_cursor.rowcount > 0:
+                    # Commit each episode individually so that progress is
+                    # durable even if the process crashes mid-batch.
+                    await db.commit()
                     summarized += 1
                 logger.info(
                     "Summarized episode %s: compression_level %d → %d",
@@ -608,8 +639,6 @@ class EpisodicMemory:
                     "Failed to summarize episode %s", episode.id, exc_info=True,
                 )
 
-        if summarized:
-            await db.commit()
         return summarized
 
     async def delete_old_episodes(self, older_than_days: float) -> int:
