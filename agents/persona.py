@@ -571,31 +571,40 @@ class _LLMPersonaAgent(PersonaAgent):
             case EventType.TICK:
                 return "Autonomous tick: review your goals and decide on next actions."
             case _:
-                return f"Event ({event.event_type.value}): {json.dumps(event.payload)}"
+                try:
+                    payload_str = json.dumps(event.payload)
+                except TypeError:
+                    payload_str = str(event.payload)
+                return f"Event ({event.event_type.value}): {payload_str}"
 
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
-        """Build tool definitions including memory tools."""
-        # Start with agent-configured tools
+        """Build tool definitions including memory tools.
+
+        Uses a dict keyed by tool name so memory tools take precedence
+        over registry tools with the same name (review finding #4).
+        """
+        # Start with agent-configured tools from the global registry
         allowed = set(self.config.get("tools", []))
-        defs: list[dict[str, Any]] = []
+        defs_by_name: dict[str, dict[str, Any]] = {}
 
         for td in list_tools():
             if td.name in allowed:
-                defs.append({
+                defs_by_name[td.name] = {
                     "name": td.name,
                     "description": td.description,
                     "parameters": td.parameters,
-                })
+                }
 
-        # Add memory tools (always available to persona agents)
+        # Memory tools override registry tools with the same name,
+        # consistent with _execute_tools() which checks memory tools first.
         for td in self._memory_tools:
-            defs.append({
+            defs_by_name[td.name] = {
                 "name": td.name,
                 "description": td.description,
                 "parameters": td.parameters,
-            })
+            }
 
-        return defs
+        return list(defs_by_name.values())
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
         """Execute tool calls, checking memory tools first then registry."""
@@ -789,64 +798,38 @@ class _LLMPersonaAgent(PersonaAgent):
             event = AgentEvent(event_type=EventType.TICK)
             return await self._on_event_inner(event)
 
-    # ─── Handle backward compatibility ─────────────────
-
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        """Backward-compatible: wraps task as a TASK_ASSIGNED event."""
-        event = AgentEvent(
-            event_type=EventType.TASK_ASSIGNED,
-            payload={"task": task},
-        )
-        actions = await self.on_event(event)
-
-        for action in actions:
-            if action.action_type == ActionType.COMPLETE_TASK:
-                return TaskOutput(
-                    status=TaskStatus.COMPLETED,
-                    result=action.payload.get("result", ""),
-                    metadata=action.payload.get("metadata", {}),
-                )
-
-        action_types = [a.action_type.value for a in actions]
-        return TaskOutput(
-            status=TaskStatus.FAILED,
-            result=f"No COMPLETE_TASK action taken; got actions: {action_types}",
-        )
+    # handle() is inherited from PersonaAgent — no override needed.
+    # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
+    # calls self.on_event(), which dispatches to _on_event_inner()
+    # via polymorphism.
 
     # ─── State persistence ─────────────────────────────
 
     async def _persist_persona_state(self) -> None:
-        """Serialize persona state to the agent_state table."""
+        """Serialize persona state to the agent_state table.
+
+        Uses EpisodicMemory's public ``persist_agent_state()`` API rather
+        than reaching into its private DB handle (review finding #3).
+        """
         try:
-            db = self._episodic_memory._ensure_db()
-            now = time.time()
             state_json = json.dumps(self._state.to_dict())
-            await db.execute(
-                """
-                INSERT INTO agent_state
-                    (agent_id, interaction_count, persona_state_json, updated_at)
-                VALUES (?, 0, ?, ?)
-                ON CONFLICT(agent_id) DO UPDATE
-                    SET persona_state_json = ?,
-                        updated_at = ?
-                """,
-                (self.agent_id, state_json, now, state_json, now),
+            await self._episodic_memory.persist_agent_state(
+                self.agent_id, state_json,
             )
-            await db.commit()
         except Exception:
             logger.warning("Failed to persist persona state", exc_info=True)
 
     async def _load_persona_state(self) -> PersonaState:
-        """Load persona state from the agent_state table, or return defaults."""
+        """Load persona state from the agent_state table, or return defaults.
+
+        Uses EpisodicMemory's public ``load_agent_state()`` API.
+        """
         try:
-            db = self._episodic_memory._ensure_db()
-            async with db.execute(
-                "SELECT persona_state_json FROM agent_state WHERE agent_id = ?",
-                (self.agent_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
-            if row and row[0]:
-                return PersonaState.from_dict(json.loads(row[0]))
+            state_json = await self._episodic_memory.load_agent_state(
+                self.agent_id,
+            )
+            if state_json:
+                return PersonaState.from_dict(json.loads(state_json))
         except Exception:
             logger.warning("Failed to load persona state, using defaults", exc_info=True)
         return PersonaState()

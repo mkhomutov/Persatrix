@@ -499,7 +499,7 @@ class TestLLMPersonaAgent:
         assert state_dict["mood"] == "focused"
 
     async def test_persona_state_persistence(self):
-        """Serialize → close → reopen → deserialize matches."""
+        """Serialize → persist to DB → load from DB → values match."""
         cfg = {**_PERSONA_CONFIG}
         client = _make_client()
 
@@ -513,10 +513,9 @@ class TestLLMPersonaAgent:
         agent1._state.goal_progress = {"v2": 0.8}
         await agent1._persist_persona_state()
 
-        # Create a second instance sharing the same in-memory DB
-        # Note: :memory: DBs are per-connection, so for a real persistence
-        # test we verify the serialize/deserialize round-trip directly
-        restored = PersonaState.from_dict(agent1._state.to_dict())
+        # Load back from the actual DB via _load_persona_state()
+        # (same agent / same DB connection — exercises the full DB path)
+        restored = await agent1._load_persona_state()
         assert restored.mood is Mood.SATISFIED
         assert restored.energy == 0.6
         assert restored.stress_level == 0.4
@@ -693,5 +692,94 @@ class TestEnergyMechanics:
         state.drain_energy()   # 0.45
         state.recover_energy()  # 0.55
         assert state.energy == pytest.approx(0.55)
+
+
+# ─── Review follow-up: additional coverage ──────────────────
+
+
+class TestFormatEventAdditional:
+    """Tests for _format_event() event types not covered above (review finding #7)."""
+
+    async def _make_agent(self) -> _LLMPersonaAgent:
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        return agent
+
+    async def test_format_event_sub_agent_completed(self):
+        agent = await self._make_agent()
+        event = AgentEvent(
+            event_type=EventType.SUB_AGENT_COMPLETED,
+            payload={"result": "Code review complete, no issues found."},
+        )
+        msg = agent._format_event(event)
+        assert "sub-agent completed" in msg
+        assert "Code review complete" in msg
+        await agent.close_memory()
+
+    async def test_format_event_catch_all(self):
+        """Catch-all path formats unknown/future event types via JSON."""
+        agent = await self._make_agent()
+        event = AgentEvent(
+            event_type=EventType.AGENT_JOINED,
+            payload={"agent_id": "new-agent", "role": "reviewer"},
+        )
+        msg = agent._format_event(event)
+        assert "agent_joined" in msg
+        assert "new-agent" in msg
+        await agent.close_memory()
+
+    async def test_format_event_catch_all_non_serializable_payload(self):
+        """Non-JSON-serializable payload falls back to str() (review finding #5)."""
+        agent = await self._make_agent()
+        # object() is not JSON-serializable
+        event = AgentEvent(
+            event_type=EventType.AGENT_LEFT,
+            payload={"agent": object()},
+        )
+        # Should not raise — falls back to str()
+        msg = agent._format_event(event)
+        assert "agent_left" in msg
+        await agent.close_memory()
+
+
+class TestMaxLLMCallsExhaustion:
+    """Test that the max_llm_calls guard prevents infinite tool loops (review finding #6)."""
+
+    async def test_max_llm_calls_exhaustion(self):
+        """LLM always returns TOOL_USE — loop bounded by max_llm_calls."""
+        # Create responses that always request tool use
+        tool_response = LLMResponse(
+            text=None,
+            tool_calls=[ToolCall(id="tc1", name="recall_notes", input={"query": "x"})],
+            stop_reason=StopReason.TOOL_USE,
+            usage=Usage(100, 50),
+        )
+        max_calls = 3
+        # Provide enough responses; the loop should break after max_calls
+        responses = [tool_response] * (max_calls + 1)
+        client = _make_client(responses)
+
+        config = {**_PERSONA_CONFIG, "max_llm_calls": max_calls}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            sender_id="test",
+        )
+        actions = await agent.on_event(event)
+
+        # LLM was called exactly max_calls times (loop bounded)
+        assert client._provider.create_message.call_count == max_calls
+        # Should still return valid actions (parse_actions handles tool_use response)
+        assert len(actions) >= 1
+        await agent.close_memory()
 
 
