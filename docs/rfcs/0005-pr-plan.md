@@ -658,6 +658,17 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 > Items deferred beyond PR 7 — nice-to-have improvements: FTS5 searchability test after summarization, composite retention index, summarization telemetry counter, `older_than_days=0` edge case documentation.
 
+**From PR 4 (PR #53 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-4-1 | `agents/memory/relationship.py` | Validate `other_agent_id` is non-empty in `update_trust()` and `record_interaction()` — add `if not other_agent_id or not other_agent_id.strip(): raise ValueError("other_agent_id must not be empty")` at top of both methods, consistent with `interaction_type` validation |
+| F-4-2 | `tests/unit/python/test_relationship_memory.py` | Add concurrent `record_interaction()` test — fire two concurrent calls, verify `interaction_count == 2`. Matches pattern established by `test_concurrent_updates_both_applied` for `update_trust()` |
+| F-4-3 | `agents/memory/relationship.py` | Cap `reason` string length in `update_trust()` — `reason = reason[:1024]` before storing. The `notes` field is injected into LLM prompts via `get_relationship_summary()`, unbounded strings waste context tokens |
+| F-4-4 | `agents/memory/relationship.py` | Cap `outcome` string length in `record_interaction()` — `outcome = outcome[:1024] if outcome else outcome`. Same concern as F-4-3 |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: interaction retention/pruning (`prune_old_interactions(older_than_days)`), async context manager (`__aenter__`/`__aexit__` for all memory tiers), trust change audit trail table, `Sentiment = Annotated[float, Ge(-1.0), Le(1.0)]` type alias, file-based DB test for `apply_decay`, pagination for `get_all_relationships()`.
+
 #### Key implementation details
 
 - Bundle all "Should Fix" findings from previous PR reviews.
