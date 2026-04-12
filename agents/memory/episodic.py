@@ -563,7 +563,7 @@ class EpisodicMemory:
         async with db.execute(
             f"SELECT {_EPISODE_SELECT} FROM episodes "
             "WHERE agent_id = ? AND compression_level < 1 AND created_at < ? "
-            "LIMIT ?",
+            "ORDER BY created_at ASC LIMIT ?",
             (self._agent_id, cutoff, batch_size),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -609,10 +609,11 @@ class EpisodicMemory:
                         response.usage.input_tokens,
                         response.usage.output_tokens,
                     )
-                if summary is None:
+                if summary is None or not summary.strip():
                     logger.warning(
-                        "Summarization of episode %s returned no text, skipping",
+                        "Summarization of episode %s returned %s, skipping",
                         episode.id,
+                        "no text" if summary is None else "empty text",
                     )
                     continue
 

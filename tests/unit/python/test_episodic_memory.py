@@ -992,6 +992,96 @@ class TestSummarizeOldEpisodes:
         assert count == 3
         assert call_count == 3
 
+    async def test_batch_size_zero_raises(self, memory: EpisodicMemory):
+        """batch_size < 1 raises ValueError."""
+        llm_client = AsyncMock()
+        with pytest.raises(ValueError, match="batch_size must be >= 1"):
+            await memory.summarize_old_episodes(7, llm_client, batch_size=0)
+
+    async def test_batch_size_limits_processing(self, memory: EpisodicMemory):
+        """With 5 old episodes and batch_size=2, only 2 are summarized."""
+        db = memory._ensure_db()
+        old_time = time.time() - 30 * 86400
+
+        ids = []
+        for i in range(5):
+            ep_id = await memory.store_episode(
+                summary=f"Old episode {i}", context={"idx": i},
+            )
+            await db.execute(
+                "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
+            )
+            ids.append(ep_id)
+        await db.commit()
+
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            return_value=_make_llm_response("Compressed")
+        )
+
+        count = await memory.summarize_old_episodes(7, llm_client, batch_size=2)
+        assert count == 2
+        assert llm_client.create_message.call_count == 2
+
+        # 3 episodes remain at compression_level 0
+        remaining = 0
+        for ep_id in ids:
+            ep = await memory.get_episode(ep_id)
+            if ep.compression_level == 0:
+                remaining += 1
+        assert remaining == 3
+
+    async def test_context_truncation_in_prompt(self, memory: EpisodicMemory):
+        """Episode context > _MAX_CONTEXT_CHARS is truncated in the prompt."""
+        db = memory._ensure_db()
+        old_time = time.time() - 30 * 86400
+
+        # Create episode with context larger than the 2000-char limit
+        large_context = {"data": "x" * 3000}
+        ep_id = await memory.store_episode(
+            summary="Episode with large context", context=large_context,
+        )
+        await db.execute(
+            "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
+        )
+        await db.commit()
+
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            return_value=_make_llm_response("Compressed")
+        )
+
+        await memory.summarize_old_episodes(7, llm_client)
+
+        # Verify the prompt sent to the LLM contains the truncation marker
+        call_kwargs = llm_client.create_message.call_args
+        prompt = call_kwargs.kwargs["messages"][0]["content"]
+        assert "... [truncated]" in prompt
+
+    async def test_handles_llm_returning_empty_string(self, memory: EpisodicMemory):
+        """When LLM returns empty/whitespace text, episode is skipped."""
+        db = memory._ensure_db()
+        old_time = time.time() - 30 * 86400
+        ep_id = await memory.store_episode(
+            summary="Original summary", context={},
+        )
+        await db.execute(
+            "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
+        )
+        await db.commit()
+
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            return_value=_make_llm_response("   ")
+        )
+
+        count = await memory.summarize_old_episodes(7, llm_client)
+        assert count == 0
+
+        ep = await memory.get_episode(ep_id)
+        assert ep.summary == "Original summary"
+        assert ep.compression_level == 0
+
 
 # ─── Episode deletion / retention ───────────────────────────
 
