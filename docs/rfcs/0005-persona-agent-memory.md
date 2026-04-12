@@ -259,7 +259,7 @@ def _load_agent(agent_config: dict[str, Any]) -> BaseAgent:
 
 ### Autonomous Tick Loop
 
-For agents with `autonomy.level` in (`semi-autonomous`, `autonomous`, `supervisor`), the server runs an async tick loop:
+For agents with `autonomy.level` in (`semi-autonomous`, `autonomous`, `supervisor`), the server runs an async tick loop. Agents with `passive` or `reactive` level do not get a tick loop — they only respond to events via `on_event()`.
 
 ```python
 class TickScheduler:
@@ -922,6 +922,8 @@ Note-taking ability is controlled per-agent in the `memory` config section. This
 
 **How `auto_reflect_after` works**: After every N interactions (configurable, default 5), the framework appends a one-line nudge to the system prompt: *"You have completed {N} interactions since your last note. Consider whether any patterns, decisions, or lessons are worth recording with `store_note`."* This is a **soft behavioral nudge**, not a forced action — the LLM decides whether to call the tool. Agents with `detail_focus: detail-focused` naturally respond to this nudge more often than `big-picture` agents, creating personality-consistent learning behavior without a dedicated "learning" dimension.
 
+**Interaction with `notes.enabled: false`**: When `memory.notes.enabled` is `false`, the `auto_reflect_after` nudge is not injected and the interaction counter is not maintained. Since the agent cannot use `store_note` in this configuration, the reflection nudge would be a wasted prompt token with no actionable outcome.
+
 **Counter persistence**: The interaction counter for `auto_reflect_after` is stored in the SQLite database (a lightweight `agent_state` table keyed by `agent_id`) so that it survives process restarts. Without persistence, agents restarting frequently would never reach the nudge threshold.
 
 **What about auto-extracting lessons?** A tempting alternative is framework-initiated reflection: after every interaction, the system calls the LLM asking "what should this agent remember?" and auto-stores the result. This is explicitly **not** done because:
@@ -1146,7 +1148,7 @@ Update `schemas/agent.schema.json` to add:
   - `knowledge` object (`domains`, `limitations`)
 - `autonomy` object with `level`, `tick_interval_seconds`, `max_actions_per_tick`, `idle_after_ticks`
 - `relationships` array
-- `memory` configuration object with `db_path` (string), `notes` object (`enabled` bool, `max_notes` int, `auto_reflect_after` int, `inject_recent_notes` int)
+- `memory` configuration object with `db_path` (string), `notes` object (`enabled` bool, `max_notes` int, `auto_reflect_after` int, `inject_recent_notes` int), `relationship` object (`decay_rate` float, default 0.01 — per-cycle trust decay rate toward neutral, aligning with extension spec E7.2)
 
 ### CLI Command Wiring
 
@@ -1711,6 +1713,8 @@ LIMIT ?;
 *Composite scoring formula:*
 
 $$\text{score} = \text{BM25}(query, episode) \times \text{importance} \times (1 + \ln(1 + \text{access\_count})) \times \frac{1}{1 + \text{age\_days}}$$
+
+*Implementation note:* SQLite FTS5 `rank` values are **negative** (lower = more relevant match). The SQL uses `fts.rank * -1` to convert to a positive score before combining with other factors. Implementers should preserve this negation — omitting it inverts the relevance ordering.
 
 The `access_count` factor gives a mild boost to frequently retrieved memories (logarithmic to avoid runaway dominance). Each `recall()` hit increments `access_count` and updates `last_accessed_at` on returned episodes.
 

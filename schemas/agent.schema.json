@@ -243,6 +243,19 @@
               "description": "Number of most relevant notes to include in context per LLM call"
             }
           }
+        },
+        "relationship": {
+          "type": "object",
+          "description": "Relationship memory configuration (extension spec E7.2)",
+          "properties": {
+            "decay_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.01,
+              "description": "Per-cycle trust decay rate toward neutral (0.5). Higher values cause faster trust erosion without reinforcement."
+            }
+          }
         }
       }
     },
