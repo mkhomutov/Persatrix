@@ -187,8 +187,18 @@ for agent in persona_agents.values():
 ```python
 class PersonaAgent(BaseAgent, ABC):
     async def close_memory(self) -> None:
-        """Gracefully close all memory tiers, waiting for in-flight operations."""
+        """Gracefully close all memory tiers, waiting for in-flight operations.
+
+        Awaits any outstanding WorkingMemory compression task before
+        closing, preventing silent loss of compressed results on shutdown.
+        """
         async with self._lock:
+            if self.working_memory._compression_task:
+                try:
+                    await self.working_memory._compression_task
+                except Exception:
+                    logger.warning("Compression task failed during shutdown",
+                                   agent_id=self.agent_id)
             await self.working_memory.close()
             await self.episodic_memory.close()
             await self.relationship_memory.close()
@@ -423,9 +433,14 @@ class EventDispatcher:
                 token_count=estimate_tokens(episode_text),
             ))
 
-        # Trigger working memory compression if over budget (fire-and-forget;
-        # current event proceeds with pre-compression context)
-        asyncio.create_task(wm.compress_if_needed(agent.llm_client))
+        # Trigger working memory compression if over budget.
+        # Uses the _compression_task guard (see compress_if_needed docstring)
+        # to prevent concurrent compressions from rapid events.
+        # Current event proceeds with pre-compression context.
+        if wm._compression_task is None or wm._compression_task.done():
+            wm._compression_task = asyncio.create_task(
+                wm.compress_if_needed(agent.llm_client)
+            )
 ```
 
 #### Concrete `on_event()` Decision Loop
@@ -538,6 +553,7 @@ class WorkingMemory:
     def __init__(self, max_tokens: int = 100_000):
         self._max_tokens = max_tokens
         self._sections: list[ContextSection] = []
+        self._compression_task: asyncio.Task[None] | None = None
 
     def add_section(self, section: ContextSection) -> None: ...
     def total_tokens(self) -> int: ...
@@ -551,6 +567,15 @@ class WorkingMemory:
         The next ``build_context()`` call will pick up the compressed
         sections.  Direct ``await`` is acceptable during shutdown or
         testing where blocking is tolerable.
+
+        **Concurrency guard**: ``WorkingMemory`` tracks the outstanding
+        compression task in a ``_compression_task: asyncio.Task | None``
+        attribute.  Before spawning a new task, callers must check
+        whether one is already in flight (``if self._compression_task
+        and not self._compression_task.done(): return``).  This prevents
+        rapid events from spawning multiple concurrent compressions that
+        could double-compress the same sections.  ``close()`` awaits the
+        outstanding task to ensure clean shutdown.
         """
         # Implementation note: Compression triggers an LLM call (1-10s
         # latency). The summarization call may use a cheaper/faster model
@@ -595,6 +620,14 @@ class EpisodicMemory:
         certain Docker images) may exclude it. initialize() tests FTS5
         availability with a throwaway 'CREATE VIRTUAL TABLE' and falls
         back to LIKE-based queries with a warning log if unavailable.
+
+        Performance note on LIKE fallback: LIKE-based queries on
+        unindexed text columns are O(N) full table scans. Performance
+        degrades noticeably beyond ~1000 episodes per agent. The warning
+        log on fallback should recommend installing a Python build with
+        FTS5 support. If FTS5 is unavailable in production, episode
+        retrieval latency should be monitored via the
+        ``memory_episode_recall_duration_ms`` metric.
         """
         # episodes(id, agent_id, summary, context, outcome, timestamp, importance)
 
@@ -631,6 +664,19 @@ class EpisodicMemory:
         reasoning.
         """
         ...
+
+    async def delete_old_episodes(
+        self,
+        older_than_days: int = 90,
+    ) -> int:
+        """Hard-delete episodes beyond the retention window. Returns count deleted.
+
+        Only deletes episodes that have already been compressed
+        (compression_level >= 1). Uncompressed episodes older than the
+        retention window are compressed first via summarize_old_episodes(),
+        then deleted on the next cycle.
+        """
+        ...
 ```
 
 Schema:
@@ -655,6 +701,22 @@ CREATE INDEX idx_episodes_agent ON episodes(agent_id);
 CREATE INDEX idx_episodes_importance ON episodes(importance DESC);
 CREATE INDEX idx_episodes_created ON episodes(created_at DESC);
 ```
+
+> **Spec divergence notes (E7.2):**
+>
+> - **`summarize_after_messages`**: The extension spec (E7.2) defines `summarize_after_messages: 50`
+>   for auto-summarizing long conversations by message count. This RFC uses time-based compression
+>   (`older_than_days`) for episodic memory and interaction-count-based nudges (`auto_reflect_after`)
+>   for agent-initiated notes. Message-count-based episodic triggers are deferred — MVP uses
+>   time-based compression as a simpler starting point. A message-count trigger can be added in
+>   Phase 3c follow-up once real-world episode accumulation patterns are observed.
+>
+> - **`retention_days`**: The extension spec (E7.2) defines `retention_days: 90` for episodic memory.
+>   This RFC adds a `delete_old_episodes(older_than_days=90)` method that hard-deletes compressed
+>   episodes beyond the retention window. Without this, long-running agents accumulate unbounded
+>   episodes, degrading query performance and consuming disk. The retention window is configurable
+>   per-agent via `memory.episodic.retention_days` (default: 90, matching the extension spec).
+>   Only episodes with `compression_level >= 1` (already summarized) are eligible for deletion.
 
 #### Future Enhancement: Semantic Search via Vector Embeddings
 
@@ -902,6 +964,15 @@ Like `EpisodicMemory` and `RelationshipMemory`, notes are **agent-scoped** — e
 > ```
 >
 > This ensures `agent_id` is fixed at construction, not per-call, and that multi-agent processes get correctly scoped tool instances.
+>
+> **Registry integration**: Agent-scoped memory tools returned by `create_memory_tools()` are
+> registered in the agent's per-instance tool list during `PersonaAgent.__init__()`, **not** in the
+> module-level `tools.registry`. The existing `BaseAgent._build_tool_definitions()` method already
+> merges the agent's config-listed tools (from `agents.yaml` `tools:` array) with any instance-level
+> tools. Memory tools are auto-injected for agents with `memory.notes.enabled: true` — they do not
+> need to be listed in the agent's `tools:` config array. Task agents without `memory.notes.enabled`
+> do not receive memory tools. This keeps the module-level registry clean (only stateless tools)
+> while giving each persona agent correctly scoped memory tool instances.
 
 #### Configurable Learning Behavior
 
@@ -913,6 +984,8 @@ Note-taking ability is controlled per-agent in the `memory` config section. This
   type: "persona"
   memory:
     db_path: "data/memory.db"
+    episodic:
+      retention_days: 90         # hard-delete compressed episodes older than this (default: 90, per E7.2)
     notes:
       enabled: true              # default: true for persona agents, false for task agents
       max_notes: 500             # per-agent cap; oldest low-access notes pruned when exceeded
@@ -1148,7 +1221,7 @@ Update `schemas/agent.schema.json` to add:
   - `knowledge` object (`domains`, `limitations`)
 - `autonomy` object with `level`, `tick_interval_seconds`, `max_actions_per_tick`, `idle_after_ticks`
 - `relationships` array
-- `memory` configuration object with `db_path` (string), `notes` object (`enabled` bool, `max_notes` int, `auto_reflect_after` int, `inject_recent_notes` int), `relationship` object (`decay_rate` float, default 0.01 — per-cycle trust decay rate toward neutral, aligning with extension spec E7.2)
+- `memory` configuration object with `db_path` (string), `episodic` object (`retention_days` int, default 90 — hard-delete compressed episodes beyond this window, aligning with extension spec E7.2), `notes` object (`enabled` bool, `max_notes` int, `auto_reflect_after` int, `inject_recent_notes` int), `relationship` object (`decay_rate` float, default 0.01 — per-cycle trust decay rate toward neutral, aligning with extension spec E7.2)
 
 ### CLI Command Wiring
 
