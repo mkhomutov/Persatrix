@@ -3,19 +3,26 @@ Built-in tools bundled with the framework.
 
 These tools provide sandboxed filesystem, shell, and HTTP access with
 deny-by-default permission enforcement via PermissionGate and PathValidator.
+Also provides agent-initiated memory tools (notes) via closure-based factory.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import shlex
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import aiohttp
 
 from .permissions import PermissionGate
-from .registry import ToolResult, tool
+from .registry import ToolDefinition, ToolResult, get_tool, tool
 from .sandbox import PathValidator
+
+if TYPE_CHECKING:
+    from ..memory.episodic import EpisodicMemory
 
 logger = logging.getLogger(__name__)
 
@@ -313,3 +320,134 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
         return ToolResult(success=False, error=str(exc), error_type=type(exc).__name__)
     except TimeoutError:
         return ToolResult(success=False, error="HTTP request timed out", error_type="TimeoutError")
+
+
+# ─── Memory Tools (Agent-Initiated Notes) ──────────────────
+
+
+def create_memory_tools(
+    memory: EpisodicMemory,
+    gate: PermissionGate,
+    *,
+    max_notes: int = 500,
+    auto_reflect_after: int = 0,
+) -> list[ToolDefinition]:
+    """Create closure-based memory tools bound to a specific EpisodicMemory instance.
+
+    The ``agent_id`` and DB connection are captured in the closure — they are
+    NOT controllable by the LLM.
+
+    Returns a list of registered ToolDefinition objects.
+    """
+    tools: list[ToolDefinition] = []
+
+    @tool(
+        name="store_note",
+        description="Store a note for future reference",
+        permissions=["memory:write"],
+        tier="builtin",
+    )
+    async def store_note(topic: str, content: str, tags: str = "") -> ToolResult:
+        """Store a note with a topic and content. Tags is a comma-separated string."""
+        if not gate.check("memory:write"):
+            return ToolResult(success=False, error="Permission denied: memory:write")
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        try:
+            note_id = await memory.store_note(
+                topic=topic, content=content, tags=tag_list, max_notes=max_notes,
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc), error_type="ValueError")
+        return ToolResult(success=True, data={"note_id": note_id, "topic": topic})
+
+    @tool(
+        name="recall_notes",
+        description="Search stored notes by query",
+        permissions=["memory:read"],
+        tier="builtin",
+    )
+    async def recall_notes(query: str = "", limit: int = 10) -> ToolResult:
+        """Search notes. Empty query returns most recent notes."""
+        if not gate.check("memory:read"):
+            return ToolResult(success=False, error="Permission denied: memory:read")
+        try:
+            notes = await memory.recall_notes(query=query, limit=limit)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc), error_type="ValueError")
+        return ToolResult(
+            success=True,
+            data=[
+                {
+                    "id": n.id,
+                    "topic": n.topic,
+                    "content": n.content,
+                    "tags": n.tags,
+                    "access_count": n.access_count,
+                }
+                for n in notes
+            ],
+        )
+
+    @tool(
+        name="update_note",
+        description="Update the content of an existing note",
+        permissions=["memory:write"],
+        tier="builtin",
+    )
+    async def update_note(note_id: str, content: str) -> ToolResult:
+        """Update a note's content. Topic and tags are preserved."""
+        if not gate.check("memory:write"):
+            return ToolResult(success=False, error="Permission denied: memory:write")
+        try:
+            found = await memory.update_note(note_id=note_id, content=content)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc), error_type="ValueError")
+        if not found:
+            return ToolResult(success=False, error=f"Note not found: {note_id}")
+        return ToolResult(success=True, data={"note_id": note_id, "updated": True})
+
+    @tool(
+        name="delete_note",
+        description="Delete a stored note",
+        permissions=["memory:write"],
+        tier="builtin",
+    )
+    async def delete_note(note_id: str) -> ToolResult:
+        """Delete a note by ID."""
+        if not gate.check("memory:write"):
+            return ToolResult(success=False, error="Permission denied: memory:write")
+        found = await memory.delete_note(note_id=note_id)
+        if not found:
+            return ToolResult(success=False, error=f"Note not found: {note_id}")
+        return ToolResult(success=True, data={"note_id": note_id, "deleted": True})
+
+    # Collect registered tool definitions
+    for name in ("store_note", "recall_notes", "update_note", "delete_note"):
+        td = get_tool(name)
+        if td is not None:
+            tools.append(td)
+
+    return tools
+
+
+async def check_auto_reflect(
+    memory: EpisodicMemory,
+    auto_reflect_after: int,
+) -> str | None:
+    """Increment the interaction counter and return a nudge if threshold reached.
+
+    Returns a system prompt nudge string if ``auto_reflect_after > 0`` and the
+    counter has reached the threshold, otherwise ``None``.  Resets the counter
+    after firing.
+    """
+    if auto_reflect_after <= 0:
+        return None
+    count = await memory.increment_interaction_count()
+    if count >= auto_reflect_after:
+        await memory.reset_interaction_count()
+        return (
+            "You have processed several interactions since your last reflection. "
+            "Consider using store_note to record any new insights, patterns, or "
+            "important context you've observed."
+        )
+    return None

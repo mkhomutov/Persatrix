@@ -287,13 +287,13 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_memory_tools.py -v` passes
-- [ ] Coverage ≥ 80% for new code in `episodic.py` and `builtin.py`
-- [ ] `ruff check agents/` clean
-- [ ] Agent-scoped isolation verified
-- [ ] `max_notes` pruning tested
-- [ ] `auto_reflect_after` counter persistence tested
-- [ ] Note content size bounded (10KB default)
+- [x] `pytest tests/unit/python/test_memory_tools.py -v` passes
+- [x] Coverage ≥ 80% for new code in `episodic.py` and `builtin.py`
+- [x] `ruff check agents/` clean
+- [x] Agent-scoped isolation verified
+- [x] `max_notes` pruning tested
+- [x] `auto_reflect_after` counter persistence tested
+- [x] Note content size bounded (10KB default)
 
 ---
 
