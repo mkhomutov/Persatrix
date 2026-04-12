@@ -26,6 +26,7 @@ from agents.persona import (
     EventType,
     Mood,
     PersonaState,
+    SubAgentRequest,
     _LLMPersonaAgent,
     create_persona_agent,
     render_behavior,
@@ -902,4 +903,159 @@ class TestPersonaStateFromDictClamping:
         state = PersonaState.from_dict({"energy": 0.7, "stress_level": 0.3})
         assert state.energy == 0.7
         assert state.stress_level == 0.3
+
+
+# ─── Review finding: goal_progress validation ────────────────
+
+
+class TestPersonaStateGoalProgressValidation:
+    """Verify from_dict rejects non-numeric goal_progress values.
+
+    Review finding: corrupted DB entry with {"goal": "not_a_number"}
+    would crash to_prompt_section() at the f"{progress:.0%}" format string.
+    """
+
+    def test_valid_goal_progress_preserved(self):
+        state = PersonaState.from_dict({"goal_progress": {"ship": 0.75, "hire": 0.5}})
+        assert state.goal_progress == {"ship": 0.75, "hire": 0.5}
+
+    def test_non_numeric_value_skipped(self):
+        state = PersonaState.from_dict({"goal_progress": {"ship": "not_a_number"}})
+        assert state.goal_progress == {}
+
+    def test_mixed_valid_invalid_values(self):
+        state = PersonaState.from_dict(
+            {"goal_progress": {"ship": 0.75, "bad": None, "hire": "oops"}}
+        )
+        assert state.goal_progress == {"ship": 0.75}
+
+    def test_integer_coerced_to_float(self):
+        state = PersonaState.from_dict({"goal_progress": {"done": 1}})
+        assert state.goal_progress == {"done": 1.0}
+
+    def test_empty_goal_progress(self):
+        state = PersonaState.from_dict({"goal_progress": {}})
+        assert state.goal_progress == {}
+
+    def test_prompt_section_after_validation(self):
+        """Validated goal_progress renders without error."""
+        state = PersonaState.from_dict({"goal_progress": {"ship": 0.75}})
+        section = state.to_prompt_section()
+        assert "ship: 75%" in section
+
+
+# ─── Review finding: spawn_sub_agent without client ──────────
+
+
+class TestSpawnSubAgentWithoutClient:
+    """Verify spawn_sub_agent raises RuntimeError when orchestrator client is None.
+
+    Review finding: this error path was untested.
+    """
+
+    async def test_raises_runtime_error(self):
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        assert agent._orchestrator_client is None
+
+        with pytest.raises(RuntimeError, match="Orchestrator client not initialized"):
+            await agent.spawn_sub_agent(SubAgentRequest(role="helper", task="test"))
+
+        await agent.close_memory()
+
+
+# ─── Review finding: tool precedence (registry + memory) ────
+
+
+class TestBuildToolDefinitionsWithRegistry:
+    """Verify _build_tool_definitions includes registry tools and memory tools
+    take precedence over same-name registry tools.
+
+    Review finding: only memory tools were tested; tool precedence logic was
+    not verified.
+    """
+
+    async def _make_agent(self) -> _LLMPersonaAgent:
+        from agents.tools.registry import tool
+        from agents.tools.builtin import ToolResult
+
+        # Register a tool in the global registry with a unique name
+        @tool(name="code_search", description="Search codebase")
+        async def code_search(query: str) -> ToolResult:
+            return ToolResult(success=True, data="results")
+
+        cfg = {**_PERSONA_CONFIG, "tools": ["code_search"]}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        return agent
+
+    async def test_registry_tool_included(self):
+        agent = await self._make_agent()
+        defs = agent._build_tool_definitions()
+        names = {d["name"] for d in defs}
+        assert "code_search" in names
+        # Memory tools should also be present
+        assert "store_note" in names
+        assert "recall_notes" in names
+        await agent.close_memory()
+
+    async def test_memory_tool_overrides_registry_tool(self):
+        """If a registry tool has the same name as a memory tool, memory wins."""
+        from agents.tools.registry import tool
+        from agents.tools.builtin import ToolResult
+
+        @tool(name="store_note", description="WRONG: registry version")
+        async def store_note_fake(text: str) -> ToolResult:
+            return ToolResult(success=True, data="fake")
+
+        cfg = {**_PERSONA_CONFIG, "tools": ["store_note"]}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        defs = agent._build_tool_definitions()
+        store_defs = [d for d in defs if d["name"] == "store_note"]
+        assert len(store_defs) == 1
+        # The description should be from the memory tool, not the registry fake
+        assert "WRONG" not in store_defs[0]["description"]
+        await agent.close_memory()
+
+
+# ─── Review finding: handle() without COMPLETE_TASK ──────────
+
+
+class TestHandleWithoutCompleteTask:
+    """Verify handle() returns FAILED when LLM produces no COMPLETE_TASK action.
+
+    Review finding: the failure path in PersonaAgent.handle() was only
+    implicitly tested via the default LLM response always producing COMPLETE_TASK.
+    """
+
+    async def test_handle_no_complete_task_returns_failed(self):
+        response = LLMResponse(
+            text=json.dumps([
+                {"action_type": "send_message", "payload": {"content": "hi", "channel_id": "ch-1"}},
+                {"action_type": "do_nothing", "payload": {}},
+            ]),
+        )
+        client = _make_client([response])
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        output = await agent.handle(_task("do something"))
+        assert output.status == TaskStatus.FAILED
+        assert "No COMPLETE_TASK action taken" in output.result
+        assert "send_message" in output.result
+        await agent.close_memory()
 

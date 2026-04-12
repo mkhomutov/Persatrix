@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -357,11 +358,18 @@ class PersonaState:
         except ValueError:
             logger.warning("Unknown mood %r, defaulting to NEUTRAL", mood_str)
             mood = Mood.NEUTRAL
+        raw_goals = data.get("goal_progress", {})
+        goal_progress: dict[str, float] = {}
+        for k, v in raw_goals.items():
+            try:
+                goal_progress[k] = float(v)
+            except (TypeError, ValueError):
+                logger.warning("Invalid goal_progress value for %r: %r, skipping", k, v)
         return cls(
             mood=mood,
             stress_level=min(1.0, max(0.0, float(data.get("stress_level", 0.0)))),
             energy=min(1.0, max(0.0, float(data.get("energy", 1.0)))),
-            goal_progress=data.get("goal_progress", {}),
+            goal_progress=goal_progress,
         )
 
 
@@ -673,9 +681,15 @@ class _LLMPersonaAgent(PersonaAgent):
             if stripped.startswith("["):
                 raw_actions = json.loads(stripped)
             elif "```json" in stripped:
-                start = stripped.index("```json") + 7
-                end = stripped.index("```", start)
-                raw_actions = json.loads(stripped[start:end])
+                # Use regex to extract the first JSON code block — more robust
+                # than str.index() against nested fences (review finding P-1).
+                m = re.search(r"```json\s*(.*?)\s*```", stripped, re.DOTALL)
+                if m is None:
+                    return [AgentAction(
+                        action_type=ActionType.COMPLETE_TASK,
+                        payload={"result": text},
+                    )]
+                raw_actions = json.loads(m.group(1))
             else:
                 # Treat the whole response as a COMPLETE_TASK result
                 return [AgentAction(
@@ -690,6 +704,9 @@ class _LLMPersonaAgent(PersonaAgent):
                 except ValueError:
                     logger.warning("Unknown action_type %r, skipping", raw.get("action_type"))
                     continue
+                # TODO(PR 5b): ActionExecutor MUST validate payload contents per
+                # action_type before execution. Until then, payloads are unvalidated
+                # LLM output. See RFC 0005 "Action Execution" section.
                 actions.append(AgentAction(
                     action_type=action_type,
                     payload=raw.get("payload", {}),
