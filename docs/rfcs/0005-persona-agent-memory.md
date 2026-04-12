@@ -178,10 +178,19 @@ for agent in persona_agents.values():
 
 # In server.py shutdown (before stopping gRPC):
 for agent in persona_agents.values():
-    async with agent._lock:  # wait for in-flight operations
-        await agent.working_memory.close()
-        await agent.episodic_memory.close()
-        await agent.relationship_memory.close()
+    await agent.close_memory()
+```
+
+`PersonaAgent` exposes a public `close_memory()` method that encapsulates the lock acquisition, keeping `_lock` as a private implementation detail:
+
+```python
+class PersonaAgent(BaseAgent, ABC):
+    async def close_memory(self) -> None:
+        """Gracefully close all memory tiers, waiting for in-flight operations."""
+        async with self._lock:
+            await self.working_memory.close()
+            await self.episodic_memory.close()
+            await self.relationship_memory.close()
 ```
 
 #### Multi-Agent-Per-Process Hosting
@@ -410,8 +419,9 @@ class EventDispatcher:
                 token_count=estimate_tokens(episode_text),
             ))
 
-        # Trigger working memory compression if over budget
-        await wm.compress_if_needed(agent.llm_client)
+        # Trigger working memory compression if over budget (fire-and-forget;
+        # current event proceeds with pre-compression context)
+        asyncio.create_task(wm.compress_if_needed(agent.llm_client))
 ```
 
 #### Concrete `on_event()` Decision Loop
@@ -529,11 +539,20 @@ class WorkingMemory:
     def total_tokens(self) -> int: ...
 
     async def compress_if_needed(self, llm_client: LLMClient) -> None:
-        """Summarize lowest-priority compressible sections when over budget."""
-        # Note: Compression triggers an LLM call for summarization (1-10s
-        # latency). This should be run as an async background task so that
-        # the current event/tick can proceed with pre-compression context.
-        # Synchronous compression would block event handling unacceptably.
+        """Summarize lowest-priority compressible sections when over budget.
+
+        This method is a coroutine, but callers should spawn it as a
+        fire-and-forget background task (``asyncio.create_task()``) so
+        the current event/tick can proceed with pre-compression context.
+        The next ``build_context()`` call will pick up the compressed
+        sections.  Direct ``await`` is acceptable during shutdown or
+        testing where blocking is tolerable.
+        """
+        # Implementation note: Compression triggers an LLM call (1-10s
+        # latency). The summarization call may use a cheaper/faster model
+        # than the agent's primary model — route via optimization.yaml's
+        # ``framework_model`` field when available (e.g. haiku-class for
+        # summarization vs sonnet-class for agent reasoning).
         ...
 
     def build_context(self) -> list[dict[str, str]]:
@@ -597,7 +616,14 @@ class EpisodicMemory:
         older_than_days: int = 30,
         llm_client: LLMClient | None = None,
     ) -> int:
-        """Compress old episodes via LLM summarization. Returns count processed."""
+        """Compress old episodes via LLM summarization. Returns count processed.
+
+        Like ``WorkingMemory.compress_if_needed()``, this triggers LLM
+        calls for summarization.  These framework-initiated calls may be
+        routed to a cheaper model than the agent's primary model via
+        ``optimization.yaml``'s ``framework_model`` setting — episode
+        summarization doesn't need persona-quality reasoning.
+        """
         ...
 ```
 
@@ -857,6 +883,20 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
 
 Like `EpisodicMemory` and `RelationshipMemory`, notes are **agent-scoped** — every query is filtered by `agent_id`, fixed at the memory instance level. An agent cannot access another agent's notes without constructing a new instance (same isolation pattern as [Memory Isolation](#memory-isolation-shared-database)).
 
+> **Design note — `agent_id` injection into memory tools**: The tool function signatures above don't include `agent_id` because it must not be LLM-controllable (an agent should not be able to read/write another agent's notes by passing a different ID). Instead, memory tools are instantiated per-agent at agent construction time using a **closure-based factory**: `PersonaAgent.__init__()` creates tool instances that capture `self.agent_id` in a closure, then registers them in the agent's tool registry. This extends the existing `@tool` pattern (which uses module-level registration in `builtin.py`) with agent-scoped tool instances. The factory pattern looks like:
+>
+> ```python
+> def create_memory_tools(agent_id: str, db: aiosqlite.Connection) -> list[Tool]:
+>     @tool(name="store_note", permissions=["memory:write"])
+>     async def store_note(topic: str, content: str, ...) -> ToolResult:
+>         # agent_id captured from closure — not an LLM parameter
+>         await db.execute("INSERT INTO notes ... WHERE agent_id = ?", (agent_id, ...))
+>         ...
+>     return [store_note, recall_notes, update_note, delete_note]
+> ```
+>
+> This ensures `agent_id` is fixed at construction, not per-call, and that multi-agent processes get correctly scoped tool instances.
+
 #### Configurable Learning Behavior
 
 Note-taking ability is controlled per-agent in the `memory` config section. This is the **hard infrastructure gate** — tool permissions in `agents.yaml` control *whether* an agent can take notes, while the `memory.notes` config controls *how much* and *how often*.
@@ -1051,7 +1091,11 @@ class TaskAgent(BaseAgent):
 
     async def handle(self, task: TaskInput) -> TaskOutput:
         instructions = self.config.get("instructions", "")
-        return await self._run_llm_loop(task, system_prompt=instructions)
+        # Preserve the "Role: ..." prefix that existing agents (CoderAgent,
+        # ReviewerAgent, PlannerAgent) prepend — dropping it would be a
+        # subtle behavioral regression affecting LLM output quality.
+        system_prompt = f"Role: {self.role}\n\n{instructions}"
+        return await self._run_llm_loop(task, system_prompt=system_prompt)
 ```
 
 The three existing agents become config entries:

@@ -18,6 +18,7 @@
     "agent": {
       "type": "object",
       "required": ["id", "name", "role", "model"],
+      "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
@@ -120,28 +121,32 @@
         "background": { "type": "string" },
         "behavior": {
           "type": "object",
-          "description": "Structured behavioral dimensions (RFC 0005). Replaces free-text personality.traits / communication_style / decision_making.",
-          "required": ["directness", "detail_focus", "formality", "risk_tolerance", "expressiveness"],
+          "description": "Structured behavioral dimensions (RFC 0005). Replaces free-text personality.traits / communication_style / decision_making. Individual dimensions are optional — omitted dimensions default to their middle value.",
           "properties": {
             "directness": {
               "type": "string",
-              "enum": ["indirect", "balanced", "direct"]
+              "enum": ["indirect", "balanced", "direct"],
+              "default": "balanced"
             },
             "detail_focus": {
               "type": "string",
-              "enum": ["big-picture", "balanced", "detail-focused"]
+              "enum": ["big-picture", "balanced", "detail-focused"],
+              "default": "balanced"
             },
             "formality": {
               "type": "string",
-              "enum": ["casual", "professional", "formal"]
+              "enum": ["casual", "professional", "formal"],
+              "default": "professional"
             },
             "risk_tolerance": {
               "type": "string",
-              "enum": ["cautious", "moderate", "bold"]
+              "enum": ["cautious", "moderate", "bold"],
+              "default": "moderate"
             },
             "expressiveness": {
               "type": "string",
-              "enum": ["reserved", "moderate", "expressive"]
+              "enum": ["reserved", "moderate", "expressive"],
+              "default": "moderate"
             }
           },
           "additionalProperties": false
