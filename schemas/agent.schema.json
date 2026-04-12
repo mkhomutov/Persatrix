@@ -84,6 +84,19 @@
           "then": {
             "required": ["instructions"]
           }
+        },
+        {
+          "$comment": "Safety net: if an agent configures persona-specific fields but omits 'type', require 'type' to prevent silent misconfiguration. Without this, a v0.2 persona agent missing 'type' would skip both conditionals above and validate without 'instructions' or 'persona' being required.",
+          "if": {
+            "anyOf": [
+              { "required": ["persona"] },
+              { "required": ["autonomy"] },
+              { "required": ["memory"] }
+            ]
+          },
+          "then": {
+            "required": ["type"]
+          }
         }
       ]
     },

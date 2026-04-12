@@ -1,7 +1,7 @@
 # RFC 0005 — Persona Agent & Memory System
 
 **Type**: feature  
-**Status**: � Accepted  
+**Status**: 👍 Accepted  
 **Author**: Engineering Team  
 **Date**: 2026-04-11  
 **Target**: v0.2  
@@ -151,16 +151,28 @@ class PersonaAgent(BaseAgent, ABC):
     def __init__(self, agent_id: str, config: dict[str, Any]) -> None:
         super().__init__(agent_id, config)
         self._lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        """Acquire the agent's concurrency lock.
+
+        External components (EventDispatcher, TickScheduler) use this
+        instead of accessing _lock directly, keeping the lock as a
+        private implementation detail that can be replaced (e.g., with
+        an actor mailbox) without changing callers.
+        """
+        async with self._lock:
+            yield
 ```
 
 ```python
 # In EventDispatcher.dispatch():
-async with agent._lock:
+async with agent.exclusive():
     await self._inject_memory_context(agent, event)  # must be inside lock
     actions = await agent.on_event(event)
 
 # In TickScheduler._loop():
-async with self._agent._lock:
+async with self._agent.exclusive():
     actions = await self._agent.on_tick()
 ```
 
@@ -196,12 +208,7 @@ class PersonaAgent(BaseAgent, ABC):
         closing, preventing silent loss of compressed results on shutdown.
         """
         async with self._lock:
-            if self.working_memory._compression_task:
-                try:
-                    await self.working_memory._compression_task
-                except Exception:
-                    logger.warning("Compression task failed during shutdown",
-                                   agent_id=self.agent_id)
+            await self.working_memory.await_pending_compression()
             await self.working_memory.close()
             await self.episodic_memory.close()
             await self.relationship_memory.close()
@@ -320,7 +327,7 @@ class TickScheduler:
                 continue
 
             try:
-                async with self._agent._lock:
+                async with self._agent.exclusive():
                     actions = await self._agent.on_tick()
             except Exception:
                 # Log and continue — an unhandled exception must not kill
@@ -386,7 +393,7 @@ class EventDispatcher:
         if scheduler := self._tick_schedulers.get(agent_id):
             await scheduler.wake()
 
-        async with agent._lock:
+        async with agent.exclusive():
             # Inject memory context inside the lock to prevent racing with
             # a concurrent on_tick() that may be mutating working memory.
             # _inject_memory_context() calls wm.add_section() and spawns a
@@ -453,13 +460,11 @@ class EventDispatcher:
                 ))
 
         # Trigger working memory compression if over budget.
-        # Uses the _compression_task guard (see compress_if_needed docstring)
-        # to prevent concurrent compressions from rapid events.
+        # try_start_compression() is idempotent — returns immediately if a
+        # compression task is already in flight. Encapsulates the
+        # _compression_task guard (see compress_if_needed docstring).
         # Current event proceeds with pre-compression context.
-        if wm._compression_task is None or wm._compression_task.done():
-            wm._compression_task = asyncio.create_task(
-                wm.compress_if_needed(agent.llm_client)
-            )
+        wm.try_start_compression(agent.llm_client)
 ```
 
 #### Concrete `on_event()` Decision Loop
@@ -577,24 +582,48 @@ class WorkingMemory:
     def add_section(self, section: ContextSection) -> None: ...
     def total_tokens(self) -> int: ...
 
+    def try_start_compression(self, llm_client: LLMClient) -> None:
+        """Spawn a background compression task if none is in flight.
+
+        Idempotent — returns immediately if a compression task is already
+        running. This is the public API for triggering compression from
+        outside WorkingMemory (e.g., EventDispatcher._inject_memory_context).
+        Callers should NOT access _compression_task directly.
+        """
+        if self._compression_task is None or self._compression_task.done():
+            self._compression_task = asyncio.create_task(
+                self.compress_if_needed(llm_client)
+            )
+
+    async def await_pending_compression(self) -> None:
+        """Await the outstanding compression task, if any.
+
+        Used during shutdown (PersonaAgent.close_memory()) to ensure
+        compressed results are not silently lost. Callers should NOT
+        access _compression_task directly.
+        """
+        if self._compression_task:
+            try:
+                await self._compression_task
+            except Exception:
+                logger.warning("Compression task failed during shutdown")
+
     async def compress_if_needed(self, llm_client: LLMClient) -> None:
         """Summarize lowest-priority compressible sections when over budget.
 
-        This method is a coroutine, but callers should spawn it as a
-        fire-and-forget background task (``asyncio.create_task()``) so
-        the current event/tick can proceed with pre-compression context.
-        The next ``build_context()`` call will pick up the compressed
-        sections.  Direct ``await`` is acceptable during shutdown or
-        testing where blocking is tolerable.
+        This method is a coroutine, but callers should use
+        ``try_start_compression()`` to spawn it as a fire-and-forget
+        background task so the current event/tick can proceed with
+        pre-compression context. The next ``build_context()`` call will
+        pick up the compressed sections. Direct ``await`` is acceptable
+        during shutdown or testing where blocking is tolerable.
 
-        **Concurrency guard**: ``WorkingMemory`` tracks the outstanding
-        compression task in a ``_compression_task: asyncio.Task | None``
-        attribute.  Before spawning a new task, callers must check
-        whether one is already in flight (``if self._compression_task
-        and not self._compression_task.done(): return``).  This prevents
-        rapid events from spawning multiple concurrent compressions that
-        could double-compress the same sections.  ``close()`` awaits the
-        outstanding task to ensure clean shutdown.
+        **Concurrency guard**: ``try_start_compression()`` checks the
+        ``_compression_task`` attribute before spawning a new task,
+        preventing rapid events from spawning multiple concurrent
+        compressions that could double-compress the same sections.
+        ``await_pending_compression()`` awaits the outstanding task to
+        ensure clean shutdown.
         """
         # Implementation note: Compression triggers an LLM call (1-10s
         # latency). The summarization call may use a cheaper/faster model
@@ -968,6 +997,10 @@ CREATE INDEX idx_notes_topic ON notes(topic);
 -- table uses TEXT PRIMARY KEY (id), but SQLite always exposes an implicit
 -- integer rowid alongside it. FTS5 requires this integer rowid for
 -- content sync — it is NOT the TEXT id column.
+-- IMPORTANT: The notes table must NOT use WITHOUT ROWID. WITHOUT ROWID
+-- tables do not expose an implicit integer rowid, which would silently
+-- break FTS5 content sync. The same constraint applies to the episodes
+-- table and its episodes_fts virtual table.
 CREATE VIRTUAL TABLE notes_fts USING fts5(
     topic, content, tags_json,
     content=notes, content_rowid=rowid
@@ -1085,11 +1118,13 @@ class PersonaState:
 ```
 
 **Energy mechanics:**
-- Each LLM call / action costs `0.05` energy (configurable)
-- Each idle tick recovers `0.1` energy (configurable)
+- Each LLM call / action costs `0.05` energy (hardcoded constant for MVP — not yet in config schema)
+- Each idle tick recovers `0.1` energy (hardcoded constant for MVP — not yet in config schema)
 - For non-tick agents (`passive` / `reactive` level without a tick loop), energy recovers passively at `+0.1` per elapsed `tick_interval_seconds` since the last action, computed lazily on the next `on_event()` call. This prevents agents without tick loops from permanently draining energy. **Default recovery interval**: If the agent has no `autonomy` config section (or no `tick_interval_seconds`), the default of 60 seconds is used as the recovery interval. The formula is: `recovery = 0.1 × floor(elapsed_seconds / recovery_interval)`, clamped to `[0.0, 1.0]`.
 - Low energy (< 0.3) → shorter responses, more delegation, less initiative
 - Energy is clamped to `[0.0, 1.0]`
+
+> **Config note**: `energy_cost_per_action` and `energy_recovery_per_tick` are not in the `autonomy` schema section for MVP. They are hardcoded constants in the `PersonaAgent` implementation. If per-agent tuning is needed, these can be promoted to schema fields in a follow-up PR without breaking existing configs (new optional fields with defaults matching the hardcoded values).
 
 #### PersonaState Persistence
 
@@ -1797,6 +1832,8 @@ SQLite FTS5 is a **built-in** SQLite extension (available in Python's `sqlite3` 
 
 ```sql
 -- Create virtual table alongside the regular table
+-- IMPORTANT: The episodes table must NOT use WITHOUT ROWID — see notes_fts
+-- comment in Agent-Initiated Memory Tools for details.
 CREATE VIRTUAL TABLE episodes_fts USING fts5(summary, context_json, content=episodes, content_rowid=rowid);
 
 -- Query with BM25 ranking

@@ -20,7 +20,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0004 fully merged (v0.1 complete). The v0.1 agent infrastructure (`BaseAgent`, `_run_llm_loop()`, `LLMClient`, `server.py` agent loader, permission gate, tool registry) is the foundation for all v0.2 work.
 
-**Recommended merge order:** **PR 1a** → **PR 1b** (can parallel with PR 2) → **PR 2** → **PR 3a** → **PR 3b** → **PR 3c** (can parallel with PR 4) → **PR 4** → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7**.
+**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** (can parallel with each other; both depend on PR 3a) → **PR 4** → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7**.
 
 ---
 
@@ -76,7 +76,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PR 1b: `feature/v02-cli-v1-wiring` — CLI Wiring to v0.1 REST Endpoints
 
-**Depends on**: PR 1a merged (or independent, can parallel if no agent type changes needed)
+**Depends on**: None — fully independent of PR 1a (CLI commands hit existing v0.1 REST endpoints, no agent type changes needed). Can parallel with PR 1a and PR 2.
 **Branch**: `feature/v02-cli-v1-wiring`
 **Estimated size**: ~250–400 lines (Rust implementation)
 
@@ -260,7 +260,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PR 3c: `feature/v02-episode-summarization` — Episode Auto-Summarization
 
-**Depends on**: PR 3b merged (uses `agent_state` table, episode infrastructure)
+**Depends on**: PR 3a merged (uses `agent_state` table, episode infrastructure from PR 3a; can parallel with PR 3b — no dependency on notes or memory tools)
 **Branch**: `feature/v02-episode-summarization`
 **Estimated size**: ~200–350 lines (implementation + tests)
 
@@ -577,11 +577,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ```
 PR 1a (TaskAgent + type system)
-  ├── PR 1b (CLI v0.1 wiring) ─────────────────────────────┐
+  ├── PR 1b (CLI v0.1 wiring) [independent — can parallel] ┐
   └── PR 2 (Working Memory)                                 │
         └── PR 3a (Schema Migration + Episodic Core)        │
-              ├── PR 3b (Memory Tools)                      │
-              │     └── PR 3c (Episode Summarization)  ─┐   │
+              ├── PR 3b (Memory Tools) ─────────────────┐   │
+              ├── PR 3c (Episode Summarization) [can ────┤   │
+              │         parallel with PR 3b]             │   │
               └── PR 4 (Relationship Memory) ───────────┤   │
                                                         ↓   │
                                         PR 5a (Persona Runtime Core)
