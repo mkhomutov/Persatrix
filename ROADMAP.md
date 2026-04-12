@@ -72,7 +72,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
 | `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
-| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes) | ✅ Complete (RFC 0005 PR 3a+3b) |
+| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
