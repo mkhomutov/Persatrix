@@ -31,11 +31,14 @@
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
   - [Config Schema Updates](#config-schema-updates)
   - [CLI Command Wiring](#cli-command-wiring)
+  - [SQLite Schema Migration Strategy](#sqlite-schema-migration-strategy)
+  - [Memory Observability](#memory-observability)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
 - [Open Questions](#open-questions)
+- [Future Considerations](#future-considerations)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
 
@@ -43,7 +46,7 @@
 
 ## Summary
 
-This RFC implements the PersonaAgent runtime and three-tier memory system as the foundational v0.2 feature. It activates the existing `PersonaAgent` class scaffold (currently abstract-only) with: (1) an autonomous tick loop for goal-driven agents, (2) an event dispatch framework that routes `AgentEvent`s to persona agents, (3) three-tier memory (working, episodic, relationship), (4) dynamic persona state injection, and (5) agent-initiated memory tools (`store_note`, `recall_notes`, `update_note`) for deliberate knowledge capture. As a bundled improvement, it consolidates the three structurally identical v0.1 task agents into a single data-driven `TaskAgent` class with YAML-configured instructions.
+This RFC implements the PersonaAgent runtime and three-tier memory system as the foundational v0.2 feature. It activates the existing `PersonaAgent` class scaffold (currently abstract-only) with: (1) an autonomous tick loop for goal-driven agents, (2) an event dispatch framework that routes `AgentEvent`s to persona agents, (3) three-tier memory (working, episodic, relationship), (4) dynamic persona state injection, and (5) agent-initiated memory tools (`store_note`, `recall_notes`, `update_note`, `delete_note`) for deliberate knowledge capture. As a bundled improvement, it consolidates the three structurally identical v0.1 task agents into a single data-driven `TaskAgent` class with YAML-configured instructions.
 
 ## Motivation
 
@@ -78,7 +81,7 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 8. **Agent type discrimination**: Explicit `type: task | persona` field in agent config, replacing capability heuristics.
 9. **Data-driven TaskAgent**: Single `TaskAgent` class driven by YAML `instructions` field, replacing `CoderAgent` / `ReviewerAgent` / `PlannerAgent`.
 10. **CLI command wiring**: Wire Rust CLI stubs to existing and new REST endpoints as each phase lands — `run`, `status`, `agent list/info`, `validate`, `test --persona`.
-11. **Agent-initiated memory tools**: Built-in `store_note`, `recall_notes`, `update_note` tools that let agents deliberately capture structured knowledge (distinct from framework-managed automatic memory).
+11. **Agent-initiated memory tools**: Built-in `store_note`, `recall_notes`, `update_note`, `delete_note` tools that let agents deliberately capture and manage structured knowledge (distinct from framework-managed automatic memory).
 12. **Configurable learning behavior**: Per-agent `memory.notes` config section controlling whether agents can self-direct note-taking, how many notes they retain, and auto-reflection triggers.
 
 ## Non-Goals
@@ -215,8 +218,17 @@ class TickScheduler:
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
+        """Graceful shutdown: cancel the loop but allow the current action
+        batch to finish. If the agent is mid-tick (ActionExecutor processing),
+        we wait up to a bounded timeout for it to complete before forcing
+        cancellation. This prevents silent loss of in-flight actions (e.g.,
+        SEND_MESSAGE) and ensures pending memory writes are flushed."""
         if self._task:
             self._task.cancel()
+            try:
+                await asyncio.wait_for(self._task, timeout=10.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
     async def _loop(self) -> None:
         while True:
@@ -273,11 +285,86 @@ class EventDispatcher:
     async def _inject_memory_context(
         self, agent: PersonaAgent, event: AgentEvent
     ) -> None:
-        """Load relevant memories and inject into agent context."""
-        # Working memory: recent conversation context
-        # Episodic memory: relevant past experiences
-        # Relationship memory: trust/interaction history with sender
-        ...
+        """Load relevant memories and inject into agent context.
+
+        Priority order (highest first):
+        1. System prompt + persona description (non-compressible)
+        2. Dynamic persona state (mood, energy, stress)
+        3. Relationship context with event sender (if sender_id present)
+        4. Relevant episodic memories (FTS5 query on event summary)
+        5. Recent agent notes (inject_recent_notes most relevant)
+        6. Current conversation history (compressible)
+        """
+        wm = agent.working_memory
+
+        # Relationship context for the sender (if applicable)
+        if event.sender_id:
+            rel_summary = await agent.relationship_memory.get_relationship_summary(
+                event.sender_id
+            )
+            wm.add_section(ContextSection(
+                name="relationship",
+                content=format_relationship(rel_summary),
+                priority=70,
+                token_count=estimate_tokens(format_relationship(rel_summary)),
+            ))
+
+        # Relevant episodic memories
+        event_summary = summarize_event(event)  # extract searchable text from payload
+        episodes = await agent.episodic_memory.recall(event_summary, limit=5)
+        if episodes:
+            episode_text = format_episodes(episodes)
+            wm.add_section(ContextSection(
+                name="episodic_memories",
+                content=episode_text,
+                priority=60,
+                token_count=estimate_tokens(episode_text),
+            ))
+
+        # Trigger working memory compression if over budget
+        await wm.compress_if_needed(agent.llm_client)
+```
+
+#### Concrete `on_event()` Decision Loop
+
+`PersonaAgent` is abstract — subclasses must implement `on_event()`. The `create_persona_agent()` factory (Phase 5) returns a concrete subclass whose `on_event()` drives an LLM-powered decision loop:
+
+1. **Build prompt**: Assemble system prompt from persona config + behavioral dimensions (via `render_behavior()`) + dynamic state (via `PersonaState.to_prompt_section()`) + injected memory context (via `_inject_memory_context()`)
+2. **Format event**: Convert the `AgentEvent` into a user message describing what happened
+3. **Call LLM**: Send the assembled messages to the configured model, with memory tools available
+4. **Parse response**: Extract `AgentAction` list from the LLM's structured response (tool calls map to actions)
+5. **Return actions**: The framework's `ActionExecutor` handles execution; results may generate new events
+
+```python
+class _LLMPersonaAgent(PersonaAgent):
+    """Concrete PersonaAgent with LLM-powered decision loop."""
+
+    async def on_event(self, event: AgentEvent) -> list[AgentAction]:
+        # 1. Build system prompt from persona + behavior + state + memories
+        system_prompt = self._build_system_prompt()
+
+        # 2. Format the event as a user message
+        user_message = self._format_event(event)
+
+        # 3. Call LLM with available tools (memory tools, agent tools)
+        response = await self._llm_client.chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            tools=self._available_tools,
+        )
+
+        # 4. Parse LLM response into agent actions
+        actions = self._parse_actions(response)
+
+        # 5. Store episode for this interaction (framework-managed)
+        await self.episodic_memory.store_episode(
+            summary=f"Event: {event.event_type.value} → Actions: {[a.action_type.value for a in actions]}",
+            context={"event": event.payload, "sender": event.sender_id},
+        )
+
+        return actions
 ```
 
 ### Three-Tier Agent Memory System
@@ -300,25 +387,21 @@ PersonaAgent
 # Shared Knowledge Base — deferred to separate v0.2 RFC (see Non-Goals)
 ```
 
-All three tiers implement a common `MemoryStore` protocol:
+The three tiers have **intentionally distinct interfaces** — they are not interchangeable backends behind a common protocol. `WorkingMemory` manages in-process token-counted sections (`add_section()` / `build_context()`), `EpisodicMemory` stores persistent summaries (`store_episode()` / `recall()`), and `RelationshipMemory` tracks trust (`get_trust()` / `update_trust()`). A `store(entry) → retrieve(query)` protocol was considered but rejected because it would force semantically different operations into a lowest-common-denominator interface, making each tier harder to use correctly. Each tier exposes the interface natural to its domain.
+
+All three tiers share a common lifecycle contract:
 
 ```python
 @runtime_checkable
-class MemoryStore(Protocol):
-    """Protocol for memory tier backends."""
+class MemoryLifecycle(Protocol):
+    """Lifecycle management shared by all memory tiers."""
 
-    async def store(self, entry: MemoryEntry) -> str:
-        """Store a memory entry, return its ID."""
-        ...
-
-    async def retrieve(
-        self, query: str, *, limit: int = 10
-    ) -> list[MemoryEntry]:
-        """Retrieve relevant memories for a query."""
+    async def initialize(self) -> None:
+        """Set up storage (create tables, allocate resources)."""
         ...
 
     async def close(self) -> None:
-        """Clean up resources."""
+        """Clean up resources (close DB connections, flush pending writes)."""
         ...
 ```
 
@@ -422,6 +505,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     importance REAL DEFAULT 0.5,
     access_count INTEGER DEFAULT 0,  -- incremented on each recall() hit
     last_accessed_at REAL,           -- updated on each recall() hit
+    tags_json TEXT,                   -- JSON array of string tags for structured recall
     created_at REAL NOT NULL,        -- Unix timestamp
     compressed_at REAL,              -- when last summarized
     compression_level INTEGER DEFAULT 0  -- 0=raw, 1=summarized, 2=distilled
@@ -535,6 +619,17 @@ CREATE TABLE IF NOT EXISTS interactions (
 );
 ```
 
+#### Trust Bootstrapping from Config
+
+The `relationships` section in `agents.yaml` defines `trust_level` as a static initial value. `RelationshipMemory` must seed its runtime trust scores from these config-defined values on first initialization. Without this, carefully authored relationship configs (e.g., `trust_level: 0.9` between a manager and report) would be ignored, and all relationships would start at the 0.5 default.
+
+**Seeding logic** (in `RelationshipMemory.initialize()`):
+1. Read the agent's `relationships` config entries
+2. For each entry with a `trust_level`, insert into the `relationships` table **only if no row exists** for that `(agent_id, other_agent_id)` pair
+3. Existing rows (from prior runs) are never overwritten — config seeds the initial state, runtime behavior evolves it
+
+This ensures config-defined trust is respected on first run but doesn't reset trust that has evolved through actual interactions.
+
 ### Agent-Initiated Memory Tools
 
 The three memory tiers (working, episodic, relationship) are **framework-managed** — the system automatically stores episodes after interactions and updates trust scores. The agent has no say in what gets remembered. This is insufficient: agents need to *deliberately* capture structured knowledge — "this API returns paginated results", "the PM prefers bullet-point status updates", "last time we used this approach it failed because of X".
@@ -594,6 +689,20 @@ async def update_note(
 ) -> ToolResult:
     """Replace the content of an existing note. Topic and tags are preserved."""
     ...
+
+
+@tool(
+    name="delete_note",
+    description="Delete a note that is no longer accurate or relevant. Use this for self-correction when you realize a previously saved note is wrong or obsolete.",
+    permissions=["memory:write"],
+)
+async def delete_note(
+    note_id: str,
+) -> ToolResult:
+    """Remove a note from the agent's personal knowledge base. The note
+    is permanently deleted — use update_note if the note just needs
+    correction rather than removal."""
+    ...
 ```
 
 #### Storage Schema
@@ -642,6 +751,8 @@ Note-taking ability is controlled per-agent in the `memory` config section. This
 ```
 
 **How `auto_reflect_after` works**: After every N interactions (configurable, default 5), the framework appends a one-line nudge to the system prompt: *"You have completed {N} interactions since your last note. Consider whether any patterns, decisions, or lessons are worth recording with `store_note`."* This is a **soft behavioral nudge**, not a forced action — the LLM decides whether to call the tool. Agents with `detail_focus: detail-focused` naturally respond to this nudge more often than `big-picture` agents, creating personality-consistent learning behavior without a dedicated "learning" dimension.
+
+**Counter persistence**: The interaction counter for `auto_reflect_after` is stored in the SQLite database (a lightweight `agent_state` table keyed by `agent_id`) so that it survives process restarts. Without persistence, agents restarting frequently would never reach the nudge threshold.
 
 **What about auto-extracting lessons?** A tempting alternative is framework-initiated reflection: after every interaction, the system calls the LLM asking "what should this agent remember?" and auto-stores the result. This is explicitly **not** done because:
 1. It doubles LLM costs (extra call per interaction)
@@ -706,6 +817,7 @@ class PersonaState:
 **Energy mechanics:**
 - Each LLM call / action costs `0.05` energy (configurable)
 - Each idle tick recovers `0.1` energy (configurable)
+- For non-tick agents (`passive` / `reactive` level without a tick loop), energy recovers passively at `+0.1` per elapsed `tick_interval_seconds` (default 60s) since the last action, computed lazily on the next `on_event()` call. This prevents agents without tick loops from permanently draining energy.
 - Low energy (< 0.3) → shorter responses, more delegation, less initiative
 - Energy is clamped to `[0.0, 1.0]`
 
@@ -893,6 +1005,70 @@ Commands::Run { workflow, input, profile } => {
 }
 ```
 
+### SQLite Schema Migration Strategy
+
+The memory system defines schemas for `episodes`, `relationships`, `interactions`, `notes`, and `agent_state` tables. Future phases will evolve these schemas (e.g., adding the `embedding` column for vector search). A versioned migration strategy is required from day one.
+
+**Approach: `schema_version` table + ordered migration functions.**
+
+```sql
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at REAL NOT NULL,
+    description TEXT
+);
+```
+
+Each memory class's `initialize()` method:
+1. Creates `schema_version` if it doesn't exist
+2. Reads the current max version (0 if no rows)
+3. Applies all migration functions with version > current, in order
+4. Records each applied migration in `schema_version`
+
+```python
+MIGRATIONS: list[tuple[int, str, str]] = [
+    (1, "Initial schema", """
+        CREATE TABLE IF NOT EXISTS episodes (...);
+        CREATE TABLE IF NOT EXISTS notes (...);
+        -- ... all Phase 3 tables
+    """),
+    # (2, "Add embedding column", "ALTER TABLE episodes ADD COLUMN embedding BLOB;"),
+]
+
+async def _apply_migrations(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version "
+        "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL, description TEXT)"
+    )
+    row = await db.execute_fetchone("SELECT MAX(version) FROM schema_version")
+    current = row[0] or 0
+    for version, desc, sql in MIGRATIONS:
+        if version > current:
+            await db.executescript(sql)
+            await db.execute(
+                "INSERT INTO schema_version VALUES (?, ?, ?)",
+                (version, time.time(), desc),
+            )
+    await db.commit()
+```
+
+Migrations are forward-only (no rollback) — this is sufficient for an embedded database where the deployment unit is the whole application.
+
+### Memory Observability
+
+Memory operations should emit structured metrics for debugging behavioral issues in production. The following metrics should be tracked using the existing telemetry infrastructure (Go orchestrator exposes Prometheus metrics; Python agents log structured events that the orchestrator can aggregate):
+
+| Metric | Type | Labels | Purpose |
+|--------|------|--------|---------|
+| `memory_episode_store_duration_ms` | Histogram | `agent_id` | Detect slow SQLite writes |
+| `memory_episode_recall_duration_ms` | Histogram | `agent_id` | Detect slow FTS5 queries |
+| `memory_notes_count` | Gauge | `agent_id` | Track note accumulation toward `max_notes` |
+| `memory_working_compression_count` | Counter | `agent_id` | Track context window pressure |
+| `memory_trust_score` | Gauge | `agent_id`, `other_agent_id` | Monitor trust score distributions |
+| `memory_fts5_query_duration_ms` | Histogram | `agent_id`, `table` | FTS5 performance per table |
+
+Implementation: Each memory class includes a `_emit_metric()` call at operation boundaries. For MVP, these are structured log lines (`logger.info("memory.metric", ...)`) that can be scraped by the orchestrator's telemetry pipeline. Prometheus instrumentation is a post-MVP enhancement.
+
 ## Security Considerations
 
 ### Memory Data at Rest
@@ -939,6 +1115,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 - `max_actions_per_tick` limits actions per cycle (default: 3)
 - `idle_after_ticks` reduces activity when nothing is happening
 - Per-agent token budgets (from `config/optimization.yaml`) apply to tick-initiated calls
+- **Framework-initiated memory operations** (working memory compression, episode summarization, `auto_reflect_after` nudges leading to tool calls) also consume tokens and must be attributed to the agent's budget. These costs can spike during periods of high activity — per-agent budget enforcement must include framework-initiated LLM calls, not just agent-initiated ones
 
 ### Agent Note Storage Abuse
 
@@ -984,17 +1161,18 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 ### Phase 3: Episodic Memory (SQLite) + Agent-Initiated Memory Tools
 
-**Summary**: Implement long-term episode storage with relevance-based retrieval. Add `store_note`, `recall_notes`, `update_note` built-in tools for agent-initiated knowledge capture.
+**Summary**: Implement long-term episode storage with relevance-based retrieval. Add `store_note`, `recall_notes`, `update_note`, `delete_note` built-in tools for agent-initiated knowledge capture.
 
 **Deliverables**:
-1. SQLite schema and migration (episodes + notes tables, FTS5 indexes)
-2. `EpisodicMemory` class with store/recall/summarize
-3. Auto-summarization of old episodes (LLM-based compression)
-4. Integration with persona event handling (store episode after each interaction)
-5. `store_note`, `recall_notes`, `update_note` tools in `agents/tools/builtin.py`
-6. Notes pruning logic (oldest low-access notes removed when `max_notes` exceeded)
-7. `auto_reflect_after` nudge injection in working memory context builder
-8. Unit tests for CRUD, retrieval ranking, compression, note tools, note pruning
+1. SQLite schema migration infrastructure (`schema_version` table, ordered migrations)
+2. Initial migration: episodes + notes + agent_state tables, FTS5 indexes, sync triggers
+3. `EpisodicMemory` class with store/recall/summarize
+4. Auto-summarization of old episodes (LLM-based compression)
+5. Integration with persona event handling (store episode after each interaction)
+6. `store_note`, `recall_notes`, `update_note`, `delete_note` tools in `agents/tools/builtin.py`
+7. Notes pruning logic (oldest low-access notes removed when `max_notes` exceeded)
+8. `auto_reflect_after` nudge injection + counter persistence in `agent_state` table
+9. Unit tests for CRUD, retrieval ranking, compression, note tools, note deletion, note pruning, migration
 
 **Dependencies**: Phase 2 (uses token estimation for compression)
 
@@ -1017,14 +1195,15 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 **Deliverables**:
 1. `ActionExecutor` class
-2. `EventDispatcher` class
-3. `TickScheduler` class for autonomous agents
+2. `EventDispatcher` class with `_inject_memory_context()` implementation
+3. `TickScheduler` class for autonomous agents (with graceful shutdown)
 4. `PersonaState` dataclass (`Mood` enum, `energy` field) and prompt injection
 5. `render_behavior()` function and `DIMENSION_DESCRIPTIONS` mapping
 6. Wire into `server.py`: start tick loops for persona agents, route events
-6. Create a sample persona agent config for integration testing
-7. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle
-8. Wire CLI: `orch test --persona <id>` for persona consistency checks
+7. `create_persona_agent()` factory with LLM-powered `on_event()` decision loop
+8. Create a sample persona agent config for integration testing
+9. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle
+10. Wire CLI: `orch test --persona <id>` for persona consistency checks
 
 **Dependencies**: Phases 1-4
 
@@ -1047,12 +1226,12 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 |-----------|-------|--------|
 | Python agents | `agents/base.py` | Add working memory integration to `_run_llm_loop()` |
 | Python agents | `agents/task_agent.py` | **New** — data-driven TaskAgent class |
-| Python agents | `agents/persona.py` | Add `PersonaState` (`Mood` enum, `energy`), `render_behavior()`, memory integration, `ActionExecutor` |
+| Python agents | `agents/persona.py` | Add `PersonaState` (`Mood` enum, `energy`), `render_behavior()`, memory integration, `ActionExecutor`, `metadata` field on `AgentEvent` |
 | Python agents | `agents/memory/working.py` | **Implement** — `WorkingMemory`, `ContextSection`, token estimation |
-| Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema |
-| Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math |
+| Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema, migration infrastructure |
+| Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math, config trust bootstrapping |
 | Python agents | `agents/memory/__init__.py` | Export memory classes |
-| Python agents | `agents/tools/builtin.py` | Add `store_note`, `recall_notes`, `update_note` built-in tools |
+| Python agents | `agents/tools/builtin.py` | Add `store_note`, `recall_notes`, `update_note`, `delete_note` built-in tools |
 | Python agents | `agents/server.py` | Update agent loader, add tick scheduler lifecycle, notes config |
 | Python agents | `agents/coder.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/reviewer.py` | **Remove** (instructions move to YAML) |
@@ -1063,7 +1242,7 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 | Tests | `tests/unit/python/test_task_agent.py` | **New** — TaskAgent tests |
 | Tests | `tests/unit/python/test_working_memory.py` | **New** — working memory tests |
 | Tests | `tests/unit/python/test_episodic_memory.py` | **New** — episodic memory tests |
-| Tests | `tests/unit/python/test_memory_tools.py` | **New** — store_note, recall_notes, update_note tool tests |
+| Tests | `tests/unit/python/test_memory_tools.py` | **New** — store_note, recall_notes, update_note, delete_note tool tests |
 | Tests | `tests/unit/python/test_relationship_memory.py` | **New** — relationship memory tests |
 | Tests | `tests/unit/python/test_persona_runtime.py` | **New** — event dispatch, tick loop, action executor tests |
 | Tests | `tests/unit/python/test_validate.py` | **New** — config validation tests |
@@ -1074,8 +1253,8 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 ## Test Strategy
 
-- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes.
-- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle. Memory persistence across agent restarts (SQLite round-trip). Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → verify content).
+- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`, `delete_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes. FTS5 trigger sync correctness (insert/update/delete). Schema migration forward-application. Energy recovery for non-tick agents (lazy computation).
+- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle including graceful shutdown (verify in-flight actions complete). Memory persistence across agent restarts (SQLite round-trip). `auto_reflect_after` counter persistence across restarts. Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → delete → verify removal). `AgentEvent.metadata` cascade depth propagation through event dispatch.
 - **E2E / smoke tests**: Submit a workflow that routes to a persona agent configured in `agents.yaml`, verify completion. Not gated on this RFC — existing e2e tests cover task agent path.
 - **Manual tests**: Start a persona agent with `autonomy.level: semi-autonomous`, verify tick loop runs and logs actions. Verify `make validate` passes with updated configs.
 
@@ -1102,7 +1281,7 @@ Relationship memory is inherently cross-agent (trust between agent pairs), makin
 
 WAL mode (`PRAGMA journal_mode=WAL`) supports concurrent readers with a single writer, which matches our access pattern (agents mostly read memories, writes happen after interactions). The MVP runs agents in a single Python process, so contention is minimal.
 
-*Implementation detail:* Default path `data/memory.db`, configurable via `memory.db_path` in agent config. One `aiosqlite` connection per agent instance, all pointing to the same file.
+*Implementation detail:* Default path `data/memory.db`, configurable via `memory.db_path` in agent config. One `aiosqlite` connection per agent instance, all pointing to the same file. Connection pooling is not needed for MVP — `aiosqlite` wraps a single `sqlite3` connection in a background thread, and WAL mode allows concurrent readers. If contention becomes observable (measurable via the `memory_episode_store_duration_ms` metric), a connection pool can be introduced later.
 
 ### Q2: Token estimation accuracy
 
@@ -1234,7 +1413,23 @@ The `access_count` factor gives a mild boost to frequently retrieved memories (l
 
 When no query text is provided (e.g., tick loop context loading), fall back to `importance × (1 + ln(1 + access_count)) × recency` only.
 
-*FTS5 content-sync note:* FTS5 tables created with `content=episodes` do **not** auto-sync with the base table. Inserts, updates, and deletes in `episodes` must be mirrored to `episodes_fts` via triggers or explicit statements. Alternatively, a periodic `INSERT INTO episodes_fts(episodes_fts) VALUES('rebuild')` can be used for simplicity at the cost of stale results between rebuilds. The implementation must choose one strategy and test sync correctness.
+*FTS5 content-sync note:* FTS5 tables created with `content=episodes` do **not** auto-sync with the base table. **Decision: Use triggers.** Triggers are more reliable than periodic rebuilds because they keep the FTS5 index in sync transactionally — there is no window of stale search results. The same approach applies to the `notes_fts` table.
+
+```sql
+-- Triggers to keep episodes_fts in sync with episodes table
+CREATE TRIGGER episodes_ai AFTER INSERT ON episodes BEGIN
+    INSERT INTO episodes_fts(rowid, summary, context_json) VALUES (new.rowid, new.summary, new.context_json);
+END;
+CREATE TRIGGER episodes_ad AFTER DELETE ON episodes BEGIN
+    INSERT INTO episodes_fts(episodes_fts, rowid, summary, context_json) VALUES('delete', old.rowid, old.summary, old.context_json);
+END;
+CREATE TRIGGER episodes_au AFTER UPDATE ON episodes BEGIN
+    INSERT INTO episodes_fts(episodes_fts, rowid, summary, context_json) VALUES('delete', old.rowid, old.summary, old.context_json);
+    INSERT INTO episodes_fts(rowid, summary, context_json) VALUES (new.rowid, new.summary, new.context_json);
+END;
+```
+
+The same trigger pattern is applied to `notes_fts` for the notes table.
 
 *Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not. Every `recall()` call updates `access_count` and `last_accessed_at` for returned rows.
 
@@ -1265,6 +1460,36 @@ The combination of:
 - Tool permission `memory:write` → deny-by-default access control
 
 ...provides more precise, testable, and reliable control over learning behavior than a single behavioral enum could.
+
+---
+
+## Future Considerations
+
+The following ideas were raised during RFC review. They are out of scope for this RFC but worth capturing for future work. Each builds naturally on the infrastructure this RFC introduces.
+
+### Memory Snapshots for Session Replay
+
+The Non-Goals mention "observer mode & session replay" as a future feature. Adding a `snapshot()` method to `PersonaState` and `WorkingMemory` that serializes full state at a point in time would be zero-cost preparation. Store snapshots alongside episodes for faithful reconstruction of what an agent "saw" and "felt" at decision points. This enables session replay without requiring the full observer-mode infrastructure.
+
+### Mood Transition Rules
+
+The `Mood` enum has 6 values but no rules governing transitions. A transition matrix (e.g., `SATISFIED` can't jump directly to `FRUSTRATED` without passing through `NEUTRAL`) would make mood changes more natural and prevent whiplash behavior. Even a soft constraint (logged warning on "surprising" transitions) would help. Consider this when mood is actively used in production and behavioral patterns are observable.
+
+### Relationship Reciprocity Asymmetry
+
+The relationship model stores `(agent_id, other_agent_id)` → trust as a directed graph, but provides no mechanism for detecting or reasoning about asymmetry. If Agent A trusts Agent B at 0.9 but Agent B trusts Agent A at 0.3, this is a meaningful social signal. A `get_trust_asymmetry(other_id) → float` method on `RelationshipMemory`, with asymmetry injected into the relationship summary for the LLM prompt, would enable interesting social dynamics without adding complexity.
+
+### Decision Audit Trail
+
+Episodic memory stores conversation summaries, but not the reasoning chain that led to a decision. For debugging agent behavior, operators need to answer "why did the agent choose to delegate instead of act?" A lightweight `decision_log` (either a column on `episodes` or a separate table) storing the triggering event, compressed working memory context, LLM response, and chosen action outcome would provide audit capability without full session replay cost.
+
+### Personality Drift Detection
+
+With 243 personality profiles, an interesting failure mode is when an LLM's outputs drift away from configured personality dimensions over long conversations. A lightweight post-hoc check — after every N interactions, compare recent agent outputs against the expected behavioral profile using a cheap classifier LLM call — could detect drift and optionally re-inject a stronger persona reminder. Log drift as a metric for observability.
+
+### Working Memory Pinning
+
+The working memory compression algorithm evicts lowest-priority sections first, but sometimes an agent encounters mid-conversation information that's critical to retain despite low structural priority. A `pin(section_name)` mechanism would let the agent (or framework) mark specific context sections as non-compressible for the duration of a task.
 
 ---
 

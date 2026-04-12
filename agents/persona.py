@@ -39,6 +39,10 @@ class AgentEvent:
     # default_factory=time.time ensures each event gets the current timestamp
     # rather than a sentinel 0.0 that callers might forget to override.
     timestamp: float = field(default_factory=time.time)
+    # Extensible metadata for cross-cutting concerns (e.g. cascade_depth
+    # tracking from Q4 decision, tracing correlation IDs). Using a dict
+    # avoids adding a new field for every framework-level concern.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ─── Actions that a persona agent can take ─────────────────
