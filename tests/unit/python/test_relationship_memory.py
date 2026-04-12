@@ -114,6 +114,19 @@ class TestInitialization:
         await memory.close()
         await memory.close()  # Should not raise
 
+    async def test_double_initialize_no_leak(self):
+        """Calling initialize() twice closes the previous connection."""
+        mem = RelationshipMemory(agent_id="test", db_path=":memory:")
+        await mem.initialize()
+        # Seed a relationship on first connection.
+        await mem.update_trust("bob", delta=0.1, reason="r1")
+        # Re-initialize — old connection should be closed, new one opened.
+        # In-memory DB is lost, so bob should not exist.
+        await mem.initialize()
+        trust = await mem.get_trust("bob")
+        assert trust == _DEFAULT_TRUST
+        await mem.close()
+
 
 # ─── Trust CRUD ──────────────────────────────────────────────
 
@@ -183,6 +196,21 @@ class TestUpdateTrust:
     async def test_zero_delta(self, memory):
         new_trust = await memory.update_trust("bob", delta=0.0, reason="no change")
         assert new_trust == pytest.approx(0.5, abs=0.001)
+
+    async def test_concurrent_updates_both_applied(self, memory):
+        """Concurrent update_trust() calls must both apply (TOCTOU safety).
+
+        Validates the SQL-level arithmetic documented in update_trust():
+        two concurrent +0.1 deltas on default 0.5 should yield 0.7.
+        """
+        import asyncio
+
+        await asyncio.gather(
+            memory.update_trust("bob", 0.1, "r1"),
+            memory.update_trust("bob", 0.1, "r2"),
+        )
+        trust = await memory.get_trust("bob")
+        assert trust == pytest.approx(0.7, abs=0.001)
 
 
 # ─── Bidirectional decay ────────────────────────────────────
@@ -280,6 +308,26 @@ class TestRecordInteraction:
         summary = await memory.get_relationship_summary("bob")
         assert summary.last_interaction_at is not None
 
+    async def test_sentiment_clamped_to_bounds(self, memory):
+        """Sentiment values outside [-1.0, 1.0] are clamped."""
+        await memory.record_interaction("bob", "chat", sentiment=5.0)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == 1.0
+
+        await memory.record_interaction("bob", "chat", sentiment=-9.9)
+        # Newest first — index 0 is the -9.9 → -1.0 entry.
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == -1.0
+
+    async def test_sentiment_rejects_nan_inf(self, memory):
+        """NaN and Inf are rejected to prevent corrupt aggregation."""
+        with pytest.raises(ValueError, match="finite"):
+            await memory.record_interaction("bob", "chat", sentiment=float("nan"))
+        with pytest.raises(ValueError, match="finite"):
+            await memory.record_interaction("bob", "chat", sentiment=float("inf"))
+        with pytest.raises(ValueError, match="finite"):
+            await memory.record_interaction("bob", "chat", sentiment=float("-inf"))
+
 
 # ─── Relationship summary ───────────────────────────────────
 
@@ -352,6 +400,13 @@ class TestGetAllRelationships:
         assert rels[0].other_agent_id == "bob"
         assert rels[1].other_agent_id == "alice"
 
+    async def test_recent_interactions_not_populated(self, memory):
+        """get_all_relationships() does not populate recent_interactions."""
+        await memory.update_trust("bob", delta=0.1, reason="good")
+        await memory.record_interaction("bob", "chat")
+        rels = await memory.get_all_relationships()
+        assert rels[0].recent_interactions == []
+
 
 # ─── Trust bootstrapping from config ────────────────────────
 
@@ -422,6 +477,21 @@ class TestTrustBootstrapping:
         try:
             assert await mem.get_trust("mike") == pytest.approx(1.0, abs=0.001)
             assert await mem.get_trust("alice") == pytest.approx(0.0, abs=0.001)
+        finally:
+            await mem.close()
+
+    async def test_skips_non_numeric_trust_level(self):
+        """Non-numeric trust_level (e.g., 'high') is skipped, not crashed."""
+        mem = RelationshipMemory(agent_id="sarah", db_path=":memory:")
+        config = [
+            {"agent_id": "mike", "trust_level": "high"},
+            {"agent_id": "alice", "trust_level": 0.8},  # valid entry still works
+        ]
+        await mem.initialize(config_relationships=config)
+        try:
+            # mike was skipped, alice was seeded
+            assert await mem.get_trust("mike") == _DEFAULT_TRUST
+            assert await mem.get_trust("alice") == pytest.approx(0.8, abs=0.001)
         finally:
             await mem.close()
 

@@ -84,6 +84,11 @@ class RelationshipMemory:
         Existing trust scores are never overwritten — config only seeds
         the initial state.
         """
+        # Guard against double-initialize: close any existing connection
+        # to prevent file descriptor and SQLite connection leaks.
+        if self._db is not None:
+            await self._db.close()
+
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute("PRAGMA journal_mode=WAL")
         await _apply_migrations(self._db)
@@ -191,6 +196,9 @@ class RelationshipMemory:
         Bidirectional: trust above 0.5 decays downward, trust below 0.5
         decays upward. Formula: ``new = old + decay_rate * (0.5 - old)``.
 
+        Relationships already within 0.001 of neutral (0.5) are skipped
+        to avoid unnecessary writes.
+
         Returns the number of relationships updated.
         """
         if not 0.0 < decay_rate <= 1.0:
@@ -236,6 +244,15 @@ class RelationshipMemory:
         Returns the generated interaction ID.
         """
         db = self._ensure_db()
+
+        # Clamp sentiment to [-1.0, 1.0] and reject NaN/Inf for consistency
+        # with other bounded numeric fields (trust delta, decay rate).
+        import math
+
+        if math.isnan(sentiment) or math.isinf(sentiment):
+            raise ValueError(f"sentiment must be a finite number, got {sentiment}")
+        sentiment = max(-1.0, min(1.0, sentiment))
+
         interaction_id = str(uuid.uuid4())
         now = time.time()
 
@@ -341,7 +358,15 @@ class RelationshipMemory:
         )
 
     async def get_all_relationships(self) -> list[RelationshipSummary]:
-        """Get summaries for all known relationships of this agent."""
+        """Get summaries for all known relationships of this agent.
+
+        .. note::
+
+           ``recent_interactions`` is not populated in returned summaries
+           (defaults to ``[]``) to avoid N+1 queries. Use
+           ``get_relationship_summary()`` for individual relationships
+           with full interaction history.
+        """
         db = self._ensure_db()
         async with db.execute(
             "SELECT other_agent_id, trust_score, interaction_count, "
@@ -375,8 +400,21 @@ class RelationshipMemory:
             other_id = entry.get("agent_id")
             trust_level = entry.get("trust_level")
             if other_id is None or trust_level is None:
+                logger.debug(
+                    "Skipping config relationship entry: "
+                    "missing agent_id or trust_level: %r",
+                    entry,
+                )
                 continue
-            trust_level = max(0.0, min(1.0, float(trust_level)))
+            try:
+                trust_level = max(0.0, min(1.0, float(trust_level)))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid trust_level for %s: %r, skipping",
+                    other_id,
+                    trust_level,
+                )
+                continue
 
             # INSERT OR IGNORE — only seeds if no row exists.
             await db.execute(
