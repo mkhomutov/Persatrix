@@ -233,6 +233,19 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] FTS5 fallback tested
 - [x] Migration infrastructure tested for idempotency
 
+#### Review findings (PR #50 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-3a-1 | Medium | Zero-importance episodes invisible in scoring: multiplicative formula produces `score=0.0` when `importance=0.0`, making stored episodes effectively invisible in ranked recall | Change `e.importance` to `(0.1 + e.importance * 0.9)` for non-zero baseline, or document that `importance=0.0` suppresses episodes from ranked recall |
+| F-3a-2 | Medium | Scoring formula duplicated across `_recall_fts5()`, `_recall_like()`, `_recall_recency()` — tuning change requires updating 3 SQL strings in sync | Extract shared scoring expression into a module-level constant `_SCORE_EXPR` |
+| F-3a-3 | Medium | No future migration forward-compatibility test — migration system is a critical building block for PRs 3b and 4 | Add test that patches `MIGRATIONS` with a hypothetical v2 entry and verifies both v1 and v2 are applied |
+| F-3a-4 | Low | `MemoryLifecycle` protocol not defined or exported per PR plan scope. `EpisodicMemory` and `WorkingMemory` duck-type-match but no formal protocol class exists | Add `MemoryLifecycle(Protocol)` with `initialize()` and `close()` to `agents/memory/__init__.py` |
+| F-3a-5 | Low | Relative default `db_path` `"data/memory.db"` depends on process working directory — unpredictable on deployment | Add docstring note that callers should resolve to absolute path |
+| F-3a-6 | Low | No async context manager support (`__aenter__`/`__aexit__`) — callers must remember to call `close()` explicitly | Add `__aenter__`/`__aexit__` for `async with` cleanup pattern |
+| F-3a-7 | Low | Aggressive recency decay `1/(1 + age_days)` halves score at 1 day, ~3% at 30 days — too aggressive for 90-day retention window | Consider softer decay like `1/(1 + age_days/7)` or `1/(1 + sqrt(age_days))` |
+| F-3a-8 | Info | No scoring formula docstring explaining component rationale and edge case behavior | Add inline comment block in `_recall_fts5()` |
+
 ---
 
 ### PR 3b: `feature/v02-memory-tools` — Agent-Initiated Memory Tools
