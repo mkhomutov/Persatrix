@@ -65,28 +65,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [x] `pytest tests/unit/python/ -v` passes (57 unit tests)
-- [x] `ruff check agents/` clean
-- [x] `make validate` passes with updated `agents.yaml`
-- [x] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
-- [x] Agent loader uses `type` field dispatch
-- [x] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
-
-#### Review findings (PR #47)
-
-Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, gitignored).
-
-**Should Fix** (track in PR 7):
-
-1. **Test helper duplication** — `_make_client()`, `_DEFAULT_CONFIG`, `_task()` duplicated between `test_task_agent.py` and `test_agents.py`. Extract to shared `tests/unit/python/conftest.py` or `_helpers.py`.
-2. **Overlapping test coverage** — both files test the same `TaskAgent` class with duplicate assertions (`test_handle_returns_completed`, `test_system_prompt_includes_role`, etc.). Keep `test_task_agent.py` for generic TaskAgent tests, `test_agents.py` for parametrized role-specific backward-compat tests only.
-3. **Missing empty-string instructions test** — add explicit test with `{"instructions": ""}` to document that empty string and absent are treated identically.
-
-**Nice to Have** (track in PR 7):
-
-4. **Config validator stub** — `agents/validate.py` is still a stub; `schema_version: "0.2"` bump not enforced at runtime. Addressed in PR 6a.
-5. **Deprecation aliases** — consider `warnings.warn()` aliases for removed `CoderAgent`/`ReviewerAgent`/`PlannerAgent` imports. Low priority (internal-only).
-6. **Integration test for full `load_agent()` pipeline** — current integration tests create `TaskAgent` directly; add test going through `load_agent()` with temp YAML containing `type: task` + `instructions`.
+- [ ] `pytest tests/unit/python/ -v` passes
+- [ ] `ruff check agents/` clean
+- [ ] `make validate` passes with updated `agents.yaml`
+- [ ] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
+- [ ] Agent loader uses `type` field dispatch
+- [ ] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
 
 ---
 
@@ -126,6 +110,17 @@ Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, git
 - [x] `cargo clippy -- -D warnings` clean
 - [x] All 5 v0.1 commands produce HTTP calls to correct endpoints
 - [x] Error handling for connection refused, 404, 500
+
+#### Review findings (PR #48 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-1b-1 | Medium | `validate_path_param()` not called for workflow ID in `cmd_run()` — workflow ID goes into JSON body (safe), but client-side validation would catch malformed IDs earlier and give clearer error messages | Add `validate_resource_id()` matching server's `resourceIDRegex` `^[a-z0-9][a-z0-9-]*[a-z0-9]$` |
+| F-1b-2 | Low | No serde serialization test for `SubmitWorkflowRequest` — field rename or serde attribute change would silently break the API contract | Add `#[test] fn submit_workflow_request_serializes_correctly()` |
+| F-1b-3 | Low | `AgentCommands::Reload` stub discards `agent_id` with `_` pattern — generic "not yet implemented" message | Capture `agent_id` and include in message: `"Agent reload for '{agent_id}' not yet implemented"` |
+| F-1b-4 | Low | Server URL scheme check is case-sensitive — `HTTP://` would be rejected | Add `.to_lowercase()` before `starts_with` check |
+| F-1b-5 | Info | `WorkflowRunResponse` missing `steps` field — safe due to forward-compatible serde, but needed when step-level display is added | Add `steps: Option<HashMap<String, serde_json::Value>>` when `--steps` flag is needed |
+| F-1b-6 | Info | `--server` flag could support `env = "ORCHESTR8_SERVER"` via clap `#[arg(env)]` | Wire env var fallback when auth headers are also added |
 
 ---
 
@@ -557,17 +552,16 @@ Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, git
 
 #### Accumulated review findings
 
-**From PR 1a (PR #47):**
+**From PR 1b (PR #48 review):**
 
-| # | Severity | Description | File(s) |
-|---|----------|-------------|----------|
-| 1 | Should Fix | Extract duplicated test helpers (`_make_client`, `_DEFAULT_CONFIG`, `_task`) to shared module | `tests/unit/python/test_task_agent.py`, `test_agents.py` → shared `conftest.py` or `_helpers.py` |
-| 2 | Should Fix | De-duplicate overlapping test coverage between `test_task_agent.py` and `test_agents.py` | `tests/unit/python/test_task_agent.py`, `test_agents.py` |
-| 3 | Should Fix | Add explicit empty-string `instructions` test (`{"instructions": ""}`) | `tests/unit/python/test_task_agent.py` |
-| 4 | Nice to Have | Add integration test going through `load_agent()` with temp YAML `type: task` + `instructions` | `tests/integration/test_agent_server.py` |
-| 5 | Nice to Have | Consider deprecation aliases for removed `CoderAgent`/`ReviewerAgent`/`PlannerAgent` imports | `agents/__init__.py` |
+| ID | File | Change |
+|----|------|--------|
+| F-1b-1 | `cli/src/main.rs` | Add `validate_resource_id()` for workflow ID in `cmd_run()` — client-side regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` matching server's `resourceIDRegex` |
+| F-1b-2 | `cli/src/main.rs` | Add `#[test] fn submit_workflow_request_serializes_correctly()` — serde contract test |
+| F-1b-3 | `cli/src/main.rs` | `AgentCommands::Reload` — capture `agent_id`, include in stub message |
+| F-1b-4 | `cli/src/main.rs` | Case-insensitive server URL scheme check (`.to_lowercase()`) |
 
-*(Findings from subsequent PRs will be appended here as they are reviewed.)*
+> Items F-1b-5 and F-1b-6 are deferred beyond PR 7 — they require new features (`--steps` flag, env-based auth), not review fixes.
 
 #### Key implementation details
 
@@ -580,7 +574,7 @@ Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, git
 - [ ] RFC 0005 status is `✅ Implemented`
 - [ ] ROADMAP RFC tracker updated with correct merged count
 - [ ] ROADMAP Component Status tables updated for v0.2 components
-- [ ] All accumulated review findings addressed (see table above)
+- [ ] All accumulated review findings addressed
 - [ ] Full test suite passes: `make test`
 - [ ] Full lint passes: `make lint`
 
