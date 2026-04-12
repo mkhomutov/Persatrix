@@ -325,6 +325,10 @@ class WorkingMemory:
 
     async def compress_if_needed(self, llm_client: LLMClient) -> None:
         """Summarize lowest-priority compressible sections when over budget."""
+        # Note: Compression triggers an LLM call for summarization (1-10s
+        # latency). This should be run as an async background task so that
+        # the current event/tick can proceed with pre-compression context.
+        # Synchronous compression would block event handling unacceptably.
         ...
 
     def build_context(self) -> list[dict[str, str]]:
@@ -651,7 +655,11 @@ Episodic and relationship memory are stored in SQLite. For v0.2 MVP, the databas
 
 ### Memory Isolation (Shared Database)
 
-The shared SQLite database (Q1 decision) has no built-in row-level security. Application-level enforcement is **security-critical**: every query against the shared database must filter by `agent_id` to prevent cross-agent memory leakage. Integration tests must verify that agent A cannot retrieve agent B's episodes or relationship data through the shared database connection.
+The shared SQLite database (Q1 decision) has no built-in row-level security. Application-level enforcement is **security-critical**: every query against the shared database must filter by `agent_id` to prevent cross-agent memory leakage.
+
+**Enforcement pattern:** All memory classes (`EpisodicMemory`, `RelationshipMemory`) must accept `agent_id` at construction and automatically scope every query. The `agent_id` must never be a parameter of individual query methods — it is fixed at the instance level. This makes cross-agent access structurally impossible without constructing a new instance. The same pattern applies to FTS5 queries, which must include `agent_id` filtering to prevent cross-agent content leakage via full-text search.
+
+Integration tests must verify that agent A cannot retrieve agent B's episodes or relationship data through the shared database connection.
 
 ### Persona State Injection
 
@@ -793,6 +801,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 | Tests | `tests/integration/test_persona_e2e.py` | **New** — persona agent end-to-end with mock LLM |
 | Rust CLI | `cli/src/main.rs` | Wire `run`, `status`, `agent list/info`, `logs`, `validate`, `test --persona` |
 | Rust CLI | `cli/Cargo.toml` | Add `reqwest`, `serde_json`, `serde` dependencies |
+| Python agents | `agents/pyproject.toml` | Add `aiosqlite` dependency (required by Q1 shared SQLite decision) |
 
 ## Test Strategy
 
@@ -944,7 +953,7 @@ SELECT e.*, fts.rank
 FROM episodes_fts fts
 JOIN episodes e ON e.rowid = fts.rowid
 WHERE episodes_fts MATCH ?
-ORDER BY (fts.rank * -1) * e.importance * (1.0 / (1 + (julianday('now') - julianday(e.created_at, 'unixepoch'))))
+ORDER BY (fts.rank * -1) * e.importance * (1.0 / (1 + (unixepoch('now') - e.created_at) / 86400.0))
 LIMIT ?;
 ```
 
@@ -955,6 +964,8 @@ $$\text{score} = \text{BM25}(query, episode) \times \text{importance} \times (1 
 The `access_count` factor gives a mild boost to frequently retrieved memories (logarithmic to avoid runaway dominance). Each `recall()` hit increments `access_count` and updates `last_accessed_at` on returned episodes.
 
 When no query text is provided (e.g., tick loop context loading), fall back to `importance × (1 + ln(1 + access_count)) × recency` only.
+
+*FTS5 content-sync note:* FTS5 tables created with `content=episodes` do **not** auto-sync with the base table. Inserts, updates, and deletes in `episodes` must be mirrored to `episodes_fts` via triggers or explicit statements. Alternatively, a periodic `INSERT INTO episodes_fts(episodes_fts) VALUES('rebuild')` can be used for simplicity at the cost of stale results between rebuilds. The implementation must choose one strategy and test sync correctness.
 
 *Implementation:* Add FTS5 table creation to `EpisodicMemory.initialize()` and `RelationshipMemory.initialize()`. The `recall()` method uses FTS5 when a query string is provided, falls back to recency × importance when not. Every `recall()` call updates `access_count` and `last_accessed_at` for returned rows.
 
