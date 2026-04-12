@@ -212,6 +212,15 @@ class TestUpdateTrust:
         trust = await memory.get_trust("bob")
         assert trust == pytest.approx(0.7, abs=0.001)
 
+    async def test_delta_rejects_nan_inf(self, memory):
+        """NaN and Inf deltas are rejected to prevent SQLite corruption."""
+        with pytest.raises(ValueError, match="finite"):
+            await memory.update_trust("bob", delta=float("nan"), reason="r")
+        with pytest.raises(ValueError, match="finite"):
+            await memory.update_trust("bob", delta=float("inf"), reason="r")
+        with pytest.raises(ValueError, match="finite"):
+            await memory.update_trust("bob", delta=float("-inf"), reason="r")
+
 
 # ─── Bidirectional decay ────────────────────────────────────
 
@@ -264,6 +273,13 @@ class TestApplyDecay:
             await memory.apply_decay(decay_rate=-0.1)
         with pytest.raises(ValueError, match="decay_rate"):
             await memory.apply_decay(decay_rate=1.5)
+
+    async def test_decay_rate_rejects_nan_inf(self, memory):
+        """NaN and Inf decay rates are explicitly rejected."""
+        with pytest.raises(ValueError, match="decay_rate"):
+            await memory.apply_decay(decay_rate=float("nan"))
+        with pytest.raises(ValueError, match="decay_rate"):
+            await memory.apply_decay(decay_rate=float("inf"))
 
     async def test_repeated_decay_converges(self, memory):
         """Repeated decay should converge toward 0.5."""

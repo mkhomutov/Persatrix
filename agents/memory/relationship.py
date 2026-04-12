@@ -9,6 +9,7 @@ permanent grudges in long-running simulations.
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -143,6 +144,11 @@ class RelationshipMemory:
            is retained.
         """
         db = self._ensure_db()
+        # Reject non-finite deltas: NaN propagates through max()/min()
+        # unpredictably in Python and corrupts trust_score in SQLite,
+        # breaking subsequent comparisons (e.g. apply_decay() threshold).
+        if math.isnan(delta) or math.isinf(delta):
+            raise ValueError(f"delta must be a finite number, got {delta}")
         # Clamp delta to prevent extreme single-event swings.
         delta = max(-_MAX_TRUST_DELTA, min(_MAX_TRUST_DELTA, delta))
 
@@ -201,7 +207,7 @@ class RelationshipMemory:
 
         Returns the number of relationships updated.
         """
-        if not 0.0 < decay_rate <= 1.0:
+        if math.isnan(decay_rate) or math.isinf(decay_rate) or not 0.0 < decay_rate <= 1.0:
             raise ValueError(f"decay_rate must be in (0.0, 1.0], got {decay_rate}")
         db = self._ensure_db()
 
@@ -247,8 +253,6 @@ class RelationshipMemory:
 
         # Clamp sentiment to [-1.0, 1.0] and reject NaN/Inf for consistency
         # with other bounded numeric fields (trust delta, decay rate).
-        import math
-
         if math.isnan(sentiment) or math.isinf(sentiment):
             raise ValueError(f"sentiment must be a finite number, got {sentiment}")
         sentiment = max(-1.0, min(1.0, sentiment))
