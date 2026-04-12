@@ -447,14 +447,14 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_persona_runtime.py -v` passes
-- [ ] Coverage ≥ 80% for new code in `agents/persona.py`
-- [ ] `ruff check agents/` clean
-- [ ] `Mood` enum constraints enforced
-- [ ] Energy clamped to [0.0, 1.0]
-- [ ] Behavioral dimension defaults applied for omitted dimensions
-- [ ] PersonaState persistence round-trip tested
-- [ ] `handle()` backward compatibility verified
+- [x] `pytest tests/unit/python/test_persona_runtime.py -v` passes
+- [x] Coverage ≥ 80% for new code in `agents/persona.py`
+- [x] `ruff check agents/` clean
+- [x] `Mood` enum constraints enforced
+- [x] Energy clamped to [0.0, 1.0]
+- [x] Behavioral dimension defaults applied for omitted dimensions
+- [x] PersonaState persistence round-trip tested
+- [x] `handle()` backward compatibility verified
 
 ---
 
