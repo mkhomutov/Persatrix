@@ -1,7 +1,7 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-11  
-> **Current phase**: v0.1 (MVP) — ✅ Complete (RFC 0001–0004 all implemented)
+> **Last updated**: 2026-04-12  
+> **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -115,7 +115,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 👍 Accepted | 12 | 0/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | � Implementing | 12 | 0/12 |
 
 ### Dependency Chain
 
