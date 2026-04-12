@@ -590,6 +590,17 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 > Items F-2-6 through F-2-8 are deferred beyond PR 7 — nice-to-have improvements (zero-token edge case tests, `__repr__`, thread-safety docstring).
 
+**From PR 3a (PR #50 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-3a-1 | `agents/memory/episodic.py` | Handle zero-importance episodes in scoring formula — `importance=0.0` produces `score=0.0` via multiplicative formula, making valid episodes invisible in all recall results. Change `e.importance` to `(0.1 + e.importance * 0.9)` or similar non-zero baseline in FTS5, LIKE, and recency scoring expressions |
+| F-3a-2 | `agents/memory/episodic.py` | Extract shared scoring formula — the non-BM25 scoring components (`importance × access_boost × recency_decay`) are duplicated across `_recall_fts5()`, `_recall_like()`, and `_recall_recency()`. Extract into a module-level SQL fragment constant or helper |
+| F-3a-3 | `tests/unit/python/test_episodic_memory.py` | Add future migration forward-compatibility test — patch `MIGRATIONS` to include a hypothetical v2 entry, verify both v1 and v2 are applied and recorded in `schema_version`. Core value proposition of the migration infrastructure |
+| F-3a-4 | `agents/memory/__init__.py` | Define `MemoryLifecycle` protocol — PR plan scope specifies exporting `MemoryLifecycle` but it was not implemented. Add `class MemoryLifecycle(Protocol): async def initialize(self) -> None: ...; async def close(self) -> None: ...` |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`), async context manager (`__aenter__`/`__aexit__`), Unicode/large payload tests, query length validation cap, scoring formula inline docstring.
+
 #### Key implementation details
 
 - Bundle all "Should Fix" findings from previous PR reviews.
