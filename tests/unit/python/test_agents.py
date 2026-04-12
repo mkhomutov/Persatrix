@@ -1,6 +1,8 @@
 """
-Tests for CoderAgent, ReviewerAgent, and PlannerAgent.
+Tests for TaskAgent — backward compatibility with v0.1 agent behavior.
 
+Verifies that TaskAgent with appropriate instructions produces the same
+behavior as the removed CoderAgent, ReviewerAgent, and PlannerAgent.
 All tests use mock LLM client — no real API calls.
 """
 
@@ -9,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.base import TaskInput, TaskStatus
-from agents.coder import CoderAgent
 from agents.llm_client import (
     LLMClient,
     LLMResponse,
@@ -17,8 +18,7 @@ from agents.llm_client import (
     ToolCall,
     Usage,
 )
-from agents.planner_agent import PlannerAgent
-from agents.reviewer import ReviewerAgent
+from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolResult, clear_registry, tool
 
 
@@ -66,7 +66,16 @@ def _task(payload: str = "do something") -> TaskInput:
     return TaskInput(task_id="t1", workflow_id="w1", payload=payload)
 
 
-# ─── CoderAgent Tests ───────────────────────────────────────
+# ─── Coder-role TaskAgent Tests ─────────────────────────────
+
+_CODER_INSTRUCTIONS = """\
+You are a code generation agent. Your job is to write clean, well-tested code
+based on the specifications you receive."""
+
+_CODER_CONFIG: dict = {
+    **_DEFAULT_CONFIG,
+    "instructions": _CODER_INSTRUCTIONS,
+}
 
 
 class TestCoderAgent:
@@ -74,7 +83,7 @@ class TestCoderAgent:
         client = _make_client(
             responses=[LLMResponse(text="Here is the code:\n```python\nprint('hi')\n```", stop_reason=StopReason.END_TURN, usage=Usage(50, 100))]
         )
-        agent = CoderAgent(agent_id="code-writer", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="code-writer", config=_CODER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Write a hello world script"))
         assert output.status == TaskStatus.COMPLETED
         assert "code" in output.result.lower()
@@ -89,16 +98,17 @@ class TestCoderAgent:
             LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(30, 20)),
             LLMResponse(text="Created main.py with hello world.", stop_reason=StopReason.END_TURN, usage=Usage(40, 30)),
         ]
+        config = {**_CODER_CONFIG, "tools": ["file_write"]}
         client = _make_client(responses=responses)
-        agent = CoderAgent(agent_id="code-writer", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="code-writer", config=config, llm_client=client)
         output = await agent.handle(_task("Write a hello world script"))
         assert output.status == TaskStatus.COMPLETED
         assert output.metadata["tool_calls"] == "1"
 
     async def test_system_prompt_includes_role(self):
-        config = {**_DEFAULT_CONFIG, "role": "Senior Python developer"}
+        config = {**_CODER_CONFIG, "role": "Senior Python developer"}
         client = _make_client()
-        agent = CoderAgent(agent_id="code-writer", config=config, llm_client=client)
+        agent = TaskAgent(agent_id="code-writer", config=config, llm_client=client)
         await agent.handle(_task())
         call_kwargs = client._provider.create_message.call_args[1]
         assert "Senior Python developer" in call_kwargs["system"]
@@ -108,21 +118,30 @@ class TestCoderAgent:
         client._provider.create_message = AsyncMock(
             side_effect=RuntimeError("API error")
         )
-        agent = CoderAgent(agent_id="code-writer", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="code-writer", config=_CODER_CONFIG, llm_client=client)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
 
     async def test_capabilities_from_config(self):
-        config = {**_DEFAULT_CONFIG, "capabilities": ["code_generation", "code_review"]}
-        agent = CoderAgent(agent_id="code-writer", config=config)
+        config = {**_CODER_CONFIG, "capabilities": ["code_generation", "code_review"]}
+        agent = TaskAgent(agent_id="code-writer", config=config)
         assert agent.capabilities == ["code_generation", "code_review"]
 
     async def test_capabilities_empty_without_config(self):
-        agent = CoderAgent(agent_id="code-writer", config={"model": "test"})
+        agent = TaskAgent(agent_id="code-writer", config={"model": "test"})
         assert agent.capabilities == []
 
 
-# ─── ReviewerAgent Tests ────────────────────────────────────
+# ─── Reviewer-role TaskAgent Tests ──────────────────────────
+
+_REVIEWER_INSTRUCTIONS = """\
+You are a code review agent. Your job is to review code for correctness,
+style, and security issues."""
+
+_REVIEWER_CONFIG: dict = {
+    **_DEFAULT_CONFIG,
+    "instructions": _REVIEWER_INSTRUCTIONS,
+}
 
 
 class TestReviewerAgent:
@@ -131,15 +150,15 @@ class TestReviewerAgent:
         client = _make_client(
             responses=[LLMResponse(text=review_output, stop_reason=StopReason.END_TURN, usage=Usage(80, 60))]
         )
-        agent = ReviewerAgent(agent_id="code-reviewer", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="code-reviewer", config=_REVIEWER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Review this code: def add(a, b): return a + b"))
         assert output.status == TaskStatus.COMPLETED
         assert "approved" in output.result
 
     async def test_system_prompt_includes_role(self):
-        config = {**_DEFAULT_CONFIG, "role": "Security-focused code reviewer"}
+        config = {**_REVIEWER_CONFIG, "role": "Security-focused code reviewer"}
         client = _make_client()
-        agent = ReviewerAgent(agent_id="code-reviewer", config=config, llm_client=client)
+        agent = TaskAgent(agent_id="code-reviewer", config=config, llm_client=client)
         await agent.handle(_task())
         call_kwargs = client._provider.create_message.call_args[1]
         assert "Security-focused code reviewer" in call_kwargs["system"]
@@ -149,17 +168,17 @@ class TestReviewerAgent:
         client._provider.create_message = AsyncMock(
             side_effect=ConnectionError("timeout")
         )
-        agent = ReviewerAgent(agent_id="code-reviewer", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="code-reviewer", config=_REVIEWER_CONFIG, llm_client=client)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
 
     async def test_capabilities_from_config(self):
-        config = {**_DEFAULT_CONFIG, "capabilities": ["code_review", "security_audit"]}
-        agent = ReviewerAgent(agent_id="code-reviewer", config=config)
+        config = {**_REVIEWER_CONFIG, "capabilities": ["code_review", "security_audit"]}
+        agent = TaskAgent(agent_id="code-reviewer", config=config)
         assert agent.capabilities == ["code_review", "security_audit"]
 
     async def test_handle_with_tool_use(self):
-        """S-13: ReviewerAgent tool-use test (parity with CoderAgent)."""
+        """S-13: Reviewer tool-use test (parity with coder)."""
 
         @tool(name="file_read", description="Read a file")
         async def file_read(path: str) -> ToolResult:
@@ -183,9 +202,9 @@ class TestReviewerAgent:
                 usage=Usage(50, 40),
             ),
         ]
-        config = {**_DEFAULT_CONFIG, "tools": ["file_read"]}
+        config = {**_REVIEWER_CONFIG, "tools": ["file_read"]}
         client = _make_client(responses=responses)
-        agent = ReviewerAgent(
+        agent = TaskAgent(
             agent_id="code-reviewer",
             config=config,
             llm_client=client,
@@ -195,7 +214,16 @@ class TestReviewerAgent:
         assert output.metadata["tool_calls"] == "1"
 
 
-# ─── PlannerAgent Tests ─────────────────────────────────────
+# ─── Planner-role TaskAgent Tests ───────────────────────────
+
+_PLANNER_INSTRUCTIONS = """\
+You are a planning agent. Your job is to decompose high-level goals into
+actionable step-by-step plans."""
+
+_PLANNER_CONFIG: dict = {
+    **_DEFAULT_CONFIG,
+    "instructions": _PLANNER_INSTRUCTIONS,
+}
 
 
 class TestPlannerAgent:
@@ -204,15 +232,15 @@ class TestPlannerAgent:
         client = _make_client(
             responses=[LLMResponse(text=plan_output, stop_reason=StopReason.END_TURN, usage=Usage(60, 80))]
         )
-        agent = PlannerAgent(agent_id="planner", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="planner", config=_PLANNER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Plan a web application project"))
         assert output.status == TaskStatus.COMPLETED
         assert "steps" in output.result
 
     async def test_system_prompt_includes_role(self):
-        config = {**_DEFAULT_CONFIG, "role": "Technical project planner"}
+        config = {**_PLANNER_CONFIG, "role": "Technical project planner"}
         client = _make_client()
-        agent = PlannerAgent(agent_id="planner", config=config, llm_client=client)
+        agent = TaskAgent(agent_id="planner", config=config, llm_client=client)
         await agent.handle(_task())
         call_kwargs = client._provider.create_message.call_args[1]
         assert "Technical project planner" in call_kwargs["system"]
@@ -222,13 +250,13 @@ class TestPlannerAgent:
         client._provider.create_message = AsyncMock(
             side_effect=RuntimeError("rate limited")
         )
-        agent = PlannerAgent(agent_id="planner", config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="planner", config=_PLANNER_CONFIG, llm_client=client)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
 
     async def test_capabilities_from_config(self):
-        config = {**_DEFAULT_CONFIG, "capabilities": ["planning", "decomposition"]}
-        agent = PlannerAgent(agent_id="planner", config=config)
+        config = {**_PLANNER_CONFIG, "capabilities": ["planning", "decomposition"]}
+        agent = TaskAgent(agent_id="planner", config=config)
         assert agent.capabilities == ["planning", "decomposition"]
 
 
@@ -236,61 +264,61 @@ class TestPlannerAgent:
 
 
 class TestCrossAgent:
-    """Tests that apply to all three agent types."""
+    """Tests that apply to TaskAgent with all three role configurations."""
 
     @pytest.mark.parametrize(
-        "agent_cls,agent_id",
+        "agent_id,config",
         [
-            (CoderAgent, "code-writer"),
-            (ReviewerAgent, "code-reviewer"),
-            (PlannerAgent, "planner"),
+            ("code-writer", _CODER_CONFIG),
+            ("code-reviewer", _REVIEWER_CONFIG),
+            ("planner", _PLANNER_CONFIG),
         ],
     )
-    async def test_no_llm_client_returns_failed(self, agent_cls, agent_id):
-        agent = agent_cls(agent_id=agent_id, config=_DEFAULT_CONFIG)
+    async def test_no_llm_client_returns_failed(self, agent_id, config):
+        agent = TaskAgent(agent_id=agent_id, config=config)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
         assert "LLM client not configured" in output.result
 
     @pytest.mark.parametrize(
-        "agent_cls,agent_id",
+        "agent_id,config",
         [
-            (CoderAgent, "code-writer"),
-            (ReviewerAgent, "code-reviewer"),
-            (PlannerAgent, "planner"),
+            ("code-writer", _CODER_CONFIG),
+            ("code-reviewer", _REVIEWER_CONFIG),
+            ("planner", _PLANNER_CONFIG),
         ],
     )
-    async def test_name_from_config(self, agent_cls, agent_id):
-        config = {**_DEFAULT_CONFIG, "name": "Custom Name"}
-        agent = agent_cls(agent_id=agent_id, config=config)
+    async def test_name_from_config(self, agent_id, config):
+        cfg = {**config, "name": "Custom Name"}
+        agent = TaskAgent(agent_id=agent_id, config=cfg)
         assert agent.name == "Custom Name"
 
     @pytest.mark.parametrize(
-        "agent_cls,agent_id",
+        "agent_id,config",
         [
-            (CoderAgent, "code-writer"),
-            (ReviewerAgent, "code-reviewer"),
-            (PlannerAgent, "planner"),
+            ("code-writer", _CODER_CONFIG),
+            ("code-reviewer", _REVIEWER_CONFIG),
+            ("planner", _PLANNER_CONFIG),
         ],
     )
-    async def test_role_from_config(self, agent_cls, agent_id):
-        config = {**_DEFAULT_CONFIG, "role": "Custom Role"}
-        agent = agent_cls(agent_id=agent_id, config=config)
+    async def test_role_from_config(self, agent_id, config):
+        cfg = {**config, "role": "Custom Role"}
+        agent = TaskAgent(agent_id=agent_id, config=cfg)
         assert agent.role == "Custom Role"
 
     @pytest.mark.parametrize(
-        "agent_cls,agent_id",
+        "agent_id,config",
         [
-            (CoderAgent, "code-writer"),
-            (ReviewerAgent, "code-reviewer"),
-            (PlannerAgent, "planner"),
+            ("code-writer", _CODER_CONFIG),
+            ("code-reviewer", _REVIEWER_CONFIG),
+            ("planner", _PLANNER_CONFIG),
         ],
     )
-    async def test_token_counting(self, agent_cls, agent_id):
+    async def test_token_counting(self, agent_id, config):
         client = _make_client(
             responses=[LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(100, 200))]
         )
-        agent = agent_cls(agent_id=agent_id, config=_DEFAULT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id=agent_id, config=config, llm_client=client)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.COMPLETED
         assert output.metadata["tokens_used"] == "300"

@@ -11,7 +11,6 @@ import grpc
 import grpc.aio
 import pytest
 
-from agents.coder import CoderAgent
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.llm_client import (
     LLMClient,
@@ -20,9 +19,8 @@ from agents.llm_client import (
     ToolCall,
     Usage,
 )
-from agents.planner_agent import PlannerAgent
-from agents.reviewer import ReviewerAgent
 from agents.server import AgentServiceServicer
+from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolResult, clear_registry, tool
 
 
@@ -78,6 +76,7 @@ _DEFAULT_CONFIG: dict = {
     "max_llm_calls": 10,
     "max_tokens": 4096,
     "tools": [],
+    "instructions": "You are a test agent.",
 }
 
 
@@ -88,7 +87,7 @@ class TestEndToEndExecution:
     """Full round-trip: gRPC client → server → agent → LLM mock → response."""
 
     async def test_coder_agent_success(self):
-        """CoderAgent receives task, calls mock LLM, returns COMPLETED."""
+        """TaskAgent (coder role) receives task, calls mock LLM, returns COMPLETED."""
         client = _make_client(
             responses=[
                 LLMResponse(
@@ -98,7 +97,7 @@ class TestEndToEndExecution:
                 )
             ]
         )
-        agent = CoderAgent(
+        agent = TaskAgent(
             agent_id="code-writer",
             config=_DEFAULT_CONFIG,
             llm_client=client,
@@ -126,7 +125,7 @@ class TestEndToEndExecution:
             await server.stop(grace=0)
 
     async def test_reviewer_agent_success(self):
-        """ReviewerAgent returns structured review."""
+        """TaskAgent (reviewer role) returns structured review."""
         review_text = '{"approved": true, "issues": [], "summary": "Looks good."}'
         client = _make_client(
             responses=[
@@ -137,7 +136,7 @@ class TestEndToEndExecution:
                 )
             ]
         )
-        agent = ReviewerAgent(
+        agent = TaskAgent(
             agent_id="code-reviewer",
             config=_DEFAULT_CONFIG,
             llm_client=client,
@@ -168,7 +167,7 @@ class TestEndToEndExecution:
             await server.stop(grace=0)
 
     async def test_planner_agent_success(self):
-        """PlannerAgent returns execution plan."""
+        """TaskAgent (planner role) returns execution plan."""
         plan_text = '{"steps": [{"id": 1, "description": "Setup"}], "summary": "Plan"}'
         client = _make_client(
             responses=[
@@ -179,7 +178,7 @@ class TestEndToEndExecution:
                 )
             ]
         )
-        agent = PlannerAgent(
+        agent = TaskAgent(
             agent_id="planner",
             config=_DEFAULT_CONFIG,
             llm_client=client,
@@ -212,7 +211,7 @@ class TestEndToEndExecution:
         client._provider.create_message = AsyncMock(
             side_effect=RuntimeError("API error")
         )
-        agent = CoderAgent(
+        agent = TaskAgent(
             agent_id="code-writer",
             config=_DEFAULT_CONFIG,
             llm_client=client,
@@ -285,7 +284,7 @@ class TestEndToEndExecution:
         ]
         config = {**_DEFAULT_CONFIG, "tools": ["file_write"]}
         client = _make_client(responses=responses)
-        agent = CoderAgent(
+        agent = TaskAgent(
             agent_id="code-writer",
             config=config,
             llm_client=client,

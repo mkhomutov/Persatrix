@@ -1,7 +1,7 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-11  
-> **Current phase**: v0.1 (MVP) — ✅ Complete (RFC 0001–0004 all implemented)
+> **Last updated**: 2026-04-12  
+> **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -70,9 +70,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/base.py` | BaseAgent ABC + dataclasses + LLM loop | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
-| `agents/coder.py` | Code generation task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
-| `agents/reviewer.py` | Code review task agent | ✅ Complete (RFC 0004 PR 4b, #39) |
-| `agents/planner_agent.py` | Task decomposition agent | ✅ Complete (RFC 0004 PR 4b, #39) |
+| `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | ✅ Complete (RFC 0004 PR 3) |
@@ -115,7 +113,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 👍 Accepted | 12 | 0/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | � Implementing | 12 | 0/12 |
 
 ### Dependency Chain
 

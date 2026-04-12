@@ -23,9 +23,7 @@ from agents.server import (
     _resolve_agent_type,
     load_agent,
 )
-from agents.coder import CoderAgent
-from agents.planner_agent import PlannerAgent
-from agents.reviewer import ReviewerAgent
+from agents.task_agent import TaskAgent
 from agents.tools import builtin
 
 
@@ -350,13 +348,14 @@ class TestLoadAgent:
                     "name": "Planner",
                     "role": "Plans things",
                     "model": "test-model",
+                    "type": "task",
                     "capabilities": ["planning"],
                     "tools": [],
                     "permissions": {},
                 },
             ])
             agent = load_agent("planner", config_path, tmp)
-            assert isinstance(agent, PlannerAgent)
+            assert isinstance(agent, TaskAgent)
             assert agent.agent_id == "planner"
 
     @patch("agents.server.create_provider")
@@ -370,13 +369,14 @@ class TestLoadAgent:
                     "name": "Code Writer",
                     "role": "Writes code",
                     "model": "test-model",
+                    "type": "task",
                     "capabilities": ["code_generation", "code_review"],
                     "tools": ["file_read", "file_write"],
                     "permissions": {},
                 },
             ])
             agent = load_agent("code-writer", config_path, tmp)
-            assert isinstance(agent, CoderAgent)
+            assert isinstance(agent, TaskAgent)
 
     @patch("agents.server.create_provider")
     def test_load_reviewer(self, mock_create):
@@ -389,13 +389,14 @@ class TestLoadAgent:
                     "name": "Code Reviewer",
                     "role": "Reviews code",
                     "model": "test-model",
+                    "type": "task",
                     "capabilities": ["code_review", "security_audit"],
                     "tools": ["file_read"],
                     "permissions": {},
                 },
             ])
             agent = load_agent("code-reviewer", config_path, tmp)
-            assert isinstance(agent, ReviewerAgent)
+            assert isinstance(agent, TaskAgent)
 
     def test_missing_config_file(self):
         with pytest.raises(SystemExit, match="not found"):
@@ -417,13 +418,21 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="Invalid YAML"):
                 load_agent("planner", str(bad_path), tmp)
 
-    def test_unknown_capabilities(self):
+    @patch("agents.server.create_provider")
+    def test_unknown_type_raises_system_exit(self, mock_create):
+        """Unknown agent type in config raises SystemExit (not ValueError)."""
+        mock_create.return_value = MagicMock()
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
-                {"id": "mystery", "capabilities": ["unknown_cap"], "permissions": {}},
+                {
+                    "id": "mystery",
+                    "type": "banana",
+                    "model": "test-model",
+                    "permissions": {},
+                },
             ])
-            with pytest.raises(SystemExit, match="Cannot determine agent type"):
+            with pytest.raises(SystemExit, match="Unknown agent type"):
                 load_agent("mystery", config_path, tmp)
 
     def test_agent_entry_missing_id_field(self):
@@ -485,37 +494,24 @@ class TestLoadAgent:
 
 
 class TestResolveAgentType:
-    """Tests for _resolve_agent_type()."""
+    """Tests for _resolve_agent_type() — type-based dispatch (RFC 0005 PR 1a)."""
 
-    def test_planning_capability(self):
-        assert _resolve_agent_type({"id": "x", "capabilities": ["planning"]}) == PlannerAgent
+    def test_type_task_explicit(self):
+        assert _resolve_agent_type({"id": "x", "type": "task"}) is TaskAgent
 
-    def test_code_generation_capability(self):
-        assert _resolve_agent_type({"id": "x", "capabilities": ["code_generation"]}) == CoderAgent
+    def test_type_default_is_task(self):
+        """Agents without a type field default to TaskAgent (backward compat)."""
+        assert _resolve_agent_type({"id": "x"}) is TaskAgent
 
-    def test_code_review_capability(self):
-        assert _resolve_agent_type({"id": "x", "capabilities": ["code_review"]}) == ReviewerAgent
+    def test_type_persona_raises_system_exit(self):
+        """PersonaAgent not yet implemented — must fail fast at startup."""
+        with pytest.raises(SystemExit, match="PersonaAgent is not yet implemented"):
+            _resolve_agent_type({"id": "x", "type": "persona"})
 
-    def test_code_writer_with_both_caps(self):
-        """code-writer has both code_generation and code_review → CoderAgent."""
-        assert _resolve_agent_type(
-            {"id": "x", "capabilities": ["code_generation", "code_review"]}
-        ) == CoderAgent
-
-    def test_no_matching_capabilities(self):
-        with pytest.raises(SystemExit):
-            _resolve_agent_type({"id": "x", "capabilities": ["unknown"]})
-
-    def test_empty_capabilities(self):
-        """T-02: empty capabilities list raises SystemExit."""
-        with pytest.raises(SystemExit, match="Cannot determine agent type"):
-            _resolve_agent_type({"id": "x", "capabilities": []})
-
-    def test_planning_beats_code_generation(self):
-        """T-03/N-02: planning capability takes priority over code_generation."""
-        assert _resolve_agent_type(
-            {"id": "x", "capabilities": ["planning", "code_generation"]}
-        ) == PlannerAgent
+    def test_unknown_type_raises_system_exit(self):
+        """Unknown type values must produce a clean operator-facing SystemExit."""
+        with pytest.raises(SystemExit, match="Unknown agent type"):
+            _resolve_agent_type({"id": "x", "type": "banana"})
 
 
 # ─── AgentServer Tests ───────────────────────────────────────

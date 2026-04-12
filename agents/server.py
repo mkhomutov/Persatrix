@@ -23,11 +23,9 @@ import grpc.aio
 import yaml
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
-from .coder import CoderAgent
 from .generated import task_pb2, task_pb2_grpc
 from .llm_client import LLMClient, create_provider
-from .planner_agent import PlannerAgent
-from .reviewer import ReviewerAgent
+from .task_agent import TaskAgent
 from .tools import builtin
 from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator
@@ -162,26 +160,30 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 
 
 def _resolve_agent_type(agent_config: dict[str, Any]) -> type[BaseAgent]:
-    """Resolve agent type from capabilities.
+    """Resolve agent class from the ``type`` field in agent config.
 
-    # TODO(v0.2): add explicit 'type' field to agent config for direct
-    # type resolution instead of capability-based inference.
+    Supported types:
+    - ``task`` (default) — data-driven TaskAgent with YAML instructions
+    - ``persona`` — not yet implemented (v0.2 Phase 5)
+
+    Agents without a ``type`` field default to ``task`` for backward
+    compatibility with v0.1 configs.
     """
-    caps = set(agent_config.get("capabilities", []))
+    agent_type = agent_config.get("type", "task")
 
-    # N-02: priority order — first match wins when an agent has multiple
-    # capabilities (e.g. planning + code_generation → PlannerAgent).
-    if "planning" in caps:
-        return PlannerAgent
-    if "code_generation" in caps:
-        return CoderAgent
-    if "code_review" in caps:
-        return ReviewerAgent
-
-    raise SystemExit(
-        f"Cannot determine agent type for {agent_config['id']!r} "
-        f"from capabilities: {caps}"
-    )
+    match agent_type:
+        case "task":
+            return TaskAgent
+        case "persona":
+            raise SystemExit(
+                f"Agent {agent_config['id']!r} has type 'persona' but "
+                f"PersonaAgent is not yet implemented (v0.2 Phase 5)"
+            )
+        case _:
+            raise SystemExit(
+                f"Unknown agent type {agent_type!r} for agent "
+                f"{agent_config['id']!r}. Supported types: task, persona"
+            )
 
 
 def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:

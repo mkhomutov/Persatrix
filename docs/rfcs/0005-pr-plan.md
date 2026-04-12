@@ -65,12 +65,28 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `make validate` passes with updated `agents.yaml`
-- [ ] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
-- [ ] Agent loader uses `type` field dispatch
-- [ ] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
+- [x] `pytest tests/unit/python/ -v` passes (57 unit tests)
+- [x] `ruff check agents/` clean
+- [x] `make validate` passes with updated `agents.yaml`
+- [x] `CoderAgent`, `ReviewerAgent`, `PlannerAgent` files removed
+- [x] Agent loader uses `type` field dispatch
+- [x] `TaskAgent` preserves `"Role: ..."` prefix in system prompt
+
+#### Review findings (PR #47)
+
+Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, gitignored).
+
+**Should Fix** (track in PR 7):
+
+1. **Test helper duplication** — `_make_client()`, `_DEFAULT_CONFIG`, `_task()` duplicated between `test_task_agent.py` and `test_agents.py`. Extract to shared `tests/unit/python/conftest.py` or `_helpers.py`.
+2. **Overlapping test coverage** — both files test the same `TaskAgent` class with duplicate assertions (`test_handle_returns_completed`, `test_system_prompt_includes_role`, etc.). Keep `test_task_agent.py` for generic TaskAgent tests, `test_agents.py` for parametrized role-specific backward-compat tests only.
+3. **Missing empty-string instructions test** — add explicit test with `{"instructions": ""}` to document that empty string and absent are treated identically.
+
+**Nice to Have** (track in PR 7):
+
+4. **Config validator stub** — `agents/validate.py` is still a stub; `schema_version: "0.2"` bump not enforced at runtime. Addressed in PR 6a.
+5. **Deprecation aliases** — consider `warnings.warn()` aliases for removed `CoderAgent`/`ReviewerAgent`/`PlannerAgent` imports. Low priority (internal-only).
+6. **Integration test for full `load_agent()` pipeline** — current integration tests create `TaskAgent` directly; add test going through `load_agent()` with temp YAML containing `type: task` + `instructions`.
 
 ---
 
@@ -539,6 +555,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | `ROADMAP.md` | Update RFC 0005 tracker: merged count, status. Update Component Status tables |
 | Various | Accumulated review follow-up findings from PRs 1a–6b |
 
+#### Accumulated review findings
+
+**From PR 1a (PR #47):**
+
+| # | Severity | Description | File(s) |
+|---|----------|-------------|----------|
+| 1 | Should Fix | Extract duplicated test helpers (`_make_client`, `_DEFAULT_CONFIG`, `_task`) to shared module | `tests/unit/python/test_task_agent.py`, `test_agents.py` → shared `conftest.py` or `_helpers.py` |
+| 2 | Should Fix | De-duplicate overlapping test coverage between `test_task_agent.py` and `test_agents.py` | `tests/unit/python/test_task_agent.py`, `test_agents.py` |
+| 3 | Should Fix | Add explicit empty-string `instructions` test (`{"instructions": ""}`) | `tests/unit/python/test_task_agent.py` |
+| 4 | Nice to Have | Add integration test going through `load_agent()` with temp YAML `type: task` + `instructions` | `tests/integration/test_agent_server.py` |
+| 5 | Nice to Have | Consider deprecation aliases for removed `CoderAgent`/`ReviewerAgent`/`PlannerAgent` imports | `agents/__init__.py` |
+
+*(Findings from subsequent PRs will be appended here as they are reviewed.)*
+
 #### Key implementation details
 
 - Bundle all "Should Fix" findings from previous PR reviews.
@@ -550,7 +580,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [ ] RFC 0005 status is `✅ Implemented`
 - [ ] ROADMAP RFC tracker updated with correct merged count
 - [ ] ROADMAP Component Status tables updated for v0.2 components
-- [ ] All accumulated review findings addressed
+- [ ] All accumulated review findings addressed (see table above)
 - [ ] Full test suite passes: `make test`
 - [ ] Full lint passes: `make lint`
 
