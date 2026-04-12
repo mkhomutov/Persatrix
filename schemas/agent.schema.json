@@ -244,6 +244,18 @@
             }
           }
         },
+        "episodic": {
+          "type": "object",
+          "description": "Episodic memory configuration (extension spec E7.2)",
+          "properties": {
+            "retention_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 90,
+              "description": "Hard-delete compressed episodes older than this many days (per E7.2)"
+            }
+          }
+        },
         "relationship": {
           "type": "object",
           "description": "Relationship memory configuration (extension spec E7.2)",

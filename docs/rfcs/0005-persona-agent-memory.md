@@ -120,6 +120,9 @@ class ActionExecutor:
                 case ActionType.COMPLETE_TASK:
                     pass  # handled by PersonaAgent.handle() return
                 case ActionType.SEND_MESSAGE:
+                    # In-process MVP: routes through EventDispatcher.dispatch()
+                    # on the target agent with cascade_depth incremented from
+                    # the originating event's metadata. See Q4 cascade limiting.
                     await self._send_message(agent, action.payload)
                 case ActionType.DELEGATE:
                     await self._delegate(agent, action.payload)
@@ -433,6 +436,22 @@ class EventDispatcher:
                 token_count=estimate_tokens(episode_text),
             ))
 
+        # Recent agent notes (inject_recent_notes most relevant)
+        notes_config = agent.config.get("memory", {}).get("notes", {})
+        inject_count = notes_config.get("inject_recent_notes", 0)
+        if inject_count > 0 and notes_config.get("enabled", False):
+            notes = await agent.episodic_memory.recall_notes(
+                agent_id=agent.agent_id, query=event_summary, limit=inject_count
+            )
+            if notes:
+                notes_text = format_notes(notes)
+                wm.add_section(ContextSection(
+                    name="agent_notes",
+                    content=notes_text,
+                    priority=55,  # between episodic (60) and conversation
+                    token_count=estimate_tokens(notes_text),
+                ))
+
         # Trigger working memory compression if over budget.
         # Uses the _compression_task guard (see compress_if_needed docstring)
         # to prevent concurrent compressions from rapid events.
@@ -450,7 +469,7 @@ class EventDispatcher:
 1. **Build prompt**: Assemble system prompt from persona config + behavioral dimensions (via `render_behavior()`) + dynamic state (via `PersonaState.to_prompt_section()`) + injected memory context (via `_inject_memory_context()`)
 2. **Format event**: Convert the `AgentEvent` into a user message describing what happened
 3. **Run tool-use loop**: Send the assembled messages to the configured model, with memory tools available. If the LLM returns tool calls (e.g., `store_note`, `recall_notes`), execute them and feed results back in a multi-turn loop — same pattern as `BaseAgent._run_llm_loop()` for task agents. The loop continues until the LLM produces a final response without tool calls.
-4. **Parse response**: Extract `AgentAction` list from the LLM's final (non-tool-call) response
+4. **Parse response**: Extract `AgentAction` list from the LLM's final (non-tool-call) response. Implementation uses the LLM's structured output / function-calling mechanism to produce typed `AgentAction` objects, falling back to JSON parsing of the final response text. The expected output schema (`action_type` enum + `payload` dict) is provided in the system prompt so models without native structured output can still produce parseable responses.
 5. **Return actions**: The framework's `ActionExecutor` handles execution; results may generate new events
 
 **Tool-use loop vs single-shot call**: Unlike a simple `chat()` → parse flow, persona agents run a multi-turn tool-use loop to allow memory tools to execute *during* the LLM's reasoning, not after. This matches `BaseAgent._run_llm_loop()` semantics. The loop terminates when the LLM produces a response with no tool calls, which is then parsed into `AgentAction`s for the `ActionExecutor`.
@@ -717,6 +736,12 @@ CREATE INDEX idx_episodes_created ON episodes(created_at DESC);
 >   episodes, degrading query performance and consuming disk. The retention window is configurable
 >   per-agent via `memory.episodic.retention_days` (default: 90, matching the extension spec).
 >   Only episodes with `compression_level >= 1` (already summarized) are eligible for deletion.
+>
+> - **Configurable backend**: The extension spec (E7.2) defines `backend: "sqlite"` as a
+>   configurable field implying future alternative backends (e.g., vector stores). This RFC
+>   hard-codes SQLite directly without a backend abstraction layer. Backend configurability is
+>   a post-MVP concern — introducing an abstraction before a second backend exists would be
+>   premature. The `EpisodicMemory` class interface is the natural extension point when needed.
 
 #### Future Enhancement: Semantic Search via Vector Embeddings
 
