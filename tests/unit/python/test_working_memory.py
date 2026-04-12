@@ -200,6 +200,18 @@ class TestBuildContext:
         context = wm.build_context()
         assert len(context) == 2  # exactly at budget
 
+    def test_skips_large_section_includes_smaller(self):
+        """Greedy bin-packing: a mid-priority section overflows but a smaller low-priority one fits."""
+        wm = WorkingMemory(max_tokens=200)
+        wm.add_section(_make_section(name="high", priority=100, token_count=150))
+        wm.add_section(_make_section(name="mid", priority=50, token_count=100))  # overflows
+        wm.add_section(_make_section(name="low", priority=10, token_count=40))  # fits
+        context = wm.build_context()
+        names = [c["role"] for c in context]
+        assert "high" in names
+        assert "mid" not in names
+        assert "low" in names
+
 
 # ─── WorkingMemory.compress_if_needed ───────────────────────
 
@@ -283,6 +295,60 @@ class TestCompression:
         await wm.compress_if_needed(client)
         # Only the low-priority section should have been compressed
         assert client._provider.create_message.await_count == 1
+
+    async def test_compression_passes_all_required_kwargs(self):
+        """Verify that compress_if_needed() passes all kwargs required by LLMProvider protocol."""
+        wm = WorkingMemory(max_tokens=100)
+        wm.add_section(
+            _make_section(name="a", token_count=200, content="a" * 800, compressible=True)
+        )
+        client = _make_llm_client(summary="short")
+        await wm.compress_if_needed(client)
+        call_kwargs = client._provider.create_message.call_args.kwargs
+        assert "model" in call_kwargs
+        assert "temperature" in call_kwargs
+        assert "messages" in call_kwargs
+        assert "system" in call_kwargs
+        assert "tools" in call_kwargs
+        assert "max_tokens" in call_kwargs
+
+    async def test_compression_uses_configured_model(self):
+        """Verify that the configurable compression_model is passed to the LLM call."""
+        wm = WorkingMemory(max_tokens=100, compression_model="gpt-4o-mini")
+        wm.add_section(
+            _make_section(name="a", token_count=200, content="a" * 800, compressible=True)
+        )
+        client = _make_llm_client(summary="short")
+        await wm.compress_if_needed(client)
+        call_kwargs = client._provider.create_message.call_args.kwargs
+        assert call_kwargs["model"] == "gpt-4o-mini"
+
+    async def test_compression_null_response_preserves_original(self):
+        """When LLM returns text=None, the original section is preserved."""
+        wm = WorkingMemory(max_tokens=100)
+        wm.add_section(
+            _make_section(name="a", priority=10, token_count=200, content="original", compressible=True)
+        )
+        client = _make_llm_client()
+        client._provider.create_message = AsyncMock(
+            return_value=LLMResponse(text=None, usage=Usage(10, 0))
+        )
+        await wm.compress_if_needed(client)
+        section = wm.get_section("a")
+        assert section is not None
+        assert section.content == "original"
+        assert section.token_count == 200
+
+    async def test_compression_max_tokens_floor(self):
+        """Very small sections get a floor of 64 for max_tokens in the LLM call."""
+        wm = WorkingMemory(max_tokens=50)
+        wm.add_section(
+            _make_section(name="tiny", token_count=100, content="x" * 4, compressible=True)
+        )
+        client = _make_llm_client(summary="s")
+        await wm.compress_if_needed(client)
+        call_kwargs = client._provider.create_message.call_args.kwargs
+        assert call_kwargs["max_tokens"] >= 64
 
 
 # ─── WorkingMemory.try_start_compression (concurrency guard) ─

@@ -51,10 +51,18 @@ class WorkingMemory:
     sections are summarized via LLM.
     """
 
-    def __init__(self, max_tokens: int = 100_000) -> None:
+    def __init__(
+        self,
+        max_tokens: int = 100_000,
+        compression_model: str = "claude-haiku-4",
+    ) -> None:
         self._max_tokens = max_tokens
+        self._compression_model = compression_model
         self._sections: list[ContextSection] = []
         self._compression_task: asyncio.Task[None] | None = None
+
+    async def initialize(self) -> None:
+        """No-op for in-memory working memory. Satisfies MemoryLifecycle protocol."""
 
     @property
     def max_tokens(self) -> int:
@@ -84,9 +92,14 @@ class WorkingMemory:
         return sum(s.token_count for s in self._sections)
 
     def build_context(self) -> list[dict[str, str]]:
-        """Return ordered context messages for an LLM call.
+        """Return ordered context sections for prompt assembly.
 
-        Sections are sorted by priority (highest first). Sections whose
+        Each dict has ``{"role": <section_name>, "content": <text>}``.
+        Note: ``role`` is the section name (e.g. "system", "persona",
+        "memories"), **not** an LLM API role.  Callers must map sections
+        to valid LLM message format before passing to a provider.
+
+        Sections are sorted by priority (highest first).  Sections whose
         cumulative token count would exceed the budget are dropped,
         starting from the lowest-priority end.
         """
@@ -152,13 +165,20 @@ class WorkingMemory:
 
             try:
                 response = await llm_client.create_message(
-                    model="summarization-model",
+                    model=self._compression_model,
                     messages=[{"role": "user", "content": section.content}],
                     system="Summarize the following content concisely, preserving key information.",
                     tools=[],
-                    max_tokens=section.token_count // 2,
+                    max_tokens=max(section.token_count // 2, 64),
+                    temperature=0.2,
                 )
-                summary = response.text or section.content
+                summary = response.text
+                if summary is None:
+                    logger.warning(
+                        "Compression of section '%s' returned no text, preserving original",
+                        section.name,
+                    )
+                    continue
                 new_token_count = estimate_tokens(summary)
                 self.add_section(
                     ContextSection(
