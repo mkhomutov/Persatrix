@@ -31,6 +31,8 @@
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
   - [Config Schema Updates](#config-schema-updates)
   - [CLI Command Wiring](#cli-command-wiring)
+  - [Go Orchestrator Impact](#go-orchestrator-impact)
+  - [REST API for Persona Observability](#rest-api-for-persona-observability)
   - [SQLite Schema Migration Strategy](#sqlite-schema-migration-strategy)
   - [Memory Observability](#memory-observability)
 - [Security Considerations](#security-considerations)
@@ -92,6 +94,7 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 - **Communication protocols** (standup, debate, consensus) — separate RFC
 - **Organizational topologies** — separate RFC
 - **Distributed state / agent migration** — v0.3 scope
+- **Persona template composition** (`extends: "personas.yaml#template"`) — template field deep-merge semantics, template-extending-template composition, and resolution during config loading require careful design. Deferred to a separate v0.2 RFC. The `templates/personas.yaml` and `templates/sub_agents.yaml` files exist but composition is not activated by this RFC.
 - **Full autonomous level** with goal planning — v0.2 delivers `passive`, `reactive`, and `semi-autonomous`; full `autonomous` and `supervisor` levels are a v0.2 follow-up
 - **Shared knowledge base** (org-wide document store) — deferred to later v0.2 RFC
 - **Task refusal behavior** (`can_refuse_tasks` from extension spec E2.1) — deferred to follow-up when full autonomous level is implemented
@@ -133,6 +136,59 @@ class ActionExecutor:
                 case ActionType.DO_NOTHING:
                     pass
 ```
+
+#### Concurrency Control
+
+`on_event()` and `on_tick()` can fire concurrently — the tick loop runs on a schedule while events arrive asynchronously. Both mutate shared state: `PersonaState`, `WorkingMemory`, and the LLM client. Without synchronization, concurrent calls could double-compress working memory, race on energy/stress updates, or produce interleaved SQLite writes.
+
+**Requirement**: Each persona agent holds an `asyncio.Lock` that serializes `on_event()` and `on_tick()` execution. The `TickScheduler` acquires the lock before calling `on_tick()`, and the `EventDispatcher` acquires it before calling `on_event()`:
+
+```python
+class PersonaAgent(BaseAgent, ABC):
+    def __init__(self, agent_id: str, config: dict[str, Any]) -> None:
+        super().__init__(agent_id, config)
+        self._lock = asyncio.Lock()
+```
+
+```python
+# In EventDispatcher.dispatch():
+async with agent._lock:
+    actions = await agent.on_event(event)
+
+# In TickScheduler._loop():
+async with self._agent._lock:
+    actions = await self._agent.on_tick()
+```
+
+This guarantees at most one concurrent `on_event()` or `on_tick()` per agent. Events arriving while the agent is mid-tick queue on the lock and execute sequentially.
+
+#### Memory Lifecycle in Server
+
+The `MemoryLifecycle` protocol defines `initialize()` and `close()`. These are called at well-defined points in the server lifecycle:
+
+- **`initialize()`**: Called during `server.py` startup, after the agent is constructed but before the gRPC server starts accepting requests. All three memory tiers must be initialized (tables created, config-seeded data loaded) before any `on_event()` or `on_tick()` can fire.
+- **`close()`**: Called during graceful shutdown, **after** the gRPC server stops accepting new requests but **before** the process exits. In-flight memory operations (pending SQLite writes from the current `on_event()`/`on_tick()`) are allowed to complete via the concurrency lock — shutdown waits for the lock to be released before calling `close()`.
+
+```python
+# In server.py startup:
+for agent in persona_agents.values():
+    await agent.working_memory.initialize()
+    await agent.episodic_memory.initialize()
+    await agent.relationship_memory.initialize()
+
+# In server.py shutdown (before stopping gRPC):
+for agent in persona_agents.values():
+    async with agent._lock:  # wait for in-flight operations
+        await agent.working_memory.close()
+        await agent.episodic_memory.close()
+        await agent.relationship_memory.close()
+```
+
+#### Multi-Agent-Per-Process Hosting
+
+For v0.2 MVP, the server supports multiple persona agents in a single Python process. The `TickScheduler` creates one `asyncio.Task` per autonomous agent, and the `EventDispatcher` holds a dict of all persona agents. The per-agent `asyncio.Lock` (see [Concurrency Control](#concurrency-control)) ensures agents don't interfere with each other's state.
+
+**Scaling consideration**: If the server hosts N persona agents each with `tick_interval_seconds: 60`, that's N concurrent `on_tick()` calls every minute plus incoming events. The concurrency lock serializes per-agent, not globally — agents run in parallel, only concurrent access to the *same* agent is serialized. For v0.2 MVP, this is sufficient; v0.3 may require multi-process hosting for large agent populations.
 
 ### Agent Type Discrimination
 
@@ -233,8 +289,16 @@ class TickScheduler:
     async def _loop(self) -> None:
         while True:
             await asyncio.sleep(self._interval)
+
+            # Skip LLM call entirely when idle — avoids wasting tokens
+            # on agents that repeatedly produce DO_NOTHING actions.
+            # Wake from idle when EventDispatcher calls wake().
+            if self._idle_count >= self._idle_limit:
+                continue
+
             try:
-                actions = await self._agent.on_tick()
+                async with self._agent._lock:
+                    actions = await self._agent.on_tick()
             except Exception:
                 # Log and continue — an unhandled exception must not kill
                 # the tick loop permanently for this agent.
@@ -245,18 +309,36 @@ class TickScheduler:
             meaningful = [a for a in actions if a.action_type != ActionType.DO_NOTHING]
             if not meaningful:
                 self._idle_count += 1
-                if self._idle_count >= self._idle_limit:
-                    continue  # stay idle but keep loop alive
             else:
                 self._idle_count = 0
                 await self._executor.execute(
                     self._agent, meaningful[:self._max_actions]
                 )
+
+    async def wake(self) -> None:
+        """Reset idle state. Called by EventDispatcher on incoming event.
+
+        When a persona agent enters idle mode (idle_count >= idle_limit),
+        the tick loop skips on_tick() calls to save LLM costs. When a new
+        event arrives for that agent, the EventDispatcher calls wake() to
+        reset the idle counter so the next tick cycle resumes normal
+        behavior. This makes agents responsive to new activity while still
+        saving costs during quiet periods."""
+        self._idle_count = 0
 ```
 
 ### Event Dispatch Framework
 
 Events flow through a central dispatcher that routes to the appropriate persona agent:
+
+#### `AgentEvent` Structure
+
+`AgentEvent` has two dict fields with distinct purposes:
+
+- **`payload`** (`dict[str, Any]`): Event-specific content — task details, message text, mention context. Produced by the event source.
+- **`metadata`** (`dict[str, Any]`): Framework-managed routing and tracking info — `cascade_depth`, `timestamp`, `trace_id`, `source_tick_id`. Produced and consumed by the framework (`EventDispatcher`, `TickScheduler`), never by the agent's LLM prompt.
+
+This separation ensures framework control fields don't leak into the agent's LLM context and event content doesn't interfere with routing logic.
 
 ```python
 class EventDispatcher:
@@ -266,19 +348,26 @@ class EventDispatcher:
         self,
         agents: dict[str, PersonaAgent],
         executor: ActionExecutor,
+        tick_schedulers: dict[str, TickScheduler] | None = None,
     ):
         self._agents = agents
         self._executor = executor
+        self._tick_schedulers = tick_schedulers or {}
 
     async def dispatch(self, agent_id: str, event: AgentEvent) -> list[AgentAction]:
         agent = self._agents.get(agent_id)
         if agent is None:
             raise ValueError(f"Unknown persona agent: {agent_id}")
 
+        # Wake the agent's tick scheduler from idle on incoming events
+        if scheduler := self._tick_schedulers.get(agent_id):
+            await scheduler.wake()
+
         # Inject memory context before event handling
         await self._inject_memory_context(agent, event)
 
-        actions = await agent.on_event(event)
+        async with agent._lock:
+            actions = await agent.on_event(event)
         await self._executor.execute(agent, actions)
         return actions
 
@@ -331,9 +420,11 @@ class EventDispatcher:
 
 1. **Build prompt**: Assemble system prompt from persona config + behavioral dimensions (via `render_behavior()`) + dynamic state (via `PersonaState.to_prompt_section()`) + injected memory context (via `_inject_memory_context()`)
 2. **Format event**: Convert the `AgentEvent` into a user message describing what happened
-3. **Call LLM**: Send the assembled messages to the configured model, with memory tools available
-4. **Parse response**: Extract `AgentAction` list from the LLM's structured response (tool calls map to actions)
+3. **Run tool-use loop**: Send the assembled messages to the configured model, with memory tools available. If the LLM returns tool calls (e.g., `store_note`, `recall_notes`), execute them and feed results back in a multi-turn loop — same pattern as `BaseAgent._run_llm_loop()` for task agents. The loop continues until the LLM produces a final response without tool calls.
+4. **Parse response**: Extract `AgentAction` list from the LLM's final (non-tool-call) response
 5. **Return actions**: The framework's `ActionExecutor` handles execution; results may generate new events
+
+**Tool-use loop vs single-shot call**: Unlike a simple `chat()` → parse flow, persona agents run a multi-turn tool-use loop to allow memory tools to execute *during* the LLM's reasoning, not after. This matches `BaseAgent._run_llm_loop()` semantics. The loop terminates when the LLM produces a response with no tool calls, which is then parsed into `AgentAction`s for the `ActionExecutor`.
 
 ```python
 class _LLMPersonaAgent(PersonaAgent):
@@ -346,14 +437,22 @@ class _LLMPersonaAgent(PersonaAgent):
         # 2. Format the event as a user message
         user_message = self._format_event(event)
 
-        # 3. Call LLM with available tools (memory tools, agent tools)
-        response = await self._llm_client.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            tools=self._available_tools,
-        )
+        # 3. Multi-turn tool-use loop (same pattern as BaseAgent._run_llm_loop)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+        while True:
+            response = await self._llm_client.chat(
+                messages=messages,
+                tools=self._available_tools,
+            )
+            if not response.tool_calls:
+                break
+            # Execute tool calls (memory tools, agent tools) and append results
+            tool_results = await self._execute_tools(response.tool_calls)
+            messages.append(response.to_message())
+            messages.extend(tool_results)
 
         # 4. Parse LLM response into agent actions
         actions = self._parse_actions(response)
@@ -450,6 +549,8 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 ```
 
+> **Accuracy note**: chars/4 is approximately 85% accurate for English prose. For heavily structured content (JSON, YAML, code with long variable names), it can **under-count by 30-40%** because tokenizers split on punctuation and capitalization boundaries. For CJK text, it drastically **over-counts**. The 20% safety margin (compress at ~80K for a 100K window) handles typical cases, but agents working with multilingual content or heavily structured data should use the `accurate=True` tiktoken path (see [Q2](#q2-token-estimation-accuracy)) or risk hitting context limits.
+
 ### Episodic Memory (Long-Term Storage)
 
 SQLite-backed storage for conversation summaries and decisions:
@@ -463,7 +564,14 @@ class EpisodicMemory:
         self._db_path = db_path
 
     async def initialize(self) -> None:
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist.
+
+        FTS5 availability check: FTS5 is enabled by default in CPython
+        builds, but some minimal Python distributions (Alpine Linux,
+        certain Docker images) may exclude it. initialize() tests FTS5
+        availability with a throwaway 'CREATE VIRTUAL TABLE' and falls
+        back to LIKE-based queries with a warning log if unavailable.
+        """
         # episodes(id, agent_id, summary, context, outcome, timestamp, importance)
 
     async def store_episode(
@@ -585,7 +693,18 @@ class RelationshipMemory:
     ) -> None: ...
 
     async def apply_decay(self, decay_rate: float = 0.01) -> None:
-        """Decay all trust scores toward 0.5 (neutral)."""
+        """Decay all trust scores toward 0.5 (neutral).
+
+        Intentionally bidirectional: trust above 0.5 decays downward
+        (certainty erodes without reinforcement), and distrust below 0.5
+        decays upward (modeling natural forgiveness without requiring
+        positive interaction). This means an agent betrayed at trust 0.1
+        will gradually return to neutral — a deliberate design choice
+        that prevents permanent grudges in long-running simulations.
+
+        If unidirectional decay (toward 0.0 only) is preferred, the
+        decay target can be made configurable in a follow-up.
+        """
         ...
 
     async def get_relationship_summary(
@@ -725,6 +844,11 @@ CREATE INDEX idx_notes_agent ON notes(agent_id);
 CREATE INDEX idx_notes_topic ON notes(topic);
 
 -- FTS5 for recall_notes search
+-- Note: content_rowid=rowid uses the implicit integer rowid that SQLite
+-- auto-generates for tables without an INTEGER PRIMARY KEY. The notes
+-- table uses TEXT PRIMARY KEY (id), but SQLite always exposes an implicit
+-- integer rowid alongside it. FTS5 requires this integer rowid for
+-- content sync — it is NOT the TEXT id column.
 CREATE VIRTUAL TABLE notes_fts USING fts5(
     topic, content, tags_json,
     content=notes, content_rowid=rowid
@@ -817,9 +941,25 @@ class PersonaState:
 **Energy mechanics:**
 - Each LLM call / action costs `0.05` energy (configurable)
 - Each idle tick recovers `0.1` energy (configurable)
-- For non-tick agents (`passive` / `reactive` level without a tick loop), energy recovers passively at `+0.1` per elapsed `tick_interval_seconds` (default 60s) since the last action, computed lazily on the next `on_event()` call. This prevents agents without tick loops from permanently draining energy.
+- For non-tick agents (`passive` / `reactive` level without a tick loop), energy recovers passively at `+0.1` per elapsed `tick_interval_seconds` since the last action, computed lazily on the next `on_event()` call. This prevents agents without tick loops from permanently draining energy. **Default recovery interval**: If the agent has no `autonomy` config section (or no `tick_interval_seconds`), the default of 60 seconds is used as the recovery interval. The formula is: `recovery = 0.1 × floor(elapsed_seconds / recovery_interval)`, clamped to `[0.0, 1.0]`.
 - Low energy (< 0.3) → shorter responses, more delegation, less initiative
 - Energy is clamped to `[0.0, 1.0]`
+
+#### PersonaState Persistence
+
+`PersonaState` is in-memory during normal operation for performance, but must survive process restarts. Without persistence, an agent that has been running for hours — accumulating stress, tracking goal progress, draining energy — resets to defaults on restart.
+
+**Persistence strategy**: Serialize `PersonaState` to the `agent_state` table (see [agent_state schema](#agent_state-schema)) at the end of each `on_event()` and `on_tick()` cycle. Load from the table during `initialize()`. If no row exists (first run), use dataclass defaults.
+
+```python
+# At the end of on_event() / on_tick():
+await self._persist_persona_state()
+
+# During initialize():
+self.persona_state = await self._load_persona_state() or PersonaState()
+```
+
+This ensures mood, stress, energy, and goal progress are recovered after restarts. The `recent_context` list is **not** persisted — it is rebuilt from working memory on the next event.
 
 ### Behavioral Dimensions & Rendering
 
@@ -842,6 +982,8 @@ The persona `behavior` config uses **five structured 3-point enum dimensions** i
 | `formality` | `casual` \| `professional` \| `formal` | Tone, word choice, structure. Drives cross-hierarchy interaction feel. |
 | `risk_tolerance` | `cautious` \| `moderate` \| `bold` | Decision hedging, willingness to act on incomplete info, approval-seeking. Feeds into autonomy behavior. |
 | `expressiveness` | `reserved` \| `moderate` \| `expressive` | Emotional language, reactions to events, how feelings enter reasoning |
+
+**Defaults**: All five dimensions default to their middle value (`balanced` or `moderate`) when not specified in config. For persona agents, the `behavior` object is **required** in validation, but individual dimensions within it are optional — omitted dimensions use their default. This means a config that specifies only `directness: direct` produces a valid agent with `direct` directness and `balanced`/`moderate` for the other four dimensions. Task agents do not have a `behavior` section.
 
 #### Rendering Layer
 
@@ -1005,6 +1147,58 @@ Commands::Run { workflow, input, profile } => {
 }
 ```
 
+### Go Orchestrator Impact
+
+This RFC focuses on Python agent and Rust CLI changes. The Go orchestrator requires corresponding changes that are **documented here for awareness** but scoped to a follow-up RFC (or implemented as part of Phase 5 if small enough). The Python agent runtime can be developed and tested independently using mock orchestrator interactions.
+
+#### Assumptions This RFC Makes About the Orchestrator
+
+1. **Agent type routing**: The orchestrator's registry must understand `type: task` vs `type: persona` to route work appropriately. Task agents receive `ExecuteTask` RPCs; persona agents receive events. For Phase 1-4, persona agents are backward-compatible via the `handle()` bridge — the orchestrator can treat them as task agents. Phase 5 requires the orchestrator to dispatch events.
+2. **Unidirectional gRPC (for now)**: The current gRPC contract (`task.proto`, `agent_message.proto`) is orchestrator → agent only. This RFC's `ActionExecutor` handles `SEND_MESSAGE`, `DELEGATE`, and `SPAWN_SUB_AGENT`, all of which need to call **back** to the orchestrator. For MVP, these actions are handled within the Python process (single-process multi-agent hosting), avoiding the need for reverse gRPC. Cross-process action execution requires the callback protocol below.
+3. **Tick loop ownership**: The tick loop runs in the Python agent process (`TickScheduler`), not in the Go orchestrator. The orchestrator does not need to coordinate tick scheduling — it only needs to avoid sending tasks during ticks, which the per-agent `asyncio.Lock` handles.
+
+#### Deferred Orchestrator Changes (Follow-Up RFC)
+
+| Change | Why Needed | When |
+|--------|-----------|------|
+| **Agent type field in registry** | Route events to persona agents, tasks to task agents | When events cross process boundaries |
+| **Event routing service** | Dispatch `AgentEvent`s over gRPC to persona agents in separate processes | Multi-process deployment |
+| **Agent→Orchestrator callback proto** | `SEND_MESSAGE`, `DELEGATE`, `SPAWN_SUB_AGENT` actions need a reverse gRPC service | Cross-process persona interactions |
+| **Tick awareness** | Orchestrator avoids assigning tasks during tick execution | Optimization (not blocking) |
+
+**Proto changes for events/actions**: The 10 event types and 9 action types defined in this RFC are Python-only enums. If events flow over gRPC (multi-process deployment), these need proto definitions. For MVP (single-process), Python enums are sufficient. Proto definitions should be added when the orchestrator event routing RFC is written, ensuring the enum values are wire-compatible.
+
+#### Callback Protocol Sketch
+
+When agent-initiated actions need to cross process boundaries, a new gRPC service is required:
+
+```protobuf
+// Future: orchestrator_callback.proto
+service OrchestratorCallback {
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc DelegateTask(DelegateTaskRequest) returns (DelegateTaskResponse);
+  rpc SpawnSubAgent(SpawnSubAgentRequest) returns (SpawnSubAgentResponse);
+}
+```
+
+This is explicitly **not** implemented in this RFC. The `OrchestratorClient` protocol in `persona.py` is the Python-side interface that will wrap these RPCs when they're available. For now, `ActionExecutor` handles actions in-process.
+
+### REST API for Persona Observability
+
+Persona agent state, memory contents, and relationship data need REST endpoints for debugging and monitoring. Without these, diagnosing persona agent behavior requires direct SQLite inspection.
+
+**Endpoint signatures** (implementation deferred to Phase 5 or follow-up, but defined here for API contract stability):
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/agents/{id}/state` | GET | Current `PersonaState` (mood, stress, energy, goal_progress) |
+| `/api/v1/agents/{id}/memory/episodes` | GET | Recent episodes with optional `?query=` FTS5 search |
+| `/api/v1/agents/{id}/memory/notes` | GET | Agent's notes with optional `?topic=` filter |
+| `/api/v1/agents/{id}/memory/relationships` | GET | Trust scores and interaction summaries for all known agents |
+| `/api/v1/agents/{id}/tick` | POST | Manually trigger a single `on_tick()` cycle (debug/test only) |
+
+These endpoints are served by the Go orchestrator, which proxies to the Python agent process. Authentication and authorization follow the existing REST API patterns. The `POST .../tick` endpoint is restricted to development/staging environments.
+
 ### SQLite Schema Migration Strategy
 
 The memory system defines schemas for `episodes`, `relationships`, `interactions`, `notes`, and `agent_state` tables. Future phases will evolve these schemas (e.g., adding the `embedding` column for vector search). A versioned migration strategy is required from day one.
@@ -1053,6 +1247,21 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
 ```
 
 Migrations are forward-only (no rollback) — this is sufficient for an embedded database where the deployment unit is the whole application.
+
+#### `agent_state` Schema
+
+The `agent_state` table stores per-agent persistent state that must survive process restarts — the `auto_reflect_after` interaction counter (see [Configurable Learning Behavior](#configurable-learning-behavior)) and the serialized `PersonaState` (see [PersonaState Persistence](#personastate-persistence)):
+
+```sql
+CREATE TABLE IF NOT EXISTS agent_state (
+    agent_id TEXT PRIMARY KEY,
+    interaction_count INTEGER DEFAULT 0,   -- counter for auto_reflect_after nudge
+    persona_state_json TEXT,               -- serialized PersonaState (mood, stress, energy, goal_progress)
+    updated_at REAL NOT NULL
+);
+```
+
+This table is created in the initial migration (migration version 1) alongside `episodes`, `notes`, and other tables. The `persona_state_json` column stores a JSON blob with fields: `mood` (string enum value), `stress_level` (float), `energy` (float), `goal_progress` (dict). The `recent_context` list from `PersonaState` is **not** persisted — it is rebuilt from working memory on the next event.
 
 ### Memory Observability
 
@@ -1117,6 +1326,11 @@ The tick loop could cause runaway LLM calls if not bounded.
 - Per-agent token budgets (from `config/optimization.yaml`) apply to tick-initiated calls
 - **Framework-initiated memory operations** (working memory compression, episode summarization, `auto_reflect_after` nudges leading to tool calls) also consume tokens and must be attributed to the agent's budget. These costs can spike during periods of high activity — per-agent budget enforcement must include framework-initiated LLM calls, not just agent-initiated ones
 
+**Budget integration details**: The memory system reads the agent's token budget from `config/optimization.yaml` via the agent config's `model` field (which maps to a pricing/budget entry). Framework-initiated LLM calls (compression, summarization) use the same `LLMClient` as agent-initiated calls, so budget tracking is automatic if the client enforces it. When the budget is exhausted:
+- **Working memory compression**: Skipped — the agent operates with uncompressed context, which may cause LLM context overflow errors. This is preferable to silent data loss.
+- **Episode summarization**: Skipped — old episodes remain unsummarized but are still queryable.
+- **`auto_reflect_after` nudge**: Still injected (it's just a prompt string, no LLM cost), but if the agent's tool call triggers an LLM response, that response is subject to the budget.
+
 ### Agent Note Storage Abuse
 
 Memory tools allow agents to write to the shared SQLite database. A compromised or misbehaving agent could flood the notes table with garbage data, consuming disk space and degrading FTS5 query performance.
@@ -1127,6 +1341,20 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 - Note content size is bounded (configurable max, default 10KB per note)
 - Agent-scoped isolation (same pattern as episodic/relationship memory) — an agent can only write/read its own notes
 - Note writes are logged for audit
+
+### Error Recovery for Memory Failures
+
+SQLite writes can fail due to disk full, permission errors, WAL checkpoint failures, or database corruption. The MVP policy is **best-effort persistence** — memory failures don't crash the agent:
+
+| Failure | Behavior | Rationale |
+|---------|----------|-----------|
+| Episodic memory write fails | Log error, continue processing. Agent loses this episode but completes the current interaction. | Episodes are summaries — the interaction result is already returned to the caller. |
+| Relationship memory write fails | Log error, continue. Trust score update is lost. | Next interaction will re-derive trust delta. |
+| Note write fails | Return error to LLM via `ToolResult`. Agent sees the failure and can retry or skip. | Agent has agency over note-taking — surfacing the error is more useful than hiding it. |
+| Working memory (in-process) | Always available — no external dependency. | No failure mode. |
+| `initialize()` fails | **Fatal** — agent cannot start without memory tables. Propagate error, fail agent registration. | Running without any persistence would produce silently wrong behavior. |
+
+This policy is logged via the `memory_*` metrics (see [Memory Observability](#memory-observability)) so operators can detect persistent storage issues.
 
 ## Phased Implementation Plan
 
@@ -1159,22 +1387,44 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 **Dependencies**: Phase 1
 
-### Phase 3: Episodic Memory (SQLite) + Agent-Initiated Memory Tools
+### Phase 3a: Schema Migration + Episodic Memory Core
 
-**Summary**: Implement long-term episode storage with relevance-based retrieval. Add `store_note`, `recall_notes`, `update_note`, `delete_note` built-in tools for agent-initiated knowledge capture.
+**Summary**: Implement SQLite schema migration infrastructure and core episodic memory (store/recall).
 
 **Deliverables**:
 1. SQLite schema migration infrastructure (`schema_version` table, ordered migrations)
-2. Initial migration: episodes + notes + agent_state tables, FTS5 indexes, sync triggers
-3. `EpisodicMemory` class with store/recall/summarize
-4. Auto-summarization of old episodes (LLM-based compression)
+2. Initial migration: `episodes` + `agent_state` tables, FTS5 index for episodes, sync triggers
+3. `EpisodicMemory` class with `store_episode()` and `recall()` (FTS5-based)
+4. FTS5 availability check with `LIKE`-based fallback (see [Episodic Memory](#episodic-memory-long-term-storage))
 5. Integration with persona event handling (store episode after each interaction)
-6. `store_note`, `recall_notes`, `update_note`, `delete_note` tools in `agents/tools/builtin.py`
-7. Notes pruning logic (oldest low-access notes removed when `max_notes` exceeded)
-8. `auto_reflect_after` nudge injection + counter persistence in `agent_state` table
-9. Unit tests for CRUD, retrieval ranking, compression, note tools, note deletion, note pruning, migration
+6. Unit tests for CRUD, retrieval ranking, FTS5 trigger sync, migration forward-application
 
 **Dependencies**: Phase 2 (uses token estimation for compression)
+
+### Phase 3b: Agent-Initiated Memory Tools
+
+**Summary**: Add `store_note`, `recall_notes`, `update_note`, `delete_note` built-in tools for agent-initiated knowledge capture.
+
+**Deliverables**:
+1. Migration: `notes` table + `notes_fts` FTS5 index + sync triggers
+2. `store_note`, `recall_notes`, `update_note`, `delete_note` tools in `agents/tools/builtin.py`
+3. Notes pruning logic (oldest low-access notes removed when `max_notes` exceeded)
+4. `auto_reflect_after` nudge injection + counter persistence in `agent_state` table
+5. Unit tests for note CRUD, FTS5 search ranking, pruning, nudge injection
+
+**Dependencies**: Phase 3a (shares SQLite infrastructure and migration system)
+
+### Phase 3c: Episode Auto-Summarization
+
+**Summary**: Implement LLM-based compression of old episodes and reflection nudge behavior.
+
+**Deliverables**:
+1. `summarize_old_episodes()` method with LLM-based compression (raw → summarized → distilled)
+2. Configurable summarization thresholds (`older_than_days`, `compression_level`)
+3. `auto_reflect_after` counter persistence across restarts (round-trip test)
+4. Unit tests for summarization, compression level transitions
+
+**Dependencies**: Phase 3b (uses `agent_state` table, episode infrastructure)
 
 ### Phase 4: Relationship Memory
 
@@ -1187,7 +1437,7 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 4. Integration with persona state (trust deltas update relationship memory)
 5. Unit tests for trust math, decay, interaction recording
 
-**Dependencies**: Phase 3 (shares SQLite infrastructure)
+**Dependencies**: Phase 3a (shares SQLite infrastructure)
 
 ### Phase 5: PersonaAgent Runtime + Event Dispatch
 
@@ -1195,30 +1445,31 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 **Deliverables**:
 1. `ActionExecutor` class
-2. `EventDispatcher` class with `_inject_memory_context()` implementation
-3. `TickScheduler` class for autonomous agents (with graceful shutdown)
-4. `PersonaState` dataclass (`Mood` enum, `energy` field) and prompt injection
-5. `render_behavior()` function and `DIMENSION_DESCRIPTIONS` mapping
-6. Wire into `server.py`: start tick loops for persona agents, route events
-7. `create_persona_agent()` factory with LLM-powered `on_event()` decision loop
-8. Create a sample persona agent config for integration testing
-9. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle
-10. Wire CLI: `orch test --persona <id>` for persona consistency checks
+2. `EventDispatcher` class with `_inject_memory_context()` implementation and idle wake-up signal
+3. `TickScheduler` class for autonomous agents (with graceful shutdown and idle wake-up)
+4. Per-agent `asyncio.Lock` for concurrency control (see [Concurrency Control](#concurrency-control))
+5. `PersonaState` dataclass (`Mood` enum, `energy` field), prompt injection, and persistence to `agent_state` table
+6. `render_behavior()` function and `DIMENSION_DESCRIPTIONS` mapping (with dimension defaults)
+7. Wire into `server.py`: memory lifecycle calls at startup/shutdown, start tick loops for persona agents, route events
+8. `create_persona_agent()` factory with LLM-powered multi-turn `on_event()` decision loop
+9. Create a sample persona agent config for integration testing
+10. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle (including idle/wake), concurrency lock
+11. Wire CLI: `orch test --persona <id>` for persona consistency checks
 
 **Dependencies**: Phases 1-4
 
 ### Phase 6: Config Validation + Schema Updates
 
-**Summary**: Implement the `validate.py` config validator with JSON Schema support.
+**Summary**: Implement the `validate.py` config validator with JSON Schema support. Schema structure is updated in Phase 1 (to support `type` field), but persona-specific field validation is fully testable only after Phase 5 lands all persona config fields.
 
 **Deliverables**:
 1. Implement `validate_config_dir()` using `jsonschema` library
-2. Update `schemas/agent.schema.json` for persona fields
+2. Update `schemas/agent.schema.json` for persona fields (behavioral dimension defaults, memory config, autonomy)
 3. Add `make validate` target that actually works
-4. Unit tests for validation pass/fail cases
+4. Unit tests for validation pass/fail cases (including persona-specific fields, behavioral dimension enum validation, `behavior` defaults)
 5. Wire CLI: `orch validate <path>` — invoke Python validator or implement JSON Schema validation in Rust
 
-**Dependencies**: Phase 1 (schema changes)
+**Dependencies**: Phase 5 (all persona config fields must exist to validate them fully)
 
 ## Files Touched (Estimated)
 
@@ -1226,26 +1477,26 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 |-----------|-------|--------|
 | Python agents | `agents/base.py` | Add working memory integration to `_run_llm_loop()` |
 | Python agents | `agents/task_agent.py` | **New** — data-driven TaskAgent class |
-| Python agents | `agents/persona.py` | Add `PersonaState` (`Mood` enum, `energy`), `render_behavior()`, memory integration, `ActionExecutor`, `metadata` field on `AgentEvent` |
-| Python agents | `agents/memory/working.py` | **Implement** — `WorkingMemory`, `ContextSection`, token estimation |
-| Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema, migration infrastructure |
-| Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math, config trust bootstrapping |
+| Python agents | `agents/persona.py` | Add `PersonaState` (`Mood` enum, `energy`), `render_behavior()`, memory integration, `ActionExecutor`, `metadata` field on `AgentEvent`, per-agent `asyncio.Lock` for concurrency control, PersonaState persistence |
+| Python agents | `agents/memory/working.py` | **Implement** — `WorkingMemory`, `ContextSection`, token estimation (with accuracy note) |
+| Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema, migration infrastructure, FTS5 availability check with fallback |
+| Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math (bidirectional decay), config trust bootstrapping |
 | Python agents | `agents/memory/__init__.py` | Export memory classes |
 | Python agents | `agents/tools/builtin.py` | Add `store_note`, `recall_notes`, `update_note`, `delete_note` built-in tools |
-| Python agents | `agents/server.py` | Update agent loader, add tick scheduler lifecycle, notes config |
+| Python agents | `agents/server.py` | Update agent loader, add tick scheduler lifecycle, memory lifecycle (initialize/close), notes config |
 | Python agents | `agents/coder.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/reviewer.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/planner_agent.py` | **Remove** (instructions move to YAML) |
 | Python agents | `agents/validate.py` | **Implement** — JSON Schema config validation |
 | Config | `config/agents.yaml` | Add `type`, `instructions` fields; add sample persona agent |
-| Config | `schemas/agent.schema.json` | Add persona, autonomy, memory, type fields |
+| Config | `schemas/agent.schema.json` | Add persona, autonomy, memory, type fields; behavioral dimension defaults |
 | Tests | `tests/unit/python/test_task_agent.py` | **New** — TaskAgent tests |
 | Tests | `tests/unit/python/test_working_memory.py` | **New** — working memory tests |
-| Tests | `tests/unit/python/test_episodic_memory.py` | **New** — episodic memory tests |
+| Tests | `tests/unit/python/test_episodic_memory.py` | **New** — episodic memory tests (including FTS5 fallback) |
 | Tests | `tests/unit/python/test_memory_tools.py` | **New** — store_note, recall_notes, update_note, delete_note tool tests |
-| Tests | `tests/unit/python/test_relationship_memory.py` | **New** — relationship memory tests |
-| Tests | `tests/unit/python/test_persona_runtime.py` | **New** — event dispatch, tick loop, action executor tests |
-| Tests | `tests/unit/python/test_validate.py` | **New** — config validation tests |
+| Tests | `tests/unit/python/test_relationship_memory.py` | **New** — relationship memory tests (including bidirectional decay) |
+| Tests | `tests/unit/python/test_persona_runtime.py` | **New** — event dispatch, tick loop (idle/wake), action executor, concurrency lock, memory lifecycle tests |
+| Tests | `tests/unit/python/test_validate.py` | **New** — config validation tests (including dimension defaults) |
 | Tests | `tests/integration/test_persona_e2e.py` | **New** — persona agent end-to-end with mock LLM |
 | Rust CLI | `cli/src/main.rs` | Wire `run`, `status`, `agent list/info`, `logs`, `validate`, `test --persona` |
 | Rust CLI | `cli/Cargo.toml` | Add `reqwest`, `serde_json`, `serde` dependencies |
@@ -1253,8 +1504,8 @@ Memory tools allow agents to write to the shared SQLite database. A compromised 
 
 ## Test Strategy
 
-- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`, `delete_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes. FTS5 trigger sync correctness (insert/update/delete). Schema migration forward-application. Energy recovery for non-tick agents (lazy computation).
-- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle including graceful shutdown (verify in-flight actions complete). Memory persistence across agent restarts (SQLite round-trip). `auto_reflect_after` counter persistence across restarts. Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → delete → verify removal). `AgentEvent.metadata` cascade depth propagation through event dispatch.
+- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy (including accuracy note for structured/multilingual content). Trust math (clamping, bidirectional decay toward 0.5). PersonaState serialization (Mood enum, energy clamping) and persistence round-trip (serialize → restart → deserialize). Behavioral dimension rendering (all 5 dimensions × 3 values) and defaults for omitted dimensions. TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`, `delete_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes. FTS5 availability check and LIKE-based fallback. FTS5 trigger sync correctness (insert/update/delete). Schema migration forward-application. Energy recovery for non-tick agents (lazy computation with default 60s interval).
+- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Concurrency control: concurrent `on_event()` and `on_tick()` calls serialize via `asyncio.Lock`. Tick loop start/stop lifecycle including graceful shutdown (verify in-flight actions complete). Tick loop idle detection and wake-up on new event. Memory lifecycle: `initialize()` at startup, `close()` at shutdown with in-flight operation completion. Memory persistence across agent restarts (SQLite round-trip including PersonaState). `auto_reflect_after` counter persistence across restarts. Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → delete → verify removal). `AgentEvent.metadata` cascade depth propagation through event dispatch. Multi-turn tool-use loop in `_LLMPersonaAgent.on_event()`. Memory write failure resilience (agent continues processing on SQLite error).
 - **E2E / smoke tests**: Submit a workflow that routes to a persona agent configured in `agents.yaml`, verify completion. Not gated on this RFC — existing e2e tests cover task agent path.
 - **Manual tests**: Start a persona agent with `autonomy.level: semi-autonomous`, verify tick loop runs and logs actions. Verify `make validate` passes with updated configs.
 
@@ -1297,6 +1548,8 @@ The working memory's `compress_if_needed()` should trigger well before hitting t
 | tiktoken | ~99% | ~1ms per call | `tiktoken` (~2MB, model-specific encodings) |
 
 The cost of over-estimating tokens is unnecessary compression (minor quality loss). The cost of under-estimating is context overflow (LLM error). chars/4 slightly over-estimates for code (more ASCII), which errs on the safe side.
+
+**Known limitations**: For heavily structured content (JSON, YAML, code with long variable names), chars/4 can under-count by 30-40% because tokenizers split on punctuation and capitalization boundaries. For CJK text, chars/4 drastically over-counts. The 20% safety margin handles typical English/code workloads. Agents working with multilingual content should use the `accurate=True` path or risk context overflow.
 
 *Implementation:*
 
@@ -1490,6 +1743,46 @@ With 243 personality profiles, an interesting failure mode is when an LLM's outp
 ### Working Memory Pinning
 
 The working memory compression algorithm evicts lowest-priority sections first, but sometimes an agent encounters mid-conversation information that's critical to retain despite low structural priority. A `pin(section_name)` mechanism would let the agent (or framework) mark specific context sections as non-compressible for the duration of a task.
+
+### Agent Memory Export/Import
+
+For debugging, testing, and "personality transfer," agents should be able to export their full memory state (episodes, notes, relationships, persona state) to a JSON file and import it back. Use cases: snapshot before destructive experiments, clone a veteran agent's knowledge to bootstrap a new agent, share memories across environments (dev → staging), unit test with realistic memory state. CLI: `orch agent export-memory <id> --output agent-memory.json` and `orch agent import-memory <id> --input agent-memory.json`.
+
+### Conversation Threading in Episodic Memory
+
+Episodes are currently flat — each interaction produces one row. Multi-turn conversations spanning 10+ exchanges produce 10+ disconnected episodes. Adding a `thread_id` (or `conversation_id`) column would let `recall()` retrieve entire conversation arcs, not isolated moments. `recall()` could optionally expand results: "give me this episode and all episodes from the same thread."
+
+### Trust Decay as a Server-Level Scheduled Task
+
+Trust decay currently depends on someone calling `apply_decay()` — presumably during `on_tick()`. But passive agents don't have ticks, and agents that are offline accumulate no decay. A server-level scheduled task (e.g., daily) that iterates all agent pairs and applies decay would ensure consistent trust evolution regardless of agent activity.
+
+### Working Memory Compression History
+
+When working memory is compressed, the original content is lost. Keeping a log of compressed sections (original token count, compressed token count, timestamp, summary text) enables post-hoc analysis ("why did the agent forget about X?") and potential re-expansion from episodic memory when the compressed topic becomes relevant again.
+
+### Rate Limiting on Memory Tools
+
+Beyond `max_notes`, limit the rate at which agents call memory tools per tick/event cycle. An LLM in a note-taking spiral could burn through budget. A `max_writes_per_cycle` config (e.g., 3 `store_note` + `update_note` calls per `on_event`/`on_tick` cycle) is a cheap safeguard against pathological tool-use loops.
+
+### Relationship-Type-Aware Trust Dynamics
+
+`update_trust()` takes a flat delta, but trust dynamics should differ by relationship type. Managers might have higher expectations (negative delta multiplied by 1.5x), external agents might be harder to trust (positive delta at 0.5x), and subordinates might be more forgiving (negative delta at 0.5x). These multipliers would be internal to `update_trust()` based on the stored relationship type, creating more realistic organizational dynamics without API complexity.
+
+### Cross-Agent Knowledge Discovery
+
+While agents can't read each other's memories (proper isolation), the orchestrator could offer a knowledge routing query: given a topic, return which agents have relevant episodes (relevance score + episode count, no content exposed). The requesting agent can then decide to delegate to the knowledgeable agent. This enables organic knowledge routing without breaking memory isolation.
+
+### Memory Importance Auto-Scoring
+
+Episodes currently receive a static `importance: float = 0.5` default. Auto-scoring based on event type weight (`TASK_ASSIGNED` > `MENTION` > `TICK`), action count, trust delta magnitude, and agent energy at time of interaction would improve retrieval quality without agent involvement.
+
+### Agent "Forgetting" as Explicit Action
+
+The RFC has `delete_note` for agent-initiated knowledge removal, but no equivalent for episodic memory. An `archive_episode` tool that marks episodes as low-importance rather than deleting them would reduce retrieval noise while preserving auditability — useful when an agent realizes a past interaction was based on wrong assumptions.
+
+### Behavioral Dimension Compatibility Matrix
+
+With 243 possible personality profiles, some combinations may produce contradictory LLM behavior (e.g., `directness: direct` + `expressiveness: reserved` creates "blunt but emotionless" prompts). A compatibility matrix or set of "known good" profiles would help config authors. Could also be implemented as a validation warning rather than an error.
 
 ---
 
