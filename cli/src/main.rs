@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+use serde::{Deserialize, Serialize};
+use tabled::{Table, Tabled};
 
 /// Orchestr8 CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
@@ -10,6 +13,76 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
+}
+
+// ─── API request/response types ──────────────────────────────────────────
+
+#[derive(Serialize)]
+struct SubmitWorkflowRequest {
+    workflow_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inputs: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct SubmitWorkflowResponse {
+    run_id: String,
+    workflow_id: String,
+    status: String,
+}
+
+#[derive(Deserialize, Tabled)]
+struct WorkflowRunResponse {
+    run_id: String,
+    workflow_id: String,
+    status: String,
+    #[tabled(display_with = "fmt_option")]
+    error: Option<String>,
+    #[tabled(display_with = "fmt_option")]
+    started_at: Option<String>,
+    #[tabled(display_with = "fmt_option")]
+    finished_at: Option<String>,
+}
+
+#[derive(Deserialize, Tabled)]
+struct AgentResponse {
+    id: String,
+    address: String,
+    #[tabled(display_with = "fmt_vec")]
+    capabilities: Vec<String>,
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct ApiError {
+    error: String,
+    #[allow(dead_code)]
+    code: Option<String>,
+}
+
+fn fmt_option(val: &Option<String>) -> String {
+    match val {
+        Some(s) => s.clone(),
+        None => "\u{2014}".to_string(),
+    }
+}
+
+fn fmt_vec(val: &[String]) -> String {
+    if val.is_empty() {
+        "\u{2014}".to_string()
+    } else {
+        val.join(", ")
+    }
+}
+
+// ─── HTTP helper ─────────────────────────────────────────────────────────
+
+async fn api_error_message(resp: reqwest::Response) -> String {
+    let status = resp.status();
+    match resp.json::<ApiError>().await {
+        Ok(e) => format!("{}: {}", status, e.error),
+        Err(_) => format!("HTTP {status}"),
+    }
 }
 
 #[derive(Subcommand)]
@@ -188,48 +261,289 @@ enum MeshCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let client = reqwest::Client::new();
 
-    // TODO: Implement each command by calling the orchestrator REST API
-    match cli.command {
+    let result = match cli.command {
         Commands::Run {
             workflow,
-            input: _input,
-            profile,
-        } => {
-            println!("→ Running workflow: {} (profile: {})", workflow, profile);
-            // TODO: POST /api/v1/workflows/run
-            println!("  Not yet implemented");
+            input,
+            profile: _profile,
+        } => cmd_run(&client, &cli.server, &workflow, input.as_deref()).await,
+
+        Commands::Status { execution_id } => {
+            cmd_status(&client, &cli.server, execution_id.as_deref()).await
         }
-        Commands::Validate { path, strict } => {
-            println!("→ Validating config: {} (strict: {})", path, strict);
-            // TODO: Call Python validator or implement in Rust
-            println!("  Not yet implemented");
-        }
+
         Commands::Agent(cmd) => match cmd {
-            AgentCommands::List => {
-                println!("→ Listing agents...");
-                // TODO: GET /api/v1/agents
-            }
+            AgentCommands::List => cmd_agent_list(&client, &cli.server).await,
             AgentCommands::Info { agent_id } => {
-                println!("→ Agent info: {}", agent_id);
+                cmd_agent_info(&client, &cli.server, &agent_id).await
             }
             AgentCommands::Reload {
-                agent_id,
+                agent_id: _,
                 config: _config,
             } => {
-                println!("→ Reloading agent: {}", agent_id);
+                println!("{}", "Agent reload not yet implemented".yellow());
+                Ok(())
             }
         },
+
+        Commands::Logs {
+            execution_id,
+            follow: _follow,
+            agent: _agent,
+        } => cmd_logs(&client, &cli.server, &execution_id).await,
+
         // Exhaustive match instead of catch-all `_ =>` so that adding a new
         // Commands variant produces a compile error until its handler is added.
-        Commands::Test { .. } => println!("Command 'test' not yet implemented"),
-        Commands::Status { .. } => println!("Command 'status' not yet implemented"),
-        Commands::Logs { .. } => println!("Command 'logs' not yet implemented"),
-        Commands::Init { .. } => println!("Command 'init' not yet implemented"),
-        Commands::Replay { .. } => println!("Command 'replay' not yet implemented"),
-        Commands::Cost { .. } => println!("Command 'cost' not yet implemented"),
-        Commands::State(_) => println!("Command 'state' not yet implemented"),
-        Commands::Node(_) => println!("Command 'node' not yet implemented"),
-        Commands::Mesh(_) => println!("Command 'mesh' not yet implemented"),
+        Commands::Validate { path, strict } => {
+            println!(
+                "{}",
+                format!("Validating config: {path} (strict: {strict}) — not yet implemented")
+                    .yellow()
+            );
+            Ok(())
+        }
+        Commands::Test { .. } => {
+            println!("{}", "Command 'test' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::Init { .. } => {
+            println!("{}", "Command 'init' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::Replay { .. } => {
+            println!("{}", "Command 'replay' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::Cost { .. } => {
+            println!("{}", "Command 'cost' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::State(_) => {
+            println!("{}", "Command 'state' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::Node(_) => {
+            println!("{}", "Command 'node' not yet implemented".yellow());
+            Ok(())
+        }
+        Commands::Mesh(_) => {
+            println!("{}", "Command 'mesh' not yet implemented".yellow());
+            Ok(())
+        }
+    };
+
+    if let Err(e) = result {
+        eprintln!("{} {e}", "error:".red().bold());
+        std::process::exit(1);
+    }
+}
+
+// ─── Command implementations ─────────────────────────────────────────────
+
+async fn cmd_run(
+    client: &reqwest::Client,
+    server: &str,
+    workflow: &str,
+    input: Option<&str>,
+) -> Result<(), String> {
+    let inputs: Option<serde_json::Value> = match input {
+        Some(raw) => {
+            Some(serde_json::from_str(raw).map_err(|e| format!("invalid --input JSON: {e}"))?)
+        }
+        None => None,
+    };
+
+    let body = SubmitWorkflowRequest {
+        workflow_id: workflow.to_string(),
+        inputs,
+    };
+
+    let resp = client
+        .post(format!("{server}/api/v1/workflows/run"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+
+    let data: SubmitWorkflowResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("invalid response: {e}"))?;
+
+    println!(
+        "{} Workflow {} submitted (run_id: {})",
+        "✓".green().bold(),
+        data.workflow_id.bold(),
+        data.run_id
+    );
+    println!("  Status: {}", data.status);
+    Ok(())
+}
+
+async fn cmd_status(
+    client: &reqwest::Client,
+    server: &str,
+    execution_id: Option<&str>,
+) -> Result<(), String> {
+    match execution_id {
+        Some(id) => {
+            let resp = client
+                .get(format!("{server}/api/v1/workflows/{id}/status"))
+                .send()
+                .await
+                .map_err(|e| format!("connection failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(api_error_message(resp).await);
+            }
+
+            let run: WorkflowRunResponse = resp
+                .json()
+                .await
+                .map_err(|e| format!("invalid response: {e}"))?;
+
+            println!("{:<14} {}", "Run ID:".bold(), run.run_id);
+            println!("{:<14} {}", "Workflow:".bold(), run.workflow_id);
+            println!("{:<14} {}", "Status:".bold(), colorize_status(&run.status));
+            if let Some(ref err) = run.error {
+                println!("{:<14} {}", "Error:".bold(), err.red());
+            }
+            if let Some(ref t) = run.started_at {
+                println!("{:<14} {}", "Started:".bold(), t);
+            }
+            if let Some(ref t) = run.finished_at {
+                println!("{:<14} {}", "Finished:".bold(), t);
+            }
+        }
+        None => {
+            let resp = client
+                .get(format!("{server}/api/v1/workflows"))
+                .send()
+                .await
+                .map_err(|e| format!("connection failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(api_error_message(resp).await);
+            }
+
+            let runs: Vec<WorkflowRunResponse> = resp
+                .json()
+                .await
+                .map_err(|e| format!("invalid response: {e}"))?;
+
+            if runs.is_empty() {
+                println!("No workflow runs found.");
+            } else {
+                println!("{}", Table::new(&runs));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_agent_list(client: &reqwest::Client, server: &str) -> Result<(), String> {
+    let resp = client
+        .get(format!("{server}/api/v1/agents"))
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+
+    let agents: Vec<AgentResponse> = resp
+        .json()
+        .await
+        .map_err(|e| format!("invalid response: {e}"))?;
+
+    if agents.is_empty() {
+        println!("No agents registered.");
+    } else {
+        println!("{}", Table::new(&agents));
+    }
+    Ok(())
+}
+
+async fn cmd_agent_info(
+    client: &reqwest::Client,
+    server: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    let resp = client
+        .get(format!("{server}/api/v1/agents/{agent_id}"))
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+
+    let agent: AgentResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("invalid response: {e}"))?;
+
+    println!("{:<16} {}", "ID:".bold(), agent.id);
+    println!("{:<16} {}", "Address:".bold(), agent.address);
+    println!(
+        "{:<16} {}",
+        "Status:".bold(),
+        colorize_status(&agent.status)
+    );
+    println!(
+        "{:<16} {}",
+        "Capabilities:".bold(),
+        if agent.capabilities.is_empty() {
+            "—".to_string()
+        } else {
+            agent.capabilities.join(", ")
+        }
+    );
+    Ok(())
+}
+
+async fn cmd_logs(
+    client: &reqwest::Client,
+    server: &str,
+    execution_id: &str,
+) -> Result<(), String> {
+    let resp = client
+        .get(format!("{server}/api/v1/executions/{execution_id}/logs"))
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("failed to read response: {e}"))?;
+
+    println!("{body}");
+    Ok(())
+}
+
+fn colorize_status(status: &str) -> colored::ColoredString {
+    match status {
+        "completed" => status.green(),
+        "running" | "pending" => status.cyan(),
+        "failed" => status.red(),
+        "cancelled" => status.yellow(),
+        "retrying" => status.yellow(),
+        "healthy" => status.green(),
+        "degraded" => status.yellow(),
+        "offline" => status.red(),
+        _ => status.normal(),
     }
 }

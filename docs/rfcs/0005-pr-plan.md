@@ -122,10 +122,10 @@ Reviewed 2026-04-12. Report: `docs/pr-reviews/pr-047-review.md` (local-only, git
 
 #### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] All 5 v0.1 commands produce HTTP calls to correct endpoints
-- [ ] Error handling for connection refused, 404, 500
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] All 5 v0.1 commands produce HTTP calls to correct endpoints
+- [x] Error handling for connection refused, 404, 500
 
 ---
 
