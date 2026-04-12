@@ -64,6 +64,7 @@
       },
       "allOf": [
         {
+          "$comment": "Conditional validation: each if-block requires 'type' to be present (required: [type]) so that v0.1 agents — which omit the 'type' field entirely — skip these conditionals and pass validation without 'persona' or 'instructions'. This is intentional backward-compatibility: v0.1 and v0.2 agent entries coexist in the same agents.yaml.",
           "if": {
             "properties": { "type": { "const": "persona" } },
             "required": ["type"]

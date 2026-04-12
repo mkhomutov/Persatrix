@@ -115,6 +115,10 @@ agents:
   #     tick_interval_seconds: 60
   #     max_actions_per_tick: 3
   #     idle_after_ticks: 10
+  #     # The following boolean flags are defined in agent.schema.json
+  #     # (from extension spec E2.1) but are NOT enforced by RFC 0005.
+  #     # They are included here for schema-completeness; enforcement is
+  #     # deferred to a follow-up v0.2 RFC covering full autonomy levels.
   #     can_initiate_conversations: true
   #     can_delegate_tasks: true
   #     can_spawn_sub_agents: true

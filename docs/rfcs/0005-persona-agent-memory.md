@@ -153,6 +153,7 @@ class PersonaAgent(BaseAgent, ABC):
 ```python
 # In EventDispatcher.dispatch():
 async with agent._lock:
+    await self._inject_memory_context(agent, event)  # must be inside lock
     actions = await agent.on_event(event)
 
 # In TickScheduler._loop():
@@ -160,7 +161,7 @@ async with self._agent._lock:
     actions = await self._agent.on_tick()
 ```
 
-This guarantees at most one concurrent `on_event()` or `on_tick()` per agent. Events arriving while the agent is mid-tick queue on the lock and execute sequentially.
+This guarantees at most one concurrent `on_event()` or `on_tick()` per agent. Memory injection (`_inject_memory_context`, which mutates `WorkingMemory`) is inside the lock to prevent racing with a concurrent `on_tick()`. Events arriving while the agent is mid-tick queue on the lock and execute sequentially.
 
 #### Memory Lifecycle in Server
 
@@ -372,10 +373,13 @@ class EventDispatcher:
         if scheduler := self._tick_schedulers.get(agent_id):
             await scheduler.wake()
 
-        # Inject memory context before event handling
-        await self._inject_memory_context(agent, event)
-
         async with agent._lock:
+            # Inject memory context inside the lock to prevent racing with
+            # a concurrent on_tick() that may be mutating working memory.
+            # _inject_memory_context() calls wm.add_section() and spawns a
+            # fire-and-forget compress_if_needed() task — both mutate
+            # WorkingMemory state that on_tick() also reads/writes.
+            await self._inject_memory_context(agent, event)
             actions = await agent.on_event(event)
         await self._executor.execute(agent, actions)
         return actions
@@ -551,8 +555,9 @@ class WorkingMemory:
         # Implementation note: Compression triggers an LLM call (1-10s
         # latency). The summarization call may use a cheaper/faster model
         # than the agent's primary model — route via optimization.yaml's
-        # ``framework_model`` field when available (e.g. haiku-class for
-        # summarization vs sonnet-class for agent reasoning).
+        # ``context_management.summarization.model`` field when available
+        # (e.g. haiku-class for summarization vs sonnet-class for agent
+        # reasoning).
         ...
 
     def build_context(self) -> list[dict[str, str]]:
@@ -621,8 +626,9 @@ class EpisodicMemory:
         Like ``WorkingMemory.compress_if_needed()``, this triggers LLM
         calls for summarization.  These framework-initiated calls may be
         routed to a cheaper model than the agent's primary model via
-        ``optimization.yaml``'s ``framework_model`` setting — episode
-        summarization doesn't need persona-quality reasoning.
+        ``optimization.yaml``'s ``context_management.summarization.model``
+        setting — episode summarization doesn't need persona-quality
+        reasoning.
         """
         ...
 ```
@@ -1549,7 +1555,7 @@ This policy is logged via the `memory_*` metrics (see [Memory Observability](#me
 ## Test Strategy
 
 - **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy (including accuracy note for structured/multilingual content). Trust math (clamping, bidirectional decay toward 0.5). PersonaState serialization (Mood enum, energy clamping) and persistence round-trip (serialize → restart → deserialize). Behavioral dimension rendering (all 5 dimensions × 3 values) and defaults for omitted dimensions. TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values). Memory tools (`store_note`, `recall_notes`, `update_note`, `delete_note`) CRUD and permission gating. Note pruning when `max_notes` exceeded. FTS5 search ranking for notes. FTS5 availability check and LIKE-based fallback. FTS5 trigger sync correctness (insert/update/delete). Schema migration forward-application. Energy recovery for non-tick agents (lazy computation with default 60s interval).
-- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Concurrency control: concurrent `on_event()` and `on_tick()` calls serialize via `asyncio.Lock`. Tick loop start/stop lifecycle including graceful shutdown (verify in-flight actions complete). Tick loop idle detection and wake-up on new event. Memory lifecycle: `initialize()` at startup, `close()` at shutdown with in-flight operation completion. Memory persistence across agent restarts (SQLite round-trip including PersonaState). `auto_reflect_after` counter persistence across restarts. Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → delete → verify removal). `AgentEvent.metadata` cascade depth propagation through event dispatch. Multi-turn tool-use loop in `_LLMPersonaAgent.on_event()`. Memory write failure resilience (agent continues processing on SQLite error).
+- **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Concurrency control: concurrent `on_event()` and `on_tick()` calls serialize via `asyncio.Lock`. Tick loop start/stop lifecycle including graceful shutdown (verify in-flight actions complete). Tick loop idle detection and wake-up on new event. Memory lifecycle: `initialize()` at startup, `close()` at shutdown with in-flight operation completion. Memory persistence across agent restarts (SQLite round-trip including PersonaState). `auto_reflect_after` counter persistence across restarts. Persona agent handling task via backward-compatible `handle()` path. `auto_reflect_after` nudge injection after N interactions. Agent-initiated note-taking round-trip (store → recall → delete → verify removal). `AgentEvent.metadata` cascade depth propagation through event dispatch. Multi-turn tool-use loop in `_LLMPersonaAgent.on_event()`. Memory write failure resilience (agent continues processing on SQLite error). Cross-agent memory isolation: verify agent A cannot retrieve agent B's episodes, notes, or relationships through the shared SQLite database — validates `agent_id` scoping and closure-based tool factory injection (security-critical).
 - **E2E / smoke tests**: Submit a workflow that routes to a persona agent configured in `agents.yaml`, verify completion. Not gated on this RFC — existing e2e tests cover task agent path.
 - **Manual tests**: Start a persona agent with `autonomy.level: semi-autonomous`, verify tick loop runs and logs actions. Verify `make validate` passes with updated configs.
 
