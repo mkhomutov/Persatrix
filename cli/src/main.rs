@@ -103,6 +103,7 @@ fn validate_path_param(value: &str, label: &str) -> Result<(), String> {
         || value.contains("..")
         || value.contains('?')
         || value.contains('#')
+        || value.contains('%')
     {
         return Err(format!(
             "invalid {label}: contains characters not allowed in URL path"
@@ -157,7 +158,7 @@ enum Commands {
 
     /// View execution status and logs
     Status {
-        /// Execution ID (omit for latest)
+        /// Execution ID (omit to list all runs)
         execution_id: Option<String>,
     },
 
@@ -288,6 +289,15 @@ enum MeshCommands {
 async fn main() {
     let cli = Cli::parse();
     let server = cli.server.trim_end_matches('/');
+
+    if !server.starts_with("http://") && !server.starts_with("https://") {
+        eprintln!(
+            "{} --server must start with http:// or https://",
+            "error:".red().bold()
+        );
+        std::process::exit(1);
+    }
+
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))
@@ -599,5 +609,41 @@ fn colorize_status(status: &str) -> colored::ColoredString {
         "degraded" => status.yellow(),
         "offline" => status.red(),
         _ => status.normal(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_path_param_rejects_empty() {
+        assert!(validate_path_param("", "test").is_err());
+    }
+
+    #[test]
+    fn validate_path_param_rejects_traversal() {
+        assert!(validate_path_param("../etc/passwd", "test").is_err());
+        assert!(validate_path_param("foo/bar", "test").is_err());
+        assert!(validate_path_param("foo\\bar", "test").is_err());
+    }
+
+    #[test]
+    fn validate_path_param_rejects_query_fragment_injection() {
+        assert!(validate_path_param("id?admin=true", "test").is_err());
+        assert!(validate_path_param("id#fragment", "test").is_err());
+    }
+
+    #[test]
+    fn validate_path_param_rejects_percent_encoding() {
+        assert!(validate_path_param("id%2Ftraversal", "test").is_err());
+        assert!(validate_path_param("%00null", "test").is_err());
+    }
+
+    #[test]
+    fn validate_path_param_accepts_valid_ids() {
+        assert!(validate_path_param("my-agent-01", "test").is_ok());
+        assert!(validate_path_param("abc", "test").is_ok());
+        assert!(validate_path_param("550e8400-e29b-41d4-a716-446655440000", "test").is_ok());
     }
 }
