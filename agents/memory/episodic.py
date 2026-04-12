@@ -196,6 +196,13 @@ class EpisodicMemory:
     ) -> str:
         """Store a new episode. Returns the generated episode ID."""
         db = self._ensure_db()
+        # Clamp importance to [0.0, 1.0] — the scoring formula assumes
+        # non-negative values; negative importance would invert ranking.
+        if not 0.0 <= importance <= 1.0:
+            logger.warning(
+                "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
+            )
+            importance = max(0.0, min(1.0, importance))
         episode_id = str(uuid.uuid4())
         now = time.time()
         await db.execute(
@@ -268,26 +275,36 @@ class EpisodicMemory:
         limit: int,
         min_importance: float,
     ) -> list[aiosqlite.Row]:
-        """FTS5 search with composite BM25 x importance x access x recency scoring."""
-        async with db.execute(
-            """
-            SELECT e.*
-            FROM episodes_fts fts
-            JOIN episodes e ON e.rowid = fts.rowid
-            WHERE episodes_fts MATCH ?
-              AND e.agent_id = ?
-              AND e.importance >= ?
-            ORDER BY
-                (fts.rank * -1)
-                * e.importance
-                * (1.0 + ln(1 + e.access_count))
-                * (1.0 / (1 + (? - e.created_at) / 86400.0))
-                DESC
-            LIMIT ?
-            """,
-            (query, self._agent_id, min_importance, time.time(), limit),
-        ) as cursor:
-            return await cursor.fetchall()
+        """FTS5 search with composite BM25 x importance x access x recency scoring.
+
+        Falls back to LIKE search if the query contains malformed FTS5 syntax
+        (e.g. lone ``*``, unbalanced quotes, bare ``NOT``).
+        """
+        try:
+            async with db.execute(
+                """
+                SELECT e.*
+                FROM episodes_fts fts
+                JOIN episodes e ON e.rowid = fts.rowid
+                WHERE episodes_fts MATCH ?
+                  AND e.agent_id = ?
+                  AND e.importance >= ?
+                ORDER BY
+                    (fts.rank * -1)
+                    * e.importance
+                    * (1.0 + ln(1 + e.access_count))
+                    * (1.0 / (1 + (? - e.created_at) / 86400.0))
+                    DESC
+                LIMIT ?
+                """,
+                (query, self._agent_id, min_importance, time.time(), limit),
+            ) as cursor:
+                return await cursor.fetchall()
+        except Exception:
+            logger.warning(
+                "FTS5 query failed for %r, falling back to LIKE", query,
+            )
+            return await self._recall_like(db, query, limit, min_importance)
 
     async def _recall_like(
         self,
@@ -296,15 +313,20 @@ class EpisodicMemory:
         limit: int,
         min_importance: float,
     ) -> list[aiosqlite.Row]:
-        """LIKE fallback when FTS5 is unavailable."""
-        pattern = f"%{query}%"
+        """LIKE fallback when FTS5 is unavailable.
+
+        Escapes LIKE wildcard characters (``%``, ``_``) in the query so they
+        are matched literally rather than treated as pattern metacharacters.
+        """
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         async with db.execute(
             """
             SELECT *
             FROM episodes
             WHERE agent_id = ?
               AND importance >= ?
-              AND (summary LIKE ? OR context_json LIKE ?)
+              AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
             ORDER BY
                 importance
                 * (1.0 + ln(1 + access_count))

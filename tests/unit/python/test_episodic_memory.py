@@ -519,3 +519,123 @@ class TestEdgeCases:
         )
         results = await memory.recall("quantum physics")
         assert len(results) == 0
+
+
+# ─── FTS5 malformed query fallback ──────────────────────────
+
+
+class TestFTS5MalformedQueryFallback:
+    """FTS5 MATCH raises OperationalError on malformed syntax;
+    _recall_fts5 must catch it and fall back to LIKE."""
+
+    async def test_recall_lone_star(self, memory: EpisodicMemory):
+        """A lone '*' is invalid FTS5 syntax — should fall back, not crash."""
+        await memory.store_episode(summary="star test episode", context={})
+        results = await memory.recall("*")
+        # Falls back to LIKE '%*%' — no match expected, but no crash
+        assert isinstance(results, list)
+
+    async def test_recall_bare_not(self, memory: EpisodicMemory):
+        """Bare 'NOT' is invalid FTS5 syntax — should fall back."""
+        await memory.store_episode(summary="not test episode", context={})
+        results = await memory.recall("NOT")
+        assert isinstance(results, list)
+
+    async def test_recall_unbalanced_quotes(self, memory: EpisodicMemory):
+        """Unbalanced quotes are invalid FTS5 syntax — should fall back."""
+        await memory.store_episode(summary="quote test episode", context={})
+        results = await memory.recall('"unclosed')
+        assert isinstance(results, list)
+
+    async def test_recall_fts5_fallback_still_finds_via_like(self, memory: EpisodicMemory):
+        """When FTS5 fails, LIKE fallback should still find matching episodes."""
+        await memory.store_episode(
+            summary="recipe for NOT burning toast",
+            context={},
+        )
+        # "NOT" alone is invalid FTS5, but the episode summary contains "NOT"
+        # so LIKE fallback with '%NOT%' should still match
+        results = await memory.recall("NOT")
+        assert len(results) >= 1
+        assert "NOT" in results[0].summary
+
+
+# ─── LIKE wildcard escaping ─────────────────────────────────
+
+
+class TestLikeWildcardEscaping:
+    """LIKE metacharacters %, _ in queries must be escaped so they
+    match literally rather than acting as wildcards."""
+
+    async def test_percent_in_query_does_not_match_all(self):
+        """A query of '%' should not match every episode."""
+        mem = EpisodicMemory(agent_id="test-like", db_path=":memory:")
+        with patch("agents.memory.episodic._fts5_available", new_callable=AsyncMock) as mock_fts5:
+            mock_fts5.return_value = False
+            await mem.initialize()
+
+        await mem.store_episode(summary="no percent sign here", context={})
+        results = await mem.recall("%")
+        assert len(results) == 0
+        await mem.close()
+
+    async def test_underscore_in_query_matches_literally(self):
+        """A query of '_' should only match episodes containing literal '_'."""
+        mem = EpisodicMemory(agent_id="test-like", db_path=":memory:")
+        with patch("agents.memory.episodic._fts5_available", new_callable=AsyncMock) as mock_fts5:
+            mock_fts5.return_value = False
+            await mem.initialize()
+
+        await mem.store_episode(summary="has_underscore in text", context={})
+        await mem.store_episode(summary="no underscore meta here", context={})
+        results = await mem.recall("_")
+        assert len(results) == 1
+        assert "_" in results[0].summary
+        await mem.close()
+
+
+# ─── Importance validation ──────────────────────────────────
+
+
+class TestImportanceValidation:
+    """store_episode() clamps importance to [0.0, 1.0]."""
+
+    async def test_negative_importance_clamped(self, memory: EpisodicMemory):
+        ep_id = await memory.store_episode(
+            summary="Negative importance test",
+            context={},
+            importance=-0.5,
+        )
+        ep = await memory.get_episode(ep_id)
+        assert ep is not None
+        assert ep.importance == 0.0
+
+    async def test_over_one_importance_clamped(self, memory: EpisodicMemory):
+        ep_id = await memory.store_episode(
+            summary="Over one importance test",
+            context={},
+            importance=1.5,
+        )
+        ep = await memory.get_episode(ep_id)
+        assert ep is not None
+        assert ep.importance == 1.0
+
+    async def test_valid_importance_unchanged(self, memory: EpisodicMemory):
+        ep_id = await memory.store_episode(
+            summary="Normal importance test",
+            context={},
+            importance=0.7,
+        )
+        ep = await memory.get_episode(ep_id)
+        assert ep is not None
+        assert ep.importance == 0.7
+
+    async def test_boundary_values_accepted(self, memory: EpisodicMemory):
+        ep_id_zero = await memory.store_episode(
+            summary="Zero importance", context={}, importance=0.0,
+        )
+        ep_id_one = await memory.store_episode(
+            summary="One importance", context={}, importance=1.0,
+        )
+        assert (await memory.get_episode(ep_id_zero)).importance == 0.0
+        assert (await memory.get_episode(ep_id_one)).importance == 1.0
