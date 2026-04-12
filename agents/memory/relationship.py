@@ -130,41 +130,55 @@ class RelationshipMemory:
 
         *delta* is clamped to ±0.2 to prevent single interactions from
         swinging trust dramatically.
+
+        .. note::
+
+           The *reason* overwrites the previous ``notes`` value on the
+           relationship row — only the most recent trust-change reason
+           is retained.
         """
         db = self._ensure_db()
         # Clamp delta to prevent extreme single-event swings.
         delta = max(-_MAX_TRUST_DELTA, min(_MAX_TRUST_DELTA, delta))
 
-        current = await self.get_trust(other_agent_id)
-        new_trust = max(0.0, min(1.0, current + delta))
-        now = time.time()
+        # Pre-compute trust for the INSERT path (new relationship).
+        insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
 
+        # Use SQL-level arithmetic in ON CONFLICT to avoid a TOCTOU race:
+        # a prior implementation read trust via get_trust() then wrote the
+        # computed value, allowing a concurrent coroutine to cause a lost
+        # update between the SELECT and UPSERT await points.
+        #
+        # The INSERT path sets last_interaction_at = NULL because a trust
+        # update is not an interaction — only record_interaction() should
+        # populate that field.
         await db.execute(
             """
             INSERT INTO relationships
                 (agent_id, other_agent_id, trust_score, interaction_count,
                  last_interaction_at, notes)
-            VALUES (?, ?, ?, 0, ?, ?)
+            VALUES (?, ?, ?, 0, NULL, ?)
             ON CONFLICT(agent_id, other_agent_id) DO UPDATE SET
-                trust_score = ?,
+                trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
                 notes = ?
             """,
             (
                 self._agent_id,
                 other_agent_id,
-                new_trust,
-                now,
+                insert_trust,
                 reason,
-                new_trust,
+                delta,
                 reason,
             ),
         )
         await db.commit()
+
+        # Read back the actual trust value after the atomic update.
+        new_trust = await self.get_trust(other_agent_id)
         logger.debug(
-            "Trust %s→%s: %.3f → %.3f (delta=%.3f, reason=%s)",
+            "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
             self._agent_id,
             other_agent_id,
-            current,
             new_trust,
             delta,
             reason,

@@ -11,6 +11,7 @@ from agents.memory.relationship import (
     RelationshipMemory,
     RelationshipSummary,
     _DEFAULT_TRUST,
+    _MAX_RECENT_INTERACTIONS,
     _MAX_TRUST_DELTA,
 )
 
@@ -138,14 +139,18 @@ class TestUpdateTrust:
         assert new_trust == pytest.approx(0.35, abs=0.001)
 
     async def test_delta_clamped_positive(self, memory):
-        """Delta > 0.2 is clamped to 0.2."""
+        """Delta > _MAX_TRUST_DELTA is clamped."""
         new_trust = await memory.update_trust("bob", delta=0.5, reason="huge")
-        assert new_trust == pytest.approx(0.7, abs=0.001)  # 0.5 + 0.2
+        assert new_trust == pytest.approx(
+            _DEFAULT_TRUST + _MAX_TRUST_DELTA, abs=0.001,
+        )
 
     async def test_delta_clamped_negative(self, memory):
-        """Delta < -0.2 is clamped to -0.2."""
+        """Delta < -_MAX_TRUST_DELTA is clamped."""
         new_trust = await memory.update_trust("bob", delta=-0.8, reason="huge fail")
-        assert new_trust == pytest.approx(0.3, abs=0.001)  # 0.5 - 0.2
+        assert new_trust == pytest.approx(
+            _DEFAULT_TRUST - _MAX_TRUST_DELTA, abs=0.001,
+        )
 
     async def test_trust_clamped_to_max(self, memory):
         """Trust cannot exceed 1.0."""
@@ -305,6 +310,32 @@ class TestGetRelationshipSummary:
         summary = await memory.get_relationship_summary("bob")
         types = [i.interaction_type for i in summary.recent_interactions]
         assert types == ["third", "second", "first"]
+
+    async def test_limits_to_max_recent_interactions(self, memory):
+        """Only the most recent _MAX_RECENT_INTERACTIONS are returned."""
+        total = _MAX_RECENT_INTERACTIONS + 5
+        for i in range(total):
+            await memory.record_interaction("bob", f"chat-{i}")
+        summary = await memory.get_relationship_summary("bob")
+        assert len(summary.recent_interactions) == _MAX_RECENT_INTERACTIONS
+        # Newest first: last recorded interaction is first in the list.
+        assert summary.recent_interactions[0].interaction_type == f"chat-{total - 1}"
+        assert summary.recent_interactions[-1].interaction_type == f"chat-{total - _MAX_RECENT_INTERACTIONS}"
+
+    async def test_trust_only_relationship_has_null_last_interaction(self, memory):
+        """update_trust() alone should NOT set last_interaction_at."""
+        await memory.update_trust("bob", delta=0.1, reason="good work")
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.last_interaction_at is None
+
+    async def test_trust_preserved_after_interaction(self, memory):
+        """record_interaction() UPSERT preserves trust set by update_trust()."""
+        await memory.update_trust("bob", delta=0.1, reason="good work")
+        await memory.record_interaction("bob", "code_review")
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.trust_score == pytest.approx(0.6, abs=0.001)
+        assert summary.interaction_count == 1
+        assert summary.notes == "good work"
 
 
 class TestGetAllRelationships:
