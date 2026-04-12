@@ -73,6 +73,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
+| `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
@@ -115,7 +116,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 6/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 7/12 |
 
 ### Dependency Chain
 
@@ -215,6 +216,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/12) | 2026-04-12 |
 | [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/12) | 2026-04-12 |
 | [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/12) | 2026-04-12 |
+| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/12) | 2026-04-12 |
 
 ---
 
