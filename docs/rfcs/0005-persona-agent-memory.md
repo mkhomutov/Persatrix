@@ -26,6 +26,7 @@
     - [Future Enhancement: Semantic Search via Vector Embeddings](#future-enhancement-semantic-search-via-vector-embeddings)
   - [Relationship Memory (Trust & Interaction)](#relationship-memory-trust--interaction)
   - [Dynamic Persona State](#dynamic-persona-state)
+  - [Behavioral Dimensions & Rendering](#behavioral-dimensions--rendering)
   - [Data-Driven TaskAgent Consolidation](#data-driven-taskagent-consolidation)
   - [Config Schema Updates](#config-schema-updates)
   - [CLI Command Wiring](#cli-command-wiring)
@@ -71,10 +72,11 @@ The three v0.1 task agents (`CoderAgent`, `ReviewerAgent`, `PlannerAgent`) are s
 3. **Working memory**: Context window manager that tracks token usage per section (system prompt, persona, memories, conversation), automatically summarizes old history when the window fills, and supports priority-weighted retention.
 4. **Episodic memory**: SQLite-backed long-term storage of conversation summaries, decisions, and outcomes with relevance-based retrieval.
 5. **Relationship memory**: Per-agent-pair trust scores, interaction history tracking, and configurable trust decay.
-6. **Dynamic persona state**: Runtime mood, stress, goal progress, and relationship deltas injected into agent system prompts.
-7. **Agent type discrimination**: Explicit `type: task | persona` field in agent config, replacing capability heuristics.
-8. **Data-driven TaskAgent**: Single `TaskAgent` class driven by YAML `instructions` field, replacing `CoderAgent` / `ReviewerAgent` / `PlannerAgent`.
-9. **CLI command wiring**: Wire Rust CLI stubs to existing and new REST endpoints as each phase lands — `run`, `status`, `agent list/info`, `validate`, `test --persona`.
+6. **Dynamic persona state**: Runtime mood (enum-constrained), stress, energy, goal progress, and relationship deltas injected into agent system prompts.
+7. **Structured behavioral dimensions**: Replace free-text `traits` / `communication_style` / `decision_making` with five 3-point behavioral dimension enums (`directness`, `detail_focus`, `formality`, `risk_tolerance`, `expressiveness`), rendered into natural language for LLM prompts.
+8. **Agent type discrimination**: Explicit `type: task | persona` field in agent config, replacing capability heuristics.
+9. **Data-driven TaskAgent**: Single `TaskAgent` class driven by YAML `instructions` field, replacing `CoderAgent` / `ReviewerAgent` / `PlannerAgent`.
+10. **CLI command wiring**: Wire Rust CLI stubs to existing and new REST endpoints as each phase lands — `run`, `status`, `agent list/info`, `validate`, `test --persona`.
 
 ## Non-Goals
 
@@ -143,7 +145,25 @@ agents:
     type: "persona"                 # persona agent — event-driven with autonomy
     persona:
       title: "VP of Engineering"
-      background: "..."
+      background: |
+        15 years in software engineering. Former tech lead at a Series B startup.
+        Values pragmatism over perfection.
+      behavior:
+        directness: direct          # indirect | balanced | direct
+        detail_focus: big-picture    # big-picture | balanced | detail-focused
+        formality: professional      # casual | professional | formal
+        risk_tolerance: moderate     # cautious | moderate | bold
+        expressiveness: reserved     # reserved | moderate | expressive
+      quirks:
+        - "Starts every Monday with 'Alright, what's on fire?'"
+        - "Hates meetings longer than 30 minutes"
+      goals:
+        primary: "Ship v2.0 on time with acceptable quality"
+        secondary: ["Reduce tech debt by 20%"]
+        hidden: "Prove the team can self-organize"
+      knowledge:
+        domains: ["system design", "team management", "Go"]
+        limitations: ["frontend/CSS", "ML internals"]
     autonomy:
       level: "semi-autonomous"
       tick_interval_seconds: 60
@@ -514,22 +534,35 @@ CREATE TABLE IF NOT EXISTS interactions (
 
 ### Dynamic Persona State
 
-Runtime state injected into the system prompt before each LLM call:
+Runtime state injected into the system prompt before each LLM call. `mood` is constrained to an enum (not free-text) to prevent unpredictable drift when the framework auto-updates mood from interaction analysis. `energy` decays per action and recovers on idle, naturally pairing with the tick loop's `idle_after_ticks` mechanic.
 
 ```python
+class Mood(Enum):
+    """Constrained mood states. Each maps to known prompt behavior."""
+    NEUTRAL = "neutral"
+    FOCUSED = "focused"
+    FRUSTRATED = "frustrated"
+    ENERGIZED = "energized"
+    UNCERTAIN = "uncertain"
+    SATISFIED = "satisfied"
+
+
 @dataclass
 class PersonaState:
     """Mutable runtime state for a persona agent."""
-    mood: str = "neutral"
+    mood: Mood = Mood.NEUTRAL
     stress_level: float = 0.0           # 0.0 - 1.0
+    energy: float = 1.0                 # 0.0 - 1.0, decays per action, recovers on idle
     recent_context: list[str] = field(default_factory=list)
     goal_progress: dict[str, float] = field(default_factory=dict)
 
     def to_prompt_section(self) -> str:
         """Format state for injection into system prompt."""
-        lines = [f"Current mood: {self.mood}"]
+        lines = [f"Current mood: {self.mood.value}"]
         if self.stress_level > 0.3:
             lines.append(f"Stress level: {self.stress_level:.1f}/1.0")
+        if self.energy < 0.5:
+            lines.append(f"Energy level: {self.energy:.1f}/1.0 — conserve effort, prefer delegation")
         if self.recent_context:
             lines.append("Recent context:")
             for ctx in self.recent_context[-5:]:
@@ -540,6 +573,90 @@ class PersonaState:
                 lines.append(f"  - {goal}: {progress:.0%}")
         return "\n".join(lines)
 ```
+
+**Energy mechanics:**
+- Each LLM call / action costs `0.05` energy (configurable)
+- Each idle tick recovers `0.1` energy (configurable)
+- Low energy (< 0.3) → shorter responses, more delegation, less initiative
+- Energy is clamped to `[0.0, 1.0]`
+
+### Behavioral Dimensions & Rendering
+
+The persona `behavior` config uses **five structured 3-point enum dimensions** instead of free-text `traits` / `communication_style` / `decision_making`. This ensures consistent, comparable, and validatable personality configuration across agents.
+
+**Why structured dimensions over free-text:**
+- Config authors pick from a small set of meaningful knobs — two agents' differences are visible at a glance
+- The LLM gets a consistent, well-formed natural language description (not raw enums)
+- The framework can programmatically compare personalities, validate configs, and algorithmically generate personality profiles for experiments
+- 5 dimensions × 3 values = 243 distinct personality profiles — more than enough
+
+**Why 3-point enums, not floats or 5-point scales:** LLMs can't distinguish `assertiveness: 0.55` from `assertiveness: 0.65` in behavioral output. Three levels match the resolution at which LLMs actually produce different behavior.
+
+#### Dimension Definitions
+
+| Dimension | Values | What it controls |
+|-----------|--------|------------------|
+| `directness` | `indirect` \| `balanced` \| `direct` | Hedging, confrontation, qualification. The single most impactful axis. |
+| `detail_focus` | `big-picture` \| `balanced` \| `detail-focused` | Depth of analysis, response length, what gets flagged vs ignored |
+| `formality` | `casual` \| `professional` \| `formal` | Tone, word choice, structure. Drives cross-hierarchy interaction feel. |
+| `risk_tolerance` | `cautious` \| `moderate` \| `bold` | Decision hedging, willingness to act on incomplete info, approval-seeking. Feeds into autonomy behavior. |
+| `expressiveness` | `reserved` \| `moderate` \| `expressive` | Emotional language, reactions to events, how feelings enter reasoning |
+
+#### Rendering Layer
+
+A `render_behavior()` function maps dimensions to natural language for the system prompt:
+
+```python
+DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = {
+    "directness": {
+        "indirect": "Diplomatic and tactful. Softens criticism, asks questions instead of stating objections directly.",
+        "balanced": "Balances directness with tact. States positions clearly but frames feedback constructively.",
+        "direct": "Says exactly what they think. Doesn't sugarcoat feedback or hedge opinions.",
+    },
+    "detail_focus": {
+        "big-picture": "Focuses on high-level patterns and architecture. Skips minutiae to keep discussions strategic.",
+        "balanced": "Addresses both high-level concerns and specific details as needed.",
+        "detail-focused": "Thorough and meticulous. Flags edge cases, checks specifics, prefers exhaustive analysis.",
+    },
+    "formality": {
+        "casual": "Informal and approachable. Uses humor, contractions, and conversational language.",
+        "professional": "Clear and structured. Uses professional language without being stiff.",
+        "formal": "Precise and formal. Uses structured reports, proper titles, and measured language.",
+    },
+    "risk_tolerance": {
+        "cautious": "Wants thorough analysis before decisions. Asks for more data. Flags risks others might overlook.",
+        "moderate": "Balances speed with diligence. Comfortable with reasonable assumptions.",
+        "bold": "Willing to make calls with incomplete information and course-correct. Bias toward action.",
+    },
+    "expressiveness": {
+        "reserved": "Keeps emotions out of professional communication. Focuses on facts and logic.",
+        "moderate": "Acknowledges emotions when relevant but keeps focus on substance.",
+        "expressive": "Openly shares reactions and feelings. Communication is warm, enthusiastic, or frustrated as the situation warrants.",
+    },
+}
+
+
+def render_behavior(behavior: dict[str, str]) -> str:
+    """Convert structured behavior dimensions into natural language for LLM prompt."""
+    lines: list[str] = []
+    for dimension, value in behavior.items():
+        desc = DIMENSION_DESCRIPTIONS.get(dimension, {}).get(value)
+        if desc:
+            lines.append(f"- {desc}")
+    return "\n".join(lines)
+```
+
+This ensures 50 different config authors produce identically-formatted personality descriptions, varying only along intentional dimensions.
+
+#### What replaced what
+
+| Old field (extension spec E2.1) | Replacement | Rationale |
+|---|----|---|
+| `traits: [pragmatic, direct]` | `behavior` dimensions | Traits are ambiguous labels; dimensions are behavioral levers. "Pragmatic" = `risk_tolerance: moderate` + `detail_focus: big-picture` |
+| `communication_style` (free-text) | `directness` + `formality` + `detail_focus` | These three dimensions cover what people actually varied in `communication_style`, but consistently |
+| `decision_making` (free-text) | `risk_tolerance` + `directness` | "Data-driven" → `risk_tolerance: cautious`. "Trusts instincts" → `risk_tolerance: bold` |
+
+**Kept as free-text:** `background` and `quirks` — these set unique character voice and flavor, not controllable behavioral variation.
 
 ### Data-Driven TaskAgent Consolidation
 
@@ -588,7 +705,12 @@ agents:
 Update `schemas/agent.schema.json` to add:
 - `type` enum: `["task", "persona"]`
 - `instructions` string field (required for `type: task`)
-- `persona` object (required for `type: persona`)
+- `persona` object (required for `type: persona`), containing:
+  - `title`, `background` (string)
+  - `behavior` object with 5 enum-constrained dimensions: `directness` (`indirect` | `balanced` | `direct`), `detail_focus` (`big-picture` | `balanced` | `detail-focused`), `formality` (`casual` | `professional` | `formal`), `risk_tolerance` (`cautious` | `moderate` | `bold`), `expressiveness` (`reserved` | `moderate` | `expressive`)
+  - `quirks` (array of strings)
+  - `goals` object (`primary`, `secondary`, `hidden`)
+  - `knowledge` object (`domains`, `limitations`)
 - `autonomy` object with `level`, `tick_interval_seconds`, `max_actions_per_tick`, `idle_after_ticks`
 - `relationships` array
 - `memory` configuration object
@@ -666,7 +788,8 @@ Integration tests must verify that agent A cannot retrieve agent B's episodes or
 Dynamic persona state is injected into LLM prompts. Adversarial input in event payloads could attempt to manipulate the persona state section.
 
 **Mitigations:**
-- Persona state fields have type validation (mood is a string, stress_level is clamped 0.0-1.0)
+- Persona state fields have type validation (`mood` is enum-constrained to 6 values, `stress_level` and `energy` are clamped 0.0-1.0)
+- Behavioral dimensions are enum-constrained (3 values per dimension) — free-text personality injection is not possible
 - State is constructed from trusted internal sources (framework-managed), not from raw user input
 - Goal progress values are numeric, not free-text
 
@@ -753,8 +876,9 @@ The tick loop could cause runaway LLM calls if not bounded.
 1. `ActionExecutor` class
 2. `EventDispatcher` class
 3. `TickScheduler` class for autonomous agents
-4. `PersonaState` dataclass and prompt injection
-5. Wire into `server.py`: start tick loops for persona agents, route events
+4. `PersonaState` dataclass (`Mood` enum, `energy` field) and prompt injection
+5. `render_behavior()` function and `DIMENSION_DESCRIPTIONS` mapping
+6. Wire into `server.py`: start tick loops for persona agents, route events
 6. Create a sample persona agent config for integration testing
 7. Integration tests: event dispatch → on_event → action execution, tick loop lifecycle
 8. Wire CLI: `orch test --persona <id>` for persona consistency checks
@@ -780,7 +904,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 |-----------|-------|--------|
 | Python agents | `agents/base.py` | Add working memory integration to `_run_llm_loop()` |
 | Python agents | `agents/task_agent.py` | **New** — data-driven TaskAgent class |
-| Python agents | `agents/persona.py` | Add `PersonaState`, memory integration, `ActionExecutor` |
+| Python agents | `agents/persona.py` | Add `PersonaState` (`Mood` enum, `energy`), `render_behavior()`, memory integration, `ActionExecutor` |
 | Python agents | `agents/memory/working.py` | **Implement** — `WorkingMemory`, `ContextSection`, token estimation |
 | Python agents | `agents/memory/episodic.py` | **Implement** — `EpisodicMemory`, SQLite schema |
 | Python agents | `agents/memory/relationship.py` | **Implement** — `RelationshipMemory`, trust math |
@@ -805,7 +929,7 @@ The tick loop could cause runaway LLM calls if not bounded.
 
 ## Test Strategy
 
-- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization. TaskAgent YAML-driven behavior. Config validation pass/fail cases.
+- **Unit tests**: Each memory tier tested independently with in-memory SQLite. Token estimation accuracy. Trust math (clamping, decay). PersonaState serialization (Mood enum, energy clamping). Behavioral dimension rendering (all 5 dimensions × 3 values). TaskAgent YAML-driven behavior. Config validation pass/fail cases (including invalid behavior dimension values).
 - **Integration tests**: Full event dispatch cycle (event → on_event → actions → execution) with mock LLM. Tick loop start/stop lifecycle. Memory persistence across agent restarts (SQLite round-trip). Persona agent handling task via backward-compatible `handle()` path.
 - **E2E / smoke tests**: Submit a workflow that routes to a persona agent configured in `agents.yaml`, verify completion. Not gated on this RFC — existing e2e tests cover task agent path.
 - **Manual tests**: Start a persona agent with `autonomy.level: semi-autonomous`, verify tick loop runs and logs actions. Verify `make validate` passes with updated configs.
