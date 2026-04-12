@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -20,8 +22,10 @@ struct Cli {
 #[derive(Serialize)]
 struct SubmitWorkflowRequest {
     workflow_id: String,
+    /// Matches Go server's `map[string]string` — typed precisely to catch
+    /// non-string values on the client side instead of round-tripping a 400.
     #[serde(skip_serializing_if = "Option::is_none")]
-    inputs: Option<serde_json::Value>,
+    inputs: Option<HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -261,14 +265,26 @@ enum MeshCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("failed to create HTTP client");
 
     let result = match cli.command {
         Commands::Run {
             workflow,
             input,
-            profile: _profile,
-        } => cmd_run(&client, &cli.server, &workflow, input.as_deref()).await,
+            profile,
+        } => {
+            if profile != "default" {
+                eprintln!(
+                    "{}",
+                    "warning: --profile is not yet supported by the server, ignored".yellow()
+                );
+            }
+            cmd_run(&client, &cli.server, &workflow, input.as_deref()).await
+        }
 
         Commands::Status { execution_id } => {
             cmd_status(&client, &cli.server, execution_id.as_deref()).await
@@ -290,9 +306,23 @@ async fn main() {
 
         Commands::Logs {
             execution_id,
-            follow: _follow,
-            agent: _agent,
-        } => cmd_logs(&client, &cli.server, &execution_id).await,
+            follow,
+            agent,
+        } => {
+            if follow {
+                eprintln!(
+                    "{}",
+                    "warning: --follow is not yet supported, ignored".yellow()
+                );
+            }
+            if agent.is_some() {
+                eprintln!(
+                    "{}",
+                    "warning: --agent filter is not yet supported, ignored".yellow()
+                );
+            }
+            cmd_logs(&client, &cli.server, &execution_id).await
+        }
 
         // Exhaustive match instead of catch-all `_ =>` so that adding a new
         // Commands variant produces a compile error until its handler is added.
@@ -348,10 +378,10 @@ async fn cmd_run(
     workflow: &str,
     input: Option<&str>,
 ) -> Result<(), String> {
-    let inputs: Option<serde_json::Value> = match input {
-        Some(raw) => {
-            Some(serde_json::from_str(raw).map_err(|e| format!("invalid --input JSON: {e}"))?)
-        }
+    let inputs: Option<HashMap<String, String>> = match input {
+        Some(raw) => Some(serde_json::from_str(raw).map_err(|e| {
+            format!("invalid --input JSON (expected {{\"key\": \"value\", ...}}): {e}")
+        })?),
         None => None,
     };
 
