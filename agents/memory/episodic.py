@@ -3,6 +3,9 @@ Episodic memory — long-term storage of past interactions.
 
 Stores summaries of conversations, decisions, and outcomes in SQLite
 with FTS5 full-text search for relevance-ranked retrieval.
+
+Also provides agent-initiated note storage (migration v2) for
+structured knowledge the agent chooses to persist.
 """
 
 import json
@@ -10,7 +13,7 @@ import logging
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiosqlite
@@ -38,6 +41,30 @@ class Episode:
     compressed_at: float | None
     compression_level: int  # 0=raw, 1=summarized, 2=distilled
 
+
+@dataclass
+class Note:
+    """An agent-initiated note persisted via memory tools."""
+
+    id: str
+    agent_id: str
+    topic: str
+    content: str
+    tags: list[str] = field(default_factory=list)
+    access_count: int = 0
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+
+# Maximum content size for a single note (10 KB).
+_MAX_NOTE_CONTENT_BYTES = 10_240
+
+# Column list for SELECT queries on the notes table.
+_NOTE_COLS = (
+    "id", "agent_id", "topic", "content", "tags_json",
+    "access_count", "created_at", "updated_at",
+)
+_NOTE_SELECT = ", ".join(_NOTE_COLS)
 
 # Column list for SELECT queries — keeps _row_to_episode() positional
 # mapping stable when future migrations add columns to the episodes table.
@@ -93,6 +120,29 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         );
         """,
     ),
+    (
+        2,
+        "Notes table, FTS5 index, and sync triggers",
+        """
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tags_json TEXT,
+            access_count INTEGER DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_notes_agent
+            ON notes(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_notes_topic
+            ON notes(agent_id, topic);
+        CREATE INDEX IF NOT EXISTS idx_notes_created
+            ON notes(created_at DESC);
+        """,
+    ),
 ]
 
 # FTS5 DDL — applied only when FTS5 is available.
@@ -117,6 +167,31 @@ CREATE TRIGGER IF NOT EXISTS episodes_au AFTER UPDATE ON episodes BEGIN
         VALUES ('delete', old.rowid, old.summary, old.context_json);
     INSERT INTO episodes_fts(rowid, summary, context_json)
         VALUES (new.rowid, new.summary, new.context_json);
+END;
+"""
+
+# FTS5 DDL for notes — applied only when FTS5 is available.
+_NOTES_FTS5_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+    topic, content, tags_json,
+    content=notes, content_rowid=rowid
+);
+
+CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+    INSERT INTO notes_fts(rowid, topic, content, tags_json)
+        VALUES (new.rowid, new.topic, new.content, new.tags_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+    INSERT INTO notes_fts(notes_fts, rowid, topic, content, tags_json)
+        VALUES ('delete', old.rowid, old.topic, old.content, old.tags_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
+    INSERT INTO notes_fts(notes_fts, rowid, topic, content, tags_json)
+        VALUES ('delete', old.rowid, old.topic, old.content, old.tags_json);
+    INSERT INTO notes_fts(rowid, topic, content, tags_json)
+        VALUES (new.rowid, new.topic, new.content, new.tags_json);
 END;
 """
 
@@ -188,6 +263,7 @@ class EpisodicMemory:
         self._fts5 = await _fts5_available(self._db)
         if self._fts5:
             await self._db.executescript(_FTS5_DDL)
+            await self._db.executescript(_NOTES_FTS5_DDL)
             await self._db.commit()
             logger.info("FTS5 enabled for episodic memory")
         else:
@@ -434,3 +510,290 @@ class EpisodicMemory:
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else 0
+
+    # ─── Notes CRUD ─────────────────────────────────────────
+
+    async def store_note(
+        self,
+        topic: str,
+        content: str,
+        tags: list[str] | None = None,
+        max_notes: int = 500,
+    ) -> str:
+        """Store a new note. Prunes oldest low-access notes if over cap.
+
+        Returns the generated note ID.
+        """
+        db = self._ensure_db()
+        if not topic or not topic.strip():
+            raise ValueError("topic must not be empty")
+        if not content or not content.strip():
+            raise ValueError("content must not be empty")
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > _MAX_NOTE_CONTENT_BYTES:
+            raise ValueError(
+                f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
+                f"({len(content_bytes)} bytes)"
+            )
+
+        # Prune oldest low-access notes if at capacity.
+        await self._prune_notes(db, max_notes)
+
+        note_id = str(uuid.uuid4())
+        now = time.time()
+        await db.execute(
+            """
+            INSERT INTO notes
+                (id, agent_id, topic, content, tags_json,
+                 access_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                note_id,
+                self._agent_id,
+                topic.strip(),
+                content,
+                json.dumps(tags or []),
+                now,
+                now,
+            ),
+        )
+        await db.commit()
+        return note_id
+
+    async def recall_notes(
+        self,
+        query: str = "",
+        *,
+        limit: int = 10,
+    ) -> list[Note]:
+        """Retrieve notes matching query, ranked by relevance.
+
+        Increments access_count on returned notes.
+        """
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        limit = min(limit, _MAX_RECALL_LIMIT)
+        db = self._ensure_db()
+
+        if query and self._fts5:
+            rows = await self._recall_notes_fts5(db, query, limit)
+        elif query:
+            rows = await self._recall_notes_like(db, query, limit)
+        else:
+            rows = await self._recall_notes_recency(db, limit)
+
+        notes = [self._row_to_note(row) for row in rows]
+
+        if notes:
+            ids = [n.id for n in notes]
+            placeholders = ",".join("?" for _ in ids)
+            await db.execute(
+                f"UPDATE notes SET access_count = access_count + 1 "
+                f"WHERE id IN ({placeholders})",
+                ids,
+            )
+            await db.commit()
+            for note in notes:
+                note.access_count += 1
+
+        return notes
+
+    async def update_note(self, note_id: str, content: str) -> bool:
+        """Update note content. Topic and tags preserved. Returns True if found."""
+        db = self._ensure_db()
+        if not content or not content.strip():
+            raise ValueError("content must not be empty")
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > _MAX_NOTE_CONTENT_BYTES:
+            raise ValueError(
+                f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
+                f"({len(content_bytes)} bytes)"
+            )
+        now = time.time()
+        cursor = await db.execute(
+            "UPDATE notes SET content = ?, updated_at = ? "
+            "WHERE id = ? AND agent_id = ?",
+            (content, now, note_id, self._agent_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_note(self, note_id: str) -> bool:
+        """Delete a note by ID (agent-scoped). Returns True if found."""
+        db = self._ensure_db()
+        cursor = await db.execute(
+            "DELETE FROM notes WHERE id = ? AND agent_id = ?",
+            (note_id, self._agent_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def count_notes(self) -> int:
+        """Return the number of notes for this agent."""
+        db = self._ensure_db()
+        async with db.execute(
+            "SELECT COUNT(*) FROM notes WHERE agent_id = ?",
+            (self._agent_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def _prune_notes(self, db: aiosqlite.Connection, max_notes: int) -> None:
+        """Remove oldest low-access notes when count >= max_notes."""
+        async with db.execute(
+            "SELECT COUNT(*) FROM notes WHERE agent_id = ?",
+            (self._agent_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        count = row[0] if row else 0
+        if count < max_notes:
+            return
+        # Delete the oldest, least-accessed note(s) to make room.
+        overflow = count - max_notes + 1
+        await db.execute(
+            """
+            DELETE FROM notes WHERE id IN (
+                SELECT id FROM notes
+                WHERE agent_id = ?
+                ORDER BY access_count ASC, created_at ASC
+                LIMIT ?
+            )
+            """,
+            (self._agent_id, overflow),
+        )
+
+    async def _recall_notes_fts5(
+        self,
+        db: aiosqlite.Connection,
+        query: str,
+        limit: int,
+    ) -> list[aiosqlite.Row]:
+        """FTS5 search across topic, content, and tags."""
+        try:
+            async with db.execute(
+                f"""
+                SELECT {", ".join(f"n.{c}" for c in _NOTE_COLS)}
+                FROM notes_fts fts
+                JOIN notes n ON n.rowid = fts.rowid
+                WHERE notes_fts MATCH ?
+                  AND n.agent_id = ?
+                ORDER BY fts.rank * -1 DESC
+                LIMIT ?
+                """,
+                (query, self._agent_id, limit),
+            ) as cursor:
+                return await cursor.fetchall()
+        except sqlite3.OperationalError:
+            logger.warning(
+                "Notes FTS5 query failed for %r, falling back to LIKE", query,
+            )
+            return await self._recall_notes_like(db, query, limit)
+
+    async def _recall_notes_like(
+        self,
+        db: aiosqlite.Connection,
+        query: str,
+        limit: int,
+    ) -> list[aiosqlite.Row]:
+        """LIKE fallback when FTS5 is unavailable."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        async with db.execute(
+            f"""
+            SELECT {_NOTE_SELECT}
+            FROM notes
+            WHERE agent_id = ?
+              AND (topic LIKE ? ESCAPE '\\'
+                   OR content LIKE ? ESCAPE '\\'
+                   OR tags_json LIKE ? ESCAPE '\\')
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (self._agent_id, pattern, pattern, pattern, limit),
+        ) as cursor:
+            return await cursor.fetchall()
+
+    async def _recall_notes_recency(
+        self,
+        db: aiosqlite.Connection,
+        limit: int,
+    ) -> list[aiosqlite.Row]:
+        """No query — return most recently updated notes."""
+        async with db.execute(
+            f"""
+            SELECT {_NOTE_SELECT}
+            FROM notes
+            WHERE agent_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (self._agent_id, limit),
+        ) as cursor:
+            return await cursor.fetchall()
+
+    def _row_to_note(self, row: aiosqlite.Row) -> Note:
+        """Convert a database row to a Note dataclass."""
+        return Note(
+            id=row[0],
+            agent_id=row[1],
+            topic=row[2],
+            content=row[3],
+            tags=json.loads(row[4]) if row[4] else [],
+            access_count=row[5],
+            created_at=row[6],
+            updated_at=row[7],
+        )
+
+    # ─── Interaction counter (auto_reflect_after) ───────────
+
+    async def get_interaction_count(self) -> int:
+        """Get the current interaction count for this agent."""
+        db = self._ensure_db()
+        async with db.execute(
+            "SELECT interaction_count FROM agent_state WHERE agent_id = ?",
+            (self._agent_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def increment_interaction_count(self) -> int:
+        """Increment and return the new interaction count.
+
+        Creates the agent_state row if it doesn't exist (upsert).
+        """
+        db = self._ensure_db()
+        now = time.time()
+        await db.execute(
+            """
+            INSERT INTO agent_state (agent_id, interaction_count, updated_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(agent_id) DO UPDATE
+                SET interaction_count = interaction_count + 1,
+                    updated_at = ?
+            """,
+            (self._agent_id, now, now),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT interaction_count FROM agent_state WHERE agent_id = ?",
+            (self._agent_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def reset_interaction_count(self) -> None:
+        """Reset the interaction counter to zero."""
+        db = self._ensure_db()
+        now = time.time()
+        await db.execute(
+            """
+            INSERT INTO agent_state (agent_id, interaction_count, updated_at)
+            VALUES (?, 0, ?)
+            ON CONFLICT(agent_id) DO UPDATE
+                SET interaction_count = 0,
+                    updated_at = ?
+            """,
+            (self._agent_id, now, now),
+        )
+        await db.commit()

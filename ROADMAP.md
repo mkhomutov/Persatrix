@@ -72,10 +72,10 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
 | `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
-| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations) | ✅ Complete (RFC 0005 PR 3a) |
+| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes) | ✅ Complete (RFC 0005 PR 3a+3b) |
 | `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
-| `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request) | ✅ Complete (RFC 0004 PR 3) |
+| `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
 | `agents/tools/sandbox.py` | Filesystem path restriction (PathValidator) | ✅ Complete (100% coverage) |
 | `agents/generated/` | Python gRPC generated stubs | ✅ Complete (RFC 0004 PR 5a) |
@@ -115,7 +115,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 4/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 5/12 |
 
 ### Dependency Chain
 
@@ -213,6 +213,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/12) | 2026-04-12 |
 | [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/12) | 2026-04-12 |
 | [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/12) | 2026-04-12 |
+| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/12) | 2026-04-12 |
 
 ---
 
