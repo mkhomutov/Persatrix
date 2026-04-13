@@ -524,6 +524,16 @@ class _LLMPersonaAgent(PersonaAgent):
         """Typed access to persona state."""
         return self._state
 
+    def exclusive(self) -> asyncio.Lock:
+        """Return the per-agent concurrency lock.
+
+        Public accessor for the internal ``_lock`` so that same-module
+        components (``TickScheduler``) can serialize without reaching
+        into private attributes.  Called as ``async with agent.exclusive():``.
+        (PR #55 review: TickScheduler should use public API for agent lock.)
+        """
+        return self._lock
+
     # ─── System prompt assembly ────────────────────────
 
     def _build_system_prompt(self) -> str:
@@ -1128,15 +1138,23 @@ class ActionExecutor:
         self,
         agent_id: str,
         actions: list[AgentAction],
+        *,
+        cascade_depth: int = 0,
     ) -> list[dict[str, Any]]:
         """Execute actions and return results.
 
         Returns a list of dicts, one per action, with ``action_type`` and
         ``status`` fields. Non-fatal failures are logged but do not propagate.
+
+        Args:
+            cascade_depth: Current cascade depth from the parent dispatch.
+                Propagated to child dispatches via SEND_MESSAGE so the
+                cascade depth limit is enforced across the full event chain.
+                (PR #55 review: SEND_MESSAGE child events bypassed cascade limit.)
         """
         results: list[dict[str, Any]] = []
         for action in actions:
-            result = await self._execute_one(agent_id, action)
+            result = await self._execute_one(agent_id, action, cascade_depth=cascade_depth)
             results.append(result)
         return results
 
@@ -1144,6 +1162,8 @@ class ActionExecutor:
         self,
         agent_id: str,
         action: AgentAction,
+        *,
+        cascade_depth: int = 0,
     ) -> dict[str, Any]:
         match action.action_type:
             case ActionType.COMPLETE_TASK:
@@ -1153,7 +1173,9 @@ class ActionExecutor:
                     "result": action.payload.get("result", ""),
                 }
             case ActionType.SEND_MESSAGE:
-                return await self._handle_send_message(agent_id, action)
+                return await self._handle_send_message(
+                    agent_id, action, cascade_depth=cascade_depth,
+                )
             case ActionType.USE_TOOL:
                 # Tool execution happens inside _on_event_inner() via
                 # _execute_tools(). If USE_TOOL appears as a returned
@@ -1220,6 +1242,8 @@ class ActionExecutor:
         self,
         sender_id: str,
         action: AgentAction,
+        *,
+        cascade_depth: int = 0,
     ) -> dict[str, Any]:
         """Route SEND_MESSAGE to the EventDispatcher as a MESSAGE_RECEIVED event."""
         if self._dispatcher is None:
@@ -1242,6 +1266,11 @@ class ActionExecutor:
         dispatched = 0
         for target_id in mentions:
             try:
+                # Propagate cascade_depth so that cross-agent message
+                # chains are bounded by the dispatcher's max_cascade_depth.
+                # Without this, each SEND_MESSAGE would restart at depth 0,
+                # bypassing the cascade limit entirely.
+                # (PR #55 review: cascade depth not propagated through SEND_MESSAGE.)
                 event = AgentEvent(
                     event_type=EventType.MESSAGE_RECEIVED,
                     payload={
@@ -1250,6 +1279,7 @@ class ActionExecutor:
                     },
                     channel_id=target_channel,
                     sender_id=sender_id,
+                    metadata={"cascade_depth": cascade_depth},
                 )
                 await self._dispatcher.dispatch(target_id, event)
                 dispatched += 1
@@ -1322,11 +1352,25 @@ class EventDispatcher:
 
         .. note::
 
+           **Lock acquisition intentionally at agent level, not dispatcher level.**
+           RFC 0005 spec (L382–401) shows ``async with agent.exclusive()`` inside
+           ``dispatch()``.  However, ``on_event()`` already acquires the per-agent
+           lock internally.  Acquiring it here would deadlock because
+           ``asyncio.Lock`` is not reentrant (dispatch → lock → on_event → lock).
+           This is acceptable for MVP: only ``_LLMPersonaAgent`` exists, and it
+           always acquires the lock in ``on_event()``.  If ``PersonaAgent`` is
+           subclassed without internal locking, the dispatcher should be revisited
+           to acquire the lock externally — or use a reentrant lock.
+           (PR #55 review: dispatcher does not acquire per-agent lock.)
+
+        .. note::
+
            TODO(v0.2): Inject memory context (episodic recall, relationship
            summaries, recent notes) into the agent's working memory before
            event handling — see RFC 0005 Phase 5b ``_inject_memory_context()``.
            Deferred from this PR; persona agents currently rely on explicit
            memory tool calls for context retrieval.
+           Tracked as F-5b-1 in PR plan for PR 7 follow-up.
         """
         depth = event.metadata.get("cascade_depth", 0)
         if depth >= self._max_cascade_depth:
@@ -1373,8 +1417,11 @@ class EventDispatcher:
         # Deliver event
         actions = await agent.on_event(event)
 
-        # Execute resulting actions
-        await self._executor.execute(target_id, actions)
+        # Execute resulting actions, propagating cascade depth so that
+        # SEND_MESSAGE actions inherit the current depth for child dispatches.
+        await self._executor.execute(
+            target_id, actions, cascade_depth=depth + 1,
+        )
 
         return actions
 
@@ -1514,7 +1561,10 @@ class TickScheduler:
                     self._agent.agent_id,
                     self._idle_count,
                 )
-                async with self._agent._lock:
+                # Use public exclusive() API instead of reaching into
+                # _lock directly (PR #55 review: TickScheduler should
+                # use public API for agent lock).
+                async with self._agent.exclusive():
                     self._agent._state.recover_energy()
                 continue
 

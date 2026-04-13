@@ -787,6 +787,48 @@ class TestAgentServerPersonaLifecycle:
         await server.stop()
         assert len(server._tick_schedulers) == 0
 
+    async def test_memory_init_failure_skips_dispatch_registration(self):
+        """If initialize_memory() fails, agent is NOT registered with dispatcher or scheduler.
+
+        An agent whose memory initialization fails would crash on the first
+        dispatched event (store_episode() on unopened DB).  The server must
+        skip dispatcher and tick scheduler registration for such agents.
+        (PR #55 review: memory init failure should prevent dispatch registration.)
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 60,
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=config,
+            llm_client=_make_client(),
+        )
+
+        server = AgentServer()
+        server.agents["sarah-chen"] = agent
+
+        # Force initialize_memory() to fail
+        agent.initialize_memory = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("DB connection failed"),
+        )
+
+        with patch.object(server, '_self_register', new_callable=AsyncMock):
+            mock_grpc = AsyncMock()
+            mock_grpc.add_insecure_port = MagicMock(return_value=50051)
+            server._server = mock_grpc
+            await server.start()
+
+        # Agent should NOT be registered with dispatcher
+        assert "sarah-chen" not in server._dispatcher._agents
+        # Agent should NOT have a tick scheduler
+        assert "sarah-chen" not in server._tick_schedulers
+
+        await server.stop()
+
 
 # ─── Cross-Agent Memory Isolation ───────────────────────────
 

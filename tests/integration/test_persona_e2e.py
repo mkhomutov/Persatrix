@@ -287,6 +287,78 @@ class TestCrossAgentRouting:
             await agent_a.close_memory()
             await agent_b.close_memory()
 
+    async def test_cascade_depth_limits_cross_agent_chain(self):
+        """A → B → A chain terminates when cascade depth reaches max_cascade_depth.
+
+        Agent A sends message mentioning B, B replies mentioning A, and so on.
+        With max_cascade_depth=3, the chain should terminate without infinite
+        recursion.  Validates full-stack cascade limiting (not just the unit-level
+        depth check in EventDispatcher).
+        (PR #55 review: cascade depth integration test.)
+        """
+        # Each agent always replies mentioning the other
+        reply_a = LLMResponse(
+            text=(
+                '```json\n[{"action_type": "send_message", '
+                '"payload": {"content": "Reply from A", "mentions": ["agent-b"], '
+                '"channel_id": "general"}}]\n```'
+            ),
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(20, 30),
+        )
+        reply_b = LLMResponse(
+            text=(
+                '```json\n[{"action_type": "send_message", '
+                '"payload": {"content": "Reply from B", "mentions": ["agent-a"], '
+                '"channel_id": "general"}}]\n```'
+            ),
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(20, 30),
+        )
+
+        # Provide enough responses for max possible cascade invocations
+        agent_a = _create_persona(
+            agent_id="agent-a",
+            config={**_PERSONA_CONFIG, "id": "agent-a"},
+            responses=[reply_a for _ in range(10)],
+        )
+        agent_b = _create_persona(
+            agent_id="agent-b",
+            config={**_PERSONA_CONFIG, "id": "agent-b"},
+            responses=[reply_b for _ in range(10)],
+        )
+        await agent_a.initialize_memory()
+        await agent_b.initialize_memory()
+
+        try:
+            dispatcher = EventDispatcher(
+                agents={"agent-a": agent_a, "agent-b": agent_b},
+                max_cascade_depth=3,
+            )
+
+            # Kick off the cascade
+            event = AgentEvent(
+                event_type=EventType.TASK_ASSIGNED,
+                payload={"task": "Start a conversation with Agent B"},
+            )
+            actions = await dispatcher.dispatch("agent-a", event)
+
+            # Chain should complete (not hang or raise)
+            assert isinstance(actions, list)
+
+            # Total LLM calls across both agents should be bounded by
+            # cascade depth (at most 3 dispatches, each triggers one LLM call)
+            total_calls = (
+                agent_a._llm_client._provider.create_message.call_count
+                + agent_b._llm_client._provider.create_message.call_count
+            )
+            assert total_calls <= 3, (
+                f"Expected at most 3 LLM calls (cascade depth=3), got {total_calls}"
+            )
+        finally:
+            await agent_a.close_memory()
+            await agent_b.close_memory()
+
 
 # ─── Tick Scheduler Integration ──────────────────────────────
 

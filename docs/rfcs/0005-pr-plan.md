@@ -683,6 +683,18 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 > Items deferred beyond PR 7 — nice-to-have improvements: make energy thresholds configurable (`stress_level > 0.3`, `energy < 0.5` in `to_prompt_section()`), cap `recent_context` list size during accumulation (currently only capped on display via `[-5:]`), `SubAgentRequest.model` default value as a constant instead of hardcoded string, `APPROVAL_REQUESTED`/`APPROVAL_RESPONSE` event type explicit tests.
 
+**From PR 5b (PR #55 review):**
+
+> **Already applied** (committed on branch before merge): `EventDispatcher.dispatch()` uses `copy.deepcopy()` for event payload (was shallow spread), `TickScheduler._run()` recovers energy during idle tick skips, integration test config fixed to use valid string enum behavior values under `persona` key.
+
+| ID | File | Change |
+|----|------|--------|
+| F-5b-1 | `agents/persona.py` | `_inject_memory_context()` deferred as TODO — scope reduction from PR plan. Persona agents rely solely on explicit memory tool calls for context retrieval.  Implement automatic episodic recall + relationship summary + recent notes injection into working memory before event handling. |
+| F-5b-2 | `agents/server.py` | Memory init failure now prevents dispatch/scheduler registration (applied in PR #55 review fix pass). Verify no regressions if `initialize_memory()` is flaky in production. |
+| F-5b-3 | `agents/persona.py` | `_LLMPersonaAgent.exclusive()` added as public lock accessor (applied in PR #55 review fix pass). Consider promoting to base `PersonaAgent` class if external components need serialization. |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds.
+
 #### Key implementation details
 
 - Bundle all "Should Fix" findings from previous PR reviews.

@@ -344,7 +344,13 @@ class AgentServer:
             list(self.agents.keys()),
         )
 
-        # Initialize persona agent memory tiers before accepting requests
+        # Initialize persona agent memory tiers before accepting requests.
+        # Track agents that fail memory init so they are excluded from
+        # dispatcher and tick scheduler registration — an agent with
+        # uninitialized memory would crash on the first dispatched event
+        # or gRPC ExecuteTask (store_episode() on unopened DB).
+        # (PR #55 review: memory init failure should prevent dispatch registration.)
+        failed_memory_init: set[str] = set()
         for agent_id, agent in self.agents.items():
             if isinstance(agent, _LLMPersonaAgent):
                 try:
@@ -352,12 +358,18 @@ class AgentServer:
                     logger.info("Initialized memory for persona agent %s", agent_id)
                 except Exception:
                     logger.exception(
-                        "Failed to initialize memory for agent %s", agent_id,
+                        "Failed to initialize memory for agent %s — "
+                        "agent will NOT receive dispatched events or tick scheduling",
+                        agent_id,
                     )
+                    failed_memory_init.add(agent_id)
 
-        # Register persona agents with the event dispatcher
+        # Register persona agents with the event dispatcher, skipping
+        # agents whose memory initialization failed.
         for agent_id, agent in self.agents.items():
             if isinstance(agent, _LLMPersonaAgent):
+                if agent_id in failed_memory_init:
+                    continue
                 self._dispatcher.register_agent(agent_id, agent)
 
         # Deep-review D4: shared aiohttp session for self-registration and
@@ -367,9 +379,12 @@ class AgentServer:
         # Self-register with orchestrator after gRPC server is listening.
         await self._self_register()
 
-        # Start tick schedulers for autonomous persona agents
+        # Start tick schedulers for autonomous persona agents, skipping
+        # agents whose memory initialization failed.
         for agent_id, agent in self.agents.items():
             if isinstance(agent, _LLMPersonaAgent):
+                if agent_id in failed_memory_init:
+                    continue
                 autonomy = agent.config.get("autonomy", {})
                 level = autonomy.get("level", "reactive")
                 if level in ("semi-autonomous", "autonomous"):
