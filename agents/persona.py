@@ -322,17 +322,8 @@ _MAX_MENTIONS_PER_ACTION = 10
 
 # Default per-dispatch timeout (seconds) for SEND_MESSAGE cascades.
 # Prevents a hung target agent from blocking the sender indefinitely.
-# Separate from _DEFAULT_EVENT_TIMEOUT because dispatch timeout bounds a
-# single hop in a cascade chain, not the full event processing.
-#
-# Worst-case wall-clock for a single SEND_MESSAGE with 10 mentions across
-# 5 cascade levels: 10 × 5 × 60 = 3,000s.  The outermost on_event() timeout
-# (_DEFAULT_EVENT_TIMEOUT = 300s) fires first for the root event, but inner
-# cascade levels have no aggregate timeout.  This is acceptable for MVP
-# because (a) real cascades rarely exceed 2–3 hops, (b) max_cascade_depth
-# bounds recursion, and (c) individual dispatch timeouts cap each hop.
-# TODO(v0.3): add aggregate cascade wall-clock budget and make per-dispatch
-# timeout configurable via config["dispatch_timeout"].
+# Separate from _DEFAULT_EVENT_TIMEOUT: bounds a single hop, not full event.
+# TODO(v0.3): make configurable via config["dispatch_timeout"].
 # (PR #60 review: hard-coded 60s dispatch timeout.)
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
@@ -891,7 +882,9 @@ class _LLMPersonaAgent(PersonaAgent):
                     },
                 )]
 
-    async def _inject_memory_context(self, event: AgentEvent) -> None:
+    async def _inject_memory_context(
+        self, event: AgentEvent, *, query: str | None = None,
+    ) -> None:
         """Inject episodic, relationship, and note context into working memory.
 
         Queries the three memory tiers for content relevant to the current
@@ -913,7 +906,10 @@ class _LLMPersonaAgent(PersonaAgent):
         caught by ``except Exception``.
         (PR #60 review: document intent of broad exception handling.)
         """
-        query = self._format_event(event)
+        # query is pre-computed by _on_event_inner() to avoid calling
+        # _format_event() twice per event.  (F-60-2: deduplicate call.)
+        if query is None:
+            query = self._format_event(event)
 
         # 1. Episodic recall — recent episodes matching event content.
         # Skip for TICK events: the boilerplate "Autonomous tick: review
@@ -970,15 +966,23 @@ class _LLMPersonaAgent(PersonaAgent):
             if rel and rel.interaction_count > 0:
                 lines = [
                     f"Relationship with {rel.other_agent_id}:",
-                    f"  Trust: {rel.trust_score:.2f}",
-                    f"  Interactions: {rel.interaction_count}",
                 ]
+                # Only inject trust when it has deviated from the 0.5 default.
+                # A score of exactly 0.50 provides no useful signal to the LLM
+                # and implies a measured assessment when it's just the initial value.
+                # (F-60-4: skip default trust injection.)
+                if abs(rel.trust_score - 0.5) > 0.01:
+                    lines.append(f"  Trust: {rel.trust_score:.2f}")
+                lines.append(f"  Interactions: {rel.interaction_count}")
                 if rel.notes:
                     # TODO(v0.3): sanitize rel.notes when A2A protocol allows
                     # external agents — a compromised peer could store prompt
                     # injection text in its relationship notes.
                     # (PR #60 review: internal prompt injection via peer memory.)
-                    lines.append(f"  Notes: {rel.notes}")
+                    # Cap relationship notes to prevent excessive working memory
+                    # usage.  No storage cap exists on rel.notes currently.
+                    # (F-60-5: unbounded relationship notes in prompt.)
+                    lines.append(f"  Notes: {rel.notes[:300]}")
                 text = "\n".join(lines)
                 self._working_memory.add_section(ContextSection(
                     name="relationship_context",
@@ -1001,7 +1005,13 @@ class _LLMPersonaAgent(PersonaAgent):
         if notes:
             lines = ["Relevant notes:"]
             for note in notes:
-                lines.append(f"- [{note.topic}] {note.content}")
+                # Cap note content to prevent disproportionate token usage.
+                # Notes can be up to 10KB each (_MAX_NOTE_CONTENT_BYTES);
+                # 500 chars balances detail vs budget (longer than episode
+                # summaries since notes are user-authored).
+                # (F-60-1: note content not truncated.)
+                content = note.content[:500]
+                lines.append(f"- [{note.topic}] {content}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
                 name="recent_notes",
@@ -1028,16 +1038,16 @@ class _LLMPersonaAgent(PersonaAgent):
                 payload={"result": "Agent config missing required 'model' field"},
             )]
 
-        # 0. Inject memory context (episodic, relationship, notes)
-        await self._inject_memory_context(event)
+        # 0. Format event once and inject memory context.
+        # _format_event() is pure; computing it here avoids a redundant call
+        # inside _inject_memory_context().  (F-60-2: deduplicate _format_event.)
+        user_message = self._format_event(event)
+        await self._inject_memory_context(event, query=user_message)
 
         # 1. Build system prompt
         system_prompt = self._build_system_prompt()
 
-        # 2. Format the event as a user message
-        user_message = self._format_event(event)
-
-        # 3. Multi-turn tool-use loop
+        # 2. Multi-turn tool-use loop (user_message already computed above)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": user_message},
         ]
@@ -1518,9 +1528,13 @@ class ActionExecutor:
                     sender_id, target_id, exc_info=True,
                 )
 
+        # Use "failed" status when all dispatches timed out or errored,
+        # so callers don't see a successful-looking result with dispatched_to=0.
+        # (F-60-6: status "dispatched" with dispatched_to=0 is misleading.)
+        status = "dispatched" if dispatched > 0 else "failed"
         return {
             "action_type": "send_message",
-            "status": "dispatched",
+            "status": status,
             "dispatched_to": dispatched,
         }
 

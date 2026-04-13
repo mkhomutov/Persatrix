@@ -1115,6 +1115,7 @@ class TestPerDispatchTimeout:
         assert len(results) == 1
         # Dispatch timed out, so dispatched_to == 0 (timeout is caught, not counted).
         assert results[0]["dispatched_to"] == 0
-        assert results[0]["status"] == "dispatched"
+        # F-60-6: status is "failed" when all dispatches failed (was "dispatched").
+        assert results[0]["status"] == "failed"
 
         await agent.close_memory()

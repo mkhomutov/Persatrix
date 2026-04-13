@@ -347,7 +347,6 @@ class AgentServer:
         # Initialize memory, register with dispatcher, and start tick
         # schedulers for persona agents in a single pass.
         # (F-5b-9: consolidated three separate agent-iteration loops.)
-        failed_memory_init: set[str] = set()
         for agent_id, agent in self.agents.items():
             if not isinstance(agent, _LLMPersonaAgent):
                 continue
@@ -362,7 +361,8 @@ class AgentServer:
                     "agent will NOT receive dispatched events or tick scheduling",
                     agent_id,
                 )
-                failed_memory_init.add(agent_id)
+                # (F-60-8: removed dead failed_memory_init set — continue
+                # already skips the agent, no downstream loops need it.)
                 continue
 
             # Register with event dispatcher.

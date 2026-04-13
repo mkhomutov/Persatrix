@@ -1905,3 +1905,132 @@ class TestInjectMemoryContext:
         assert rel_section is None
         await agent.close_memory()
 
+    async def test_note_content_truncated(self):
+        """F-60-1: note content exceeding 500 chars is truncated.
+
+        Notes can be up to 10KB (_MAX_NOTE_CONTENT_BYTES).  Injecting them
+        without truncation wastes working memory budget and crowds out
+        episodic and relationship context.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        long_content = "x" * 1000
+        await agent._episodic_memory.store_note(
+            topic="verbose",
+            content=long_content,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "verbose"},
+        )
+        with patch.object(agent, "_format_event", return_value="verbose"):
+            await agent._inject_memory_context(event)
+
+        notes_section = agent._working_memory.get_section("recent_notes")
+        assert notes_section is not None
+        # The full 1000-char content should NOT appear — capped at 500.
+        assert long_content not in notes_section.content
+        assert "x" * 500 in notes_section.content
+        await agent.close_memory()
+
+    async def test_query_param_avoids_double_format_event(self):
+        """F-60-2: passing query= skips internal _format_event() call.
+
+        _on_event_inner() pre-computes user_message via _format_event()
+        and passes it as query= to avoid a redundant call.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture review"},
+        )
+
+        spy = MagicMock(wraps=agent._format_event)
+        agent._format_event = spy
+
+        await agent._inject_memory_context(event, query="pre-computed query")
+
+        # _format_event should NOT be called when query is provided.
+        spy.assert_not_called()
+        await agent.close_memory()
+
+    async def test_default_trust_not_injected(self):
+        """F-60-4: trust at default 0.5 is omitted from relationship context.
+
+        A trust score of 0.50 provides no useful signal (it's just the
+        initial value) and could mislead the LLM into thinking trust was
+        measured.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record interaction without sentiment to keep trust at ~0.5.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="neutral",
+            sentiment=0.0,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        # Trust line should NOT appear when trust is ~0.5 default.
+        assert "Trust:" not in rel_section.content
+        # Interaction count should still appear.
+        assert "Interactions:" in rel_section.content
+        await agent.close_memory()
+
+    async def test_relationship_notes_truncated(self):
+        """F-60-5: relationship notes exceeding 300 chars are truncated."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record interaction to create a relationship with long notes.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.8,
+        )
+        # Manually set long notes on the relationship.
+        long_notes = "n" * 600
+        async with agent._relationship_memory._db.execute(
+            "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",
+            (long_notes, "sarah-chen", "mike-torres"),
+        ):
+            pass
+        await agent._relationship_memory._db.commit()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        # Full 600-char notes should NOT appear — capped at 300.
+        assert long_notes not in rel_section.content
+        assert "n" * 300 in rel_section.content
+        await agent.close_memory()
+

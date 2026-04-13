@@ -78,21 +78,25 @@ def validate_config_dir(
     config_dir: str,
     schemas_dir: str = "schemas/",
     workflow_dir: str | None = None,
-) -> tuple[bool, list[ValidationError]]:
+) -> tuple[bool, list[ValidationError], int]:
     """Validate all YAML files in a config directory.
 
-    Returns a tuple of (success, errors). ``success`` is True when all
-    files pass validation. ``errors`` contains structured error objects
-    for programmatic consumption.
+    Returns a tuple of (success, errors, files_checked). ``success`` is True
+    when all files pass validation. ``errors`` contains structured error
+    objects for programmatic consumption. ``files_checked`` is the number
+    of files that were actually validated.
     (F-6a-1: structured validation return.)
+    (F-60-3: include files_checked to detect empty-dir edge case.)
     """
     config_path = Path(config_dir)
     if not config_path.exists():
-        return False, [ValidationError(config_dir, f"Config directory not found: {config_dir}")]
+        err = ValidationError(config_dir, f"Config directory not found: {config_dir}")
+        return False, [err], 0
 
     schemas_path = Path(schemas_dir)
     if not schemas_path.exists():
-        return False, [ValidationError(schemas_dir, f"Schemas directory not found: {schemas_dir}")]
+        err = ValidationError(schemas_dir, f"Schemas directory not found: {schemas_dir}")
+        return False, [err], 0
 
     all_errors: list[ValidationError] = []
     files_checked = 0
@@ -129,18 +133,21 @@ def validate_config_dir(
                     files_checked += 1
 
     if files_checked == 0:
-        return True, []
+        return True, [], 0
 
-    return (len(all_errors) == 0), all_errors
+    return (len(all_errors) == 0), all_errors, files_checked
 
 
 if __name__ == "__main__":
     config_dir = sys.argv[1] if len(sys.argv) > 1 else "config/"
-    success, errors = validate_config_dir(config_dir)
+    success, errors, files_checked = validate_config_dir(config_dir)
     if errors:
-        print(f"Validation failed — {len(errors)} error(s):\n")
+        print(f"Validation failed \u2014 {len(errors)} error(s):\n")
         for error in errors:
             print(error)
+    elif files_checked == 0:
+        # (F-60-3: distinguish "no files found" from "all files valid".)
+        print(f"Warning: no config files found in {config_dir}")
     elif success:
-        print("Validation passed")
+        print(f"Validation passed ({files_checked} file(s) checked)")
     sys.exit(0 if success else 1)
