@@ -497,16 +497,15 @@ class TestResolveAgentType:
     """Tests for _resolve_agent_type() — type-based dispatch (RFC 0005 PR 1a)."""
 
     def test_type_task_explicit(self):
-        assert _resolve_agent_type({"id": "x", "type": "task"}) is TaskAgent
+        assert _resolve_agent_type({"id": "x", "type": "task"}) == "task"
 
     def test_type_default_is_task(self):
-        """Agents without a type field default to TaskAgent (backward compat)."""
-        assert _resolve_agent_type({"id": "x"}) is TaskAgent
+        """Agents without a type field default to task (backward compat)."""
+        assert _resolve_agent_type({"id": "x"}) == "task"
 
-    def test_type_persona_raises_system_exit(self):
-        """PersonaAgent not yet implemented — must fail fast at startup."""
-        with pytest.raises(SystemExit, match="PersonaAgent is not yet implemented"):
-            _resolve_agent_type({"id": "x", "type": "persona"})
+    def test_type_persona(self):
+        """PersonaAgent type resolves to 'persona' string."""
+        assert _resolve_agent_type({"id": "x", "type": "persona"}) == "persona"
 
     def test_unknown_type_raises_system_exit(self):
         """Unknown type values must produce a clean operator-facing SystemExit."""

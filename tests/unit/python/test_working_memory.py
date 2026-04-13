@@ -8,8 +8,6 @@ All tests use mock LLM client — no real API calls.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
 

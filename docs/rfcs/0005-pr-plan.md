@@ -497,15 +497,31 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
-- [ ] Coverage ≥ 80% for new code
-- [ ] `ruff check agents/` clean
-- [ ] Cascade depth limiting tested
-- [ ] Idle detection and wake tested
-- [ ] Graceful shutdown tested (in-flight operations complete)
-- [ ] Memory lifecycle correct (initialize → use → close)
-- [ ] Cross-agent memory isolation verified
-- [ ] Sample persona agent in `agents.yaml`
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [x] Coverage ≥ 80% for new code
+- [x] `ruff check agents/` clean
+- [x] Cascade depth limiting tested
+- [x] Idle detection and wake tested
+- [x] Graceful shutdown tested (in-flight operations complete)
+- [x] Memory lifecycle correct (initialize → use → close)
+- [x] Cross-agent memory isolation verified
+- [x] Sample persona agent in `agents.yaml`
+
+#### Review findings (PR #55 → deferred to PR 7)
+
+> **Already applied** (committed on branch before merge): `EventDispatcher.dispatch()` uses `copy.deepcopy()` for event payload (was shallow spread), `TickScheduler._run()` recovers energy during idle tick skips, integration test config fixed to use valid string enum behavior values under `persona` key, memory init failure prevents dispatch/scheduler registration, `exclusive()` public lock accessor added, cascade depth propagated through `SEND_MESSAGE`, `recover_idle_energy()` public API added, WARNING log for channel-only messages without mentions.
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-5b-1 | Medium | `_inject_memory_context()` deferred as TODO — persona agents rely solely on explicit memory tool calls for context retrieval, LLMs may not proactively recall context | Implement automatic episodic recall + relationship summary + recent notes injection into working memory before event handling |
+| F-5b-4 | Medium | No per-dispatch timeout in `_handle_send_message()` — if a mentioned agent's `on_event()` hangs (despite event timeout), the sending agent blocks indefinitely. Cascade can stack 5 levels of blocking calls | Wrap each `self._dispatcher.dispatch()` call in `asyncio.wait_for()` with configurable timeout (e.g., 60s) |
+| F-5b-5 | Low | `_MAX_MENTIONS_PER_ACTION` truncation untested — resource exhaustion mitigation (cap 10 mentions per SEND_MESSAGE) has no test coverage | Add test: LLM response with 15 mentions → verify only 10 dispatched + warning logged |
+| F-5b-6 | Low | `_handle_send_message()` with `dispatcher=None` returns `"no_dispatcher"` status untested — misconfigured setup could silently lose messages | Add test: `ActionExecutor(dispatcher=None)` + SEND_MESSAGE → verify `"no_dispatcher"` status returned |
+| F-5b-7 | Low | `TickScheduler._MIN_INTERVAL` clamping untested — safety clamp for zero/negative config not verified | Add test: `TickScheduler(agent, interval=0.0)` → verify `scheduler._interval == 0.01` |
+| F-5b-8 | Low | Cascade depth termination only tested via integration test — no unit-level test for `EventDispatcher.dispatch()` rejecting events at `max_cascade_depth` | Add unit test: `dispatch()` with `metadata["cascade_depth"] >= max_cascade_depth` → empty actions + warning logged |
+| F-5b-9 | Low | Three separate agent iteration loops in `server.py start()` (memory init, dispatcher registration, tick scheduler start) — code duplication | Consolidate into single loop with `if agent_id in failed_memory_init: continue` guard |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test.
 
 ---
 
@@ -682,6 +698,24 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-5a-5 | `tests/unit/python/test_persona_runtime.py` | Add test for `on_tick()` when energy is already at `1.0` — verify `recover_energy()` clamp (trivially correct but validates contract). |
 
 > Items deferred beyond PR 7 — nice-to-have improvements: make energy thresholds configurable (`stress_level > 0.3`, `energy < 0.5` in `to_prompt_section()`), cap `recent_context` list size during accumulation (currently only capped on display via `[-5:]`), `SubAgentRequest.model` default value as a constant instead of hardcoded string, `APPROVAL_REQUESTED`/`APPROVAL_RESPONSE` event type explicit tests.
+
+**From PR 5b (PR #55 review):**
+
+> **Already applied** (committed on branch before merge): `EventDispatcher.dispatch()` uses `copy.deepcopy()` for event payload (was shallow spread), `TickScheduler._run()` recovers energy during idle tick skips, integration test config fixed to use valid string enum behavior values under `persona` key, memory init failure prevents dispatch/scheduler registration, `exclusive()` public lock accessor added, cascade depth propagated through `SEND_MESSAGE`, `recover_idle_energy()` public API added, WARNING log for channel-only messages without mentions.
+
+| ID | File | Change |
+|----|------|--------|
+| F-5b-1 | `agents/persona.py` | `_inject_memory_context()` deferred as TODO — scope reduction from PR plan. Persona agents rely solely on explicit memory tool calls for context retrieval. Implement automatic episodic recall + relationship summary + recent notes injection into working memory before event handling. |
+| F-5b-4 | `agents/persona.py` | No per-dispatch timeout in `_handle_send_message()` — if a mentioned agent's `on_event()` hangs, the sending agent blocks indefinitely. Cascade can stack 5 levels. Wrap each `self._dispatcher.dispatch()` call in `asyncio.wait_for()` with configurable timeout (e.g., 60s) |
+| F-5b-5 | `tests/unit/python/test_event_dispatch_tick.py` | Add test for `_MAX_MENTIONS_PER_ACTION` truncation — LLM response with 15 mentions → verify only 10 dispatched + warning logged |
+| F-5b-6 | `tests/unit/python/test_event_dispatch_tick.py` | Add test for `_handle_send_message()` with `dispatcher=None` → `ActionExecutor(dispatcher=None)` + SEND_MESSAGE → verify `"no_dispatcher"` status |
+| F-5b-7 | `tests/unit/python/test_event_dispatch_tick.py` | Add test for `TickScheduler._MIN_INTERVAL` clamping — `TickScheduler(agent, interval=0.0)` → verify `_interval == 0.01` |
+| F-5b-8 | `tests/unit/python/test_event_dispatch_tick.py` | Add unit test for cascade depth termination at dispatcher level — `dispatch()` with `metadata["cascade_depth"] >= max_cascade_depth` → empty actions + warning |
+| F-5b-9 | `agents/server.py` | Consolidate three agent iteration loops in `start()` (memory init, dispatcher registration, tick scheduler start) into single loop with `if agent_id in failed_memory_init: continue` guard |
+
+> Items F-5b-2 and F-5b-3 already applied in review fix passes (memory init failure isolation, `exclusive()` lock accessor). No further action needed.
+
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test.
 
 #### Key implementation details
 
