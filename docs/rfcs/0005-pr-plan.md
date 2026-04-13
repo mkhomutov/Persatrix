@@ -406,6 +406,17 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] Agent isolation verified
 - [x] Delta clamping tested
 
+#### Review findings (PR #53 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-4-1 | Medium | `update_trust()` and `record_interaction()` accept empty `other_agent_id` without error — downstream queries silently return no results | Add `if not other_agent_id or not other_agent_id.strip(): raise ValueError(...)` at top of both methods |
+| F-4-2 | Low | No concurrent `record_interaction()` test — `update_trust()` has one but `record_interaction()` (which also upserts relationships) does not | Add test: two concurrent calls → verify `interaction_count == 2` |
+| F-4-3 | Low | `reason` string in `update_trust()` unbounded — injected into LLM prompts via `get_relationship_summary()` | Cap at 1024 chars before storing |
+| F-4-4 | Low | `outcome` string in `record_interaction()` unbounded — same concern as F-4-3 | Cap at 1024 chars before storing |
+
+> All 4 findings assigned to **PR 7a** (memory tier review fixes).
+
 ---
 
 ### PR 5a: `feature/v02-persona-runtime` — PersonaAgent Runtime Core
@@ -457,6 +468,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] Behavioral dimension defaults applied for omitted dimensions
 - [x] PersonaState persistence round-trip tested
 - [x] `handle()` backward compatibility verified
+
+#### Review findings (PR #54 → deferred to PR 7)
+
+> **Already applied** (committed on branch before merge): `close_memory()` individual tier try/except for resilient close, `_parse_actions()` regex hardened from `\s*` to `\n` anchors to prevent polynomial backtracking, `render_behavior()` warns on unknown dimension keys, module docstring trimmed of PR 5b scope references.
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-5a-1 | Medium | `on_tick()` calls `_on_event_inner()` directly without timeout — slow LLM holds agent lock indefinitely | Wrap in `asyncio.wait_for()` with same configurable timeout as `on_event()` |
+| F-5a-2 | Low | No prompt injection trust boundary comment in `_format_event()` — `sender_id`/`content` will originate from untrusted sources when external bridges are added | Add security comment noting sanitization requirement for external bridges |
+| F-5a-3 | Low | `llm_client` not forwarded through `PersonaAgent.__init__` — `_LLMPersonaAgent` sets it directly | Forward through `__init__` or document override contract |
+| F-5a-4 | Low | All `_build_system_prompt()` tests use full config fixture — no minimal config test | Add test with empty `background`, no `quirks`, no `goals` |
+| F-5a-5 | Low | No test for `recover_energy()` clamp when energy already at 1.0 | Add test verifying clamp behavior |
+
+> All 5 findings assigned to **PR 7b** (persona + validation review fixes).
 
 ---
 
@@ -634,7 +659,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PRs 7a–7d: Review Follow-ups + RFC Close
 
-The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated review findings from PRs 1a–6b totaled ~48 actionable items (58 total captured: 48 assigned to sub-PRs + 2 already applied + 8 deferred beyond PR 7) across Python, Rust, and JSON schema — exceeding the 500-line PR limit. Each sub-PR is independently mergeable.
+The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated review findings from PRs 1a–6b totaled ~48 actionable items (60 total captured: 48 assigned to sub-PRs + 2 already applied + 10 deferred beyond PR 7) across Python, Rust, and JSON schema — exceeding the 500-line PR limit. Each sub-PR is independently mergeable.
 
 **Recommended order**: **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 7d**.
 
@@ -766,7 +791,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 #### PR 7a: `feature/v02-memory-review-fixes` — Memory Tier Review Fixes
 
-**Depends on**: PR 6b merged
+**Depends on**: PRs 6a, 6b merged (all feature PRs complete before review fixes)
 **Branch**: `feature/v02-memory-review-fixes`
 **Estimated size**: ~300–400 lines (targeted fixes + tests)
 
@@ -969,7 +994,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | 5b | 5 | `feature/v02-event-dispatch-tick` | 400–500 | 5a |
 | 6a | 6 | `feature/v02-config-validation` | 300–450 | 5b |
 | 6b | 6 | `feature/v02-cli-persona` | 150–250 | 5b |
-| 7a | — | `feature/v02-memory-review-fixes` | 300–400 | 6b |
+| 7a | — | `feature/v02-memory-review-fixes` | 300–400 | 6a, 6b |
 | 7b | — | `feature/v02-persona-validation-fixes` | 350–450 | 7a |
 | 7c | — | `feature/v02-cli-review-fixes` | 200–300 | 7a |
 | 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7a, 7b, 7c |
@@ -984,14 +1009,13 @@ PR 1a (TaskAgent + type system)
   └── PR 2 (Working Memory)                                 │
         └── PR 3a (Schema Migration + Episodic Core)        │
               ├── PR 3b (Memory Tools) ─────────────────┐   │
-              ├── PR 3c (Episode Summarization) [can ────┤   │
-              │         parallel with PR 3b]             │   │
+              ├── PR 3c (Episode Summarization) [indep.] │   │
               └── PR 4 (Relationship Memory) ───────────┤   │
                                                         ↓   │
                                         PR 5a (Persona Runtime Core)
                                               └── PR 5b (Event Dispatch + Tick)
-                                                    ├── PR 6a (Config Validation)
-                                                    └── PR 6b (CLI Persona)
+                                                    ├── PR 6a (Config Validation) ──────┐
+                                                    └── PR 6b (CLI Persona)             │
                                                           └── PR 7a (Memory Review Fixes)
                                                                 ├── PR 7b (Persona + Validation Fixes) ──┐
                                                                 └── PR 7c (CLI Review Fixes) [parallel] ─┤
