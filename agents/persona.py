@@ -937,8 +937,11 @@ class _LLMPersonaAgent(PersonaAgent):
                 # from consuming a disproportionate share of the working memory
                 # token budget.  build_context() enforces the overall budget, but
                 # truncating here gives fairer distribution across episodes.
+                # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                 # (PR #60 review: unbounded episode summary length.)
                 summary = ep.summary[:200]
+                if len(ep.summary) > 200:
+                    summary = summary.rsplit(" ", 1)[0] + "..."
                 lines.append(f"- {summary}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
@@ -981,8 +984,12 @@ class _LLMPersonaAgent(PersonaAgent):
                     # (PR #60 review: internal prompt injection via peer memory.)
                     # Cap relationship notes to prevent excessive working memory
                     # usage.  No storage cap exists on rel.notes currently.
+                    # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                     # (F-60-5: unbounded relationship notes in prompt.)
-                    lines.append(f"  Notes: {rel.notes[:300]}")
+                    rel_notes = rel.notes[:300]
+                    if len(rel.notes) > 300:
+                        rel_notes = rel_notes.rsplit(" ", 1)[0] + "..."
+                    lines.append(f"  Notes: {rel_notes}")
                 text = "\n".join(lines)
                 self._working_memory.add_section(ContextSection(
                     name="relationship_context",
@@ -1009,8 +1016,11 @@ class _LLMPersonaAgent(PersonaAgent):
                 # Notes can be up to 10KB each (_MAX_NOTE_CONTENT_BYTES);
                 # 500 chars balances detail vs budget (longer than episode
                 # summaries since notes are user-authored).
+                # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                 # (F-60-1: note content not truncated.)
                 content = note.content[:500]
+                if len(note.content) > 500:
+                    content = content.rsplit(" ", 1)[0] + "..."
                 lines.append(f"- [{note.topic}] {content}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
@@ -1044,8 +1054,19 @@ class _LLMPersonaAgent(PersonaAgent):
         user_message = self._format_event(event)
         await self._inject_memory_context(event, query=user_message)
 
-        # 1. Build system prompt
+        # 1. Build system prompt and append working memory context.
         system_prompt = self._build_system_prompt()
+
+        # Retrieve assembled working memory (episodic, relationship, notes)
+        # and append to the system prompt so the LLM sees relevant memories.
+        # build_context() returns sections sorted by priority (highest first),
+        # dropping those that exceed the token budget.
+        # (F-60-R2-1: build_context() was never called — injected memory
+        #  sections were silently discarded with no effect on LLM behavior.)
+        memory_sections = self._working_memory.build_context()
+        if memory_sections:
+            memory_text = "\n\n".join(s["content"] for s in memory_sections)
+            system_prompt += "\n\n" + memory_text
 
         # 2. Multi-turn tool-use loop (user_message already computed above)
         messages: list[dict[str, Any]] = [
@@ -1473,6 +1494,11 @@ class ActionExecutor:
         # makes the drop visible to operators, reducing confusion and wasted
         # LLM budget on undeliverable messages.
         # (PR #55 review: silent message drop when channel_id set without mentions.)
+        # Empty mentions is a no-op, not a failure.  Return "no_targets"
+        # instead of falling through to the dispatch loop where dispatched=0
+        # would produce a misleading "failed" status.  A channel-only message
+        # with no mentions is an intentional routing choice (future feature),
+        # not an error.  (F-60-R2-2: distinguish no-op from all-failed.)
         if not mentions:
             if target_channel:
                 logger.warning(
@@ -1486,6 +1512,11 @@ class ActionExecutor:
                     "Agent %s SEND_MESSAGE has no mentions, message not routed",
                     sender_id,
                 )
+            return {
+                "action_type": "send_message",
+                "status": "no_targets",
+                "dispatched_to": 0,
+            }
         dispatched = 0
         for target_id in mentions:
             try:

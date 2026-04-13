@@ -2034,3 +2034,105 @@ class TestInjectMemoryContext:
         assert "n" * 300 in rel_section.content
         await agent.close_memory()
 
+    async def test_episode_summary_truncated_with_ellipsis(self):
+        """F-60-R2-3: episode summaries exceeding 200 chars get word-boundary
+        truncation with trailing '...' so the LLM knows text was truncated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode with a long summary (>200 chars).
+        long_summary = "architecture " * 20  # 260 chars
+        await agent._episodic_memory.store_episode(
+            summary=long_summary,
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("episodic_recall")
+        assert section is not None
+        # Should end with "..." and NOT contain the full summary.
+        assert section.content.endswith("...")
+        assert long_summary not in section.content
+        await agent.close_memory()
+
+    async def test_note_content_truncated_with_ellipsis(self):
+        """F-60-R2-3: note content exceeding 500 chars gets word-boundary
+        truncation with trailing '...' so the LLM knows text was truncated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        long_content = "word " * 120  # 600 chars
+        await agent._episodic_memory.store_note(
+            topic="verbose",
+            content=long_content,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "verbose"},
+        )
+        with patch.object(agent, "_format_event", return_value="verbose"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is not None
+        # Should end with "..." and NOT contain the full content.
+        assert "..." in section.content
+        assert long_content not in section.content
+        await agent.close_memory()
+
+    async def test_memory_context_reaches_llm_prompt(self):
+        """F-60-R2-1 + F-60-R2-8: verify working memory context appears in
+        the system prompt sent to the LLM.
+
+        _inject_memory_context() adds sections to working memory, and
+        _on_event_inner() calls build_context() to include them in the
+        system prompt.  This end-to-end test captures the system= kwarg
+        from the LLM call and asserts the note context is present.
+        """
+        client = _make_client()
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        # Store a note so inject_memory_context has content to add.
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for the migration",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture review"},
+        )
+        # Patch _format_event to return a simple query matchable by LIKE
+        # fallback (FTS5 unavailable on :memory: SQLite).
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            async with agent._lock:
+                await agent._on_event_inner(event)
+
+        # Capture the system= kwarg passed to the LLM provider.
+        call_kwargs = client._provider.create_message.call_args
+        system_prompt = call_kwargs.kwargs.get("system", "")
+
+        # The note content should appear in the system prompt via
+        # build_context() → memory_sections append.
+        assert "event sourcing" in system_prompt.lower(), (
+            f"Expected note context in system prompt, got: {system_prompt[:500]}"
+        )
+        await agent.close_memory()
+
