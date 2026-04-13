@@ -97,7 +97,7 @@ Trunk-based development. See [BRANCHING.md](docs/BRANCHING.md) for details.
 
 ### Significant Design Changes
 
-For changes that affect architecture, cross-component interfaces, or introduce new subsystems, follow the [RFC process](docs/rfcs/README.md) before implementation.
+For changes that affect architecture, cross-component interfaces, or introduce new subsystems, follow the [RFC process](docs/rfcs/README.md) before implementation. See the [Development Workflow](docs/development-workflow.md) for the full lifecycle from version planning through RFC closure.
 
 ### Code Conventions
 

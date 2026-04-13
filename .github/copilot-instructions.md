@@ -134,6 +134,7 @@ CI runs on every PR: Go build+test, Python lint+test, Rust build+clippy, config 
 Detailed specs and design decisions live in `docs/`. Refer to these rather than duplicating content:
 
 - [ROADMAP.md](../ROADMAP.md) — Development progress, RFC status, component completion, merged PR history
+- [development-workflow.md](../docs/development-workflow.md) — End-to-end development lifecycle (version planning → RFC → PR plan → implementation → follow-ups → refactoring → close)
 - [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md) — Core MVP specification (agents, orchestrator, tasks, workflows, REST API)
 - [orchestr8-extension-spec.md](../docs/orchestr8-extension-spec.md) — Extension spec (personas, channels, bridges, memory, autonomy, blueprints)
 - [orchestr8-spec-audit.md](../docs/orchestr8-spec-audit.md) — Audit of 45 resolved spec gaps
