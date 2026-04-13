@@ -323,6 +323,21 @@ class EpisodicMemory:
 
         await _apply_migrations(self._db)
 
+        # Verify that ln() is available — the scoring formula in _SCORE_EXPR
+        # uses SQLite's ln() function, which requires SQLITE_ENABLE_MATH_FUNCTIONS
+        # at compile time.  Python's bundled SQLite typically includes this, but
+        # custom builds or Alpine musl-based Docker images may not.  Failing
+        # here with a clear message is better than a cryptic error at recall time
+        # (PR #59 review: ln() startup diagnostic).
+        try:
+            async with self._db.execute("SELECT ln(1)") as cursor:
+                await cursor.fetchone()
+        except sqlite3.OperationalError:
+            logger.warning(
+                "SQLite ln() function not available — recall scoring will fail. "
+                "Ensure Python is built with SQLITE_ENABLE_MATH_FUNCTIONS."
+            )
+
         self._fts5 = await _fts5_available(self._db)
         if self._fts5:
             await self._db.executescript(_FTS5_DDL)
@@ -468,6 +483,7 @@ class EpisodicMemory:
                     DESC
                 LIMIT ?
                 """,
+                # params: MATCH=1, agent_id=2, min_importance=3, _SCORE_EXPR.time=4, LIMIT=5
                 (query, self._agent_id, min_importance, time.time(), limit),
             ) as cursor:
                 return await cursor.fetchall()
@@ -503,6 +519,7 @@ class EpisodicMemory:
                 DESC
             LIMIT ?
             """,
+            # params: agent_id=1, min_importance=2, LIKE=3+4, _SCORE_EXPR_BARE.time=5, LIMIT=6
             (self._agent_id, min_importance, pattern, pattern, time.time(), limit),
         ) as cursor:
             return await cursor.fetchall()
@@ -525,6 +542,7 @@ class EpisodicMemory:
                 DESC
             LIMIT ?
             """,
+            # params: agent_id=1, min_importance=2, _SCORE_EXPR_BARE.time=3, LIMIT=4
             (self._agent_id, min_importance, time.time(), limit),
         ) as cursor:
             return await cursor.fetchall()

@@ -228,11 +228,21 @@ class WorkingMemory:
                     "Failed to compress section '%s'", section.name, exc_info=True
                 )
 
-        logger.info(
-            "Compression pass: %d → %d total tokens",
-            original_total,
-            self.total_tokens(),
-        )
+        # Only log at info level when compression actually reduced tokens;
+        # a no-op pass (all sections skipped/non-compressible) would add
+        # noise at info level (PR #59 review: guard unchanged state).
+        final_total = self.total_tokens()
+        if final_total != original_total:
+            logger.info(
+                "Compression pass: %d → %d total tokens",
+                original_total,
+                final_total,
+            )
+        else:
+            logger.debug(
+                "Compression pass: no change (%d total tokens)",
+                original_total,
+            )
 
     async def close(self) -> None:
         """Await outstanding compression and clear sections."""

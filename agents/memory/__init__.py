@@ -9,7 +9,19 @@ from .working import ContextSection, WorkingMemory, estimate_tokens
 
 @runtime_checkable
 class MemoryLifecycle(Protocol):
-    """Protocol for memory components that manage async resources."""
+    """Protocol for memory components that manage async resources.
+
+    ``EpisodicMemory`` and ``WorkingMemory`` satisfy this protocol
+    structurally.  ``RelationshipMemory`` does **not** — its
+    ``initialize()`` accepts an optional ``config_relationships``
+    parameter for trust seeding, so the signature differs.
+
+    Note: ``@runtime_checkable`` only checks method *existence*, not
+    signatures, so ``isinstance(rm, MemoryLifecycle)`` will return
+    ``True`` for ``RelationshipMemory`` even though argument lists
+    differ.  Callers needing strict type-safety should use static
+    type checkers (mypy / pyright) rather than runtime ``isinstance``.
+    """
 
     async def initialize(self) -> None: ...
 

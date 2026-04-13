@@ -1285,3 +1285,22 @@ class TestZeroImportanceRecall:
         episodes = await memory.recall(query="", limit=10)
         ids = [e.id for e in episodes]
         assert ep_id in ids, "Zero-importance episodes should be visible via non-zero scoring baseline"
+
+
+# ─── MemoryLifecycle protocol (EpisodicMemory) ─────────────
+
+
+class TestEpisodicMemoryLifecycle:
+    """Verify EpisodicMemory satisfies MemoryLifecycle protocol (PR #59 review).
+
+    WorkingMemory was already tested in test_working_memory.py (F-2-5).
+    EpisodicMemory structurally satisfies the same protocol — both have
+    async initialize() and async close() with matching signatures.
+    """
+
+    def test_episodic_memory_satisfies_memory_lifecycle(self):
+        from agents.memory import MemoryLifecycle
+        assert isinstance(
+            EpisodicMemory(agent_id="test", db_path=":memory:"),
+            MemoryLifecycle,
+        )
