@@ -102,9 +102,11 @@
     },
     "permissions": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "filesystem": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "read": { "type": "array", "items": { "type": "string" } },
             "write": { "type": "array", "items": { "type": "string" } },
@@ -113,6 +115,7 @@
         },
         "network": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allow": { "type": "array", "items": { "type": "string" } },
             "deny": { "type": "array", "items": { "type": "string" } }
@@ -120,6 +123,7 @@
         },
         "shell": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allowed_commands": { "type": "array", "items": { "type": "string" } },
             "max_execution_seconds": { "type": "integer" }
@@ -172,6 +176,7 @@
         },
         "goals": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "primary": { "type": "string" },
             "secondary": { "type": "array", "items": { "type": "string" } },
@@ -180,6 +185,7 @@
         },
         "knowledge": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "domains": { "type": "array", "items": { "type": "string" } },
             "limitations": { "type": "array", "items": { "type": "string" } }
@@ -189,6 +195,7 @@
     },
     "autonomy": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "level": {
           "type": "string",
@@ -223,6 +230,7 @@
     "memory": {
       "type": "object",
       "description": "Memory configuration for persona agents (RFC 0005)",
+      "additionalProperties": false,
       "properties": {
         "db_path": {
           "type": "string",
@@ -231,6 +239,7 @@
         },
         "notes": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -260,6 +269,7 @@
         "episodic": {
           "type": "object",
           "description": "Episodic memory configuration (extension spec E7.2)",
+          "additionalProperties": false,
           "properties": {
             "retention_days": {
               "type": "integer",
@@ -272,6 +282,7 @@
         "relationship": {
           "type": "object",
           "description": "Relationship memory configuration (extension spec E7.2)",
+          "additionalProperties": false,
           "properties": {
             "decay_rate": {
               "type": "number",
@@ -287,6 +298,7 @@
     "relationship": {
       "type": "object",
       "required": ["agent_id", "type"],
+      "additionalProperties": false,
       "properties": {
         "agent_id": { "type": "string" },
         "type": { "type": "string" },

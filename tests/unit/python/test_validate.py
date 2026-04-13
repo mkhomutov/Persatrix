@@ -176,6 +176,33 @@ class TestValidTaskAgent:
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
+    def test_v01_agent_without_type_passes(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """v0.1 agent (no type/instructions/persona) must pass validation.
+
+        The schema's allOf conditionals gate on ``required: ["type"]`` so
+        that v0.1 agents — which omit ``type`` entirely — skip the
+        persona/task conditionals and validate with only base required
+        fields.  A regression here would break ``make validate`` for all
+        legacy v0.1 configurations.
+        """
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "legacy-agent",
+                    "name": "Legacy",
+                    "role": "Does stuff",
+                    "model": "claude-sonnet-4-20250514",
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
 
 class TestBehaviorDimensions:
     def test_invalid_directness_value_fails(
@@ -494,6 +521,229 @@ class TestEdgeCases:
         """Empty YAML file (None content) should not crash."""
         (config_dir / "agents.yaml").write_text("", encoding="utf-8")
         assert validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_missing_schema_file_reports_error(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Missing schema file should report a clean error, not crash.
+
+        Mirrors the graceful handling already used for workflow schemas
+        (``if wf_schema_path.exists()``).  Covers the case where a schema
+        referenced in ``_SCHEMA_MAP`` is accidentally deleted while the
+        schemas directory still exists.
+        """
+        _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
+        (schemas_dir / "agent.schema.json").unlink()
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_malformed_schema_file_reports_error(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Malformed JSON schema should report error, not raise."""
+        _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
+        (schemas_dir / "agent.schema.json").write_text(
+            "{invalid json", encoding="utf-8"
+        )
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+
+class TestMultiAgentConfig:
+    """Validates allOf conditionals work across array items with mixed types."""
+
+    def test_mixed_task_and_persona_agents_pass(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Multiple agents with different types in one file should pass.
+
+        Real-world ``config/agents.yaml`` has 3 task + 1 persona agents.
+        This validates the allOf conditionals don't interfere with each
+        other across array items.
+        """
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "code-writer",
+                    "type": "task",
+                    "name": "Code Writer",
+                    "role": "Writes code",
+                    "model": "claude-sonnet-4-20250514",
+                    "instructions": "You are a code writer.",
+                },
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah Chen",
+                    "role": "VP of Engineering",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "VP of Engineering",
+                        "background": "15 years experience.",
+                        "behavior": {"directness": "direct"},
+                    },
+                },
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_one_invalid_agent_fails_whole_file(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """A valid task agent + an invalid persona agent (missing persona)
+        should fail validation for the file."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "code-writer",
+                    "type": "task",
+                    "name": "Code Writer",
+                    "role": "Writes code",
+                    "model": "claude-sonnet-4-20250514",
+                    "instructions": "You are a code writer.",
+                },
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah Chen",
+                    "role": "VP",
+                    "model": "claude-sonnet-4-20250514",
+                    # Missing 'persona'
+                },
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+
+class TestRangeConstraints:
+    """Validates schema minimum/maximum constraints on numeric fields."""
+
+    def test_trust_level_above_max_fails(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """relationship.trust_level has maximum: 1 in schema."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah",
+                    "role": "Lead",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "Lead",
+                        "background": "Engineer.",
+                        "behavior": {},
+                    },
+                    "relationships": [
+                        {
+                            "agent_id": "mike-torres",
+                            "type": "peer",
+                            "trust_level": 1.5,  # max is 1.0
+                        }
+                    ],
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_temperature_above_max_fails(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """temperature has maximum: 2 in schema."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "code-writer",
+                    "type": "task",
+                    "name": "Code Writer",
+                    "role": "Writes code",
+                    "model": "claude-sonnet-4-20250514",
+                    "instructions": "You are a code writer.",
+                    "temperature": 3.0,  # max is 2
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_autonomy_typo_rejected(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Typo in autonomy field name should be caught by additionalProperties: false."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah",
+                    "role": "Lead",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "Lead",
+                        "background": "Engineer.",
+                        "behavior": {},
+                    },
+                    "autonomy": {
+                        "level": "semi-autonomous",
+                        "tic_interval_seconds": 30,  # typo: should be tick_interval_seconds
+                    },
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_memory_typo_rejected(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Typo in memory field name should be caught by additionalProperties: false."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah",
+                    "role": "Lead",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "Lead",
+                        "background": "Engineer.",
+                        "behavior": {},
+                    },
+                    "memory": {
+                        "episodic": {
+                            "retaintion_days": 90,  # typo: should be retention_days
+                        },
+                    },
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 

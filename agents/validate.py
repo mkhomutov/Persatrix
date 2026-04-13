@@ -18,6 +18,7 @@ import yaml
 # Only files with a known schema are validated; unknown YAML files are skipped.
 _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
+    "channels.yaml": "channel.schema.json",
 }
 
 # Workflow files live in a separate directory and share one schema.
@@ -98,7 +99,12 @@ def validate_config_dir(
         yaml_path = config_path / filename
         if not yaml_path.exists():
             continue
-        schema = _load_schema(schemas_path, schema_file)
+        try:
+            schema = _load_schema(schemas_path, schema_file)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            all_errors.append(ValidationError(filename, f"Schema error: {exc}"))
+            files_checked += 1
+            continue
         errors = _validate_yaml_against_schema(yaml_path, schema)
         all_errors.extend(errors)
         files_checked += 1
