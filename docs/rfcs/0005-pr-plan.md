@@ -246,6 +246,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-3a-7 | Low | Aggressive recency decay `1/(1 + age_days)` halves score at 1 day, ~3% at 30 days — too aggressive for 90-day retention window | Consider softer decay like `1/(1 + age_days/7)` or `1/(1 + sqrt(age_days))` |
 | F-3a-8 | Info | No scoring formula docstring explaining component rationale and edge case behavior | Add inline comment block in `_recall_fts5()` |
 
+> Items F-3a-5 through F-3a-8 are deferred beyond PR 7 — they are nice-to-have improvements, not review fixes.
+
 ---
 
 ### PR 3b: `feature/v02-memory-tools` — Agent-Initiated Memory Tools
@@ -581,7 +583,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-6a-5 | Low | No test for `channels.yaml` validation path — `_SCHEMA_MAP` entry exists but has zero test coverage | Add test writing `channels.yaml` in `config_dir` and validating against `channel.schema.json` |
 | F-6a-6 | Low | Tests only check pass/fail boolean — a schema regression that fails for the *wrong* reason would be invisible | Add at least one test capturing stdout (via `capsys`) and asserting specific error message content |
 
-> Items deferred beyond PR 7 — nice-to-have improvements: schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
+> Items deferred beyond PR 7 — nice-to-have improvements: asymmetric workflow/config schema error handling pattern (F-6a-3), schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
 
 ---
 
@@ -632,7 +634,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ### PRs 7a–7d: Review Follow-ups + RFC Close
 
-The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated review findings from PRs 1a–6b totaled ~48 items across Python, Rust, and JSON schema — exceeding the 500-line PR limit. Each sub-PR is independently mergeable.
+The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated review findings from PRs 1a–6b totaled ~48 actionable items (58 total captured: 48 assigned to sub-PRs + 2 already applied + 8 deferred beyond PR 7) across Python, Rust, and JSON schema — exceeding the 500-line PR limit. Each sub-PR is independently mergeable.
 
 **Recommended order**: **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 7d**.
 
@@ -670,7 +672,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | F-3a-3 | `tests/unit/python/test_episodic_memory.py` | Add future migration forward-compatibility test — patch `MIGRATIONS` to include a hypothetical v2 entry, verify both v1 and v2 are applied and recorded in `schema_version`. Core value proposition of the migration infrastructure |
 | F-3a-4 | `agents/memory/__init__.py` | Define `MemoryLifecycle` protocol — PR plan scope specifies exporting `MemoryLifecycle` but it was not implemented. Add `class MemoryLifecycle(Protocol): async def initialize(self) -> None: ...; async def close(self) -> None: ...` |
 
-> Items deferred beyond PR 7 — nice-to-have improvements: softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`), async context manager (`__aenter__`/`__aexit__`), Unicode/large payload tests, query length validation cap, scoring formula inline docstring.
+> Items F-3a-5 through F-3a-8 deferred beyond PR 7 — nice-to-have improvements: relative `db_path` docstring note (F-3a-5), async context manager (`__aenter__`/`__aexit__`) (F-3a-6), softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`) (F-3a-7), scoring formula inline docstring (F-3a-8). Also deferred: Unicode/large payload tests, query length validation cap.
 
 **From PR 3b (PR #51 review):**
 
@@ -744,6 +746,8 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | F-6a-4 | `schemas/agent.schema.json` | Add `"minLength": 1` to `memory.db_path` — currently accepts empty strings at schema level |
 | F-6a-5 | `tests/unit/python/test_validate.py` | Add test for `channels.yaml` validation path — `_SCHEMA_MAP` entry has zero test coverage |
 | F-6a-6 | `tests/unit/python/test_validate.py` | Add test asserting specific error message content (via `capsys`) — current tests only check pass/fail boolean, schema regressions that fail for the wrong reason are invisible |
+
+> Item F-6a-3 deferred beyond PR 7 — asymmetric workflow/config schema error handling pattern. Action: "Align patterns when touching this code next." Low severity, no functional impact.
 
 **From PR 6b (PR #57 review):**
 
@@ -970,7 +974,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | 7c | — | `feature/v02-cli-review-fixes` | 200–300 | 7a |
 | 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7a, 7b, 7c |
 
-**Total estimated**: ~4,450–6,150 lines across 15 PRs (calibrated at 1.7×).
+**Total estimated**: ~4,400–6,200 lines across 15 PRs (calibrated at 1.7×).
 
 ### Dependency Graph
 
