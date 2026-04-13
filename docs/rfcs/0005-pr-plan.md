@@ -590,7 +590,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Depends on**: All previous PRs merged
 **Branch**: `feature/v02-rfc0005-close`
-**Estimated size**: ~50–150 lines (targeted fixes + status updates)
+**Estimated size**: ~100–200 lines (targeted fixes + status updates)
 
 #### Scope
 
@@ -669,6 +669,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 > Items deferred beyond PR 7 — nice-to-have improvements: interaction retention/pruning (`prune_old_interactions(older_than_days)`), async context manager (`__aenter__`/`__aexit__` for all memory tiers), trust change audit trail table, `Sentiment = Annotated[float, Ge(-1.0), Le(1.0)]` type alias, file-based DB test for `apply_decay`, pagination for `get_all_relationships()`.
 
+**From PR 5a (PR #54 review):**
+
+> **Already applied** (committed on branch before merge): `close_memory()` individual tier try/except for resilient close, `_parse_actions()` regex hardened from `\s*` to `\n` anchors to prevent polynomial backtracking, `render_behavior()` warns on unknown dimension keys, module docstring trimmed of PR 5b scope references.
+
+| ID | File | Change |
+|----|------|--------|
+| F-5a-1 | `agents/persona.py` | `on_tick()` missing per-event timeout — `on_event()` wraps `_on_event_inner()` in `asyncio.wait_for(timeout=...)`, but `on_tick()` calls `_on_event_inner()` directly. A slow LLM during a tick holds the lock indefinitely. Wrap the `_on_event_inner()` call in `on_tick()` with `asyncio.wait_for()` using the same configurable timeout. Add a test for tick timeout. |
+| F-5a-2 | `agents/persona.py` | Add prompt injection trust boundary comment in `_format_event()` — when external bridges are added (future RFC), `sender_id` and `content` from `MESSAGE_RECEIVED` events will originate from untrusted sources. Add `# Security: content is from framework-internal agents. Sanitize if external bridges are added.` at the top of `_format_event()`. |
+| F-5a-3 | `agents/persona.py` | Forward `llm_client` through `PersonaAgent.__init__` — currently `PersonaAgent.__init__` calls `super().__init__(agent_id, config)` without forwarding `llm_client`, and `_LLMPersonaAgent.__init__` sets `self._llm_client` directly. Either add `llm_client` to `PersonaAgent.__init__` signature and forward it, or document the override contract clearly. |
+| F-5a-4 | `tests/unit/python/test_persona_runtime.py` | Add test for `_build_system_prompt()` with minimal persona config (empty `background`, no `quirks`, no `goals`) — all existing tests use the full `_PERSONA_CONFIG` fixture. Verify graceful degradation. |
+| F-5a-5 | `tests/unit/python/test_persona_runtime.py` | Add test for `on_tick()` when energy is already at `1.0` — verify `recover_energy()` clamp (trivially correct but validates contract). |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: make energy thresholds configurable (`stress_level > 0.3`, `energy < 0.5` in `to_prompt_section()`), cap `recent_context` list size during accumulation (currently only capped on display via `[-5:]`), `SubAgentRequest.model` default value as a constant instead of hardcoded string, `APPROVAL_REQUESTED`/`APPROVAL_RESPONSE` event type explicit tests.
+
 #### Key implementation details
 
 - Bundle all "Should Fix" findings from previous PR reviews.
@@ -701,9 +715,9 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | 5b | 5 | `feature/v02-event-dispatch-tick` | 400–500 | 5a |
 | 6a | 6 | `feature/v02-config-validation` | 300–450 | 5b |
 | 6b | 6 | `feature/v02-cli-persona` | 150–250 | 5b |
-| 7 | — | `feature/v02-rfc0005-close` | 50–150 | All |
+| 7 | — | `feature/v02-rfc0005-close` | 100–200 | All |
 
-**Total estimated**: ~3,550–4,850 lines across 12 PRs (calibrated at 1.7×).
+**Total estimated**: ~3,600–4,900 lines across 12 PRs (calibrated at 1.7×).
 
 ### Dependency Graph
 
