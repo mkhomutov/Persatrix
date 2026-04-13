@@ -952,11 +952,29 @@ class _LLMPersonaAgent(PersonaAgent):
         return actions
 
     async def on_tick(self) -> list[AgentAction]:
-        """Autonomous tick — recovers energy, then decides on actions."""
+        """Autonomous tick — recovers energy, then decides on actions.
+
+        Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` with the same
+        configurable timeout used by ``on_event()``.  Without this guard a
+        slow LLM provider could hold the per-agent lock indefinitely,
+        blocking all event processing for the agent.
+        (Review finding F-5a-1, resolved in PR 5b.)
+        """
+        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
         async with self._lock:
             self._state.recover_energy()
             event = AgentEvent(event_type=EventType.TICK)
-            return await self._on_event_inner(event)
+            try:
+                return await asyncio.wait_for(
+                    self._on_event_inner(event), timeout=timeout,
+                )
+            except TimeoutError:
+                logger.error(
+                    "Agent %s tick timed out after %.0fs",
+                    self.agent_id,
+                    timeout,
+                )
+                return [AgentAction(ActionType.DO_NOTHING, {})]
 
     # handle() is inherited from PersonaAgent — no override needed.
     # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
@@ -1203,6 +1221,11 @@ class ActionExecutor:
         mentions = action.payload.get("mentions", [])
 
         # Route to mentioned agents as MESSAGE_RECEIVED events
+        if not mentions:
+            logger.debug(
+                "Agent %s SEND_MESSAGE has no mentions, message not routed",
+                sender_id,
+            )
         dispatched = 0
         for target_id in mentions:
             event = AgentEvent(
@@ -1253,6 +1276,15 @@ class EventDispatcher:
         """Register a tick scheduler to wake on incoming events."""
         self._tick_schedulers[agent_id] = scheduler
 
+    @property
+    def executor(self) -> ActionExecutor:
+        """Public access to the action executor.
+
+        Avoids callers needing to reach into the private ``_executor``
+        attribute.  (Review finding: private attribute coupling.)
+        """
+        return self._executor
+
     async def dispatch(
         self,
         target_id: str,
@@ -1260,7 +1292,17 @@ class EventDispatcher:
     ) -> list[AgentAction]:
         """Dispatch an event to a target agent, execute resulting actions.
 
-        Increments cascade depth. Returns the agent's actions (post-execution).
+        Creates a shallow copy of the event with incremented cascade depth
+        to avoid mutating the caller's event object.  Returns the agent's
+        actions (post-execution).
+
+        .. note::
+
+           TODO(v0.2): Inject memory context (episodic recall, relationship
+           summaries, recent notes) into the agent's working memory before
+           event handling — see RFC 0005 Phase 5b ``_inject_memory_context()``.
+           Deferred from this PR; persona agents currently rely on explicit
+           memory tool calls for context retrieval.
         """
         depth = event.metadata.get("cascade_depth", 0)
         if depth >= self._max_cascade_depth:
@@ -1281,8 +1323,19 @@ class EventDispatcher:
             )
             return []
 
-        # Increment cascade depth for downstream events
-        event.metadata["cascade_depth"] = depth + 1
+        # Create a shallow copy of event with incremented cascade depth
+        # to avoid mutating the caller's event object — prevents incorrect
+        # depth tracking if the same event were dispatched to multiple
+        # targets or reused.  (Review finding: in-place metadata mutation.)
+        event = AgentEvent(
+            event_type=event.event_type,
+            payload=event.payload,
+            channel_id=event.channel_id,
+            sender_id=event.sender_id,
+            message_id=event.message_id,
+            timestamp=event.timestamp,
+            metadata={**event.metadata, "cascade_depth": depth + 1},
+        )
 
         # Wake tick scheduler if idle
         scheduler = self._tick_schedulers.get(target_id)
@@ -1309,6 +1362,10 @@ class TickScheduler:
     Supports ``wake()`` to reset idle state on incoming events.
     """
 
+    # Minimum tick interval to prevent accidental busy loops from
+    # zero or negative configuration values.
+    _MIN_INTERVAL: float = 0.01
+
     def __init__(
         self,
         agent: _LLMPersonaAgent,
@@ -1319,6 +1376,13 @@ class TickScheduler:
         executor: ActionExecutor | None = None,
     ) -> None:
         self._agent = agent
+        if interval < self._MIN_INTERVAL:
+            logger.warning(
+                "Tick interval %.2fs below minimum, clamping to %.1fs",
+                interval,
+                self._MIN_INTERVAL,
+            )
+            interval = self._MIN_INTERVAL
         self._interval = interval
         self._max_actions_per_tick = max_actions_per_tick
         self._idle_after_ticks = idle_after_ticks
@@ -1448,7 +1512,17 @@ class TickScheduler:
         logger.info("Tick scheduler stopped for %s", self._agent.agent_id)
 
     async def _wait_for_stop_or_wake(self) -> None:
-        """Wait until either _stopped or _wake_event is set."""
+        """Wait until either ``_stopped`` or ``_wake_event`` is set.
+
+        Creates two ``asyncio.Task`` objects — one for each event — and
+        uses ``asyncio.wait(return_when=FIRST_COMPLETED)`` to unblock as
+        soon as either fires.  The losing task is cancelled in the
+        ``finally`` block to avoid leaked coroutines.
+
+        This dual-event pattern avoids race conditions that would arise
+        from sequential ``await`` calls (missing the other signal while
+        waiting on the first).
+        """
         stop_task = asyncio.create_task(self._stopped.wait())
         wake_task = asyncio.create_task(self._wake_event.wait())
         try:

@@ -381,7 +381,7 @@ class AgentServer:
                         interval=float(interval),
                         max_actions_per_tick=max_actions,
                         idle_after_ticks=idle_after,
-                        executor=self._dispatcher._executor,
+                        executor=self._dispatcher.executor,
                     )
                     self._tick_schedulers[agent_id] = scheduler
                     self._dispatcher.register_tick_scheduler(agent_id, scheduler)

@@ -1539,3 +1539,50 @@ class TestEventTimeout:
         assert "timed out" not in actions[0].payload.get("result", "").lower()
         await agent.close_memory()
 
+
+# ─── PR #55 review: on_tick() timeout ───────────────────────
+
+
+class TestTickTimeout:
+    """Verify on_tick() enforces the same wall-clock timeout as on_event().
+
+    Review finding F-5a-1 (resolved in PR 5b): on_tick() lacked the
+    asyncio.wait_for() guard that on_event() already had, allowing a slow
+    LLM to hold the per-agent lock indefinitely.
+    """
+
+    async def test_tick_timeout_returns_do_nothing(self):
+        """A slow LLM during on_tick() produces DO_NOTHING after timeout."""
+        async def slow_llm(*args, **kwargs):
+            await asyncio.sleep(10)  # will be cancelled by timeout
+            return LLMResponse(text="too slow")
+
+        mock_provider = AsyncMock()
+        mock_provider.create_message = AsyncMock(side_effect=slow_llm)
+        mock_provider.format_tool_definitions = MagicMock(return_value=[])
+        client = LLMClient(mock_provider)
+
+        config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        actions = await agent.on_tick()
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.DO_NOTHING
+        await agent.close_memory()
+
+    async def test_tick_completes_within_timeout(self):
+        """Ticks that complete within the timeout work normally."""
+        config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        actions = await agent.on_tick()
+        assert len(actions) >= 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        await agent.close_memory()
+

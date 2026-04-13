@@ -286,7 +286,7 @@ class TestEventDispatcher:
         await agent.close_memory()
 
     async def test_cascade_depth_incremented(self):
-        """Each dispatch increments cascade_depth in metadata."""
+        """Dispatch creates a copy with incremented depth; original is unchanged."""
         agent = await _make_agent()
         dispatcher = EventDispatcher(agents={"sarah-chen": agent})
 
@@ -296,7 +296,10 @@ class TestEventDispatcher:
         )
         assert event.metadata.get("cascade_depth", 0) == 0
         await dispatcher.dispatch("sarah-chen", event)
-        assert event.metadata["cascade_depth"] == 1
+        # Original event metadata must NOT be mutated (review finding:
+        # in-place metadata mutation could produce incorrect cascade depth
+        # if the same event were dispatched to multiple targets).
+        assert event.metadata.get("cascade_depth", 0) == 0
         await agent.close_memory()
 
     async def test_cascade_depth_below_limit_allowed(self):
@@ -388,7 +391,7 @@ class TestTickScheduler:
         await agent.close_memory()
 
     async def test_idle_detection(self):
-        """Repeated DO_NOTHING actions increment idle count."""
+        """Non-DO_NOTHING actions keep idle count at zero."""
         agent = await _make_agent()
         executor = ActionExecutor()
         scheduler = TickScheduler(
@@ -399,11 +402,11 @@ class TestTickScheduler:
         await asyncio.sleep(0.3)
         await scheduler.stop()
 
-        # Default LLM response → COMPLETE_TASK (not DO_NOTHING), so idle
-        # count depends on the parsed actions. The mock returns text that
-        # falls back to COMPLETE_TASK, which is NOT DO_NOTHING.
-        # This verifies the idle tracking mechanism works.
-        assert isinstance(scheduler.idle_count, int)
+        # Default mock LLM returns text that falls through to COMPLETE_TASK
+        # (not DO_NOTHING), so the idle counter should remain at zero —
+        # only consecutive DO_NOTHING ticks increment it.
+        assert scheduler.idle_count == 0
+        assert not scheduler.is_idle
         await agent.close_memory()
 
     async def test_idle_detection_with_do_nothing(self):
@@ -551,6 +554,16 @@ class TestTickScheduler:
         await asyncio.sleep(0.05)
         await scheduler.stop(timeout=0.01)  # Very short timeout
         assert not scheduler.is_running
+        await agent.close_memory()
+
+    async def test_min_interval_clamping(self):
+        """Interval below _MIN_INTERVAL is clamped to prevent busy loops."""
+        agent = await _make_agent()
+        scheduler = TickScheduler(agent, interval=0.0)
+        assert scheduler._interval >= TickScheduler._MIN_INTERVAL
+
+        scheduler2 = TickScheduler(agent, interval=-5.0)
+        assert scheduler2._interval >= TickScheduler._MIN_INTERVAL
         await agent.close_memory()
 
 
