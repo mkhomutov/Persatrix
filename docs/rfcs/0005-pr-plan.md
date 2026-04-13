@@ -610,10 +610,23 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `orch validate` command functional
-- [ ] `orch test --persona` command functional
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `orch validate` command functional
+- [x] `orch test --persona` command functional
+
+#### Review findings (PR #57 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-6b-R1 | Medium | `cmd_validate()` passes `path` argument to subprocess without validation — empty string or extremely long paths produce confusing Python errors. No `validate_path_param()`-style check applied (not a URL, but basic sanity needed) | Add `if path.is_empty() { return Err("validation path cannot be empty") }` at top of `cmd_validate()` |
+| F-6b-R2 | Medium | `total_checks` is hardcoded to `4` and `checks_passed` is manually tracked in `cmd_test_persona()` — adding or removing a check requires updating two independent variables, mismatch produces incorrect "X/Y checks passed" output | Replace with incremented `total_checks += 1` before each check block |
+| F-6b-R3 | Low | Agent type check uses `agent.agent_type.as_deref()` which defaults to `None` → "unknown" when server doesn't return the field (v0.1 servers). Check 3 always fails against v0.1 orchestrators with no indication that the failure is due to missing server support | Add `None` match arm with yellow `"?"` symbol: `"Agent type unknown (server may not support type field)"` |
+| F-6b-R4 | Low | `find_python_binary()` does not verify the binary exists on `$PATH` — if Python is not installed, `cmd.output()` returns OS error without mentioning Python by name | Add diagnostic error message: `"Python not found. Install Python 3.11+ and ensure 'python3' is on PATH."` |
+| F-6b-R5 | Low | `find_validator_script()` exe-relative path contains `..` components — `.exists()` works but error messages display uncanonicalized paths | Use `std::fs::canonicalize()` on discovered path before returning |
+| F-6b-R6 | Low | Zero new Rust tests in PR — `find_python_binary()` and `find_validator_script()` are trivially testable pure functions with no coverage | Add `find_python_binary_returns_platform_appropriate` test and `find_validator_script` temp-dir test |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: `--format json` for machine-parseable persona test output, exit code propagation for `cmd_test_persona` check failures (currently always `Ok(())`), `--strict` mode for `orch test --persona` to fail on warnings (CI usage), server-side validation endpoint (`POST /api/v1/config/validate`) to move `orch validate` to thin-client pattern, `wiremock`-based integration tests for `cmd_test_persona`.
 
 ---
 
@@ -740,9 +753,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-6a-5 | `tests/unit/python/test_validate.py` | Add test for `channels.yaml` validation path — `_SCHEMA_MAP` entry has zero test coverage |
 | F-6a-6 | `tests/unit/python/test_validate.py` | Add test asserting specific error message content (via `capsys`) — current tests only check pass/fail boolean, schema regressions that fail for the wrong reason are invisible |
 
+**From PR 6b (PR #57 review):**
+
+| ID | File | Change |
+|----|------|--------|
+| F-6b-R1 | `cli/src/main.rs` | Validate `path` argument in `cmd_validate()` — add empty-string check before passing to subprocess. Empty or whitespace-only paths produce confusing Python errors |
+| F-6b-R2 | `cli/src/main.rs` | Replace hardcoded `total_checks = 4` with incremented counter in `cmd_test_persona()` — adding/removing a check currently requires updating two independent variables |
+| F-6b-R3 | `cli/src/main.rs` | Handle missing `agent_type` (v0.1 servers) gracefully — add `None` match arm with yellow warning instead of always-failing "unknown" output |
+| F-6b-R4 | `cli/src/main.rs` | Add diagnostic error for missing Python binary — current OS error doesn't mention Python by name |
+| F-6b-R5 | `cli/src/main.rs` | Canonicalize `find_validator_script()` result path — `..` components in error messages reduce clarity |
+| F-6b-R6 | `cli/src/main.rs` | Add unit tests for `find_python_binary()` and `find_validator_script()` — trivially testable pure functions with zero coverage |
+
 > Items F-5b-2 and F-5b-3 already applied in review fix passes (memory init failure isolation, `exclusive()` lock accessor). No further action needed.
 
-> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/`.
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/`, `--format json` for persona test output, exit code propagation for `cmd_test_persona` check failures, `--strict` mode for `orch test --persona`, server-side validation endpoint (`POST /api/v1/config/validate`).
 
 #### Key implementation details
 

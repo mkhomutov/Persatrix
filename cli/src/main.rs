@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use tabled::{Table, Tabled};
+use tokio::process::Command as ProcessCommand;
 
 /// Orchestr8 CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
@@ -57,6 +58,11 @@ struct AgentResponse {
     #[tabled(display_with = "fmt_vec")]
     capabilities: Vec<String>,
     status: String,
+    /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
+    /// with v0.1 servers that don't return this field.
+    #[serde(default)]
+    #[tabled(skip)]
+    agent_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -357,17 +363,36 @@ async fn main() {
 
         // Exhaustive match instead of catch-all `_ =>` so that adding a new
         // Commands variant produces a compile error until its handler is added.
-        Commands::Validate { path, strict } => {
-            println!(
-                "{}",
-                format!("Validating config: {path} (strict: {strict}) — not yet implemented")
-                    .yellow()
-            );
-            Ok(())
-        }
-        Commands::Test { .. } => {
-            println!("{}", "Command 'test' not yet implemented".yellow());
-            Ok(())
+        Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
+        Commands::Test {
+            agent,
+            workflow,
+            persona,
+            record,
+        } => {
+            if let Some(ref id) = persona {
+                // F-6b-4: Warn when extra test flags are silently ignored.
+                if agent.is_some() || workflow.is_some() || record {
+                    eprintln!(
+                        "{}",
+                        "warning: --persona takes precedence; --agent/--workflow/--record ignored"
+                            .yellow()
+                    );
+                }
+                cmd_test_persona(&client, server, id).await
+            } else if agent.is_some() || workflow.is_some() || record {
+                println!(
+                    "{}",
+                    "Only --persona is implemented. --agent, --workflow, and --record are not yet supported.".yellow()
+                );
+                Ok(())
+            } else {
+                println!(
+                    "{}",
+                    "No test type specified. Available: --persona <id> (more coming soon)".yellow()
+                );
+                Ok(())
+            }
         }
         Commands::Init { .. } => {
             println!("{}", "Command 'init' not yet implemented".yellow());
@@ -596,6 +621,191 @@ async fn cmd_logs(
 
     println!("{body}");
     Ok(())
+}
+
+// ─── Validate command ────────────────────────────────────────────────────
+
+// NOTE: `validate` is the only CLI command that runs locally (subprocess) instead
+// of via the orchestrator REST API. This deviates from the thin-client pattern.
+// A server-side POST /api/v1/config/validate endpoint would be architecturally
+// consistent — tracked for future improvement. (F-6b-3)
+async fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
+    // F-6b-1: Python validator does not implement --strict yet.
+    if strict {
+        eprintln!(
+            "{}",
+            "warning: --strict is not yet supported by the Python validator, ignored".yellow()
+        );
+    }
+
+    let script = find_validator_script()?;
+    let python = find_python_binary();
+    let args = vec![script.to_string_lossy().to_string(), path.to_string()];
+
+    // F-6b-2: Use async subprocess to avoid blocking a tokio worker thread.
+    // F-6b-6: Timeout prevents indefinite hang if the Python process stalls.
+    let mut cmd = ProcessCommand::new(python);
+    cmd.args(&args);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output())
+        .await
+        .map_err(|_| "Python validator timed out after 120 seconds".to_string())?
+        .map_err(|e| format!("failed to run Python validator: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("validation failed".to_string())
+    }
+}
+
+fn find_validator_script() -> Result<std::path::PathBuf, String> {
+    // Try relative to CWD first (most common: running from repo root)
+    let cwd_relative = std::path::PathBuf::from("agents/validate.py");
+    if cwd_relative.exists() {
+        return Ok(cwd_relative);
+    }
+
+    // Try relative to the executable location (installed or bin/ layout)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let from_bin = parent.join("../agents/validate.py");
+            if from_bin.exists() {
+                return Ok(from_bin);
+            }
+        }
+    }
+
+    Err("cannot find agents/validate.py — run from the repository root".to_string())
+}
+
+/// Return the Python interpreter binary name for the current platform.
+/// Windows: `python` (standard name via installer or py launcher).
+/// Unix/macOS: `python3` is preferred — `python` may be absent or
+/// Python 2 on some Linux distributions. (F-6b-7)
+fn find_python_binary() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+// ─── Test persona command ────────────────────────────────────────────────
+
+async fn cmd_test_persona(
+    client: &reqwest::Client,
+    server: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    validate_path_param(agent_id, "agent ID")?;
+
+    println!(
+        "{} Testing persona agent: {}",
+        "→".cyan().bold(),
+        agent_id.bold()
+    );
+
+    // Fetch agent info from the orchestrator
+    let resp = client
+        .get(format!("{server}/api/v1/agents/{agent_id}"))
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+
+    let agent: AgentResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("invalid response: {e}"))?;
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut checks_passed = 0;
+    let total_checks = 4;
+
+    // Check 1: Agent exists and is reachable
+    println!(
+        "  {} Agent '{}' found (status: {})",
+        "✓".green(),
+        agent.id,
+        colorize_status(&agent.status)
+    );
+    checks_passed += 1;
+
+    // Check 2: Agent status is healthy
+    if agent.status == "healthy" {
+        println!("  {} Agent is healthy", "✓".green());
+        checks_passed += 1;
+    } else {
+        println!(
+            "  {} Agent status is '{}', expected 'healthy'",
+            "✗".red(),
+            agent.status
+        );
+        warnings.push(format!("agent status is '{}', not 'healthy'", agent.status));
+    }
+
+    // Check 3: Agent type is persona
+    if agent.agent_type.as_deref() == Some("persona") {
+        println!("  {} Agent type is 'persona'", "✓".green());
+        checks_passed += 1;
+    } else {
+        let actual = agent.agent_type.as_deref().unwrap_or("unknown");
+        println!(
+            "  {} Agent type is '{}', expected 'persona'",
+            "✗".red(),
+            actual
+        );
+        warnings.push(format!("agent type is '{actual}', not 'persona'"));
+    }
+
+    // Check 4: Agent has capabilities
+    if !agent.capabilities.is_empty() {
+        println!(
+            "  {} Agent has {} capability(ies): {}",
+            "✓".green(),
+            agent.capabilities.len(),
+            agent.capabilities.join(", ")
+        );
+        checks_passed += 1;
+    } else {
+        println!("  {} Agent has no capabilities", "!".yellow());
+        warnings.push("agent has no capabilities".to_string());
+    }
+
+    // Summary
+    println!();
+    if warnings.is_empty() {
+        println!(
+            "{} All {total_checks} checks passed for '{}'",
+            "✓".green().bold(),
+            agent_id.bold()
+        );
+        Ok(())
+    } else {
+        println!(
+            "{} {checks_passed}/{total_checks} checks passed for '{}' ({} warning(s))",
+            "!".yellow().bold(),
+            agent_id.bold(),
+            warnings.len()
+        );
+        for w in &warnings {
+            println!("  {} {w}", "warning:".yellow());
+        }
+        Ok(())
+    }
 }
 
 fn colorize_status(status: &str) -> colored::ColoredString {
