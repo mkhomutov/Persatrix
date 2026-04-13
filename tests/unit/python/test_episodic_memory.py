@@ -10,12 +10,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agents.memory.episodic import (
-    MIGRATIONS,
     _MAX_RECALL_LIMIT,
     Episode,
     EpisodicMemory,
     _apply_migrations,
-    _fts5_available,
 )
 from agents.llm_client import LLMResponse, StopReason, Usage
 
@@ -304,7 +302,7 @@ class TestStoreAndRecall:
 
 class TestAccessCount:
     async def test_recall_increments_access_count(self, memory: EpisodicMemory):
-        ep_id = await memory.store_episode(
+        await memory.store_episode(
             summary="Memorable event about testing",
             context={"type": "test"},
         )
@@ -420,7 +418,7 @@ class TestFTS5TriggerSync:
         await db.commit()
 
         # Old term should not match
-        old_results = await memory.recall("machine learning")
+        await memory.recall("machine learning")
         new_results = await memory.recall("deep learning")
 
         # The new summary should be findable
