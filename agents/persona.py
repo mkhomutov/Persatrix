@@ -320,6 +320,14 @@ _ENERGY_RECOVERY_PER_TICK = 0.1
 # (PR #55 review: unbounded mentions list → resource exhaustion.)
 _MAX_MENTIONS_PER_ACTION = 10
 
+# Default per-dispatch timeout (seconds) for SEND_MESSAGE cascades.
+# Prevents a hung target agent from blocking the sender indefinitely.
+# Separate from _DEFAULT_EVENT_TIMEOUT because dispatch timeout bounds a
+# single hop in a cascade chain, not the full event processing.
+# TODO(v0.3): make configurable via config["dispatch_timeout"].
+# (PR #60 review: hard-coded 60s dispatch timeout.)
+_DEFAULT_DISPATCH_TIMEOUT: float = 60.0
+
 
 @dataclass
 class PersonaState:
@@ -885,20 +893,40 @@ class _LLMPersonaAgent(PersonaAgent):
 
         Priorities: relationship=8, episodic=7, notes=6.
         (F-5b-1: implement deferred memory-context injection.)
+
+        Design: each memory tier is wrapped in ``except Exception`` to ensure
+        one tier's failure (DB lock, I/O error, corrupted data) never blocks
+        event processing.  ``exc_info=True`` logs the full traceback so
+        failures are visible to operators.  We intentionally catch broad
+        ``Exception`` rather than specific types (OSError, aiosqlite.Error)
+        because the memory tier implementations may evolve to raise different
+        exception types, and the contract here is "never fail the event".
+        ``BaseException`` subclasses (SystemExit, KeyboardInterrupt) are NOT
+        caught by ``except Exception``.
+        (PR #60 review: document intent of broad exception handling.)
         """
         from .memory.working import ContextSection, estimate_tokens
 
         query = self._format_event(event)
 
         # 1. Episodic recall — recent episodes matching event content.
-        try:
-            episodes = await self._episodic_memory.recall(query, limit=5)
-        except Exception:
-            logger.warning(
-                "Agent %s: episodic recall failed, skipping",
-                self.agent_id, exc_info=True,
-            )
+        # Skip for TICK events: the boilerplate "Autonomous tick: review
+        # your goals..." query matches broadly in FTS5, returning
+        # low-relevance episodes.  Notes (tier 3) are still injected
+        # because the agent's personal knowledge IS relevant for
+        # autonomous goal review.
+        # (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
+        if event.event_type == EventType.TICK:
             episodes = []
+        else:
+            try:
+                episodes = await self._episodic_memory.recall(query, limit=5)
+            except Exception:
+                logger.warning(
+                    "Agent %s: episodic recall failed, skipping",
+                    self.agent_id, exc_info=True,
+                )
+                episodes = []
 
         if episodes:
             lines = ["Relevant past episodes:"]
@@ -1452,7 +1480,7 @@ class ActionExecutor:
                 )
                 await asyncio.wait_for(
                     self._dispatcher.dispatch(target_id, event),
-                    timeout=60.0,
+                    timeout=_DEFAULT_DISPATCH_TIMEOUT,
                 )
                 dispatched += 1
             except TimeoutError:
@@ -1460,8 +1488,8 @@ class ActionExecutor:
                 # blocking the sender indefinitely.
                 # (F-5b-4: per-dispatch timeout in _handle_send_message.)
                 logger.warning(
-                    "Dispatch from %s to %s timed out after 60s",
-                    sender_id, target_id,
+                    "Dispatch from %s to %s timed out after %.0fs",
+                    sender_id, target_id, _DEFAULT_DISPATCH_TIMEOUT,
                 )
             except Exception:
                 # execute() promises "Non-fatal failures are logged but

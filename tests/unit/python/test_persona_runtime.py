@@ -1796,3 +1796,112 @@ class TestInjectMemoryContext:
         assert agent._working_memory.get_section("recent_notes") is None
         await agent.close_memory()
 
+    async def test_all_tiers_failing_still_proceeds(self):
+        """_inject_memory_context handles all three memory tiers failing.
+
+        Verifies that simultaneous failures across episodic recall,
+        relationship lookup, and note recall are each caught independently
+        and the method completes without raising.
+        (PR #60 review: coverage gap — all-tiers-failing case.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Sabotage all three tiers.
+        agent._episodic_memory.recall = AsyncMock(side_effect=OSError("disk full"))
+        agent._episodic_memory.recall_notes = AsyncMock(side_effect=OSError("disk full"))
+        agent._relationship_memory.get_relationship_summary = AsyncMock(
+            side_effect=RuntimeError("corrupted index"),
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            sender_id="mike-torres",
+        )
+        # Should not raise — all tiers fail gracefully.
+        await agent._inject_memory_context(event)
+
+        # No sections should be present.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        assert agent._working_memory.get_section("relationship_context") is None
+        assert agent._working_memory.get_section("recent_notes") is None
+        await agent.close_memory()
+
+    async def test_tick_skips_episodic_recall(self):
+        """TICK events skip episodic recall to avoid low-signal FTS5 matches.
+
+        The boilerplate "Autonomous tick: review your goals..." query would
+        match broadly in FTS5, wasting I/O.  Notes recall is still attempted
+        (notes contain the agent's personal knowledge relevant for autonomous
+        goal review), though results depend on FTS5/LIKE matching.
+        (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode so recall would return results if called.
+        await agent._episodic_memory.store_episode(
+            summary="Previous architecture discussion",
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+
+        # Spy on recall to verify it's NOT called for TICK.
+        recall_spy = AsyncMock(wraps=agent._episodic_memory.recall)
+        agent._episodic_memory.recall = recall_spy
+
+        # Spy on recall_notes to verify it IS still called.
+        notes_spy = AsyncMock(wraps=agent._episodic_memory.recall_notes)
+        agent._episodic_memory.recall_notes = notes_spy
+
+        event = AgentEvent(event_type=EventType.TICK, payload={})
+        await agent._inject_memory_context(event)
+
+        # Episodic recall should NOT be called for TICK events.
+        recall_spy.assert_not_called()
+        # Notes recall should still be attempted.
+        notes_spy.assert_called_once()
+
+        # No episodic section injected.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        await agent.close_memory()
+
+    async def test_zero_interaction_relationship_skips_injection(self):
+        """Bootstrapped relationship with zero interactions skips injection.
+
+        When a relationship is configured via YAML but no interactions have
+        been recorded yet, ``interaction_count == 0`` and the relationship
+        section is not injected.  This is intentional: a bootstrapped trust
+        score without any interaction history provides no actionable context
+        for the LLM.
+        (PR #60 review: test zero-interaction relationship branch.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Bootstrap a relationship with trust but zero interactions.
+        await agent._relationship_memory.update_trust(
+            other_agent_id="mike-torres",
+            delta=0.1,
+            reason="config bootstrap",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        # Relationship section should NOT be injected (zero interactions).
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is None
+        await agent.close_memory()
+
