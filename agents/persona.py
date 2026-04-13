@@ -6,9 +6,8 @@ and autonomous behavior.
 
 Includes the concrete ``_LLMPersonaAgent`` with LLM-powered ``on_event()``
 decision loop, ``PersonaState`` dynamic state, behavioral dimension rendering,
-and ``create_persona_agent()`` factory.
-
-Channel messaging and delegation dispatch are wired in PR 5b.
+``create_persona_agent()`` factory, ``ActionExecutor``, ``EventDispatcher``,
+and ``TickScheduler`` for autonomous operation.
 """
 
 from __future__ import annotations
@@ -1087,3 +1086,381 @@ def create_persona_agent(
         working_memory=working_memory,
         memory_tools=memory_tools,
     )
+
+
+# ─── Action Executor ──────────────────────────────────────
+
+
+class ActionExecutor:
+    """Executes ``AgentAction`` lists produced by persona agents.
+
+    Handles each action type exhaustively. ``SEND_MESSAGE`` dispatches
+    through the ``EventDispatcher`` (if provided) to the target agent.
+    ``DELEGATE`` and ``SPAWN_SUB_AGENT`` are TODO stubs for future RFCs.
+    """
+
+    def __init__(
+        self,
+        dispatcher: EventDispatcher | None = None,
+    ) -> None:
+        self._dispatcher = dispatcher
+
+    async def execute(
+        self,
+        agent_id: str,
+        actions: list[AgentAction],
+    ) -> list[dict[str, Any]]:
+        """Execute actions and return results.
+
+        Returns a list of dicts, one per action, with ``action_type`` and
+        ``status`` fields. Non-fatal failures are logged but do not propagate.
+        """
+        results: list[dict[str, Any]] = []
+        for action in actions:
+            result = await self._execute_one(agent_id, action)
+            results.append(result)
+        return results
+
+    async def _execute_one(
+        self,
+        agent_id: str,
+        action: AgentAction,
+    ) -> dict[str, Any]:
+        match action.action_type:
+            case ActionType.COMPLETE_TASK:
+                return {
+                    "action_type": "complete_task",
+                    "status": "completed",
+                    "result": action.payload.get("result", ""),
+                }
+            case ActionType.SEND_MESSAGE:
+                return await self._handle_send_message(agent_id, action)
+            case ActionType.USE_TOOL:
+                # Tool execution happens inside _on_event_inner() via
+                # _execute_tools(). If USE_TOOL appears as a returned
+                # action, it means the LLM wants to use a tool outside
+                # the multi-turn loop — log and skip.
+                logger.warning(
+                    "Agent %s returned USE_TOOL as a final action — "
+                    "tool calls should happen inside on_event() loop",
+                    agent_id,
+                )
+                return {
+                    "action_type": "use_tool",
+                    "status": "skipped",
+                }
+            case ActionType.DO_NOTHING:
+                return {"action_type": "do_nothing", "status": "ok"}
+            case ActionType.DELEGATE:
+                # TODO(v0.2+): route delegation through orchestrator
+                logger.info(
+                    "Agent %s requested delegation to %s (not yet implemented)",
+                    agent_id,
+                    action.payload.get("agent_id", "unknown"),
+                )
+                return {"action_type": "delegate", "status": "not_implemented"}
+            case ActionType.SPAWN_SUB_AGENT:
+                # TODO(v0.2+): spawn ephemeral sub-agent
+                logger.info(
+                    "Agent %s requested sub-agent spawn (not yet implemented)",
+                    agent_id,
+                )
+                return {"action_type": "spawn_sub_agent", "status": "not_implemented"}
+            case ActionType.REQUEST_APPROVAL:
+                logger.info(
+                    "Agent %s requested approval (not yet implemented)",
+                    agent_id,
+                )
+                return {"action_type": "request_approval", "status": "not_implemented"}
+            case ActionType.GRANT_APPROVAL:
+                logger.info(
+                    "Agent %s granted approval (not yet implemented)",
+                    agent_id,
+                )
+                return {"action_type": "grant_approval", "status": "not_implemented"}
+            case ActionType.DENY_APPROVAL:
+                logger.info(
+                    "Agent %s denied approval (not yet implemented)",
+                    agent_id,
+                )
+                return {"action_type": "deny_approval", "status": "not_implemented"}
+
+    async def _handle_send_message(
+        self,
+        sender_id: str,
+        action: AgentAction,
+    ) -> dict[str, Any]:
+        """Route SEND_MESSAGE to the EventDispatcher as a MESSAGE_RECEIVED event."""
+        if self._dispatcher is None:
+            logger.warning(
+                "Agent %s sent message but no dispatcher configured",
+                sender_id,
+            )
+            return {"action_type": "send_message", "status": "no_dispatcher"}
+
+        target_channel = action.payload.get("channel_id", "")
+        content = action.payload.get("content", "")
+        mentions = action.payload.get("mentions", [])
+
+        # Route to mentioned agents as MESSAGE_RECEIVED events
+        dispatched = 0
+        for target_id in mentions:
+            event = AgentEvent(
+                event_type=EventType.MESSAGE_RECEIVED,
+                payload={
+                    "content": content,
+                    "channel_id": target_channel,
+                },
+                channel_id=target_channel,
+                sender_id=sender_id,
+            )
+            await self._dispatcher.dispatch(target_id, event)
+            dispatched += 1
+
+        return {
+            "action_type": "send_message",
+            "status": "dispatched",
+            "dispatched_to": dispatched,
+        }
+
+
+# ─── Event Dispatcher ─────────────────────────────────────
+
+
+class EventDispatcher:
+    """Routes events to persona agents with cascade depth limiting.
+
+    Prevents infinite event loops by tracking cascade depth in
+    ``event.metadata["cascade_depth"]``. Events beyond ``max_cascade_depth``
+    are logged and dropped.
+    """
+
+    def __init__(
+        self,
+        agents: dict[str, _LLMPersonaAgent] | None = None,
+        max_cascade_depth: int = 5,
+    ) -> None:
+        self._agents: dict[str, _LLMPersonaAgent] = agents or {}
+        self._max_cascade_depth = max_cascade_depth
+        self._tick_schedulers: dict[str, TickScheduler] = {}
+        self._executor: ActionExecutor = ActionExecutor(dispatcher=self)
+
+    def register_agent(self, agent_id: str, agent: _LLMPersonaAgent) -> None:
+        """Register a persona agent for event dispatch."""
+        self._agents[agent_id] = agent
+
+    def register_tick_scheduler(self, agent_id: str, scheduler: TickScheduler) -> None:
+        """Register a tick scheduler to wake on incoming events."""
+        self._tick_schedulers[agent_id] = scheduler
+
+    async def dispatch(
+        self,
+        target_id: str,
+        event: AgentEvent,
+    ) -> list[AgentAction]:
+        """Dispatch an event to a target agent, execute resulting actions.
+
+        Increments cascade depth. Returns the agent's actions (post-execution).
+        """
+        depth = event.metadata.get("cascade_depth", 0)
+        if depth >= self._max_cascade_depth:
+            logger.warning(
+                "Cascade depth %d reached for agent %s, dropping event %s",
+                depth,
+                target_id,
+                event.event_type.value,
+            )
+            return []
+
+        agent = self._agents.get(target_id)
+        if agent is None:
+            logger.warning(
+                "Event dispatch target %s not found (event: %s)",
+                target_id,
+                event.event_type.value,
+            )
+            return []
+
+        # Increment cascade depth for downstream events
+        event.metadata["cascade_depth"] = depth + 1
+
+        # Wake tick scheduler if idle
+        scheduler = self._tick_schedulers.get(target_id)
+        if scheduler is not None:
+            scheduler.wake()
+
+        # Deliver event
+        actions = await agent.on_event(event)
+
+        # Execute resulting actions
+        await self._executor.execute(target_id, actions)
+
+        return actions
+
+
+# ─── Tick Scheduler ────────────────────────────────────────
+
+
+class TickScheduler:
+    """Autonomous tick loop for persona agents.
+
+    Fires ``on_tick()`` at configurable intervals. Tracks idle ticks
+    (consecutive ``DO_NOTHING`` actions) and skips LLM calls when idle.
+    Supports ``wake()`` to reset idle state on incoming events.
+    """
+
+    def __init__(
+        self,
+        agent: _LLMPersonaAgent,
+        *,
+        interval: float = 60.0,
+        max_actions_per_tick: int = 3,
+        idle_after_ticks: int = 10,
+        executor: ActionExecutor | None = None,
+    ) -> None:
+        self._agent = agent
+        self._interval = interval
+        self._max_actions_per_tick = max_actions_per_tick
+        self._idle_after_ticks = idle_after_ticks
+        self._executor = executor
+        self._idle_count = 0
+        self._task: asyncio.Task[None] | None = None
+        self._stopped = asyncio.Event()
+        self._wake_event = asyncio.Event()
+
+    @property
+    def idle_count(self) -> int:
+        """Number of consecutive idle ticks."""
+        return self._idle_count
+
+    @property
+    def is_idle(self) -> bool:
+        """Whether the scheduler has exceeded idle_after_ticks threshold."""
+        return self._idle_count >= self._idle_after_ticks
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the tick loop task is active."""
+        return self._task is not None and not self._task.done()
+
+    def wake(self) -> None:
+        """Reset idle state and wake the tick loop.
+
+        Called by EventDispatcher when an event arrives for this agent.
+        """
+        self._idle_count = 0
+        self._wake_event.set()
+
+    def start(self) -> None:
+        """Start the tick loop as an asyncio task."""
+        if self._task is not None and not self._task.done():
+            return
+        self._stopped.clear()
+        self._task = asyncio.create_task(self._run(), name=f"tick-{self._agent.agent_id}")
+
+    async def stop(self, timeout: float = 10.0) -> None:
+        """Stop the tick loop, waiting for in-flight operations.
+
+        Args:
+            timeout: Maximum seconds to wait for the current tick to complete.
+        """
+        self._stopped.set()
+        self._wake_event.set()  # Unblock any wait
+        if self._task is not None and not self._task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
+            except TimeoutError:
+                logger.warning(
+                    "Tick scheduler for %s did not stop within %.0fs, cancelling",
+                    self._agent.agent_id,
+                    timeout,
+                )
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+
+    async def _run(self) -> None:
+        """Main tick loop."""
+        logger.info(
+            "Tick scheduler started for %s (interval=%.0fs, idle_after=%d)",
+            self._agent.agent_id,
+            self._interval,
+            self._idle_after_ticks,
+        )
+        while not self._stopped.is_set():
+            # Wait for interval or wake signal
+            self._wake_event.clear()
+            try:
+                await asyncio.wait_for(
+                    self._wait_for_stop_or_wake(),
+                    timeout=self._interval,
+                )
+                # _stopped or _wake_event was set
+                if self._stopped.is_set():
+                    break
+                # Woken up — fall through to tick immediately
+            except TimeoutError:
+                # Normal interval elapsed
+                pass
+
+            if self._stopped.is_set():
+                break
+
+            # Skip LLM calls when idle
+            if self.is_idle:
+                logger.debug(
+                    "Agent %s idle (%d ticks), skipping LLM tick",
+                    self._agent.agent_id,
+                    self._idle_count,
+                )
+                continue
+
+            try:
+                actions = await self._agent.on_tick()
+                # Limit actions per tick
+                actions = actions[: self._max_actions_per_tick]
+
+                # Track idle state
+                all_do_nothing = all(
+                    a.action_type == ActionType.DO_NOTHING for a in actions
+                )
+                if all_do_nothing:
+                    self._idle_count += 1
+                else:
+                    self._idle_count = 0
+
+                # Execute actions
+                if self._executor is not None:
+                    await self._executor.execute(self._agent.agent_id, actions)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Tick error for agent %s", self._agent.agent_id,
+                )
+
+        logger.info("Tick scheduler stopped for %s", self._agent.agent_id)
+
+    async def _wait_for_stop_or_wake(self) -> None:
+        """Wait until either _stopped or _wake_event is set."""
+        stop_task = asyncio.create_task(self._stopped.wait())
+        wake_task = asyncio.create_task(self._wake_event.wait())
+        try:
+            await asyncio.wait(
+                {stop_task, wake_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for t in (stop_task, wake_task):
+                if not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except asyncio.CancelledError:
+                        pass

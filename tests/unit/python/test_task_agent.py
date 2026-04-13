@@ -280,24 +280,21 @@ class TestCrossAgent:
 class TestAgentLoaderDispatch:
     """Test that _resolve_agent_type dispatches on the 'type' field."""
 
-    def test_type_task_returns_task_agent(self):
+    def test_type_task_returns_task_string(self):
         from agents.server import _resolve_agent_type
 
-        agent_cls = _resolve_agent_type({"id": "test", "type": "task"})
-        assert agent_cls is TaskAgent
+        assert _resolve_agent_type({"id": "test", "type": "task"}) == "task"
 
-    def test_type_default_returns_task_agent(self):
-        """Agents without a type field default to TaskAgent."""
+    def test_type_default_returns_task_string(self):
+        """Agents without a type field default to 'task'."""
         from agents.server import _resolve_agent_type
 
-        agent_cls = _resolve_agent_type({"id": "test"})
-        assert agent_cls is TaskAgent
+        assert _resolve_agent_type({"id": "test"}) == "task"
 
-    def test_type_persona_raises_system_exit(self):
+    def test_type_persona_returns_persona_string(self):
         from agents.server import _resolve_agent_type
 
-        with pytest.raises(SystemExit, match="PersonaAgent is not yet implemented"):
-            _resolve_agent_type({"id": "test", "type": "persona"})
+        assert _resolve_agent_type({"id": "test", "type": "persona"}) == "persona"
 
     def test_unknown_type_raises_system_exit(self):
         from agents.server import _resolve_agent_type

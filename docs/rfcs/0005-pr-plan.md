@@ -497,15 +497,15 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
-- [ ] Coverage ≥ 80% for new code
-- [ ] `ruff check agents/` clean
-- [ ] Cascade depth limiting tested
-- [ ] Idle detection and wake tested
-- [ ] Graceful shutdown tested (in-flight operations complete)
-- [ ] Memory lifecycle correct (initialize → use → close)
-- [ ] Cross-agent memory isolation verified
-- [ ] Sample persona agent in `agents.yaml`
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [x] Coverage ≥ 80% for new code
+- [x] `ruff check agents/` clean
+- [x] Cascade depth limiting tested
+- [x] Idle detection and wake tested
+- [x] Graceful shutdown tested (in-flight operations complete)
+- [x] Memory lifecycle correct (initialize → use → close)
+- [x] Cross-agent memory isolation verified
+- [x] Sample persona agent in `agents.yaml`
 
 ---
 

@@ -25,6 +25,12 @@ import yaml
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .generated import task_pb2, task_pb2_grpc
 from .llm_client import LLMClient, create_provider
+from .persona import (
+    EventDispatcher,
+    TickScheduler,
+    _LLMPersonaAgent,
+    create_persona_agent,
+)
 from .task_agent import TaskAgent
 from .tools import builtin
 from .tools.permissions import PermissionGate
@@ -159,12 +165,12 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 # ─── Agent Loading ───────────────────────────────────────────
 
 
-def _resolve_agent_type(agent_config: dict[str, Any]) -> type[BaseAgent]:
-    """Resolve agent class from the ``type`` field in agent config.
+def _resolve_agent_type(agent_config: dict[str, Any]) -> str:
+    """Resolve agent type string from the ``type`` field in agent config.
 
     Supported types:
     - ``task`` (default) — data-driven TaskAgent with YAML instructions
-    - ``persona`` — not yet implemented (v0.2 Phase 5)
+    - ``persona`` — LLM-powered PersonaAgent with memory and autonomy
 
     Agents without a ``type`` field default to ``task`` for backward
     compatibility with v0.1 configs.
@@ -173,12 +179,9 @@ def _resolve_agent_type(agent_config: dict[str, Any]) -> type[BaseAgent]:
 
     match agent_type:
         case "task":
-            return TaskAgent
+            return "task"
         case "persona":
-            raise SystemExit(
-                f"Agent {agent_config['id']!r} has type 'persona' but "
-                f"PersonaAgent is not yet implemented (v0.2 Phase 5)"
-            )
+            return "persona"
         case _:
             raise SystemExit(
                 f"Unknown agent type {agent_type!r} for agent "
@@ -254,12 +257,20 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
     provider = create_provider(agent_config)
     llm_client = LLMClient(provider)
 
-    # Create agent
-    agent = agent_type(
-        agent_id=agent_id,
-        config=agent_config,
-        llm_client=llm_client,
-    )
+    # Create agent based on type
+    agent: BaseAgent
+    if agent_type == "persona":
+        agent = create_persona_agent(
+            agent_id=agent_id,
+            config=agent_config,
+            llm_client=llm_client,
+        )
+    else:
+        agent = TaskAgent(
+            agent_id=agent_id,
+            config=agent_config,
+            llm_client=llm_client,
+        )
 
     # Wire built-in tool dependencies
     permissions = agent_config.get("permissions", {})
@@ -295,6 +306,8 @@ class AgentServer:
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
         self._session: aiohttp.ClientSession | None = None
+        self._dispatcher = EventDispatcher()
+        self._tick_schedulers: dict[str, TickScheduler] = {}
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -331,12 +344,53 @@ class AgentServer:
             list(self.agents.keys()),
         )
 
+        # Initialize persona agent memory tiers before accepting requests
+        for agent_id, agent in self.agents.items():
+            if isinstance(agent, _LLMPersonaAgent):
+                try:
+                    await agent.initialize_memory()
+                    logger.info("Initialized memory for persona agent %s", agent_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to initialize memory for agent %s", agent_id,
+                    )
+
+        # Register persona agents with the event dispatcher
+        for agent_id, agent in self.agents.items():
+            if isinstance(agent, _LLMPersonaAgent):
+                self._dispatcher.register_agent(agent_id, agent)
+
         # Deep-review D4: shared aiohttp session for self-registration and
         # http_request tool (via builtin.http_session).
         self._session = aiohttp.ClientSession()
 
         # Self-register with orchestrator after gRPC server is listening.
         await self._self_register()
+
+        # Start tick schedulers for autonomous persona agents
+        for agent_id, agent in self.agents.items():
+            if isinstance(agent, _LLMPersonaAgent):
+                autonomy = agent.config.get("autonomy", {})
+                level = autonomy.get("level", "reactive")
+                if level in ("semi-autonomous", "autonomous"):
+                    interval = autonomy.get("tick_interval_seconds", 60)
+                    max_actions = autonomy.get("max_actions_per_tick", 3)
+                    idle_after = autonomy.get("idle_after_ticks", 10)
+                    scheduler = TickScheduler(
+                        agent,
+                        interval=float(interval),
+                        max_actions_per_tick=max_actions,
+                        idle_after_ticks=idle_after,
+                        executor=self._dispatcher._executor,
+                    )
+                    self._tick_schedulers[agent_id] = scheduler
+                    self._dispatcher.register_tick_scheduler(agent_id, scheduler)
+                    scheduler.start()
+                    logger.info(
+                        "Started tick scheduler for %s (interval=%ds)",
+                        agent_id,
+                        interval,
+                    )
 
     async def _self_register(self) -> None:
         """Register all hosted agents with the orchestrator (best-effort).
@@ -426,6 +480,14 @@ class AgentServer:
     async def stop(self) -> None:
         """Gracefully stop the server."""
         logger.info("Shutting down agent server...")
+        # Stop tick schedulers first (before stopping gRPC)
+        for agent_id, scheduler in self._tick_schedulers.items():
+            try:
+                await scheduler.stop()
+                logger.info("Stopped tick scheduler for %s", agent_id)
+            except Exception:
+                logger.exception("Error stopping tick scheduler for %s", agent_id)
+        self._tick_schedulers.clear()
         # De-register from orchestrator before stopping gRPC server.
         await self._self_deregister()
         if self._server:
@@ -434,6 +496,10 @@ class AgentServer:
         # doesn't prevent cleanup of remaining agents.
         for agent_id, agent in self.agents.items():
             try:
+                # Close persona agent memory before generic shutdown
+                if isinstance(agent, _LLMPersonaAgent):
+                    await agent.close_memory()
+                    logger.info("Closed memory for persona agent %s", agent_id)
                 await agent.shutdown()
             except Exception:
                 logger.exception("Error shutting down agent %s", agent_id)
