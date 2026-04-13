@@ -12,7 +12,7 @@
 
 RFC 0005 defines the PersonaAgent runtime, three-tier memory system (working, episodic, relationship), agent-initiated memory tools, behavioral dimensions, dynamic persona state, and data-driven TaskAgent consolidation. The RFC spans 6 implementation phases with an estimated ~3,500–4,850 LOC (calibrated at 1.7×) across Python agents, Rust CLI, YAML config, and JSON schemas.
 
-The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **12 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), plus a final PR 7 for accumulated review follow-ups and RFC close.
+The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **15 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), plus PRs 7a (memory tier review fixes), 7b (persona + validation review fixes), 7c (CLI review fixes), and 7d (RFC close).
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -20,7 +20,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0004 fully merged (v0.1 complete). The v0.1 agent infrastructure (`BaseAgent`, `_run_llm_loop()`, `LLMClient`, `server.py` agent loader, permission gate, tool registry) is the foundation for all v0.2 work.
 
-**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7**.
+**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 7d**.
 
 ---
 
@@ -246,6 +246,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-3a-7 | Low | Aggressive recency decay `1/(1 + age_days)` halves score at 1 day, ~3% at 30 days — too aggressive for 90-day retention window | Consider softer decay like `1/(1 + age_days/7)` or `1/(1 + sqrt(age_days))` |
 | F-3a-8 | Info | No scoring formula docstring explaining component rationale and edge case behavior | Add inline comment block in `_recall_fts5()` |
 
+> Items F-3a-5 through F-3a-8 are deferred beyond PR 7 — they are nice-to-have improvements, not review fixes.
+
 ---
 
 ### PR 3b: `feature/v02-memory-tools` — Agent-Initiated Memory Tools
@@ -404,6 +406,17 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] Agent isolation verified
 - [x] Delta clamping tested
 
+#### Review findings (PR #53 → deferred to PR 7)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-4-1 | Medium | `update_trust()` and `record_interaction()` accept empty `other_agent_id` without error — downstream queries silently return no results | Add `if not other_agent_id or not other_agent_id.strip(): raise ValueError(...)` at top of both methods |
+| F-4-2 | Low | No concurrent `record_interaction()` test — `update_trust()` has one but `record_interaction()` (which also upserts relationships) does not | Add test: two concurrent calls → verify `interaction_count == 2` |
+| F-4-3 | Low | `reason` string in `update_trust()` unbounded — injected into LLM prompts via `get_relationship_summary()` | Cap at 1024 chars before storing |
+| F-4-4 | Low | `outcome` string in `record_interaction()` unbounded — same concern as F-4-3 | Cap at 1024 chars before storing |
+
+> All 4 findings assigned to **PR 7a** (memory tier review fixes).
+
 ---
 
 ### PR 5a: `feature/v02-persona-runtime` — PersonaAgent Runtime Core
@@ -455,6 +468,20 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 - [x] Behavioral dimension defaults applied for omitted dimensions
 - [x] PersonaState persistence round-trip tested
 - [x] `handle()` backward compatibility verified
+
+#### Review findings (PR #54 → deferred to PR 7)
+
+> **Already applied** (committed on branch before merge): `close_memory()` individual tier try/except for resilient close, `_parse_actions()` regex hardened from `\s*` to `\n` anchors to prevent polynomial backtracking, `render_behavior()` warns on unknown dimension keys, module docstring trimmed of PR 5b scope references.
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-5a-1 | Medium | `on_tick()` calls `_on_event_inner()` directly without timeout — slow LLM holds agent lock indefinitely | Wrap in `asyncio.wait_for()` with same configurable timeout as `on_event()` |
+| F-5a-2 | Low | No prompt injection trust boundary comment in `_format_event()` — `sender_id`/`content` will originate from untrusted sources when external bridges are added | Add security comment noting sanitization requirement for external bridges |
+| F-5a-3 | Low | `llm_client` not forwarded through `PersonaAgent.__init__` — `_LLMPersonaAgent` sets it directly | Forward through `__init__` or document override contract |
+| F-5a-4 | Low | All `_build_system_prompt()` tests use full config fixture — no minimal config test | Add test with empty `background`, no `quirks`, no `goals` |
+| F-5a-5 | Low | No test for `recover_energy()` clamp when energy already at 1.0 | Add test verifying clamp behavior |
+
+> All 5 findings assigned to **PR 7b** (persona + validation review fixes).
 
 ---
 
@@ -581,7 +608,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-6a-5 | Low | No test for `channels.yaml` validation path — `_SCHEMA_MAP` entry exists but has zero test coverage | Add test writing `channels.yaml` in `config_dir` and validating against `channel.schema.json` |
 | F-6a-6 | Low | Tests only check pass/fail boolean — a schema regression that fails for the *wrong* reason would be invisible | Add at least one test capturing stdout (via `capsys`) and asserting specific error message content |
 
-> Items deferred beyond PR 7 — nice-to-have improvements: schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
+> Items deferred beyond PR 7 — nice-to-have improvements: asymmetric workflow/config schema error handling pattern (F-6a-3), schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
 
 ---
 
@@ -630,19 +657,11 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 ---
 
-### PR 7: `feature/v02-rfc0005-close` — Review Follow-ups + RFC Close
+### PRs 7a–7d: Review Follow-ups + RFC Close
 
-**Depends on**: All previous PRs merged
-**Branch**: `feature/v02-rfc0005-close`
-**Estimated size**: ~100–200 lines (targeted fixes + status updates)
+The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated review findings from PRs 1a–6b totaled ~48 actionable items (60 total captured: 48 assigned to sub-PRs + 2 already applied + 10 deferred beyond PR 7) across Python, Rust, and JSON schema — exceeding the 500-line PR limit. Each sub-PR is independently mergeable.
 
-#### Scope
-
-| File | Change |
-|------|--------|
-| `docs/rfcs/0005-persona-agent-memory.md` | Update status: `📋 Proposed` → `✅ Implemented` |
-| `ROADMAP.md` | Update RFC 0005 tracker: merged count, status. Update Component Status tables |
-| Various | Accumulated review follow-up findings from PRs 1a–6b |
+**Recommended order**: **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 7d**.
 
 #### Accumulated review findings
 
@@ -678,7 +697,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-3a-3 | `tests/unit/python/test_episodic_memory.py` | Add future migration forward-compatibility test — patch `MIGRATIONS` to include a hypothetical v2 entry, verify both v1 and v2 are applied and recorded in `schema_version`. Core value proposition of the migration infrastructure |
 | F-3a-4 | `agents/memory/__init__.py` | Define `MemoryLifecycle` protocol — PR plan scope specifies exporting `MemoryLifecycle` but it was not implemented. Add `class MemoryLifecycle(Protocol): async def initialize(self) -> None: ...; async def close(self) -> None: ...` |
 
-> Items deferred beyond PR 7 — nice-to-have improvements: softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`), async context manager (`__aenter__`/`__aexit__`), Unicode/large payload tests, query length validation cap, scoring formula inline docstring.
+> Items F-3a-5 through F-3a-8 deferred beyond PR 7 — nice-to-have improvements: relative `db_path` docstring note (F-3a-5), async context manager (`__aenter__`/`__aexit__`) (F-3a-6), softer recency decay (tune `1/(1+age_days)` to `1/(1+age_days/7)` or `1/(1+sqrt(age_days))`) (F-3a-7), scoring formula inline docstring (F-3a-8). Also deferred: Unicode/large payload tests, query length validation cap.
 
 **From PR 3b (PR #51 review):**
 
@@ -753,6 +772,8 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-6a-5 | `tests/unit/python/test_validate.py` | Add test for `channels.yaml` validation path — `_SCHEMA_MAP` entry has zero test coverage |
 | F-6a-6 | `tests/unit/python/test_validate.py` | Add test asserting specific error message content (via `capsys`) — current tests only check pass/fail boolean, schema regressions that fail for the wrong reason are invisible |
 
+> Item F-6a-3 deferred beyond PR 7 — asymmetric workflow/config schema error handling pattern. Action: "Align patterns when touching this code next." Low severity, no functional impact.
+
 **From PR 6b (PR #57 review):**
 
 | ID | File | Change |
@@ -768,20 +789,193 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 > Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/`, `--format json` for persona test output, exit code propagation for `cmd_test_persona` check failures, `--strict` mode for `orch test --persona`, server-side validation endpoint (`POST /api/v1/config/validate`).
 
-#### Key implementation details
+#### PR 7a: `feature/v02-memory-review-fixes` — Memory Tier Review Fixes
 
-- Bundle all "Should Fix" findings from previous PR reviews.
-- Update RFC status and ROADMAP.
-- Final lint and test pass.
+**Depends on**: PRs 6a, 6b merged (all feature PRs complete before review fixes)
+**Branch**: `feature/v02-memory-review-fixes`
+**Estimated size**: ~300–400 lines (targeted fixes + tests)
 
-#### PR checklist
+**Findings addressed**: F-2-1, F-2-2, F-2-3, F-2-4, F-2-5 (working memory), F-3a-1, F-3a-2, F-3a-3, F-3a-4 (episodic core), F-3b-1, F-3b-2, F-3b-3, F-3b-4, F-3b-5 (memory tools), F-3c-1, F-3c-2, F-3c-3 (summarization), F-4-1, F-4-2, F-4-3, F-4-4 (relationship).
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `agents/memory/working.py` | Accurate post-compression tokens (`accurate=True`), compression before/after log, `build_context()` debug log |
+| `agents/memory/episodic.py` | Zero-importance scoring baseline, extract shared scoring SQL constant, atomic note pruning (`DELETE` subquery), `RETURNING` clause for interaction counter, FTS5 fallback error message, strip summary whitespace, conditional summarization log, concurrency docstring |
+| `agents/memory/relationship.py` | `other_agent_id` non-empty validation, `reason`/`outcome` 1024-char cap |
+| `agents/memory/__init__.py` | Define and export `MemoryLifecycle(Protocol)` |
+| `agents/tools/builtin.py` | `note_id` UUID format validation in tool closures |
+| `tests/unit/python/test_working_memory.py` | Tiktoken conditional test, `initialize()` noop test |
+| `tests/unit/python/test_episodic_memory.py` | Future migration forward-compatibility test, FTS5 malformed query fallback test, zero-importance episode recall test |
+| `tests/unit/python/test_memory_tools.py` | `note_id` validation test |
+| `tests/unit/python/test_relationship_memory.py` | Concurrent `record_interaction()` test |
+
+##### Key implementation details
+
+- **Zero-importance scoring** (F-3a-1): Replace `e.importance` with `(0.1 + e.importance * 0.9)` in `_recall_fts5()`, `_recall_like()`, `_recall_recency()` — ensures `importance=0.0` episodes are visible in ranked recall instead of producing `score=0.0`
+- **Scoring formula deduplication** (F-3a-2): Extract non-BM25 scoring components into module-level `_SCORE_EXPR` SQL fragment constant shared across all three recall methods — tuning changes currently require updating 3 SQL strings in sync
+- **Atomic note pruning** (F-3b-1): Replace separate `SELECT count` + `DELETE` with single atomic `DELETE FROM notes WHERE id IN (SELECT id ... ORDER BY access_count ASC, created_at ASC LIMIT MAX(0, count - max + 1))` — eliminates TOCTOU race under concurrent access
+- **`RETURNING` clause** (F-3b-2): Replace separate UPSERT + SELECT in `increment_interaction_count()` with `INSERT ... ON CONFLICT ... SET interaction_count = interaction_count + 1 RETURNING interaction_count` — eliminates read-after-write race
+- **Post-compression accuracy** (F-2-1): Use `estimate_tokens(summary, accurate=True)` in `compress_if_needed()` — short summaries (20 chars → 5 est. vs 8–10 actual tokens) have disproportionate chars/4 error that accumulates over multiple compressions
+- **Input validation** (F-4-1): Add `if not other_agent_id or not other_agent_id.strip(): raise ValueError(...)` at top of `update_trust()` and `record_interaction()`, consistent with existing `interaction_type` validation
+- **String length caps** (F-4-3, F-4-4): `reason = reason[:1024]`, `outcome = outcome[:1024] if outcome else outcome` — prevents unbounded strings entering LLM prompts via `get_relationship_summary()`
+- **`MemoryLifecycle` protocol** (F-3a-4): Add `class MemoryLifecycle(Protocol): async def initialize(self) -> None: ...; async def close(self) -> None: ...` to `agents/memory/__init__.py` — formalizes the duck-typed contract already followed by `EpisodicMemory` and `WorkingMemory`
+
+##### Tests
+
+- Zero-importance episode recall: store with `importance=0.0` → verify it appears in ranked results (F-3a-1)
+- Future migration: patch `MIGRATIONS` with hypothetical v4 → verify v1–v4 applied and recorded (F-3a-3)
+- FTS5 malformed query: `"NOT"`, `"*"` → fallback to LIKE without crash (F-3b-5)
+- `note_id` validation: malformed UUID → clean error before DB round-trip (F-3b-3)
+- Concurrent `record_interaction()`: two concurrent calls → `interaction_count == 2` (F-4-2)
+- Tiktoken conditional: `pytest.importorskip("tiktoken")` → accurate path produces different count than chars/4 (F-2-4)
+- `test_initialize_is_noop()`: verify `WorkingMemory.initialize()` fulfills `MemoryLifecycle` protocol contract (F-2-5)
+
+##### PR checklist
+
+- [ ] `pytest tests/unit/python/ -v` passes
+- [ ] `ruff check agents/` clean
+- [ ] `MemoryLifecycle` protocol defined and exported
+- [ ] Zero-importance episodes visible in recall
+- [ ] Scoring formula deduplicated across recall methods
+- [ ] Atomic note pruning (no TOCTOU)
+- [ ] `RETURNING` clause eliminates read-after-write race
+
+---
+
+#### PR 7b: `feature/v02-persona-validation-fixes` — Persona + Validation Review Fixes
+
+**Depends on**: PR 7a merged
+**Branch**: `feature/v02-persona-validation-fixes`
+**Estimated size**: ~350–450 lines (implementation + tests)
+
+> **Size monitoring note**: This PR addresses 17 findings including `_inject_memory_context()` (the largest single item). If implementation exceeds 500 lines, split `_inject_memory_context()` into a standalone PR 7b-1 (memory context injection) and PR 7b-2 (remaining persona + validation fixes).
+
+**Findings addressed**: F-5a-1, F-5a-2, F-5a-3, F-5a-4, F-5a-5 (persona runtime), F-5b-1, F-5b-4, F-5b-5, F-5b-6, F-5b-7, F-5b-8, F-5b-9 (event dispatch + server), F-6a-1, F-6a-2, F-6a-4, F-6a-5, F-6a-6 (validation + schema).
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `agents/persona.py` | `on_tick()` timeout, prompt injection trust boundary comment, `llm_client` forwarding, `_inject_memory_context()` implementation, per-dispatch timeout in `_handle_send_message()` |
+| `agents/server.py` | Consolidate three agent iteration loops into single loop |
+| `agents/validate.py` | Return `tuple[bool, list[ValidationError]]` instead of `bool` |
+| `schemas/agent.schema.json` | Agent ID regex fix (allow 1–2 char IDs or document ≥3 requirement), `db_path` minLength |
+| `tests/unit/python/test_persona_runtime.py` | Minimal config prompt test, energy clamp at 1.0 test, tick timeout test |
+| `tests/unit/python/test_event_dispatch_tick.py` | Mentions truncation, no-dispatcher status, min interval clamp, cascade depth unit test |
+| `tests/unit/python/test_validate.py` | `channels.yaml` validation path, error message content assertion |
+
+##### Key implementation details
+
+- **`_inject_memory_context()`** (F-5b-1): Implement the deferred TODO — before `_on_event_inner()`, query episodic recall (recent 5 episodes matching event content), relationship summary for `sender_id`, and recent notes (top 5 by access count). Inject results as `WorkingMemory` sections with appropriate priorities (episodic=7, relationship=8, notes=6). This is the largest single item in the follow-up PRs
+- **`on_tick()` timeout** (F-5a-1): Wrap `_on_event_inner()` in `asyncio.wait_for()` with the same configurable timeout used by `on_event()` — currently a slow LLM during a tick holds the agent lock indefinitely
+- **Per-dispatch timeout** (F-5b-4): Wrap each `self._dispatcher.dispatch()` call in `_handle_send_message()` with `asyncio.wait_for(timeout=60.0)` — without this, cascade can stack 5 levels of blocking calls with no timeout
+- **Structured validation return** (F-6a-1): Change `validate_config_dir()` to return `tuple[bool, list[ValidationError]]`. Keep `print()` in `__main__` block only. Enables programmatic consumption by `orch validate` and server-startup validation
+- **Agent ID regex** (F-6a-2): Update pattern to `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` (allows 1-char IDs) or add `"minLength": 3` with documentation — current regex silently requires ≥3 characters
+- **Server loop consolidation** (F-5b-9): Merge three separate agent iteration loops in `server.py start()` into single loop with `if agent_id in failed_memory_init: continue` guard
+- **Prompt injection comment** (F-5a-2): Add security trust boundary comment in `_format_event()`: when external bridges are added, `sender_id` and `content` from `MESSAGE_RECEIVED` events will originate from untrusted sources
+- **`llm_client` forwarding** (F-5a-3): Forward through `PersonaAgent.__init__` or document the override contract for `_LLMPersonaAgent`
+
+##### Tests
+
+- `_inject_memory_context()`: mock memory tiers → verify episodic, relationship, notes sections added to working memory before event handling (F-5b-1)
+- `on_tick()` timeout: mock slow LLM → verify `asyncio.TimeoutError` caught, tick continues (F-5a-1)
+- Minimal persona config: empty `background`, no `quirks`, no `goals` → verify `_build_system_prompt()` graceful degradation (F-5a-4)
+- Energy at 1.0: verify `recover_energy()` clamp (F-5a-5)
+- Mentions truncation: LLM response with 15 mentions → verify only 10 dispatched + warning (F-5b-5)
+- No-dispatcher: `ActionExecutor(dispatcher=None)` + SEND_MESSAGE → `"no_dispatcher"` status (F-5b-6)
+- Min interval clamp: `TickScheduler(agent, interval=0.0)` → `_interval == 0.01` (F-5b-7)
+- Cascade depth unit test: `dispatch()` at `max_cascade_depth` → empty actions + warning (F-5b-8)
+- `channels.yaml` validation path (F-6a-5)
+- Error message content via `capsys` (F-6a-6)
+
+##### PR checklist
+
+- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [ ] `ruff check agents/` clean
+- [ ] `_inject_memory_context()` implemented and tested
+- [ ] `on_tick()` and dispatch timeouts prevent indefinite blocking
+- [ ] `validate_config_dir()` returns structured errors
+- [ ] Agent ID schema updated
+- [ ] Server startup uses single consolidated agent loop
+
+---
+
+#### PR 7c: `feature/v02-cli-review-fixes` — Rust CLI Review Fixes
+
+**Depends on**: PR 7a merged (process dependency only — merge review fixes after feature PRs. No code dependency on 7a or 7b; can parallel with 7b)
+**Branch**: `feature/v02-cli-review-fixes`
+**Estimated size**: ~200–300 lines (Rust implementation + tests)
+
+**Findings addressed**: F-1b-1, F-1b-2, F-1b-3, F-1b-4 (from PR 1b review), F-6b-R1, F-6b-R2, F-6b-R3, F-6b-R4, F-6b-R5, F-6b-R6 (from PR 6b review).
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `cli/src/main.rs` | `validate_resource_id()`, serde contract test, reload stub message, case-insensitive URL scheme, validate path check, dynamic check counter, v0.1 `agent_type` handling, Python diagnostic error, path canonicalization, unit tests for pure functions |
+
+##### Key implementation details
+
+- **`validate_resource_id()`** (F-1b-1): Add client-side regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` validation for workflow IDs before HTTP calls — catches malformed IDs early with clear error messages
+- **Serde contract test** (F-1b-2): Add `#[test] fn submit_workflow_request_serializes_correctly()` — verifies JSON field names match API contract, detects silent breaks from serde attribute changes
+- **Reload stub** (F-1b-3): Capture `agent_id` in `AgentCommands::Reload` match arm, include in message: `"Agent reload for '{agent_id}' not yet implemented"`
+- **Case-insensitive URL** (F-1b-4): Add `.to_lowercase()` before `starts_with("http://")` / `starts_with("https://")` — `HTTP://localhost:8080` currently rejected
+- **Validate path check** (F-6b-R1): Add `if path.is_empty() { return Err("validation path cannot be empty") }` at top of `cmd_validate()`
+- **Dynamic check counter** (F-6b-R2): Replace hardcoded `total_checks = 4` with `total_checks += 1` before each check block in `cmd_test_persona()` — adding/removing checks currently requires updating two independent variables
+- **v0.1 `agent_type` handling** (F-6b-R3): Add `None` match arm in persona type check with yellow `"?"` symbol: `"Agent type unknown (server may not support type field)"` — v0.1 servers don't return `agent_type`
+- **Python diagnostic** (F-6b-R4): Add `"Python not found. Install Python 3.11+ and ensure 'python3' is on PATH."` when `cmd.output()` fails
+- **Path canonicalization** (F-6b-R5): Use `std::fs::canonicalize()` on discovered validator script path — removes `..` components from error messages
+- **Pure function tests** (F-6b-R6): Add `find_python_binary_returns_platform_appropriate` and `find_validator_script` temp-dir tests — trivially testable pure functions with zero current coverage
+
+##### Tests
+
+- `validate_resource_id()`: valid IDs pass, uppercase/special chars/empty string rejected
+- `submit_workflow_request_serializes_correctly()`: JSON output matches expected field names
+- `find_python_binary()`: returns platform-appropriate binary name
+- `find_validator_script()`: finds script in temp dir structure, returns error for missing script
+
+##### PR checklist
+
+- [ ] `cargo build --release` succeeds
+- [ ] `cargo clippy -- -D warnings` clean
+- [ ] `cargo test` passes (all new + existing)
+- [ ] Resource ID validation catches malformed IDs
+- [ ] URL scheme check is case-insensitive
+- [ ] Persona test check count is dynamic
+
+---
+
+#### PR 7d: `feature/v02-rfc0005-close` — RFC Close
+
+**Depends on**: PRs 7a, 7b, 7c merged
+**Branch**: `feature/v02-rfc0005-close`
+**Estimated size**: ~50–100 lines (status updates only)
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `docs/rfcs/0005-persona-agent-memory.md` | Update status: `🚧 Implementing` → `✅ Implemented` |
+| `docs/rfcs/0005-pr-plan.md` | Mark PRs 7a–7d checklists complete |
+| `ROADMAP.md` | RFC 0005 tracker: merged count 15/15, status `✅ Implemented`. Update Component Status tables. Add PRs 7a–7d to Merged PR History |
+
+##### Key implementation details
+
+- **RFC status transition**: Only after all 15 PRs are merged and all review findings from PRs 7a–7c are addressed
+- **ROADMAP Component Status**: Update `agents/persona.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion
+- **Final verification**: `make test` (all suites), `make lint`, `make validate` must pass before merge
+
+##### PR checklist
 
 - [ ] RFC 0005 status is `✅ Implemented`
-- [ ] ROADMAP RFC tracker updated with correct merged count
-- [ ] ROADMAP Component Status tables updated for v0.2 components
-- [ ] All accumulated review findings addressed
-- [ ] Full test suite passes: `make test`
-- [ ] Full lint passes: `make lint`
+- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 15/15
+- [ ] ROADMAP Component Status tables updated for all v0.2 components
+- [ ] All accumulated review findings addressed in PRs 7a–7c
+- [ ] `make test` passes (all suites)
+- [ ] `make lint` passes
+- [ ] `make validate` passes
 
 ---
 
@@ -800,9 +994,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | 5b | 5 | `feature/v02-event-dispatch-tick` | 400–500 | 5a |
 | 6a | 6 | `feature/v02-config-validation` | 300–450 | 5b |
 | 6b | 6 | `feature/v02-cli-persona` | 150–250 | 5b |
-| 7 | — | `feature/v02-rfc0005-close` | 100–200 | All |
+| 7a | — | `feature/v02-memory-review-fixes` | 300–400 | 6a, 6b |
+| 7b | — | `feature/v02-persona-validation-fixes` | 350–450 | 7a |
+| 7c | — | `feature/v02-cli-review-fixes` | 200–300 | 7a |
+| 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7a, 7b, 7c |
 
-**Total estimated**: ~3,600–4,900 lines across 12 PRs (calibrated at 1.7×).
+**Total estimated**: ~4,400–6,200 lines across 15 PRs (calibrated at 1.7×).
 
 ### Dependency Graph
 
@@ -812,15 +1009,18 @@ PR 1a (TaskAgent + type system)
   └── PR 2 (Working Memory)                                 │
         └── PR 3a (Schema Migration + Episodic Core)        │
               ├── PR 3b (Memory Tools) ─────────────────┐   │
-              ├── PR 3c (Episode Summarization) [can ────┤   │
-              │         parallel with PR 3b]             │   │
+              ├── PR 3c (Episode Summarization) [indep.] │   │
               └── PR 4 (Relationship Memory) ───────────┤   │
                                                         ↓   │
                                         PR 5a (Persona Runtime Core)
                                               └── PR 5b (Event Dispatch + Tick)
-                                                    ├── PR 6a (Config Validation)
-                                                    └── PR 6b (CLI Persona)
-                                                          └── PR 7 (Close RFC)
+                                                    ├── PR 6a (Config Validation) ──────┐
+                                                    └── PR 6b (CLI Persona)             │
+                                                          └── PR 7a (Memory Review Fixes)
+                                                                ├── PR 7b (Persona + Validation Fixes) ──┐
+                                                                └── PR 7c (CLI Review Fixes) [parallel] ─┤
+                                                                                                          ↓
+                                                                                              PR 7d (Close RFC)
 ```
 
 ### Risk Mitigation
@@ -833,6 +1033,7 @@ PR 1a (TaskAgent + type system)
 | Behavioral dimension rendering quality | Persona agents behave poorly | All 15 dimension/value combos tested with expected output; LLM testing is manual |
 | TaskAgent consolidation breaks existing tests | PR 1a regressions | Parametrized tests preserve existing coverage; old test patterns adapted |
 | PRs 3a, 4, 5a, 5b at 500-line boundary | PRs exceed size limit, require mid-implementation splits | Calibrated at 1.7×; PR 5a/5b already pre-split. Monitor during implementation and split further if needed |
+| Follow-up review findings volume (~48 items) | PR 7 exceeds 500-line limit | Split into 4 sub-PRs: 7a (memory), 7b (persona+validation), 7c (CLI), 7d (RFC close). PRs 7b and 7c can parallel |
 
 ### Deferred to Follow-Up
 
