@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-12  
+> **Last updated**: 2026-04-13  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
