@@ -92,7 +92,7 @@ lint-rust:
 # ─── Validate ───────────────────────────────────────────
 validate: ## Validate all YAML configs against JSON schemas
 	@echo "→ Validating configuration..."
-	$(PYTHON) -m orchestr8_agents.validate config/
+	$(PYTHON) agents/validate.py config/
 	@echo "✓ All configs valid"
 
 # ─── Docker ─────────────────────────────────────────────

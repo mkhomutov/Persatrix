@@ -561,12 +561,27 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_validate.py -v` passes
-- [ ] `make validate` succeeds with updated configs
-- [ ] `ruff check agents/validate.py` clean
-- [ ] Behavioral dimension enum validation tested
-- [ ] Conditional requirements per agent type tested
-- [ ] All persona fields from RFC 0005 represented in schema
+- [x] `pytest tests/unit/python/test_validate.py -v` passes
+- [x] `make validate` succeeds with updated configs
+- [x] `ruff check agents/validate.py` clean
+- [x] Behavioral dimension enum validation tested
+- [x] Conditional requirements per agent type tested
+- [x] All persona fields from RFC 0005 represented in schema
+
+#### Review findings (PR #56 → deferred to PR 7)
+
+> **Already applied** (committed on branch before merge): `_load_schema()` wrapped in try/except for FileNotFoundError/JSONDecodeError, `channels.yaml` wired to `channel.schema.json` in `_SCHEMA_MAP`, `additionalProperties: false` added to all sub-objects (permissions, autonomy, memory, persona, goals, knowledge, relationship), workflow schema `json.loads()` error handling added, TODO comment listing unmapped config files, duplicate test class removed.
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-6a-1 | Medium | `validate_config_dir()` uses `print()` and returns `bool` — callers (future `orch validate`, server startup) cannot inspect individual errors without parsing stdout | Return `tuple[bool, list[ValidationError]]` or a `ValidationResult` dataclass. Keep `print()` in `__main__` block for CLI usage |
+| F-6a-2 | Medium | Agent ID regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` silently requires ≥3 characters — valid 1–2 char IDs like `"a1"` are rejected. The `[a-z0-9-]*` middle portion forces a minimum of start+middle+end | Either update pattern to `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` (allows 1-char) or add `"minLength": 3` with descriptive documentation |
+| F-6a-3 | Low | Workflow schema load error handling pattern is asymmetric with config schema loading — both work but the different patterns (try/else vs try/except/continue) may confuse future maintainers | Align patterns when touching this code next |
+| F-6a-4 | Low | `memory.db_path` has no schema-level validation — accepts empty strings, `..` traversal paths. Runtime must validate but schema could catch obvious errors | Add `"minLength": 1` to `db_path` |
+| F-6a-5 | Low | No test for `channels.yaml` validation path — `_SCHEMA_MAP` entry exists but has zero test coverage | Add test writing `channels.yaml` in `config_dir` and validating against `channel.schema.json` |
+| F-6a-6 | Low | Tests only check pass/fail boolean — a schema regression that fails for the *wrong* reason would be invisible | Add at least one test capturing stdout (via `capsys`) and asserting specific error message content |
+
+> Items deferred beyond PR 7 — nice-to-have improvements: schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
 
 ---
 
@@ -713,9 +728,21 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-5b-8 | `tests/unit/python/test_event_dispatch_tick.py` | Add unit test for cascade depth termination at dispatcher level — `dispatch()` with `metadata["cascade_depth"] >= max_cascade_depth` → empty actions + warning |
 | F-5b-9 | `agents/server.py` | Consolidate three agent iteration loops in `start()` (memory init, dispatcher registration, tick scheduler start) into single loop with `if agent_id in failed_memory_init: continue` guard |
 
+**From PR 6a (PR #56 review):**
+
+> **Already applied** (committed on branch before merge): `_load_schema()` try/except for FileNotFoundError/JSONDecodeError, `channels.yaml` → `channel.schema.json` wired in `_SCHEMA_MAP`, `additionalProperties: false` on all sub-objects (permissions, autonomy, memory, persona, goals, knowledge, relationship), workflow schema `json.loads()` error handling, TODO comment listing unmapped config files, duplicate test class removed.
+
+| ID | File | Change |
+|----|------|--------|
+| F-6a-1 | `agents/validate.py` | Return structured errors from `validate_config_dir()` — return `tuple[bool, list[ValidationError]]` or `ValidationResult` dataclass instead of `bool`. Keep `print()` in `__main__` block only. Enables `orch validate` (PR 6b) and programmatic server-startup validation without stdout parsing |
+| F-6a-2 | `schemas/agent.schema.json` | Clarify agent ID minimum length — regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` silently requires ≥3 chars. Either fix pattern to `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` or add `"minLength": 3` with documentation |
+| F-6a-4 | `schemas/agent.schema.json` | Add `"minLength": 1` to `memory.db_path` — currently accepts empty strings at schema level |
+| F-6a-5 | `tests/unit/python/test_validate.py` | Add test for `channels.yaml` validation path — `_SCHEMA_MAP` entry has zero test coverage |
+| F-6a-6 | `tests/unit/python/test_validate.py` | Add test asserting specific error message content (via `capsys`) — current tests only check pass/fail boolean, schema regressions that fail for the wrong reason are invisible |
+
 > Items F-5b-2 and F-5b-3 already applied in review fix passes (memory init failure isolation, `exclusive()` lock accessor). No further action needed.
 
-> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test.
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/`.
 
 #### Key implementation details
 

@@ -75,7 +75,7 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
 | `agents/persona.py` | PersonaAgent runtime (persona state, behavior dimensions, LLM event loop, memory integration, event dispatch, tick scheduler) | ✅ Complete (RFC 0005 PR 5a+5b) |
-| `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
+| `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
@@ -117,7 +117,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 9/12 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 12 | 10/12 |
 
 ### Dependency Chain
 
@@ -220,6 +220,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/12) | 2026-04-12 |
 | [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/12) | 2026-04-13 |
 | [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/12) | 2026-04-13 |
+| #56 | feat(agents): config validation + schema wiring | 0005 (6a/12) | 2026-04-13 |
 
 ---
 
