@@ -534,6 +534,16 @@ class _LLMPersonaAgent(PersonaAgent):
         """
         return self._lock
 
+    def recover_idle_energy(self) -> None:
+        """Recover energy during an idle tick.  Must be called under lock.
+
+        Public API for ``TickScheduler`` so it does not need to reach
+        into the private ``_state`` attribute.  Mirrors the internal
+        ``self._state.recover_energy()`` call used by ``on_tick()``.
+        (PR #55 review: TickScheduler accesses private agent._state.)
+        """
+        self._state.recover_energy()
+
     # ─── System prompt assembly ────────────────────────
 
     def _build_system_prompt(self) -> str:
@@ -1507,6 +1517,10 @@ class TickScheduler:
         self._wake_event.set()  # Unblock any wait
         if self._task is not None and not self._task.done():
             try:
+                # shield() prevents wait_for's cancellation from killing
+                # the task — _stopped + _wake_event already signal _run()
+                # to exit cleanly.  If it doesn't exit within `timeout`,
+                # we cancel the task explicitly in the TimeoutError branch.
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
             except TimeoutError:
                 logger.warning(
@@ -1561,11 +1575,11 @@ class TickScheduler:
                     self._agent.agent_id,
                     self._idle_count,
                 )
-                # Use public exclusive() API instead of reaching into
-                # _lock directly (PR #55 review: TickScheduler should
-                # use public API for agent lock).
+                # Use public API instead of reaching into private
+                # attributes (PR #55 review: TickScheduler should use
+                # public API for agent lock and state).
                 async with self._agent.exclusive():
-                    self._agent._state.recover_energy()
+                    self._agent.recover_idle_energy()
                 continue
 
             try:

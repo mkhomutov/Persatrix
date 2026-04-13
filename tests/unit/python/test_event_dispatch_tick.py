@@ -438,6 +438,37 @@ class TestEventDispatcher:
         assert original_payload["mutable_key"] == "original"
         await agent.close_memory()
 
+    async def test_nested_payload_fully_isolated(self):
+        """Dispatch deep-copies payload so nested structures are independent.
+
+        A shallow ``{**event.payload}`` spread would copy top-level keys
+        but share nested dicts/lists.  ``copy.deepcopy()`` at L1408
+        ensures full isolation.
+        (PR #55 review: test copy.deepcopy on nested payload structures.)
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+
+        nested_list = [1, 2, 3]
+        nested_dict = {"inner_key": "inner_value"}
+        original_payload = {
+            "content": "test",
+            "nested_list": nested_list,
+            "nested_dict": nested_dict,
+        }
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload=original_payload,
+        )
+        await dispatcher.dispatch("sarah-chen", event)
+
+        # Nested structures in the original payload must be untouched
+        assert original_payload["nested_list"] is nested_list
+        assert original_payload["nested_dict"] is nested_dict
+        assert nested_list == [1, 2, 3]
+        assert nested_dict == {"inner_key": "inner_value"}
+        await agent.close_memory()
+
 
 # ─── TickScheduler Tests ────────────────────────────────────
 
@@ -649,6 +680,38 @@ class TestTickScheduler:
 
         scheduler2 = TickScheduler(agent, interval=-5.0)
         assert scheduler2._interval >= TickScheduler._MIN_INTERVAL
+        await agent.close_memory()
+
+    async def test_idle_energy_recovery(self):
+        """When idle, tick loop still recovers energy via recover_idle_energy().
+
+        Verifies the idle recovery codepath (TickScheduler._run() idle
+        branch) restores energy so agents aren't depleted after long
+        idle periods.
+        (PR #55 review: test idle energy recovery path — coverage gap.)
+        """
+        agent = await _make_agent()
+
+        # Drain energy to a known low level
+        agent._state.energy = 0.3
+
+        async def _do_nothing_tick():
+            return [AgentAction(ActionType.DO_NOTHING, {})]
+
+        agent.on_tick = _do_nothing_tick  # type: ignore[assignment]
+        executor = ActionExecutor()
+
+        scheduler = TickScheduler(
+            agent, interval=0.05, idle_after_ticks=2, executor=executor,
+        )
+        scheduler.start()
+        # Let it tick past the idle threshold and run idle recovery
+        await asyncio.sleep(0.4)
+        await scheduler.stop()
+
+        assert scheduler.is_idle
+        # Energy should have recovered from 0.3 (each idle tick adds 0.1)
+        assert agent._state.energy > 0.3
         await agent.close_memory()
 
 
