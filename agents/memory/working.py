@@ -28,7 +28,7 @@ def estimate_tokens(text: str, *, accurate: bool = False) -> int:
             enc = tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
         except ImportError:
-            pass
+            logger.debug("tiktoken not installed, accurate=True falling back to chars/4")
     return len(text) // 4
 
 

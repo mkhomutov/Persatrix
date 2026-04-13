@@ -96,13 +96,13 @@ _MAX_RECALL_LIMIT = 100
 # being invisible in ranked recall (F-3a-1).
 _IMPORTANCE_EXPR = "(0.1 + e.importance * 0.9)"
 _ACCESS_BOOST_EXPR = "(1.0 + ln(1 + e.access_count))"
-_RECENCY_DECAY_EXPR = "(1.0 / (1 + (? - e.created_at) / 86400.0))"
+_RECENCY_DECAY_EXPR = "(1.0 / (1 + (? - e.created_at) / 86400.0))"  # ? = time.time()
 _SCORE_EXPR = f"{_IMPORTANCE_EXPR} * {_ACCESS_BOOST_EXPR} * {_RECENCY_DECAY_EXPR}"
 
 # Same as _SCORE_EXPR but without the alias prefix for non-JOIN queries.
 _IMPORTANCE_EXPR_BARE = "(0.1 + importance * 0.9)"
 _ACCESS_BOOST_EXPR_BARE = "(1.0 + ln(1 + access_count))"
-_RECENCY_DECAY_EXPR_BARE = "(1.0 / (1 + (? - created_at) / 86400.0))"
+_RECENCY_DECAY_EXPR_BARE = "(1.0 / (1 + (? - created_at) / 86400.0))"  # ? = time.time()
 _SCORE_EXPR_BARE = (
     f"{_IMPORTANCE_EXPR_BARE} * {_ACCESS_BOOST_EXPR_BARE}"
     f" * {_RECENCY_DECAY_EXPR_BARE}"
@@ -471,9 +471,9 @@ class EpisodicMemory:
                 (query, self._agent_id, min_importance, time.time(), limit),
             ) as cursor:
                 return await cursor.fetchall()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
             logger.warning(
-                "FTS5 query failed for %r, falling back to LIKE", query,
+                "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
             )
             return await self._recall_like(db, query, limit, min_importance)
 
@@ -867,14 +867,14 @@ class EpisodicMemory:
         """
         await db.execute(
             """
-            DELETE FROM notes WHERE id IN (
+            DELETE FROM notes WHERE agent_id = ? AND id IN (
                 SELECT id FROM notes
                 WHERE agent_id = ?
                 ORDER BY access_count ASC, created_at ASC
                 LIMIT MAX(0, (SELECT COUNT(*) FROM notes WHERE agent_id = ?) - ? + 1)
             )
             """,
-            (self._agent_id, self._agent_id, max_notes),
+            (self._agent_id, self._agent_id, self._agent_id, max_notes),
         )
 
     async def _recall_notes_fts5(

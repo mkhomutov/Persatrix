@@ -12,6 +12,7 @@ import pytest
 
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
+from agents.memory import MemoryLifecycle
 
 
 # ─── Fixtures ───────────────────────────────────────────────
@@ -376,6 +377,10 @@ class TestInitialize:
         await wm.initialize()
         # State is unchanged
         assert wm.total_tokens() == 50
+
+    def test_working_memory_satisfies_memory_lifecycle(self):
+        """WorkingMemory structurally matches @runtime_checkable MemoryLifecycle (R-10)."""
+        assert isinstance(WorkingMemory(), MemoryLifecycle)
 
 
 # ─── WorkingMemory.try_start_compression (concurrency guard) ─

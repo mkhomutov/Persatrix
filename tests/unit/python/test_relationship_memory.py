@@ -588,3 +588,56 @@ class TestConcurrentRecordInteraction:
         )
         summary = await memory.get_relationship_summary("bob")
         assert summary.interaction_count == 2
+
+
+# ─── Empty other_agent_id validation (R-1 / F-4-1) ─────────
+
+
+class TestEmptyOtherAgentId:
+    """update_trust() and record_interaction() reject empty other_agent_id."""
+
+    async def test_update_trust_rejects_empty(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.update_trust("", 0.1, "reason")
+
+    async def test_update_trust_rejects_whitespace(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.update_trust("   ", 0.1, "reason")
+
+    async def test_record_interaction_rejects_empty(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.record_interaction("", "chat")
+
+    async def test_record_interaction_rejects_whitespace(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.record_interaction("   ", "chat")
+
+
+# ─── String truncation (R-2 / F-4-3, F-4-4) ────────────────
+
+
+class TestStringTruncation:
+    """reason and outcome are capped at 1024 chars to bound storage and LLM context."""
+
+    async def test_reason_truncated_at_1024(self, memory):
+        long_reason = "x" * 2000
+        await memory.update_trust("bob", 0.1, long_reason)
+        summary = await memory.get_relationship_summary("bob")
+        assert len(summary.notes) == 1024
+
+    async def test_outcome_truncated_at_1024(self, memory):
+        long_outcome = "y" * 2000
+        await memory.record_interaction("bob", "chat", outcome=long_outcome)
+        summary = await memory.get_relationship_summary("bob")
+        assert len(summary.recent_interactions[0].outcome) == 1024
+
+    async def test_short_reason_unchanged(self, memory):
+        reason = "short reason"
+        await memory.update_trust("bob", 0.1, reason)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.notes == reason
+
+    async def test_none_outcome_unchanged(self, memory):
+        await memory.record_interaction("bob", "chat", outcome=None)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].outcome is None
