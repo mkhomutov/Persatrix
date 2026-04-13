@@ -119,6 +119,14 @@ class WorkingMemory:
                     section.token_count,
                 )
 
+        logger.debug(
+            "Context built: %d/%d tokens, %d/%d sections included",
+            running_total,
+            self._max_tokens,
+            len(included),
+            len(self._sections),
+        )
+
         # Return in priority order (highest first)
         return [{"role": s.name, "content": s.content} for s in included]
 
@@ -153,6 +161,8 @@ class WorkingMemory:
         if self.total_tokens() <= self._max_tokens:
             return
 
+        original_total = self.total_tokens()
+
         # Sort compressible sections by priority ascending (compress lowest first)
         compressible = sorted(
             [s for s in self._sections if s.compressible],
@@ -179,7 +189,7 @@ class WorkingMemory:
                         section.name,
                     )
                     continue
-                new_token_count = estimate_tokens(summary)
+                new_token_count = estimate_tokens(summary, accurate=True)
                 # Guard against LLM producing a summary that is as long or
                 # longer than the original — replacing it would not reduce
                 # total tokens and could infinite-loop if callers retry
@@ -212,6 +222,12 @@ class WorkingMemory:
                 logger.warning(
                     "Failed to compress section '%s'", section.name, exc_info=True
                 )
+
+        logger.info(
+            "Compression pass: %d → %d total tokens",
+            original_total,
+            self.total_tokens(),
+        )
 
     async def close(self) -> None:
         """Await outstanding compression and clear sections."""

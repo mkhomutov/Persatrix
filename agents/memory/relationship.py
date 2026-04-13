@@ -144,6 +144,10 @@ class RelationshipMemory:
            is retained.
         """
         db = self._ensure_db()
+        # Reject empty other_agent_id — downstream queries silently return
+        # no results and produce meaningless relationship entries (F-4-1).
+        if not other_agent_id or not other_agent_id.strip():
+            raise ValueError("other_agent_id must not be empty")
         # Reject non-finite deltas: NaN propagates through max()/min()
         # unpredictably in Python and corrupts trust_score in SQLite,
         # breaking subsequent comparisons (e.g. apply_decay() threshold).
@@ -151,6 +155,10 @@ class RelationshipMemory:
             raise ValueError(f"delta must be a finite number, got {delta}")
         # Clamp delta to prevent extreme single-event swings.
         delta = max(-_MAX_TRUST_DELTA, min(_MAX_TRUST_DELTA, delta))
+
+        # Cap reason length to prevent unbounded strings entering LLM
+        # prompts via get_relationship_summary() (F-4-3).
+        reason = reason[:1024]
 
         # Pre-compute trust for the INSERT path (new relationship).
         insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
@@ -255,6 +263,10 @@ class RelationshipMemory:
         """
         db = self._ensure_db()
 
+        # Reject empty other_agent_id (F-4-1).
+        if not other_agent_id or not other_agent_id.strip():
+            raise ValueError("other_agent_id must not be empty")
+
         # Reject empty interaction_type: it has no semantic value and would
         # produce meaningless entries in get_relationship_summary() output
         # injected into LLM prompts.
@@ -266,6 +278,9 @@ class RelationshipMemory:
         if math.isnan(sentiment) or math.isinf(sentiment):
             raise ValueError(f"sentiment must be a finite number, got {sentiment}")
         sentiment = max(-1.0, min(1.0, sentiment))
+
+        # Cap outcome to avoid unbounded storage (F-4-4).
+        outcome = outcome[:1024] if outcome else outcome
 
         interaction_id = str(uuid.uuid4())
         now = time.time()

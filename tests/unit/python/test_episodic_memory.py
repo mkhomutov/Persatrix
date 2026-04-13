@@ -1230,3 +1230,58 @@ class TestDeleteOldEpisodes:
 
         assert deleted == 0
         assert await memory.get_episode(ep_id) is not None
+
+
+# ─── Future migration forward-compatibility (F-3a-3) ───────
+
+
+class TestFutureMigration:
+    async def test_hypothetical_v4_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v4 entry, verify v1–v4 applied."""
+        from agents.memory.episodic import MIGRATIONS
+
+        v4 = (
+            4,
+            "Hypothetical test-only table",
+            "CREATE TABLE IF NOT EXISTS _test_v4 (id TEXT PRIMARY KEY);",
+        )
+        original = list(MIGRATIONS)
+        try:
+            MIGRATIONS.append(v4)
+            mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
+            await mem.initialize()
+            db = mem._ensure_db()
+
+            # All four versions should be recorded
+            async with db.execute(
+                "SELECT version FROM schema_version ORDER BY version"
+            ) as cursor:
+                versions = [r[0] for r in await cursor.fetchall()]
+            assert versions == [1, 2, 3, 4]
+
+            # v4 table should exist
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v4'"
+            ) as cursor:
+                assert await cursor.fetchone() is not None
+
+            await mem.close()
+        finally:
+            MIGRATIONS.clear()
+            MIGRATIONS.extend(original)
+
+
+# ─── Zero-importance recall (F-3a-1) ───────────────────────
+
+
+class TestZeroImportanceRecall:
+    async def test_zero_importance_episode_visible_in_recall(self, memory: EpisodicMemory):
+        """importance=0.0 episodes must still appear in recall results (non-zero baseline)."""
+        ep_id = await memory.store_episode(
+            summary="Zero importance event",
+            context={"detail": "test"},
+            importance=0.0,
+        )
+        episodes = await memory.recall(query="", limit=10)
+        ids = [e.id for e in episodes]
+        assert ep_id in ids, "Zero-importance episodes should be visible via non-zero scoring baseline"

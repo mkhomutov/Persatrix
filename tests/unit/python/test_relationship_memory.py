@@ -572,3 +572,19 @@ class TestAgentIsolation:
         assert rels_a[0].other_agent_id == "bob"
         assert len(rels_b) == 1
         assert rels_b[0].other_agent_id == "charlie"
+
+
+# ─── Concurrent record_interaction (F-4-2) ─────────────────
+
+
+class TestConcurrentRecordInteraction:
+    async def test_concurrent_record_interactions_both_counted(self, memory: RelationshipMemory):
+        """Two concurrent record_interaction() calls should both be counted."""
+        import asyncio
+
+        await asyncio.gather(
+            memory.record_interaction("bob", "chat", outcome="good"),
+            memory.record_interaction("bob", "review", outcome="great"),
+        )
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.interaction_count == 2

@@ -346,13 +346,13 @@ class TestMemoryToolsHappyPath:
 
     async def test_update_nonexistent_note_tool(self, tools):
         td = get_tool("update_note")
-        result = await td.func(note_id="no-such-id", content="x")
+        result = await td.func(note_id="00000000-0000-0000-0000-000000000000", content="x")
         assert result.success is False
         assert "not found" in result.error.lower()
 
     async def test_delete_nonexistent_note_tool(self, tools):
         td = get_tool("delete_note")
-        result = await td.func(note_id="no-such-id")
+        result = await td.func(note_id="00000000-0000-0000-0000-000000000000")
         assert result.success is False
         assert "not found" in result.error.lower()
 
@@ -464,3 +464,53 @@ class TestMigrationV2:
         await memory.delete_note(note_id)
         notes = await memory.recall_notes("different-content-abc")
         assert len(notes) == 0
+
+
+# ─── FTS5 malformed query fallback (F-3b-5) ────────────────
+
+
+class TestRecallNotesFTS5Fallback:
+    """Notes recall with malformed FTS5 queries falls back to LIKE without crashing."""
+
+    @pytest.mark.parametrize("malformed_query", ["NOT", "*", "OR", "AND NOT"])
+    async def test_malformed_fts5_query_returns_results(self, memory, gate_rw, malformed_query):
+        create_memory_tools(memory, gate_rw)
+        # Store a note first so LIKE fallback has something to match
+        store = get_tool("store_note")
+        await store.func(topic="test", content="some content")
+
+        recall = get_tool("recall_notes")
+        result = await recall.func(query=malformed_query, limit=10)
+        # Should not crash — either returns matches via LIKE or empty list
+        assert result.success is True
+
+
+# ─── note_id UUID validation (F-3b-3) ──────────────────────
+
+
+class TestNoteIdValidation:
+    """update_note and delete_note reject malformed note_id before DB round-trip."""
+
+    async def test_update_note_rejects_non_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        update = get_tool("update_note")
+        result = await update.func(note_id="not-a-uuid", content="new content")
+        assert result.success is False
+        assert "Invalid note_id" in result.error
+
+    async def test_delete_note_rejects_non_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        delete = get_tool("delete_note")
+        result = await delete.func(note_id="bogus-id-here")
+        assert result.success is False
+        assert "Invalid note_id" in result.error
+
+    async def test_update_note_accepts_valid_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        store = get_tool("store_note")
+        store_result = await store.func(topic="test", content="original")
+        note_id = store_result.data["note_id"]
+
+        update = get_tool("update_note")
+        result = await update.func(note_id=note_id, content="updated")
+        assert result.success is True

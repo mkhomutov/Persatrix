@@ -8,6 +8,8 @@ All tests use mock LLM client — no real API calls.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
 
@@ -347,6 +349,33 @@ class TestCompression:
         await wm.compress_if_needed(client)
         call_kwargs = client._provider.create_message.call_args.kwargs
         assert call_kwargs["max_tokens"] >= 64
+
+
+# ─── Tiktoken conditional test (F-2-4) ─────────────────────
+
+
+class TestEstimateTokensTiktoken:
+    def test_accurate_with_tiktoken(self):
+        """When tiktoken IS available, accurate=True uses it and differs from chars/4."""
+        pytest.importorskip("tiktoken")
+        text = "Hello, world! This is a longer sentence for testing token estimation."
+        accurate = estimate_tokens(text, accurate=True)
+        naive = len(text) // 4
+        assert accurate != naive, "accurate path should differ from chars/4 when tiktoken is available"
+        assert accurate > 0
+
+
+# ─── MemoryLifecycle protocol (F-2-5) ──────────────────────
+
+
+class TestInitialize:
+    async def test_initialize_is_noop(self):
+        """WorkingMemory.initialize() exists and is a no-op (MemoryLifecycle contract)."""
+        wm = WorkingMemory()
+        wm.add_section(_make_section(name="a", token_count=50))
+        await wm.initialize()
+        # State is unchanged
+        assert wm.total_tokens() == 50
 
 
 # ─── WorkingMemory.try_start_compression (concurrency guard) ─
