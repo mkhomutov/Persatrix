@@ -834,13 +834,13 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `MemoryLifecycle` protocol defined and exported
-- [ ] Zero-importance episodes visible in recall
-- [ ] Scoring formula deduplicated across recall methods
-- [ ] Atomic note pruning (no TOCTOU)
-- [ ] `RETURNING` clause eliminates read-after-write race
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `MemoryLifecycle` protocol defined and exported
+- [x] Zero-importance episodes visible in recall
+- [x] Scoring formula deduplicated across recall methods
+- [x] Atomic note pruning (no TOCTOU)
+- [x] `RETURNING` clause eliminates read-after-write race
 
 ---
 
