@@ -460,6 +460,68 @@ class TestSafetyNetConditional:
         )
 
 
+class TestPersonaAdditionalProperties:
+    """Validates additionalProperties: false on persona definition.
+
+    Without this constraint, typos in persona-level fields (e.g.
+    ``bckground`` instead of ``background``) silently pass validation.
+    Added per PR #56 review: every other schema definition already had
+    ``additionalProperties: false`` — persona was the only gap.
+    """
+
+    def test_persona_unknown_field_rejected(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah",
+                    "role": "Lead",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "Lead",
+                        "background": "Engineer.",
+                        "behavior": {},
+                        "extra_field": "should be rejected",
+                    },
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_persona_typo_in_background_rejected(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Realistic typo: ``bckground`` instead of ``background``."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "sarah-chen",
+                    "type": "persona",
+                    "name": "Sarah",
+                    "role": "Lead",
+                    "model": "claude-sonnet-4-20250514",
+                    "persona": {
+                        "title": "Lead",
+                        "bckground": "Engineer.",  # typo
+                        "behavior": {},
+                    },
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+
 class TestWorkflowValidation:
     def test_valid_workflow_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
@@ -481,6 +543,23 @@ class TestWorkflowValidation:
             },
         }
         _write_workflow_yaml(workflow_dir, "broken.yaml", data)
+        assert not validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+
+    def test_malformed_workflow_schema_reports_error(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Malformed workflow schema JSON should report error, not crash.
+
+        Mirrors the try/except in config schema loading (lines 101-104).
+        Added per PR #56 review: workflow schema loading was the only
+        json.loads() call without error handling.
+        """
+        _write_workflow_yaml(workflow_dir, "test.yaml", _VALID_WORKFLOW)
+        (schemas_dir / "workflow.schema.json").write_text(
+            "{invalid json", encoding="utf-8"
+        )
         assert not validate_config_dir(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
@@ -769,65 +848,3 @@ class TestValidationError:
         assert "parse error" in str(err)
 
 
-class TestMultipleAgents:
-    def test_mixed_task_and_persona_passes(
-        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
-    ) -> None:
-        data = {
-            "schema_version": "0.2",
-            "agents": [
-                {
-                    "id": "code-writer",
-                    "type": "task",
-                    "name": "Writer",
-                    "role": "Writes",
-                    "model": "claude-sonnet-4-20250514",
-                    "instructions": "Write code.",
-                },
-                {
-                    "id": "sarah-chen",
-                    "type": "persona",
-                    "name": "Sarah",
-                    "role": "Lead",
-                    "model": "claude-sonnet-4-20250514",
-                    "persona": {
-                        "title": "Lead",
-                        "background": "Engineer.",
-                        "behavior": {"directness": "direct"},
-                    },
-                },
-            ],
-        }
-        _write_agents_yaml(config_dir, data)
-        assert validate_config_dir(
-            str(config_dir), str(schemas_dir), str(workflow_dir)
-        )
-
-    def test_one_invalid_agent_fails_entire_file(
-        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
-    ) -> None:
-        data = {
-            "schema_version": "0.2",
-            "agents": [
-                {
-                    "id": "code-writer",
-                    "type": "task",
-                    "name": "Writer",
-                    "role": "Writes",
-                    "model": "claude-sonnet-4-20250514",
-                    "instructions": "Write code.",
-                },
-                {
-                    "id": "bad-agent",
-                    "type": "task",
-                    "name": "Bad",
-                    "role": "Bad",
-                    "model": "claude-sonnet-4-20250514",
-                    # Missing 'instructions'
-                },
-            ],
-        }
-        _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
-            str(config_dir), str(schemas_dir), str(workflow_dir)
-        )

@@ -134,6 +134,7 @@
     "persona": {
       "type": "object",
       "required": ["title", "background", "behavior"],
+      "additionalProperties": false,
       "properties": {
         "title": { "type": "string" },
         "background": { "type": "string" },

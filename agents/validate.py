@@ -16,6 +16,8 @@ import yaml
 
 # Map config filenames to their schema files.
 # Only files with a known schema are validated; unknown YAML files are skipped.
+# TODO: Add optimization.yaml, organizations.yaml, bridges.yaml, mcp-servers.yaml
+#       when JSON schemas are created for them.
 _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
     "channels.yaml": "channel.schema.json",
@@ -114,11 +116,16 @@ def validate_config_dir(
     if wf_path.exists():
         wf_schema_path = schemas_path / _WORKFLOW_SCHEMA
         if wf_schema_path.exists():
-            wf_schema = json.loads(wf_schema_path.read_text(encoding="utf-8"))
-            for yaml_file in sorted(wf_path.glob("*.yaml")):
-                errors = _validate_yaml_against_schema(yaml_file, wf_schema)
-                all_errors.extend(errors)
+            try:
+                wf_schema = json.loads(wf_schema_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                all_errors.append(ValidationError(str(wf_schema_path), f"Schema error: {exc}"))
                 files_checked += 1
+            else:
+                for yaml_file in sorted(wf_path.glob("*.yaml")):
+                    errors = _validate_yaml_against_schema(yaml_file, wf_schema)
+                    all_errors.extend(errors)
+                    files_checked += 1
 
     if files_checked == 0:
         print(f"No config files found in {config_dir}")
