@@ -7,7 +7,7 @@ All tests use mock LLM client — no real API calls.
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1374,13 +1374,14 @@ class TestActionPayloadValidation:
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING
 
-    async def test_delegate_single_char_agent_id_rejected(self):
+    async def test_delegate_single_char_agent_id_accepted(self):
+        """F-6a-2: single character agent IDs are now valid."""
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
             {"action_type": "delegate", "payload": {"agent_id": "a", "task": "do stuff"}},
         ]))
         actions = agent._parse_actions(response)
-        assert actions[0].action_type == ActionType.DO_NOTHING
+        assert actions[0].action_type == ActionType.DELEGATE
 
     async def test_delegate_missing_task(self):
         agent = await self._make_agent()
@@ -1634,5 +1635,164 @@ class TestTickTimeout:
         # The mock LLM returns a COMPLETE_TASK action which drains 0.05,
         # so net change is +0.1 - 0.05 = +0.05.
         assert agent._state.energy == pytest.approx(0.55)
+        await agent.close_memory()
+
+
+# ─── F-5a-4: Minimal config prompt ────────────────────────
+
+class TestMinimalConfigPrompt:
+    """F-5a-4: System prompt with minimal persona config."""
+
+    async def test_minimal_persona_produces_valid_prompt(self):
+        """Agent with only required persona fields builds a prompt without error."""
+        minimal_config = {
+            "id": "minimal",
+            "type": "persona",
+            "name": "Minimal Agent",
+            "role": "Tester",
+            "model": "test-model",
+            "persona": {
+                "title": "Tester",
+                "background": "QA.",
+                "behavior": {},
+            },
+            "memory": {"db_path": ":memory:"},
+        }
+        agent = create_persona_agent(
+            agent_id="minimal", config=minimal_config, llm_client=_make_client(),
+        )
+        prompt = agent._build_system_prompt()
+        assert "Minimal Agent" in prompt
+        assert "Tester" in prompt
+        # No quirks, goals, or behavior should not crash
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+
+# ─── F-5a-5: Energy at exactly 1.0 ────────────────────────
+
+class TestEnergyClampAtOne:
+    """F-5a-5: recover_energy() when energy is already at 1.0."""
+
+    def test_recover_at_max_stays_at_one(self):
+        state = PersonaState(energy=1.0)
+        state.recover_energy()
+        assert state.energy == pytest.approx(1.0)
+
+    def test_recover_near_max_clamps(self):
+        state = PersonaState(energy=0.99)
+        state.recover_energy()
+        assert state.energy == pytest.approx(1.0)
+
+
+# ─── F-5b-1: _inject_memory_context ───────────────────────
+
+class TestInjectMemoryContext:
+    """F-5b-1: Memory context injection into working memory."""
+
+    async def test_injects_episodic_and_notes(self):
+        """_inject_memory_context adds episodic and note sections."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode and a note so recall returns results.
+        await agent._episodic_memory.store_episode(
+            summary="Discussed architecture patterns",
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for architecture",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        # Patch _format_event to return a simple query that FTS5/LIKE can match.
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event)
+
+        # Check that sections were added to working memory.
+        episodic_section = agent._working_memory.get_section("episodic_recall")
+        notes_section = agent._working_memory.get_section("recent_notes")
+        assert episodic_section is not None
+        assert "architecture" in episodic_section.content.lower()
+        assert episodic_section.priority == 7
+        assert notes_section is not None
+        assert "event sourcing" in notes_section.content.lower()
+        assert notes_section.priority == 6
+        await agent.close_memory()
+
+    async def test_injects_relationship_for_sender(self):
+        """_inject_memory_context adds relationship section when sender known."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record an interaction to create a relationship.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        assert "mike-torres" in rel_section.content
+        assert rel_section.priority == 8
+        await agent.close_memory()
+
+    async def test_no_sender_skips_relationship(self):
+        """_inject_memory_context skips relationship when no sender_id."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is None
+        await agent.close_memory()
+
+    async def test_memory_error_graceful(self):
+        """_inject_memory_context logs and continues if recall() raises."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Sabotage recall to simulate failure.
+        agent._episodic_memory.recall = AsyncMock(side_effect=RuntimeError("db locked"))
+        agent._episodic_memory.recall_notes = AsyncMock(side_effect=RuntimeError("db locked"))
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            sender_id="mike-torres",
+        )
+        # Should not raise.
+        await agent._inject_memory_context(event)
+
+        # Episodic and notes sections should not be present.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        assert agent._working_memory.get_section("recent_notes") is None
         await agent.close_memory()
 

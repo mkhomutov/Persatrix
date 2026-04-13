@@ -9,6 +9,12 @@ import yaml
 
 from agents.validate import ValidationError, validate_config_dir
 
+
+def _passes(*args: str) -> bool:
+    """Return True if validate_config_dir() reports success."""
+    ok, _ = validate_config_dir(*args)
+    return ok
+
 # ── Fixtures ────────────────────────────────────────────
 
 
@@ -122,7 +128,7 @@ class TestValidTaskAgent:
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
         _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -130,7 +136,7 @@ class TestValidTaskAgent:
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
         _write_agents_yaml(config_dir, _VALID_PERSONA_AGENT)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -151,7 +157,7 @@ class TestValidTaskAgent:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -172,7 +178,7 @@ class TestValidTaskAgent:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -199,7 +205,7 @@ class TestValidTaskAgent:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -228,7 +234,7 @@ class TestBehaviorDimensions:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -254,7 +260,7 @@ class TestBehaviorDimensions:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -281,7 +287,7 @@ class TestBehaviorDimensions:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -311,7 +317,7 @@ class TestAutonomyValidation:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -342,7 +348,7 @@ class TestAutonomyValidation:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -374,7 +380,7 @@ class TestMemoryValidation:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -404,7 +410,7 @@ class TestMemoryValidation:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -427,7 +433,7 @@ class TestAgentIdValidation:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -455,7 +461,7 @@ class TestSafetyNetConditional:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -491,7 +497,7 @@ class TestPersonaAdditionalProperties:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -517,7 +523,7 @@ class TestPersonaAdditionalProperties:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -527,7 +533,7 @@ class TestWorkflowValidation:
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
         _write_workflow_yaml(workflow_dir, "test.yaml", _VALID_WORKFLOW)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -543,7 +549,7 @@ class TestWorkflowValidation:
             },
         }
         _write_workflow_yaml(workflow_dir, "broken.yaml", data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -560,27 +566,27 @@ class TestWorkflowValidation:
         (schemas_dir / "workflow.schema.json").write_text(
             "{invalid json", encoding="utf-8"
         )
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
 
 class TestEdgeCases:
     def test_nonexistent_config_dir_fails(self, tmp_path: Path) -> None:
-        assert not validate_config_dir(str(tmp_path / "no-such-dir"))
+        assert not _passes(str(tmp_path / "no-such-dir"))
 
     def test_nonexistent_schemas_dir_fails(
         self, config_dir: Path, tmp_path: Path, workflow_dir: Path
     ) -> None:
         _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(tmp_path / "no-schemas"), str(workflow_dir)
         )
 
     def test_empty_config_dir_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -590,7 +596,7 @@ class TestEdgeCases:
         (config_dir / "agents.yaml").write_text(
             "invalid: yaml: [unterminated", encoding="utf-8"
         )
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -599,7 +605,7 @@ class TestEdgeCases:
     ) -> None:
         """Empty YAML file (None content) should not crash."""
         (config_dir / "agents.yaml").write_text("", encoding="utf-8")
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -615,7 +621,7 @@ class TestEdgeCases:
         """
         _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
         (schemas_dir / "agent.schema.json").unlink()
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -627,7 +633,7 @@ class TestEdgeCases:
         (schemas_dir / "agent.schema.json").write_text(
             "{invalid json", encoding="utf-8"
         )
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -670,7 +676,7 @@ class TestMultiAgentConfig:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert validate_config_dir(
+        assert _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -701,7 +707,7 @@ class TestMultiAgentConfig:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -738,7 +744,7 @@ class TestRangeConstraints:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -761,7 +767,7 @@ class TestRangeConstraints:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -791,7 +797,7 @@ class TestRangeConstraints:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -822,7 +828,7 @@ class TestRangeConstraints:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert not validate_config_dir(
+        assert not _passes(
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
@@ -832,7 +838,7 @@ class TestRealConfig:
 
     def test_real_agents_yaml_passes(self) -> None:
         """The real config/agents.yaml must pass validation."""
-        assert validate_config_dir("config/", "schemas/", "workflows/")
+        assert _passes("config/", "schemas/", "workflows/")
 
 
 class TestValidationError:
@@ -846,5 +852,145 @@ class TestValidationError:
         err = ValidationError("agents.yaml", "parse error")
         assert "agents.yaml" in str(err)
         assert "parse error" in str(err)
+
+
+class TestChannelsValidation:
+    """F-6a-5: channels.yaml is in _SCHEMA_MAP and validated."""
+
+    def test_valid_channels_yaml_passes(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "channels": [
+                {
+                    "id": "general",
+                    "type": "group",
+                    "name": "General",
+                    "members": "all",
+                }
+            ],
+        }
+        p = config_dir / "channels.yaml"
+        p.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
+        assert _passes(str(config_dir), str(schemas_dir), str(workflow_dir))
+
+    def test_invalid_channel_type_fails(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "channels": [
+                {
+                    "id": "general",
+                    "type": "invalid-type",
+                    "name": "General",
+                }
+            ],
+        }
+        p = config_dir / "channels.yaml"
+        p.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
+        assert not _passes(str(config_dir), str(schemas_dir), str(workflow_dir))
+
+
+class TestStructuredErrors:
+    """F-6a-6: validate_config_dir returns structured error objects."""
+
+    def test_errors_contain_message_and_file(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        """Returned ValidationError objects must carry file and message info."""
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "INVALID",
+                    "type": "task",
+                    "name": "Bad",
+                    "role": "Noop",
+                    "model": "gpt-4",
+                    "instructions": "x",
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        ok, errors = validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+        assert not ok
+        assert len(errors) >= 1
+        assert any("INVALID" in e.message or "pattern" in e.message.lower() for e in errors)
+        assert all(e.file for e in errors)
+
+    def test_success_returns_empty_errors(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        _write_agents_yaml(config_dir, _VALID_TASK_AGENT)
+        ok, errors = validate_config_dir(
+            str(config_dir), str(schemas_dir), str(workflow_dir)
+        )
+        assert ok
+        assert errors == []
+
+
+class TestAgentIdRegex:
+    """F-6a-2: agent ID regex allows 1-2 character IDs."""
+
+    def test_single_char_id_passes(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "a",
+                    "type": "task",
+                    "name": "Agent A",
+                    "role": "Test",
+                    "model": "gpt-4",
+                    "instructions": "x",
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert _passes(str(config_dir), str(schemas_dir), str(workflow_dir))
+
+    def test_two_char_id_passes(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "ab",
+                    "type": "task",
+                    "name": "Agent AB",
+                    "role": "Test",
+                    "model": "gpt-4",
+                    "instructions": "x",
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert _passes(str(config_dir), str(schemas_dir), str(workflow_dir))
+
+    def test_trailing_hyphen_fails(
+        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
+    ) -> None:
+        data = {
+            "schema_version": "0.2",
+            "agents": [
+                {
+                    "id": "agent-",
+                    "type": "task",
+                    "name": "Bad",
+                    "role": "Test",
+                    "model": "gpt-4",
+                    "instructions": "x",
+                }
+            ],
+        }
+        _write_agents_yaml(config_dir, data)
+        assert not _passes(str(config_dir), str(schemas_dir), str(workflow_dir))
 
 

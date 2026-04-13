@@ -154,6 +154,13 @@ class PersonaAgent(BaseAgent):
     Subclass this for persona agents. Override on_event() to define behavior.
     The framework calls on_event() for each incoming event; the agent returns
     one or more actions to execute.
+
+    **``llm_client`` forwarding**: ``PersonaAgent.__init__`` does NOT accept
+    ``llm_client``. The concrete subclass ``_LLMPersonaAgent`` receives it
+    via its own ``__init__`` and stores it on ``self._llm_client`` directly.
+    Subclasses that need LLM access should follow the same pattern or use
+    ``create_persona_agent()`` which wires everything.
+    (F-5a-3: documented override contract.)
     """
 
     def __init__(self, agent_id: str, config: dict[str, Any] | None = None):
@@ -615,6 +622,12 @@ class _LLMPersonaAgent(PersonaAgent):
                     return f"You have been assigned a task:\n\n{task.payload}"
                 return f"You have been assigned a task:\n\n{event.payload}"
             case EventType.MESSAGE_RECEIVED:
+                # SECURITY: sender_id and content originate from the
+                # dispatcher today (trusted).  When external bridges
+                # (Slack, Discord, email) are added in v0.2+, these
+                # fields will carry untrusted user input — sanitize
+                # and length-cap before injecting into the LLM prompt
+                # to mitigate prompt injection risks.
                 sender = event.sender_id or "unknown"
                 content = event.payload.get("content", "")
                 return f"Message from {sender}:\n\n{content}"
@@ -718,7 +731,7 @@ class _LLMPersonaAgent(PersonaAgent):
         return results
 
     # Agent ID format shared with server.py — cross-component contract.
-    _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+    _AGENT_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
     def _validate_action_payload(self, action: AgentAction) -> AgentAction:
         """Validate LLM-generated action payloads, replacing invalid ones with DO_NOTHING.
@@ -862,6 +875,98 @@ class _LLMPersonaAgent(PersonaAgent):
                     },
                 )]
 
+    async def _inject_memory_context(self, event: AgentEvent) -> None:
+        """Inject episodic, relationship, and note context into working memory.
+
+        Queries the three memory tiers for content relevant to the current
+        event and adds them as ``WorkingMemory`` sections with priorities
+        that keep them below the system/persona prompts (100/90) but above
+        conversation history.
+
+        Priorities: relationship=8, episodic=7, notes=6.
+        (F-5b-1: implement deferred memory-context injection.)
+        """
+        from .memory.working import ContextSection, estimate_tokens
+
+        query = self._format_event(event)
+
+        # 1. Episodic recall — recent episodes matching event content.
+        try:
+            episodes = await self._episodic_memory.recall(query, limit=5)
+        except Exception:
+            logger.warning(
+                "Agent %s: episodic recall failed, skipping",
+                self.agent_id, exc_info=True,
+            )
+            episodes = []
+
+        if episodes:
+            lines = ["Relevant past episodes:"]
+            for ep in episodes:
+                lines.append(f"- {ep.summary}")
+            text = "\n".join(lines)
+            self._working_memory.add_section(ContextSection(
+                name="episodic_recall",
+                content=text,
+                priority=7,
+                token_count=estimate_tokens(text),
+                compressible=True,
+            ))
+
+        # 2. Relationship summary for the sender (if present).
+        sender_id = event.sender_id
+        if sender_id:
+            try:
+                rel = await self._relationship_memory.get_relationship_summary(
+                    sender_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Agent %s: relationship lookup for %s failed, skipping",
+                    self.agent_id, sender_id, exc_info=True,
+                )
+                rel = None
+
+            if rel and rel.interaction_count > 0:
+                lines = [
+                    f"Relationship with {rel.other_agent_id}:",
+                    f"  Trust: {rel.trust_score:.2f}",
+                    f"  Interactions: {rel.interaction_count}",
+                ]
+                if rel.notes:
+                    lines.append(f"  Notes: {rel.notes}")
+                text = "\n".join(lines)
+                self._working_memory.add_section(ContextSection(
+                    name="relationship_context",
+                    content=text,
+                    priority=8,
+                    token_count=estimate_tokens(text),
+                    compressible=True,
+                ))
+
+        # 3. Recent notes (top 5 matching event content).
+        try:
+            notes = await self._episodic_memory.recall_notes(query, limit=5)
+        except Exception:
+            logger.warning(
+                "Agent %s: note recall failed, skipping",
+                self.agent_id, exc_info=True,
+            )
+            notes = []
+
+        if notes:
+            lines = ["Relevant notes:"]
+            for note in notes:
+                lines.append(f"- [{note.topic}] {note.content}")
+            text = "\n".join(lines)
+            self._working_memory.add_section(ContextSection(
+                name="recent_notes",
+                content=text,
+                priority=6,
+                token_count=estimate_tokens(text),
+                compressible=True,
+            ))
+
     async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
         """Inner event handler — must be called under self._lock."""
         if self._llm_client is None:
@@ -878,6 +983,9 @@ class _LLMPersonaAgent(PersonaAgent):
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": "Agent config missing required 'model' field"},
             )]
+
+        # 0. Inject memory context (episodic, relationship, notes)
+        await self._inject_memory_context(event)
 
         # 1. Build system prompt
         system_prompt = self._build_system_prompt()
@@ -1342,8 +1450,19 @@ class ActionExecutor:
                     sender_id=sender_id,
                     metadata={"cascade_depth": cascade_depth},
                 )
-                await self._dispatcher.dispatch(target_id, event)
+                await asyncio.wait_for(
+                    self._dispatcher.dispatch(target_id, event),
+                    timeout=60.0,
+                )
                 dispatched += 1
+            except TimeoutError:
+                # Per-dispatch timeout prevents a hung target agent from
+                # blocking the sender indefinitely.
+                # (F-5b-4: per-dispatch timeout in _handle_send_message.)
+                logger.warning(
+                    "Dispatch from %s to %s timed out after 60s",
+                    sender_id, target_id,
+                )
             except Exception:
                 # execute() promises "Non-fatal failures are logged but
                 # do not propagate."  Without this guard a single failed
@@ -1426,12 +1545,10 @@ class EventDispatcher:
 
         .. note::
 
-           TODO(v0.2): Inject memory context (episodic recall, relationship
-           summaries, recent notes) into the agent's working memory before
-           event handling — see RFC 0005 Phase 5b ``_inject_memory_context()``.
-           Deferred from this PR; persona agents currently rely on explicit
-           memory tool calls for context retrieval.
-           Tracked as F-5b-1 in PR plan for PR 7 follow-up.
+           Memory context (episodic recall, relationship summaries, recent
+           notes) is injected into the agent's working memory at the start
+           of ``_on_event_inner()`` via ``_inject_memory_context()``.
+           (F-5b-1: implemented in PR 7b.)
         """
         depth = event.metadata.get("cascade_depth", 0)
         if depth >= self._max_cascade_depth:

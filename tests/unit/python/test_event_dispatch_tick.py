@@ -1080,3 +1080,41 @@ class TestEventActionMemoryCycle:
         for r in results:
             assert len(r) >= 1
         await agent.close_memory()
+
+
+# ─── F-5b-4: Per-dispatch timeout in SEND_MESSAGE ──────────
+
+
+class TestPerDispatchTimeout:
+    """F-5b-4: _handle_send_message wraps dispatch with asyncio.wait_for."""
+
+    async def test_dispatch_timeout_logged_not_raised(self):
+        """A dispatch timeout is caught gracefully — sender is not blocked.
+
+        We mock the dispatcher to raise TimeoutError (what asyncio.wait_for
+        raises) to verify the except clause in _handle_send_message.
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        # Make dispatch raise TimeoutError as if wait_for expired.
+        async def _raise_timeout(target_id, event):
+            raise TimeoutError()
+
+        dispatcher.dispatch = _raise_timeout  # type: ignore[assignment]
+
+        action = AgentAction(
+            action_type=ActionType.SEND_MESSAGE,
+            payload={
+                "content": "Hello",
+                "mentions": ["sarah-chen"],
+            },
+        )
+        results = await executor.execute("sarah-chen", [action], cascade_depth=0)
+        assert len(results) == 1
+        # Dispatch timed out, so dispatched_to == 0 (timeout is caught, not counted).
+        assert results[0]["dispatched_to"] == 0
+        assert results[0]["status"] == "dispatched"
+
+        await agent.close_memory()

@@ -892,13 +892,13 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `_inject_memory_context()` implemented and tested
-- [ ] `on_tick()` and dispatch timeouts prevent indefinite blocking
-- [ ] `validate_config_dir()` returns structured errors
-- [ ] Agent ID schema updated
-- [ ] Server startup uses single consolidated agent loop
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `_inject_memory_context()` implemented and tested
+- [x] `on_tick()` and dispatch timeouts prevent indefinite blocking
+- [x] `validate_config_dir()` returns structured errors
+- [x] Agent ID schema updated
+- [x] Server startup uses single consolidated agent loop
 
 ---
 

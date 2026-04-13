@@ -117,7 +117,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 15 | 11/15 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 15 | 12/15 |
 
 ### Dependency Chain
 
@@ -222,6 +222,8 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/15) | 2026-04-13 |
 | [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/15) | 2026-04-13 |
 | [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/15) | 2026-04-13 |
+| [#58](https://github.com/mkhomutov/Orchestr8/pull/58) | docs(rfc0005): split PR 7 into 4 sub-PRs (7a-7d) | 0005 docs | 2026-04-13 |
+| [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/15) | 2026-04-13 |
 
 ---
 

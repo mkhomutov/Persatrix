@@ -78,20 +78,21 @@ def validate_config_dir(
     config_dir: str,
     schemas_dir: str = "schemas/",
     workflow_dir: str | None = None,
-) -> bool:
+) -> tuple[bool, list[ValidationError]]:
     """Validate all YAML files in a config directory.
 
-    Returns True if all files pass validation.
+    Returns a tuple of (success, errors). ``success`` is True when all
+    files pass validation. ``errors`` contains structured error objects
+    for programmatic consumption.
+    (F-6a-1: structured validation return.)
     """
     config_path = Path(config_dir)
     if not config_path.exists():
-        print(f"ERROR: Config directory not found: {config_dir}")
-        return False
+        return False, [ValidationError(config_dir, f"Config directory not found: {config_dir}")]
 
     schemas_path = Path(schemas_dir)
     if not schemas_path.exists():
-        print(f"ERROR: Schemas directory not found: {schemas_dir}")
-        return False
+        return False, [ValidationError(schemas_dir, f"Schemas directory not found: {schemas_dir}")]
 
     all_errors: list[ValidationError] = []
     files_checked = 0
@@ -128,20 +129,18 @@ def validate_config_dir(
                     files_checked += 1
 
     if files_checked == 0:
-        print(f"No config files found in {config_dir}")
-        return True
+        return True, []
 
-    if all_errors:
-        print(f"Validation failed — {len(all_errors)} error(s) in {files_checked} file(s):\n")
-        for error in all_errors:
-            print(error)
-        return False
-
-    print(f"Validated {files_checked} file(s) — all passed")
-    return True
+    return (len(all_errors) == 0), all_errors
 
 
 if __name__ == "__main__":
     config_dir = sys.argv[1] if len(sys.argv) > 1 else "config/"
-    success = validate_config_dir(config_dir)
+    success, errors = validate_config_dir(config_dir)
+    if errors:
+        print(f"Validation failed — {len(errors)} error(s):\n")
+        for error in errors:
+            print(error)
+    elif success:
+        print("Validation passed")
     sys.exit(0 if success else 1)
