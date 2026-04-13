@@ -94,19 +94,16 @@ _MAX_RECALL_LIMIT = 100
 # importance is wrapped with (0.1 + importance * 0.9) so that episodes with
 # importance=0.0 still receive a non-zero score (10% baseline) instead of
 # being invisible in ranked recall (F-3a-1).
-_IMPORTANCE_EXPR = "(0.1 + e.importance * 0.9)"
-_ACCESS_BOOST_EXPR = "(1.0 + ln(1 + e.access_count))"
-_RECENCY_DECAY_EXPR = "(1.0 / (1 + (? - e.created_at) / 86400.0))"  # ? = time.time()
-_SCORE_EXPR = f"{_IMPORTANCE_EXPR} * {_ACCESS_BOOST_EXPR} * {_RECENCY_DECAY_EXPR}"
-
-# Same as _SCORE_EXPR but without the alias prefix for non-JOIN queries.
-_IMPORTANCE_EXPR_BARE = "(0.1 + importance * 0.9)"
-_ACCESS_BOOST_EXPR_BARE = "(1.0 + ln(1 + access_count))"
-_RECENCY_DECAY_EXPR_BARE = "(1.0 / (1 + (? - created_at) / 86400.0))"  # ? = time.time()
-_SCORE_EXPR_BARE = (
-    f"{_IMPORTANCE_EXPR_BARE} * {_ACCESS_BOOST_EXPR_BARE}"
-    f" * {_RECENCY_DECAY_EXPR_BARE}"
+#
+# A single template parameterizes the column prefix ("e." for JOINed queries,
+# "" for bare queries) so formula tuning is a single edit (F-59-2).
+_SCORE_TEMPLATE = (
+    "(0.1 + {p}importance * 0.9)"
+    " * (1.0 + ln(1 + {p}access_count))"
+    " * (1.0 / (1 + (? - {p}created_at) / 86400.0))"  # ? = time.time()
 )
+_SCORE_EXPR = _SCORE_TEMPLATE.format(p="e.")
+_SCORE_EXPR_BARE = _SCORE_TEMPLATE.format(p="")
 
 
 # ─── Schema migrations ─────────────────────────────────────
@@ -762,6 +759,12 @@ class EpisodicMemory:
         Returns the generated note ID.
         """
         db = self._ensure_db()
+        # Validate max_notes: _prune_notes() computes
+        # LIMIT MAX(0, count - max_notes + 1), so max_notes=0 would
+        # delete ALL existing notes.  Reject at the public API boundary
+        # even though create_memory_tools() always passes 500 (F-59-1).
+        if max_notes < 1:
+            raise ValueError(f"max_notes must be >= 1, got {max_notes}")
         if not topic or not topic.strip():
             raise ValueError("topic must not be empty")
         if not content or not content.strip():

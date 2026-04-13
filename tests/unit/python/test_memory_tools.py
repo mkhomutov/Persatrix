@@ -514,3 +514,57 @@ class TestNoteIdValidation:
         update = get_tool("update_note")
         result = await update.func(note_id=note_id, content="updated")
         assert result.success is True
+
+
+# ─── max_notes validation (F-59-1) ─────────────────────────
+
+
+class TestMaxNotesValidation:
+    """store_note() rejects max_notes < 1 at the public API boundary."""
+
+    async def test_max_notes_zero_raises(self, memory):
+        with pytest.raises(ValueError, match="max_notes must be >= 1"):
+            await memory.store_note("topic", "content", max_notes=0)
+
+    async def test_max_notes_negative_raises(self, memory):
+        with pytest.raises(ValueError, match="max_notes must be >= 1"):
+            await memory.store_note("topic", "content", max_notes=-1)
+
+    async def test_max_notes_one_keeps_only_newest(self, memory):
+        """max_notes=1 prunes all existing notes, keeping only the newest."""
+        await memory.store_note("first", "content-1", max_notes=10)
+        await memory.store_note("second", "content-2", max_notes=1)
+        assert await memory.count_notes() == 1
+        notes = await memory.recall_notes(limit=10)
+        assert notes[0].topic == "second"
+
+
+# ─── Pruning + FTS5 trigger interaction (F-59 should-fix) ──
+
+
+class TestPruningFTS5Cleanup:
+    """Pruned notes must not remain in the FTS5 index."""
+
+    async def test_pruned_notes_not_findable_via_fts5(self, memory):
+        """After pruning, the FTS5 DELETE trigger removes pruned notes from the index."""
+        # Store 3 notes with distinctive content for FTS5 matching.
+        # Do NOT recall between stores — that would bump access_count and
+        # change which note gets pruned (prune order: access_count ASC,
+        # created_at ASC).
+        await memory.store_note("alpha", "unique-alpha-xyzzy", max_notes=10)
+        await memory.store_note("beta", "unique-beta-xyzzy", max_notes=10)
+        await memory.store_note("gamma", "unique-gamma-xyzzy", max_notes=10)
+        assert await memory.count_notes() == 3
+
+        # Store a 4th note with max_notes=3 — prunes 1 note.
+        # All three have access_count=0, so the oldest (alpha) is pruned.
+        await memory.store_note("delta", "unique-delta-xyzzy", max_notes=3)
+        assert await memory.count_notes() == 3
+
+        # Pruned note (alpha) must not be findable via recall
+        found_after = await memory.recall_notes("unique-alpha-xyzzy")
+        assert len(found_after) == 0
+
+        # Surviving notes should still be findable
+        found_beta = await memory.recall_notes("unique-beta-xyzzy")
+        assert len(found_beta) == 1
