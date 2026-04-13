@@ -610,10 +610,10 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `orch validate` command functional
-- [ ] `orch test --persona` command functional
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `orch validate` command functional
+- [x] `orch test --persona` command functional
 
 ---
 
