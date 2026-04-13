@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::process::Command as ProcessCommand;
 use tabled::{Table, Tabled};
+use tokio::process::Command as ProcessCommand;
 
 /// Orchestr8 CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
@@ -58,6 +58,11 @@ struct AgentResponse {
     #[tabled(display_with = "fmt_vec")]
     capabilities: Vec<String>,
     status: String,
+    /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
+    /// with v0.1 servers that don't return this field.
+    #[serde(default)]
+    #[tabled(skip)]
+    agent_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -358,7 +363,7 @@ async fn main() {
 
         // Exhaustive match instead of catch-all `_ =>` so that adding a new
         // Commands variant produces a compile error until its handler is added.
-        Commands::Validate { path, strict } => cmd_validate(&path, strict),
+        Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
         Commands::Test {
             agent,
             workflow,
@@ -366,6 +371,14 @@ async fn main() {
             record,
         } => {
             if let Some(ref id) = persona {
+                // F-6b-4: Warn when extra test flags are silently ignored.
+                if agent.is_some() || workflow.is_some() || record {
+                    eprintln!(
+                        "{}",
+                        "warning: --persona takes precedence; --agent/--workflow/--record ignored"
+                            .yellow()
+                    );
+                }
                 cmd_test_persona(&client, server, id).await
             } else if agent.is_some() || workflow.is_some() || record {
                 println!(
@@ -376,7 +389,7 @@ async fn main() {
             } else {
                 println!(
                     "{}",
-                    "Specify --persona <id> to test persona consistency".yellow()
+                    "No test type specified. Available: --persona <id> (more coming soon)".yellow()
                 );
                 Ok(())
             }
@@ -612,19 +625,30 @@ async fn cmd_logs(
 
 // ─── Validate command ────────────────────────────────────────────────────
 
-fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
-    // Locate the Python validator script relative to the CLI binary or CWD.
-    // The validator is at <repo_root>/agents/validate.py.
-    let script = find_validator_script()?;
-
-    let mut args = vec![script.to_string_lossy().to_string(), path.to_string()];
+// NOTE: `validate` is the only CLI command that runs locally (subprocess) instead
+// of via the orchestrator REST API. This deviates from the thin-client pattern.
+// A server-side POST /api/v1/config/validate endpoint would be architecturally
+// consistent — tracked for future improvement. (F-6b-3)
+async fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
+    // F-6b-1: Python validator does not implement --strict yet.
     if strict {
-        args.push("--strict".to_string());
+        eprintln!(
+            "{}",
+            "warning: --strict is not yet supported by the Python validator, ignored".yellow()
+        );
     }
 
-    let output = ProcessCommand::new("python")
-        .args(&args)
-        .output()
+    let script = find_validator_script()?;
+    let python = find_python_binary();
+    let args = vec![script.to_string_lossy().to_string(), path.to_string()];
+
+    // F-6b-2: Use async subprocess to avoid blocking a tokio worker thread.
+    // F-6b-6: Timeout prevents indefinite hang if the Python process stalls.
+    let mut cmd = ProcessCommand::new(python);
+    cmd.args(&args);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output())
+        .await
+        .map_err(|_| "Python validator timed out after 120 seconds".to_string())?
         .map_err(|e| format!("failed to run Python validator: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -664,19 +688,19 @@ fn find_validator_script() -> Result<std::path::PathBuf, String> {
     Err("cannot find agents/validate.py — run from the repository root".to_string())
 }
 
-// ─── Test persona command ────────────────────────────────────────────────
-
-/// Persona agent response with persona-specific fields.
-#[derive(Deserialize)]
-struct PersonaAgentResponse {
-    id: String,
-    #[allow(dead_code)]
-    address: String,
-    capabilities: Vec<String>,
-    status: String,
-    #[serde(default)]
-    agent_type: Option<String>,
+/// Return the Python interpreter binary name for the current platform.
+/// Windows: `python` (standard name via installer or py launcher).
+/// Unix/macOS: `python3` is preferred — `python` may be absent or
+/// Python 2 on some Linux distributions. (F-6b-7)
+fn find_python_binary() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
 }
+
+// ─── Test persona command ────────────────────────────────────────────────
 
 async fn cmd_test_persona(
     client: &reqwest::Client,
@@ -702,7 +726,7 @@ async fn cmd_test_persona(
         return Err(api_error_message(resp).await);
     }
 
-    let agent: PersonaAgentResponse = resp
+    let agent: AgentResponse = resp
         .json()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
