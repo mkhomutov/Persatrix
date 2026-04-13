@@ -37,7 +37,7 @@ const maxYAMLSize = 1 << 20
 // "step_1") because step IDs are workflow-internal identifiers, not externally
 // visible names.
 var (
-	ResourceIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+	ResourceIDRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	// PR #18 F-02: share the compiled regex instance since the pattern is
 	// identical. Separate variable names are retained for clearer error
 	// messages in validation call sites; separate compilation is unnecessary

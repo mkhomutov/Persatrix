@@ -669,14 +669,14 @@ func TestStepIDRegex_InvalidIDs(t *testing.T) {
 }
 
 func TestResourceIDRegex_ValidIDs(t *testing.T) {
-	valid := []string{"ab", "feature-builder", "v01", "a1b2"}
+	valid := []string{"a", "ab", "feature-builder", "v01", "a1b2"}
 	for _, id := range valid {
 		assert.True(t, ResourceIDRegex.MatchString(id), "expected valid: %q", id)
 	}
 }
 
 func TestResourceIDRegex_InvalidIDs(t *testing.T) {
-	invalid := []string{"", "a", "-start", "end-", "A-B", "has space"}
+	invalid := []string{"", "-start", "end-", "A-B", "has space", "-", "a-"}
 	for _, id := range invalid {
 		assert.False(t, ResourceIDRegex.MatchString(id), "expected invalid: %q", id)
 	}

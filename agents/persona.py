@@ -27,7 +27,7 @@ from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from .llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from .memory.episodic import EpisodicMemory
 from .memory.relationship import RelationshipMemory
-from .memory.working import WorkingMemory
+from .memory.working import ContextSection, WorkingMemory, estimate_tokens
 from .tools.builtin import create_memory_tools
 from .tools.permissions import PermissionGate
 from .tools.registry import ToolDefinition, get_tool, list_tools
@@ -324,7 +324,15 @@ _MAX_MENTIONS_PER_ACTION = 10
 # Prevents a hung target agent from blocking the sender indefinitely.
 # Separate from _DEFAULT_EVENT_TIMEOUT because dispatch timeout bounds a
 # single hop in a cascade chain, not the full event processing.
-# TODO(v0.3): make configurable via config["dispatch_timeout"].
+#
+# Worst-case wall-clock for a single SEND_MESSAGE with 10 mentions across
+# 5 cascade levels: 10 × 5 × 60 = 3,000s.  The outermost on_event() timeout
+# (_DEFAULT_EVENT_TIMEOUT = 300s) fires first for the root event, but inner
+# cascade levels have no aggregate timeout.  This is acceptable for MVP
+# because (a) real cascades rarely exceed 2–3 hops, (b) max_cascade_depth
+# bounds recursion, and (c) individual dispatch timeouts cap each hop.
+# TODO(v0.3): add aggregate cascade wall-clock budget and make per-dispatch
+# timeout configurable via config["dispatch_timeout"].
 # (PR #60 review: hard-coded 60s dispatch timeout.)
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
@@ -905,8 +913,6 @@ class _LLMPersonaAgent(PersonaAgent):
         caught by ``except Exception``.
         (PR #60 review: document intent of broad exception handling.)
         """
-        from .memory.working import ContextSection, estimate_tokens
-
         query = self._format_event(event)
 
         # 1. Episodic recall — recent episodes matching event content.
@@ -931,7 +937,13 @@ class _LLMPersonaAgent(PersonaAgent):
         if episodes:
             lines = ["Relevant past episodes:"]
             for ep in episodes:
-                lines.append(f"- {ep.summary}")
+                # Cap individual summaries to prevent a single verbose episode
+                # from consuming a disproportionate share of the working memory
+                # token budget.  build_context() enforces the overall budget, but
+                # truncating here gives fairer distribution across episodes.
+                # (PR #60 review: unbounded episode summary length.)
+                summary = ep.summary[:200]
+                lines.append(f"- {summary}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
                 name="episodic_recall",
@@ -962,6 +974,10 @@ class _LLMPersonaAgent(PersonaAgent):
                     f"  Interactions: {rel.interaction_count}",
                 ]
                 if rel.notes:
+                    # TODO(v0.3): sanitize rel.notes when A2A protocol allows
+                    # external agents — a compromised peer could store prompt
+                    # injection text in its relationship notes.
+                    # (PR #60 review: internal prompt injection via peer memory.)
                     lines.append(f"  Notes: {rel.notes}")
                 text = "\n".join(lines)
                 self._working_memory.add_section(ContextSection(

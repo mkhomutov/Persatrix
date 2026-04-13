@@ -920,7 +920,7 @@ class TestStructuredErrors:
         assert not ok
         assert len(errors) >= 1
         assert any("INVALID" in e.message or "pattern" in e.message.lower() for e in errors)
-        assert all(e.file for e in errors)
+        assert all("agents.yaml" in e.file for e in errors)
 
     def test_success_returns_empty_errors(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
