@@ -1238,3 +1238,96 @@ class TestLoadPersonaStateCorrupted:
         assert state.stress_level == 0.0
         await agent.close_memory()
 
+
+# ─── PR #54 review: MAX_TOKENS stop_reason handling ─────────
+
+
+class TestMaxTokensStopReason:
+    """Verify _on_event_inner() returns a descriptive action when the LLM
+    truncates its response (stop_reason=MAX_TOKENS).
+
+    PR #54 review Must-Fix #1: truncated text should not be parsed as
+    actions — it could produce malformed JSON that silently falls back to
+    COMPLETE_TASK with garbage content.  Consistent with
+    BaseAgent._run_llm_loop() which returns FAILED for MAX_TOKENS.
+    """
+
+    async def test_max_tokens_returns_truncated_action(self):
+        truncated_response = LLMResponse(
+            text='[{"action_type": "send_messa',  # truncated mid-JSON
+            stop_reason=StopReason.MAX_TOKENS,
+        )
+        client = _make_client(responses=[truncated_response])
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=client,
+        )
+        await agent.initialize_memory()
+        event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
+        actions = await agent.on_event(event)
+
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "truncated" in actions[0].payload["result"].lower()
+        assert "max_tokens" in actions[0].payload["result"]
+        await agent.close_memory()
+
+    async def test_max_tokens_after_tool_use_round(self):
+        """MAX_TOKENS on the second LLM call (after a tool round) should
+        still be caught and produce the descriptive action."""
+        tool_response = LLMResponse(
+            text="",
+            stop_reason=StopReason.TOOL_USE,
+            tool_calls=[ToolCall(id="tc1", name="unknown_tool", input={})],
+        )
+        truncated_response = LLMResponse(
+            text="partial output...",
+            stop_reason=StopReason.MAX_TOKENS,
+        )
+        client = _make_client(responses=[tool_response, truncated_response])
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=client,
+        )
+        await agent.initialize_memory()
+        event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
+        actions = await agent.on_event(event)
+
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "truncated" in actions[0].payload["result"].lower()
+        await agent.close_memory()
+
+
+# ─── PR #54 review: missing 'model' config key ──────────────
+
+
+class TestMissingModelConfig:
+    """Verify _on_event_inner() fails fast with a descriptive message when
+    the agent config is missing the required 'model' field.
+
+    PR #54 review Must-Fix #2: a bare KeyError from self.config['model']
+    produces an unclear traceback.  The fail-fast check matches the
+    BaseAgent._run_llm_loop() SF2 pattern.
+    """
+
+    async def test_missing_model_returns_descriptive_error(self):
+        config_without_model = {**_PERSONA_CONFIG}
+        del config_without_model["model"]
+
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=config_without_model,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
+        actions = await agent.on_event(event)
+
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "model" in actions[0].payload["result"].lower()
+        await agent.close_memory()
+

@@ -755,6 +755,15 @@ class _LLMPersonaAgent(PersonaAgent):
                 payload={"result": "LLM client not configured"},
             )]
 
+        # Fail-fast for missing model config — a bare KeyError from
+        # self.config["model"] deep inside the LLM call produces an
+        # unclear traceback.  Matches BaseAgent._run_llm_loop() SF2 pattern.
+        if "model" not in self.config:
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "Agent config missing required 'model' field"},
+            )]
+
         # 1. Build system prompt
         system_prompt = self._build_system_prompt()
 
@@ -804,6 +813,20 @@ class _LLMPersonaAgent(PersonaAgent):
             return [AgentAction(
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": "No LLM response"},
+            )]
+
+        # 3a. Handle MAX_TOKENS — the LLM truncated its response before
+        # completing.  Parsing truncated text as actions would produce
+        # malformed JSON that silently falls back to COMPLETE_TASK with
+        # garbage content.  Return a descriptive action instead, consistent
+        # with BaseAgent._run_llm_loop() which returns FAILED for MAX_TOKENS.
+        if response.stop_reason == StopReason.MAX_TOKENS:
+            logger.warning(
+                "Agent %s response truncated (max_tokens)", self.agent_id,
+            )
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "Response truncated: max_tokens limit reached"},
             )]
 
         # 3b. Detect max_llm_calls exhaustion: if the loop ended while
@@ -920,6 +943,7 @@ class _LLMPersonaAgent(PersonaAgent):
         async with self._lock:
             await self._persist_persona_state()
             errors: list[Exception] = []
+            # Close order: working (flush compression) → episodic (DB) → relationship (DB)
             for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
                 try:
                     await tier.close()
