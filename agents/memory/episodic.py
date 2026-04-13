@@ -993,3 +993,44 @@ class EpisodicMemory:
             (self._agent_id, now, now),
         )
         await db.commit()
+
+    # ─── Persona state persistence ──────────────────────────
+
+    async def persist_agent_state(
+        self, agent_id: str, state_json: str,
+    ) -> None:
+        """Persist opaque agent state JSON to the agent_state table.
+
+        Uses INSERT … ON CONFLICT to upsert only the persona_state_json
+        and updated_at columns, preserving interaction_count managed by
+        the interaction counter methods above.
+        """
+        db = self._ensure_db()
+        now = time.time()
+        await db.execute(
+            """
+            INSERT INTO agent_state
+                (agent_id, interaction_count, persona_state_json, updated_at)
+            VALUES (?, 0, ?, ?)
+            ON CONFLICT(agent_id) DO UPDATE
+                SET persona_state_json = ?,
+                    updated_at = ?
+            """,
+            (agent_id, state_json, now, state_json, now),
+        )
+        await db.commit()
+
+    async def load_agent_state(self, agent_id: str) -> str | None:
+        """Load opaque agent state JSON from the agent_state table.
+
+        Returns ``None`` if no state has been persisted for this agent.
+        """
+        db = self._ensure_db()
+        async with db.execute(
+            "SELECT persona_state_json FROM agent_state WHERE agent_id = ?",
+            (agent_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row and row[0]:
+            return row[0]
+        return None

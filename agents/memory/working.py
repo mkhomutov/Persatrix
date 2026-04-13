@@ -180,6 +180,19 @@ class WorkingMemory:
                     )
                     continue
                 new_token_count = estimate_tokens(summary)
+                # Guard against LLM producing a summary that is as long or
+                # longer than the original — replacing it would not reduce
+                # total tokens and could infinite-loop if callers retry
+                # compression (PR #54 review: compression size guard).
+                if new_token_count >= section.token_count:
+                    logger.warning(
+                        "Compression of section '%s' produced %d tokens "
+                        "(original %d), skipping replacement",
+                        section.name,
+                        new_token_count,
+                        section.token_count,
+                    )
+                    continue
                 self.add_section(
                     ContextSection(
                         name=section.name,

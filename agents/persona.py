@@ -1,10 +1,22 @@
 """
 Orchestr8 Persona Agent Interface (v0.2+).
 
-Extends BaseAgent with async event handling, channel messaging,
-sub-agent spawning, delegation, and autonomous behavior.
+Extends BaseAgent with async event handling, sub-agent spawning,
+and autonomous behavior.
+
+Includes the concrete ``_LLMPersonaAgent`` with LLM-powered ``on_event()``
+decision loop, ``PersonaState`` dynamic state, behavioral dimension rendering,
+and ``create_persona_agent()`` factory.
+
+Channel messaging and delegation dispatch are wired in PR 5b.
 """
 
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
 import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -12,6 +24,15 @@ from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from .llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
+from .memory.episodic import EpisodicMemory
+from .memory.relationship import RelationshipMemory
+from .memory.working import WorkingMemory
+from .tools.builtin import create_memory_tools
+from .tools.permissions import PermissionGate
+from .tools.registry import ToolDefinition, get_tool, list_tools
+
+logger = logging.getLogger(__name__)
 
 # ─── Events that a persona agent can receive ───────────────
 
@@ -258,3 +279,811 @@ class PersonaAgent(BaseAgent):
             action_type=ActionType.DELEGATE,
             payload={"agent_id": agent_id, "task": task},
         )
+
+
+# ─── Dynamic Persona State ────────────────────────────────
+
+
+class Mood(Enum):
+    """Constrained mood states. Each maps to known prompt behavior."""
+
+    NEUTRAL = "neutral"
+    FOCUSED = "focused"
+    FRUSTRATED = "frustrated"
+    ENERGIZED = "energized"
+    UNCERTAIN = "uncertain"
+    SATISFIED = "satisfied"
+
+
+# Energy constants (MVP — hardcoded, config-driven in follow-up).
+_ENERGY_COST_PER_ACTION = 0.05
+_ENERGY_RECOVERY_PER_TICK = 0.1
+
+
+@dataclass
+class PersonaState:
+    """Mutable runtime state for a persona agent."""
+
+    mood: Mood = Mood.NEUTRAL
+    stress_level: float = 0.0
+    energy: float = 1.0
+    recent_context: list[str] = field(default_factory=list)
+    goal_progress: dict[str, float] = field(default_factory=dict)
+
+    def to_prompt_section(self) -> str:
+        """Format state for injection into system prompt."""
+        lines = [f"Current mood: {self.mood.value}"]
+        if self.stress_level > 0.3:
+            lines.append(f"Stress level: {self.stress_level:.1f}/1.0")
+        if self.energy < 0.5:
+            lines.append(
+                f"Energy level: {self.energy:.1f}/1.0 — conserve effort, prefer delegation"
+            )
+        if self.recent_context:
+            lines.append("Recent context:")
+            for ctx in self.recent_context[-5:]:
+                lines.append(f"  - {ctx}")
+        if self.goal_progress:
+            lines.append("Goal progress:")
+            for goal, progress in self.goal_progress.items():
+                lines.append(f"  - {goal}: {progress:.0%}")
+        return "\n".join(lines)
+
+    def drain_energy(self) -> None:
+        """Drain energy after an action. Clamped to [0.0, 1.0]."""
+        self.energy = max(0.0, self.energy - _ENERGY_COST_PER_ACTION)
+
+    def recover_energy(self) -> None:
+        """Recover energy on idle tick. Clamped to [0.0, 1.0]."""
+        self.energy = min(1.0, self.energy + _ENERGY_RECOVERY_PER_TICK)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for persistence. ``recent_context`` is NOT persisted."""
+        return {
+            "mood": self.mood.value,
+            "stress_level": self.stress_level,
+            "energy": self.energy,
+            "goal_progress": self.goal_progress,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PersonaState:
+        """Deserialize from stored JSON. Unknown fields are ignored.
+
+        Clamps ``energy`` and ``stress_level`` to [0.0, 1.0] to guard
+        against corrupted or manually edited DB data (review finding:
+        out-of-range values would produce broken prompt sections).
+        """
+        mood_str = data.get("mood", "neutral")
+        try:
+            mood = Mood(mood_str)
+        except ValueError:
+            logger.warning("Unknown mood %r, defaulting to NEUTRAL", mood_str)
+            mood = Mood.NEUTRAL
+        raw_goals = data.get("goal_progress", {})
+        goal_progress: dict[str, float] = {}
+        for k, v in raw_goals.items():
+            try:
+                goal_progress[k] = float(v)
+            except (TypeError, ValueError):
+                logger.warning("Invalid goal_progress value for %r: %r, skipping", k, v)
+        return cls(
+            mood=mood,
+            stress_level=min(1.0, max(0.0, float(data.get("stress_level", 0.0)))),
+            energy=min(1.0, max(0.0, float(data.get("energy", 1.0)))),
+            goal_progress=goal_progress,
+        )
+
+
+# ─── Behavioral Dimensions ────────────────────────────────
+
+
+DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = {
+    "directness": {
+        "indirect": (
+            "Diplomatic and tactful. Softens criticism, asks questions"
+            " instead of stating objections directly."
+        ),
+        "balanced": (
+            "Balances directness with tact. States positions clearly"
+            " but frames feedback constructively."
+        ),
+        "direct": (
+            "Says exactly what they think."
+            " Doesn't sugarcoat feedback or hedge opinions."
+        ),
+    },
+    "detail_focus": {
+        "big-picture": (
+            "Focuses on high-level patterns and architecture."
+            " Skips minutiae to keep discussions strategic."
+        ),
+        "balanced": (
+            "Addresses both high-level concerns and"
+            " specific details as needed."
+        ),
+        "detail-focused": (
+            "Thorough and meticulous. Flags edge cases,"
+            " checks specifics, prefers exhaustive analysis."
+        ),
+    },
+    "formality": {
+        "casual": (
+            "Informal and approachable. Uses humor,"
+            " contractions, and conversational language."
+        ),
+        "professional": (
+            "Clear and structured. Uses professional"
+            " language without being stiff."
+        ),
+        "formal": (
+            "Precise and formal. Uses structured reports,"
+            " proper titles, and measured language."
+        ),
+    },
+    "risk_tolerance": {
+        "cautious": (
+            "Wants thorough analysis before decisions."
+            " Asks for more data. Flags risks others might overlook."
+        ),
+        "moderate": (
+            "Balances speed with diligence."
+            " Comfortable with reasonable assumptions."
+        ),
+        "bold": (
+            "Willing to make calls with incomplete information"
+            " and course-correct. Bias toward action."
+        ),
+    },
+    "expressiveness": {
+        "reserved": (
+            "Keeps emotions out of professional communication."
+            " Focuses on facts and logic."
+        ),
+        "moderate": (
+            "Acknowledges emotions when relevant"
+            " but keeps focus on substance."
+        ),
+        "expressive": (
+            "Openly shares reactions and feelings. Communication"
+            " is warm, enthusiastic, or frustrated as the"
+            " situation warrants."
+        ),
+    },
+}
+
+# Default middle value for each dimension when not specified.
+_DIMENSION_DEFAULTS: dict[str, str] = {
+    "directness": "balanced",
+    "detail_focus": "balanced",
+    "formality": "professional",
+    "risk_tolerance": "moderate",
+    "expressiveness": "moderate",
+}
+
+
+def render_behavior(behavior: dict[str, str]) -> str:
+    """Convert structured behavior dimensions into natural language for LLM prompt.
+
+    Applies defaults for omitted dimensions so the persona always has
+    a complete behavioral profile.  Unknown dimension keys from ``behavior``
+    are logged as warnings to aid config debugging.
+    """
+    merged = {**_DIMENSION_DEFAULTS, **behavior}
+    lines: list[str] = []
+    for dimension, value in merged.items():
+        if dimension not in DIMENSION_DESCRIPTIONS:
+            logger.warning(
+                "Unknown behavior dimension %r (value=%r) — ignored",
+                dimension,
+                value,
+            )
+            continue
+        desc = DIMENSION_DESCRIPTIONS[dimension].get(value)
+        if desc:
+            lines.append(f"- {desc}")
+    return "\n".join(lines)
+
+
+# ─── LLM-Powered Persona Agent ────────────────────────────
+
+
+class _LLMPersonaAgent(PersonaAgent):
+    """Concrete PersonaAgent with LLM-powered decision loop.
+
+    Created via ``create_persona_agent()``. Not intended for direct instantiation.
+    """
+
+    def __init__(
+        self,
+        agent_id: str,
+        config: dict[str, Any],
+        *,
+        llm_client: LLMClient,
+        episodic_memory: EpisodicMemory,
+        relationship_memory: RelationshipMemory,
+        working_memory: WorkingMemory,
+        memory_tools: list[ToolDefinition],
+    ) -> None:
+        super().__init__(agent_id, config)
+        self._llm_client = llm_client
+        self._episodic_memory = episodic_memory
+        self._relationship_memory = relationship_memory
+        self._working_memory = working_memory
+        self._memory_tools = memory_tools
+        self._state = PersonaState()
+        self._lock = asyncio.Lock()
+
+    @property
+    def persona_state(self) -> dict[str, Any]:
+        """Current dynamic state as dict (backward-compatible)."""
+        return self._state.to_dict()
+
+    @property
+    def state(self) -> PersonaState:
+        """Typed access to persona state."""
+        return self._state
+
+    # ─── System prompt assembly ────────────────────────
+
+    def _build_system_prompt(self) -> str:
+        """Assemble the full system prompt from persona config, behavior, and state."""
+        persona_cfg = self.persona
+        parts: list[str] = []
+
+        # Identity
+        parts.append(f"You are {self.name}.")
+        if persona_cfg.get("title"):
+            parts.append(f"Title: {persona_cfg['title']}")
+        parts.append(f"Role: {self.role}")
+
+        # Background
+        if persona_cfg.get("background"):
+            parts.append(f"\nBackground:\n{persona_cfg['background'].strip()}")
+
+        # Behavioral dimensions
+        behavior = persona_cfg.get("behavior", {})
+        rendered = render_behavior(behavior)
+        if rendered:
+            parts.append(f"\nCommunication style:\n{rendered}")
+
+        # Quirks
+        quirks = persona_cfg.get("quirks", [])
+        if quirks:
+            parts.append("\nQuirks:")
+            for q in quirks:
+                parts.append(f"- {q}")
+
+        # Goals
+        goals = persona_cfg.get("goals", {})
+        if goals:
+            parts.append("\nGoals:")
+            if goals.get("primary"):
+                parts.append(f"- Primary: {goals['primary']}")
+            for g in goals.get("secondary", []):
+                parts.append(f"- Secondary: {g}")
+            if goals.get("hidden"):
+                parts.append(f"- Hidden motivation: {goals['hidden']}")
+
+        # Dynamic state
+        state_section = self._state.to_prompt_section()
+        if state_section:
+            parts.append(f"\nCurrent state:\n{state_section}")
+
+        return "\n".join(parts)
+
+    def _format_event(self, event: AgentEvent) -> str:
+        """Format an event as a user message for the LLM."""
+        match event.event_type:
+            case EventType.TASK_ASSIGNED:
+                task = event.payload.get("task")
+                if isinstance(task, TaskInput):
+                    return f"You have been assigned a task:\n\n{task.payload}"
+                return f"You have been assigned a task:\n\n{event.payload}"
+            case EventType.MESSAGE_RECEIVED:
+                sender = event.sender_id or "unknown"
+                content = event.payload.get("content", "")
+                return f"Message from {sender}:\n\n{content}"
+            case EventType.MENTION:
+                sender = event.sender_id or "unknown"
+                content = event.payload.get("content", "")
+                return f"You were mentioned by {sender}:\n\n{content}"
+            case EventType.SUB_AGENT_COMPLETED:
+                result = event.payload.get("result", "")
+                return f"A sub-agent completed its task:\n\n{result}"
+            case EventType.TICK:
+                return "Autonomous tick: review your goals and decide on next actions."
+            case _:
+                try:
+                    payload_str = json.dumps(event.payload)
+                except TypeError:
+                    payload_str = str(event.payload)
+                return f"Event ({event.event_type.value}): {payload_str}"
+
+    def _build_tool_definitions(self) -> list[dict[str, Any]]:
+        """Build tool definitions including memory tools.
+
+        Uses a dict keyed by tool name so memory tools take precedence
+        over registry tools with the same name (review finding #4).
+        """
+        # Start with agent-configured tools from the global registry
+        allowed = set(self.config.get("tools", []))
+        defs_by_name: dict[str, dict[str, Any]] = {}
+
+        for td in list_tools():
+            if td.name in allowed:
+                defs_by_name[td.name] = {
+                    "name": td.name,
+                    "description": td.description,
+                    "parameters": td.parameters,
+                }
+
+        # Memory tools override registry tools with the same name,
+        # consistent with _execute_tools() which checks memory tools first.
+        for td in self._memory_tools:
+            defs_by_name[td.name] = {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            }
+
+        return list(defs_by_name.values())
+
+    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
+        """Execute tool calls, checking memory tools first then registry.
+
+        Registry lookups are restricted to tools in ``config["tools"]``
+        (F-5a-2: defense-in-depth against LLM hallucinating tool names
+        that exist in the global registry but weren't offered to this agent).
+        """
+        memory_tool_map = {td.name: td for td in self._memory_tools}
+        allowed_tools = set(self.config.get("tools", []))
+        results: list[LLMToolResult] = []
+
+        for call in tool_calls:
+            # Check memory tools first (always allowed)
+            tool_def = memory_tool_map.get(call.name)
+            if tool_def is None and call.name in allowed_tools:
+                tool_def = get_tool(call.name)
+
+            if tool_def is None or tool_def.func is None:
+                results.append(LLMToolResult(
+                    tool_call_id=call.id,
+                    content=f"Unknown tool: {call.name}",
+                    is_error=True,
+                ))
+                continue
+
+            try:
+                result = await tool_def.func(**call.input)
+                if result.success:
+                    content = (
+                        json.dumps(result.data)
+                        if isinstance(result.data, (dict, list))
+                        else str(result.data)
+                    )
+                else:
+                    error_msg = result.error or "Tool failed"
+                    if result.error_type:
+                        content = f"Tool error ({result.error_type}): {error_msg}"
+                    else:
+                        content = error_msg
+                results.append(LLMToolResult(
+                    tool_call_id=call.id,
+                    content=content,
+                    is_error=not result.success,
+                ))
+            except Exception as exc:
+                logger.warning("Unexpected error in tool %s: %s", call.name, exc)
+                results.append(LLMToolResult(
+                    tool_call_id=call.id,
+                    content="Internal tool error",
+                    is_error=True,
+                ))
+
+        return results
+
+    # Agent ID format shared with server.py — cross-component contract.
+    _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+
+    def _validate_action_payload(self, action: AgentAction) -> AgentAction:
+        """Validate LLM-generated action payloads, replacing invalid ones with DO_NOTHING.
+
+        Enforces required fields per action type to prevent malformed LLM output
+        from reaching downstream execution (PR #54 review: unvalidated payloads).
+        """
+        p = action.payload
+        match action.action_type:
+            case ActionType.DELEGATE:
+                agent_id = p.get("agent_id")
+                if not isinstance(agent_id, str) or not self._AGENT_ID_RE.match(agent_id):
+                    logger.warning(
+                        "DELEGATE action has invalid agent_id %r, replacing with DO_NOTHING",
+                        agent_id,
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("task"), str) or not p["task"].strip():
+                    logger.warning(
+                        "DELEGATE action missing non-empty 'task', replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case ActionType.SEND_MESSAGE:
+                if not isinstance(p.get("channel_id"), str) or not p["channel_id"].strip():
+                    logger.warning(
+                        "SEND_MESSAGE missing non-empty 'channel_id',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("content"), str) or not p["content"].strip():
+                    logger.warning(
+                        "SEND_MESSAGE missing non-empty 'content',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case ActionType.SPAWN_SUB_AGENT:
+                if not isinstance(p.get("role"), str) or not p["role"].strip():
+                    logger.warning(
+                        "SPAWN_SUB_AGENT missing non-empty 'role',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("task"), str) or not p["task"].strip():
+                    logger.warning(
+                        "SPAWN_SUB_AGENT missing non-empty 'task',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case _:
+                pass  # COMPLETE_TASK, DO_NOTHING, approvals — no payload constraints
+        return action
+
+    def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
+        """Parse LLM response text into AgentAction list.
+
+        The LLM is expected to return a JSON array of actions. Falls back
+        to a single COMPLETE_TASK with the raw text if parsing fails.
+        Parsed actions are validated per action type before returning.
+        """
+        text = response.text or ""
+        # Try to extract JSON action array from the response
+        try:
+            # Look for a JSON array in the response
+            stripped = text.strip()
+            if stripped.startswith("["):
+                raw_actions = json.loads(stripped)
+            elif "```json" in stripped:
+                # Use regex to extract the first JSON code block — more robust
+                # than str.index() against nested fences (review finding P-1).
+                # Newline anchors (not \s*) to avoid polynomial backtracking on
+                # pathological input with many backtick sequences (PR #54 review).
+                m = re.search(r"```json\n(.*?)\n```", stripped, re.DOTALL)
+                if m is None:
+                    return [AgentAction(
+                        action_type=ActionType.COMPLETE_TASK,
+                        payload={"result": text},
+                    )]
+                raw_actions = json.loads(m.group(1))
+            else:
+                # Treat the whole response as a COMPLETE_TASK result
+                return [AgentAction(
+                    action_type=ActionType.COMPLETE_TASK,
+                    payload={"result": text},
+                )]
+
+            actions: list[AgentAction] = []
+            for raw in raw_actions:
+                try:
+                    action_type = ActionType(raw.get("action_type", "do_nothing"))
+                except ValueError:
+                    logger.warning("Unknown action_type %r, skipping", raw.get("action_type"))
+                    continue
+                # Validate payload per action type (PR #54 review: unvalidated
+                # LLM output). Full ActionExecutor validation deferred to PR 5b;
+                # this enforces required-field constraints at parse time.
+                validated = self._validate_action_payload(AgentAction(
+                    action_type=action_type,
+                    payload=raw.get("payload", {}),
+                ))
+                actions.append(validated)
+            return actions if actions else [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": text},
+            )]
+
+        except (json.JSONDecodeError, ValueError):
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": text},
+            )]
+
+    # ─── Core event handler ────────────────────────────
+
+    # Default event processing timeout (seconds). Prevents a slow LLM
+    # provider combined with multiple tool rounds from holding the per-agent
+    # lock indefinitely. Configurable via config["event_timeout"].
+    _DEFAULT_EVENT_TIMEOUT: float = 300.0
+
+    async def on_event(self, event: AgentEvent) -> list[AgentAction]:
+        """LLM-powered event handler with per-event timeout.
+
+        Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
+        wall-clock time (PR #54 review: unbounded lock hold).
+        """
+        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        async with self._lock:
+            try:
+                return await asyncio.wait_for(
+                    self._on_event_inner(event), timeout=timeout,
+                )
+            except TimeoutError:
+                logger.error(
+                    "Agent %s event processing timed out after %.0fs",
+                    self.agent_id,
+                    timeout,
+                )
+                return [AgentAction(
+                    action_type=ActionType.COMPLETE_TASK,
+                    payload={
+                        "result": f"Event processing timed out after {timeout:.0f}s",
+                    },
+                )]
+
+    async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
+        """Inner event handler — must be called under self._lock."""
+        if self._llm_client is None:
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "LLM client not configured"},
+            )]
+
+        # Fail-fast for missing model config — a bare KeyError from
+        # self.config["model"] deep inside the LLM call produces an
+        # unclear traceback.  Matches BaseAgent._run_llm_loop() SF2 pattern.
+        if "model" not in self.config:
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "Agent config missing required 'model' field"},
+            )]
+
+        # 1. Build system prompt
+        system_prompt = self._build_system_prompt()
+
+        # 2. Format the event as a user message
+        user_message = self._format_event(event)
+
+        # 3. Multi-turn tool-use loop
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": user_message},
+        ]
+        tool_defs = self._llm_client.format_tool_definitions(
+            self._build_tool_definitions()
+        )
+
+        max_llm_calls = self.config.get("max_llm_calls", 10)
+        max_tokens = self.config.get("max_tokens", 4096)
+
+        response: LLMResponse | None = None
+        for _ in range(max_llm_calls):
+            try:
+                response = await self._llm_client.create_message(
+                    model=self.config["model"],
+                    messages=messages,
+                    system=system_prompt,
+                    tools=tool_defs,
+                    max_tokens=max_tokens,
+                    temperature=self.config.get("temperature", 0.7),
+                )
+            except Exception as exc:
+                logger.error("LLM provider error in agent %s: %s", self.agent_id, exc)
+                return [AgentAction(
+                    action_type=ActionType.COMPLETE_TASK,
+                    payload={"result": "LLM provider error"},
+                )]
+
+            if response.stop_reason == StopReason.TOOL_USE:
+                tool_results = await self._execute_tools(response.tool_calls)
+                messages = self._llm_client.append_tool_round(
+                    messages, response, tool_results
+                )
+                continue
+
+            # END_TURN or MAX_TOKENS — break out
+            break
+
+        if response is None:
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "No LLM response"},
+            )]
+
+        # 3a. Handle MAX_TOKENS — the LLM truncated its response before
+        # completing.  Parsing truncated text as actions would produce
+        # malformed JSON that silently falls back to COMPLETE_TASK with
+        # garbage content.  Return a descriptive action instead, consistent
+        # with BaseAgent._run_llm_loop() which returns FAILED for MAX_TOKENS.
+        if response.stop_reason == StopReason.MAX_TOKENS:
+            logger.warning(
+                "Agent %s response truncated (max_tokens)", self.agent_id,
+            )
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "Response truncated: max_tokens limit reached"},
+            )]
+
+        # 3b. Detect max_llm_calls exhaustion: if the loop ended while
+        # the LLM was still requesting tool use, the budget was hit
+        # without a natural stop. Log a warning and set a descriptive
+        # fallback so callers can distinguish this from a normal empty
+        # completion (review finding: silent budget exhaustion).
+        if response.stop_reason == StopReason.TOOL_USE:
+            logger.warning(
+                "Agent %s exhausted max_llm_calls=%d without natural stop",
+                self.agent_id,
+                max_llm_calls,
+            )
+            response = LLMResponse(
+                text=f"Max LLM call budget exhausted after {max_llm_calls} iterations",
+                stop_reason=StopReason.END_TURN,
+                usage=response.usage,
+            )
+
+        # 4. Parse actions
+        actions = self._parse_actions(response)
+
+        # 5. Drain energy per action
+        for action in actions:
+            if action.action_type != ActionType.DO_NOTHING:
+                self._state.drain_energy()
+
+        # 6. Store episode
+        try:
+            await self._episodic_memory.store_episode(
+                summary=(
+                    f"Event: {event.event_type.value} → "
+                    f"Actions: {[a.action_type.value for a in actions]}"
+                ),
+                context={"event": event.payload, "sender": event.sender_id},
+            )
+        except Exception:
+            logger.warning("Failed to store episode for agent %s", self.agent_id, exc_info=True)
+
+        # 7. Persist state
+        await self._persist_persona_state()
+
+        return actions
+
+    async def on_tick(self) -> list[AgentAction]:
+        """Autonomous tick — recovers energy, then decides on actions."""
+        async with self._lock:
+            self._state.recover_energy()
+            event = AgentEvent(event_type=EventType.TICK)
+            return await self._on_event_inner(event)
+
+    # handle() is inherited from PersonaAgent — no override needed.
+    # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
+    # calls self.on_event(), which dispatches to _on_event_inner()
+    # via polymorphism.
+
+    # ─── State persistence ─────────────────────────────
+
+    async def _persist_persona_state(self) -> None:
+        """Serialize persona state to the agent_state table.
+
+        Uses EpisodicMemory's public ``persist_agent_state()`` API rather
+        than reaching into its private DB handle (review finding #3).
+        """
+        try:
+            state_json = json.dumps(self._state.to_dict())
+            await self._episodic_memory.persist_agent_state(
+                self.agent_id, state_json,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to persist persona state for agent %s",
+                self.agent_id,
+                exc_info=True,
+            )
+
+    async def _load_persona_state(self) -> PersonaState:
+        """Load persona state from the agent_state table, or return defaults.
+
+        Uses EpisodicMemory's public ``load_agent_state()`` API.
+        """
+        try:
+            state_json = await self._episodic_memory.load_agent_state(
+                self.agent_id,
+            )
+            if state_json:
+                return PersonaState.from_dict(json.loads(state_json))
+        except Exception:
+            logger.warning(
+                "Failed to load persona state for agent %s, using defaults",
+                self.agent_id,
+                exc_info=True,
+            )
+        return PersonaState()
+
+    # ─── Memory lifecycle ──────────────────────────────
+
+    async def initialize_memory(self) -> None:
+        """Initialize all memory tiers and load persisted state."""
+        await self._episodic_memory.initialize()
+        await self._relationship_memory.initialize(
+            config_relationships=self.config.get("relationships"),
+        )
+        await self._working_memory.initialize()
+        self._state = await self._load_persona_state()
+
+    async def close_memory(self) -> None:
+        """Close all memory tiers, awaiting in-flight operations.
+
+        Each tier is closed in its own try/except so that a failure in one
+        tier (e.g. disk-full on SQLite) does not prevent the remaining
+        tiers from releasing their resources (PR #54 review).
+        """
+        async with self._lock:
+            await self._persist_persona_state()
+            errors: list[Exception] = []
+            # Close order: working (flush compression) → episodic (DB) → relationship (DB)
+            for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
+                try:
+                    await tier.close()
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.warning("Failed to close memory tier: %s", exc)
+            if errors:
+                logger.error(
+                    "Memory close for agent %s completed with %d error(s)",
+                    self.agent_id,
+                    len(errors),
+                )
+
+
+# ─── Factory ───────────────────────────────────────────────
+
+
+def create_persona_agent(
+    agent_id: str,
+    config: dict[str, Any],
+    *,
+    llm_client: LLMClient,
+) -> _LLMPersonaAgent:
+    """Factory that creates a concrete PersonaAgent with LLM-powered decision loop.
+
+    Wires up all memory tiers, memory tools, and behavioral dimensions.
+    Caller must call ``await agent.initialize_memory()`` before use.
+    """
+    memory_config = config.get("memory", {})
+    db_path = memory_config.get("db_path", "data/memory.db")
+
+    episodic_memory = EpisodicMemory(agent_id=agent_id, db_path=db_path)
+    relationship_memory = RelationshipMemory(agent_id=agent_id, db_path=db_path)
+    # F-5a-1: Read working memory budget from memory config, not the agent's
+    # LLM completion limit (config["max_tokens"]).  These are distinct concerns:
+    # config["max_tokens"] caps LLM output tokens (e.g. 4096), while working
+    # memory needs the full context-window budget (typically 100k+).
+    working_config = memory_config.get("working", {})
+    working_memory = WorkingMemory(
+        max_tokens=working_config.get("max_tokens", 100_000),
+    )
+
+    # Create memory tools with permission gate from agent config
+    permissions = config.get("permissions", {})
+    gate = PermissionGate(permissions)
+    notes_config = memory_config.get("notes", {})
+    memory_tools = create_memory_tools(
+        episodic_memory,
+        gate,
+        max_notes=notes_config.get("max_notes", 500),
+        auto_reflect_after=notes_config.get("auto_reflect_after", 0),
+    )
+
+    return _LLMPersonaAgent(
+        agent_id=agent_id,
+        config=config,
+        llm_client=llm_client,
+        episodic_memory=episodic_memory,
+        relationship_memory=relationship_memory,
+        working_memory=working_memory,
+        memory_tools=memory_tools,
+    )
