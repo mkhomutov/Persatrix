@@ -49,12 +49,11 @@ _PERSONA_CONFIG: dict = {
     "persona": {
         "name": "Test Agent",
         "background": "A test persona for integration tests.",
-    },
-    "behavior": {
-        "formality": 0.5,
-        "verbosity": 0.5,
-        "assertiveness": 0.5,
-        "empathy": 0.5,
+        "behavior": {
+            "directness": "balanced",
+            "formality": "professional",
+            "risk_tolerance": "moderate",
+        },
     },
     "autonomy": {
         "level": "semi-autonomous",

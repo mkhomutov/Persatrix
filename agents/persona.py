@@ -13,6 +13,7 @@ and ``TickScheduler`` for autonomous operation.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -1350,9 +1351,13 @@ class EventDispatcher:
         # to avoid mutating the caller's event object — prevents incorrect
         # depth tracking if the same event were dispatched to multiple
         # targets or reused.  (Review finding: in-place metadata mutation.)
+        # Deep-copy payload to fully isolate nested mutable structures
+        # (lists, dicts inside payload values) between dispatch targets.
+        # Shallow {**event.payload} only copies top-level keys.
+        # (Review finding: shallow copy depth for event payload.)
         event = AgentEvent(
             event_type=event.event_type,
-            payload={**event.payload},
+            payload=copy.deepcopy(event.payload),
             channel_id=event.channel_id,
             sender_id=event.sender_id,
             message_id=event.message_id,
@@ -1498,13 +1503,19 @@ class TickScheduler:
             if self._stopped.is_set():
                 break
 
-            # Skip LLM calls when idle
+            # Skip LLM calls when idle, but still recover energy so
+            # woken agents aren't energy-depleted after long idle periods.
+            # Brief lock acquire ensures consistency with concurrent
+            # on_event() which may drain_energy().
+            # (Review finding: idle energy starvation.)
             if self.is_idle:
                 logger.debug(
                     "Agent %s idle (%d ticks), skipping LLM tick",
                     self._agent.agent_id,
                     self._idle_count,
                 )
+                async with self._agent._lock:
+                    self._agent._state.recover_energy()
                 continue
 
             try:
