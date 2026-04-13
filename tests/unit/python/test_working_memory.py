@@ -6,7 +6,7 @@ All tests use mock LLM client — no real API calls.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -364,6 +364,30 @@ class TestEstimateTokensTiktoken:
         naive = len(text) // 4
         assert accurate != naive, "accurate path should differ from chars/4 when tiktoken is available"
         assert accurate > 0
+
+    def test_accurate_true_fallback_when_tiktoken_unavailable(self):
+        """When tiktoken import fails, accurate=True falls back to chars/4.
+
+        Mocks the import to guarantee the fallback path is exercised even
+        when tiktoken IS installed in the test environment (PR #59 review).
+        """
+        text = "Hello, world!"
+        with patch.dict("sys.modules", {"tiktoken": None}):
+            result = estimate_tokens(text, accurate=True)
+        assert result == len(text) // 4
+
+    def test_accurate_true_fallback_when_tiktoken_broken(self):
+        """When tiktoken is installed but encoding fails, falls back to chars/4.
+
+        Covers the broader Exception catch added for defensive robustness
+        (PR #59 review: corrupted install, C extension failure, etc.).
+        """
+        text = "Hello, world!"
+        fake_tiktoken = MagicMock()
+        fake_tiktoken.get_encoding.side_effect = RuntimeError("encoding registry corrupt")
+        with patch.dict("sys.modules", {"tiktoken": fake_tiktoken}):
+            result = estimate_tokens(text, accurate=True)
+        assert result == len(text) // 4
 
 
 # ─── MemoryLifecycle protocol (F-2-5) ──────────────────────

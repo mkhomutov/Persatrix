@@ -29,6 +29,11 @@ def estimate_tokens(text: str, *, accurate: bool = False) -> int:
             return len(enc.encode(text))
         except ImportError:
             logger.debug("tiktoken not installed, accurate=True falling back to chars/4")
+        except Exception:
+            # Defensive: if tiktoken is installed but broken (e.g. corrupted
+            # C extension, encoding registry issue), fall back instead of
+            # crashing callers — estimate_tokens is a utility, not critical path.
+            logger.warning("tiktoken encoding failed, falling back to chars/4", exc_info=True)
     return len(text) // 4
 
 
