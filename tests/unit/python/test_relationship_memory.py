@@ -624,12 +624,16 @@ class TestStringTruncation:
         await memory.update_trust("bob", 0.1, long_reason)
         summary = await memory.get_relationship_summary("bob")
         assert len(summary.notes) == 1024
+        assert summary.notes.endswith("..."), "truncated reason should end with '...' indicator"
 
     async def test_outcome_truncated_at_1024(self, memory):
         long_outcome = "y" * 2000
         await memory.record_interaction("bob", "chat", outcome=long_outcome)
         summary = await memory.get_relationship_summary("bob")
         assert len(summary.recent_interactions[0].outcome) == 1024
+        assert summary.recent_interactions[0].outcome.endswith("..."), (
+            "truncated outcome should end with '...' indicator"
+        )
 
     async def test_short_reason_unchanged(self, memory):
         reason = "short reason"
@@ -641,3 +645,17 @@ class TestStringTruncation:
         await memory.record_interaction("bob", "chat", outcome=None)
         summary = await memory.get_relationship_summary("bob")
         assert summary.recent_interactions[0].outcome is None
+
+
+class TestSentimentBoundaryValues:
+    """Exact boundary values ±1.0 should pass through unclamped (R-08)."""
+
+    async def test_sentiment_exact_positive_boundary(self, memory):
+        await memory.record_interaction("bob", "chat", sentiment=1.0)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == 1.0
+
+    async def test_sentiment_exact_negative_boundary(self, memory):
+        await memory.record_interaction("bob", "chat", sentiment=-1.0)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == -1.0

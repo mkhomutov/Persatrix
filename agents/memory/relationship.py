@@ -159,11 +159,11 @@ class RelationshipMemory:
         # Cap reason length to prevent unbounded strings entering LLM
         # prompts via get_relationship_summary() (F-4-3).
         if len(reason) > 1024:
-            logger.debug(
+            logger.warning(
                 "reason truncated from %d to 1024 chars for %s→%s",
                 len(reason), self._agent_id, other_agent_id,
             )
-            reason = reason[:1024]
+            reason = reason[:1021] + "..."
 
         # Pre-compute trust for the INSERT path (new relationship).
         insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
@@ -286,11 +286,11 @@ class RelationshipMemory:
 
         # Cap outcome to avoid unbounded storage (F-4-4).
         if outcome and len(outcome) > 1024:
-            logger.debug(
+            logger.warning(
                 "outcome truncated from %d to 1024 chars for %s→%s",
                 len(outcome), self._agent_id, other_agent_id,
             )
-            outcome = outcome[:1024]
+            outcome = outcome[:1021] + "..."
 
         interaction_id = str(uuid.uuid4())
         now = time.time()

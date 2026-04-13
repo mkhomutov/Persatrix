@@ -97,6 +97,10 @@ _MAX_RECALL_LIMIT = 100
 #
 # A single template parameterizes the column prefix ("e." for JOINed queries,
 # "" for bare queries) so formula tuning is a single edit (F-59-2).
+#
+# Security: {p} is ONLY filled with hardcoded column prefixes ("e." or "").
+# NEVER pass user or LLM input into _SCORE_TEMPLATE.format().
+# All dynamic values use parameterized ? placeholders.
 _SCORE_TEMPLATE = (
     "(0.1 + {p}importance * 0.9)"
     " * (1.0 + ln(1 + {p}access_count))"
@@ -330,8 +334,8 @@ class EpisodicMemory:
             async with self._db.execute("SELECT ln(1)") as cursor:
                 await cursor.fetchone()
         except sqlite3.OperationalError:
-            logger.warning(
-                "SQLite ln() function not available — recall scoring will fail. "
+            raise RuntimeError(
+                "SQLite ln() function not available — required by recall scoring. "
                 "Ensure Python is built with SQLITE_ENABLE_MATH_FUNCTIONS."
             )
 
