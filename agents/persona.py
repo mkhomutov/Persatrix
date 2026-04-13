@@ -683,11 +683,66 @@ class _LLMPersonaAgent(PersonaAgent):
 
         return results
 
+    # Agent ID format shared with server.py — cross-component contract.
+    _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+
+    def _validate_action_payload(self, action: AgentAction) -> AgentAction:
+        """Validate LLM-generated action payloads, replacing invalid ones with DO_NOTHING.
+
+        Enforces required fields per action type to prevent malformed LLM output
+        from reaching downstream execution (PR #54 review: unvalidated payloads).
+        """
+        p = action.payload
+        match action.action_type:
+            case ActionType.DELEGATE:
+                agent_id = p.get("agent_id")
+                if not isinstance(agent_id, str) or not self._AGENT_ID_RE.match(agent_id):
+                    logger.warning(
+                        "DELEGATE action has invalid agent_id %r, replacing with DO_NOTHING",
+                        agent_id,
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("task"), str) or not p["task"].strip():
+                    logger.warning(
+                        "DELEGATE action missing non-empty 'task', replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case ActionType.SEND_MESSAGE:
+                if not isinstance(p.get("channel_id"), str) or not p["channel_id"].strip():
+                    logger.warning(
+                        "SEND_MESSAGE missing non-empty 'channel_id',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("content"), str) or not p["content"].strip():
+                    logger.warning(
+                        "SEND_MESSAGE missing non-empty 'content',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case ActionType.SPAWN_SUB_AGENT:
+                if not isinstance(p.get("role"), str) or not p["role"].strip():
+                    logger.warning(
+                        "SPAWN_SUB_AGENT missing non-empty 'role',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+                if not isinstance(p.get("task"), str) or not p["task"].strip():
+                    logger.warning(
+                        "SPAWN_SUB_AGENT missing non-empty 'task',"
+                        " replacing with DO_NOTHING",
+                    )
+                    return AgentAction(ActionType.DO_NOTHING, {})
+            case _:
+                pass  # COMPLETE_TASK, DO_NOTHING, approvals — no payload constraints
+        return action
+
     def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
         """Parse LLM response text into AgentAction list.
 
         The LLM is expected to return a JSON array of actions. Falls back
         to a single COMPLETE_TASK with the raw text if parsing fails.
+        Parsed actions are validated per action type before returning.
         """
         text = response.text or ""
         # Try to extract JSON action array from the response
@@ -722,13 +777,14 @@ class _LLMPersonaAgent(PersonaAgent):
                 except ValueError:
                     logger.warning("Unknown action_type %r, skipping", raw.get("action_type"))
                     continue
-                # TODO(PR 5b): ActionExecutor MUST validate payload contents per
-                # action_type before execution. Until then, payloads are unvalidated
-                # LLM output. See RFC 0005 "Action Execution" section.
-                actions.append(AgentAction(
+                # Validate payload per action type (PR #54 review: unvalidated
+                # LLM output). Full ActionExecutor validation deferred to PR 5b;
+                # this enforces required-field constraints at parse time.
+                validated = self._validate_action_payload(AgentAction(
                     action_type=action_type,
                     payload=raw.get("payload", {}),
                 ))
+                actions.append(validated)
             return actions if actions else [AgentAction(
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": text},
@@ -742,10 +798,35 @@ class _LLMPersonaAgent(PersonaAgent):
 
     # ─── Core event handler ────────────────────────────
 
+    # Default event processing timeout (seconds). Prevents a slow LLM
+    # provider combined with multiple tool rounds from holding the per-agent
+    # lock indefinitely. Configurable via config["event_timeout"].
+    _DEFAULT_EVENT_TIMEOUT: float = 300.0
+
     async def on_event(self, event: AgentEvent) -> list[AgentAction]:
-        """LLM-powered event handler with multi-turn tool-use loop."""
+        """LLM-powered event handler with per-event timeout.
+
+        Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
+        wall-clock time (PR #54 review: unbounded lock hold).
+        """
+        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
         async with self._lock:
-            return await self._on_event_inner(event)
+            try:
+                return await asyncio.wait_for(
+                    self._on_event_inner(event), timeout=timeout,
+                )
+            except TimeoutError:
+                logger.error(
+                    "Agent %s event processing timed out after %.0fs",
+                    self.agent_id,
+                    timeout,
+                )
+                return [AgentAction(
+                    action_type=ActionType.COMPLETE_TASK,
+                    payload={
+                        "result": f"Event processing timed out after {timeout:.0f}s",
+                    },
+                )]
 
     async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
         """Inner event handler — must be called under self._lock."""

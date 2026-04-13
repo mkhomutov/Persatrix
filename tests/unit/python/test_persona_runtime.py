@@ -532,7 +532,7 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent()
         response = LLMResponse(
             text=json.dumps([
-                {"action_type": "send_message", "payload": {"content": "hi"}},
+                {"action_type": "send_message", "payload": {"channel_id": "general", "content": "hi"}},
                 {"action_type": "complete_task", "payload": {"result": "done"}},
             ]),
         )
@@ -1329,5 +1329,213 @@ class TestMissingModelConfig:
         assert len(actions) == 1
         assert actions[0].action_type == ActionType.COMPLETE_TASK
         assert "model" in actions[0].payload["result"].lower()
+        await agent.close_memory()
+
+
+# ─── PR #54 review: action payload validation ───────────────
+
+
+class TestActionPayloadValidation:
+    """Verify _validate_action_payload() rejects malformed LLM-generated payloads.
+
+    PR #54 review Must-Fix #1: DELEGATE, SEND_MESSAGE, SPAWN_SUB_AGENT payloads
+    must contain required fields. Invalid payloads are replaced with DO_NOTHING.
+    """
+
+    async def _make_agent(self) -> _LLMPersonaAgent:
+        cfg = {**_PERSONA_CONFIG}
+        agent = create_persona_agent(
+            agent_id=cfg["id"], config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        return agent
+
+    async def test_delegate_valid(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "my-agent", "task": "do stuff"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DELEGATE
+
+    async def test_delegate_missing_agent_id(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"task": "do stuff"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_delegate_invalid_agent_id_format(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "UPPER_CASE!", "task": "do stuff"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_delegate_single_char_agent_id_rejected(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "a", "task": "do stuff"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_delegate_missing_task(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "my-agent"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_delegate_empty_task(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "my-agent", "task": "  "}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_send_message_valid(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "send_message", "payload": {"channel_id": "general", "content": "hello"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.SEND_MESSAGE
+
+    async def test_send_message_missing_channel_id(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "send_message", "payload": {"content": "hello"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_send_message_missing_content(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "send_message", "payload": {"channel_id": "general"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_send_message_empty_content(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "send_message", "payload": {"channel_id": "general", "content": ""}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_spawn_sub_agent_valid(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "spawn_sub_agent", "payload": {"role": "researcher", "task": "find info"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.SPAWN_SUB_AGENT
+
+    async def test_spawn_sub_agent_missing_role(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "spawn_sub_agent", "payload": {"task": "find info"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_spawn_sub_agent_missing_task(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "spawn_sub_agent", "payload": {"role": "researcher"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_complete_task_passes_through(self):
+        """COMPLETE_TASK has no payload constraints — always passes."""
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "complete_task", "payload": {}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+
+    async def test_do_nothing_passes_through(self):
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "do_nothing", "payload": {}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert actions[0].action_type == ActionType.DO_NOTHING
+
+    async def test_mixed_valid_and_invalid(self):
+        """Valid actions pass, invalid are replaced with DO_NOTHING."""
+        agent = await self._make_agent()
+        response = LLMResponse(text=json.dumps([
+            {"action_type": "delegate", "payload": {"agent_id": "INVALID!", "task": "x"}},
+            {"action_type": "complete_task", "payload": {"result": "ok"}},
+        ]))
+        actions = agent._parse_actions(response)
+        assert len(actions) == 2
+        assert actions[0].action_type == ActionType.DO_NOTHING
+        assert actions[1].action_type == ActionType.COMPLETE_TASK
+
+
+# ─── PR #54 review: per-event timeout ───────────────────────
+
+
+class TestEventTimeout:
+    """Verify on_event() enforces a wall-clock timeout.
+
+    PR #54 review Must-Fix #2: unbounded LLM processing could hold the
+    per-agent lock indefinitely.
+    """
+
+    async def test_timeout_returns_descriptive_action(self):
+        """A slow LLM call that exceeds event_timeout produces a timeout action."""
+        async def slow_llm(*args, **kwargs):
+            await asyncio.sleep(10)  # will be cancelled by timeout
+            return LLMResponse(text="too slow")
+
+        mock_provider = AsyncMock()
+        mock_provider.create_message = AsyncMock(side_effect=slow_llm)
+        mock_provider.format_tool_definitions = MagicMock(return_value=[])
+        client = LLMClient(mock_provider)
+
+        config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hello"},
+        )
+        actions = await agent.on_event(event)
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "timed out" in actions[0].payload["result"].lower()
+        await agent.close_memory()
+
+    async def test_normal_event_within_timeout(self):
+        """Events that complete within the timeout work normally."""
+        config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": _task()},
+        )
+        actions = await agent.on_event(event)
+        assert len(actions) >= 1
+        assert actions[0].action_type == ActionType.COMPLETE_TASK
+        assert "timed out" not in actions[0].payload.get("result", "").lower()
         await agent.close_memory()
 

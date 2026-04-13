@@ -447,3 +447,58 @@ class TestMaxTokens:
     def test_custom(self):
         wm = WorkingMemory(max_tokens=50_000)
         assert wm.max_tokens == 50_000
+
+
+# ─── PR #54 review: compression size guard ──────────────────
+
+
+class TestCompressionSizeGuard:
+    """Verify compress_if_needed() skips replacement when summary is not smaller.
+
+    PR #54 review Should-Fix #1: a summary as long or longer than the
+    original would not reduce total tokens and could loop.
+    """
+
+    async def test_larger_summary_skipped(self):
+        """When LLM produces a longer summary, the original section is kept."""
+        wm = WorkingMemory(max_tokens=100)
+        wm.add_section(_make_section(name="a", content="short", token_count=200, compressible=True))
+
+        # Return a summary that is much longer than the original content
+        long_summary = "x" * 2000  # ~500 tokens via chars/4
+        client = _make_llm_client(summary=long_summary)
+        await wm.compress_if_needed(client)
+
+        # Section should still exist with original token count (not replaced)
+        section = wm.get_section("a")
+        assert section is not None
+        assert section.token_count == 200
+        assert section.content == "short"
+
+    async def test_equal_size_summary_skipped(self):
+        """Summary with same token count as original is also skipped."""
+        wm = WorkingMemory(max_tokens=100)
+        # 80 chars / 4 = 20 tokens
+        original = "a" * 80
+        wm.add_section(_make_section(name="a", content=original, token_count=20, compressible=True))
+
+        summary = "b" * 80  # still 20 tokens — not smaller
+        client = _make_llm_client(summary=summary)
+        await wm.compress_if_needed(client)
+
+        section = wm.get_section("a")
+        assert section is not None
+        assert section.content == original
+
+    async def test_smaller_summary_accepted(self):
+        """Summary that is genuinely smaller gets applied."""
+        wm = WorkingMemory(max_tokens=100)
+        wm.add_section(_make_section(name="a", content="a" * 800, token_count=200, compressible=True))
+
+        client = _make_llm_client(summary="tiny")  # ~1 token
+        await wm.compress_if_needed(client)
+
+        section = wm.get_section("a")
+        assert section is not None
+        assert section.content == "tiny"
+        assert section.token_count < 200
