@@ -561,12 +561,12 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_validate.py -v` passes
-- [ ] `make validate` succeeds with updated configs
-- [ ] `ruff check agents/validate.py` clean
-- [ ] Behavioral dimension enum validation tested
-- [ ] Conditional requirements per agent type tested
-- [ ] All persona fields from RFC 0005 represented in schema
+- [x] `pytest tests/unit/python/test_validate.py -v` passes
+- [x] `make validate` succeeds with updated configs
+- [x] `ruff check agents/validate.py` clean
+- [x] Behavioral dimension enum validation tested
+- [x] Conditional requirements per agent type tested
+- [x] All persona fields from RFC 0005 represented in schema
 
 ---
 

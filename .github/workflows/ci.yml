@@ -120,5 +120,4 @@ jobs:
           cd agents && pip install -e ".[dev]"
 
       - name: Validate YAML configs
-        run: python -m orchestr8_agents.validate config/
-        continue-on-error: true  # validator intentionally fails in scaffold
+        run: python agents/validate.py config/
