@@ -189,12 +189,20 @@ class PersonaAgent(BaseAgent):
 
     @abstractmethod
     async def on_event(self, event: AgentEvent) -> list[AgentAction]:
-        """
-        Core event handler. Override this in your persona agent.
+        """Core event handler. Override this in your persona agent.
 
         Receives events (messages, tasks, mentions, ticks), returns
         actions (send message, spawn sub-agent, delegate, complete task).
         The framework executes actions and delivers results as new events.
+
+        **Lock contract**: Implementations MUST acquire ``self._lock``
+        internally (e.g. ``async with self._lock:``) to serialize event
+        processing.  The ``EventDispatcher`` does NOT acquire the lock
+        at the dispatch level because ``asyncio.Lock`` is not reentrant
+        — acquiring at both layers would deadlock.  If a subclass
+        overrides ``on_event()`` without internal locking, concurrent
+        dispatches to the same agent will race unserialized.
+        (PR #55 review: lock contract fragility for future subclasses.)
         """
         # Using @abstractmethod (consistent with BaseAgent.handle) so missing
         # implementations are caught at instantiation time, not first event.
@@ -298,6 +306,12 @@ class Mood(Enum):
 # Energy constants (MVP — hardcoded, config-driven in follow-up).
 _ENERGY_COST_PER_ACTION = 0.05
 _ENERGY_RECOVERY_PER_TICK = 0.1
+
+# Maximum mentions per SEND_MESSAGE action to prevent resource exhaustion
+# from LLM-generated payloads.  Each mention triggers a synchronous dispatch
+# (per-agent lock + LLM call); with cascade fan-out worst case is N^D.
+# (PR #55 review: unbounded mentions list → resource exhaustion.)
+_MAX_MENTIONS_PER_ACTION = 10
 
 
 @dataclass
@@ -983,10 +997,9 @@ class _LLMPersonaAgent(PersonaAgent):
         """
         timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
         async with self._lock:
-            self._state.recover_energy()
             event = AgentEvent(event_type=EventType.TICK)
             try:
-                return await asyncio.wait_for(
+                actions = await asyncio.wait_for(
                     self._on_event_inner(event), timeout=timeout,
                 )
             except TimeoutError:
@@ -995,7 +1008,16 @@ class _LLMPersonaAgent(PersonaAgent):
                     self.agent_id,
                     timeout,
                 )
+                # Do NOT recover energy on timeout — the tick produced no
+                # meaningful work.  Recovering before _on_event_inner()
+                # (the previous pattern) leaked +0.1 energy per timed-out
+                # tick because drain_energy() never ran for actions.
+                # (PR #55 review: energy leak on tick timeout.)
                 return [AgentAction(ActionType.DO_NOTHING, {})]
+            # Recover energy only after successful completion so timed-out
+            # ticks don't accumulate free energy.
+            self._state.recover_energy()
+            return actions
 
     # handle() is inherited from PersonaAgent — no override needed.
     # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
@@ -1266,6 +1288,21 @@ class ActionExecutor:
         target_channel = action.payload.get("channel_id", "")
         content = action.payload.get("content", "")
         mentions = action.payload.get("mentions", [])
+
+        # Cap mentions list to prevent resource exhaustion from LLM-generated
+        # payloads with many targets.  Each mention triggers a synchronous
+        # dispatch (acquiring a per-agent lock + LLM call), and with cascade
+        # fan-out the worst case is N^D dispatches where N=mentions and
+        # D=max_cascade_depth.
+        # (PR #55 review: unbounded mentions list → resource exhaustion.)
+        if len(mentions) > _MAX_MENTIONS_PER_ACTION:
+            logger.warning(
+                "Agent %s SEND_MESSAGE mentions list truncated from %d to %d",
+                sender_id,
+                len(mentions),
+                _MAX_MENTIONS_PER_ACTION,
+            )
+            mentions = mentions[:_MAX_MENTIONS_PER_ACTION]
 
         # Route to mentioned agents as MESSAGE_RECEIVED events
         if not mentions:

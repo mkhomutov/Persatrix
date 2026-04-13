@@ -1586,3 +1586,53 @@ class TestTickTimeout:
         assert actions[0].action_type == ActionType.COMPLETE_TASK
         await agent.close_memory()
 
+    async def test_tick_timeout_no_energy_leak(self):
+        """Timed-out ticks do NOT recover energy.
+
+        Previously ``recover_energy()`` was called before ``_on_event_inner()``,
+        so timed-out ticks gained +0.1 energy without executing any actions.
+        Now energy is recovered only after successful completion.
+        (PR #55 review: energy leak on tick timeout.)
+        """
+        async def slow_llm(*args, **kwargs):
+            await asyncio.sleep(10)
+            return LLMResponse(text="too slow")
+
+        mock_provider = AsyncMock()
+        mock_provider.create_message = AsyncMock(side_effect=slow_llm)
+        mock_provider.format_tool_definitions = MagicMock(return_value=[])
+        client = LLMClient(mock_provider)
+
+        config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        # Set energy to a known value
+        agent._state.energy = 0.5
+        await agent.on_tick()  # times out
+        # Energy must NOT have increased — timed-out tick produces no work
+        assert agent._state.energy == pytest.approx(0.5)
+        await agent.close_memory()
+
+    async def test_tick_success_recovers_energy(self):
+        """Successful ticks DO recover energy (after completion).
+
+        Complements ``test_tick_timeout_no_energy_leak`` — verifies the
+        normal path still recovers.
+        """
+        config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        agent._state.energy = 0.5
+        await agent.on_tick()
+        # Energy should have recovered (+0.1) minus drain for actions.
+        # The mock LLM returns a COMPLETE_TASK action which drains 0.05,
+        # so net change is +0.1 - 0.05 = +0.05.
+        assert agent._state.energy == pytest.approx(0.55)
+        await agent.close_memory()
+

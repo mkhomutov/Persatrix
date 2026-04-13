@@ -282,6 +282,74 @@ class TestActionExecutor:
         assert results[0]["status"] == "dispatched"
         await agent_ok.close_memory()
 
+    async def test_send_message_mentions_truncated(self):
+        """SEND_MESSAGE with >10 mentions is truncated to prevent resource exhaustion.
+
+        An LLM-generated payload with many mentions would trigger N
+        synchronous dispatches, each with an LLM call.  With cascade
+        fan-out the worst case is N^D dispatches.  The cap prevents this.
+        (PR #55 review: unbounded mentions list → resource exhaustion.)
+        """
+        agent = await _make_agent(config={**_PERSONA_CONFIG_2})
+        dispatcher = EventDispatcher(agents={"mike-torres": agent})
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        # 15 mentions — only first 10 should be dispatched
+        many_mentions = [f"agent-{i}" for i in range(15)]
+        many_mentions[0] = "mike-torres"  # one valid target
+
+        results = await executor.execute("sarah-chen", [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "channel_id": "general",
+                "content": "Hello!",
+                "mentions": many_mentions,
+            }),
+        ])
+        # Only 10 dispatches attempted (truncated from 15)
+        assert results[0]["dispatched_to"] <= 10
+        await agent.close_memory()
+
+    async def test_cascade_depth_propagated_through_execute(self):
+        """ActionExecutor.execute(cascade_depth=N) propagates depth to child dispatches.
+
+        Verifies the critical path: executor receives a cascade_depth from
+        its caller (the dispatcher) and passes it through to
+        _handle_send_message() so that child SEND_MESSAGE events inherit
+        the correct depth for cascade limiting.
+        (PR #55 review: add test for cascade_depth propagation through executor.)
+        """
+        agent = await _make_agent(config={**_PERSONA_CONFIG_2})
+        dispatcher = EventDispatcher(
+            agents={"mike-torres": agent},
+            max_cascade_depth=5,
+        )
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        # Track what cascade_depth the dispatcher receives
+        original_dispatch = dispatcher.dispatch
+        received_depths: list[int] = []
+
+        async def _tracking_dispatch(target_id, event):
+            received_depths.append(event.metadata.get("cascade_depth", 0))
+            return await original_dispatch(target_id, event)
+
+        dispatcher.dispatch = _tracking_dispatch  # type: ignore[assignment]
+
+        await executor.execute("sarah-chen", [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "channel_id": "general",
+                "content": "Hey!",
+                "mentions": ["mike-torres"],
+            }),
+        ], cascade_depth=3)
+
+        # _handle_send_message() should create an event with cascade_depth=3
+        # (the depth it received from execute()), and the dispatcher will
+        # then increment it to 4 internally.
+        assert len(received_depths) == 1
+        assert received_depths[0] == 3
+        await agent.close_memory()
+
 
 # ─── EventDispatcher Tests ──────────────────────────────────
 
