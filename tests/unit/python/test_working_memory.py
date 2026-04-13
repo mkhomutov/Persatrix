@@ -6,10 +6,13 @@ All tests use mock LLM client — no real API calls.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
+from agents.memory import MemoryLifecycle
 
 
 # ─── Fixtures ───────────────────────────────────────────────
@@ -347,6 +350,61 @@ class TestCompression:
         await wm.compress_if_needed(client)
         call_kwargs = client._provider.create_message.call_args.kwargs
         assert call_kwargs["max_tokens"] >= 64
+
+
+# ─── Tiktoken conditional test (F-2-4) ─────────────────────
+
+
+class TestEstimateTokensTiktoken:
+    def test_accurate_with_tiktoken(self):
+        """When tiktoken IS available, accurate=True uses it and differs from chars/4."""
+        pytest.importorskip("tiktoken")
+        text = "Hello, world! This is a longer sentence for testing token estimation."
+        accurate = estimate_tokens(text, accurate=True)
+        naive = len(text) // 4
+        assert accurate != naive, "accurate path should differ from chars/4 when tiktoken is available"
+        assert accurate > 0
+
+    def test_accurate_true_fallback_when_tiktoken_unavailable(self):
+        """When tiktoken import fails, accurate=True falls back to chars/4.
+
+        Mocks the import to guarantee the fallback path is exercised even
+        when tiktoken IS installed in the test environment (PR #59 review).
+        """
+        text = "Hello, world!"
+        with patch.dict("sys.modules", {"tiktoken": None}):
+            result = estimate_tokens(text, accurate=True)
+        assert result == len(text) // 4
+
+    def test_accurate_true_fallback_when_tiktoken_broken(self):
+        """When tiktoken is installed but encoding fails, falls back to chars/4.
+
+        Covers the broader Exception catch added for defensive robustness
+        (PR #59 review: corrupted install, C extension failure, etc.).
+        """
+        text = "Hello, world!"
+        fake_tiktoken = MagicMock()
+        fake_tiktoken.get_encoding.side_effect = RuntimeError("encoding registry corrupt")
+        with patch.dict("sys.modules", {"tiktoken": fake_tiktoken}):
+            result = estimate_tokens(text, accurate=True)
+        assert result == len(text) // 4
+
+
+# ─── MemoryLifecycle protocol (F-2-5) ──────────────────────
+
+
+class TestInitialize:
+    async def test_initialize_is_noop(self):
+        """WorkingMemory.initialize() exists and is a no-op (MemoryLifecycle contract)."""
+        wm = WorkingMemory()
+        wm.add_section(_make_section(name="a", token_count=50))
+        await wm.initialize()
+        # State is unchanged
+        assert wm.total_tokens() == 50
+
+    def test_working_memory_satisfies_memory_lifecycle(self):
+        """WorkingMemory structurally matches @runtime_checkable MemoryLifecycle (R-10)."""
+        assert isinstance(WorkingMemory(), MemoryLifecycle)
 
 
 # ─── WorkingMemory.try_start_compression (concurrency guard) ─

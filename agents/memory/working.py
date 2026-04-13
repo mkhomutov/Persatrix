@@ -28,7 +28,12 @@ def estimate_tokens(text: str, *, accurate: bool = False) -> int:
             enc = tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
         except ImportError:
-            pass
+            logger.debug("tiktoken not installed, accurate=True falling back to chars/4")
+        except Exception:
+            # Defensive: if tiktoken is installed but broken (e.g. corrupted
+            # C extension, encoding registry issue), fall back instead of
+            # crashing callers — estimate_tokens is a utility, not critical path.
+            logger.warning("tiktoken encoding failed, falling back to chars/4", exc_info=True)
     return len(text) // 4
 
 
@@ -119,6 +124,14 @@ class WorkingMemory:
                     section.token_count,
                 )
 
+        logger.debug(
+            "Context built: %d/%d tokens, %d/%d sections included",
+            running_total,
+            self._max_tokens,
+            len(included),
+            len(self._sections),
+        )
+
         # Return in priority order (highest first)
         return [{"role": s.name, "content": s.content} for s in included]
 
@@ -153,6 +166,8 @@ class WorkingMemory:
         if self.total_tokens() <= self._max_tokens:
             return
 
+        original_total = self.total_tokens()
+
         # Sort compressible sections by priority ascending (compress lowest first)
         compressible = sorted(
             [s for s in self._sections if s.compressible],
@@ -179,7 +194,7 @@ class WorkingMemory:
                         section.name,
                     )
                     continue
-                new_token_count = estimate_tokens(summary)
+                new_token_count = estimate_tokens(summary, accurate=True)
                 # Guard against LLM producing a summary that is as long or
                 # longer than the original — replacing it would not reduce
                 # total tokens and could infinite-loop if callers retry
@@ -212,6 +227,22 @@ class WorkingMemory:
                 logger.warning(
                     "Failed to compress section '%s'", section.name, exc_info=True
                 )
+
+        # Only log at info level when compression actually reduced tokens;
+        # a no-op pass (all sections skipped/non-compressible) would add
+        # noise at info level (PR #59 review: guard unchanged state).
+        final_total = self.total_tokens()
+        if final_total != original_total:
+            logger.info(
+                "Compression pass: %d → %d total tokens",
+                original_total,
+                final_total,
+            )
+        else:
+            logger.debug(
+                "Compression pass: no change (%d total tokens)",
+                original_total,
+            )
 
     async def close(self) -> None:
         """Await outstanding compression and clear sections."""

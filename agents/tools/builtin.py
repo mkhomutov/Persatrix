@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+import uuid as _uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -399,6 +400,14 @@ def create_memory_tools(
         if not gate.check("memory:write"):
             return ToolResult(success=False, error="Permission denied: memory:write")
         try:
+            _uuid.UUID(note_id)
+        except (ValueError, AttributeError):
+            return ToolResult(
+                success=False,
+                error=f"Invalid note_id (expected UUID): {note_id}",
+                error_type="ValueError",
+            )
+        try:
             found = await memory.update_note(note_id=note_id, content=content)
         except ValueError as exc:
             return ToolResult(success=False, error=str(exc), error_type="ValueError")
@@ -416,6 +425,14 @@ def create_memory_tools(
         """Delete a note by ID."""
         if not gate.check("memory:write"):
             return ToolResult(success=False, error="Permission denied: memory:write")
+        try:
+            _uuid.UUID(note_id)
+        except (ValueError, AttributeError):
+            return ToolResult(
+                success=False,
+                error=f"Invalid note_id (expected UUID): {note_id}",
+                error_type="ValueError",
+            )
         found = await memory.delete_note(note_id=note_id)
         if not found:
             return ToolResult(success=False, error=f"Note not found: {note_id}")

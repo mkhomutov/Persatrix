@@ -85,6 +85,30 @@ _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
 # result sets and resource exhaustion.
 _MAX_RECALL_LIMIT = 100
 
+# ─── Shared scoring SQL fragments ──────────────────────────
+
+# Non-BM25 scoring components shared across _recall_fts5(), _recall_like(),
+# and _recall_recency().  Extracted to avoid maintaining the same formula in
+# three SQL strings (F-3a-2).
+#
+# importance is wrapped with (0.1 + importance * 0.9) so that episodes with
+# importance=0.0 still receive a non-zero score (10% baseline) instead of
+# being invisible in ranked recall (F-3a-1).
+#
+# A single template parameterizes the column prefix ("e." for JOINed queries,
+# "" for bare queries) so formula tuning is a single edit (F-59-2).
+#
+# Security: {p} is ONLY filled with hardcoded column prefixes ("e." or "").
+# NEVER pass user or LLM input into _SCORE_TEMPLATE.format().
+# All dynamic values use parameterized ? placeholders.
+_SCORE_TEMPLATE = (
+    "(0.1 + {p}importance * 0.9)"
+    " * (1.0 + ln(1 + {p}access_count))"
+    " * (1.0 / (1 + (? - {p}created_at) / 86400.0))"  # ? = time.time()
+)
+_SCORE_EXPR = _SCORE_TEMPLATE.format(p="e.")
+_SCORE_EXPR_BARE = _SCORE_TEMPLATE.format(p="")
+
 
 # ─── Schema migrations ─────────────────────────────────────
 
@@ -300,6 +324,21 @@ class EpisodicMemory:
 
         await _apply_migrations(self._db)
 
+        # Verify that ln() is available — the scoring formula in _SCORE_EXPR
+        # uses SQLite's ln() function, which requires SQLITE_ENABLE_MATH_FUNCTIONS
+        # at compile time.  Python's bundled SQLite typically includes this, but
+        # custom builds or Alpine musl-based Docker images may not.  Failing
+        # here with a clear message is better than a cryptic error at recall time
+        # (PR #59 review: ln() startup diagnostic).
+        try:
+            async with self._db.execute("SELECT ln(1)") as cursor:
+                await cursor.fetchone()
+        except sqlite3.OperationalError:
+            raise RuntimeError(
+                "SQLite ln() function not available — required by recall scoring. "
+                "Ensure Python is built with SQLITE_ENABLE_MATH_FUNCTIONS."
+            )
+
         self._fts5 = await _fts5_available(self._db)
         if self._fts5:
             await self._db.executescript(_FTS5_DDL)
@@ -441,18 +480,17 @@ class EpisodicMemory:
                   AND e.importance >= ?
                 ORDER BY
                     (fts.rank * -1)
-                    * e.importance
-                    * (1.0 + ln(1 + e.access_count))
-                    * (1.0 / (1 + (? - e.created_at) / 86400.0))
+                    * {_SCORE_EXPR}
                     DESC
                 LIMIT ?
                 """,
+                # params: MATCH=1, agent_id=2, min_importance=3, _SCORE_EXPR.time=4, LIMIT=5
                 (query, self._agent_id, min_importance, time.time(), limit),
             ) as cursor:
                 return await cursor.fetchall()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
             logger.warning(
-                "FTS5 query failed for %r, falling back to LIKE", query,
+                "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
             )
             return await self._recall_like(db, query, limit, min_importance)
 
@@ -478,12 +516,11 @@ class EpisodicMemory:
               AND importance >= ?
               AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
             ORDER BY
-                importance
-                * (1.0 + ln(1 + access_count))
-                * (1.0 / (1 + (? - created_at) / 86400.0))
+                {_SCORE_EXPR_BARE}
                 DESC
             LIMIT ?
             """,
+            # params: agent_id=1, min_importance=2, LIKE=3+4, _SCORE_EXPR_BARE.time=5, LIMIT=6
             (self._agent_id, min_importance, pattern, pattern, time.time(), limit),
         ) as cursor:
             return await cursor.fetchall()
@@ -502,12 +539,11 @@ class EpisodicMemory:
             WHERE agent_id = ?
               AND importance >= ?
             ORDER BY
-                importance
-                * (1.0 + ln(1 + access_count))
-                * (1.0 / (1 + (? - created_at) / 86400.0))
+                {_SCORE_EXPR_BARE}
                 DESC
             LIMIT ?
             """,
+            # params: agent_id=1, min_importance=2, _SCORE_EXPR_BARE.time=3, LIMIT=4
             (self._agent_id, min_importance, time.time(), limit),
         ) as cursor:
             return await cursor.fetchall()
@@ -576,6 +612,9 @@ class EpisodicMemory:
 
         Callers that need to process a full backlog should invoke this method
         in a loop until it returns 0.
+
+        Not concurrency-safe.  External callers should ensure only one
+        summarization run per agent at a time.
 
         Returns the number of episodes summarized in this batch.
         """
@@ -652,6 +691,9 @@ class EpisodicMemory:
                     )
                     continue
 
+                # Strip leading/trailing whitespace from LLM output (F-3c-1).
+                summary = summary.strip()
+
                 now = time.time()
                 new_level = episode.compression_level + 1
                 update_cursor = await db.execute(
@@ -664,12 +706,12 @@ class EpisodicMemory:
                     # durable even if the process crashes mid-batch.
                     await db.commit()
                     summarized += 1
-                logger.info(
-                    "Summarized episode %s: compression_level %d → %d",
-                    episode.id,
-                    episode.compression_level,
-                    new_level,
-                )
+                    logger.info(
+                        "Summarized episode %s: compression_level %d → %d",
+                        episode.id,
+                        episode.compression_level,
+                        new_level,
+                    )
             except Exception:
                 logger.warning(
                     "Failed to summarize episode %s", episode.id, exc_info=True,
@@ -721,6 +763,12 @@ class EpisodicMemory:
         Returns the generated note ID.
         """
         db = self._ensure_db()
+        # Validate max_notes: _prune_notes() computes
+        # LIMIT MAX(0, count - max_notes + 1), so max_notes=0 would
+        # delete ALL existing notes.  Reject at the public API boundary
+        # even though create_memory_tools() always passes 500 (F-59-1).
+        if max_notes < 1:
+            raise ValueError(f"max_notes must be >= 1, got {max_notes}")
         if not topic or not topic.strip():
             raise ValueError("topic must not be empty")
         if not content or not content.strip():
@@ -836,27 +884,22 @@ class EpisodicMemory:
         return row[0] if row else 0
 
     async def _prune_notes(self, db: aiosqlite.Connection, max_notes: int) -> None:
-        """Remove oldest low-access notes when count >= max_notes."""
-        async with db.execute(
-            "SELECT COUNT(*) FROM notes WHERE agent_id = ?",
-            (self._agent_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        count = row[0] if row else 0
-        if count < max_notes:
-            return
-        # Delete the oldest, least-accessed note(s) to make room.
-        overflow = count - max_notes + 1
+        """Remove oldest low-access notes when count >= max_notes.
+
+        Uses a single atomic DELETE with a subquery to avoid a TOCTOU race
+        between SELECT count and DELETE that could occur when multiple
+        EpisodicMemory instances share a DB file (F-3b-1).
+        """
         await db.execute(
             """
-            DELETE FROM notes WHERE id IN (
+            DELETE FROM notes WHERE agent_id = ? AND id IN (
                 SELECT id FROM notes
                 WHERE agent_id = ?
                 ORDER BY access_count ASC, created_at ASC
-                LIMIT ?
+                LIMIT MAX(0, (SELECT COUNT(*) FROM notes WHERE agent_id = ?) - ? + 1)
             )
             """,
-            (self._agent_id, overflow),
+            (self._agent_id, self._agent_id, self._agent_id, max_notes),
         )
 
     async def _recall_notes_fts5(
@@ -880,9 +923,11 @@ class EpisodicMemory:
                 (query, self._agent_id, limit),
             ) as cursor:
                 return await cursor.fetchall()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
             logger.warning(
-                "Notes FTS5 query failed for %r, falling back to LIKE", query,
+                "Notes FTS5 query failed for %r, falling back to LIKE: %s",
+                query,
+                exc,
             )
             return await self._recall_notes_like(db, query, limit)
 
@@ -957,25 +1002,25 @@ class EpisodicMemory:
         """Increment and return the new interaction count.
 
         Creates the agent_state row if it doesn't exist (upsert).
+        Uses RETURNING to get the post-upsert count in a single round-trip,
+        eliminating a read-after-write race (F-3b-2).  Requires SQLite >= 3.35
+        (Python 3.11+ ships >= 3.39).
         """
         db = self._ensure_db()
         now = time.time()
-        await db.execute(
+        cursor = await db.execute(
             """
             INSERT INTO agent_state (agent_id, interaction_count, updated_at)
             VALUES (?, 1, ?)
             ON CONFLICT(agent_id) DO UPDATE
                 SET interaction_count = interaction_count + 1,
                     updated_at = ?
+            RETURNING interaction_count
             """,
             (self._agent_id, now, now),
         )
+        row = await cursor.fetchone()
         await db.commit()
-        async with db.execute(
-            "SELECT interaction_count FROM agent_state WHERE agent_id = ?",
-            (self._agent_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
         return row[0] if row else 0
 
     async def reset_interaction_count(self) -> None:

@@ -1230,3 +1230,173 @@ class TestDeleteOldEpisodes:
 
         assert deleted == 0
         assert await memory.get_episode(ep_id) is not None
+
+
+# ─── Future migration forward-compatibility (F-3a-3) ───────
+
+
+class TestFutureMigration:
+    async def test_hypothetical_v4_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v4 entry, verify v1–v4 applied."""
+        from agents.memory.episodic import MIGRATIONS
+
+        v4 = (
+            4,
+            "Hypothetical test-only table",
+            "CREATE TABLE IF NOT EXISTS _test_v4 (id TEXT PRIMARY KEY);",
+        )
+        original = list(MIGRATIONS)
+        try:
+            MIGRATIONS.append(v4)
+            mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
+            await mem.initialize()
+            db = mem._ensure_db()
+
+            # All four versions should be recorded
+            async with db.execute(
+                "SELECT version FROM schema_version ORDER BY version"
+            ) as cursor:
+                versions = [r[0] for r in await cursor.fetchall()]
+            assert versions == [1, 2, 3, 4]
+
+            # v4 table should exist
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v4'"
+            ) as cursor:
+                assert await cursor.fetchone() is not None
+
+            await mem.close()
+        finally:
+            MIGRATIONS.clear()
+            MIGRATIONS.extend(original)
+
+
+# ─── Zero-importance recall (F-3a-1) ───────────────────────
+
+
+class TestZeroImportanceRecall:
+    async def test_zero_importance_episode_visible_in_recall(self, memory: EpisodicMemory):
+        """importance=0.0 episodes must still appear in recall results (non-zero baseline)."""
+        ep_id = await memory.store_episode(
+            summary="Zero importance event",
+            context={"detail": "test"},
+            importance=0.0,
+        )
+        episodes = await memory.recall(query="", limit=10)
+        ids = [e.id for e in episodes]
+        assert ep_id in ids, "Zero-importance episodes should be visible via non-zero scoring baseline"
+
+
+# ─── ln() availability check ───────────────────────────────
+
+
+class TestLnAvailabilityCheck:
+    """initialize() should raise RuntimeError when SQLite ln() is missing (R-02).
+
+    Without ln(), the scoring formula in _SCORE_EXPR would cause all recall()
+    calls to fail with a cryptic OperationalError. Failing at startup with a
+    clear message is better than failing at query time.
+    """
+
+    async def test_initialize_raises_when_ln_unavailable(self):
+        import sqlite3
+
+        import aiosqlite
+
+        real_connect = aiosqlite.connect
+
+        class _FailOnLn:
+            """Fake cursor that raises OperationalError on __aenter__."""
+
+            async def __aenter__(self):
+                raise sqlite3.OperationalError("no such function: ln")
+
+            async def __aexit__(self, *a):
+                pass
+
+            def __await__(self):
+                return self.__aenter__().__await__()
+
+        class _LnFailDB:
+            """Wraps aiosqlite.Connection, failing only the ln(1) query."""
+
+            def __init__(self, db):
+                self._db = db
+
+            def execute(self, sql, *args, **kwargs):
+                if "ln(1)" in sql:
+                    return _FailOnLn()
+                return self._db.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._db, name)
+
+        wrapped_db = None
+
+        async def patched_connect(*a, **kw):
+            nonlocal wrapped_db
+            db = await real_connect(*a, **kw)
+            wrapped_db = _LnFailDB(db)
+            return wrapped_db
+
+        mem = EpisodicMemory(agent_id="test", db_path=":memory:")
+        with patch("aiosqlite.connect", side_effect=patched_connect):
+            with pytest.raises(RuntimeError, match="ln.*not available"):
+                await mem.initialize()
+
+        # Clean up the underlying real connection
+        if wrapped_db is not None:
+            await wrapped_db._db.close()
+
+
+# ─── MemoryLifecycle protocol (EpisodicMemory) ─────────────
+
+
+class TestEpisodicMemoryLifecycle:
+    """Verify EpisodicMemory satisfies MemoryLifecycle protocol (PR #59 review).
+
+    WorkingMemory was already tested in test_working_memory.py (F-2-5).
+    EpisodicMemory structurally satisfies the same protocol — both have
+    async initialize() and async close() with matching signatures.
+    """
+
+    def test_episodic_memory_satisfies_memory_lifecycle(self):
+        from agents.memory import MemoryLifecycle
+        assert isinstance(
+            EpisodicMemory(agent_id="test", db_path=":memory:"),
+            MemoryLifecycle,
+        )
+
+
+# ─── SQL scoring expression syntax (R-01) ──────────────────
+
+
+class TestScoreExpressionSyntax:
+    """Verify _SCORE_EXPR and _SCORE_EXPR_BARE produce valid SQL.
+
+    A typo in _SCORE_TEMPLATE would only surface at recall time. This test
+    catches template formatting errors at test time by executing the generated
+    SQL fragments against an in-memory database (R-01).
+    """
+
+    async def test_score_expr_is_valid_sql(self, memory):
+        """_SCORE_EXPR (table-aliased) should be syntactically valid SQL."""
+        from agents.memory.episodic import _SCORE_EXPR
+
+        # Execute inside a SELECT against the real episodes table (aliased as e)
+        # with a concrete time parameter to exercise the full expression.
+        sql = f"SELECT {_SCORE_EXPR} FROM episodes e WHERE e.agent_id = ? LIMIT 1"
+        import time
+
+        async with memory._db.execute(sql, (time.time(), "test-agent")) as cursor:
+            await cursor.fetchone()  # No OperationalError = valid SQL
+
+    async def test_score_expr_bare_is_valid_sql(self, memory):
+        """_SCORE_EXPR_BARE (no table prefix) should be syntactically valid SQL."""
+        from agents.memory.episodic import _SCORE_EXPR_BARE
+
+        sql = f"SELECT {_SCORE_EXPR_BARE} FROM episodes WHERE agent_id = ? LIMIT 1"
+        import time
+
+        async with memory._db.execute(sql, (time.time(), "test-agent")) as cursor:
+            await cursor.fetchone()

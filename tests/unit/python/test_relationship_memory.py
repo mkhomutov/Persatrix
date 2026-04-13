@@ -572,3 +572,90 @@ class TestAgentIsolation:
         assert rels_a[0].other_agent_id == "bob"
         assert len(rels_b) == 1
         assert rels_b[0].other_agent_id == "charlie"
+
+
+# ─── Concurrent record_interaction (F-4-2) ─────────────────
+
+
+class TestConcurrentRecordInteraction:
+    async def test_concurrent_record_interactions_both_counted(self, memory: RelationshipMemory):
+        """Two concurrent record_interaction() calls should both be counted."""
+        import asyncio
+
+        await asyncio.gather(
+            memory.record_interaction("bob", "chat", outcome="good"),
+            memory.record_interaction("bob", "review", outcome="great"),
+        )
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.interaction_count == 2
+
+
+# ─── Empty other_agent_id validation (R-1 / F-4-1) ─────────
+
+
+class TestEmptyOtherAgentId:
+    """update_trust() and record_interaction() reject empty other_agent_id."""
+
+    async def test_update_trust_rejects_empty(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.update_trust("", 0.1, "reason")
+
+    async def test_update_trust_rejects_whitespace(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.update_trust("   ", 0.1, "reason")
+
+    async def test_record_interaction_rejects_empty(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.record_interaction("", "chat")
+
+    async def test_record_interaction_rejects_whitespace(self, memory):
+        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+            await memory.record_interaction("   ", "chat")
+
+
+# ─── String truncation (R-2 / F-4-3, F-4-4) ────────────────
+
+
+class TestStringTruncation:
+    """reason and outcome are capped at 1024 chars to bound storage and LLM context."""
+
+    async def test_reason_truncated_at_1024(self, memory):
+        long_reason = "x" * 2000
+        await memory.update_trust("bob", 0.1, long_reason)
+        summary = await memory.get_relationship_summary("bob")
+        assert len(summary.notes) == 1024
+        assert summary.notes.endswith("..."), "truncated reason should end with '...' indicator"
+
+    async def test_outcome_truncated_at_1024(self, memory):
+        long_outcome = "y" * 2000
+        await memory.record_interaction("bob", "chat", outcome=long_outcome)
+        summary = await memory.get_relationship_summary("bob")
+        assert len(summary.recent_interactions[0].outcome) == 1024
+        assert summary.recent_interactions[0].outcome.endswith("..."), (
+            "truncated outcome should end with '...' indicator"
+        )
+
+    async def test_short_reason_unchanged(self, memory):
+        reason = "short reason"
+        await memory.update_trust("bob", 0.1, reason)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.notes == reason
+
+    async def test_none_outcome_unchanged(self, memory):
+        await memory.record_interaction("bob", "chat", outcome=None)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].outcome is None
+
+
+class TestSentimentBoundaryValues:
+    """Exact boundary values ±1.0 should pass through unclamped (R-08)."""
+
+    async def test_sentiment_exact_positive_boundary(self, memory):
+        await memory.record_interaction("bob", "chat", sentiment=1.0)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == 1.0
+
+    async def test_sentiment_exact_negative_boundary(self, memory):
+        await memory.record_interaction("bob", "chat", sentiment=-1.0)
+        summary = await memory.get_relationship_summary("bob")
+        assert summary.recent_interactions[0].sentiment == -1.0

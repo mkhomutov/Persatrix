@@ -346,13 +346,13 @@ class TestMemoryToolsHappyPath:
 
     async def test_update_nonexistent_note_tool(self, tools):
         td = get_tool("update_note")
-        result = await td.func(note_id="no-such-id", content="x")
+        result = await td.func(note_id="00000000-0000-0000-0000-000000000000", content="x")
         assert result.success is False
         assert "not found" in result.error.lower()
 
     async def test_delete_nonexistent_note_tool(self, tools):
         td = get_tool("delete_note")
-        result = await td.func(note_id="no-such-id")
+        result = await td.func(note_id="00000000-0000-0000-0000-000000000000")
         assert result.success is False
         assert "not found" in result.error.lower()
 
@@ -464,3 +464,107 @@ class TestMigrationV2:
         await memory.delete_note(note_id)
         notes = await memory.recall_notes("different-content-abc")
         assert len(notes) == 0
+
+
+# ─── FTS5 malformed query fallback (F-3b-5) ────────────────
+
+
+class TestRecallNotesFTS5Fallback:
+    """Notes recall with malformed FTS5 queries falls back to LIKE without crashing."""
+
+    @pytest.mark.parametrize("malformed_query", ["NOT", "*", "OR", "AND NOT"])
+    async def test_malformed_fts5_query_returns_results(self, memory, gate_rw, malformed_query):
+        create_memory_tools(memory, gate_rw)
+        # Store a note first so LIKE fallback has something to match
+        store = get_tool("store_note")
+        await store.func(topic="test", content="some content")
+
+        recall = get_tool("recall_notes")
+        result = await recall.func(query=malformed_query, limit=10)
+        # Should not crash — either returns matches via LIKE or empty list
+        assert result.success is True
+
+
+# ─── note_id UUID validation (F-3b-3) ──────────────────────
+
+
+class TestNoteIdValidation:
+    """update_note and delete_note reject malformed note_id before DB round-trip."""
+
+    async def test_update_note_rejects_non_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        update = get_tool("update_note")
+        result = await update.func(note_id="not-a-uuid", content="new content")
+        assert result.success is False
+        assert "Invalid note_id" in result.error
+
+    async def test_delete_note_rejects_non_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        delete = get_tool("delete_note")
+        result = await delete.func(note_id="bogus-id-here")
+        assert result.success is False
+        assert "Invalid note_id" in result.error
+
+    async def test_update_note_accepts_valid_uuid(self, memory, gate_rw):
+        create_memory_tools(memory, gate_rw)
+        store = get_tool("store_note")
+        store_result = await store.func(topic="test", content="original")
+        note_id = store_result.data["note_id"]
+
+        update = get_tool("update_note")
+        result = await update.func(note_id=note_id, content="updated")
+        assert result.success is True
+
+
+# ─── max_notes validation (F-59-1) ─────────────────────────
+
+
+class TestMaxNotesValidation:
+    """store_note() rejects max_notes < 1 at the public API boundary."""
+
+    async def test_max_notes_zero_raises(self, memory):
+        with pytest.raises(ValueError, match="max_notes must be >= 1"):
+            await memory.store_note("topic", "content", max_notes=0)
+
+    async def test_max_notes_negative_raises(self, memory):
+        with pytest.raises(ValueError, match="max_notes must be >= 1"):
+            await memory.store_note("topic", "content", max_notes=-1)
+
+    async def test_max_notes_one_keeps_only_newest(self, memory):
+        """max_notes=1 prunes all existing notes, keeping only the newest."""
+        await memory.store_note("first", "content-1", max_notes=10)
+        await memory.store_note("second", "content-2", max_notes=1)
+        assert await memory.count_notes() == 1
+        notes = await memory.recall_notes(limit=10)
+        assert notes[0].topic == "second"
+
+
+# ─── Pruning + FTS5 trigger interaction (F-59 should-fix) ──
+
+
+class TestPruningFTS5Cleanup:
+    """Pruned notes must not remain in the FTS5 index."""
+
+    async def test_pruned_notes_not_findable_via_fts5(self, memory):
+        """After pruning, the FTS5 DELETE trigger removes pruned notes from the index."""
+        # Store 3 notes with distinctive content for FTS5 matching.
+        # Do NOT recall between stores — that would bump access_count and
+        # change which note gets pruned (prune order: access_count ASC,
+        # created_at ASC).
+        await memory.store_note("alpha", "unique-alpha-xyzzy", max_notes=10)
+        await memory.store_note("beta", "unique-beta-xyzzy", max_notes=10)
+        await memory.store_note("gamma", "unique-gamma-xyzzy", max_notes=10)
+        assert await memory.count_notes() == 3
+
+        # Store a 4th note with max_notes=3 — prunes 1 note.
+        # All three have access_count=0, so the oldest (alpha) is pruned.
+        await memory.store_note("delta", "unique-delta-xyzzy", max_notes=3)
+        assert await memory.count_notes() == 3
+
+        # Pruned note (alpha) must not be findable via recall
+        found_after = await memory.recall_notes("unique-alpha-xyzzy")
+        assert len(found_after) == 0
+
+        # Surviving notes should still be findable
+        found_beta = await memory.recall_notes("unique-beta-xyzzy")
+        assert len(found_beta) == 1
