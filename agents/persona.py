@@ -1,12 +1,14 @@
 """
 Orchestr8 Persona Agent Interface (v0.2+).
 
-Extends BaseAgent with async event handling, channel messaging,
-sub-agent spawning, delegation, and autonomous behavior.
+Extends BaseAgent with async event handling, sub-agent spawning,
+and autonomous behavior.
 
 Includes the concrete ``_LLMPersonaAgent`` with LLM-powered ``on_event()``
 decision loop, ``PersonaState`` dynamic state, behavioral dimension rendering,
 and ``create_persona_agent()`` factory.
+
+Channel messaging and delegation dispatch are wired in PR 5b.
 """
 
 from __future__ import annotations
@@ -464,12 +466,20 @@ def render_behavior(behavior: dict[str, str]) -> str:
     """Convert structured behavior dimensions into natural language for LLM prompt.
 
     Applies defaults for omitted dimensions so the persona always has
-    a complete behavioral profile.
+    a complete behavioral profile.  Unknown dimension keys from ``behavior``
+    are logged as warnings to aid config debugging.
     """
     merged = {**_DIMENSION_DEFAULTS, **behavior}
     lines: list[str] = []
     for dimension, value in merged.items():
-        desc = DIMENSION_DESCRIPTIONS.get(dimension, {}).get(value)
+        if dimension not in DIMENSION_DESCRIPTIONS:
+            logger.warning(
+                "Unknown behavior dimension %r (value=%r) — ignored",
+                dimension,
+                value,
+            )
+            continue
+        desc = DIMENSION_DESCRIPTIONS[dimension].get(value)
         if desc:
             lines.append(f"- {desc}")
     return "\n".join(lines)
@@ -689,7 +699,9 @@ class _LLMPersonaAgent(PersonaAgent):
             elif "```json" in stripped:
                 # Use regex to extract the first JSON code block — more robust
                 # than str.index() against nested fences (review finding P-1).
-                m = re.search(r"```json\s*(.*?)\s*```", stripped, re.DOTALL)
+                # Newline anchors (not \s*) to avoid polynomial backtracking on
+                # pathological input with many backtick sequences (PR #54 review).
+                m = re.search(r"```json\n(.*?)\n```", stripped, re.DOTALL)
                 if m is None:
                     return [AgentAction(
                         action_type=ActionType.COMPLETE_TASK,
@@ -899,12 +911,27 @@ class _LLMPersonaAgent(PersonaAgent):
         self._state = await self._load_persona_state()
 
     async def close_memory(self) -> None:
-        """Close all memory tiers, awaiting in-flight operations."""
+        """Close all memory tiers, awaiting in-flight operations.
+
+        Each tier is closed in its own try/except so that a failure in one
+        tier (e.g. disk-full on SQLite) does not prevent the remaining
+        tiers from releasing their resources (PR #54 review).
+        """
         async with self._lock:
             await self._persist_persona_state()
-            await self._working_memory.close()
-            await self._episodic_memory.close()
-            await self._relationship_memory.close()
+            errors: list[Exception] = []
+            for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
+                try:
+                    await tier.close()
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.warning("Failed to close memory tier: %s", exc)
+            if errors:
+                logger.error(
+                    "Memory close for agent %s completed with %d error(s)",
+                    self.agent_id,
+                    len(errors),
+                )
 
 
 # ─── Factory ───────────────────────────────────────────────

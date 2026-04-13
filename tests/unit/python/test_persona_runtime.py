@@ -295,11 +295,15 @@ class TestRenderBehavior:
         # Other dimensions should use defaults
         assert "Balances speed with diligence" in rendered
 
-    def test_unknown_dimension_ignored(self):
+    def test_unknown_dimension_ignored(self, caplog):
         behavior = {"unknown_dim": "unknown_val"}
-        rendered = render_behavior(behavior)
+        with caplog.at_level("WARNING", logger="agents.persona"):
+            rendered = render_behavior(behavior)
         # Should still have defaults for known dimensions
         assert "Balances directness with tact" in rendered
+        # PR #54 review: unknown dimensions now emit a warning
+        assert "Unknown behavior dimension" in caplog.text
+        assert "unknown_dim" in caplog.text
 
     def test_unknown_value_no_line(self):
         behavior = {"directness": "super-direct"}
@@ -1139,5 +1143,98 @@ class TestHandleWithoutCompleteTask:
         assert output.status == TaskStatus.FAILED
         assert "No COMPLETE_TASK action taken" in output.result
         assert "send_message" in output.result
+        await agent.close_memory()
+
+
+# ─── PR #54 review: close_memory() partial tier failure ──────
+
+
+class TestCloseMemoryPartialFailure:
+    """Verify close_memory() closes all tiers even if one raises.
+
+    PR #54 review finding #3: sequential close without try/finally meant a
+    failure in an earlier tier would leak later tiers' DB connections.
+    """
+
+    async def test_later_tiers_closed_when_earlier_tier_raises(self):
+        """If episodic close() raises, relationship memory is still closed."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Sabotage episodic close to raise
+        agent._episodic_memory.close = AsyncMock(side_effect=RuntimeError("disk full"))
+
+        # Spy on relationship close
+        original_rel_close = agent._relationship_memory.close
+        rel_close_called = False
+
+        async def _tracking_rel_close() -> None:
+            nonlocal rel_close_called
+            rel_close_called = True
+            await original_rel_close()
+
+        agent._relationship_memory.close = _tracking_rel_close  # type: ignore[assignment]
+
+        # close_memory() should NOT raise
+        await agent.close_memory()
+        assert rel_close_called, "relationship memory was never closed"
+
+    async def test_all_tiers_attempted_when_working_memory_fails(self):
+        """If working memory close() raises, episodic and relationship are still closed."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        agent._working_memory.close = AsyncMock(side_effect=RuntimeError("boom"))
+
+        ep_close_called = False
+        original_ep_close = agent._episodic_memory.close
+
+        async def _tracking_ep_close() -> None:
+            nonlocal ep_close_called
+            ep_close_called = True
+            await original_ep_close()
+
+        agent._episodic_memory.close = _tracking_ep_close  # type: ignore[assignment]
+
+        await agent.close_memory()
+        assert ep_close_called, "episodic memory was never closed"
+
+
+# ─── PR #54 review: corrupted JSON in _load_persona_state() ──
+
+
+class TestLoadPersonaStateCorrupted:
+    """Verify _load_persona_state() returns defaults for corrupted DB data.
+
+    PR #54 review finding #12: the except-Exception branch in
+    _load_persona_state() was untested — a corrupted JSON string in
+    agent_state should fall back to defaults without propagating.
+    """
+
+    async def test_corrupted_json_returns_defaults(self):
+        agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Write corrupted JSON directly via the episodic memory API
+        await agent._episodic_memory.persist_agent_state(
+            agent.agent_id, "not-valid-json!!{",
+        )
+
+        state = await agent._load_persona_state()
+        assert state.mood == Mood.NEUTRAL
+        assert state.energy == 1.0
+        assert state.stress_level == 0.0
         await agent.close_memory()
 
