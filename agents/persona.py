@@ -1202,6 +1202,18 @@ class ActionExecutor:
                     agent_id,
                 )
                 return {"action_type": "deny_approval", "status": "not_implemented"}
+            case _:
+                # Defensive catch-all: Python match is not exhaustive at
+                # the type level.  If ActionType gains a new variant without
+                # updating this match, the function would implicitly return
+                # None — breaking the -> dict[str, Any] contract and causing
+                # a TypeError in execute()'s results.append(result).
+                # (Review finding: missing catch-all branch.)
+                logger.warning(
+                    "Agent %s: unhandled action type %s",
+                    agent_id, action.action_type.value,
+                )
+                return {"action_type": action.action_type.value, "status": "unhandled"}
 
     async def _handle_send_message(
         self,
@@ -1228,17 +1240,28 @@ class ActionExecutor:
             )
         dispatched = 0
         for target_id in mentions:
-            event = AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
-                payload={
-                    "content": content,
-                    "channel_id": target_channel,
-                },
-                channel_id=target_channel,
-                sender_id=sender_id,
-            )
-            await self._dispatcher.dispatch(target_id, event)
-            dispatched += 1
+            try:
+                event = AgentEvent(
+                    event_type=EventType.MESSAGE_RECEIVED,
+                    payload={
+                        "content": content,
+                        "channel_id": target_channel,
+                    },
+                    channel_id=target_channel,
+                    sender_id=sender_id,
+                )
+                await self._dispatcher.dispatch(target_id, event)
+                dispatched += 1
+            except Exception:
+                # execute() promises "Non-fatal failures are logged but
+                # do not propagate."  Without this guard a single failed
+                # dispatch would skip remaining mentions and propagate
+                # the exception up to the executor loop.
+                # (Review finding: _handle_send_message exception propagation.)
+                logger.warning(
+                    "Failed to dispatch message from %s to %s",
+                    sender_id, target_id, exc_info=True,
+                )
 
         return {
             "action_type": "send_message",
@@ -1329,7 +1352,7 @@ class EventDispatcher:
         # targets or reused.  (Review finding: in-place metadata mutation.)
         event = AgentEvent(
             event_type=event.event_type,
-            payload=event.payload,
+            payload={**event.payload},
             channel_id=event.channel_id,
             sender_id=event.sender_id,
             message_id=event.message_id,

@@ -240,6 +240,48 @@ class TestActionExecutor:
         ])
         assert results[0]["dispatched_to"] == 0
 
+    async def test_send_message_dispatch_failure_continues(self):
+        """A failed dispatch to one mention does not skip remaining mentions.
+
+        execute() promises "Non-fatal failures are logged but do not
+        propagate."  The try/except inside _handle_send_message() ensures
+        that a failure dispatching to one target still attempts the rest.
+        (Review finding: _handle_send_message exception propagation.)
+        """
+        agent_ok = await _make_agent(config={**_PERSONA_CONFIG_2})
+        dispatcher = EventDispatcher(agents={"mike-torres": agent_ok})
+
+        # "ghost-agent" is not registered — dispatch will log a warning
+        # but not raise.  To test actual exception handling, make the
+        # dispatcher raise for one specific target.
+        original_dispatch = dispatcher.dispatch
+
+        call_count = 0
+
+        async def _failing_dispatch(target_id, event):
+            nonlocal call_count
+            call_count += 1
+            if target_id == "bad-agent":
+                raise RuntimeError("dispatch failed")
+            return await original_dispatch(target_id, event)
+
+        dispatcher.dispatch = _failing_dispatch  # type: ignore[assignment]
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        results = await executor.execute("sarah-chen", [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "channel_id": "general",
+                "content": "Hey everyone!",
+                "mentions": ["bad-agent", "mike-torres"],
+            }),
+        ])
+        # Both mentions were attempted despite "bad-agent" raising
+        assert call_count == 2
+        # Only "mike-torres" succeeded
+        assert results[0]["dispatched_to"] == 1
+        assert results[0]["status"] == "dispatched"
+        await agent_ok.close_memory()
+
 
 # ─── EventDispatcher Tests ──────────────────────────────────
 
@@ -351,6 +393,49 @@ class TestEventDispatcher:
 
         # Scheduler should be woken (idle count reset)
         assert scheduler.idle_count == 0
+        await agent.close_memory()
+
+    async def test_self_dispatch_no_deadlock(self):
+        """Agent mentioning itself does not deadlock.
+
+        The lock inside on_event() is acquired and released per dispatch
+        call (not held across nested dispatches), so self-dispatch is
+        safe — bounded by max_cascade_depth.
+        (Review finding: untested self-dispatch edge case.)
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(
+            agents={"sarah-chen": agent},
+            max_cascade_depth=3,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Talking to myself"},
+            sender_id="sarah-chen",
+        )
+        # Should complete without deadlock or error
+        actions = await dispatcher.dispatch("sarah-chen", event)
+        assert isinstance(actions, list)
+        await agent.close_memory()
+
+    async def test_payload_isolated_between_targets(self):
+        """Dispatch shallow-copies payload so targets cannot mutate caller's data.
+
+        (Review finding: shared payload reference between caller and target.)
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+
+        original_payload = {"content": "test", "mutable_key": "original"}
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload=original_payload,
+        )
+        await dispatcher.dispatch("sarah-chen", event)
+
+        # Original payload must be unchanged (dispatch copies it)
+        assert original_payload["mutable_key"] == "original"
         await agent.close_memory()
 
 
