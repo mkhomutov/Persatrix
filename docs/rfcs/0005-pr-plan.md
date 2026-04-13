@@ -821,6 +821,8 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 **Branch**: `feature/v02-persona-validation-fixes`
 **Estimated size**: ~350–450 lines (implementation + tests)
 
+> **Size monitoring note**: This PR addresses 17 findings including `_inject_memory_context()` (the largest single item). If implementation exceeds 500 lines, split `_inject_memory_context()` into a standalone PR 7b-1 (memory context injection) and PR 7b-2 (remaining persona + validation fixes).
+
 **Findings addressed**: F-5a-1, F-5a-2, F-5a-3, F-5a-4, F-5a-5 (persona runtime), F-5b-1, F-5b-4, F-5b-5, F-5b-6, F-5b-7, F-5b-8, F-5b-9 (event dispatch + server), F-6a-1, F-6a-2, F-6a-4, F-6a-5, F-6a-6 (validation + schema).
 
 ##### Scope
@@ -873,7 +875,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 #### PR 7c: `feature/v02-cli-review-fixes` — Rust CLI Review Fixes
 
-**Depends on**: PR 7a merged (no code dependency on PR 7b; can parallel)
+**Depends on**: PR 7a merged (process dependency only — merge review fixes after feature PRs. No code dependency on 7a or 7b; can parallel with 7b)
 **Branch**: `feature/v02-cli-review-fixes`
 **Estimated size**: ~200–300 lines (Rust implementation + tests)
 
@@ -986,10 +988,11 @@ PR 1a (TaskAgent + type system)
                                               └── PR 5b (Event Dispatch + Tick)
                                                     ├── PR 6a (Config Validation)
                                                     └── PR 6b (CLI Persona)
-                                                          ├── PR 7a (Memory Review Fixes)
-                                                          │     ├── PR 7b (Persona + Validation Fixes)
-                                                          │     └── PR 7c (CLI Review Fixes) [can parallel]
-                                                          └── PR 7d (Close RFC)
+                                                          └── PR 7a (Memory Review Fixes)
+                                                                ├── PR 7b (Persona + Validation Fixes) ──┐
+                                                                └── PR 7c (CLI Review Fixes) [parallel] ─┤
+                                                                                                          ↓
+                                                                                              PR 7d (Close RFC)
 ```
 
 ### Risk Mitigation

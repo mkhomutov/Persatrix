@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-12  
+> **Last updated**: 2026-04-13  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -74,7 +74,8 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
-| `agents/validate.py` | Config validation | 🔲 TODO (RFC 0004) |
+| `agents/persona.py` | PersonaAgent runtime (persona state, behavior dimensions, LLM event loop, memory integration, event dispatch, tick scheduler) | ✅ Complete (RFC 0005 PR 5a+5b) |
+| `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
@@ -210,13 +211,17 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#44](https://github.com/mkhomutov/Orchestr8/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
 | [#45](https://github.com/mkhomutov/Orchestr8/pull/45) | docs(rfc): RFC 0005 — Persona Agent & Memory System | 0005 (RFC) | 2026-04-12 |
 | [#46](https://github.com/mkhomutov/Orchestr8/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
-| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/12) | 2026-04-12 |
-| [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/12) | 2026-04-12 |
-| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/12) | 2026-04-12 |
-| [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/12) | 2026-04-12 |
-| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/12) | 2026-04-12 |
-| [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/12) | 2026-04-12 |
-| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/12) | 2026-04-12 |
+| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/15) | 2026-04-12 |
+| [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/15) | 2026-04-12 |
+| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/15) | 2026-04-12 |
+| [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/15) | 2026-04-12 |
+| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/15) | 2026-04-12 |
+| [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/15) | 2026-04-12 |
+| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/15) | 2026-04-12 |
+| [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/15) | 2026-04-13 |
+| [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/15) | 2026-04-13 |
+| [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/15) | 2026-04-13 |
+| [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/15) | 2026-04-13 |
 
 ---
 
