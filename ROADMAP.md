@@ -219,6 +219,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/12) | 2026-04-12 |
 | [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/12) | 2026-04-12 |
 | [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/12) | 2026-04-13 |
+| [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/12) | 2026-04-13 |
 
 ---
 
