@@ -220,7 +220,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/12) | 2026-04-12 |
 | [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/12) | 2026-04-13 |
 | [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/12) | 2026-04-13 |
-| #56 | feat(agents): config validation + schema wiring | 0005 (6a/12) | 2026-04-13 |
+| [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/12) | 2026-04-13 |
 
 ---
 
