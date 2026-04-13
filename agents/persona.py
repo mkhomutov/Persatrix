@@ -1304,12 +1304,26 @@ class ActionExecutor:
             )
             mentions = mentions[:_MAX_MENTIONS_PER_ACTION]
 
-        # Route to mentioned agents as MESSAGE_RECEIVED events
+        # Route to mentioned agents as MESSAGE_RECEIVED events.
+        # Log at WARNING when channel_id is present but mentions is empty —
+        # this almost certainly means the LLM intended to route to a channel
+        # (not yet implemented), so the message is silently lost.  WARNING
+        # makes the drop visible to operators, reducing confusion and wasted
+        # LLM budget on undeliverable messages.
+        # (PR #55 review: silent message drop when channel_id set without mentions.)
         if not mentions:
-            logger.debug(
-                "Agent %s SEND_MESSAGE has no mentions, message not routed",
-                sender_id,
-            )
+            if target_channel:
+                logger.warning(
+                    "Agent %s SEND_MESSAGE to channel %s has no mentions — "
+                    "message not routed (channel routing not yet implemented)",
+                    sender_id,
+                    target_channel,
+                )
+            else:
+                logger.debug(
+                    "Agent %s SEND_MESSAGE has no mentions, message not routed",
+                    sender_id,
+                )
         dispatched = 0
         for target_id in mentions:
             try:

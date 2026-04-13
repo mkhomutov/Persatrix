@@ -6,6 +6,7 @@ All tests use mock LLM client — no real API calls.
 """
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -239,6 +240,55 @@ class TestActionExecutor:
             }),
         ])
         assert results[0]["dispatched_to"] == 0
+
+    async def test_send_message_channel_no_mentions_warns(self, caplog):
+        """SEND_MESSAGE with channel_id but no mentions logs WARNING.
+
+        A message targeting a channel with no explicit mentions is almost
+        certainly an LLM error — channel routing is not yet implemented,
+        so the message is silently dropped.  The WARNING log makes this
+        visible to operators.
+        (PR #55 review: silent message drop when channel_id set without mentions.)
+        """
+        dispatcher = EventDispatcher()
+        executor = ActionExecutor(dispatcher=dispatcher)
+        with caplog.at_level(logging.WARNING):
+            results = await executor.execute("sarah-chen", [
+                AgentAction(ActionType.SEND_MESSAGE, {
+                    "channel_id": "general",
+                    "content": "Hello team!",
+                    "mentions": [],
+                }),
+            ])
+        assert results[0]["dispatched_to"] == 0
+        assert any(
+            "channel routing not yet implemented" in r.message
+            and r.levelno == logging.WARNING
+            for r in caplog.records
+        )
+
+    async def test_send_message_no_channel_no_mentions_debug(self, caplog):
+        """SEND_MESSAGE with no channel_id and no mentions logs at DEBUG only.
+
+        No channel_id means the LLM didn't intend channel routing — a
+        plain debug log is sufficient (no operator-visible warning).
+        """
+        dispatcher = EventDispatcher()
+        executor = ActionExecutor(dispatcher=dispatcher)
+        with caplog.at_level(logging.DEBUG):
+            results = await executor.execute("sarah-chen", [
+                AgentAction(ActionType.SEND_MESSAGE, {
+                    "content": "Hello!",
+                    "mentions": [],
+                }),
+            ])
+        assert results[0]["dispatched_to"] == 0
+        # Should be DEBUG, not WARNING
+        warning_records = [
+            r for r in caplog.records
+            if "channel routing not yet implemented" in r.message
+        ]
+        assert len(warning_records) == 0
 
     async def test_send_message_dispatch_failure_continues(self):
         """A failed dispatch to one mention does not skip remaining mentions.
