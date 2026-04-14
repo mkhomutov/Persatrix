@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["ActionExecutor", "EventDispatcher"]
+
 # Maximum mentions per SEND_MESSAGE action to prevent resource exhaustion
 # from LLM-generated payloads.  Each mention triggers a synchronous dispatch
 # (per-agent lock + LLM call); with cascade fan-out worst case is N^D.

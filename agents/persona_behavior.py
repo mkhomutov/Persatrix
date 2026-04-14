@@ -11,6 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["DIMENSION_DESCRIPTIONS", "render_behavior"]
+
 
 DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = {
     "directness": {
@@ -101,11 +103,15 @@ _DIMENSION_DEFAULTS: dict[str, str] = {
 # Caught at import time: if a future dimension is added to one dict and not
 # the other, the mismatch surfaces immediately rather than silently producing
 # incomplete behavioral prompts.
+# Uses if/raise instead of assert because assert is stripped by python -O,
+# which would silently disable this guard in optimized production deployments.
 # (PR review: no guard against _DIMENSION_DEFAULTS/DIMENSION_DESCRIPTIONS key drift.)
-assert set(_DIMENSION_DEFAULTS) == set(DIMENSION_DESCRIPTIONS), (
-    f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
-    f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
-)
+# (PR #64 review F-64-DR-04: assert stripped in optimized mode — use if/raise.)
+if set(_DIMENSION_DEFAULTS) != set(DIMENSION_DESCRIPTIONS):
+    raise RuntimeError(
+        f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
+        f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
+    )
 
 
 def render_behavior(behavior: dict[str, str]) -> str:
@@ -128,4 +134,19 @@ def render_behavior(behavior: dict[str, str]) -> str:
         desc = DIMENSION_DESCRIPTIONS[dimension].get(value)
         if desc:
             lines.append(f"- {desc}")
+        else:
+            # Known dimension but unknown value — log a warning so config
+            # typos (e.g. "super-direct" instead of "direct") are visible
+            # to operators.  The dimension still gets no line in the output,
+            # but unlike the unknown-dimension case, the dimension key is
+            # valid so the issue is the value.
+            # (PR #64 review F-64-DR-05: unknown dimension values silently
+            # produce no output — no warning logged.)
+            logger.warning(
+                "Unknown value %r for behavior dimension %r — "
+                "no description produced (valid values: %s)",
+                value,
+                dimension,
+                ", ".join(DIMENSION_DESCRIPTIONS[dimension]),
+            )
     return "\n".join(lines)

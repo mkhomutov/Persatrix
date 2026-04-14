@@ -173,6 +173,28 @@ class TestModuleImports:
         assert PersonaState is not None  # persona_types
         assert render_behavior is not None  # persona_behavior
 
+    def test_reexports_exhaustive(self):
+        """All public symbols from new submodules are re-exported from persona.py.
+
+        Programmatically verifies that every symbol in each submodule's
+        ``__all__`` is importable from ``agents.persona``. Catches
+        accidental omissions when symbols are added to a submodule but
+        not to the persona.py re-export block.
+        (PR #64 review F-64-DR-16: re-export maintenance burden.)
+        """
+        import agents.persona as persona
+        from agents import dispatch, persona_behavior, persona_types, tick
+
+        missing: list[str] = []
+        for module in (persona_types, persona_behavior, dispatch, tick):
+            for name in getattr(module, "__all__", []):
+                if not hasattr(persona, name):
+                    missing.append(f"{module.__name__}.{name}")
+
+        assert not missing, (
+            f"Symbols not re-exported from agents.persona: {missing}"
+        )
+
 
 # ─── Mood Enum Tests ────────────────────────────────────────
 
@@ -377,6 +399,54 @@ class TestRenderBehavior:
         # but other defaults should still be present
         assert "super-direct" not in rendered
         assert "Balances speed" in rendered
+
+    def test_unknown_value_logs_warning(self, caplog):
+        """Unknown values of a known dimension log a warning with valid values.
+
+        Previously, unknown dimension values silently produced no output line.
+        Operators had no way to know a typo was causing a missing behavioral
+        description.  Now a WARNING is logged listing the valid values.
+        (PR #64 review F-64-DR-05: unknown dimension values silently
+        produce no output — no warning logged.)
+        """
+        behavior = {"directness": "super-direct"}
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
+            render_behavior(behavior)
+        assert any(
+            "Unknown value" in r.message
+            and "super-direct" in r.message
+            and "directness" in r.message
+            for r in caplog.records
+        )
+
+    def test_all_invalid_values_still_produces_defaults(self, caplog):
+        """All user-provided values invalid — defaults still produce full output.
+
+        When every dimension has an unrecognised value, the merged dict
+        contains only invalid values for the user-specified keys, but
+        defaults should fill in for any unspecified dimensions.  If all
+        five dimensions are overridden with invalid values, the rendered
+        output should be empty (no valid descriptions) and five warnings
+        should be logged.
+        (PR #64 review F-64-DR-22: render_behavior all-invalid-values edge case.)
+        """
+        behavior = {
+            "directness": "xyz",
+            "detail_focus": "abc",
+            "formality": "nope",
+            "risk_tolerance": "invalid",
+            "expressiveness": "wrong",
+        }
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
+            rendered = render_behavior(behavior)
+        # All five dimensions have invalid values — no description lines produced
+        assert rendered == ""
+        # A warning should be logged for each invalid value
+        warning_records = [
+            r for r in caplog.records
+            if "Unknown value" in r.message
+        ]
+        assert len(warning_records) == 5
 
     @pytest.mark.parametrize("dimension,values", [
         ("directness", ["indirect", "balanced", "direct"]),

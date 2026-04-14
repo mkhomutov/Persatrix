@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["TickScheduler"]
+
 
 class TickScheduler:
     """Autonomous tick loop for persona agents.
@@ -164,6 +166,13 @@ class TickScheduler:
                 continue
 
             try:
+                # on_tick() acquires self._agent._lock internally — do NOT
+                # wrap this call in self._agent.exclusive().  asyncio.Lock
+                # is not reentrant: acquiring here + inside on_tick() would
+                # deadlock.  The idle-recovery branch above acquires the
+                # lock explicitly because recover_idle_energy() does NOT
+                # acquire it internally.
+                # (PR #64 review F-64-DR-12: document lock asymmetry.)
                 actions = await self._agent.on_tick()
                 # Limit actions per tick
                 actions = actions[: self._max_actions_per_tick]
@@ -180,6 +189,17 @@ class TickScheduler:
                 # Execute actions
                 if self._executor is not None:
                     await self._executor.execute(self._agent.agent_id, actions)
+                elif not all_do_nothing:
+                    # No executor configured but agent produced actionable
+                    # output — likely a wiring bug.  Log so operators can
+                    # diagnose why actions are silently discarded.
+                    # (PR #64 review F-64-DR-14: silent action discard.)
+                    logger.warning(
+                        "Agent %s produced %d non-idle action(s) but no "
+                        "executor is configured — actions discarded",
+                        self._agent.agent_id,
+                        len(actions),
+                    )
 
             except asyncio.CancelledError:
                 raise
