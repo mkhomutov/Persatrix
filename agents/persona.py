@@ -331,6 +331,16 @@ _MAX_MENTIONS_PER_ACTION = 10
 # (PR #60 review: hard-coded 60s dispatch timeout.)
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
+# Hard upper bounds for LLM-provided SPAWN_SUB_AGENT resource fields.
+# Applied in _validate_action_payload() before the payload reaches
+# ActionExecutor.  The action is not yet wired (returns 'not_implemented'),
+# but caps are enforced at validation time so the boundary is in place
+# when execution is wired in a future RFC.
+# (PR review: SPAWN_SUB_AGENT resource fields not bounded at validation time.)
+_MAX_SUB_AGENT_TOKENS: int = 100_000
+_MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
+_MAX_SUB_AGENT_LLM_CALLS: int = 50
+
 
 @dataclass
 class PersonaState:
@@ -497,6 +507,18 @@ _DIMENSION_DEFAULTS: dict[str, str] = {
     "risk_tolerance": "moderate",
     "expressiveness": "moderate",
 }
+
+# Invariant: every key in _DIMENSION_DEFAULTS must also appear in
+# DIMENSION_DESCRIPTIONS (so render_behavior() can look up descriptions),
+# and vice versa (so defaults are available for every documented dimension).
+# Caught at import time: if a future dimension is added to one dict and not
+# the other, the mismatch surfaces immediately rather than silently producing
+# incomplete behavioral prompts.
+# (PR review: no guard against _DIMENSION_DEFAULTS/DIMENSION_DESCRIPTIONS key drift.)
+assert set(_DIMENSION_DEFAULTS) == set(DIMENSION_DESCRIPTIONS), (
+    f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
+    f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
+)
 
 
 def render_behavior(behavior: dict[str, str]) -> str:
@@ -667,7 +689,8 @@ class _LLMPersonaAgent(PersonaAgent):
         """Build tool definitions including memory tools.
 
         Uses a dict keyed by tool name so memory tools take precedence
-        over registry tools with the same name (review finding #4).
+        over registry tools with the same name (F-5a-2: defense-in-depth,
+        memory tools should shadow any same-named registry tools).
         """
         # Start with agent-configured tools from the global registry
         allowed = set(self.config.get("tools", []))
@@ -796,6 +819,32 @@ class _LLMPersonaAgent(PersonaAgent):
                         " replacing with DO_NOTHING",
                     )
                     return AgentAction(ActionType.DO_NOTHING, {})
+                # Cap numeric resource fields to guard against LLM-generated
+                # payloads with unbounded values (e.g. max_tokens: 500000).
+                # Uses module-level hard caps; config-driven limits are a v0.3
+                # concern once SPAWN_SUB_AGENT execution is wired.
+                # (PR review: SPAWN_SUB_AGENT resource fields not bounded.)
+                for field_name, cap in (
+                    ("max_tokens", _MAX_SUB_AGENT_TOKENS),
+                    ("timeout_seconds", _MAX_SUB_AGENT_TIMEOUT_SECONDS),
+                    ("max_llm_calls", _MAX_SUB_AGENT_LLM_CALLS),
+                ):
+                    if field_name in p:
+                        try:
+                            val = int(p[field_name])
+                        except (TypeError, ValueError):
+                            logger.warning(
+                                "SPAWN_SUB_AGENT %s is not numeric (%r), removing",
+                                field_name, p[field_name],
+                            )
+                            del p[field_name]
+                            continue
+                        if val > cap:
+                            logger.warning(
+                                "SPAWN_SUB_AGENT %s %d exceeds cap %d, clamping",
+                                field_name, val, cap,
+                            )
+                            p[field_name] = cap
             case _:
                 pass  # COMPLETE_TASK, DO_NOTHING, approvals — no payload constraints
         return action
@@ -872,7 +921,20 @@ class _LLMPersonaAgent(PersonaAgent):
         Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
         wall-clock time (PR #54 review: unbounded lock hold).
         """
-        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        raw_timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            # Guard against YAML configs that supply a string for a numeric key
+            # (e.g.  event_timeout: "300").  asyncio.wait_for(timeout=...) requires
+            # a real float; a non-numeric value raises TypeError silently escaping
+            # lock acquisition with no useful log message.
+            # (PR review: event_timeout used without type coercion.)
+            logger.warning(
+                "Agent %s: invalid event_timeout %r, using default %.0fs",
+                self.agent_id, raw_timeout, self._DEFAULT_EVENT_TIMEOUT,
+            )
+            timeout = self._DEFAULT_EVENT_TIMEOUT
         async with self._lock:
             try:
                 return await asyncio.wait_for(
@@ -1051,6 +1113,15 @@ class _LLMPersonaAgent(PersonaAgent):
                 ))
 
         # 3. Recent notes (top 5 matching event content).
+        # Note: for TICK events the query is the same boilerplate
+        # "Autonomous tick: review your goals..." string used above.
+        # This may return low-signal notes as it does for episodes.
+        # Notes recall is preserved on TICK (unlike episodic recall which is
+        # skipped) because notes are agent-authored curated knowledge that
+        # can be directly relevant to autonomous goal review.  Accepted
+        # limitation: low-relevance TICK notes may occasionally be injected.
+        # TODO(future): use a different query strategy for TICK notes to
+        # improve signal quality (e.g. goal-topic query).
         try:
             notes = await self._episodic_memory.recall_notes(query, limit=5)
         except Exception:
@@ -1243,7 +1314,17 @@ class _LLMPersonaAgent(PersonaAgent):
         blocking all event processing for the agent.
         (Review finding F-5a-1, resolved in PR 5b.)
         """
-        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        raw_timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            # Same coercion guard as on_event() — see comment there.
+            # (PR review: event_timeout used without type coercion.)
+            logger.warning(
+                "Agent %s: invalid event_timeout %r, using default %.0fs",
+                self.agent_id, raw_timeout, self._DEFAULT_EVENT_TIMEOUT,
+            )
+            timeout = self._DEFAULT_EVENT_TIMEOUT
         async with self._lock:
             event = AgentEvent(event_type=EventType.TICK)
             try:

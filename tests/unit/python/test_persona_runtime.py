@@ -980,6 +980,25 @@ class TestPersonaStateGoalProgressValidation:
         section = state.to_prompt_section()
         assert "ship: 75%" in section
 
+    def test_goal_progress_above_one_clamped(self):
+        """Numeric value > 1.0 is clamped to 1.0 (e.g. corrupted DB row = 2.5).
+
+        The clamping code at min(1.0, max(0.0, float(v))) handles this path but
+        it was untested.  Without clamping, to_prompt_section() would render
+        'goal: 250%', misleading the LLM.
+        (PR review: numeric-out-of-range goal_progress path had zero test coverage.)
+        """
+        state = PersonaState.from_dict({"goal_progress": {"ship": 2.5}})
+        assert state.goal_progress == {"ship": 1.0}
+
+    def test_goal_progress_below_zero_clamped(self):
+        """Numeric value < 0.0 is clamped to 0.0 (e.g. corrupted DB row = -0.5).
+
+        (PR review: numeric-out-of-range goal_progress path had zero test coverage.)
+        """
+        state = PersonaState.from_dict({"goal_progress": {"debt": -0.5}})
+        assert state.goal_progress == {"debt": 0.0}
+
 
 # ─── Review finding: spawn_sub_agent without client ──────────
 
