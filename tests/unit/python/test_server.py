@@ -455,15 +455,26 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="Invalid agent ID"):
                 load_agent("UPPER_CASE", config_path, tmp)
 
-    def test_single_char_agent_id_rejected(self):
-        """MF-02: single character ID fails the regex (requires 2+ chars)."""
+    def test_single_char_agent_id_accepted(self):
+        """F-6a-2: single character ID is now valid per updated regex."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
                 {"id": "a", "capabilities": ["planning"], "permissions": {}},
             ])
-            with pytest.raises(SystemExit, match="Invalid agent ID"):
+            # 'a' is a valid ID now, so it should fail for missing model, not ID
+            with pytest.raises(SystemExit, match="missing required 'model' field"):
                 load_agent("a", config_path, tmp)
+
+    def test_trailing_hyphen_agent_id_rejected(self):
+        """Agent ID ending with hyphen fails the regex."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {"id": "agent-", "capabilities": ["planning"], "permissions": {}},
+            ])
+            with pytest.raises(SystemExit, match="Invalid agent ID"):
+                load_agent("agent-", config_path, tmp)
 
     @patch("agents.server.create_provider")
     def test_missing_model_field(self, mock_create):
