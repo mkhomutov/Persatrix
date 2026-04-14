@@ -146,21 +146,13 @@ Detailed specs and design decisions live in `docs/`. Refer to these rather than 
 
 ## Status Hygiene
 
-Progress is tracked in multiple places. **Before and after every task** (not just at completion), review and update all documents whose status may have changed:
+Follow the [Status Hygiene rules](../docs/development-workflow.md#status-hygiene) in the development workflow guide. Key points:
 
-| Document | What to check |
-|----------|---------------|
-| RFC file (`docs/rfcs/NNNN-*.md`) | `Status:` field matches actual state (Proposed → Implementing → Implemented, etc.). Use the lifecycle markers from [RFC README](../docs/rfcs/README.md). |
-| PR plan (`docs/rfcs/NNNN-pr-plan.md`) | Checklist items (`- [x]` / `- [ ]`) reflect completed work. |
-| [ROADMAP.md](../ROADMAP.md) | RFC Tracker table (merged count, status), Component Status tables, Merged PR History. |
-
-**Rules:**
-1. When starting implementation of an RFC, transition its status to `🚧 Implementing` in both the RFC file and ROADMAP.
-2. When a PR is merged, update the PR plan checklist, ROADMAP merged-PR table and RFC merged count immediately.
-3. When all PRs for an RFC are merged, transition status to `✅ Implemented` in the RFC file and ROADMAP.
-4. When a component moves from stub to working, update the Component Status table in ROADMAP.
-5. Never leave a stale status — if you touch a file governed by an RFC, verify that RFC's status is current.
-6. When creating a new RFC, add it to the ROADMAP RFC Tracker table.
+- **Before and after every task**, verify consistency across RFC files, PR plans, and [ROADMAP.md](../ROADMAP.md).
+- When a PR is merged → update PR plan checklist, ROADMAP merged-PR table and RFC merged count immediately.
+- When all PRs for an RFC are merged → status to `✅ Implemented` in RFC file and ROADMAP.
+- When creating a new RFC → add it to the ROADMAP RFC Tracker table.
+- Never leave a stale status.
 
 ## Branching
 

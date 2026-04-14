@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-13  
+> **Last updated**: 2026-04-14  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -222,6 +222,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/15) | 2026-04-13 |
 | [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/15) | 2026-04-13 |
 | [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/15) | 2026-04-13 |
+| [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
 
 ---
 

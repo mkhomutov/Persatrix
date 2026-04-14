@@ -174,7 +174,7 @@ Review findings are recorded *per PR review*, not batched at the end. Each PR se
 3. Size each group — if a group exceeds 500 lines, split into sub-PRs.
 4. Add the follow-up PRs to the PR plan with full scope, implementation details, and checklists.
 5. Implement each follow-up PR using the same review-and-merge cycle as Phase 4.
-6. Review findings from follow-up PR reviews are either fixed in-place or added as new deferred items. Iterate until the backlog converges.
+6. Review findings from follow-up PR reviews are either fixed in-place or added as new deferred items. Iterate until no High or Medium findings remain. Low/Info findings may be deferred to the next RFC cycle.
 
 ### Splitting strategy
 
@@ -268,6 +268,7 @@ Rules:
 3. All PRs merged → status to `✅ Implemented` in RFC file and ROADMAP.
 4. Component moves from stub to working → update Component Status table in ROADMAP.
 5. Never leave a stale status.
+6. Creating a new RFC → add it to the ROADMAP RFC Tracker table.
 
 ---
 
@@ -279,8 +280,8 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 |-------|--------------|-----------|
 | **1. Version Planning** | v0.2 scope defined: personas, memory, channels, bridges. RFC dependency chain: 0005 → 0006 → 0007 → 0008. | ROADMAP.md v0.2 section |
 | **2. RFC Authoring** | RFC 0005 written with 6 implementation phases. Reviewed and accepted. | `docs/rfcs/0005-persona-agent-memory.md` |
-| **3. PR Plan** | Split into 12 core PRs (1a–6b). Sizes calibrated at 1.7× based on v0.1 actuals (~73–138% overrun). Reserved PR 7 for follow-ups. | `docs/rfcs/0005-pr-plan.md` |
-| **4. Core Implementation** | 12 PRs implemented and merged. Each PR reviewed; findings recorded in PR plan per-PR sections (60 total findings: 48 assigned to follow-ups, 2 fixed in-place, 10 deferred beyond scope). | PRs #44–#57 merged |
+| **3. PR Plan** | Split into 11 core PRs (1a–6b). Sizes calibrated at 1.7× based on v0.1 actuals (~73–138% overrun). Reserved PR 7 for follow-ups. | `docs/rfcs/0005-pr-plan.md` |
+| **4. Core Implementation** | 11 PRs implemented and merged (#47–#57). Each PR reviewed; findings recorded in PR plan per-PR sections (60 total findings: 48 assigned to follow-ups, 2 fixed in-place, 10 deferred beyond scope). | PRs #47–#57 merged |
 | **5. Follow-Up PRs** | PR 7 split into 4 sub-PRs (7a–7d) when 48 findings exceeded 500-line limit. Grouped by component: memory (7a), persona+validation (7b), CLI (7c), close (7d). | PRs 7a–7d (3 merged, 1 pending) |
 | **6. Refactoring** | Assessment identified 3 files exceeding 800 LOC. PRs 8a–8c planned for module splits. | PRs 8a–8c (planned) |
 | **7. RFC Close** | PR 7d will transition RFC 0005 to `✅ Implemented`. | Pending |
