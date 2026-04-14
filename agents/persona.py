@@ -954,12 +954,13 @@ class _LLMPersonaAgent(PersonaAgent):
                 summary = ep.summary[:200]
                 if len(ep.summary) > 200:
                     # Word-boundary truncation: prefer cutting at a space so
-                    # the LLM sees a complete word.  Guard: if the slice has
-                    # no space, rsplit returns a 1-element list whose only
-                    # element is the full 200-char slice — appending '...'
-                    # would then *extend* beyond the cap; fall back to the
-                    # slice itself in that case.  (PR review: zero-space edge
-                    # case silently defeats truncation for hashes/URLs.)
+                    # the LLM sees a complete word.  Zero-space guard: if the
+                    # 200-char slice contains no space, rsplit returns it
+                    # unchanged (len(truncated) == len(summary)), so we fall
+                    # back to the full slice.  Either way '...' is appended,
+                    # giving a 200-char or 203-char maximum (3-char overage
+                    # for space-free strings is acceptable).
+                    # (PR review: zero-space edge case — '...' always appended.)
                     truncated = summary.rsplit(" ", 1)[0]
                     summary = (
                         truncated if len(truncated) < len(summary) else summary
@@ -975,6 +976,13 @@ class _LLMPersonaAgent(PersonaAgent):
             ))
 
         # 2. Relationship summary for the sender (if present).
+        # IMPORTANT: always remove any stale relationship section from a
+        # previous event BEFORE deciding whether to add a new one.  Without
+        # this, a sender-less event (e.g. TICK) that follows a sender event
+        # would inherit alice's relationship context in working memory and
+        # silently influence the LLM response.
+        # (PR review finding: stale relationship_context persists on sender-less events.)
+        self._working_memory.remove_section("relationship_context")
         sender_id = event.sender_id
         if sender_id:
             try:
@@ -1010,7 +1018,10 @@ class _LLMPersonaAgent(PersonaAgent):
                     # (F-60-5: unbounded relationship notes in prompt.)
                     rel_notes = rel.notes[:300]
                     if len(rel.notes) > 300:
-                        # Same zero-space guard as episode summary truncation.
+                        # Zero-space guard: if the 300-char slice has no space,
+                        # rsplit returns it unchanged and '...' is still appended
+                        # (giving a 303-char maximum).  Same pattern as episode
+                        # summary truncation — '...' is always appended.
                         truncated = rel_notes.rsplit(" ", 1)[0]
                         rel_notes = (
                             truncated if len(truncated) < len(rel_notes) else rel_notes
@@ -1046,7 +1057,10 @@ class _LLMPersonaAgent(PersonaAgent):
                 # (F-60-1: note content not truncated.)
                 content = note.content[:500]
                 if len(note.content) > 500:
-                    # Same zero-space guard as episode summary truncation.
+                    # Zero-space guard: if the 500-char slice has no space,
+                    # rsplit returns it unchanged and '...' is still appended
+                    # (giving a 503-char maximum).  Same pattern as episode
+                    # summary truncation — '...' is always appended.
                     truncated = content.rsplit(" ", 1)[0]
                     content = (
                         truncated if len(truncated) < len(content) else content
@@ -1095,6 +1109,13 @@ class _LLMPersonaAgent(PersonaAgent):
         #  sections were silently discarded with no effect on LLM behavior.)
         memory_sections = self._working_memory.build_context()
         if memory_sections:
+            # Each element is a dict with "role" (the section name, e.g.
+            # "episodic_recall") and "content" (the text to inject).
+            # "role" is a WorkingMemory section identifier — NOT an LLM
+            # conversation role (user/assistant/system).  We use only
+            # "content" here; "role" labels are intentionally omitted from
+            # the prompt to avoid confusing the LLM with metadata noise.
+            # (PR review should-fix #6: document "role" vs LLM message role.)
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
 

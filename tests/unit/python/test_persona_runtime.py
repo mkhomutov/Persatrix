@@ -2180,3 +2180,80 @@ class TestInjectMemoryContext:
         )
         await agent.close_memory()
 
+    async def test_episode_summary_no_space_still_gets_ellipsis(self):
+        """PR review should-fix #3: zero-space truncation edge case.
+
+        A 260-char episode summary with no spaces (e.g. a UUID or hash
+        run) should still get '...' appended, not silently omit it.
+        The word-boundary guard falls back to the full 200-char slice
+        when there is no space, and '...' is appended regardless.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # 260 chars, no spaces — simulates a hash chain or URL path.
+        no_space_summary = "a" * 260
+        await agent._episodic_memory.store_episode(
+            summary=no_space_summary,
+            context={"topic": "aaaa"},
+            importance=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "aaaa"},
+        )
+        with patch.object(agent, "_format_event", return_value="aaaa"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("episodic_recall")
+        assert section is not None
+        # '...' must appear even when there are no word boundaries.
+        assert "..." in section.content
+        # The full 260-char string must not appear (it was truncated).
+        assert no_space_summary not in section.content
+        await agent.close_memory()
+
+    async def test_stale_relationship_cleared_on_sender_less_event(self):
+        """PR review must-fix #1: stale relationship_context is removed
+        when a sender-less event (e.g. TICK) follows a sender event.
+
+        Without the remove_section() guard, alice's relationship context
+        would persist in working memory and silently influence the LLM
+        response for the subsequent TICK event.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record an interaction so there is a relationship to inject.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="alice",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.9,
+        )
+
+        # Event 1: message from alice — relationship section added.
+        sender_event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="alice",
+        )
+        await agent._inject_memory_context(sender_event)
+        assert agent._working_memory.get_section("relationship_context") is not None
+
+        # Event 2: TICK (no sender) — relationship section must be cleared.
+        tick_event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(tick_event)
+        assert agent._working_memory.get_section("relationship_context") is None, (
+            "Stale relationship_context from alice persisted into TICK event"
+        )
+        await agent.close_memory()
+

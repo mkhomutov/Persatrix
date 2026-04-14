@@ -25,7 +25,11 @@ const stepIDPattern = `[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?`
 const maxYAMLSize = 1 << 20
 
 // ResourceIDRegex validates external-facing resource identifiers (workflow IDs, agent IDs).
-// Requires minimum 2 characters, lowercase alphanumeric with hyphens, no leading/trailing hyphens.
+// Requires minimum 1 character, lowercase alphanumeric with hyphens, no leading/trailing hyphens.
+// The optional inner group “([a-z0-9-]*[a-z0-9])?“ means a single alphanumeric char (e.g. "a")
+// is valid — the group is absent and the regex reduces to “^[a-z0-9]$“.
+// This matches the JSON Schema pattern in schemas/agent.schema.json which was
+// aligned in PR #60; the previous comment incorrectly stated minimum 2 characters.
 // Exported for reuse by the server package (review finding F-04: eliminates regex
 // duplication across security-relevant validation boundaries).
 // Renamed from WorkflowIDRegex (PR #16 F-04) since it validates both workflow and agent IDs.

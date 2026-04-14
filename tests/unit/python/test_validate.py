@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -1023,5 +1025,29 @@ class TestFilesCheckedReturn:
         )
         assert ok
         assert files_checked >= 1
+
+    def test_zero_files_checked_prints_warning(
+        self, config_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """PR review should-fix #4: verify the __main__ block prints
+        'Warning: no config files found' when validate_config_dir returns
+        files_checked=0 (empty directory).
+
+        Exercises the actual __main__ code path via runpy so a message-text
+        change in validate.py fails this test rather than silently passing.
+        (F-6a-6: capsys assertion for 'no config files found' warning.)
+        """
+        monkeypatch.setattr(sys, "argv", ["validate.py", str(config_dir)])
+        # run_module executes the __main__ block; exit(0) is raised since
+        # files_checked=0 returns ok=True (no errors, no files).
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("agents.validate", run_name="__main__")
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "Warning: no config files found" in captured.out
+        assert str(config_dir) in captured.out
 
 
