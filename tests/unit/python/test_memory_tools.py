@@ -10,7 +10,8 @@ import tempfile
 
 import pytest
 
-from agents.memory.episodic import EpisodicMemory, Note, _MAX_NOTE_CONTENT_BYTES
+from agents.memory.episodic import EpisodicMemory
+from agents.memory.notes import Note, _MAX_NOTE_CONTENT_BYTES
 from agents.tools.builtin import check_auto_reflect, create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry, get_tool
