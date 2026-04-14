@@ -133,6 +133,13 @@ refactor: extract agent registry interface
 test: add integration tests for DAG executor
 ```
 
+### Licensing
+
+This repository is licensed under the Business Source License 1.1 (`BUSL-1.1`).
+By submitting a contribution, you agree that your contribution will be distributed
+under the same license terms as the rest of the repository, including the stated
+change date and transition to Apache License, Version 2.0 in [LICENSE](LICENSE).
+
 ---
 
 ## Pull Request Process

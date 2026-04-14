@@ -19,7 +19,7 @@
 | Security gaps | 5 | ✅ Added §6.8 (rate limiting), §6.9 (input sanitization), E10.3 (observer privacy) |
 | Architecture gaps | 5 | ✅ Diagram updated; project structure expanded; embedding infra added; state persistence specified; dependency DAG added |
 | Duplication/overlap | 3 | ✅ Cross-references added between E7↔E9.7, E8.8↔E9.2↔§6.3, E9.3↔E9.6 |
-| Minor issues | 2 | ✅ Project named "Orchestr8" throughout; Apache 2.0 license specified |
+| Minor issues | 2 | ✅ Project named "Orchestr8" throughout; BUSL 1.1 license specified |
 
 ---
 
@@ -128,7 +128,7 @@ Entire areas that are implied or mentioned but never specified.
 | # | Issue | Details |
 |---|-------|---------|
 | 44 | **Inconsistent project name** | Main spec never names the project. Extension uses "Orchestr8" throughout. CLI examples use `orch`. The YAML examples show `orchestr8/` as the project root. Should be established once in §1 of the main spec. |
-| 45 | **No license or contribution model** | For an open-source project, no mention of: license choice (Apache 2.0? MIT?), contribution guidelines, code of conduct, governance model. This affects adoption decisions. |
+| 45 | **No license or contribution model** | No mention of: license choice, contribution guidelines, code of conduct, or governance model. This affects adoption decisions. |
 
 ---
 
