@@ -86,6 +86,24 @@ Examples:
   hotfix/0.1.2-secret-redaction-bypass
 ```
 
+### `docs/*` — Documentation-Only Changes
+
+For standalone documentation PRs that are not part of a feature branch
+(e.g., new guides, process docs, cross-RFC documentation).
+
+```
+Naming:    docs/<description>
+Lifetime:  1–3 days
+Merges to: main (via PR, squash merge)
+
+Examples:
+  docs/development-workflow        # development lifecycle guide
+  docs/branching-update            # branching strategy additions
+  docs/spec-audit-followup         # spec audit documentation
+```
+
+Use `feature/*` when the docs change accompanies code changes.
+
 ---
 
 ## Branch Lifecycle

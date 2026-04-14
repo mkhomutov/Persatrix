@@ -10,6 +10,8 @@
 > "Cross-cutting" means touching multiple components (Go/Python/Rust),
 > affecting the security model, changing protobuf contracts, or requiring
 > input from multiple contributors or domain experts.
+>
+> **See also:** [Development Workflow](../development-workflow.md) — how RFCs fit into the broader version planning → implementation → closure lifecycle.
 
 ---
 

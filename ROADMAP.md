@@ -1,6 +1,6 @@
 # Orchestr8 Roadmap
 
-> **Last updated**: 2026-04-13  
+> **Last updated**: 2026-04-14  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -224,6 +224,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/15) | 2026-04-13 |
 | [#58](https://github.com/mkhomutov/Orchestr8/pull/58) | docs(rfc0005): split PR 7 into 4 sub-PRs (7a-7d) | 0005 docs | 2026-04-13 |
 | [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/15) | 2026-04-13 |
+| [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
 
 ---
 
