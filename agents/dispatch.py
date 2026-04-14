@@ -348,7 +348,10 @@ class EventDispatcher:
 
         Creates a shallow copy of the event with incremented cascade depth
         to avoid mutating the caller's event object.  Returns the agent's
-        actions (post-execution).
+        decided actions.  Action execution results (e.g. dispatch
+        success/failure) are handled internally and not reflected in
+        the return value.
+        (F-64-DR2-01: clarify return semantics — pre-execution objects.)
 
         .. note::
 
@@ -397,6 +400,10 @@ class EventDispatcher:
         # (lists, dicts inside payload values) between dispatch targets.
         # Shallow {**event.payload} only copies top-level keys.
         # (Review finding: shallow copy depth for event payload.)
+        # Deep-copy metadata for the same reason: if metadata gains nested
+        # mutable structures beyond cascade_depth (e.g. tracing context
+        # dicts), shallow spread would share them between caller and copy.
+        # (F-64-DR2-02: metadata not deep-copied, inconsistent with payload.)
         event = AgentEvent(
             event_type=event.event_type,
             payload=copy.deepcopy(event.payload),
@@ -404,7 +411,7 @@ class EventDispatcher:
             sender_id=event.sender_id,
             message_id=event.message_id,
             timestamp=event.timestamp,
-            metadata={**event.metadata, "cascade_depth": depth + 1},
+            metadata={**copy.deepcopy(event.metadata), "cascade_depth": depth + 1},
         )
 
         # Wake tick scheduler if idle

@@ -360,6 +360,18 @@ class TestCrossAgentRouting:
 class TestTickSchedulerIntegration:
     """Tick scheduler fires on_tick() with real asyncio timing."""
 
+    @pytest.fixture(autouse=True)
+    def _lower_min_interval(self):
+        """Allow sub-second intervals in tests.
+
+        Production _MIN_INTERVAL is 1.0s to prevent cost bursts
+        (F-64-DR2-11).  Tests need fast intervals to avoid multi-second waits.
+        """
+        original = TickScheduler._MIN_INTERVAL
+        TickScheduler._MIN_INTERVAL = 0.01
+        yield
+        TickScheduler._MIN_INTERVAL = original
+
     async def test_tick_fires_and_stops(self):
         """Scheduler fires at least one tick and stops gracefully."""
         agent = _create_persona(

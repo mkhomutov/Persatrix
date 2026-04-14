@@ -3,6 +3,21 @@ Orchestr8 Tick Scheduler.
 
 Autonomous tick loop for persona agents with idle detection.
 Extracted from ``persona.py`` for modularity — no logic changes.
+
+Lock protocol
+~~~~~~~~~~~~~
+The tick loop has two branches with different locking strategies:
+
+- **Idle branch** (``is_idle`` is True): acquires ``agent.exclusive()``
+  explicitly because ``recover_idle_energy()`` does *not* acquire the
+  lock internally.
+- **Non-idle branch**: calls ``agent.on_tick()`` which acquires the
+  per-agent lock *internally*.  Wrapping in ``exclusive()`` here would
+  deadlock because ``asyncio.Lock`` is not reentrant.
+
+This asymmetry is intentional and must be preserved if the lock
+strategy changes.
+(F-64-DR2-13: document lock protocol in module docstring.)
 """
 
 from __future__ import annotations
@@ -31,8 +46,12 @@ class TickScheduler:
     """
 
     # Minimum tick interval to prevent accidental busy loops from
-    # zero or negative configuration values.
-    _MIN_INTERVAL: float = 0.01
+    # zero or negative configuration values.  Set to 1.0s (not lower)
+    # because each tick triggers an LLM call; at 0.01s a misconfigured
+    # agent would fire 100 calls/second during the initial non-idle
+    # window, incurring significant cost before idle detection kicks in.
+    # (F-64-DR2-11: 10ms floor allows cost-burst from misconfigured agents.)
+    _MIN_INTERVAL: float = 1.0
 
     def __init__(
         self,

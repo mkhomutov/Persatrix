@@ -400,11 +400,44 @@ class TestActionExecutor:
         assert received_depths[0] == 3
         await agent.close_memory()
 
+    async def test_send_message_missing_channel_id(self):
+        """SEND_MESSAGE with no channel_id defaults to empty string.
+
+        Verifies the ``action.payload.get("channel_id", "")`` path at
+        dispatch.py _handle_send_message() when channel_id is absent.
+        (F-64-DR2-08: missing channel_id path untested.)
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        action = AgentAction(
+            action_type=ActionType.SEND_MESSAGE,
+            payload={
+                "content": "No channel",
+                "mentions": ["sarah-chen"],
+                # channel_id intentionally omitted
+            },
+        )
+        results = await executor.execute("mike-torres", [action])
+        assert len(results) == 1
+        assert results[0]["status"] == "dispatched"
+        assert results[0]["dispatched_to"] == 1
+        await agent.close_memory()
+
 
 # ─── EventDispatcher Tests ──────────────────────────────────
 
 
 class TestEventDispatcher:
+
+    async def test_executor_property_returns_internal_executor(self):
+        """Public .executor accessor exposes the internal ActionExecutor.
+
+        (F-64-DR2-06: one-line test to guard accessor stability.)
+        """
+        dispatcher = EventDispatcher()
+        assert dispatcher.executor is dispatcher._executor
 
     async def test_dispatch_to_registered_agent(self):
         agent = await _make_agent()
@@ -592,6 +625,18 @@ class TestEventDispatcher:
 
 
 class TestTickScheduler:
+
+    @pytest.fixture(autouse=True)
+    def _lower_min_interval(self):
+        """Allow sub-second intervals in tests.
+
+        Production _MIN_INTERVAL is 1.0s to prevent cost bursts
+        (F-64-DR2-11).  Tests need fast intervals to avoid multi-second waits.
+        """
+        original = TickScheduler._MIN_INTERVAL
+        TickScheduler._MIN_INTERVAL = 0.01
+        yield
+        TickScheduler._MIN_INTERVAL = original
 
     async def test_start_stop(self):
         agent = await _make_agent()
@@ -830,6 +875,35 @@ class TestTickScheduler:
         assert scheduler.is_idle
         # Energy should have recovered from 0.3 (each idle tick adds 0.1)
         assert agent._state.energy > 0.3
+        await agent.close_memory()
+
+    async def test_no_executor_non_idle_actions_logs_warning(self, caplog):
+        """When executor is None and agent produces non-idle actions, warn.
+
+        Covers the warning log path at tick.py _run() where actionable
+        output is silently discarded due to missing executor wiring.
+        (F-64-DR2-07: no test for no-executor warning path.)
+        """
+        agent = await _make_agent()
+
+        async def _actionable_tick():
+            return [AgentAction(ActionType.COMPLETE_TASK, {"result": "done"})]
+
+        agent.on_tick = _actionable_tick  # type: ignore[assignment]
+
+        # executor=None — actions will be discarded with a warning
+        scheduler = TickScheduler(
+            agent, interval=0.05, idle_after_ticks=100, executor=None,
+        )
+        scheduler.start()
+        with caplog.at_level(logging.WARNING, logger="agents.tick"):
+            await asyncio.sleep(0.15)
+        await scheduler.stop()
+
+        assert any(
+            "no executor is configured" in rec.message
+            for rec in caplog.records
+        ), "Expected warning about discarded actions with no executor"
         await agent.close_memory()
 
 
