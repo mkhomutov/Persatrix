@@ -122,7 +122,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 15/19 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 16/19 |
 
 ### Dependency Chain
 
@@ -233,7 +233,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
 | [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/18) | 2026-04-14 |
 | [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
-| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/19) | 2026-04-15 |
+| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/19) | 2026-04-14 |
 
 ---
 
