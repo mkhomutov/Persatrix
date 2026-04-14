@@ -3,7 +3,7 @@ name = "orchestr8-agents"
 version = "0.1.0"
 description = "Orchestr8 AI Agent Runtime"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = {text = "BUSL-1.1"}
 
 # PR review: upper bounds prevent silent breakage from major version bumps.
 # Caps are set at the next major (or next minor for 0.x) version to allow
