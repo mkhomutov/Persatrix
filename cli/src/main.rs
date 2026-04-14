@@ -1,10 +1,13 @@
-use std::collections::HashMap;
+mod commands;
+mod types;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use serde::{Deserialize, Serialize};
-use tabled::{Table, Tabled};
-use tokio::process::Command as ProcessCommand;
+
+use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
+use commands::logs::cmd_logs;
+use commands::validate::cmd_validate;
+use commands::workflow::{cmd_run, cmd_status};
 
 /// Orchestr8 CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
@@ -16,140 +19,6 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
-}
-
-// ─── API request/response types ──────────────────────────────────────────
-
-#[derive(Serialize)]
-struct SubmitWorkflowRequest {
-    workflow_id: String,
-    /// Matches Go server's `map[string]string` — typed precisely to catch
-    /// non-string values on the client side instead of round-tripping a 400.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    inputs: Option<HashMap<String, String>>,
-}
-
-#[derive(Deserialize)]
-struct SubmitWorkflowResponse {
-    run_id: String,
-    workflow_id: String,
-    status: String,
-}
-
-/// Response fields intentionally use `Option` and no `#[serde(deny_unknown_fields)]`
-/// so the CLI stays forward-compatible when the server adds new fields (e.g. `steps`).
-#[derive(Deserialize, Tabled)]
-struct WorkflowRunResponse {
-    run_id: String,
-    workflow_id: String,
-    status: String,
-    #[tabled(display_with = "fmt_option")]
-    error: Option<String>,
-    #[tabled(display_with = "fmt_option")]
-    started_at: Option<String>,
-    #[tabled(display_with = "fmt_option")]
-    finished_at: Option<String>,
-}
-
-#[derive(Deserialize, Tabled)]
-struct AgentResponse {
-    id: String,
-    address: String,
-    #[tabled(display_with = "fmt_vec")]
-    capabilities: Vec<String>,
-    status: String,
-    /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
-    /// with v0.1 servers that don't return this field.
-    #[serde(default)]
-    #[tabled(skip)]
-    agent_type: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ApiError {
-    error: String,
-    #[allow(dead_code)]
-    code: Option<String>,
-}
-
-fn fmt_option(val: &Option<String>) -> String {
-    match val {
-        Some(s) => s.clone(),
-        None => "\u{2014}".to_string(),
-    }
-}
-
-fn fmt_vec(val: &[String]) -> String {
-    if val.is_empty() {
-        "\u{2014}".to_string()
-    } else {
-        val.join(", ")
-    }
-}
-
-// ─── HTTP helper ─────────────────────────────────────────────────────────
-
-async fn api_error_message(resp: reqwest::Response) -> String {
-    let status = resp.status();
-    match resp.json::<ApiError>().await {
-        Ok(e) => format!("{}: {}", status, e.error),
-        Err(_) => format!("HTTP {status}"),
-    }
-}
-
-/// Reject path parameters that could cause path-traversal or query-injection
-/// when interpolated into URLs. Defense-in-depth — the server also validates
-/// IDs, but failing fast here gives the user a clearer error message.
-fn validate_path_param(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err(format!("{label} cannot be empty"));
-    }
-    if value.contains('/')
-        || value.contains('\\')
-        || value.contains("..")
-        || value.contains('?')
-        || value.contains('#')
-        || value.contains('%')
-    {
-        return Err(format!(
-            "invalid {label}: contains characters not allowed in URL path"
-        ));
-    }
-    Ok(())
-}
-
-/// Validate that a resource ID matches the cross-component contract
-/// `^[a-z0-9][a-z0-9-]*[a-z0-9]$` shared with the Go orchestrator registry.
-/// Catches malformed IDs early with a clear client-side error message instead
-/// of round-tripping to the server.
-fn validate_resource_id(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err(format!("{label} cannot be empty"));
-    }
-    // Single-character IDs are valid per updated schema
-    // (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$).
-    let bytes = value.as_bytes();
-    if !bytes[0].is_ascii_lowercase() && !bytes[0].is_ascii_digit() {
-        return Err(format!(
-            "invalid {label} {value:?}: must start with lowercase letter or digit"
-        ));
-    }
-    if bytes.len() > 1 {
-        let last = bytes[bytes.len() - 1];
-        if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
-            return Err(format!(
-                "invalid {label} {value:?}: must end with lowercase letter or digit"
-            ));
-        }
-        for &b in &bytes[1..bytes.len() - 1] {
-            if !b.is_ascii_lowercase() && !b.is_ascii_digit() && b != b'-' {
-                return Err(format!(
-                    "invalid {label} {value:?}: only lowercase letters, digits, and hyphens allowed"
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -165,7 +34,6 @@ enum Commands {
         #[arg(long, default_value = "default")]
         profile: String,
     },
-
     /// Validate YAML configuration files
     Validate {
         /// Config directory or file path
@@ -175,7 +43,6 @@ enum Commands {
         #[arg(long)]
         strict: bool,
     },
-
     /// Run tests
     Test {
         /// Test a specific agent
@@ -191,17 +58,14 @@ enum Commands {
         #[arg(long)]
         record: bool,
     },
-
     /// Manage agents
     #[command(subcommand)]
     Agent(AgentCommands),
-
     /// View execution status and logs
     Status {
         /// Execution ID (omit to list all runs)
         execution_id: Option<String>,
     },
-
     /// View execution logs
     Logs {
         /// Execution ID
@@ -213,7 +77,6 @@ enum Commands {
         #[arg(long)]
         agent: Option<String>,
     },
-
     /// Manage blueprints
     Init {
         /// Blueprint name (software-team, social-experiment)
@@ -223,7 +86,6 @@ enum Commands {
         #[arg(default_value = ".")]
         output: String,
     },
-
     /// Session replay
     Replay {
         /// Session ID
@@ -238,7 +100,6 @@ enum Commands {
         #[arg(long)]
         export: Option<String>,
     },
-
     /// Cost reports
     Cost {
         /// Time period (today, week, month)
@@ -248,16 +109,12 @@ enum Commands {
         #[arg(long, default_value = "agent")]
         group_by: String,
     },
-
     /// State management
     #[command(subcommand)]
     State(StateCommands),
-
-    // ─── v0.3: Mesh commands ─────────────────────────
     /// Manage mesh nodes (v0.3+)
     #[command(subcommand)]
     Node(NodeCommands),
-
     /// Mesh status and diagnostics (v0.3+)
     #[command(subcommand)]
     Mesh(MeshCommands),
@@ -330,7 +187,6 @@ async fn main() {
     let cli = Cli::parse();
     let server = cli.server.trim_end_matches('/');
 
-    // Case-insensitive scheme check — HTTP URLs are case-insensitive per RFC 7230.
     let server_lower = server.to_lowercase();
     if !server_lower.starts_with("http://") && !server_lower.starts_with("https://") {
         eprintln!(
@@ -346,73 +202,30 @@ async fn main() {
         .build()
         .expect("failed to create HTTP client");
 
+    // Exhaustive match — adding a Commands variant produces a compile error
+    // until its handler is added.
     let result = match cli.command {
         Commands::Run {
             workflow,
             input,
             profile,
-        } => {
-            if profile != "default" {
-                eprintln!(
-                    "{}",
-                    "warning: --profile is not yet supported by the server, ignored".yellow()
-                );
-            }
-            if let Err(e) = validate_resource_id(&workflow, "workflow ID") {
-                Err(e)
-            } else {
-                cmd_run(&client, server, &workflow, input.as_deref()).await
-            }
-        }
-
+        } => cmd_run(&client, server, &workflow, input.as_deref(), &profile).await,
         Commands::Status { execution_id } => {
             cmd_status(&client, server, execution_id.as_deref()).await
         }
-
         Commands::Agent(cmd) => match cmd {
             AgentCommands::List => cmd_agent_list(&client, server).await,
             AgentCommands::Info { agent_id } => cmd_agent_info(&client, server, &agent_id).await,
             AgentCommands::Reload {
                 agent_id,
                 config: _,
-            } => {
-                // Validate early for consistency with Info and cmd_test_persona.
-                // Defense-in-depth: when reload is implemented the validation
-                // is already in place.
-                if let Err(e) = validate_resource_id(&agent_id, "agent ID") {
-                    Err(e)
-                } else {
-                    println!(
-                        "{}",
-                        format!("Agent reload for '{}' not yet implemented", agent_id).yellow()
-                    );
-                    Ok(())
-                }
-            }
+            } => cmd_agent_reload(&agent_id).await,
         },
-
         Commands::Logs {
             execution_id,
             follow,
             agent,
-        } => {
-            if follow {
-                eprintln!(
-                    "{}",
-                    "warning: --follow is not yet supported, ignored".yellow()
-                );
-            }
-            if agent.is_some() {
-                eprintln!(
-                    "{}",
-                    "warning: --agent filter is not yet supported, ignored".yellow()
-                );
-            }
-            cmd_logs(&client, server, &execution_id).await
-        }
-
-        // Exhaustive match instead of catch-all `_ =>` so that adding a new
-        // Commands variant produces a compile error until its handler is added.
+        } => cmd_logs(&client, server, &execution_id, follow, agent.as_deref()).await,
         Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
         Commands::Test {
             agent,
@@ -420,28 +233,15 @@ async fn main() {
             persona,
             record,
         } => {
-            if let Some(ref id) = persona {
-                if agent.is_some() || workflow.is_some() || record {
-                    eprintln!(
-                        "{}",
-                        "warning: --persona takes precedence; --agent/--workflow/--record ignored"
-                            .yellow()
-                    );
-                }
-                cmd_test_persona(&client, server, id).await
-            } else if agent.is_some() || workflow.is_some() || record {
-                println!(
-                    "{}",
-                    "Only --persona is implemented. --agent, --workflow, and --record are not yet supported.".yellow()
-                );
-                Ok(())
-            } else {
-                println!(
-                    "{}",
-                    "No test type specified. Available: --persona <id> (more coming soon)".yellow()
-                );
-                Ok(())
-            }
+            cmd_test(
+                &client,
+                server,
+                agent.as_deref(),
+                workflow.as_deref(),
+                persona.as_deref(),
+                record,
+            )
+            .await
         }
         Commands::Init { .. } => {
             println!("{}", "Command 'init' not yet implemented".yellow());
@@ -472,688 +272,5 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("{} {e}", "error:".red().bold());
         std::process::exit(1);
-    }
-}
-
-// ─── Command implementations ─────────────────────────────────────────────
-
-async fn cmd_run(
-    client: &reqwest::Client,
-    server: &str,
-    workflow: &str,
-    input: Option<&str>,
-) -> Result<(), String> {
-    let inputs: Option<HashMap<String, String>> = match input {
-        Some(raw) => Some(serde_json::from_str(raw).map_err(|e| {
-            format!("invalid --input JSON (expected {{\"key\": \"value\", ...}}): {e}")
-        })?),
-        None => None,
-    };
-
-    let body = SubmitWorkflowRequest {
-        workflow_id: workflow.to_string(),
-        inputs,
-    };
-
-    let resp = client
-        .post(format!("{server}/api/v1/workflows/run"))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-
-    let data: SubmitWorkflowResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("invalid response: {e}"))?;
-
-    println!(
-        "{} Workflow {} submitted (run_id: {})",
-        "✓".green().bold(),
-        data.workflow_id.bold(),
-        data.run_id
-    );
-    println!("  Status: {}", data.status);
-    Ok(())
-}
-
-async fn cmd_status(
-    client: &reqwest::Client,
-    server: &str,
-    execution_id: Option<&str>,
-) -> Result<(), String> {
-    match execution_id {
-        Some(id) => {
-            validate_path_param(id, "execution ID")?;
-            let resp = client
-                .get(format!("{server}/api/v1/workflows/{id}/status"))
-                .send()
-                .await
-                .map_err(|e| format!("connection failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                return Err(api_error_message(resp).await);
-            }
-
-            let run: WorkflowRunResponse = resp
-                .json()
-                .await
-                .map_err(|e| format!("invalid response: {e}"))?;
-
-            println!("{:<14} {}", "Run ID:".bold(), run.run_id);
-            println!("{:<14} {}", "Workflow:".bold(), run.workflow_id);
-            println!("{:<14} {}", "Status:".bold(), colorize_status(&run.status));
-            // Guard against empty error strings: Go's omitempty omits the field
-            // when empty, but a non-Go server could send "error": "". Without
-            // this filter the CLI would print a blank "Error:" line.
-            if let Some(err) = run.error.as_deref().filter(|e| !e.is_empty()) {
-                println!("{:<14} {}", "Error:".bold(), err.red());
-            }
-            if let Some(ref t) = run.started_at {
-                println!("{:<14} {}", "Started:".bold(), t);
-            }
-            if let Some(ref t) = run.finished_at {
-                println!("{:<14} {}", "Finished:".bold(), t);
-            }
-        }
-        None => {
-            let resp = client
-                .get(format!("{server}/api/v1/workflows"))
-                .send()
-                .await
-                .map_err(|e| format!("connection failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                return Err(api_error_message(resp).await);
-            }
-
-            let runs: Vec<WorkflowRunResponse> = resp
-                .json()
-                .await
-                .map_err(|e| format!("invalid response: {e}"))?;
-
-            if runs.is_empty() {
-                println!("No workflow runs found.");
-            } else {
-                println!("{}", Table::new(&runs));
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn cmd_agent_list(client: &reqwest::Client, server: &str) -> Result<(), String> {
-    let resp = client
-        .get(format!("{server}/api/v1/agents"))
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-
-    let agents: Vec<AgentResponse> = resp
-        .json()
-        .await
-        .map_err(|e| format!("invalid response: {e}"))?;
-
-    if agents.is_empty() {
-        println!("No agents registered.");
-    } else {
-        println!("{}", Table::new(&agents));
-    }
-    Ok(())
-}
-
-async fn cmd_agent_info(
-    client: &reqwest::Client,
-    server: &str,
-    agent_id: &str,
-) -> Result<(), String> {
-    // Agent IDs follow the same cross-component contract as workflow IDs.
-    validate_resource_id(agent_id, "agent ID")?;
-    let resp = client
-        .get(format!("{server}/api/v1/agents/{agent_id}"))
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-
-    let agent: AgentResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("invalid response: {e}"))?;
-
-    println!("{:<16} {}", "ID:".bold(), agent.id);
-    println!("{:<16} {}", "Address:".bold(), agent.address);
-    println!(
-        "{:<16} {}",
-        "Status:".bold(),
-        colorize_status(&agent.status)
-    );
-    println!(
-        "{:<16} {}",
-        "Capabilities:".bold(),
-        if agent.capabilities.is_empty() {
-            "—".to_string()
-        } else {
-            agent.capabilities.join(", ")
-        }
-    );
-    Ok(())
-}
-
-async fn cmd_logs(
-    client: &reqwest::Client,
-    server: &str,
-    execution_id: &str,
-) -> Result<(), String> {
-    validate_path_param(execution_id, "execution ID")?;
-    let resp = client
-        .get(format!("{server}/api/v1/executions/{execution_id}/logs"))
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("failed to read response: {e}"))?;
-
-    println!("{body}");
-    Ok(())
-}
-
-// ─── Validate command ────────────────────────────────────────────────────
-
-// NOTE: `validate` is the only CLI command that runs locally (subprocess) instead
-// of via the orchestrator REST API. This deviates from the thin-client pattern.
-// A server-side POST /api/v1/config/validate endpoint would be architecturally
-// consistent — tracked for future improvement.
-async fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
-    // Whitespace-only paths pass through to Python and produce confusing errors.
-    if path.trim().is_empty() {
-        return Err("validation path cannot be empty".to_string());
-    }
-
-    // Python validator does not implement --strict yet.
-    if strict {
-        eprintln!(
-            "{}",
-            "warning: --strict is not yet supported by the Python validator, ignored".yellow()
-        );
-    }
-
-    let script = find_validator_script()?;
-    let python = find_python_binary();
-    let args = vec![script.to_string_lossy().to_string(), path.to_string()];
-
-    // Async subprocess avoids blocking a tokio worker thread.
-    // Timeout prevents indefinite hang if the Python process stalls.
-    let mut cmd = ProcessCommand::new(python);
-    cmd.args(&args);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output())
-        .await
-        .map_err(|_| "Python validator timed out after 120 seconds".to_string())?
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                python_not_found_message()
-            } else {
-                format!("failed to run Python validator: {e}")
-            }
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.is_empty() {
-        print!("{stdout}");
-    }
-    if !stderr.is_empty() {
-        eprint!("{stderr}");
-    }
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err("validation failed".to_string())
-    }
-}
-
-fn find_validator_script() -> Result<std::path::PathBuf, String> {
-    // Try relative to CWD first (most common: running from repo root)
-    let cwd_relative = std::path::PathBuf::from("agents/validate.py");
-    if cwd_relative.exists() {
-        // Canonicalize to produce clean absolute paths in error messages.
-        return std::fs::canonicalize(&cwd_relative)
-            .map_err(|e| format!("failed to canonicalize {}: {e}", cwd_relative.display()));
-    }
-
-    // Try relative to the executable location (installed or bin/ layout)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let from_bin = parent.join("../agents/validate.py");
-            if from_bin.exists() {
-                // Canonicalize here too.
-                return std::fs::canonicalize(&from_bin)
-                    .map_err(|e| format!("failed to canonicalize {}: {e}", from_bin.display()));
-            }
-        }
-    }
-
-    Err("cannot find agents/validate.py — run from the repository root".to_string())
-}
-
-/// Return the Python interpreter binary name for the current platform.
-/// Windows: `python` (standard name via installer or py launcher).
-/// Unix/macOS: `python3` is preferred — `python` may be absent or
-/// Python 2 on some Linux distributions.
-fn find_python_binary() -> &'static str {
-    if cfg!(windows) {
-        "python"
-    } else {
-        "python3"
-    }
-}
-
-/// Diagnostic error message when Python is not found on PATH.
-fn python_not_found_message() -> String {
-    let binary = find_python_binary();
-    format!("Python not found. Install Python 3.11+ and ensure '{binary}' is on PATH.")
-}
-
-// ─── Test persona command ────────────────────────────────────────────────
-
-async fn cmd_test_persona(
-    client: &reqwest::Client,
-    server: &str,
-    agent_id: &str,
-) -> Result<(), String> {
-    // Agent IDs follow the same cross-component contract as workflow IDs.
-    validate_resource_id(agent_id, "agent ID")?;
-
-    println!(
-        "{} Testing persona agent: {}",
-        "→".cyan().bold(),
-        agent_id.bold()
-    );
-
-    // Fetch agent info from the orchestrator
-    let resp = client
-        .get(format!("{server}/api/v1/agents/{agent_id}"))
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-
-    let agent: AgentResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("invalid response: {e}"))?;
-
-    let mut warnings: Vec<String> = Vec::new();
-    let mut checks_passed: u32 = 0;
-    // Dynamic check counter — adding/removing a check no longer requires
-    // updating a separate hardcoded total.
-    let mut total_checks: u32 = 0;
-
-    // Check 1: Agent exists and is reachable
-    total_checks += 1;
-    println!(
-        "  {} Agent '{}' found (status: {})",
-        "✓".green(),
-        agent.id,
-        colorize_status(&agent.status)
-    );
-    checks_passed += 1;
-
-    // Check 2: Agent status is healthy
-    total_checks += 1;
-    if agent.status == "healthy" {
-        println!("  {} Agent is healthy", "✓".green());
-        checks_passed += 1;
-    } else {
-        println!(
-            "  {} Agent status is '{}', expected 'healthy'",
-            "✗".red(),
-            agent.status
-        );
-        warnings.push(format!("agent status is '{}', not 'healthy'", agent.status));
-    }
-
-    // Check 3: Agent type is persona
-    // Handle missing agent_type (v0.1 servers don't return this field).
-    total_checks += 1;
-    match agent.agent_type.as_deref() {
-        Some("persona") => {
-            println!("  {} Agent type is 'persona'", "✓".green());
-            checks_passed += 1;
-        }
-        Some(other) => {
-            println!(
-                "  {} Agent type is '{}', expected 'persona'",
-                "✗".red(),
-                other
-            );
-            warnings.push(format!("agent type is '{other}', not 'persona'"));
-        }
-        None => {
-            println!(
-                "  {} Agent type unknown (server may not support type field)",
-                "?".yellow()
-            );
-            warnings.push("agent type unknown — server may not support the type field".to_string());
-        }
-    }
-
-    // Check 4: Agent has capabilities
-    total_checks += 1;
-    if !agent.capabilities.is_empty() {
-        println!(
-            "  {} Agent has {} capability(ies): {}",
-            "✓".green(),
-            agent.capabilities.len(),
-            agent.capabilities.join(", ")
-        );
-        checks_passed += 1;
-    } else {
-        println!("  {} Agent has no capabilities", "!".yellow());
-        warnings.push("agent has no capabilities".to_string());
-    }
-
-    // Summary
-    println!();
-    if warnings.is_empty() {
-        println!(
-            "{} All {total_checks} checks passed for '{}'",
-            "✓".green().bold(),
-            agent_id.bold()
-        );
-        Ok(())
-    } else {
-        println!(
-            "{} {checks_passed}/{total_checks} checks passed for '{}' ({} warning(s))",
-            "!".yellow().bold(),
-            agent_id.bold(),
-            warnings.len()
-        );
-        for w in &warnings {
-            println!("  {} {w}", "warning:".yellow());
-        }
-        Ok(())
-    }
-}
-
-fn colorize_status(status: &str) -> colored::ColoredString {
-    match status {
-        "completed" => status.green(),
-        "running" | "pending" => status.cyan(),
-        "failed" => status.red(),
-        "cancelled" => status.yellow(),
-        "retrying" => status.yellow(),
-        "healthy" => status.green(),
-        "degraded" => status.yellow(),
-        "offline" => status.red(),
-        _ => status.normal(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validate_path_param_rejects_empty() {
-        assert!(validate_path_param("", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_traversal() {
-        assert!(validate_path_param("../etc/passwd", "test").is_err());
-        assert!(validate_path_param("foo/bar", "test").is_err());
-        assert!(validate_path_param("foo\\bar", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_query_fragment_injection() {
-        assert!(validate_path_param("id?admin=true", "test").is_err());
-        assert!(validate_path_param("id#fragment", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_percent_encoding() {
-        assert!(validate_path_param("id%2Ftraversal", "test").is_err());
-        assert!(validate_path_param("%00null", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_accepts_valid_ids() {
-        assert!(validate_path_param("my-agent-01", "test").is_ok());
-        assert!(validate_path_param("abc", "test").is_ok());
-        assert!(validate_path_param("550e8400-e29b-41d4-a716-446655440000", "test").is_ok());
-    }
-
-    // ─── validate_resource_id tests ──────────────────────────────────────
-
-    #[test]
-    fn validate_resource_id_accepts_valid_ids() {
-        assert!(validate_resource_id("a", "id").is_ok());
-        assert!(validate_resource_id("a1", "id").is_ok());
-        assert!(validate_resource_id("my-agent-01", "id").is_ok());
-        assert!(validate_resource_id("abc", "id").is_ok());
-        assert!(validate_resource_id("code-reviewer", "id").is_ok());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_empty() {
-        assert!(validate_resource_id("", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_uppercase() {
-        assert!(validate_resource_id("MyAgent", "id").is_err());
-        assert!(validate_resource_id("AGENT", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_special_chars() {
-        assert!(validate_resource_id("my_agent", "id").is_err());
-        assert!(validate_resource_id("my agent", "id").is_err());
-        assert!(validate_resource_id("agent.1", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_leading_trailing_hyphen() {
-        assert!(validate_resource_id("-agent", "id").is_err());
-        assert!(validate_resource_id("agent-", "id").is_err());
-    }
-
-    // ─── Serde contract tests ────────────────────────────────────────────
-
-    #[test]
-    fn submit_workflow_request_serializes_correctly() {
-        let req = SubmitWorkflowRequest {
-            workflow_id: "my-workflow".to_string(),
-            inputs: Some(HashMap::from([("key1".to_string(), "value1".to_string())])),
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["workflow_id"], "my-workflow");
-        assert_eq!(json["inputs"]["key1"], "value1");
-        // Verify exact field names match the Go server's API contract
-        assert!(json.get("workflow_id").is_some());
-        assert!(json.get("inputs").is_some());
-    }
-
-    #[test]
-    fn submit_workflow_request_omits_none_inputs() {
-        let req = SubmitWorkflowRequest {
-            workflow_id: "test".to_string(),
-            inputs: None,
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["workflow_id"], "test");
-        // skip_serializing_if = "Option::is_none" should omit inputs
-        assert!(json.get("inputs").is_none());
-    }
-
-    // ─── Response deserialization contract tests ─────────────────────────
-    // Verify the CLI can parse the exact JSON shape the Go server produces
-    // (see internal/server/types.go). A server-side field rename would
-    // silently produce None/default values due to serde's lenient defaults;
-    // these tests catch that.
-
-    #[test]
-    fn workflow_run_response_deserializes_correctly() {
-        // Matches Go workflowRunResponse JSON tags in internal/server/types.go.
-        // Go's omitempty omits the error field when empty, so the canonical
-        // success shape has no "error" key at all.
-        let json = serde_json::json!({
-            "run_id": "run-001",
-            "workflow_id": "feature-builder",
-            "status": "completed",
-            "started_at": "2026-04-14T10:00:00Z",
-            "finished_at": "2026-04-14T10:05:00Z",
-            "steps": {}
-        });
-        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
-        assert_eq!(resp.run_id, "run-001");
-        assert_eq!(resp.workflow_id, "feature-builder");
-        assert_eq!(resp.status, "completed");
-        assert!(resp.error.is_none());
-        assert_eq!(resp.started_at.as_deref(), Some("2026-04-14T10:00:00Z"));
-        assert_eq!(resp.finished_at.as_deref(), Some("2026-04-14T10:05:00Z"));
-    }
-
-    #[test]
-    fn workflow_run_response_deserializes_error_field() {
-        // Go's omitempty sends a non-empty error string on failure.
-        let json = serde_json::json!({
-            "run_id": "run-003",
-            "workflow_id": "feature-builder",
-            "status": "failed",
-            "error": "task timed out",
-            "started_at": "2026-04-14T10:00:00Z",
-            "finished_at": null,
-            "steps": {}
-        });
-        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
-        assert_eq!(resp.status, "failed");
-        assert_eq!(resp.error.as_deref(), Some("task timed out"));
-    }
-
-    #[test]
-    fn workflow_run_response_handles_null_timestamps() {
-        // Go server sends null for zero-valued *time.Time pointers
-        let json = serde_json::json!({
-            "run_id": "run-002",
-            "workflow_id": "test-wf",
-            "status": "pending",
-            "started_at": null,
-            "finished_at": null,
-            "steps": {}
-        });
-        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
-        assert_eq!(resp.status, "pending");
-        assert!(resp.started_at.is_none());
-        assert!(resp.finished_at.is_none());
-        assert!(resp.error.is_none());
-    }
-
-    #[test]
-    fn agent_response_deserializes_correctly() {
-        // Matches Go agentResponse JSON tags in internal/server/types.go.
-        // Note: Go server does NOT include agent_type — CLI's #[serde(default)]
-        // correctly handles its absence.
-        let json = serde_json::json!({
-            "id": "code-reviewer",
-            "address": "localhost:50051",
-            "capabilities": ["review", "lint"],
-            "status": "healthy"
-        });
-        let resp: AgentResponse = serde_json::from_value(json).unwrap();
-        assert_eq!(resp.id, "code-reviewer");
-        assert_eq!(resp.address, "localhost:50051");
-        assert_eq!(resp.capabilities, vec!["review", "lint"]);
-        assert_eq!(resp.status, "healthy");
-        assert!(resp.agent_type.is_none(), "Go server omits agent_type");
-    }
-
-    #[test]
-    fn agent_response_with_empty_capabilities() {
-        // Go server normalizes capabilities to empty slice, not null
-        let json = serde_json::json!({
-            "id": "new-agent",
-            "address": "localhost:50052",
-            "capabilities": [],
-            "status": "offline"
-        });
-        let resp: AgentResponse = serde_json::from_value(json).unwrap();
-        assert!(resp.capabilities.is_empty());
-        assert_eq!(resp.status, "offline");
-    }
-
-    // ─── find_python_binary tests ────────────────────────────────────────
-
-    #[test]
-    fn find_python_binary_returns_platform_appropriate() {
-        let binary = find_python_binary();
-        if cfg!(windows) {
-            assert_eq!(binary, "python");
-        } else {
-            assert_eq!(binary, "python3");
-        }
-    }
-
-    #[test]
-    fn python_not_found_message_contains_binary_name() {
-        let msg = python_not_found_message();
-        assert!(msg.contains("Python not found"));
-        assert!(msg.contains(find_python_binary()));
-        assert!(msg.contains("3.11+"));
-    }
-
-    // ─── find_validator_script tests ─────────────────────────────────────
-
-    // WARNING: This test mutates process-global CWD via set_current_dir(),
-    // which is not thread-safe. `cargo test` runs tests in parallel. If another
-    // test also depends on CWD, results become nondeterministic. Safe today
-    // because no other test touches CWD, but must be addressed when the file is
-    // split (PR 8c) — either via `serial_test` crate or by refactoring
-    // find_validator_script() to accept an explicit base directory.
-    #[test]
-    fn find_validator_script_in_temp_dir() {
-        let tmp = std::env::temp_dir().join("orch_test_validator");
-        let agents_dir = tmp.join("agents");
-        std::fs::create_dir_all(&agents_dir).unwrap();
-        let script = agents_dir.join("validate.py");
-        std::fs::write(&script, "# test").unwrap();
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&tmp).unwrap();
-        let result = find_validator_script();
-        std::env::set_current_dir(original_dir).unwrap();
-
-        // Cleanup
-        std::fs::remove_dir_all(&tmp).ok();
-
-        assert!(result.is_ok(), "expected Ok, got: {result:?}");
-        // Result should be canonicalized (absolute path)
-        let path = result.unwrap();
-        assert!(path.is_absolute(), "expected absolute path, got: {path:?}");
     }
 }

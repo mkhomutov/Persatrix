@@ -93,7 +93,12 @@ v0.1 Complete ─ end-to-end execution working
 
 | Module | Purpose | Status |
 |--------|---------|--------|
-| `cli/src/main.rs` | CLI commands (run, status, agents) | ✅ Functional (submits workflows via REST) |
+| `cli/src/main.rs` | CLI entry point, clap definitions, command dispatch | ✅ Functional (RFC 0005 PR 8c split) |
+| `cli/src/types.rs` | API request/response types, shared validation helpers | ✅ Complete (RFC 0005 PR 8c) |
+| `cli/src/commands/workflow.rs` | Workflow commands (run, status) | ✅ Complete (RFC 0005 PR 8c) |
+| `cli/src/commands/agent.rs` | Agent commands (list, info, reload, test persona) | ✅ Complete (RFC 0005 PR 8c) |
+| `cli/src/commands/logs.rs` | Execution log viewing | ✅ Complete (RFC 0005 PR 8c) |
+| `cli/src/commands/validate.rs` | Config validation (Python subprocess) | ✅ Complete (RFC 0005 PR 8c) |
 
 ### What Works Today
 
