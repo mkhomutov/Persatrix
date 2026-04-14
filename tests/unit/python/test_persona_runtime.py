@@ -19,11 +19,11 @@ from agents.llm_client import (
     ToolCall,
     Usage,
 )
-from agents.persona import (
+from agents.persona import create_persona_agent
+from agents.persona_runtime import (
     _LLMPersonaAgent,
     _coerce_event_timeout,
     _truncate_with_ellipsis,
-    create_persona_agent,
 )
 from agents.persona_behavior import DIMENSION_DESCRIPTIONS, render_behavior
 from agents.persona_types import (
@@ -139,11 +139,28 @@ class TestModuleImports:
 
         assert hasattr(tick, "TickScheduler")
 
+    def test_persona_runtime_importable(self):
+        from agents import persona_runtime
+
+        assert hasattr(persona_runtime, "_LLMPersonaAgent")
+
     def test_sub_agent_status_reexported(self):
         """SubAgentStatus must remain importable from persona.py (F-64-01)."""
         from agents.persona import SubAgentStatus
 
         assert hasattr(SubAgentStatus, "COMPLETED")
+
+    def test_persona_runtime_symbols_reexported(self):
+        """Private runtime symbols remain importable from persona.py via late import."""
+        from agents.persona import (  # noqa: F401
+            _LLMPersonaAgent,
+            _coerce_event_timeout,
+            _truncate_with_ellipsis,
+        )
+
+        assert _LLMPersonaAgent is not None
+        assert callable(_coerce_event_timeout)
+        assert callable(_truncate_with_ellipsis)
 
     def test_reexports_backward_compat(self):
         """Key symbols remain importable from persona.py via re-exports.
@@ -234,7 +251,7 @@ class TestModuleImports:
             "import importlib; "
             "[importlib.import_module(m) for m in "
             "('agents.persona_types', 'agents.persona_behavior', "
-            "'agents.dispatch', 'agents.tick')]"
+            "'agents.dispatch', 'agents.tick', 'agents.persona_runtime')]"
         )
         result = subprocess.run(
             [sys.executable, "-c", script],
