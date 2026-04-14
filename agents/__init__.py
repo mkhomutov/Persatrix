@@ -1,16 +1,12 @@
 """Orchestr8 Agent Runtime."""
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from .persona import (
-    ActionExecutor,
-    EventDispatcher,
-    Mood,
-    PersonaState,
-    TickScheduler,
-    create_persona_agent,
-    render_behavior,
-)
+from .dispatch import ActionExecutor, EventDispatcher
+from .persona import create_persona_agent
+from .persona_behavior import render_behavior
+from .persona_types import Mood, PersonaState
 from .task_agent import TaskAgent
+from .tick import TickScheduler
 
 __all__ = [
     "ActionExecutor",

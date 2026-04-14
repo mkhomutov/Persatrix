@@ -23,15 +23,12 @@ import grpc.aio
 import yaml
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
+from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .llm_client import LLMClient, create_provider
-from .persona import (
-    EventDispatcher,
-    TickScheduler,
-    _LLMPersonaAgent,
-    create_persona_agent,
-)
+from .persona import _LLMPersonaAgent, create_persona_agent
 from .task_agent import TaskAgent
+from .tick import TickScheduler
 from .tools import builtin
 from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator

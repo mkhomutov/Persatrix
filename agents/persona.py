@@ -4,145 +4,172 @@ Orchestr8 Persona Agent Interface (v0.2+).
 Extends BaseAgent with async event handling, sub-agent spawning,
 and autonomous behavior.
 
-Includes the concrete ``_LLMPersonaAgent`` with LLM-powered ``on_event()``
-decision loop, ``PersonaState`` dynamic state, behavioral dimension rendering,
-``create_persona_agent()`` factory, ``ActionExecutor``, ``EventDispatcher``,
-and ``TickScheduler`` for autonomous operation.
+Includes the ``PersonaAgent`` ABC, the concrete ``_LLMPersonaAgent``
+with LLM-powered ``on_event()`` decision loop, and the
+``create_persona_agent()`` factory.
+
+Type definitions live in ``persona_types``, behavioral dimension
+rendering in ``persona_behavior``, event dispatch in ``dispatch``,
+and the tick scheduler in ``tick``.
 """
 
 from __future__ import annotations
 
+# Public API of this module.  Includes the two locally-defined public
+# symbols plus all symbols re-exported from extracted submodules (their
+# __all__ lists).  Keeps persona.py consistent with the four submodules
+# that already define __all__.
+# (F-64-DR5-06: no __all__ defined — inconsistent with extracted modules.)
+__all__ = [
+    # Local public symbols
+    "PersonaAgent",
+    "create_persona_agent",
+    # Re-exported from persona_types
+    "ActionType",
+    "AgentAction",
+    "AgentEvent",
+    "EventType",
+    "Mood",
+    "OrchestratorClient",
+    "PersonaState",
+    "SubAgentRequest",
+    "SubAgentResult",
+    "SubAgentStatus",
+    # Re-exported from persona_behavior
+    "DIMENSION_DESCRIPTIONS",
+    "render_behavior",
+    # Re-exported from dispatch
+    "ActionExecutor",
+    "EventDispatcher",
+    # Re-exported from tick
+    "TickScheduler",
+]
+
 import asyncio
-import copy
 import json
 import logging
 import re
-import time
 from abc import abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+
+# Re-export everything that was previously importable from this module
+# so that existing ``from agents.persona import X`` statements continue
+# to work without modification.  New code should import from the
+# specific submodule directly.
+# TODO(v0.3): deprecate these re-exports — new code should import from
+# specific submodules (persona_types, persona_behavior, dispatch, tick).
+# Once all internal consumers have migrated, emit DeprecationWarning and
+# eventually remove the re-export block.  (PR #64 review: should fix.)
+from .dispatch import ActionExecutor, EventDispatcher  # noqa: F401
 from .llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from .memory.episodic import EpisodicMemory
 from .memory.relationship import RelationshipMemory
 from .memory.working import ContextSection, WorkingMemory, estimate_tokens
+from .persona_behavior import (
+    DIMENSION_DESCRIPTIONS,  # noqa: F401
+    render_behavior,
+)
+from .persona_types import (
+    ActionType,
+    AgentAction,
+    AgentEvent,
+    EventType,
+    Mood,  # noqa: F401 — re-exported for backward compatibility
+    OrchestratorClient,
+    PersonaState,
+    SubAgentRequest,
+    SubAgentResult,
+    SubAgentStatus,  # noqa: F401 — re-exported for backward compatibility (F-64-01)
+)
+from .tick import TickScheduler  # noqa: F401
 from .tools.builtin import create_memory_tools
 from .tools.permissions import PermissionGate
 from .tools.registry import ToolDefinition, get_tool, list_tools
 
 logger = logging.getLogger(__name__)
 
-# ─── Events that a persona agent can receive ───────────────
+# Hard upper bounds for LLM-provided SPAWN_SUB_AGENT resource fields.
+# Applied in _validate_action_payload() before the payload reaches
+# ActionExecutor.  The action is not yet wired (returns 'not_implemented'),
+# but caps are enforced at validation time so the boundary is in place
+# when execution is wired in a future RFC.
+# (PR review: SPAWN_SUB_AGENT resource fields not bounded at validation time.)
+_MAX_SUB_AGENT_TOKENS: int = 100_000
+_MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
+_MAX_SUB_AGENT_LLM_CALLS: int = 50
 
-class EventType(Enum):
-    TASK_ASSIGNED = "task_assigned"
-    MESSAGE_RECEIVED = "message_received"
-    MENTION = "mention"
-    SUB_AGENT_COMPLETED = "sub_agent_completed"
-    APPROVAL_REQUESTED = "approval_requested"
-    APPROVAL_RESPONSE = "approval_response"
-    TICK = "tick"  # autonomous loop heartbeat
-    AGENT_JOINED = "agent_joined"
-    AGENT_LEFT = "agent_left"
+# Per-tier truncation caps for memory context injected into working memory.
+# build_context() enforces the overall token budget, but truncating per-item
+# gives fairer distribution across entries within a tier.  Values balance
+# detail vs. budget: notes are longest (agent-authored curated knowledge),
+# relationship notes are medium, episode summaries shortest.
+# (PR #60 review: inline magic numbers for truncation caps.)
+_MAX_EPISODE_SUMMARY_CHARS: int = 200
+_MAX_RELATIONSHIP_NOTES_CHARS: int = 300
+_MAX_NOTE_CONTENT_CHARS: int = 500
 
-
-@dataclass
-class AgentEvent:
-    """An event delivered to a persona agent."""
-
-    event_type: EventType
-    payload: dict[str, Any] = field(default_factory=dict)
-    channel_id: str | None = None
-    sender_id: str | None = None
-    message_id: str | None = None
-    # default_factory=time.time ensures each event gets the current timestamp
-    # rather than a sentinel 0.0 that callers might forget to override.
-    timestamp: float = field(default_factory=time.time)
-    # Extensible metadata for cross-cutting concerns (e.g. cascade_depth
-    # tracking from Q4 decision, tracing correlation IDs). Using a dict
-    # avoids adding a new field for every framework-level concern.
-    metadata: dict[str, Any] = field(default_factory=dict)
+# Trust score defaults for relationship context filtering.
+# A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
+# useful signal to the LLM.  Only inject trust when it has deviated by more
+# than _TRUST_DEVIATION_THRESHOLD from the default.
+# (PR #60 review: unnamed magic numbers in trust comparison.)
+_DEFAULT_TRUST_SCORE: float = 0.5
+_TRUST_DEVIATION_THRESHOLD: float = 0.01
 
 
-# ─── Actions that a persona agent can take ─────────────────
+def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
+    """Truncate *text* to *max_chars* with word-boundary awareness.
 
-class ActionType(Enum):
-    SEND_MESSAGE = "send_message"
-    COMPLETE_TASK = "complete_task"
-    DELEGATE = "delegate"
-    SPAWN_SUB_AGENT = "spawn_sub_agent"
-    USE_TOOL = "use_tool"
-    REQUEST_APPROVAL = "request_approval"
-    GRANT_APPROVAL = "grant_approval"
-    DENY_APPROVAL = "deny_approval"
-    DO_NOTHING = "do_nothing"
+    If *text* fits within *max_chars*, it is returned unchanged.
+    Otherwise it is sliced to *max_chars* and an attempt is made to cut at
+    the last space so the LLM sees a complete word.  If the slice contains
+    no space, the full slice is used.  ``"..."`` is always appended to
+    signal truncation (giving a 3-char overage in the worst case, which
+    is acceptable).
 
-
-@dataclass
-class AgentAction:
-    """An action a persona agent wants to execute."""
-
-    action_type: ActionType
-    payload: dict[str, Any] = field(default_factory=dict)
-
-
-# ─── Sub-Agent Types ───────────────────────────────────────
-
-@dataclass
-class SubAgentRequest:
-    """Request to spawn an ephemeral sub-agent."""
-
-    role: str
-    task: str
-    tools: list[str] = field(default_factory=list)
-    context: dict[str, Any] = field(default_factory=dict)
-    output_schema: dict | None = None
-    model: str = "claude-sonnet-4-20250514"
-    temperature: float = 0.2
-    max_llm_calls: int = 10
-    max_tokens: int = 50000
-    timeout_seconds: int = 120
-    inherit_permissions: bool = True
-    restricted_permissions: list[str] = field(default_factory=list)
-
-
-class SubAgentStatus(Enum):
-    """Status of a sub-agent execution."""
-
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMEOUT = "timeout"
-
-
-@dataclass
-class SubAgentResult:
-    """Result from an ephemeral sub-agent."""
-
-    status: SubAgentStatus
-    result: Any = None
-    summary: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-# ─── Orchestrator Client Protocol ──────────────────────────
-
-@runtime_checkable
-class OrchestratorClient(Protocol):
+    Extracted from _inject_memory_context() where the same pattern was
+    copy-pasted for episode summaries, relationship notes, and note content.
+    (PR #60 review: truncation pattern duplicated 3 times.)
     """
-    Protocol defining the interface for the orchestrator client injected
-    into PersonaAgent. Using a Protocol (structural typing) instead of Any
-    enables type checking and makes the expected interface self-documenting
-    for testing.
+    if len(text) <= max_chars:
+        return text
+    sliced = text[:max_chars]
+    truncated = sliced.rsplit(" ", 1)[0]
+    # Zero-space guard: if the slice has no space, rsplit returns it
+    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
+    if len(truncated) == len(sliced):
+        truncated = sliced
+    return truncated + "..."
 
-    PR review: _orchestrator_client was typed as Any, providing zero type
-    safety and making it impossible to verify mocks implement the contract.
+
+def _coerce_event_timeout(
+    raw_value: object,
+    default: float,
+    agent_id: str,
+) -> float:
+    """Coerce a config-sourced timeout to ``float``.
+
+    YAML configs can supply a string for a numeric key (e.g.
+    ``event_timeout: "300"``).  ``asyncio.wait_for(timeout=...)``
+    requires a real float; a non-numeric value raises TypeError
+    that silently escapes lock acquisition with no useful log.
+
+    Returns *default* with a warning when coercion fails.
+
+    Extracted from ``on_event()`` / ``on_tick()`` where the same
+    ``try: float(raw)`` guard was duplicated.
+    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
     """
-
-    async def spawn_sub_agent(
-        self, *, parent_id: str, request: SubAgentRequest
-    ) -> SubAgentResult: ...
+    try:
+        return float(raw_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        logger.warning(
+            "Agent %s: invalid event_timeout %r, using default %.0fs",
+            agent_id, raw_value, default,
+        )
+        return default
 
 
 # ─── Persona Agent Base Class ──────────────────────────────
@@ -294,325 +321,6 @@ class PersonaAgent(BaseAgent):
             action_type=ActionType.DELEGATE,
             payload={"agent_id": agent_id, "task": task},
         )
-
-
-# ─── Dynamic Persona State ────────────────────────────────
-
-
-class Mood(Enum):
-    """Constrained mood states. Each maps to known prompt behavior."""
-
-    NEUTRAL = "neutral"
-    FOCUSED = "focused"
-    FRUSTRATED = "frustrated"
-    ENERGIZED = "energized"
-    UNCERTAIN = "uncertain"
-    SATISFIED = "satisfied"
-
-
-# Energy constants (MVP — hardcoded, config-driven in follow-up).
-_ENERGY_COST_PER_ACTION = 0.05
-_ENERGY_RECOVERY_PER_TICK = 0.1
-
-# Maximum mentions per SEND_MESSAGE action to prevent resource exhaustion
-# from LLM-generated payloads.  Each mention triggers a synchronous dispatch
-# (per-agent lock + LLM call); with cascade fan-out worst case is N^D.
-# (PR #55 review: unbounded mentions list → resource exhaustion.)
-_MAX_MENTIONS_PER_ACTION = 10
-
-# Default per-dispatch timeout (seconds) for SEND_MESSAGE cascades.
-# Prevents a hung target agent from blocking the sender indefinitely.
-# Separate from _DEFAULT_EVENT_TIMEOUT: bounds a single hop, not full event.
-# TODO(v0.3): make configurable via config["dispatch_timeout"].
-# Hard-coded here as a partial fix for F-5b-4 (PR #55 review: no per-dispatch
-# timeout in _handle_send_message()); making it configurable requires the v0.3
-# dispatch config schema and is tracked as a deferred item in the PR 7b section
-# of docs/rfcs/0005-pr-plan.md.
-# (PR #60 review: hard-coded 60s dispatch timeout.)
-_DEFAULT_DISPATCH_TIMEOUT: float = 60.0
-
-# Hard upper bounds for LLM-provided SPAWN_SUB_AGENT resource fields.
-# Applied in _validate_action_payload() before the payload reaches
-# ActionExecutor.  The action is not yet wired (returns 'not_implemented'),
-# but caps are enforced at validation time so the boundary is in place
-# when execution is wired in a future RFC.
-# (PR review: SPAWN_SUB_AGENT resource fields not bounded at validation time.)
-_MAX_SUB_AGENT_TOKENS: int = 100_000
-_MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
-_MAX_SUB_AGENT_LLM_CALLS: int = 50
-
-# Per-tier truncation caps for memory context injected into working memory.
-# build_context() enforces the overall token budget, but truncating per-item
-# gives fairer distribution across entries within a tier.  Values balance
-# detail vs. budget: notes are longest (agent-authored curated knowledge),
-# relationship notes are medium, episode summaries shortest.
-# (PR #60 review: inline magic numbers for truncation caps.)
-_MAX_EPISODE_SUMMARY_CHARS: int = 200
-_MAX_RELATIONSHIP_NOTES_CHARS: int = 300
-_MAX_NOTE_CONTENT_CHARS: int = 500
-
-# Trust score defaults for relationship context filtering.
-# A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
-# useful signal to the LLM.  Only inject trust when it has deviated by more
-# than _TRUST_DEVIATION_THRESHOLD from the default.
-# (PR #60 review: unnamed magic numbers in trust comparison.)
-_DEFAULT_TRUST_SCORE: float = 0.5
-_TRUST_DEVIATION_THRESHOLD: float = 0.01
-
-
-def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
-    """Truncate *text* to *max_chars* with word-boundary awareness.
-
-    If *text* fits within *max_chars*, it is returned unchanged.
-    Otherwise it is sliced to *max_chars* and an attempt is made to cut at
-    the last space so the LLM sees a complete word.  If the slice contains
-    no space, the full slice is used.  ``"..."`` is always appended to
-    signal truncation (giving a 3-char overage in the worst case, which
-    is acceptable).
-
-    Extracted from _inject_memory_context() where the same pattern was
-    copy-pasted for episode summaries, relationship notes, and note content.
-    (PR #60 review: truncation pattern duplicated 3 times.)
-    """
-    if len(text) <= max_chars:
-        return text
-    sliced = text[:max_chars]
-    truncated = sliced.rsplit(" ", 1)[0]
-    # Zero-space guard: if the slice has no space, rsplit returns it
-    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
-    if len(truncated) == len(sliced):
-        truncated = sliced
-    return truncated + "..."
-
-
-def _coerce_event_timeout(
-    raw_value: object,
-    default: float,
-    agent_id: str,
-) -> float:
-    """Coerce a config-sourced timeout to ``float``.
-
-    YAML configs can supply a string for a numeric key (e.g.
-    ``event_timeout: "300"``).  ``asyncio.wait_for(timeout=...)``
-    requires a real float; a non-numeric value raises TypeError
-    that silently escapes lock acquisition with no useful log.
-
-    Returns *default* with a warning when coercion fails.
-
-    Extracted from ``on_event()`` / ``on_tick()`` where the same
-    ``try: float(raw)`` guard was duplicated.
-    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
-    """
-    try:
-        return float(raw_value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        logger.warning(
-            "Agent %s: invalid event_timeout %r, using default %.0fs",
-            agent_id, raw_value, default,
-        )
-        return default
-
-
-@dataclass
-class PersonaState:
-    """Mutable runtime state for a persona agent."""
-
-    mood: Mood = Mood.NEUTRAL
-    stress_level: float = 0.0
-    energy: float = 1.0
-    recent_context: list[str] = field(default_factory=list)
-    goal_progress: dict[str, float] = field(default_factory=dict)
-
-    def to_prompt_section(self) -> str:
-        """Format state for injection into system prompt."""
-        lines = [f"Current mood: {self.mood.value}"]
-        if self.stress_level > 0.3:
-            lines.append(f"Stress level: {self.stress_level:.1f}/1.0")
-        if self.energy < 0.5:
-            lines.append(
-                f"Energy level: {self.energy:.1f}/1.0 — conserve effort, prefer delegation"
-            )
-        if self.recent_context:
-            lines.append("Recent context:")
-            for ctx in self.recent_context[-5:]:
-                lines.append(f"  - {ctx}")
-        if self.goal_progress:
-            lines.append("Goal progress:")
-            for goal, progress in self.goal_progress.items():
-                lines.append(f"  - {goal}: {progress:.0%}")
-        return "\n".join(lines)
-
-    def drain_energy(self) -> None:
-        """Drain energy after an action. Clamped to [0.0, 1.0]."""
-        self.energy = max(0.0, self.energy - _ENERGY_COST_PER_ACTION)
-
-    def recover_energy(self) -> None:
-        """Recover energy on idle tick. Clamped to [0.0, 1.0]."""
-        self.energy = min(1.0, self.energy + _ENERGY_RECOVERY_PER_TICK)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for persistence. ``recent_context`` is NOT persisted."""
-        return {
-            "mood": self.mood.value,
-            "stress_level": self.stress_level,
-            "energy": self.energy,
-            "goal_progress": self.goal_progress,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PersonaState:
-        """Deserialize from stored JSON. Unknown fields are ignored.
-
-        Clamps ``energy`` and ``stress_level`` to [0.0, 1.0] to guard
-        against corrupted or manually edited DB data (review finding:
-        out-of-range values would produce broken prompt sections).
-        """
-        mood_str = data.get("mood", "neutral")
-        try:
-            mood = Mood(mood_str)
-        except ValueError:
-            logger.warning("Unknown mood %r, defaulting to NEUTRAL", mood_str)
-            mood = Mood.NEUTRAL
-        raw_goals = data.get("goal_progress", {})
-        goal_progress: dict[str, float] = {}
-        for k, v in raw_goals.items():
-            try:
-                # Clamp to [0.0, 1.0]: a corrupted DB value like 2.5 would
-                # otherwise produce "goal: 250%" in to_prompt_section(), which
-                # is misleading both to operators and the LLM.
-                # energy and stress_level are clamped the same way below.
-                # (PR review F-60-R6: goal_progress not clamped to [0.0, 1.0].)
-                goal_progress[k] = min(1.0, max(0.0, float(v)))
-            except (TypeError, ValueError):
-                logger.warning("Invalid goal_progress value for %r: %r, skipping", k, v)
-        return cls(
-            mood=mood,
-            stress_level=min(1.0, max(0.0, float(data.get("stress_level", 0.0)))),
-            energy=min(1.0, max(0.0, float(data.get("energy", 1.0)))),
-            goal_progress=goal_progress,
-        )
-
-
-# ─── Behavioral Dimensions ────────────────────────────────
-
-
-DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = {
-    "directness": {
-        "indirect": (
-            "Diplomatic and tactful. Softens criticism, asks questions"
-            " instead of stating objections directly."
-        ),
-        "balanced": (
-            "Balances directness with tact. States positions clearly"
-            " but frames feedback constructively."
-        ),
-        "direct": (
-            "Says exactly what they think."
-            " Doesn't sugarcoat feedback or hedge opinions."
-        ),
-    },
-    "detail_focus": {
-        "big-picture": (
-            "Focuses on high-level patterns and architecture."
-            " Skips minutiae to keep discussions strategic."
-        ),
-        "balanced": (
-            "Addresses both high-level concerns and"
-            " specific details as needed."
-        ),
-        "detail-focused": (
-            "Thorough and meticulous. Flags edge cases,"
-            " checks specifics, prefers exhaustive analysis."
-        ),
-    },
-    "formality": {
-        "casual": (
-            "Informal and approachable. Uses humor,"
-            " contractions, and conversational language."
-        ),
-        "professional": (
-            "Clear and structured. Uses professional"
-            " language without being stiff."
-        ),
-        "formal": (
-            "Precise and formal. Uses structured reports,"
-            " proper titles, and measured language."
-        ),
-    },
-    "risk_tolerance": {
-        "cautious": (
-            "Wants thorough analysis before decisions."
-            " Asks for more data. Flags risks others might overlook."
-        ),
-        "moderate": (
-            "Balances speed with diligence."
-            " Comfortable with reasonable assumptions."
-        ),
-        "bold": (
-            "Willing to make calls with incomplete information"
-            " and course-correct. Bias toward action."
-        ),
-    },
-    "expressiveness": {
-        "reserved": (
-            "Keeps emotions out of professional communication."
-            " Focuses on facts and logic."
-        ),
-        "moderate": (
-            "Acknowledges emotions when relevant"
-            " but keeps focus on substance."
-        ),
-        "expressive": (
-            "Openly shares reactions and feelings. Communication"
-            " is warm, enthusiastic, or frustrated as the"
-            " situation warrants."
-        ),
-    },
-}
-
-# Default middle value for each dimension when not specified.
-_DIMENSION_DEFAULTS: dict[str, str] = {
-    "directness": "balanced",
-    "detail_focus": "balanced",
-    "formality": "professional",
-    "risk_tolerance": "moderate",
-    "expressiveness": "moderate",
-}
-
-# Invariant: every key in _DIMENSION_DEFAULTS must also appear in
-# DIMENSION_DESCRIPTIONS (so render_behavior() can look up descriptions),
-# and vice versa (so defaults are available for every documented dimension).
-# Caught at import time: if a future dimension is added to one dict and not
-# the other, the mismatch surfaces immediately rather than silently producing
-# incomplete behavioral prompts.
-# (PR review: no guard against _DIMENSION_DEFAULTS/DIMENSION_DESCRIPTIONS key drift.)
-assert set(_DIMENSION_DEFAULTS) == set(DIMENSION_DESCRIPTIONS), (
-    f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
-    f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
-)
-
-
-def render_behavior(behavior: dict[str, str]) -> str:
-    """Convert structured behavior dimensions into natural language for LLM prompt.
-
-    Applies defaults for omitted dimensions so the persona always has
-    a complete behavioral profile.  Unknown dimension keys from ``behavior``
-    are logged as warnings to aid config debugging.
-    """
-    merged = {**_DIMENSION_DEFAULTS, **behavior}
-    lines: list[str] = []
-    for dimension, value in merged.items():
-        if dimension not in DIMENSION_DESCRIPTIONS:
-            logger.warning(
-                "Unknown behavior dimension %r (value=%r) — ignored",
-                dimension,
-                value,
-            )
-            continue
-        desc = DIMENSION_DESCRIPTIONS[dimension].get(value)
-        if desc:
-            lines.append(f"- {desc}")
-    return "\n".join(lines)
 
 
 # ─── LLM-Powered Persona Agent ────────────────────────────
@@ -1508,584 +1216,3 @@ def create_persona_agent(
         working_memory=working_memory,
         memory_tools=memory_tools,
     )
-
-
-# ─── Action Executor ──────────────────────────────────────
-
-
-class ActionExecutor:
-    """Executes ``AgentAction`` lists produced by persona agents.
-
-    Handles each action type exhaustively. ``SEND_MESSAGE`` dispatches
-    through the ``EventDispatcher`` (if provided) to the target agent.
-    ``DELEGATE`` and ``SPAWN_SUB_AGENT`` are TODO stubs for future RFCs.
-    """
-
-    def __init__(
-        self,
-        dispatcher: EventDispatcher | None = None,
-    ) -> None:
-        self._dispatcher = dispatcher
-
-    async def execute(
-        self,
-        agent_id: str,
-        actions: list[AgentAction],
-        *,
-        cascade_depth: int = 0,
-    ) -> list[dict[str, Any]]:
-        """Execute actions and return results.
-
-        Returns a list of dicts, one per action, with ``action_type`` and
-        ``status`` fields. Non-fatal failures are logged but do not propagate.
-
-        Args:
-            cascade_depth: Current cascade depth from the parent dispatch.
-                Propagated to child dispatches via SEND_MESSAGE so the
-                cascade depth limit is enforced across the full event chain.
-                (PR #55 review: SEND_MESSAGE child events bypassed cascade limit.)
-        """
-        results: list[dict[str, Any]] = []
-        for action in actions:
-            result = await self._execute_one(agent_id, action, cascade_depth=cascade_depth)
-            results.append(result)
-        return results
-
-    async def _execute_one(
-        self,
-        agent_id: str,
-        action: AgentAction,
-        *,
-        cascade_depth: int = 0,
-    ) -> dict[str, Any]:
-        """Execute a single agent action and return a status dict.
-
-        Every returned dict contains ``action_type`` (str) and ``status``
-        (str).  The status contract:
-
-        * ``"completed"`` — COMPLETE_TASK executed successfully.
-        * ``"dispatched"`` — SEND_MESSAGE routed to at least one target.
-        * ``"failed"`` — SEND_MESSAGE attempted but all dispatches failed.
-        * ``"no_targets"`` — SEND_MESSAGE had no mentioned targets (no-op).
-        * ``"no_dispatcher"`` — SEND_MESSAGE with no EventDispatcher configured.
-        * ``"skipped"`` — USE_TOOL appeared as a final action (should not happen).
-        * ``"ok"`` — DO_NOTHING.
-        * ``"not_implemented"`` — DELEGATE, SPAWN_SUB_AGENT, or approval actions.
-        * ``"unhandled"`` — Unknown ActionType (defensive catch-all).
-
-        SEND_MESSAGE dicts also include ``dispatched_to`` (int).
-        (PR #60 review: document status contract for downstream consumers.)
-        """
-        match action.action_type:
-            case ActionType.COMPLETE_TASK:
-                return {
-                    "action_type": "complete_task",
-                    "status": "completed",
-                    "result": action.payload.get("result", ""),
-                }
-            case ActionType.SEND_MESSAGE:
-                return await self._handle_send_message(
-                    agent_id, action, cascade_depth=cascade_depth,
-                )
-            case ActionType.USE_TOOL:
-                # Tool execution happens inside _on_event_inner() via
-                # _execute_tools(). If USE_TOOL appears as a returned
-                # action, it means the LLM wants to use a tool outside
-                # the multi-turn loop — log and skip.
-                logger.warning(
-                    "Agent %s returned USE_TOOL as a final action — "
-                    "tool calls should happen inside on_event() loop",
-                    agent_id,
-                )
-                return {
-                    "action_type": "use_tool",
-                    "status": "skipped",
-                }
-            case ActionType.DO_NOTHING:
-                return {"action_type": "do_nothing", "status": "ok"}
-            case ActionType.DELEGATE:
-                # TODO(v0.2+): route delegation through orchestrator
-                logger.info(
-                    "Agent %s requested delegation to %s (not yet implemented)",
-                    agent_id,
-                    action.payload.get("agent_id", "unknown"),
-                )
-                return {"action_type": "delegate", "status": "not_implemented"}
-            case ActionType.SPAWN_SUB_AGENT:
-                # TODO(v0.2+): spawn ephemeral sub-agent
-                logger.info(
-                    "Agent %s requested sub-agent spawn (not yet implemented)",
-                    agent_id,
-                )
-                return {"action_type": "spawn_sub_agent", "status": "not_implemented"}
-            case ActionType.REQUEST_APPROVAL:
-                logger.info(
-                    "Agent %s requested approval (not yet implemented)",
-                    agent_id,
-                )
-                return {"action_type": "request_approval", "status": "not_implemented"}
-            case ActionType.GRANT_APPROVAL:
-                logger.info(
-                    "Agent %s granted approval (not yet implemented)",
-                    agent_id,
-                )
-                return {"action_type": "grant_approval", "status": "not_implemented"}
-            case ActionType.DENY_APPROVAL:
-                logger.info(
-                    "Agent %s denied approval (not yet implemented)",
-                    agent_id,
-                )
-                return {"action_type": "deny_approval", "status": "not_implemented"}
-            case _:
-                # Defensive catch-all: Python match is not exhaustive at
-                # the type level.  If ActionType gains a new variant without
-                # updating this match, the function would implicitly return
-                # None — breaking the -> dict[str, Any] contract and causing
-                # a TypeError in execute()'s results.append(result).
-                # (Review finding: missing catch-all branch.)
-                logger.warning(
-                    "Agent %s: unhandled action type %s",
-                    agent_id, action.action_type.value,
-                )
-                return {"action_type": action.action_type.value, "status": "unhandled"}
-
-    async def _handle_send_message(
-        self,
-        sender_id: str,
-        action: AgentAction,
-        *,
-        cascade_depth: int = 0,
-    ) -> dict[str, Any]:
-        """Route SEND_MESSAGE to the EventDispatcher as a MESSAGE_RECEIVED event."""
-        if self._dispatcher is None:
-            logger.warning(
-                "Agent %s sent message but no dispatcher configured",
-                sender_id,
-            )
-            return {"action_type": "send_message", "status": "no_dispatcher"}
-
-        target_channel = action.payload.get("channel_id", "")
-        content = action.payload.get("content", "")
-        mentions = action.payload.get("mentions", [])
-
-        # Cap mentions list to prevent resource exhaustion from LLM-generated
-        # payloads with many targets.  Each mention triggers a synchronous
-        # dispatch (acquiring a per-agent lock + LLM call), and with cascade
-        # fan-out the worst case is N^D dispatches where N=mentions and
-        # D=max_cascade_depth.
-        # (PR #55 review: unbounded mentions list → resource exhaustion.)
-        if len(mentions) > _MAX_MENTIONS_PER_ACTION:
-            logger.warning(
-                "Agent %s SEND_MESSAGE mentions list truncated from %d to %d",
-                sender_id,
-                len(mentions),
-                _MAX_MENTIONS_PER_ACTION,
-            )
-            mentions = mentions[:_MAX_MENTIONS_PER_ACTION]
-
-        # Route to mentioned agents as MESSAGE_RECEIVED events.
-        # Log at WARNING when channel_id is present but mentions is empty —
-        # this almost certainly means the LLM intended to route to a channel
-        # (not yet implemented), so the message is silently lost.  WARNING
-        # makes the drop visible to operators, reducing confusion and wasted
-        # LLM budget on undeliverable messages.
-        # (PR #55 review: silent message drop when channel_id set without mentions.)
-        # Empty mentions is a no-op, not a failure.  Return "no_targets"
-        # instead of falling through to the dispatch loop where dispatched=0
-        # would produce a misleading "failed" status.  A channel-only message
-        # with no mentions is an intentional routing choice (future feature),
-        # not an error.  (F-60-R2-2: distinguish no-op from all-failed.)
-        if not mentions:
-            if target_channel:
-                logger.warning(
-                    "Agent %s SEND_MESSAGE to channel %s has no mentions — "
-                    "message not routed (channel routing not yet implemented)",
-                    sender_id,
-                    target_channel,
-                )
-            else:
-                logger.debug(
-                    "Agent %s SEND_MESSAGE has no mentions, message not routed",
-                    sender_id,
-                )
-            return {
-                "action_type": "send_message",
-                "status": "no_targets",
-                "dispatched_to": 0,
-            }
-        dispatched = 0
-        for target_id in mentions:
-            try:
-                # Propagate cascade_depth so that cross-agent message
-                # chains are bounded by the dispatcher's max_cascade_depth.
-                # Without this, each SEND_MESSAGE would restart at depth 0,
-                # bypassing the cascade limit entirely.
-                # (PR #55 review: cascade depth not propagated through SEND_MESSAGE.)
-                event = AgentEvent(
-                    event_type=EventType.MESSAGE_RECEIVED,
-                    payload={
-                        "content": content,
-                        "channel_id": target_channel,
-                    },
-                    channel_id=target_channel,
-                    sender_id=sender_id,
-                    metadata={"cascade_depth": cascade_depth},
-                )
-                await asyncio.wait_for(
-                    self._dispatcher.dispatch(target_id, event),
-                    timeout=_DEFAULT_DISPATCH_TIMEOUT,
-                )
-                dispatched += 1
-            except TimeoutError:
-                # Per-dispatch timeout prevents a hung target agent from
-                # blocking the sender indefinitely.
-                # (F-5b-4: per-dispatch timeout in _handle_send_message.)
-                logger.warning(
-                    "Dispatch from %s to %s timed out after %.0fs",
-                    sender_id, target_id, _DEFAULT_DISPATCH_TIMEOUT,
-                )
-            except Exception:
-                # execute() promises "Non-fatal failures are logged but
-                # do not propagate."  Without this guard a single failed
-                # dispatch would skip remaining mentions and propagate
-                # the exception up to the executor loop.
-                # (Review finding: _handle_send_message exception propagation.)
-                logger.warning(
-                    "Failed to dispatch message from %s to %s",
-                    sender_id, target_id, exc_info=True,
-                )
-
-        # Use "failed" status when all dispatches timed out or errored,
-        # so callers don't see a successful-looking result with dispatched_to=0.
-        # (F-60-6: status "dispatched" with dispatched_to=0 is misleading.)
-        status = "dispatched" if dispatched > 0 else "failed"
-        return {
-            "action_type": "send_message",
-            "status": status,
-            "dispatched_to": dispatched,
-        }
-
-
-# ─── Event Dispatcher ─────────────────────────────────────
-
-
-class EventDispatcher:
-    """Routes events to persona agents with cascade depth limiting.
-
-    Prevents infinite event loops by tracking cascade depth in
-    ``event.metadata["cascade_depth"]``. Events beyond ``max_cascade_depth``
-    are logged and dropped.
-    """
-
-    def __init__(
-        self,
-        agents: dict[str, _LLMPersonaAgent] | None = None,
-        max_cascade_depth: int = 5,
-    ) -> None:
-        self._agents: dict[str, _LLMPersonaAgent] = agents or {}
-        self._max_cascade_depth = max_cascade_depth
-        self._tick_schedulers: dict[str, TickScheduler] = {}
-        self._executor: ActionExecutor = ActionExecutor(dispatcher=self)
-
-    def register_agent(self, agent_id: str, agent: _LLMPersonaAgent) -> None:
-        """Register a persona agent for event dispatch."""
-        self._agents[agent_id] = agent
-
-    def register_tick_scheduler(self, agent_id: str, scheduler: TickScheduler) -> None:
-        """Register a tick scheduler to wake on incoming events."""
-        self._tick_schedulers[agent_id] = scheduler
-
-    @property
-    def executor(self) -> ActionExecutor:
-        """Public access to the action executor.
-
-        Avoids callers needing to reach into the private ``_executor``
-        attribute.  (Review finding: private attribute coupling.)
-        """
-        return self._executor
-
-    async def dispatch(
-        self,
-        target_id: str,
-        event: AgentEvent,
-    ) -> list[AgentAction]:
-        """Dispatch an event to a target agent, execute resulting actions.
-
-        Creates a shallow copy of the event with incremented cascade depth
-        to avoid mutating the caller's event object.  Returns the agent's
-        actions (post-execution).
-
-        .. note::
-
-           **Lock acquisition intentionally at agent level, not dispatcher level.**
-           RFC 0005 spec (L382–401) shows ``async with agent.exclusive()`` inside
-           ``dispatch()``.  However, ``on_event()`` already acquires the per-agent
-           lock internally.  Acquiring it here would deadlock because
-           ``asyncio.Lock`` is not reentrant (dispatch → lock → on_event → lock).
-           This is acceptable for MVP: only ``_LLMPersonaAgent`` exists, and it
-           always acquires the lock in ``on_event()``.  If ``PersonaAgent`` is
-           subclassed without internal locking, the dispatcher should be revisited
-           to acquire the lock externally — or use a reentrant lock.
-           (PR #55 review: dispatcher does not acquire per-agent lock.)
-
-        .. note::
-
-           Memory context (episodic recall, relationship summaries, recent
-           notes) is injected into the agent's working memory at the start
-           of ``_on_event_inner()`` via ``_inject_memory_context()``.
-           (F-5b-1: implemented in PR 7b.)
-        """
-        depth = event.metadata.get("cascade_depth", 0)
-        if depth >= self._max_cascade_depth:
-            logger.warning(
-                "Cascade depth %d reached for agent %s, dropping event %s",
-                depth,
-                target_id,
-                event.event_type.value,
-            )
-            return []
-
-        agent = self._agents.get(target_id)
-        if agent is None:
-            logger.warning(
-                "Event dispatch target %s not found (event: %s)",
-                target_id,
-                event.event_type.value,
-            )
-            return []
-
-        # Create a shallow copy of event with incremented cascade depth
-        # to avoid mutating the caller's event object — prevents incorrect
-        # depth tracking if the same event were dispatched to multiple
-        # targets or reused.  (Review finding: in-place metadata mutation.)
-        # Deep-copy payload to fully isolate nested mutable structures
-        # (lists, dicts inside payload values) between dispatch targets.
-        # Shallow {**event.payload} only copies top-level keys.
-        # (Review finding: shallow copy depth for event payload.)
-        event = AgentEvent(
-            event_type=event.event_type,
-            payload=copy.deepcopy(event.payload),
-            channel_id=event.channel_id,
-            sender_id=event.sender_id,
-            message_id=event.message_id,
-            timestamp=event.timestamp,
-            metadata={**event.metadata, "cascade_depth": depth + 1},
-        )
-
-        # Wake tick scheduler if idle
-        scheduler = self._tick_schedulers.get(target_id)
-        if scheduler is not None:
-            scheduler.wake()
-
-        # Deliver event
-        actions = await agent.on_event(event)
-
-        # Execute resulting actions, propagating cascade depth so that
-        # SEND_MESSAGE actions inherit the current depth for child dispatches.
-        await self._executor.execute(
-            target_id, actions, cascade_depth=depth + 1,
-        )
-
-        return actions
-
-
-# ─── Tick Scheduler ────────────────────────────────────────
-
-
-class TickScheduler:
-    """Autonomous tick loop for persona agents.
-
-    Fires ``on_tick()`` at configurable intervals. Tracks idle ticks
-    (consecutive ``DO_NOTHING`` actions) and skips LLM calls when idle.
-    Supports ``wake()`` to reset idle state on incoming events.
-    """
-
-    # Minimum tick interval to prevent accidental busy loops from
-    # zero or negative configuration values.
-    _MIN_INTERVAL: float = 0.01
-
-    def __init__(
-        self,
-        agent: _LLMPersonaAgent,
-        *,
-        interval: float = 60.0,
-        max_actions_per_tick: int = 3,
-        idle_after_ticks: int = 10,
-        executor: ActionExecutor | None = None,
-    ) -> None:
-        self._agent = agent
-        if interval < self._MIN_INTERVAL:
-            logger.warning(
-                "Tick interval %.2fs below minimum, clamping to %.1fs",
-                interval,
-                self._MIN_INTERVAL,
-            )
-            interval = self._MIN_INTERVAL
-        self._interval = interval
-        self._max_actions_per_tick = max_actions_per_tick
-        self._idle_after_ticks = idle_after_ticks
-        self._executor = executor
-        self._idle_count = 0
-        self._task: asyncio.Task[None] | None = None
-        self._stopped = asyncio.Event()
-        self._wake_event = asyncio.Event()
-
-    @property
-    def idle_count(self) -> int:
-        """Number of consecutive idle ticks."""
-        return self._idle_count
-
-    @property
-    def is_idle(self) -> bool:
-        """Whether the scheduler has exceeded idle_after_ticks threshold."""
-        return self._idle_count >= self._idle_after_ticks
-
-    @property
-    def is_running(self) -> bool:
-        """Whether the tick loop task is active."""
-        return self._task is not None and not self._task.done()
-
-    def wake(self) -> None:
-        """Reset idle state and wake the tick loop.
-
-        Called by EventDispatcher when an event arrives for this agent.
-        """
-        self._idle_count = 0
-        self._wake_event.set()
-
-    def start(self) -> None:
-        """Start the tick loop as an asyncio task."""
-        if self._task is not None and not self._task.done():
-            return
-        self._stopped.clear()
-        self._task = asyncio.create_task(self._run(), name=f"tick-{self._agent.agent_id}")
-
-    async def stop(self, timeout: float = 10.0) -> None:
-        """Stop the tick loop, waiting for in-flight operations.
-
-        Args:
-            timeout: Maximum seconds to wait for the current tick to complete.
-        """
-        self._stopped.set()
-        self._wake_event.set()  # Unblock any wait
-        if self._task is not None and not self._task.done():
-            try:
-                # shield() prevents wait_for's cancellation from killing
-                # the task — _stopped + _wake_event already signal _run()
-                # to exit cleanly.  If it doesn't exit within `timeout`,
-                # we cancel the task explicitly in the TimeoutError branch.
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
-            except TimeoutError:
-                logger.warning(
-                    "Tick scheduler for %s did not stop within %.0fs, cancelling",
-                    self._agent.agent_id,
-                    timeout,
-                )
-                self._task.cancel()
-                try:
-                    await self._task
-                except asyncio.CancelledError:
-                    pass
-            except asyncio.CancelledError:
-                pass
-        self._task = None
-
-    async def _run(self) -> None:
-        """Main tick loop."""
-        logger.info(
-            "Tick scheduler started for %s (interval=%.0fs, idle_after=%d)",
-            self._agent.agent_id,
-            self._interval,
-            self._idle_after_ticks,
-        )
-        while not self._stopped.is_set():
-            # Wait for interval or wake signal
-            self._wake_event.clear()
-            try:
-                await asyncio.wait_for(
-                    self._wait_for_stop_or_wake(),
-                    timeout=self._interval,
-                )
-                # _stopped or _wake_event was set
-                if self._stopped.is_set():
-                    break
-                # Woken up — fall through to tick immediately
-            except TimeoutError:
-                # Normal interval elapsed
-                pass
-
-            if self._stopped.is_set():
-                break
-
-            # Skip LLM calls when idle, but still recover energy so
-            # woken agents aren't energy-depleted after long idle periods.
-            # Brief lock acquire ensures consistency with concurrent
-            # on_event() which may drain_energy().
-            # (Review finding: idle energy starvation.)
-            if self.is_idle:
-                logger.debug(
-                    "Agent %s idle (%d ticks), skipping LLM tick",
-                    self._agent.agent_id,
-                    self._idle_count,
-                )
-                # Use public API instead of reaching into private
-                # attributes (PR #55 review: TickScheduler should use
-                # public API for agent lock and state).
-                async with self._agent.exclusive():
-                    self._agent.recover_idle_energy()
-                continue
-
-            try:
-                actions = await self._agent.on_tick()
-                # Limit actions per tick
-                actions = actions[: self._max_actions_per_tick]
-
-                # Track idle state
-                all_do_nothing = all(
-                    a.action_type == ActionType.DO_NOTHING for a in actions
-                )
-                if all_do_nothing:
-                    self._idle_count += 1
-                else:
-                    self._idle_count = 0
-
-                # Execute actions
-                if self._executor is not None:
-                    await self._executor.execute(self._agent.agent_id, actions)
-
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "Tick error for agent %s", self._agent.agent_id,
-                )
-
-        logger.info("Tick scheduler stopped for %s", self._agent.agent_id)
-
-    async def _wait_for_stop_or_wake(self) -> None:
-        """Wait until either ``_stopped`` or ``_wake_event`` is set.
-
-        Creates two ``asyncio.Task`` objects — one for each event — and
-        uses ``asyncio.wait(return_when=FIRST_COMPLETED)`` to unblock as
-        soon as either fires.  The losing task is cancelled in the
-        ``finally`` block to avoid leaked coroutines.
-
-        This dual-event pattern avoids race conditions that would arise
-        from sequential ``await`` calls (missing the other signal while
-        waiting on the first).
-        """
-        stop_task = asyncio.create_task(self._stopped.wait())
-        wake_task = asyncio.create_task(self._wake_event.wait())
-        try:
-            await asyncio.wait(
-                {stop_task, wake_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        finally:
-            for t in (stop_task, wake_task):
-                if not t.done():
-                    t.cancel()
-                    try:
-                        await t
-                    except asyncio.CancelledError:
-                        pass

@@ -20,18 +20,19 @@ from agents.llm_client import (
     Usage,
 )
 from agents.persona import (
-    DIMENSION_DESCRIPTIONS,
+    _LLMPersonaAgent,
+    _coerce_event_timeout,
+    _truncate_with_ellipsis,
+    create_persona_agent,
+)
+from agents.persona_behavior import DIMENSION_DESCRIPTIONS, render_behavior
+from agents.persona_types import (
     ActionType,
     AgentEvent,
     EventType,
     Mood,
     PersonaState,
     SubAgentRequest,
-    _LLMPersonaAgent,
-    _coerce_event_timeout,
-    _truncate_with_ellipsis,
-    create_persona_agent,
-    render_behavior,
 )
 from agents.tools.registry import clear_registry
 
@@ -109,6 +110,142 @@ _PERSONA_CONFIG: dict = {
 
 def _task(payload: str = "do something") -> TaskInput:
     return TaskInput(task_id="t1", workflow_id="w1", payload=payload)
+
+
+# ─── Module Import Smoke Tests ──────────────────────────────
+# Verify each extracted module is independently importable without
+# circular-import errors.  All other tests go through persona.py
+# re-exports, which would mask import-order issues.  (F-64-04)
+
+
+class TestModuleImports:
+    def test_persona_types_importable(self):
+        from agents import persona_types
+
+        assert hasattr(persona_types, "EventType")
+
+    def test_persona_behavior_importable(self):
+        from agents import persona_behavior
+
+        assert hasattr(persona_behavior, "render_behavior")
+
+    def test_dispatch_importable(self):
+        from agents import dispatch
+
+        assert hasattr(dispatch, "EventDispatcher")
+
+    def test_tick_importable(self):
+        from agents import tick
+
+        assert hasattr(tick, "TickScheduler")
+
+    def test_sub_agent_status_reexported(self):
+        """SubAgentStatus must remain importable from persona.py (F-64-01)."""
+        from agents.persona import SubAgentStatus
+
+        assert hasattr(SubAgentStatus, "COMPLETED")
+
+    def test_reexports_backward_compat(self):
+        """Key symbols remain importable from persona.py via re-exports.
+
+        Functional tests now import from the specific submodules directly.
+        This test guards the re-export layer for external consumers that
+        still use ``from agents.persona import X``.
+        (PR #64 review: keep one test verifying re-export path.)
+        """
+        from agents.persona import (  # noqa: F401
+            ActionExecutor,
+            ActionType,
+            AgentAction,
+            AgentEvent,
+            DIMENSION_DESCRIPTIONS,
+            EventDispatcher,
+            EventType,
+            Mood,
+            PersonaState,
+            TickScheduler,
+            render_behavior,
+        )
+
+        # Spot-check a symbol from each extracted module
+        assert ActionExecutor is not None  # dispatch
+        assert TickScheduler is not None  # tick
+        assert PersonaState is not None  # persona_types
+        assert render_behavior is not None  # persona_behavior
+
+    def test_reexports_exhaustive(self):
+        """All public symbols from new submodules are re-exported from persona.py.
+
+        Programmatically verifies that every symbol in each submodule's
+        ``__all__`` is importable from ``agents.persona``. Catches
+        accidental omissions when symbols are added to a submodule but
+        not to the persona.py re-export block.
+        (PR #64 review F-64-DR-16: re-export maintenance burden.)
+        """
+        import agents.persona as persona
+        from agents import dispatch, persona_behavior, persona_types, tick
+
+        missing: list[str] = []
+        for module in (persona_types, persona_behavior, dispatch, tick):
+            for name in getattr(module, "__all__", []):
+                if not hasattr(persona, name):
+                    missing.append(f"{module.__name__}.{name}")
+
+        assert not missing, (
+            f"Symbols not re-exported from agents.persona: {missing}"
+        )
+
+    def test_persona_all_includes_submodule_symbols(self):
+        """persona.py __all__ includes all submodule __all__ symbols.
+
+        Verifies that persona.py's __all__ is a superset of all four
+        extracted submodule __all__ lists.  Without this, ``from
+        agents.persona import *`` would silently drop symbols that are
+        available via explicit import.
+        (F-64-DR5-06: persona.py had no __all__ — now verified.)
+        """
+        import agents.persona as persona
+        from agents import dispatch, persona_behavior, persona_types, tick
+
+        persona_all = set(getattr(persona, "__all__", []))
+        missing: list[str] = []
+        for module in (persona_types, persona_behavior, dispatch, tick):
+            for name in getattr(module, "__all__", []):
+                if name not in persona_all:
+                    missing.append(f"{module.__name__}.{name}")
+
+        assert not missing, (
+            f"Symbols in submodule __all__ but not in persona.__all__: {missing}"
+        )
+
+    def test_circular_import_isolation(self):
+        """Each extracted module imports without persona.py loaded first.
+
+        Runs a subprocess that imports each new module in isolation,
+        verifying no circular import errors.  In-process import tests
+        (test_*_importable above) cannot detect this because persona.py
+        is already loaded at the module level of this test file.
+        (F-64-DR5-08: no explicit circular import test in isolation.)
+        """
+        import subprocess
+        import sys
+
+        script = (
+            "import importlib; "
+            "[importlib.import_module(m) for m in "
+            "('agents.persona_types', 'agents.persona_behavior', "
+            "'agents.dispatch', 'agents.tick')]"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Circular import detected in isolated subprocess:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
 
 # ─── Mood Enum Tests ────────────────────────────────────────
@@ -299,7 +436,7 @@ class TestRenderBehavior:
 
     def test_unknown_dimension_ignored(self, caplog):
         behavior = {"unknown_dim": "unknown_val"}
-        with caplog.at_level("WARNING", logger="agents.persona"):
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
             rendered = render_behavior(behavior)
         # Should still have defaults for known dimensions
         assert "Balances directness with tact" in rendered
@@ -314,6 +451,54 @@ class TestRenderBehavior:
         # but other defaults should still be present
         assert "super-direct" not in rendered
         assert "Balances speed" in rendered
+
+    def test_unknown_value_logs_warning(self, caplog):
+        """Unknown values of a known dimension log a warning with valid values.
+
+        Previously, unknown dimension values silently produced no output line.
+        Operators had no way to know a typo was causing a missing behavioral
+        description.  Now a WARNING is logged listing the valid values.
+        (PR #64 review F-64-DR-05: unknown dimension values silently
+        produce no output — no warning logged.)
+        """
+        behavior = {"directness": "super-direct"}
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
+            render_behavior(behavior)
+        assert any(
+            "Unknown value" in r.message
+            and "super-direct" in r.message
+            and "directness" in r.message
+            for r in caplog.records
+        )
+
+    def test_all_invalid_values_still_produces_defaults(self, caplog):
+        """All user-provided values invalid — defaults still produce full output.
+
+        When every dimension has an unrecognised value, the merged dict
+        contains only invalid values for the user-specified keys, but
+        defaults should fill in for any unspecified dimensions.  If all
+        five dimensions are overridden with invalid values, the rendered
+        output should be empty (no valid descriptions) and five warnings
+        should be logged.
+        (PR #64 review F-64-DR-22: render_behavior all-invalid-values edge case.)
+        """
+        behavior = {
+            "directness": "xyz",
+            "detail_focus": "abc",
+            "formality": "nope",
+            "risk_tolerance": "invalid",
+            "expressiveness": "wrong",
+        }
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
+            rendered = render_behavior(behavior)
+        # All five dimensions have invalid values — no description lines produced
+        assert rendered == ""
+        # A warning should be logged for each invalid value
+        warning_records = [
+            r for r in caplog.records
+            if "Unknown value" in r.message
+        ]
+        assert len(warning_records) == 5
 
     @pytest.mark.parametrize("dimension,values", [
         ("directness", ["indirect", "balanced", "direct"]),
