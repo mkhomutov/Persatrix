@@ -1068,7 +1068,7 @@ orchestr8/
 │       └── llm_mocks/
 ├── docker-compose.yaml
 ├── Makefile
-├── LICENSE                     # Apache 2.0
+├── LICENSE                     # BUSL 1.1
 └── README.md
 ```
 
@@ -1116,7 +1116,7 @@ orchestr8/
 - [ ] Structured JSON logging with OTEL trace correlation
 - [ ] Error messages and developer experience polish
 - [ ] End-to-end integration tests (including MCP + permission + resilience scenarios)
-- [ ] README, getting-started guide, example workflows, LICENSE (Apache 2.0)
+- [ ] README, getting-started guide, example workflows, LICENSE (BUSL 1.1)
 
 ---
 
@@ -1399,7 +1399,7 @@ orch restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 | Cost tracking | Token counting + model price table | Enables budget enforcement and cost attribution from day one |
 | Testing | Mock LLM replay + sandbox mode + persona consistency evals | Agents are non-deterministic; testing requires recorded responses and evaluation |
 | Human participants | Humans as bridge-connected agent type | Humans join channels and protocols as peers; framework waits for their input |
-| License | Apache 2.0 | Permissive, enterprise-friendly, compatible with most ecosystems |
+| License | BUSL 1.1 | Source-available with a delayed Apache 2.0 conversion for each version |
 
 ---
 

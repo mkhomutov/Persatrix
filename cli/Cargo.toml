@@ -3,7 +3,7 @@ name = "orch"
 version = "0.1.0"
 edition = "2021"
 description = "Orchestr8 CLI — manage agents, workflows, and the mesh"
-license = "Apache-2.0"
+license = "BUSL-1.1"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
