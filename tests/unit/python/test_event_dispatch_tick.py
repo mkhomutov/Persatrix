@@ -907,6 +907,35 @@ class TestTickScheduler:
         await agent.close_memory()
 
 
+class TestTickSchedulerProductionDefaults:
+    """Tests for TickScheduler production defaults without fixture override.
+
+    Separated from TestTickScheduler which uses _lower_min_interval
+    autouse fixture.  These tests verify production behavior at the
+    default _MIN_INTERVAL = 1.0s.
+    (F-64-DR5-09: no test verifies production _MIN_INTERVAL without
+    fixture override.)
+    """
+
+    def test_min_interval_production_default(self):
+        """Production _MIN_INTERVAL is 1.0s, not the test-lowered value."""
+        assert TickScheduler._MIN_INTERVAL == 1.0, (
+            f"Expected production _MIN_INTERVAL=1.0, "
+            f"got {TickScheduler._MIN_INTERVAL}"
+        )
+
+    async def test_sub_second_interval_clamped_to_min(self):
+        """Agent with interval=0.5 is clamped to _MIN_INTERVAL at production default."""
+        agent = await _make_agent()
+        scheduler = TickScheduler(agent, interval=0.5)
+        # The scheduler should clamp to _MIN_INTERVAL (1.0s)
+        assert scheduler._interval >= TickScheduler._MIN_INTERVAL, (
+            f"interval={scheduler._interval} should be >= "
+            f"_MIN_INTERVAL={TickScheduler._MIN_INTERVAL}"
+        )
+        await agent.close_memory()
+
+
 # ─── Server Persona Wiring Tests ────────────────────────────
 
 

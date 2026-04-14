@@ -195,6 +195,58 @@ class TestModuleImports:
             f"Symbols not re-exported from agents.persona: {missing}"
         )
 
+    def test_persona_all_includes_submodule_symbols(self):
+        """persona.py __all__ includes all submodule __all__ symbols.
+
+        Verifies that persona.py's __all__ is a superset of all four
+        extracted submodule __all__ lists.  Without this, ``from
+        agents.persona import *`` would silently drop symbols that are
+        available via explicit import.
+        (F-64-DR5-06: persona.py had no __all__ — now verified.)
+        """
+        import agents.persona as persona
+        from agents import dispatch, persona_behavior, persona_types, tick
+
+        persona_all = set(getattr(persona, "__all__", []))
+        missing: list[str] = []
+        for module in (persona_types, persona_behavior, dispatch, tick):
+            for name in getattr(module, "__all__", []):
+                if name not in persona_all:
+                    missing.append(f"{module.__name__}.{name}")
+
+        assert not missing, (
+            f"Symbols in submodule __all__ but not in persona.__all__: {missing}"
+        )
+
+    def test_circular_import_isolation(self):
+        """Each extracted module imports without persona.py loaded first.
+
+        Runs a subprocess that imports each new module in isolation,
+        verifying no circular import errors.  In-process import tests
+        (test_*_importable above) cannot detect this because persona.py
+        is already loaded at the module level of this test file.
+        (F-64-DR5-08: no explicit circular import test in isolation.)
+        """
+        import subprocess
+        import sys
+
+        script = (
+            "import importlib; "
+            "[importlib.import_module(m) for m in "
+            "('agents.persona_types', 'agents.persona_behavior', "
+            "'agents.dispatch', 'agents.tick')]"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Circular import detected in isolated subprocess:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
 
 # ─── Mood Enum Tests ────────────────────────────────────────
 

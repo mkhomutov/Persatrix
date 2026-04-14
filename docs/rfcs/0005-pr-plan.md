@@ -963,11 +963,11 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 | File | Change |
 |------|--------|
-| `agents/persona_types.py` | **New** — extract `PersonaState`, `Mood` enum, `AgentEvent`, `EventType`, `AgentAction`, `ActionType`, `ToolCall`, `LLMToolResult` dataclasses/enums (~150 lines) |
+| `agents/persona_types.py` | **New** — extract `PersonaState`, `Mood` enum, `AgentEvent`, `EventType`, `AgentAction`, `ActionType` dataclasses/enums (~150 lines). _Note: `ToolCall` and `LLMToolResult` were originally listed for extraction here but are defined in `llm_client.py`, not `persona.py` — not in scope for this PR._ (F-64-DR5-02) |
 | `agents/persona_behavior.py` | **New** — extract `render_behavior()`, `DIMENSION_DESCRIPTIONS` mapping (~80 lines) |
 | `agents/dispatch.py` | **New** — extract `EventDispatcher`, `ActionExecutor` classes (~250 lines) |
 | `agents/tick.py` | **New** — extract `TickScheduler` class (~160 lines) |
-| `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `_LLMPersonaAgent`, `create_persona_agent()` factory (~600 lines). Update imports to reference new modules |
+| `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `_LLMPersonaAgent`, `create_persona_agent()` factory (~1,190 lines actual — `_LLMPersonaAgent` grew during review fix rounds 7b; further splitting tracked as follow-up). Update imports to reference new modules |
 | `agents/__init__.py` | Update re-exports for public API stability |
 | `agents/server.py` | Update imports for `EventDispatcher`, `ActionExecutor`, `TickScheduler` |
 | `tests/unit/python/test_persona_runtime.py` | Update imports |
@@ -976,7 +976,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### Key implementation details
 
-- **Pure move refactoring**: no logic changes, no renames, no behavioral differences. Every function and class body is moved verbatim.
+- **Move refactoring with review fixes**: code moved verbatim, plus minor safety improvements applied during PR review rounds (F-64-DR* findings): `_MIN_INTERVAL` raised to 1.0s, `assert` replaced with `if/raise RuntimeError`, `metadata` deep-copied, unknown dimension value warnings added. (F-64-DR5-03)
 - **Public API preserved**: `agents/__init__.py` re-exports all moved symbols so external imports (`from agents import PersonaState`) continue to work.
 - **Import graph**: `persona.py` imports from `persona_types`, `persona_behavior`, `dispatch`, `tick`. `dispatch.py` imports from `persona_types`. `tick.py` imports from `persona_types` and `dispatch`. No circular dependencies.
 - **Test-verified**: full test suite must pass with zero changes to test assertions — only import paths change.
@@ -990,10 +990,10 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 - [x] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
 - [x] `ruff check agents/` clean
-- [ ] `persona.py` ≤ 650 lines (actual: ~1190 — `_LLMPersonaAgent` grew during review rounds)
+- [ ] ~~`persona.py` ≤ 650 lines~~ — actual ~1,190 lines. `_LLMPersonaAgent` grew during review fix rounds. Further splitting tracked as follow-up (F-64-DR5-01/28)
 - [x] No circular imports (each new module importable independently)
 - [x] `agents/__init__.py` re-exports preserve public API
-- [x] `git diff --stat` shows only moves + import edits (no logic changes)
+- [x] `git diff --stat` shows moves + import edits + review safety fixes (F-64-DR* findings — see key implementation details)
 
 ---
 

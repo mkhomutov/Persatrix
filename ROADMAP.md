@@ -74,7 +74,11 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
-| `agents/persona.py` | PersonaAgent runtime (persona state, behavior dimensions, LLM event loop, memory integration, event dispatch, tick scheduler) | ✅ Complete (RFC 0005 PR 5a+5b) |
+| `agents/persona.py` | PersonaAgent ABC, _LLMPersonaAgent, create_persona_agent() factory | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a) |
+| `agents/persona_types.py` | Persona type definitions (PersonaState, Mood, AgentEvent, EventType, AgentAction, ActionType) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/persona_behavior.py` | Behavioral dimension rendering (render_behavior, DIMENSION_DESCRIPTIONS) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/dispatch.py` | Event dispatch and action execution (EventDispatcher, ActionExecutor) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/tick.py` | Autonomous tick scheduler (TickScheduler) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |

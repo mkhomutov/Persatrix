@@ -15,6 +15,36 @@ and the tick scheduler in ``tick``.
 
 from __future__ import annotations
 
+# Public API of this module.  Includes the two locally-defined public
+# symbols plus all symbols re-exported from extracted submodules (their
+# __all__ lists).  Keeps persona.py consistent with the four submodules
+# that already define __all__.
+# (F-64-DR5-06: no __all__ defined — inconsistent with extracted modules.)
+__all__ = [
+    # Local public symbols
+    "PersonaAgent",
+    "create_persona_agent",
+    # Re-exported from persona_types
+    "ActionType",
+    "AgentAction",
+    "AgentEvent",
+    "EventType",
+    "Mood",
+    "OrchestratorClient",
+    "PersonaState",
+    "SubAgentRequest",
+    "SubAgentResult",
+    "SubAgentStatus",
+    # Re-exported from persona_behavior
+    "DIMENSION_DESCRIPTIONS",
+    "render_behavior",
+    # Re-exported from dispatch
+    "ActionExecutor",
+    "EventDispatcher",
+    # Re-exported from tick
+    "TickScheduler",
+]
+
 import asyncio
 import json
 import logging
