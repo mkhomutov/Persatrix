@@ -71,5 +71,6 @@ All notable changes to this project will be documented in this file.
 ### 📦 Miscellaneous
 
 - Update FILEMAP.md
+- *(license)* Adopt Business Source License 1.1 (#63)
 
 

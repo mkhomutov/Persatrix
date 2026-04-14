@@ -121,5 +121,5 @@ See [ROADMAP.md](ROADMAP.md) for detailed progress tracking, RFC status, and com
 
 Orchestr8 is distributed under the Business Source License 1.1 (`BUSL-1.1`).
 Production use is not granted under the default terms in this repository.
-On 2030-04-14, use of this software will transition to Apache License, Version 2.0.
+Each version transitions to Apache License, Version 2.0 four years after its first public release.
 See [LICENSE](LICENSE) for the full terms.
