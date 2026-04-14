@@ -118,6 +118,40 @@ fn validate_path_param(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate that a resource ID matches the cross-component contract
+/// `^[a-z0-9][a-z0-9-]*[a-z0-9]$` shared with the Go orchestrator registry.
+/// Catches malformed IDs early with a clear client-side error message instead
+/// of round-tripping to the server.
+fn validate_resource_id(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{label} cannot be empty"));
+    }
+    // Single-character IDs are valid per updated schema
+    // (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$).
+    let bytes = value.as_bytes();
+    if !bytes[0].is_ascii_lowercase() && !bytes[0].is_ascii_digit() {
+        return Err(format!(
+            "invalid {label} {value:?}: must start with lowercase letter or digit"
+        ));
+    }
+    if bytes.len() > 1 {
+        let last = bytes[bytes.len() - 1];
+        if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+            return Err(format!(
+                "invalid {label} {value:?}: must end with lowercase letter or digit"
+            ));
+        }
+        for &b in &bytes[1..bytes.len() - 1] {
+            if !b.is_ascii_lowercase() && !b.is_ascii_digit() && b != b'-' {
+                return Err(format!(
+                    "invalid {label} {value:?}: only lowercase letters, digits, and hyphens allowed"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Execute a workflow
@@ -296,7 +330,9 @@ async fn main() {
     let cli = Cli::parse();
     let server = cli.server.trim_end_matches('/');
 
-    if !server.starts_with("http://") && !server.starts_with("https://") {
+    // Case-insensitive scheme check — HTTP URLs are case-insensitive per RFC 7230.
+    let server_lower = server.to_lowercase();
+    if !server_lower.starts_with("http://") && !server_lower.starts_with("https://") {
         eprintln!(
             "{} --server must start with http:// or https://",
             "error:".red().bold()
@@ -322,7 +358,11 @@ async fn main() {
                     "warning: --profile is not yet supported by the server, ignored".yellow()
                 );
             }
-            cmd_run(&client, server, &workflow, input.as_deref()).await
+            if let Err(e) = validate_resource_id(&workflow, "workflow ID") {
+                Err(e)
+            } else {
+                cmd_run(&client, server, &workflow, input.as_deref()).await
+            }
         }
 
         Commands::Status { execution_id } => {
@@ -333,11 +373,21 @@ async fn main() {
             AgentCommands::List => cmd_agent_list(&client, server).await,
             AgentCommands::Info { agent_id } => cmd_agent_info(&client, server, &agent_id).await,
             AgentCommands::Reload {
-                agent_id: _,
+                agent_id,
                 config: _,
             } => {
-                println!("{}", "Agent reload not yet implemented".yellow());
-                Ok(())
+                // Validate early for consistency with Info and cmd_test_persona.
+                // Defense-in-depth: when reload is implemented the validation
+                // is already in place.
+                if let Err(e) = validate_resource_id(&agent_id, "agent ID") {
+                    Err(e)
+                } else {
+                    println!(
+                        "{}",
+                        format!("Agent reload for '{}' not yet implemented", agent_id).yellow()
+                    );
+                    Ok(())
+                }
             }
         },
 
@@ -371,7 +421,6 @@ async fn main() {
             record,
         } => {
             if let Some(ref id) = persona {
-                // F-6b-4: Warn when extra test flags are silently ignored.
                 if agent.is_some() || workflow.is_some() || record {
                     eprintln!(
                         "{}",
@@ -498,7 +547,10 @@ async fn cmd_status(
             println!("{:<14} {}", "Run ID:".bold(), run.run_id);
             println!("{:<14} {}", "Workflow:".bold(), run.workflow_id);
             println!("{:<14} {}", "Status:".bold(), colorize_status(&run.status));
-            if let Some(ref err) = run.error {
+            // Guard against empty error strings: Go's omitempty omits the field
+            // when empty, but a non-Go server could send "error": "". Without
+            // this filter the CLI would print a blank "Error:" line.
+            if let Some(err) = run.error.as_deref().filter(|e| !e.is_empty()) {
                 println!("{:<14} {}", "Error:".bold(), err.red());
             }
             if let Some(ref t) = run.started_at {
@@ -563,7 +615,8 @@ async fn cmd_agent_info(
     server: &str,
     agent_id: &str,
 ) -> Result<(), String> {
-    validate_path_param(agent_id, "agent ID")?;
+    // Agent IDs follow the same cross-component contract as workflow IDs.
+    validate_resource_id(agent_id, "agent ID")?;
     let resp = client
         .get(format!("{server}/api/v1/agents/{agent_id}"))
         .send()
@@ -628,9 +681,14 @@ async fn cmd_logs(
 // NOTE: `validate` is the only CLI command that runs locally (subprocess) instead
 // of via the orchestrator REST API. This deviates from the thin-client pattern.
 // A server-side POST /api/v1/config/validate endpoint would be architecturally
-// consistent — tracked for future improvement. (F-6b-3)
+// consistent — tracked for future improvement.
 async fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
-    // F-6b-1: Python validator does not implement --strict yet.
+    // Whitespace-only paths pass through to Python and produce confusing errors.
+    if path.trim().is_empty() {
+        return Err("validation path cannot be empty".to_string());
+    }
+
+    // Python validator does not implement --strict yet.
     if strict {
         eprintln!(
             "{}",
@@ -642,14 +700,20 @@ async fn cmd_validate(path: &str, strict: bool) -> Result<(), String> {
     let python = find_python_binary();
     let args = vec![script.to_string_lossy().to_string(), path.to_string()];
 
-    // F-6b-2: Use async subprocess to avoid blocking a tokio worker thread.
-    // F-6b-6: Timeout prevents indefinite hang if the Python process stalls.
+    // Async subprocess avoids blocking a tokio worker thread.
+    // Timeout prevents indefinite hang if the Python process stalls.
     let mut cmd = ProcessCommand::new(python);
     cmd.args(&args);
     let output = tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output())
         .await
         .map_err(|_| "Python validator timed out after 120 seconds".to_string())?
-        .map_err(|e| format!("failed to run Python validator: {e}"))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                python_not_found_message()
+            } else {
+                format!("failed to run Python validator: {e}")
+            }
+        })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -672,7 +736,9 @@ fn find_validator_script() -> Result<std::path::PathBuf, String> {
     // Try relative to CWD first (most common: running from repo root)
     let cwd_relative = std::path::PathBuf::from("agents/validate.py");
     if cwd_relative.exists() {
-        return Ok(cwd_relative);
+        // Canonicalize to produce clean absolute paths in error messages.
+        return std::fs::canonicalize(&cwd_relative)
+            .map_err(|e| format!("failed to canonicalize {}: {e}", cwd_relative.display()));
     }
 
     // Try relative to the executable location (installed or bin/ layout)
@@ -680,7 +746,9 @@ fn find_validator_script() -> Result<std::path::PathBuf, String> {
         if let Some(parent) = exe.parent() {
             let from_bin = parent.join("../agents/validate.py");
             if from_bin.exists() {
-                return Ok(from_bin);
+                // Canonicalize here too.
+                return std::fs::canonicalize(&from_bin)
+                    .map_err(|e| format!("failed to canonicalize {}: {e}", from_bin.display()));
             }
         }
     }
@@ -691,13 +759,19 @@ fn find_validator_script() -> Result<std::path::PathBuf, String> {
 /// Return the Python interpreter binary name for the current platform.
 /// Windows: `python` (standard name via installer or py launcher).
 /// Unix/macOS: `python3` is preferred — `python` may be absent or
-/// Python 2 on some Linux distributions. (F-6b-7)
+/// Python 2 on some Linux distributions.
 fn find_python_binary() -> &'static str {
     if cfg!(windows) {
         "python"
     } else {
         "python3"
     }
+}
+
+/// Diagnostic error message when Python is not found on PATH.
+fn python_not_found_message() -> String {
+    let binary = find_python_binary();
+    format!("Python not found. Install Python 3.11+ and ensure '{binary}' is on PATH.")
 }
 
 // ─── Test persona command ────────────────────────────────────────────────
@@ -707,7 +781,8 @@ async fn cmd_test_persona(
     server: &str,
     agent_id: &str,
 ) -> Result<(), String> {
-    validate_path_param(agent_id, "agent ID")?;
+    // Agent IDs follow the same cross-component contract as workflow IDs.
+    validate_resource_id(agent_id, "agent ID")?;
 
     println!(
         "{} Testing persona agent: {}",
@@ -732,10 +807,13 @@ async fn cmd_test_persona(
         .map_err(|e| format!("invalid response: {e}"))?;
 
     let mut warnings: Vec<String> = Vec::new();
-    let mut checks_passed = 0;
-    let total_checks = 4;
+    let mut checks_passed: u32 = 0;
+    // Dynamic check counter — adding/removing a check no longer requires
+    // updating a separate hardcoded total.
+    let mut total_checks: u32 = 0;
 
     // Check 1: Agent exists and is reachable
+    total_checks += 1;
     println!(
         "  {} Agent '{}' found (status: {})",
         "✓".green(),
@@ -745,6 +823,7 @@ async fn cmd_test_persona(
     checks_passed += 1;
 
     // Check 2: Agent status is healthy
+    total_checks += 1;
     if agent.status == "healthy" {
         println!("  {} Agent is healthy", "✓".green());
         checks_passed += 1;
@@ -758,20 +837,32 @@ async fn cmd_test_persona(
     }
 
     // Check 3: Agent type is persona
-    if agent.agent_type.as_deref() == Some("persona") {
-        println!("  {} Agent type is 'persona'", "✓".green());
-        checks_passed += 1;
-    } else {
-        let actual = agent.agent_type.as_deref().unwrap_or("unknown");
-        println!(
-            "  {} Agent type is '{}', expected 'persona'",
-            "✗".red(),
-            actual
-        );
-        warnings.push(format!("agent type is '{actual}', not 'persona'"));
+    // Handle missing agent_type (v0.1 servers don't return this field).
+    total_checks += 1;
+    match agent.agent_type.as_deref() {
+        Some("persona") => {
+            println!("  {} Agent type is 'persona'", "✓".green());
+            checks_passed += 1;
+        }
+        Some(other) => {
+            println!(
+                "  {} Agent type is '{}', expected 'persona'",
+                "✗".red(),
+                other
+            );
+            warnings.push(format!("agent type is '{other}', not 'persona'"));
+        }
+        None => {
+            println!(
+                "  {} Agent type unknown (server may not support type field)",
+                "?".yellow()
+            );
+            warnings.push("agent type unknown — server may not support the type field".to_string());
+        }
     }
 
     // Check 4: Agent has capabilities
+    total_checks += 1;
     if !agent.capabilities.is_empty() {
         println!(
             "  {} Agent has {} capability(ies): {}",
@@ -855,5 +946,214 @@ mod tests {
         assert!(validate_path_param("my-agent-01", "test").is_ok());
         assert!(validate_path_param("abc", "test").is_ok());
         assert!(validate_path_param("550e8400-e29b-41d4-a716-446655440000", "test").is_ok());
+    }
+
+    // ─── validate_resource_id tests ──────────────────────────────────────
+
+    #[test]
+    fn validate_resource_id_accepts_valid_ids() {
+        assert!(validate_resource_id("a", "id").is_ok());
+        assert!(validate_resource_id("a1", "id").is_ok());
+        assert!(validate_resource_id("my-agent-01", "id").is_ok());
+        assert!(validate_resource_id("abc", "id").is_ok());
+        assert!(validate_resource_id("code-reviewer", "id").is_ok());
+    }
+
+    #[test]
+    fn validate_resource_id_rejects_empty() {
+        assert!(validate_resource_id("", "id").is_err());
+    }
+
+    #[test]
+    fn validate_resource_id_rejects_uppercase() {
+        assert!(validate_resource_id("MyAgent", "id").is_err());
+        assert!(validate_resource_id("AGENT", "id").is_err());
+    }
+
+    #[test]
+    fn validate_resource_id_rejects_special_chars() {
+        assert!(validate_resource_id("my_agent", "id").is_err());
+        assert!(validate_resource_id("my agent", "id").is_err());
+        assert!(validate_resource_id("agent.1", "id").is_err());
+    }
+
+    #[test]
+    fn validate_resource_id_rejects_leading_trailing_hyphen() {
+        assert!(validate_resource_id("-agent", "id").is_err());
+        assert!(validate_resource_id("agent-", "id").is_err());
+    }
+
+    // ─── Serde contract tests ────────────────────────────────────────────
+
+    #[test]
+    fn submit_workflow_request_serializes_correctly() {
+        let req = SubmitWorkflowRequest {
+            workflow_id: "my-workflow".to_string(),
+            inputs: Some(HashMap::from([("key1".to_string(), "value1".to_string())])),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["workflow_id"], "my-workflow");
+        assert_eq!(json["inputs"]["key1"], "value1");
+        // Verify exact field names match the Go server's API contract
+        assert!(json.get("workflow_id").is_some());
+        assert!(json.get("inputs").is_some());
+    }
+
+    #[test]
+    fn submit_workflow_request_omits_none_inputs() {
+        let req = SubmitWorkflowRequest {
+            workflow_id: "test".to_string(),
+            inputs: None,
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["workflow_id"], "test");
+        // skip_serializing_if = "Option::is_none" should omit inputs
+        assert!(json.get("inputs").is_none());
+    }
+
+    // ─── Response deserialization contract tests ─────────────────────────
+    // Verify the CLI can parse the exact JSON shape the Go server produces
+    // (see internal/server/types.go). A server-side field rename would
+    // silently produce None/default values due to serde's lenient defaults;
+    // these tests catch that.
+
+    #[test]
+    fn workflow_run_response_deserializes_correctly() {
+        // Matches Go workflowRunResponse JSON tags in internal/server/types.go.
+        // Go's omitempty omits the error field when empty, so the canonical
+        // success shape has no "error" key at all.
+        let json = serde_json::json!({
+            "run_id": "run-001",
+            "workflow_id": "feature-builder",
+            "status": "completed",
+            "started_at": "2026-04-14T10:00:00Z",
+            "finished_at": "2026-04-14T10:05:00Z",
+            "steps": {}
+        });
+        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.run_id, "run-001");
+        assert_eq!(resp.workflow_id, "feature-builder");
+        assert_eq!(resp.status, "completed");
+        assert!(resp.error.is_none());
+        assert_eq!(resp.started_at.as_deref(), Some("2026-04-14T10:00:00Z"));
+        assert_eq!(resp.finished_at.as_deref(), Some("2026-04-14T10:05:00Z"));
+    }
+
+    #[test]
+    fn workflow_run_response_deserializes_error_field() {
+        // Go's omitempty sends a non-empty error string on failure.
+        let json = serde_json::json!({
+            "run_id": "run-003",
+            "workflow_id": "feature-builder",
+            "status": "failed",
+            "error": "task timed out",
+            "started_at": "2026-04-14T10:00:00Z",
+            "finished_at": null,
+            "steps": {}
+        });
+        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.status, "failed");
+        assert_eq!(resp.error.as_deref(), Some("task timed out"));
+    }
+
+    #[test]
+    fn workflow_run_response_handles_null_timestamps() {
+        // Go server sends null for zero-valued *time.Time pointers
+        let json = serde_json::json!({
+            "run_id": "run-002",
+            "workflow_id": "test-wf",
+            "status": "pending",
+            "started_at": null,
+            "finished_at": null,
+            "steps": {}
+        });
+        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.status, "pending");
+        assert!(resp.started_at.is_none());
+        assert!(resp.finished_at.is_none());
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn agent_response_deserializes_correctly() {
+        // Matches Go agentResponse JSON tags in internal/server/types.go.
+        // Note: Go server does NOT include agent_type — CLI's #[serde(default)]
+        // correctly handles its absence.
+        let json = serde_json::json!({
+            "id": "code-reviewer",
+            "address": "localhost:50051",
+            "capabilities": ["review", "lint"],
+            "status": "healthy"
+        });
+        let resp: AgentResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.id, "code-reviewer");
+        assert_eq!(resp.address, "localhost:50051");
+        assert_eq!(resp.capabilities, vec!["review", "lint"]);
+        assert_eq!(resp.status, "healthy");
+        assert!(resp.agent_type.is_none(), "Go server omits agent_type");
+    }
+
+    #[test]
+    fn agent_response_with_empty_capabilities() {
+        // Go server normalizes capabilities to empty slice, not null
+        let json = serde_json::json!({
+            "id": "new-agent",
+            "address": "localhost:50052",
+            "capabilities": [],
+            "status": "offline"
+        });
+        let resp: AgentResponse = serde_json::from_value(json).unwrap();
+        assert!(resp.capabilities.is_empty());
+        assert_eq!(resp.status, "offline");
+    }
+
+    // ─── find_python_binary tests ────────────────────────────────────────
+
+    #[test]
+    fn find_python_binary_returns_platform_appropriate() {
+        let binary = find_python_binary();
+        if cfg!(windows) {
+            assert_eq!(binary, "python");
+        } else {
+            assert_eq!(binary, "python3");
+        }
+    }
+
+    #[test]
+    fn python_not_found_message_contains_binary_name() {
+        let msg = python_not_found_message();
+        assert!(msg.contains("Python not found"));
+        assert!(msg.contains(find_python_binary()));
+        assert!(msg.contains("3.11+"));
+    }
+
+    // ─── find_validator_script tests ─────────────────────────────────────
+
+    // WARNING: This test mutates process-global CWD via set_current_dir(),
+    // which is not thread-safe. `cargo test` runs tests in parallel. If another
+    // test also depends on CWD, results become nondeterministic. Safe today
+    // because no other test touches CWD, but must be addressed when the file is
+    // split (PR 8c) — either via `serial_test` crate or by refactoring
+    // find_validator_script() to accept an explicit base directory.
+    #[test]
+    fn find_validator_script_in_temp_dir() {
+        let tmp = std::env::temp_dir().join("orch_test_validator");
+        let agents_dir = tmp.join("agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        let script = agents_dir.join("validate.py");
+        std::fs::write(&script, "# test").unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&tmp).unwrap();
+        let result = find_validator_script();
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Cleanup
+        std::fs::remove_dir_all(&tmp).ok();
+
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+        // Result should be canonicalized (absolute path)
+        let path = result.unwrap();
+        assert!(path.is_absolute(), "expected absolute path, got: {path:?}");
     }
 }
