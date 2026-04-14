@@ -154,6 +154,8 @@ Review findings are recorded *per PR review*, not batched at the end. Each PR se
 - Each finding has traceability to its source PR.
 - The follow-up PR scope is built incrementally, not estimated from memory.
 
+> **Escape hatch**: If review findings reveal a fundamental design flaw that cannot be addressed as a follow-up, return to [Phase 2](#phase-2--rfc-authoring) to revise the RFC before continuing implementation.
+
 ### Artifacts
 
 - Merged PRs on `main`.
@@ -282,8 +284,8 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 | **2. RFC Authoring** | RFC 0005 written with 6 implementation phases. Reviewed and accepted. | `docs/rfcs/0005-persona-agent-memory.md` |
 | **3. PR Plan** | Split into 11 core PRs (1a–6b). Sizes calibrated at 1.7× based on v0.1 actuals (~73–138% overrun). Reserved PR 7 for follow-ups. | `docs/rfcs/0005-pr-plan.md` |
 | **4. Core Implementation** | 11 PRs implemented and merged (#47–#57). Each PR reviewed; findings recorded in PR plan per-PR sections (60 total findings: 48 assigned to follow-ups, 2 fixed in-place, 10 deferred beyond scope). | PRs #47–#57 merged |
-| **5. Follow-Up PRs** | PR 7 split into 4 sub-PRs (7a–7d) when 48 findings exceeded 500-line limit. Grouped by component: memory (7a), persona+validation (7b), CLI (7c), close (7d). | PRs 7a–7d (3 merged, 1 pending) |
-| **6. Refactoring** | Assessment identified 3 files exceeding 800 LOC. PRs 8a–8c planned for module splits. | PRs 8a–8c (planned) |
+| **5. Follow-Up PRs** | PR 7 split into 4 sub-PRs (7a–7d) when 48 findings exceeded 500-line limit. Grouped by component: memory (7a), persona+validation (7b), CLI (7c), close (7d). | PRs 7a–7d (0/4 merged) |
+| **6. Refactoring** | Assessment identified 3 files exceeding 800 LOC. PRs 8a–8c planned for module splits (not yet added to PR plan — will be appended after Phase 5 completes). | PRs 8a–8c (planned) |
 | **7. RFC Close** | PR 7d will transition RFC 0005 to `✅ Implemented`. | Pending |
 
 ### Key lessons from RFC 0005
@@ -292,3 +294,14 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 - **Plan for follow-up growth**: The original single "PR 7" (50–150 lines) grew to 4 sub-PRs (~900–1,250 lines) once all review findings were enumerated.
 - **Record findings continuously**: Per-PR review tables in the PR plan prevented finding loss and made follow-up PR scoping straightforward.
 - **Split early**: When a follow-up PR group approaches the 500-line limit, split preemptively rather than hoping it fits.
+
+---
+
+## Related Documentation
+
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — PR process, quality gates, development setup
+- [BRANCHING.md](BRANCHING.md) — Branch naming, lifecycle, merge strategy
+- [rfcs/README.md](rfcs/README.md) — RFC format, lifecycle, and templates
+- [ROADMAP.md](../ROADMAP.md) — Version progress, RFC tracker, merged PR history
+- [Documentation Guide](documentation-guide.md) — Documentation update conventions
+- [Consistency Checklist](docs-consistency-checklist.md) — Documentation consistency verification
