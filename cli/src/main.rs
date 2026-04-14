@@ -376,11 +376,18 @@ async fn main() {
                 agent_id,
                 config: _,
             } => {
-                println!(
-                    "{}",
-                    format!("Agent reload for '{}' not yet implemented", agent_id).yellow()
-                );
-                Ok(())
+                // Validate early for consistency with Info and cmd_test_persona.
+                // Defense-in-depth: when reload is implemented the validation
+                // is already in place.
+                if let Err(e) = validate_resource_id(&agent_id, "agent ID") {
+                    Err(e)
+                } else {
+                    println!(
+                        "{}",
+                        format!("Agent reload for '{}' not yet implemented", agent_id).yellow()
+                    );
+                    Ok(())
+                }
             }
         },
 
@@ -540,7 +547,10 @@ async fn cmd_status(
             println!("{:<14} {}", "Run ID:".bold(), run.run_id);
             println!("{:<14} {}", "Workflow:".bold(), run.workflow_id);
             println!("{:<14} {}", "Status:".bold(), colorize_status(&run.status));
-            if let Some(ref err) = run.error {
+            // Guard against empty error strings: Go's omitempty omits the field
+            // when empty, but a non-Go server could send "error": "". Without
+            // this filter the CLI would print a blank "Error:" line.
+            if let Some(err) = run.error.as_deref().filter(|e| !e.is_empty()) {
                 println!("{:<14} {}", "Error:".bold(), err.red());
             }
             if let Some(ref t) = run.started_at {
@@ -1009,12 +1019,13 @@ mod tests {
 
     #[test]
     fn workflow_run_response_deserializes_correctly() {
-        // Matches Go workflowRunResponse JSON tags in internal/server/types.go
+        // Matches Go workflowRunResponse JSON tags in internal/server/types.go.
+        // Go's omitempty omits the error field when empty, so the canonical
+        // success shape has no "error" key at all.
         let json = serde_json::json!({
             "run_id": "run-001",
             "workflow_id": "feature-builder",
             "status": "completed",
-            "error": "",
             "started_at": "2026-04-14T10:00:00Z",
             "finished_at": "2026-04-14T10:05:00Z",
             "steps": {}
@@ -1023,8 +1034,26 @@ mod tests {
         assert_eq!(resp.run_id, "run-001");
         assert_eq!(resp.workflow_id, "feature-builder");
         assert_eq!(resp.status, "completed");
+        assert!(resp.error.is_none());
         assert_eq!(resp.started_at.as_deref(), Some("2026-04-14T10:00:00Z"));
         assert_eq!(resp.finished_at.as_deref(), Some("2026-04-14T10:05:00Z"));
+    }
+
+    #[test]
+    fn workflow_run_response_deserializes_error_field() {
+        // Go's omitempty sends a non-empty error string on failure.
+        let json = serde_json::json!({
+            "run_id": "run-003",
+            "workflow_id": "feature-builder",
+            "status": "failed",
+            "error": "task timed out",
+            "started_at": "2026-04-14T10:00:00Z",
+            "finished_at": null,
+            "steps": {}
+        });
+        let resp: WorkflowRunResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.status, "failed");
+        assert_eq!(resp.error.as_deref(), Some("task timed out"));
     }
 
     #[test]
