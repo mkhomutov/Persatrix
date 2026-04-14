@@ -12,7 +12,7 @@
 
 RFC 0005 defines the PersonaAgent runtime, three-tier memory system (working, episodic, relationship), agent-initiated memory tools, behavioral dimensions, dynamic persona state, and data-driven TaskAgent consolidation. The RFC spans 6 implementation phases with an estimated ~3,500–4,850 LOC (calibrated at 1.7×) across Python agents, Rust CLI, YAML config, and JSON schemas.
 
-The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **19 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), PRs 7a (memory tier review fixes), 7b (persona + validation review fixes), 7c (CLI review fixes), then PRs 8a (split persona.py), 8b (split episodic.py), 8c (split main.rs into modules), 8d (extract _LLMPersonaAgent from persona.py), and finally 7d (RFC close).
+The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **20 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), PRs 7a (memory tier review fixes), 7b (persona + validation review fixes), 7c (CLI review fixes), then PRs 8a (split persona.py), 8b (split episodic.py), 8c (split main.rs into modules), 8d (extract _LLMPersonaAgent from persona.py), PR 9 (documentation & architecture diagrams), and finally 7d (RFC close).
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -20,7 +20,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0004 fully merged (v0.1 complete). The v0.1 agent infrastructure (`BaseAgent`, `_run_llm_loop()`, `LLMClient`, `server.py` agent loader, permission gate, tool registry) is the foundation for all v0.2 work.
 
-**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 8a** → **PR 8d** (depends on 8a) / **PR 8b** / **PR 8c** (8b, 8c, 8d can parallel — independent module splits) → **PR 7d**.
+**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 8a** → **PR 8d** (depends on 8a) / **PR 8b** / **PR 8c** (8b, 8c, 8d can parallel — independent module splits) → **PR 9** (documentation) → **PR 7d**.
 
 ---
 
@@ -1190,9 +1190,47 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ---
 
+#### PR 9: `feature/v02-rfc0005-docs` — Documentation & Architecture Diagrams
+
+**Depends on**: PRs 8a, 8b, 8c, 8d merged (final module structure must be stable)
+**Branch**: `feature/v02-rfc0005-docs`
+**Estimated size**: ~200–400 lines (Mermaid diagrams + prose)
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `docs/diagrams/0005-system-overview.md` | **New** — Top-level component interaction diagram: CLI ↔ Orchestrator ↔ Agents, showing REST/gRPC boundaries |
+| `docs/diagrams/0005-persona-runtime.md` | **New** — Persona agent lifecycle: event dispatch → LLM call → action execution → memory write, tick loop |
+| `docs/diagrams/0005-memory-architecture.md` | **New** — Three-tier memory system: working memory (context window), episodic memory (SQLite + FTS5), relationship memory (trust/interaction). Shows read/write paths and data flow |
+| `docs/diagrams/0005-module-structure.md` | **New** — Python agent package structure after refactoring PRs (8a–8d): `agents/` module tree with purpose annotations |
+| `docs/diagrams/0005-workflow-execution.md` | **New** — End-to-end workflow execution sequence: YAML → Planner → Scheduler → Executor → Agent → LLM → result propagation |
+
+##### Key implementation details
+
+- All diagrams use **Mermaid** syntax in fenced code blocks — renders natively on GitHub without tooling
+- Each file contains one or more related diagrams with title and caption
+- Diagrams reference actual module/file names from the post-refactoring codebase (e.g., `persona_runtime.py`, `memory/episodic.py`, `memory/notes.py`)
+- Sequence diagrams cover the key runtime flows a new contributor needs to understand
+- Component diagrams show technology boundaries (Go/Python/Rust) and communication protocols (REST/gRPC)
+- No code changes — documentation only
+
+##### PR checklist
+
+- [ ] `docs/diagrams/` directory created
+- [ ] System overview diagram shows CLI ↔ Orchestrator ↔ Agents with protocol labels
+- [ ] Persona runtime diagram covers event dispatch, tick loop, and memory injection
+- [ ] Memory architecture diagram shows all three tiers with read/write paths
+- [ ] Module structure diagram reflects post-refactoring package layout
+- [ ] Workflow execution sequence diagram covers end-to-end flow
+- [ ] All diagrams render correctly on GitHub (Mermaid syntax valid)
+- [ ] Diagram file names follow `NNNN-kebab-description.md` convention
+
+---
+
 #### PR 7d: `feature/v02-rfc0005-close` — RFC Close
 
-**Depends on**: PRs 7a, 7b, 7c, 8a, 8b, 8c, 8d merged
+**Depends on**: PRs 7a, 7b, 7c, 8a, 8b, 8c, 8d, 9 merged
 **Branch**: `feature/v02-rfc0005-close`
 **Estimated size**: ~50–100 lines (status updates only)
 
@@ -1201,12 +1239,12 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | File | Change |
 |------|--------|
 | `docs/rfcs/0005-persona-agent-memory.md` | Update status: `🚧 Implementing` → `✅ Implemented` |
-| `docs/rfcs/0005-pr-plan.md` | Mark PRs 7a–7d and 8a–8d checklists complete |
-| `ROADMAP.md` | RFC 0005 tracker: merged count 19/19, status `✅ Implemented`. Update Component Status tables. Add PRs 7a–7d and 8a–8d to Merged PR History |
+| `docs/rfcs/0005-pr-plan.md` | Mark PRs 7a–7d, 8a–8d, and 9 checklists complete |
+| `ROADMAP.md` | RFC 0005 tracker: merged count 20/20, status `✅ Implemented`. Update Component Status tables. Add PRs 7a–7d, 8a–8d, and 9 to Merged PR History |
 
 ##### Key implementation details
 
-- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c, 8a, 8b, and 8d are addressed, and refactoring PRs 8a–8d have split oversized files
+- **RFC status transition**: Only after all 20 PRs are merged, all review findings from PRs 7a–7c, 8a, 8b, and 8d are addressed, refactoring PRs 8a–8d have split oversized files, and PR 9 documentation/diagrams are in place
 - **ROADMAP Component Status**: Update `agents/persona.py`, `agents/persona_runtime.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion. Add new files from refactoring PRs to component table
 - **F-66-02 fix**: Update `migrations.py` docstring — change "used by both `episodic.py` and `notes.py`" to "used by `episodic.py`"
 - **Final verification**: `make test` (all suites), `make lint`, `make validate` must pass before merge
@@ -1214,7 +1252,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 ##### PR checklist
 
 - [ ] RFC 0005 status is `✅ Implemented`
-- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 19/19
+- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 20/20
 - [ ] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
 - [ ] All accumulated review findings addressed in PRs 7a–7c, 8a, 8b, and 8d (including F-66-02 docstring fix)
 - [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module, `episodic.py` 668 lines after 8b — acceptable per F-66-01)
@@ -1246,9 +1284,10 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | 8b | refactor | `feature/v02-refactor-episodic` | 300–400 | 7a |
 | 8c | refactor | `feature/v02-refactor-cli` | 250–350 | 7c |
 | 8d | refactor | `feature/v02-refactor-persona-runtime` | 350–500 | 8a |
-| 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7b, 7c, 8a, 8b, 8c, 8d |
+| 9 | docs | `feature/v02-rfc0005-docs` | 200–400 | 8a, 8b, 8c, 8d |
+| 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7b, 7c, 8a, 8b, 8c, 8d, 9 |
 
-**Total estimated**: ~5,650–7,800 lines across 19 PRs (calibrated at 1.7×).
+**Total estimated**: ~5,850–8,200 lines across 20 PRs (calibrated at 1.7×).
 
 ### Dependency Graph
 
@@ -1271,6 +1310,8 @@ PR 1a (TaskAgent + type system)
                                                                 ├── PR 8b (Split episodic.py) [parallel with 8a, 8c, 8d] ──────────────────────────────────┤
                                                                 │                                                                                              │
                                                                 └── PR 7c (CLI Review) ──→ PR 8c (Split main.rs) ──────────────────────────────────────────┤
+                                                                                                                                                                ↓
+                                                                                                                                              PR 9 (Docs & Diagrams)
                                                                                                                                                                 ↓
                                                                                                                                                     PR 7d (Close RFC)
 ```
