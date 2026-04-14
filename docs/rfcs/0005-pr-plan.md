@@ -1117,7 +1117,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime.py` | **New** — extract `_LLMPersonaAgent` concrete class with `_on_event_inner()`, `_build_system_prompt()`, `_format_event()`, `_parse_actions()`, `_validate_action_payload()`, `_execute_tools()`, `_inject_memory_context()`, and helper functions (`_truncate_with_ellipsis`, `_coerce_event_timeout`) (~700 lines) |
+| `agents/persona_runtime.py` | **New** — extract `_LLMPersonaAgent` concrete class with `_on_event_inner()`, `_build_system_prompt()`, `_format_event()`, `_parse_actions()`, `_validate_action_payload()`, `_execute_tools()`, `_inject_memory_context()`, and helper functions (`_truncate_with_ellipsis`, `_coerce_event_timeout`) (~980 lines actual — constants and helpers larger than estimated ~700; file is cohesive single-class module) |
 | `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `create_persona_agent()` factory, re-exports (~350–400 lines) |
 | `agents/__init__.py` | Update imports — `_LLMPersonaAgent` now from `persona_runtime` |
 | `agents/server.py` | Update factory import if needed |
@@ -1143,10 +1143,29 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 - [x] `pytest tests/unit/python/ tests/integration/ -v` passes
 - [x] `ruff check agents/` clean
-- [x] `persona.py` ≤ 400 lines (ABC + factory + re-exports)
+- [x] `persona.py` ≤ 400 lines (ABC + factory + re-exports) — actual ~303 lines
 - [x] No circular imports (`persona_runtime.py` importable independently)
 - [x] Metadata deep-copy isolation test added
 - [x] `agents/__init__.py` re-exports preserve public API
+
+##### Review findings (PR #65)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-65-01 | Low | `test_reexports_exhaustive()` checks `persona_types`, `persona_behavior`, `dispatch`, `tick` `__all__` lists but not `persona_runtime.__all__` — the 3 re-exported private symbols (`_LLMPersonaAgent`, `_coerce_event_timeout`, `_truncate_with_ellipsis`) are underscore-prefixed and excluded from `persona.__all__`, so the exhaustive test doesn't cover them | Add parallel check in `test_reexports_exhaustive()` verifying all `persona_runtime.__all__` symbols importable from `agents.persona` |
+| F-65-02 | Info | `persona_runtime.py` at ~980 lines exceeds the estimated ~700 — constants and helper functions were larger than expected. File is cohesive (single class + helpers) but may be a split candidate in v0.3+ | Updated PR plan estimate. No action needed now; monitor during v0.3 |
+| F-65-03 | Info | SPAWN_SUB_AGENT resource cap validation (clamping `max_tokens`, `timeout_seconds`, `max_llm_calls` to `_MAX_SUB_AGENT_*` constants) has no test coverage — pre-existing gap moved into `persona_runtime.py` | Deferred to follow-up (not a regression) |
+| F-65-04 | Info | Late import `# noqa: E402, I001` comments are correct and necessary for circular import strategy | No action needed |
+| F-65-05 | Info | Agent ID regex `_AGENT_ID_RE` duplicated between `persona_runtime.py` and `server.py` — pre-existing, not a regression | Deferred to follow-up: extract to shared `agents/constants.py` |
+
+> F-65-01 to be addressed in PR #65 review fix commit. F-65-03 and F-65-05 are pre-existing gaps tracked as follow-ups below.
+
+**Open follow-up items (deferred beyond RFC 0005)**:
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-65-03 | Info | SPAWN_SUB_AGENT resource cap tests | Add 3 tests: (1) `max_tokens=500000` clamped to `100000`, (2) non-numeric `timeout_seconds` removed, (3) within-cap values preserved |
+| F-65-05 | Info | Shared agent ID regex duplication | Extract `AGENT_ID_PATTERN` to `agents/constants.py`, import in `persona_runtime.py` and `server.py` |
 
 ---
 
@@ -1161,13 +1180,13 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | File | Change |
 |------|--------|
 | `docs/rfcs/0005-persona-agent-memory.md` | Update status: `🚧 Implementing` → `✅ Implemented` |
-| `docs/rfcs/0005-pr-plan.md` | Mark PRs 7a–7d and 8a–8c checklists complete |
-| `ROADMAP.md` | RFC 0005 tracker: merged count 18/18, status `✅ Implemented`. Update Component Status tables. Add PRs 7a–7d and 8a–8c to Merged PR History |
+| `docs/rfcs/0005-pr-plan.md` | Mark PRs 7a–7d and 8a–8d checklists complete |
+| `ROADMAP.md` | RFC 0005 tracker: merged count 19/19, status `✅ Implemented`. Update Component Status tables. Add PRs 7a–7d and 8a–8d to Merged PR History |
 
 ##### Key implementation details
 
-- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c and 8a are addressed, and refactoring PRs 8a–8d have split oversized files
-- **ROADMAP Component Status**: Update `agents/persona.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion. Add new files from refactoring PRs to component table
+- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c, 8a, and 8d are addressed, and refactoring PRs 8a–8d have split oversized files
+- **ROADMAP Component Status**: Update `agents/persona.py`, `agents/persona_runtime.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion. Add new files from refactoring PRs to component table
 - **Final verification**: `make test` (all suites), `make lint`, `make validate` must pass before merge
 
 ##### PR checklist
@@ -1175,8 +1194,8 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 - [ ] RFC 0005 status is `✅ Implemented`
 - [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 19/19
 - [ ] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
-- [ ] All accumulated review findings addressed in PRs 7a–7c and 8a
-- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d)
+- [ ] All accumulated review findings addressed in PRs 7a–7c, 8a, and 8d
+- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module)
 - [ ] `make test` passes (all suites)
 - [ ] `make lint` passes
 - [ ] `make validate` passes
@@ -1254,3 +1273,5 @@ The following RFC 0005 items are **out of scope** for this PR plan and will be a
 - **REST API Observability Endpoints** (Go orchestrator changes): `/api/v1/agents/{id}/state`, `/memory/episodes`, `/memory/notes`, `/memory/relationships`, `/{id}/tick`. These are Go-side changes outside the Python agent scope of this plan.
 - **Memory Observability Metrics**: The RFC defines structured log metrics (`memory_episode_store_duration_ms`, `memory_notes_count`, `memory_trust_update`, etc.). These should be added incrementally in each memory PR (episode metrics in PR 3a, notes metrics in PR 3b, trust metrics in PR 4, working memory metrics in PR 2) but are not tracked as explicit deliverables in this plan. Implementers should include basic `logger.info()`-level observability when implementing each memory tier.
 - **Go Orchestrator Impact**: Persona-aware scheduling, agent type routing, and orchestrator-side config changes are deferred to a separate Go-focused RFC/plan.
+- **SPAWN_SUB_AGENT resource cap tests** (F-65-03): Add test coverage for `_validate_action_payload()` clamping of `max_tokens`, `timeout_seconds`, `max_llm_calls` to `_MAX_SUB_AGENT_*` constants. Pre-existing gap surfaced during PR 8d review.
+- **Shared agent ID regex** (F-65-05): Extract `AGENT_ID_PATTERN` constant to `agents/constants.py` and import in `persona_runtime.py` and `server.py`. Eliminates duplication of `_AGENT_ID_RE` regex across modules. Pre-existing gap surfaced during PR 8d review.
