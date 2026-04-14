@@ -1217,14 +1217,15 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `docs/diagrams/` directory created
-- [ ] System overview diagram shows CLI ↔ Orchestrator ↔ Agents with protocol labels
-- [ ] Persona runtime diagram covers event dispatch, tick loop, and memory injection
-- [ ] Memory architecture diagram shows all three tiers with read/write paths
-- [ ] Module structure diagram reflects post-refactoring package layout
-- [ ] Workflow execution sequence diagram covers end-to-end flow
-- [ ] All diagrams render correctly on GitHub (Mermaid syntax valid)
-- [ ] Diagram file names follow `NNNN-kebab-description.md` convention
+- [x] PR 9 scope documented in PR plan and development workflow
+- [x] `docs/diagrams/` directory created
+- [x] System overview diagram shows CLI ↔ Orchestrator ↔ Agents with protocol labels
+- [x] Persona runtime diagram covers event dispatch, tick loop, and memory injection
+- [x] Memory architecture diagram shows all three tiers with read/write paths
+- [x] Module structure diagram reflects post-refactoring package layout
+- [x] Workflow execution sequence diagram covers end-to-end flow
+- [x] All diagrams render correctly on GitHub (Mermaid syntax valid)
+- [x] Diagram file names follow `NNNN-kebab-description.md` convention
 
 ---
 
@@ -1251,14 +1252,14 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] RFC 0005 status is `✅ Implemented`
-- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 20/20
-- [ ] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
-- [ ] All accumulated review findings addressed in PRs 7a–7c, 8a, 8b, and 8d (including F-66-02 docstring fix)
-- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module, `episodic.py` 668 lines after 8b — acceptable per F-66-01)
-- [ ] `make test` passes (all suites)
-- [ ] `make lint` passes
-- [ ] `make validate` passes
+- [x] RFC 0005 status is `✅ Implemented`
+- [x] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 20/20
+- [x] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
+- [x] All accumulated review findings addressed in PRs 7a–7c, 8a, 8b, and 8d (including F-66-02 docstring fix)
+- [x] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module, `episodic.py` 668 lines after 8b — acceptable per F-66-01)
+- [x] `make test` passes (all suites)
+- [x] `make lint` passes
+- [x] `make validate` passes
 
 ---
 

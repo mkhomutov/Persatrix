@@ -129,12 +129,12 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 20 | 18/20 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
 
 ### Dependency Chain
 
 ```
-RFC 0005 (PersonaAgent + Memory + TaskAgent)   � Implementing
+RFC 0005 (PersonaAgent + Memory + TaskAgent)   ✅ Done (20/20)
     ↓
 RFC 0006 (Sub-Agent Spawning)                  Not yet written
     ↓
@@ -223,26 +223,29 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#44](https://github.com/mkhomutov/Orchestr8/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
 | [#45](https://github.com/mkhomutov/Orchestr8/pull/45) | docs(rfc): RFC 0005 — Persona Agent & Memory System | 0005 (RFC) | 2026-04-12 |
 | [#46](https://github.com/mkhomutov/Orchestr8/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
-| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/15) | 2026-04-12 |
-| [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/15) | 2026-04-12 |
-| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/15) | 2026-04-12 |
-| [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/15) | 2026-04-12 |
-| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/15) | 2026-04-12 |
-| [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/15) | 2026-04-12 |
-| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/15) | 2026-04-12 |
-| [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/15) | 2026-04-13 |
-| [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/15) | 2026-04-13 |
-| [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/15) | 2026-04-13 |
-| [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/15) | 2026-04-13 |
+| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/20) | 2026-04-12 |
+| [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/20) | 2026-04-12 |
+| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/20) | 2026-04-12 |
+| [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/20) | 2026-04-12 |
+| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/20) | 2026-04-12 |
+| [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/20) | 2026-04-12 |
+| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/20) | 2026-04-12 |
+| [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/20) | 2026-04-13 |
+| [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/20) | 2026-04-13 |
+| [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/20) | 2026-04-13 |
+| [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/20) | 2026-04-13 |
 | [#58](https://github.com/mkhomutov/Orchestr8/pull/58) | docs(rfc0005): split PR 7 into 4 sub-PRs (7a-7d) | 0005 docs | 2026-04-13 |
-| [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/15) | 2026-04-13 |
-| [#60](https://github.com/mkhomutov/Orchestr8/pull/60) | feat(persona,validate): persona + validation review fixes (PR 7b) | 0005 (7b/15) | 2026-04-14 |
+| [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/20) | 2026-04-13 |
+| [#60](https://github.com/mkhomutov/Orchestr8/pull/60) | feat(persona,validate): persona + validation review fixes (PR 7b) | 0005 (7b/20) | 2026-04-14 |
 | [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
-| [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/18) | 2026-04-14 |
+| [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/20) | 2026-04-14 |
 | [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
-| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/19) | 2026-04-14 |
-| [#65](https://github.com/mkhomutov/Orchestr8/pull/65) | refactor(persona): extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) | 0005 (8d/19) | 2026-04-14 |
-| [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/19) | 2026-04-14 |
+| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/20) | 2026-04-14 |
+| [#65](https://github.com/mkhomutov/Orchestr8/pull/65) | refactor(persona): extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) | 0005 (8d/20) | 2026-04-14 |
+| [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/20) | 2026-04-14 |
+| [#67](https://github.com/mkhomutov/Orchestr8/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
+| [#68](https://github.com/mkhomutov/Orchestr8/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
+| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs: close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) | 0005 (7d/20) | 2026-04-14 |
 
 ---
 
