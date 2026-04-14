@@ -28,6 +28,8 @@ from agents.persona import (
     PersonaState,
     SubAgentRequest,
     _LLMPersonaAgent,
+    _coerce_event_timeout,
+    _truncate_with_ellipsis,
     create_persona_agent,
     render_behavior,
 )
@@ -908,6 +910,84 @@ class TestConvenienceMethods:
         assert action.payload["agent_id"] == "coder-agent"
         assert action.payload["task"] == "Implement the feature"
         await agent.close_memory()
+
+
+# ─── _truncate_with_ellipsis() unit tests ────────────────────
+
+
+class TestTruncateWithEllipsis:
+    """Dedicated unit tests for the _truncate_with_ellipsis() helper.
+
+    The helper is used in 3 critical paths inside _inject_memory_context()
+    (episode summaries, relationship notes, note content).  Direct tests
+    prevent regressions that would silently corrupt memory context.
+    (PR #60 review: _truncate_with_ellipsis has no dedicated unit tests.)
+    """
+
+    def test_short_text_unchanged(self):
+        """Text within the limit is returned as-is."""
+        assert _truncate_with_ellipsis("hello", 10) == "hello"
+
+    def test_exact_length_unchanged(self):
+        """Text exactly at the limit is NOT truncated."""
+        text = "abcde"
+        assert _truncate_with_ellipsis(text, 5) == "abcde"
+
+    def test_long_text_truncated_at_word_boundary(self):
+        """Text exceeding the limit is cut at the last word boundary."""
+        text = "the quick brown fox jumps over the lazy dog"
+        result = _truncate_with_ellipsis(text, 15)
+        # "the quick brown" is 15 chars; rsplit at last space → "the quick"
+        assert result == "the quick..."
+
+    def test_no_space_in_slice_uses_full_slice(self):
+        """Text without spaces falls back to hard slice at max_chars."""
+        text = "abcdefghijklmnopqrstuvwxyz"
+        result = _truncate_with_ellipsis(text, 10)
+        assert result == "abcdefghij..."
+
+    def test_empty_string(self):
+        """Empty string is returned unchanged."""
+        assert _truncate_with_ellipsis("", 10) == ""
+
+    def test_single_char_limit(self):
+        """max_chars=1 with multi-char text truncates correctly."""
+        result = _truncate_with_ellipsis("hello world", 1)
+        # Slice is "h", no space → full slice used.
+        assert result == "h..."
+
+    def test_ellipsis_always_appended_on_truncation(self):
+        """Truncated text always ends with '...'."""
+        result = _truncate_with_ellipsis("a b c d e f g h", 5)
+        assert result.endswith("...")
+
+
+class TestCoerceEventTimeout:
+    """Verify _coerce_event_timeout() handles various input types.
+
+    Extracted from on_event()/on_tick() where the same try/float() guard
+    was duplicated.  Tests ensure the helper handles YAML-sourced strings,
+    valid numerics, and invalid types without duplicating coverage already
+    in TestEventTimeout/TestTickTimeout (which test the full on_event/on_tick
+    paths).
+    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
+    """
+
+    def test_float_passthrough(self):
+        assert _coerce_event_timeout(300.0, 100.0, "test") == 300.0
+
+    def test_int_coerced(self):
+        assert _coerce_event_timeout(60, 100.0, "test") == 60.0
+
+    def test_string_coerced(self):
+        """YAML configs can supply '300' as a string for a numeric key."""
+        assert _coerce_event_timeout("300", 100.0, "test") == 300.0
+
+    def test_invalid_string_returns_default(self):
+        assert _coerce_event_timeout("not-a-number", 100.0, "test") == 100.0
+
+    def test_none_returns_default(self):
+        assert _coerce_event_timeout(None, 100.0, "test") == 100.0
 
 
 # ─── Review follow-up: from_dict clamping tests ─────────────

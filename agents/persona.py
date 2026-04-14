@@ -385,6 +385,34 @@ def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
     return truncated + "..."
 
 
+def _coerce_event_timeout(
+    raw_value: object,
+    default: float,
+    agent_id: str,
+) -> float:
+    """Coerce a config-sourced timeout to ``float``.
+
+    YAML configs can supply a string for a numeric key (e.g.
+    ``event_timeout: "300"``).  ``asyncio.wait_for(timeout=...)``
+    requires a real float; a non-numeric value raises TypeError
+    that silently escapes lock acquisition with no useful log.
+
+    Returns *default* with a warning when coercion fails.
+
+    Extracted from ``on_event()`` / ``on_tick()`` where the same
+    ``try: float(raw)`` guard was duplicated.
+    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
+    """
+    try:
+        return float(raw_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        logger.warning(
+            "Agent %s: invalid event_timeout %r, using default %.0fs",
+            agent_id, raw_value, default,
+        )
+        return default
+
+
 @dataclass
 class PersonaState:
     """Mutable runtime state for a persona agent."""
@@ -964,20 +992,11 @@ class _LLMPersonaAgent(PersonaAgent):
         Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
         wall-clock time (PR #54 review: unbounded lock hold).
         """
-        raw_timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
-        try:
-            timeout = float(raw_timeout)
-        except (TypeError, ValueError):
-            # Guard against YAML configs that supply a string for a numeric key
-            # (e.g.  event_timeout: "300").  asyncio.wait_for(timeout=...) requires
-            # a real float; a non-numeric value raises TypeError silently escaping
-            # lock acquisition with no useful log message.
-            # (PR review: event_timeout used without type coercion.)
-            logger.warning(
-                "Agent %s: invalid event_timeout %r, using default %.0fs",
-                self.agent_id, raw_timeout, self._DEFAULT_EVENT_TIMEOUT,
-            )
-            timeout = self._DEFAULT_EVENT_TIMEOUT
+        timeout = _coerce_event_timeout(
+            self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
+            self._DEFAULT_EVENT_TIMEOUT,
+            self.agent_id,
+        )
         async with self._lock:
             try:
                 return await asyncio.wait_for(
@@ -1333,17 +1352,11 @@ class _LLMPersonaAgent(PersonaAgent):
         blocking all event processing for the agent.
         (Review finding F-5a-1, resolved in PR 5b.)
         """
-        raw_timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
-        try:
-            timeout = float(raw_timeout)
-        except (TypeError, ValueError):
-            # Same coercion guard as on_event() — see comment there.
-            # (PR review: event_timeout used without type coercion.)
-            logger.warning(
-                "Agent %s: invalid event_timeout %r, using default %.0fs",
-                self.agent_id, raw_timeout, self._DEFAULT_EVENT_TIMEOUT,
-            )
-            timeout = self._DEFAULT_EVENT_TIMEOUT
+        timeout = _coerce_event_timeout(
+            self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
+            self._DEFAULT_EVENT_TIMEOUT,
+            self.agent_id,
+        )
         async with self._lock:
             event = AgentEvent(event_type=EventType.TICK)
             try:
@@ -1545,6 +1558,24 @@ class ActionExecutor:
         *,
         cascade_depth: int = 0,
     ) -> dict[str, Any]:
+        """Execute a single agent action and return a status dict.
+
+        Every returned dict contains ``action_type`` (str) and ``status``
+        (str).  The status contract:
+
+        * ``"completed"`` — COMPLETE_TASK executed successfully.
+        * ``"dispatched"`` — SEND_MESSAGE routed to at least one target.
+        * ``"failed"`` — SEND_MESSAGE attempted but all dispatches failed.
+        * ``"no_targets"`` — SEND_MESSAGE had no mentioned targets (no-op).
+        * ``"no_dispatcher"`` — SEND_MESSAGE with no EventDispatcher configured.
+        * ``"skipped"`` — USE_TOOL appeared as a final action (should not happen).
+        * ``"ok"`` — DO_NOTHING.
+        * ``"not_implemented"`` — DELEGATE, SPAWN_SUB_AGENT, or approval actions.
+        * ``"unhandled"`` — Unknown ActionType (defensive catch-all).
+
+        SEND_MESSAGE dicts also include ``dispatched_to`` (int).
+        (PR #60 review: document status contract for downstream consumers.)
+        """
         match action.action_type:
             case ActionType.COMPLETE_TASK:
                 return {
