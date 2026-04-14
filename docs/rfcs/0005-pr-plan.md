@@ -938,12 +938,12 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `cargo test` passes (all new + existing)
-- [ ] Resource ID validation catches malformed IDs
-- [ ] URL scheme check is case-insensitive
-- [ ] Persona test check count is dynamic
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `cargo test` passes (all new + existing)
+- [x] Resource ID validation catches malformed IDs
+- [x] URL scheme check is case-insensitive
+- [x] Persona test check count is dynamic
 
 ---
 
