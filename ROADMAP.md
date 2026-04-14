@@ -72,7 +72,9 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
 | `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
-| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
+| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, episode CRUD, recall, summarization, agent state persistence, delegates notes to NoteStore) | ✅ Complete (RFC 0005 PR 3a+3b+3c, split in PR 8b) |
+| `agents/memory/notes.py` | Agent-initiated note storage (NoteStore class, note CRUD, FTS5/LIKE search, pruning) | ✅ Complete (RFC 0005 PR 8b) |
+| `agents/memory/migrations.py` | Schema migrations, FTS5 DDL, scoring SQL constants | ✅ Complete (RFC 0005 PR 8b) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
 | `agents/persona.py` | PersonaAgent ABC, create_persona_agent() factory, re-exports | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a+8d) |
 | `agents/persona_runtime.py` | _LLMPersonaAgent concrete class (LLM-powered event loop, memory injection, tool use) | ✅ Complete (RFC 0005 PR 8d) |
@@ -122,7 +124,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 16/19 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 18/19 |
 
 ### Dependency Chain
 
@@ -234,6 +236,8 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/18) | 2026-04-14 |
 | [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
 | [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/19) | 2026-04-14 |
+| [#65](https://github.com/mkhomutov/Orchestr8/pull/65) | refactor(persona): extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) | 0005 (8d/19) | 2026-04-14 |
+| [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/19) | 2026-04-14 |
 
 ---
 
