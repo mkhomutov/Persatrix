@@ -2257,3 +2257,89 @@ class TestInjectMemoryContext:
         )
         await agent.close_memory()
 
+    async def test_stale_episodic_cleared_on_tick(self):
+        """F-60-R1/R2: stale episodic_recall section from event N is
+        removed when event N+1 finds no episodes (e.g. TICK bypass).
+
+        test_stale_relationship_cleared_on_sender_less_event covers the
+        relationship_context tier with the same scenario.  This test
+        covers the episodic tier, which previously lacked the upfront
+        remove_section() guard (finding F-60-R1).
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_episode(
+            summary="Architecture discussion with the team",
+            context={},
+            importance=0.8,
+        )
+
+        # Event 1: MESSAGE — FTS5 finds the episode; episodic_recall added.
+        msg_event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(msg_event)
+        assert agent._working_memory.get_section("episodic_recall") is not None, (
+            "Expected episodic_recall section after MESSAGE event"
+        )
+
+        # Event 2: TICK — episodic recall is skipped entirely for TICK events.
+        # The stale section from event 1 must be cleared before add_section()
+        # would have been called (which it isn't, because TICK bypasses recall).
+        tick_event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(tick_event)
+        assert agent._working_memory.get_section("episodic_recall") is None, (
+            "Stale episodic_recall from MESSAGE event persisted into TICK event"
+        )
+        await agent.close_memory()
+
+    async def test_stale_notes_cleared_when_no_match(self):
+        """F-60-R1: stale recent_notes section is removed when the next
+        event's topic query finds no matching notes.
+
+        Without the upfront remove_section() guard, notes from event N
+        would persist as recent_notes and reach the LLM for event N+1
+        even if the topics are unrelated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for architecture scalability",
+        )
+
+        # Event 1: query matches the note — recent_notes section added.
+        event1 = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event1)
+        assert agent._working_memory.get_section("recent_notes") is not None, (
+            "Expected recent_notes after first event"
+        )
+
+        # Event 2: completely unrelated topic — recall_notes returns empty.
+        # The stale section from event 1 must be cleared.
+        event2 = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "zzz-no-match-zzz"},
+        )
+        with patch.object(agent, "_format_event", return_value="zzz-no-match-zzz"):
+            await agent._inject_memory_context(event2)
+        assert agent._working_memory.get_section("recent_notes") is None, (
+            "Stale recent_notes from event 1 persisted into unrelated event 2"
+        )
+        await agent.close_memory()
+

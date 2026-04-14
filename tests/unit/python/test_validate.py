@@ -844,8 +844,18 @@ class TestRealConfig:
     """Validate the actual project config to catch regressions."""
 
     def test_real_agents_yaml_passes(self) -> None:
-        """The real config/agents.yaml must pass validation."""
-        assert _validate_passes("config/", "schemas/", "workflows/")
+        """The real config/agents.yaml must pass validation.
+
+        Uses absolute paths derived from this file's location so the test
+        passes regardless of the working directory from which pytest is invoked.
+        (PR review F-60-R10: relative paths fail when pytest run outside repo root.)
+        """
+        repo_root = Path(__file__).parent.parent.parent.parent
+        assert _validate_passes(
+            str(repo_root / "config"),
+            str(repo_root / "schemas"),
+            str(repo_root / "workflows"),
+        )
 
 
 class TestValidationError:

@@ -396,7 +396,12 @@ class PersonaState:
         goal_progress: dict[str, float] = {}
         for k, v in raw_goals.items():
             try:
-                goal_progress[k] = float(v)
+                # Clamp to [0.0, 1.0]: a corrupted DB value like 2.5 would
+                # otherwise produce "goal: 250%" in to_prompt_section(), which
+                # is misleading both to operators and the LLM.
+                # energy and stress_level are clamped the same way below.
+                # (PR review F-60-R6: goal_progress not clamped to [0.0, 1.0].)
+                goal_progress[k] = min(1.0, max(0.0, float(v)))
             except (TypeError, ValueError):
                 logger.warning("Invalid goal_progress value for %r: %r, skipping", k, v)
         return cls(
@@ -915,6 +920,22 @@ class _LLMPersonaAgent(PersonaAgent):
         if query is None:
             query = self._format_event(event)
 
+        # Always remove all three memory sections before (re-)injecting.
+        # WorkingMemory.add_section() overwrites a section by name when the
+        # tier finds results.  But when a tier finds NO results (e.g. no FTS5
+        # matches, or a TICK event that skips episodic recall), add_section()
+        # is never called — so a stale section from the previous event silently
+        # persists and contaminates the next event's LLM system prompt.
+        # Removing unconditionally here makes all three tiers symmetric:
+        # section is absent after the call if and only if no results were found.
+        # The relationship tier had its own remove_section() inside the sender
+        # block; that call is now redundant and has been removed.
+        # (PR #60 review F-60-R1: stale episodic_recall/recent_notes sections
+        # not cleared between events.)
+        self._working_memory.remove_section("episodic_recall")
+        self._working_memory.remove_section("recent_notes")
+        self._working_memory.remove_section("relationship_context")
+
         # Three memory tiers are queried sequentially rather than concurrently
         # via asyncio.gather() because all three share the same aiosqlite
         # connection (same db_path).  aiosqlite serialises operations on a
@@ -976,13 +997,6 @@ class _LLMPersonaAgent(PersonaAgent):
             ))
 
         # 2. Relationship summary for the sender (if present).
-        # IMPORTANT: always remove any stale relationship section from a
-        # previous event BEFORE deciding whether to add a new one.  Without
-        # this, a sender-less event (e.g. TICK) that follows a sender event
-        # would inherit alice's relationship context in working memory and
-        # silently influence the LLM response.
-        # (PR review finding: stale relationship_context persists on sender-less events.)
-        self._working_memory.remove_section("relationship_context")
         sender_id = event.sender_id
         if sender_id:
             try:
