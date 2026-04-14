@@ -7,7 +7,7 @@ All tests use mock LLM client — no real API calls.
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -28,6 +28,8 @@ from agents.persona import (
     PersonaState,
     SubAgentRequest,
     _LLMPersonaAgent,
+    _coerce_event_timeout,
+    _truncate_with_ellipsis,
     create_persona_agent,
     render_behavior,
 )
@@ -910,6 +912,84 @@ class TestConvenienceMethods:
         await agent.close_memory()
 
 
+# ─── _truncate_with_ellipsis() unit tests ────────────────────
+
+
+class TestTruncateWithEllipsis:
+    """Dedicated unit tests for the _truncate_with_ellipsis() helper.
+
+    The helper is used in 3 critical paths inside _inject_memory_context()
+    (episode summaries, relationship notes, note content).  Direct tests
+    prevent regressions that would silently corrupt memory context.
+    (PR #60 review: _truncate_with_ellipsis has no dedicated unit tests.)
+    """
+
+    def test_short_text_unchanged(self):
+        """Text within the limit is returned as-is."""
+        assert _truncate_with_ellipsis("hello", 10) == "hello"
+
+    def test_exact_length_unchanged(self):
+        """Text exactly at the limit is NOT truncated."""
+        text = "abcde"
+        assert _truncate_with_ellipsis(text, 5) == "abcde"
+
+    def test_long_text_truncated_at_word_boundary(self):
+        """Text exceeding the limit is cut at the last word boundary."""
+        text = "the quick brown fox jumps over the lazy dog"
+        result = _truncate_with_ellipsis(text, 15)
+        # "the quick brown" is 15 chars; rsplit at last space → "the quick"
+        assert result == "the quick..."
+
+    def test_no_space_in_slice_uses_full_slice(self):
+        """Text without spaces falls back to hard slice at max_chars."""
+        text = "abcdefghijklmnopqrstuvwxyz"
+        result = _truncate_with_ellipsis(text, 10)
+        assert result == "abcdefghij..."
+
+    def test_empty_string(self):
+        """Empty string is returned unchanged."""
+        assert _truncate_with_ellipsis("", 10) == ""
+
+    def test_single_char_limit(self):
+        """max_chars=1 with multi-char text truncates correctly."""
+        result = _truncate_with_ellipsis("hello world", 1)
+        # Slice is "h", no space → full slice used.
+        assert result == "h..."
+
+    def test_ellipsis_always_appended_on_truncation(self):
+        """Truncated text always ends with '...'."""
+        result = _truncate_with_ellipsis("a b c d e f g h", 5)
+        assert result.endswith("...")
+
+
+class TestCoerceEventTimeout:
+    """Verify _coerce_event_timeout() handles various input types.
+
+    Extracted from on_event()/on_tick() where the same try/float() guard
+    was duplicated.  Tests ensure the helper handles YAML-sourced strings,
+    valid numerics, and invalid types without duplicating coverage already
+    in TestEventTimeout/TestTickTimeout (which test the full on_event/on_tick
+    paths).
+    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
+    """
+
+    def test_float_passthrough(self):
+        assert _coerce_event_timeout(300.0, 100.0, "test") == 300.0
+
+    def test_int_coerced(self):
+        assert _coerce_event_timeout(60, 100.0, "test") == 60.0
+
+    def test_string_coerced(self):
+        """YAML configs can supply '300' as a string for a numeric key."""
+        assert _coerce_event_timeout("300", 100.0, "test") == 300.0
+
+    def test_invalid_string_returns_default(self):
+        assert _coerce_event_timeout("not-a-number", 100.0, "test") == 100.0
+
+    def test_none_returns_default(self):
+        assert _coerce_event_timeout(None, 100.0, "test") == 100.0
+
+
 # ─── Review follow-up: from_dict clamping tests ─────────────
 
 
@@ -979,6 +1059,25 @@ class TestPersonaStateGoalProgressValidation:
         state = PersonaState.from_dict({"goal_progress": {"ship": 0.75}})
         section = state.to_prompt_section()
         assert "ship: 75%" in section
+
+    def test_goal_progress_above_one_clamped(self):
+        """Numeric value > 1.0 is clamped to 1.0 (e.g. corrupted DB row = 2.5).
+
+        The clamping code at min(1.0, max(0.0, float(v))) handles this path but
+        it was untested.  Without clamping, to_prompt_section() would render
+        'goal: 250%', misleading the LLM.
+        (PR review: numeric-out-of-range goal_progress path had zero test coverage.)
+        """
+        state = PersonaState.from_dict({"goal_progress": {"ship": 2.5}})
+        assert state.goal_progress == {"ship": 1.0}
+
+    def test_goal_progress_below_zero_clamped(self):
+        """Numeric value < 0.0 is clamped to 0.0 (e.g. corrupted DB row = -0.5).
+
+        (PR review: numeric-out-of-range goal_progress path had zero test coverage.)
+        """
+        state = PersonaState.from_dict({"goal_progress": {"debt": -0.5}})
+        assert state.goal_progress == {"debt": 0.0}
 
 
 # ─── Review finding: spawn_sub_agent without client ──────────
@@ -1111,6 +1210,41 @@ class TestBuildToolDefinitionsWithRegistry:
         assert len(results) == 1
         assert results[0].is_error is False
         assert results[0].content == "executed"
+        await agent.close_memory()
+
+    async def test_execute_tools_returns_error_for_func_none_memory_tool(self):
+        """_execute_tools must return is_error=True when a ToolDefinition has
+        func=None (e.g. a schema-only declaration injected as a memory tool).
+
+        The guard ``if tool_def is None or tool_def.func is None`` has two
+        branches; only the first (tool_def is None) was covered by the
+        test above.  A ToolDefinition with func=None can arise for schema
+        documentation tools or if create_memory_tools() produces a stub
+        entry.  (PR review: second branch of func=None guard untested.)
+        """
+        from agents.tools.registry import ToolDefinition
+
+        null_func_tool = ToolDefinition(
+            name="ghost",
+            description="Schema-only declaration with no callable",
+            parameters={},
+            func=None,
+        )
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        # Inject the stub directly into the agent's memory-tools list so it
+        # is found by the memory-tool-first lookup path.
+        agent._memory_tools.append(null_func_tool)
+
+        results = await agent._execute_tools([
+            ToolCall(id="tc-ghost", name="ghost", input={}),
+        ])
+
+        assert len(results) == 1
+        assert results[0].is_error is True
+        assert "Unknown tool" in results[0].content
         await agent.close_memory()
 
 
@@ -1374,13 +1508,14 @@ class TestActionPayloadValidation:
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING
 
-    async def test_delegate_single_char_agent_id_rejected(self):
+    async def test_delegate_single_char_agent_id_accepted(self):
+        """F-6a-2: single character agent IDs are now valid."""
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
             {"action_type": "delegate", "payload": {"agent_id": "a", "task": "do stuff"}},
         ]))
         actions = agent._parse_actions(response)
-        assert actions[0].action_type == ActionType.DO_NOTHING
+        assert actions[0].action_type == ActionType.DELEGATE
 
     async def test_delegate_missing_task(self):
         agent = await self._make_agent()
@@ -1634,5 +1769,676 @@ class TestTickTimeout:
         # The mock LLM returns a COMPLETE_TASK action which drains 0.05,
         # so net change is +0.1 - 0.05 = +0.05.
         assert agent._state.energy == pytest.approx(0.55)
+        await agent.close_memory()
+
+
+# ─── F-5a-4: Minimal config prompt ────────────────────────
+
+class TestMinimalConfigPrompt:
+    """F-5a-4: System prompt with minimal persona config."""
+
+    async def test_minimal_persona_produces_valid_prompt(self):
+        """Agent with only required persona fields builds a prompt without error."""
+        minimal_config = {
+            "id": "minimal",
+            "type": "persona",
+            "name": "Minimal Agent",
+            "role": "Tester",
+            "model": "test-model",
+            "persona": {
+                "title": "Tester",
+                "background": "QA.",
+                "behavior": {},
+            },
+            "memory": {"db_path": ":memory:"},
+        }
+        agent = create_persona_agent(
+            agent_id="minimal", config=minimal_config, llm_client=_make_client(),
+        )
+        prompt = agent._build_system_prompt()
+        assert "Minimal Agent" in prompt
+        assert "Tester" in prompt
+        # No quirks, goals, or behavior should not crash
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+
+# ─── F-5a-5: Energy at exactly 1.0 ────────────────────────
+
+class TestEnergyClampAtOne:
+    """F-5a-5: recover_energy() when energy is already at 1.0."""
+
+    def test_recover_at_max_stays_at_one(self):
+        state = PersonaState(energy=1.0)
+        state.recover_energy()
+        assert state.energy == pytest.approx(1.0)
+
+    def test_recover_near_max_clamps(self):
+        state = PersonaState(energy=0.99)
+        state.recover_energy()
+        assert state.energy == pytest.approx(1.0)
+
+
+# ─── F-5b-1: _inject_memory_context ───────────────────────
+
+class TestInjectMemoryContext:
+    """F-5b-1: Memory context injection into working memory."""
+
+    async def test_injects_episodic_and_notes(self):
+        """_inject_memory_context adds episodic and note sections."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode and a note so recall returns results.
+        await agent._episodic_memory.store_episode(
+            summary="Discussed architecture patterns",
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for architecture",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        # Patch _format_event to return a simple query that FTS5/LIKE can match.
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event)
+
+        # Check that sections were added to working memory.
+        episodic_section = agent._working_memory.get_section("episodic_recall")
+        notes_section = agent._working_memory.get_section("recent_notes")
+        assert episodic_section is not None
+        assert "architecture" in episodic_section.content.lower()
+        assert episodic_section.priority == 7
+        assert notes_section is not None
+        assert "event sourcing" in notes_section.content.lower()
+        assert notes_section.priority == 6
+        await agent.close_memory()
+
+    async def test_injects_relationship_for_sender(self):
+        """_inject_memory_context adds relationship section when sender known."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record an interaction to create a relationship.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        assert "mike-torres" in rel_section.content
+        assert rel_section.priority == 8
+        await agent.close_memory()
+
+    async def test_no_sender_skips_relationship(self):
+        """_inject_memory_context skips relationship when no sender_id."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is None
+        await agent.close_memory()
+
+    async def test_memory_error_graceful(self):
+        """_inject_memory_context logs and continues if recall() raises."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Sabotage recall to simulate failure.
+        agent._episodic_memory.recall = AsyncMock(side_effect=RuntimeError("db locked"))
+        agent._episodic_memory.recall_notes = AsyncMock(side_effect=RuntimeError("db locked"))
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            sender_id="mike-torres",
+        )
+        # Should not raise.
+        await agent._inject_memory_context(event)
+
+        # Episodic and notes sections should not be present.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        assert agent._working_memory.get_section("recent_notes") is None
+        await agent.close_memory()
+
+    async def test_all_tiers_failing_still_proceeds(self):
+        """_inject_memory_context handles all three memory tiers failing.
+
+        Verifies that simultaneous failures across episodic recall,
+        relationship lookup, and note recall are each caught independently
+        and the method completes without raising.
+        (PR #60 review: coverage gap — all-tiers-failing case.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Sabotage all three tiers.
+        agent._episodic_memory.recall = AsyncMock(side_effect=OSError("disk full"))
+        agent._episodic_memory.recall_notes = AsyncMock(side_effect=OSError("disk full"))
+        agent._relationship_memory.get_relationship_summary = AsyncMock(
+            side_effect=RuntimeError("corrupted index"),
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            sender_id="mike-torres",
+        )
+        # Should not raise — all tiers fail gracefully.
+        await agent._inject_memory_context(event)
+
+        # No sections should be present.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        assert agent._working_memory.get_section("relationship_context") is None
+        assert agent._working_memory.get_section("recent_notes") is None
+        await agent.close_memory()
+
+    async def test_tick_skips_episodic_recall(self):
+        """TICK events skip episodic recall to avoid low-signal FTS5 matches.
+
+        The boilerplate "Autonomous tick: review your goals..." query would
+        match broadly in FTS5, wasting I/O.  Notes recall is still attempted
+        (notes contain the agent's personal knowledge relevant for autonomous
+        goal review), though results depend on FTS5/LIKE matching.
+        (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode so recall would return results if called.
+        await agent._episodic_memory.store_episode(
+            summary="Previous architecture discussion",
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+
+        # Spy on recall to verify it's NOT called for TICK.
+        recall_spy = AsyncMock(wraps=agent._episodic_memory.recall)
+        agent._episodic_memory.recall = recall_spy
+
+        # Spy on recall_notes to verify it IS still called.
+        notes_spy = AsyncMock(wraps=agent._episodic_memory.recall_notes)
+        agent._episodic_memory.recall_notes = notes_spy
+
+        event = AgentEvent(event_type=EventType.TICK, payload={})
+        await agent._inject_memory_context(event)
+
+        # Episodic recall should NOT be called for TICK events.
+        recall_spy.assert_not_called()
+        # Notes recall should still be attempted.
+        notes_spy.assert_called_once()
+
+        # No episodic section injected.
+        assert agent._working_memory.get_section("episodic_recall") is None
+        await agent.close_memory()
+
+    async def test_zero_interaction_relationship_skips_injection(self):
+        """Bootstrapped relationship with zero interactions skips injection.
+
+        When a relationship is configured via YAML but no interactions have
+        been recorded yet, ``interaction_count == 0`` and the relationship
+        section is not injected.  This is intentional: a bootstrapped trust
+        score without any interaction history provides no actionable context
+        for the LLM.
+        (PR #60 review: test zero-interaction relationship branch.)
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Bootstrap a relationship with trust but zero interactions.
+        await agent._relationship_memory.update_trust(
+            other_agent_id="mike-torres",
+            delta=0.1,
+            reason="config bootstrap",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        # Relationship section should NOT be injected (zero interactions).
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is None
+        await agent.close_memory()
+
+    async def test_note_content_truncated(self):
+        """F-60-1: note content exceeding 500 chars is truncated.
+
+        Notes can be up to 10KB (_MAX_NOTE_CONTENT_BYTES).  Injecting them
+        without truncation wastes working memory budget and crowds out
+        episodic and relationship context.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        long_content = "x" * 1000
+        await agent._episodic_memory.store_note(
+            topic="verbose",
+            content=long_content,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "verbose"},
+        )
+        with patch.object(agent, "_format_event", return_value="verbose"):
+            await agent._inject_memory_context(event)
+
+        notes_section = agent._working_memory.get_section("recent_notes")
+        assert notes_section is not None
+        # The full 1000-char content should NOT appear — capped at 500.
+        assert long_content not in notes_section.content
+        assert "x" * 500 in notes_section.content
+        await agent.close_memory()
+
+    async def test_query_param_avoids_double_format_event(self):
+        """F-60-2: passing query= skips internal _format_event() call.
+
+        _on_event_inner() pre-computes user_message via _format_event()
+        and passes it as query= to avoid a redundant call.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture review"},
+        )
+
+        spy = MagicMock(wraps=agent._format_event)
+        agent._format_event = spy
+
+        await agent._inject_memory_context(event, query="pre-computed query")
+
+        # _format_event should NOT be called when query is provided.
+        spy.assert_not_called()
+        await agent.close_memory()
+
+    async def test_default_trust_not_injected(self):
+        """F-60-4: trust at default 0.5 is omitted from relationship context.
+
+        A trust score of 0.50 provides no useful signal (it's just the
+        initial value) and could mislead the LLM into thinking trust was
+        measured.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record interaction without sentiment to keep trust at ~0.5.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="neutral",
+            sentiment=0.0,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        # Trust line should NOT appear when trust is ~0.5 default.
+        assert "Trust:" not in rel_section.content
+        # Interaction count should still appear.
+        assert "Interactions:" in rel_section.content
+        await agent.close_memory()
+
+    async def test_relationship_notes_truncated(self):
+        """F-60-5: relationship notes exceeding 300 chars are truncated."""
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record interaction to create a relationship with long notes.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="mike-torres",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.8,
+        )
+        # Manually set long notes on the relationship.
+        # NOTE: RelationshipMemory has no public setter for the `notes`
+        # column (it accumulates notes through record_interaction() which
+        # does not directly expose the notes field).  Using the raw DB
+        # connection is the only way to inject a controlled long string
+        # without adding a test-only API to production code.  If the
+        # `relationships` table schema changes (e.g. column rename), this
+        # raw execute will fail with an sqlite3.OperationalError rather
+        # than an assertion error — treat that as a reminder to update
+        # the fixture.  (PR review: coupling note for future maintainers.)
+        long_notes = "n" * 600
+        async with agent._relationship_memory._db.execute(
+            "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",
+            (long_notes, "sarah-chen", "mike-torres"),
+        ):
+            pass
+        await agent._relationship_memory._db.commit()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="mike-torres",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        # Full 600-char notes should NOT appear — capped at 300.
+        assert long_notes not in rel_section.content
+        assert "n" * 300 in rel_section.content
+        await agent.close_memory()
+
+    async def test_episode_summary_truncated_with_ellipsis(self):
+        """F-60-R2-3: episode summaries exceeding 200 chars get word-boundary
+        truncation with trailing '...' so the LLM knows text was truncated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode with a long summary (>200 chars).
+        long_summary = "architecture " * 20  # 260 chars
+        await agent._episodic_memory.store_episode(
+            summary=long_summary,
+            context={"topic": "arch"},
+            importance=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("episodic_recall")
+        assert section is not None
+        # Should end with "..." and NOT contain the full summary.
+        assert section.content.endswith("...")
+        assert long_summary not in section.content
+        await agent.close_memory()
+
+    async def test_note_content_truncated_with_ellipsis(self):
+        """F-60-R2-3: note content exceeding 500 chars gets word-boundary
+        truncation with trailing '...' so the LLM knows text was truncated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        long_content = "word " * 120  # 600 chars
+        await agent._episodic_memory.store_note(
+            topic="verbose",
+            content=long_content,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "verbose"},
+        )
+        with patch.object(agent, "_format_event", return_value="verbose"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is not None
+        # Should end with "..." and NOT contain the full content.
+        assert "..." in section.content
+        assert long_content not in section.content
+        await agent.close_memory()
+
+    async def test_memory_context_reaches_llm_prompt(self):
+        """F-60-R2-1 + F-60-R2-8: verify working memory context appears in
+        the system prompt sent to the LLM.
+
+        _inject_memory_context() adds sections to working memory, and
+        _on_event_inner() calls build_context() to include them in the
+        system prompt.  This end-to-end test captures the system= kwarg
+        from the LLM call and asserts the note context is present.
+        """
+        client = _make_client()
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        # Store a note so inject_memory_context has content to add.
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for the migration",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture review"},
+        )
+        # Patch _format_event to return a simple query matchable by LIKE
+        # fallback (FTS5 unavailable on :memory: SQLite).
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            async with agent._lock:
+                await agent._on_event_inner(event)
+
+        # Capture the system= kwarg passed to the LLM provider.
+        call_kwargs = client._provider.create_message.call_args
+        system_prompt = call_kwargs.kwargs.get("system", "")
+
+        # The note content should appear in the system prompt via
+        # build_context() → memory_sections append.
+        assert "event sourcing" in system_prompt.lower(), (
+            f"Expected note context in system prompt, got: {system_prompt[:500]}"
+        )
+        await agent.close_memory()
+
+    async def test_episode_summary_no_space_still_gets_ellipsis(self):
+        """PR review should-fix #3: zero-space truncation edge case.
+
+        A 260-char episode summary with no spaces (e.g. a UUID or hash
+        run) should still get '...' appended, not silently omit it.
+        The word-boundary guard falls back to the full 200-char slice
+        when there is no space, and '...' is appended regardless.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # 260 chars, no spaces — simulates a hash chain or URL path.
+        no_space_summary = "a" * 260
+        await agent._episodic_memory.store_episode(
+            summary=no_space_summary,
+            context={"topic": "aaaa"},
+            importance=0.8,
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "aaaa"},
+        )
+        with patch.object(agent, "_format_event", return_value="aaaa"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("episodic_recall")
+        assert section is not None
+        # '...' must appear even when there are no word boundaries.
+        assert "..." in section.content
+        # The full 260-char string must not appear (it was truncated).
+        assert no_space_summary not in section.content
+        await agent.close_memory()
+
+    async def test_stale_relationship_cleared_on_sender_less_event(self):
+        """PR review must-fix #1: stale relationship_context is removed
+        when a sender-less event (e.g. TICK) follows a sender event.
+
+        Without the remove_section() guard, alice's relationship context
+        would persist in working memory and silently influence the LLM
+        response for the subsequent TICK event.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record an interaction so there is a relationship to inject.
+        await agent._relationship_memory.record_interaction(
+            other_agent_id="alice",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.9,
+        )
+
+        # Event 1: message from alice — relationship section added.
+        sender_event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="alice",
+        )
+        await agent._inject_memory_context(sender_event)
+        assert agent._working_memory.get_section("relationship_context") is not None
+
+        # Event 2: TICK (no sender) — relationship section must be cleared.
+        tick_event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(tick_event)
+        assert agent._working_memory.get_section("relationship_context") is None, (
+            "Stale relationship_context from alice persisted into TICK event"
+        )
+        await agent.close_memory()
+
+    async def test_stale_episodic_cleared_on_tick(self):
+        """F-60-R1/R2: stale episodic_recall section from event N is
+        removed when event N+1 finds no episodes (e.g. TICK bypass).
+
+        test_stale_relationship_cleared_on_sender_less_event covers the
+        relationship_context tier with the same scenario.  This test
+        covers the episodic tier, which previously lacked the upfront
+        remove_section() guard (finding F-60-R1).
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_episode(
+            summary="Architecture discussion with the team",
+            context={},
+            importance=0.8,
+        )
+
+        # Event 1: MESSAGE — FTS5 finds the episode; episodic_recall added.
+        msg_event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(msg_event)
+        assert agent._working_memory.get_section("episodic_recall") is not None, (
+            "Expected episodic_recall section after MESSAGE event"
+        )
+
+        # Event 2: TICK — episodic recall is skipped entirely for TICK events.
+        # The stale section from event 1 must be cleared before add_section()
+        # would have been called (which it isn't, because TICK bypasses recall).
+        tick_event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        await agent._inject_memory_context(tick_event)
+        assert agent._working_memory.get_section("episodic_recall") is None, (
+            "Stale episodic_recall from MESSAGE event persisted into TICK event"
+        )
+        await agent.close_memory()
+
+    async def test_stale_notes_cleared_when_no_match(self):
+        """F-60-R1: stale recent_notes section is removed when the next
+        event's topic query finds no matching notes.
+
+        Without the upfront remove_section() guard, notes from event N
+        would persist as recent_notes and reach the LLM for event N+1
+        even if the topics are unrelated.
+        """
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for architecture scalability",
+        )
+
+        # Event 1: query matches the note — recent_notes section added.
+        event1 = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event1)
+        assert agent._working_memory.get_section("recent_notes") is not None, (
+            "Expected recent_notes after first event"
+        )
+
+        # Event 2: completely unrelated topic — recall_notes returns empty.
+        # The stale section from event 1 must be cleared.
+        event2 = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "zzz-no-match-zzz"},
+        )
+        with patch.object(agent, "_format_event", return_value="zzz-no-match-zzz"):
+            await agent._inject_memory_context(event2)
+        assert agent._working_memory.get_section("recent_notes") is None, (
+            "Stale recent_notes from event 1 persisted into unrelated event 2"
+        )
         await agent.close_memory()
 
