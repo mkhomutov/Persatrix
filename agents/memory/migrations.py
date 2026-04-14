@@ -2,7 +2,7 @@
 Schema migrations and shared scoring SQL fragments.
 
 Forward-only migrations applied by ``_apply_migrations()`` and shared
-scoring constants used by both ``episodic.py`` and ``notes.py``.
+scoring constants used by ``episodic.py``.
 """
 
 from __future__ import annotations
