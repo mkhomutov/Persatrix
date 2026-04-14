@@ -14,16 +14,10 @@ import pytest
 
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
-from agents.persona import (
-    ActionExecutor,
-    ActionType,
-    AgentEvent,
-    EventDispatcher,
-    EventType,
-    TickScheduler,
-    _LLMPersonaAgent,
-    create_persona_agent,
-)
+from agents.dispatch import ActionExecutor, EventDispatcher
+from agents.persona import _LLMPersonaAgent, create_persona_agent
+from agents.persona_types import ActionType, AgentEvent, EventType
+from agents.tick import TickScheduler
 from agents.server import AgentServiceServicer
 from agents.tools.registry import clear_registry
 

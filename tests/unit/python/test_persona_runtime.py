@@ -20,18 +20,19 @@ from agents.llm_client import (
     Usage,
 )
 from agents.persona import (
-    DIMENSION_DESCRIPTIONS,
+    _LLMPersonaAgent,
+    _coerce_event_timeout,
+    _truncate_with_ellipsis,
+    create_persona_agent,
+)
+from agents.persona_behavior import DIMENSION_DESCRIPTIONS, render_behavior
+from agents.persona_types import (
     ActionType,
     AgentEvent,
     EventType,
     Mood,
     PersonaState,
     SubAgentRequest,
-    _LLMPersonaAgent,
-    _coerce_event_timeout,
-    _truncate_with_ellipsis,
-    create_persona_agent,
-    render_behavior,
 )
 from agents.tools.registry import clear_registry
 
@@ -143,6 +144,34 @@ class TestModuleImports:
         from agents.persona import SubAgentStatus
 
         assert hasattr(SubAgentStatus, "COMPLETED")
+
+    def test_reexports_backward_compat(self):
+        """Key symbols remain importable from persona.py via re-exports.
+
+        Functional tests now import from the specific submodules directly.
+        This test guards the re-export layer for external consumers that
+        still use ``from agents.persona import X``.
+        (PR #64 review: keep one test verifying re-export path.)
+        """
+        from agents.persona import (  # noqa: F401
+            ActionExecutor,
+            ActionType,
+            AgentAction,
+            AgentEvent,
+            DIMENSION_DESCRIPTIONS,
+            EventDispatcher,
+            EventType,
+            Mood,
+            PersonaState,
+            TickScheduler,
+            render_behavior,
+        )
+
+        # Spot-check a symbol from each extracted module
+        assert ActionExecutor is not None  # dispatch
+        assert TickScheduler is not None  # tick
+        assert PersonaState is not None  # persona_types
+        assert render_behavior is not None  # persona_behavior
 
 
 # ─── Mood Enum Tests ────────────────────────────────────────

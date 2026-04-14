@@ -28,6 +28,10 @@ from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 # so that existing ``from agents.persona import X`` statements continue
 # to work without modification.  New code should import from the
 # specific submodule directly.
+# TODO(v0.3): deprecate these re-exports — new code should import from
+# specific submodules (persona_types, persona_behavior, dispatch, tick).
+# Once all internal consumers have migrated, emit DeprecationWarning and
+# eventually remove the re-export block.  (PR #64 review: should fix.)
 from .dispatch import ActionExecutor, EventDispatcher  # noqa: F401
 from .llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from .memory.episodic import EpisodicMemory

@@ -12,17 +12,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agents.llm_client import LLMClient, LLMResponse
-from agents.persona import (
-    ActionExecutor,
+from agents.dispatch import ActionExecutor, EventDispatcher
+from agents.persona import _LLMPersonaAgent, create_persona_agent
+from agents.persona_types import (
     ActionType,
     AgentAction,
     AgentEvent,
-    EventDispatcher,
     EventType,
-    TickScheduler,
-    _LLMPersonaAgent,
-    create_persona_agent,
 )
+from agents.tick import TickScheduler
 from agents.server import AgentServer, _resolve_agent_type
 from agents.tools.registry import clear_registry
 
