@@ -1,6 +1,6 @@
 # Orchestr8 — Development Workflow
 
-> **Last updated**: 2026-04-13
+> **Last updated**: 2026-04-14
 
 This document describes the end-to-end development lifecycle for Orchestr8, from version planning through RFC closure. It connects the strategic planning loop to the tactical processes documented in [CONTRIBUTING.md](../CONTRIBUTING.md) (PR process), [BRANCHING.md](BRANCHING.md) (branch naming), and [rfcs/README.md](rfcs/README.md) (RFC format and lifecycle).
 
@@ -15,7 +15,8 @@ This document describes the end-to-end development lifecycle for Orchestr8, from
 - [Phase 4 — Core Implementation](#phase-4--core-implementation)
 - [Phase 5 — Follow-Up PRs](#phase-5--follow-up-prs)
 - [Phase 6 — Refactoring Assessment](#phase-6--refactoring-assessment)
-- [Phase 7 — RFC Close](#phase-7--rfc-close)
+- [Phase 7 — Documentation & Diagrams](#phase-7--documentation--diagrams)
+- [Phase 8 — RFC Close](#phase-8--rfc-close)
 - [Status Hygiene](#status-hygiene)
 - [Worked Example — RFC 0005](#worked-example--rfc-0005)
 
@@ -33,7 +34,8 @@ Version Planning
            → Core Implementation (with continuous finding capture)
              → Follow-Up PRs (batched review findings)
                → Refactoring Assessment
-                 → RFC Close
+                 → Documentation & Diagrams
+                   → RFC Close
 ```
 
 Each phase has clear entry/exit criteria and produces specific artifacts. The cycle repeats for every RFC within a version, then the next version is planned.
@@ -225,9 +227,50 @@ The follow-up PR scope is often larger than initially expected. RFC 0005's singl
 
 ---
 
-## Phase 7 — RFC Close
+## Phase 7 — Documentation & Diagrams
 
-**Entry**: All PRs (core + follow-up + refactoring) merged.
+**Entry**: All code PRs (core + follow-up + refactoring) merged. Codebase is in its final state for this RFC.
+**Exit**: Architecture diagrams and documentation updated to reflect the implemented design.
+
+### Rationale
+
+Code changes accumulate across many PRs, but documentation and diagrams that explain *how the system works* should be written once the implementation is stable — not mid-flight when the design is still shifting. Placing this phase after refactoring ensures diagrams reflect the final module structure, not an intermediate state.
+
+### Activities
+
+1. Identify which architectural areas changed during the RFC implementation.
+2. Create or update **Mermaid diagrams** in `docs/diagrams/` covering:
+   - **Component interaction diagrams**: how the major modules connect (gRPC, REST, internal calls).
+   - **Data flow diagrams**: request lifecycle, workflow execution flow, memory read/write paths.
+   - **Module structure diagrams**: package/module organization after refactoring.
+   - **Sequence diagrams**: key runtime flows (e.g., persona event dispatch, memory recall, tick loop).
+3. Update prose documentation where diagrams reveal gaps or stale descriptions:
+   - Architecture sections in spec docs.
+   - README or CLAUDE.md if component boundaries changed.
+4. Ensure every diagram has a title and a brief caption explaining what it shows.
+5. Add the documentation PR to the PR plan with scope and checklist.
+
+### Diagram conventions
+
+| Convention | Rule |
+|------------|------|
+| Format | Mermaid (`.md` files with fenced `mermaid` blocks) — renders natively on GitHub |
+| Location | `docs/diagrams/` directory, one file per diagram or logical group |
+| Naming | `NNNN-kebab-description.md` where `NNNN` matches the RFC number |
+| Scope | Each diagram should fit on one screen — split complex flows into sub-diagrams |
+| Labels | Use actual module/file names, not abstract boxes |
+
+### Artifacts
+
+- Diagram files in `docs/diagrams/`.
+- Updated prose documentation (if needed).
+- PR plan updated with documentation PR section.
+
+---
+
+## Phase 8 — RFC Close
+
+**Entry**: All PRs (core + follow-up + refactoring + documentation) merged.
 **Exit**: RFC status transitions to `✅ Implemented`.
 
 ### Activities
@@ -250,6 +293,8 @@ The follow-up PR scope is often larger than initially expected. RFC 0005's singl
 ### Then
 
 Return to [Phase 2](#phase-2--rfc-authoring) for the next RFC in the dependency chain. When all RFCs for the version are implemented, return to [Phase 1](#phase-1--version-planning) for the next version.
+
+> **Note**: Documentation PRs (Phase 7) are not counted toward the RFC's "code complete" milestone. They can overlap with the RFC close PR if the documentation changes are small enough.
 
 ---
 
@@ -285,8 +330,9 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 | **3. PR Plan** | Split into 11 core PRs (1a–6b). Sizes calibrated at 1.7× based on v0.1 actuals (~73–138% overrun). Reserved PR 7 for follow-ups. | `docs/rfcs/0005-pr-plan.md` |
 | **4. Core Implementation** | 11 PRs implemented and merged (#47–#57). Each PR reviewed; findings recorded in PR plan per-PR sections (60 total findings: 48 assigned to follow-ups, 2 fixed in-place, 10 deferred beyond scope). | PRs #47–#57 merged |
 | **5. Follow-Up PRs** | PR 7 split into 4 sub-PRs (7a–7d) when 48 findings exceeded 500-line limit. Grouped by component: memory (7a), persona+validation (7b), CLI (7c), close (7d). | PRs 7a–7d (0/4 merged) |
-| **6. Refactoring** | Assessment identified 3 files exceeding 800 LOC. PRs 8a–8c planned for module splits (not yet added to PR plan — will be appended after Phase 5 completes). | PRs 8a–8c (planned) |
-| **7. RFC Close** | PR 7d will transition RFC 0005 to `✅ Implemented`. | Pending |
+| **6. Refactoring** | Assessment identified 3 files exceeding 800 LOC. PRs 8a–8d split oversized modules. | PRs 8a–8d merged (#64–#67) |
+| **7. Documentation** | Architecture diagrams covering system components, data flows, and module structure. PR 9 planned. | Pending |
+| **8. RFC Close** | PR 7d will transition RFC 0005 to `✅ Implemented`. | Pending |
 
 ### Key lessons from RFC 0005
 
