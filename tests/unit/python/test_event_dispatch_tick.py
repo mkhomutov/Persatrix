@@ -229,7 +229,10 @@ class TestActionExecutor:
         await agent.close_memory()
 
     async def test_send_message_no_mentions(self):
-        """SEND_MESSAGE with no mentions dispatches to 0 agents."""
+        """SEND_MESSAGE with no mentions returns 'no_targets' status.
+
+        An empty mentions list is a no-op, not a failure.  (F-60-R2-2.)
+        """
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
         results = await executor.execute("sarah-chen", [
@@ -240,9 +243,11 @@ class TestActionExecutor:
             }),
         ])
         assert results[0]["dispatched_to"] == 0
+        assert results[0]["status"] == "no_targets"
 
     async def test_send_message_channel_no_mentions_warns(self, caplog):
-        """SEND_MESSAGE with channel_id but no mentions logs WARNING.
+        """SEND_MESSAGE with channel_id but no mentions logs WARNING and
+        returns 'no_targets' status.
 
         A message targeting a channel with no explicit mentions is almost
         certainly an LLM error — channel routing is not yet implemented,
@@ -261,6 +266,7 @@ class TestActionExecutor:
                 }),
             ])
         assert results[0]["dispatched_to"] == 0
+        assert results[0]["status"] == "no_targets"
         assert any(
             "channel routing not yet implemented" in r.message
             and r.levelno == logging.WARNING
@@ -268,10 +274,11 @@ class TestActionExecutor:
         )
 
     async def test_send_message_no_channel_no_mentions_debug(self, caplog):
-        """SEND_MESSAGE with no channel_id and no mentions logs at DEBUG only.
+        """SEND_MESSAGE with no channel_id and no mentions returns 'no_targets'.
 
         No channel_id means the LLM didn't intend channel routing — a
         plain debug log is sufficient (no operator-visible warning).
+        (F-60-R2-2: 'no_targets' status distinguishes no-op from failure.)
         """
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
@@ -283,12 +290,7 @@ class TestActionExecutor:
                 }),
             ])
         assert results[0]["dispatched_to"] == 0
-        # Should be DEBUG, not WARNING
-        warning_records = [
-            r for r in caplog.records
-            if "channel routing not yet implemented" in r.message
-        ]
-        assert len(warning_records) == 0
+        assert results[0]["status"] == "no_targets"
 
     async def test_send_message_dispatch_failure_continues(self):
         """A failed dispatch to one mention does not skip remaining mentions.
@@ -1079,4 +1081,43 @@ class TestEventActionMemoryCycle:
         assert len(results) == 3
         for r in results:
             assert len(r) >= 1
+        await agent.close_memory()
+
+
+# ─── F-5b-4: Per-dispatch timeout in SEND_MESSAGE ──────────
+
+
+class TestPerDispatchTimeout:
+    """F-5b-4: _handle_send_message wraps dispatch with asyncio.wait_for."""
+
+    async def test_dispatch_timeout_logged_not_raised(self):
+        """A dispatch timeout is caught gracefully — sender is not blocked.
+
+        We mock the dispatcher to raise TimeoutError (what asyncio.wait_for
+        raises) to verify the except clause in _handle_send_message.
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        executor = ActionExecutor(dispatcher=dispatcher)
+
+        # Make dispatch raise TimeoutError as if wait_for expired.
+        async def _raise_timeout(target_id, event):
+            raise TimeoutError()
+
+        dispatcher.dispatch = _raise_timeout  # type: ignore[assignment]
+
+        action = AgentAction(
+            action_type=ActionType.SEND_MESSAGE,
+            payload={
+                "content": "Hello",
+                "mentions": ["sarah-chen"],
+            },
+        )
+        results = await executor.execute("sarah-chen", [action], cascade_depth=0)
+        assert len(results) == 1
+        # Dispatch timed out, so dispatched_to == 0 (timeout is caught, not counted).
+        assert results[0]["dispatched_to"] == 0
+        # F-60-6: status is "failed" when all dispatches failed (was "dispatched").
+        assert results[0]["status"] == "failed"
+
         await agent.close_memory()

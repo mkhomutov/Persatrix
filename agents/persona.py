@@ -27,7 +27,7 @@ from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from .llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from .memory.episodic import EpisodicMemory
 from .memory.relationship import RelationshipMemory
-from .memory.working import WorkingMemory
+from .memory.working import ContextSection, WorkingMemory, estimate_tokens
 from .tools.builtin import create_memory_tools
 from .tools.permissions import PermissionGate
 from .tools.registry import ToolDefinition, get_tool, list_tools
@@ -154,6 +154,13 @@ class PersonaAgent(BaseAgent):
     Subclass this for persona agents. Override on_event() to define behavior.
     The framework calls on_event() for each incoming event; the agent returns
     one or more actions to execute.
+
+    **``llm_client`` forwarding**: ``PersonaAgent.__init__`` does NOT accept
+    ``llm_client``. The concrete subclass ``_LLMPersonaAgent`` receives it
+    via its own ``__init__`` and stores it on ``self._llm_client`` directly.
+    Subclasses that need LLM access should follow the same pattern or use
+    ``create_persona_agent()`` which wires everything.
+    (F-5a-3: documented override contract.)
     """
 
     def __init__(self, agent_id: str, config: dict[str, Any] | None = None):
@@ -313,6 +320,98 @@ _ENERGY_RECOVERY_PER_TICK = 0.1
 # (PR #55 review: unbounded mentions list → resource exhaustion.)
 _MAX_MENTIONS_PER_ACTION = 10
 
+# Default per-dispatch timeout (seconds) for SEND_MESSAGE cascades.
+# Prevents a hung target agent from blocking the sender indefinitely.
+# Separate from _DEFAULT_EVENT_TIMEOUT: bounds a single hop, not full event.
+# TODO(v0.3): make configurable via config["dispatch_timeout"].
+# Hard-coded here as a partial fix for F-5b-4 (PR #55 review: no per-dispatch
+# timeout in _handle_send_message()); making it configurable requires the v0.3
+# dispatch config schema and is tracked as a deferred item in the PR 7b section
+# of docs/rfcs/0005-pr-plan.md.
+# (PR #60 review: hard-coded 60s dispatch timeout.)
+_DEFAULT_DISPATCH_TIMEOUT: float = 60.0
+
+# Hard upper bounds for LLM-provided SPAWN_SUB_AGENT resource fields.
+# Applied in _validate_action_payload() before the payload reaches
+# ActionExecutor.  The action is not yet wired (returns 'not_implemented'),
+# but caps are enforced at validation time so the boundary is in place
+# when execution is wired in a future RFC.
+# (PR review: SPAWN_SUB_AGENT resource fields not bounded at validation time.)
+_MAX_SUB_AGENT_TOKENS: int = 100_000
+_MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
+_MAX_SUB_AGENT_LLM_CALLS: int = 50
+
+# Per-tier truncation caps for memory context injected into working memory.
+# build_context() enforces the overall token budget, but truncating per-item
+# gives fairer distribution across entries within a tier.  Values balance
+# detail vs. budget: notes are longest (agent-authored curated knowledge),
+# relationship notes are medium, episode summaries shortest.
+# (PR #60 review: inline magic numbers for truncation caps.)
+_MAX_EPISODE_SUMMARY_CHARS: int = 200
+_MAX_RELATIONSHIP_NOTES_CHARS: int = 300
+_MAX_NOTE_CONTENT_CHARS: int = 500
+
+# Trust score defaults for relationship context filtering.
+# A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
+# useful signal to the LLM.  Only inject trust when it has deviated by more
+# than _TRUST_DEVIATION_THRESHOLD from the default.
+# (PR #60 review: unnamed magic numbers in trust comparison.)
+_DEFAULT_TRUST_SCORE: float = 0.5
+_TRUST_DEVIATION_THRESHOLD: float = 0.01
+
+
+def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
+    """Truncate *text* to *max_chars* with word-boundary awareness.
+
+    If *text* fits within *max_chars*, it is returned unchanged.
+    Otherwise it is sliced to *max_chars* and an attempt is made to cut at
+    the last space so the LLM sees a complete word.  If the slice contains
+    no space, the full slice is used.  ``"..."`` is always appended to
+    signal truncation (giving a 3-char overage in the worst case, which
+    is acceptable).
+
+    Extracted from _inject_memory_context() where the same pattern was
+    copy-pasted for episode summaries, relationship notes, and note content.
+    (PR #60 review: truncation pattern duplicated 3 times.)
+    """
+    if len(text) <= max_chars:
+        return text
+    sliced = text[:max_chars]
+    truncated = sliced.rsplit(" ", 1)[0]
+    # Zero-space guard: if the slice has no space, rsplit returns it
+    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
+    if len(truncated) == len(sliced):
+        truncated = sliced
+    return truncated + "..."
+
+
+def _coerce_event_timeout(
+    raw_value: object,
+    default: float,
+    agent_id: str,
+) -> float:
+    """Coerce a config-sourced timeout to ``float``.
+
+    YAML configs can supply a string for a numeric key (e.g.
+    ``event_timeout: "300"``).  ``asyncio.wait_for(timeout=...)``
+    requires a real float; a non-numeric value raises TypeError
+    that silently escapes lock acquisition with no useful log.
+
+    Returns *default* with a warning when coercion fails.
+
+    Extracted from ``on_event()`` / ``on_tick()`` where the same
+    ``try: float(raw)`` guard was duplicated.
+    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
+    """
+    try:
+        return float(raw_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        logger.warning(
+            "Agent %s: invalid event_timeout %r, using default %.0fs",
+            agent_id, raw_value, default,
+        )
+        return default
+
 
 @dataclass
 class PersonaState:
@@ -378,7 +477,12 @@ class PersonaState:
         goal_progress: dict[str, float] = {}
         for k, v in raw_goals.items():
             try:
-                goal_progress[k] = float(v)
+                # Clamp to [0.0, 1.0]: a corrupted DB value like 2.5 would
+                # otherwise produce "goal: 250%" in to_prompt_section(), which
+                # is misleading both to operators and the LLM.
+                # energy and stress_level are clamped the same way below.
+                # (PR review F-60-R6: goal_progress not clamped to [0.0, 1.0].)
+                goal_progress[k] = min(1.0, max(0.0, float(v)))
             except (TypeError, ValueError):
                 logger.warning("Invalid goal_progress value for %r: %r, skipping", k, v)
         return cls(
@@ -474,6 +578,18 @@ _DIMENSION_DEFAULTS: dict[str, str] = {
     "risk_tolerance": "moderate",
     "expressiveness": "moderate",
 }
+
+# Invariant: every key in _DIMENSION_DEFAULTS must also appear in
+# DIMENSION_DESCRIPTIONS (so render_behavior() can look up descriptions),
+# and vice versa (so defaults are available for every documented dimension).
+# Caught at import time: if a future dimension is added to one dict and not
+# the other, the mismatch surfaces immediately rather than silently producing
+# incomplete behavioral prompts.
+# (PR review: no guard against _DIMENSION_DEFAULTS/DIMENSION_DESCRIPTIONS key drift.)
+assert set(_DIMENSION_DEFAULTS) == set(DIMENSION_DESCRIPTIONS), (
+    f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
+    f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
+)
 
 
 def render_behavior(behavior: dict[str, str]) -> str:
@@ -615,6 +731,12 @@ class _LLMPersonaAgent(PersonaAgent):
                     return f"You have been assigned a task:\n\n{task.payload}"
                 return f"You have been assigned a task:\n\n{event.payload}"
             case EventType.MESSAGE_RECEIVED:
+                # SECURITY: sender_id and content originate from the
+                # dispatcher today (trusted).  When external bridges
+                # (Slack, Discord, email) are added in v0.2+, these
+                # fields will carry untrusted user input — sanitize
+                # and length-cap before injecting into the LLM prompt
+                # to mitigate prompt injection risks.
                 sender = event.sender_id or "unknown"
                 content = event.payload.get("content", "")
                 return f"Message from {sender}:\n\n{content}"
@@ -638,7 +760,8 @@ class _LLMPersonaAgent(PersonaAgent):
         """Build tool definitions including memory tools.
 
         Uses a dict keyed by tool name so memory tools take precedence
-        over registry tools with the same name (review finding #4).
+        over registry tools with the same name (F-5a-2: defense-in-depth,
+        memory tools should shadow any same-named registry tools).
         """
         # Start with agent-configured tools from the global registry
         allowed = set(self.config.get("tools", []))
@@ -718,7 +841,7 @@ class _LLMPersonaAgent(PersonaAgent):
         return results
 
     # Agent ID format shared with server.py — cross-component contract.
-    _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+    _AGENT_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
     def _validate_action_payload(self, action: AgentAction) -> AgentAction:
         """Validate LLM-generated action payloads, replacing invalid ones with DO_NOTHING.
@@ -767,6 +890,32 @@ class _LLMPersonaAgent(PersonaAgent):
                         " replacing with DO_NOTHING",
                     )
                     return AgentAction(ActionType.DO_NOTHING, {})
+                # Cap numeric resource fields to guard against LLM-generated
+                # payloads with unbounded values (e.g. max_tokens: 500000).
+                # Uses module-level hard caps; config-driven limits are a v0.3
+                # concern once SPAWN_SUB_AGENT execution is wired.
+                # (PR review: SPAWN_SUB_AGENT resource fields not bounded.)
+                for field_name, cap in (
+                    ("max_tokens", _MAX_SUB_AGENT_TOKENS),
+                    ("timeout_seconds", _MAX_SUB_AGENT_TIMEOUT_SECONDS),
+                    ("max_llm_calls", _MAX_SUB_AGENT_LLM_CALLS),
+                ):
+                    if field_name in p:
+                        try:
+                            val = int(p[field_name])
+                        except (TypeError, ValueError):
+                            logger.warning(
+                                "SPAWN_SUB_AGENT %s is not numeric (%r), removing",
+                                field_name, p[field_name],
+                            )
+                            del p[field_name]
+                            continue
+                        if val > cap:
+                            logger.warning(
+                                "SPAWN_SUB_AGENT %s %d exceeds cap %d, clamping",
+                                field_name, val, cap,
+                            )
+                            p[field_name] = cap
             case _:
                 pass  # COMPLETE_TASK, DO_NOTHING, approvals — no payload constraints
         return action
@@ -843,7 +992,11 @@ class _LLMPersonaAgent(PersonaAgent):
         Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
         wall-clock time (PR #54 review: unbounded lock hold).
         """
-        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        timeout = _coerce_event_timeout(
+            self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
+            self._DEFAULT_EVENT_TIMEOUT,
+            self.agent_id,
+        )
         async with self._lock:
             try:
                 return await asyncio.wait_for(
@@ -862,6 +1015,189 @@ class _LLMPersonaAgent(PersonaAgent):
                     },
                 )]
 
+    async def _inject_memory_context(
+        self, event: AgentEvent, *, query: str | None = None,
+    ) -> None:
+        """Inject episodic, relationship, and note context into working memory.
+
+        Queries the three memory tiers for content relevant to the current
+        event and adds them as ``WorkingMemory`` sections with priorities
+        that keep them below the system/persona prompts (100/90) but above
+        conversation history.
+
+        Priorities: relationship=8, episodic=7, notes=6.
+        (F-5b-1: implement deferred memory-context injection.)
+
+        Design: each memory tier is wrapped in ``except Exception`` to ensure
+        one tier's failure (DB lock, I/O error, corrupted data) never blocks
+        event processing.  ``exc_info=True`` logs the full traceback so
+        failures are visible to operators.  We intentionally catch broad
+        ``Exception`` rather than specific types (OSError, aiosqlite.Error)
+        because the memory tier implementations may evolve to raise different
+        exception types, and the contract here is "never fail the event".
+        ``BaseException`` subclasses (SystemExit, KeyboardInterrupt) are NOT
+        caught by ``except Exception``.
+        (PR #60 review: document intent of broad exception handling.)
+        """
+        # query is pre-computed by _on_event_inner() to avoid calling
+        # _format_event() twice per event.  (F-60-2: deduplicate call.)
+        if query is None:
+            query = self._format_event(event)
+
+        # Always remove all three memory sections before (re-)injecting.
+        # WorkingMemory.add_section() overwrites a section by name when the
+        # tier finds results.  But when a tier finds NO results (e.g. no FTS5
+        # matches, or a TICK event that skips episodic recall), add_section()
+        # is never called — so a stale section from the previous event silently
+        # persists and contaminates the next event's LLM system prompt.
+        # Removing unconditionally here makes all three tiers symmetric:
+        # section is absent after the call if and only if no results were found.
+        # The relationship tier had its own remove_section() inside the sender
+        # block; that call is now redundant and has been removed.
+        # (PR #60 review F-60-R1: stale episodic_recall/recent_notes sections
+        # not cleared between events.)
+        self._working_memory.remove_section("episodic_recall")
+        self._working_memory.remove_section("recent_notes")
+        self._working_memory.remove_section("relationship_context")
+
+        # Three memory tiers are queried sequentially rather than concurrently
+        # via asyncio.gather() because all three share the same aiosqlite
+        # connection (same db_path).  aiosqlite serialises operations on a
+        # single connection, so concurrent gather() would not increase
+        # throughput and would add complexity.  If the tiers ever move to
+        # separate DB files, this can be revisited.
+        # (PR #60 review: document why sequential rather than gather().)
+
+        # 1. Episodic recall — recent episodes matching event content.
+        # Skip for TICK events: the boilerplate "Autonomous tick: review
+        # your goals..." query matches broadly in FTS5, returning
+        # low-relevance episodes.  Notes (tier 3) are still injected
+        # because the agent's personal knowledge IS relevant for
+        # autonomous goal review.
+        # (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
+        if event.event_type == EventType.TICK:
+            episodes = []
+        else:
+            try:
+                episodes = await self._episodic_memory.recall(query, limit=5)
+            except Exception:
+                logger.warning(
+                    "Agent %s: episodic recall failed, skipping",
+                    self.agent_id, exc_info=True,
+                )
+                episodes = []
+
+        if episodes:
+            lines = ["Relevant past episodes:"]
+            for ep in episodes:
+                # Cap individual summaries to prevent a single verbose episode
+                # from consuming a disproportionate share of the working memory
+                # token budget.  build_context() enforces the overall budget, but
+                # truncating here gives fairer distribution across episodes.
+                # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
+                # (PR #60 review: unbounded episode summary length.)
+                summary = _truncate_with_ellipsis(
+                    ep.summary, _MAX_EPISODE_SUMMARY_CHARS,
+                )
+                lines.append(f"- {summary}")
+            text = "\n".join(lines)
+            self._working_memory.add_section(ContextSection(
+                name="episodic_recall",
+                content=text,
+                priority=7,
+                token_count=estimate_tokens(text),
+                compressible=True,
+            ))
+
+        # 2. Relationship summary for the sender (if present).
+        sender_id = event.sender_id
+        if sender_id:
+            try:
+                rel = await self._relationship_memory.get_relationship_summary(
+                    sender_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Agent %s: relationship lookup for %s failed, skipping",
+                    self.agent_id, sender_id, exc_info=True,
+                )
+                rel = None
+
+            if rel and rel.interaction_count > 0:
+                lines = [
+                    f"Relationship with {rel.other_agent_id}:",
+                ]
+                # Only inject trust when it has deviated from the default.
+                # A score of exactly _DEFAULT_TRUST_SCORE provides no useful
+                # signal to the LLM and implies a measured assessment when
+                # it's just the initial value.
+                # (F-60-4: skip default trust injection.)
+                if abs(rel.trust_score - _DEFAULT_TRUST_SCORE) > _TRUST_DEVIATION_THRESHOLD:
+                    lines.append(f"  Trust: {rel.trust_score:.2f}")
+                lines.append(f"  Interactions: {rel.interaction_count}")
+                if rel.notes:
+                    # TODO(v0.3): sanitize rel.notes when A2A protocol allows
+                    # external agents — a compromised peer could store prompt
+                    # injection text in its relationship notes.
+                    # (PR #60 review: internal prompt injection via peer memory.)
+                    # Cap relationship notes to prevent excessive working memory
+                    # usage.  No storage cap exists on rel.notes currently.
+                    # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
+                    # (F-60-5: unbounded relationship notes in prompt.)
+                    rel_notes = _truncate_with_ellipsis(
+                        rel.notes, _MAX_RELATIONSHIP_NOTES_CHARS,
+                    )
+                    lines.append(f"  Notes: {rel_notes}")
+                text = "\n".join(lines)
+                self._working_memory.add_section(ContextSection(
+                    name="relationship_context",
+                    content=text,
+                    priority=8,
+                    token_count=estimate_tokens(text),
+                    compressible=True,
+                ))
+
+        # 3. Recent notes (top 5 matching event content).
+        # Note: for TICK events the query is the same boilerplate
+        # "Autonomous tick: review your goals..." string used above.
+        # This may return low-signal notes as it does for episodes.
+        # Notes recall is preserved on TICK (unlike episodic recall which is
+        # skipped) because notes are agent-authored curated knowledge that
+        # can be directly relevant to autonomous goal review.  Accepted
+        # limitation: low-relevance TICK notes may occasionally be injected.
+        # TODO(future): use a different query strategy for TICK notes to
+        # improve signal quality (e.g. goal-topic query).
+        try:
+            notes = await self._episodic_memory.recall_notes(query, limit=5)
+        except Exception:
+            logger.warning(
+                "Agent %s: note recall failed, skipping",
+                self.agent_id, exc_info=True,
+            )
+            notes = []
+
+        if notes:
+            lines = ["Relevant notes:"]
+            for note in notes:
+                # Cap note content to prevent disproportionate token usage.
+                # Notes can be up to 10KB each (_MAX_NOTE_CONTENT_BYTES);
+                # _MAX_NOTE_CONTENT_CHARS balances detail vs budget (longer
+                # than episode summaries since notes are user-authored).
+                # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
+                # (F-60-1: note content not truncated.)
+                content = _truncate_with_ellipsis(
+                    note.content, _MAX_NOTE_CONTENT_CHARS,
+                )
+                lines.append(f"- [{note.topic}] {content}")
+            text = "\n".join(lines)
+            self._working_memory.add_section(ContextSection(
+                name="recent_notes",
+                content=text,
+                priority=6,
+                token_count=estimate_tokens(text),
+                compressible=True,
+            ))
+
     async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
         """Inner event handler — must be called under self._lock."""
         if self._llm_client is None:
@@ -879,13 +1215,34 @@ class _LLMPersonaAgent(PersonaAgent):
                 payload={"result": "Agent config missing required 'model' field"},
             )]
 
-        # 1. Build system prompt
+        # 0. Format event once and inject memory context.
+        # _format_event() is pure; computing it here avoids a redundant call
+        # inside _inject_memory_context().  (F-60-2: deduplicate _format_event.)
+        user_message = self._format_event(event)
+        await self._inject_memory_context(event, query=user_message)
+
+        # 1. Build system prompt and append working memory context.
         system_prompt = self._build_system_prompt()
 
-        # 2. Format the event as a user message
-        user_message = self._format_event(event)
+        # Retrieve assembled working memory (episodic, relationship, notes)
+        # and append to the system prompt so the LLM sees relevant memories.
+        # build_context() returns sections sorted by priority (highest first),
+        # dropping those that exceed the token budget.
+        # (F-60-R2-1: build_context() was never called — injected memory
+        #  sections were silently discarded with no effect on LLM behavior.)
+        memory_sections = self._working_memory.build_context()
+        if memory_sections:
+            # Each element is a dict with "role" (the section name, e.g.
+            # "episodic_recall") and "content" (the text to inject).
+            # "role" is a WorkingMemory section identifier — NOT an LLM
+            # conversation role (user/assistant/system).  We use only
+            # "content" here; "role" labels are intentionally omitted from
+            # the prompt to avoid confusing the LLM with metadata noise.
+            # (PR review should-fix #6: document "role" vs LLM message role.)
+            memory_text = "\n\n".join(s["content"] for s in memory_sections)
+            system_prompt += "\n\n" + memory_text
 
-        # 3. Multi-turn tool-use loop
+        # 2. Multi-turn tool-use loop (user_message already computed above)
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": user_message},
         ]
@@ -995,7 +1352,11 @@ class _LLMPersonaAgent(PersonaAgent):
         blocking all event processing for the agent.
         (Review finding F-5a-1, resolved in PR 5b.)
         """
-        timeout = self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT)
+        timeout = _coerce_event_timeout(
+            self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
+            self._DEFAULT_EVENT_TIMEOUT,
+            self.agent_id,
+        )
         async with self._lock:
             event = AgentEvent(event_type=EventType.TICK)
             try:
@@ -1197,6 +1558,24 @@ class ActionExecutor:
         *,
         cascade_depth: int = 0,
     ) -> dict[str, Any]:
+        """Execute a single agent action and return a status dict.
+
+        Every returned dict contains ``action_type`` (str) and ``status``
+        (str).  The status contract:
+
+        * ``"completed"`` — COMPLETE_TASK executed successfully.
+        * ``"dispatched"`` — SEND_MESSAGE routed to at least one target.
+        * ``"failed"`` — SEND_MESSAGE attempted but all dispatches failed.
+        * ``"no_targets"`` — SEND_MESSAGE had no mentioned targets (no-op).
+        * ``"no_dispatcher"`` — SEND_MESSAGE with no EventDispatcher configured.
+        * ``"skipped"`` — USE_TOOL appeared as a final action (should not happen).
+        * ``"ok"`` — DO_NOTHING.
+        * ``"not_implemented"`` — DELEGATE, SPAWN_SUB_AGENT, or approval actions.
+        * ``"unhandled"`` — Unknown ActionType (defensive catch-all).
+
+        SEND_MESSAGE dicts also include ``dispatched_to`` (int).
+        (PR #60 review: document status contract for downstream consumers.)
+        """
         match action.action_type:
             case ActionType.COMPLETE_TASK:
                 return {
@@ -1311,6 +1690,11 @@ class ActionExecutor:
         # makes the drop visible to operators, reducing confusion and wasted
         # LLM budget on undeliverable messages.
         # (PR #55 review: silent message drop when channel_id set without mentions.)
+        # Empty mentions is a no-op, not a failure.  Return "no_targets"
+        # instead of falling through to the dispatch loop where dispatched=0
+        # would produce a misleading "failed" status.  A channel-only message
+        # with no mentions is an intentional routing choice (future feature),
+        # not an error.  (F-60-R2-2: distinguish no-op from all-failed.)
         if not mentions:
             if target_channel:
                 logger.warning(
@@ -1324,6 +1708,11 @@ class ActionExecutor:
                     "Agent %s SEND_MESSAGE has no mentions, message not routed",
                     sender_id,
                 )
+            return {
+                "action_type": "send_message",
+                "status": "no_targets",
+                "dispatched_to": 0,
+            }
         dispatched = 0
         for target_id in mentions:
             try:
@@ -1342,8 +1731,19 @@ class ActionExecutor:
                     sender_id=sender_id,
                     metadata={"cascade_depth": cascade_depth},
                 )
-                await self._dispatcher.dispatch(target_id, event)
+                await asyncio.wait_for(
+                    self._dispatcher.dispatch(target_id, event),
+                    timeout=_DEFAULT_DISPATCH_TIMEOUT,
+                )
                 dispatched += 1
+            except TimeoutError:
+                # Per-dispatch timeout prevents a hung target agent from
+                # blocking the sender indefinitely.
+                # (F-5b-4: per-dispatch timeout in _handle_send_message.)
+                logger.warning(
+                    "Dispatch from %s to %s timed out after %.0fs",
+                    sender_id, target_id, _DEFAULT_DISPATCH_TIMEOUT,
+                )
             except Exception:
                 # execute() promises "Non-fatal failures are logged but
                 # do not propagate."  Without this guard a single failed
@@ -1355,9 +1755,13 @@ class ActionExecutor:
                     sender_id, target_id, exc_info=True,
                 )
 
+        # Use "failed" status when all dispatches timed out or errored,
+        # so callers don't see a successful-looking result with dispatched_to=0.
+        # (F-60-6: status "dispatched" with dispatched_to=0 is misleading.)
+        status = "dispatched" if dispatched > 0 else "failed"
         return {
             "action_type": "send_message",
-            "status": "dispatched",
+            "status": status,
             "dispatched_to": dispatched,
         }
 
@@ -1426,12 +1830,10 @@ class EventDispatcher:
 
         .. note::
 
-           TODO(v0.2): Inject memory context (episodic recall, relationship
-           summaries, recent notes) into the agent's working memory before
-           event handling — see RFC 0005 Phase 5b ``_inject_memory_context()``.
-           Deferred from this PR; persona agents currently rely on explicit
-           memory tool calls for context retrieval.
-           Tracked as F-5b-1 in PR plan for PR 7 follow-up.
+           Memory context (episodic recall, relationship summaries, recent
+           notes) is injected into the agent's working memory at the start
+           of ``_on_event_inner()`` via ``_inject_memory_context()``.
+           (F-5b-1: implemented in PR 7b.)
         """
         depth = event.metadata.get("cascade_depth", 0)
         if depth >= self._max_cascade_depth:

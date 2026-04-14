@@ -23,10 +23,10 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "id is required", http.StatusBadRequest)
 		return
 	}
-	// Agent IDs share the same format as workflow IDs (^[a-z0-9][a-z0-9-]*[a-z0-9]$).
+	// Agent IDs share the same format as workflow IDs (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$).
 	// Uses resourceIDRegex directly — single source of truth from planner package.
 	if !resourceIDRegex.MatchString(req.ID) {
-		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
+		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", http.StatusBadRequest)
 		return
 	}
 	// TODO(v0.2): validate address format (host:port or URI scheme).
