@@ -341,6 +341,49 @@ _MAX_SUB_AGENT_TOKENS: int = 100_000
 _MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
 _MAX_SUB_AGENT_LLM_CALLS: int = 50
 
+# Per-tier truncation caps for memory context injected into working memory.
+# build_context() enforces the overall token budget, but truncating per-item
+# gives fairer distribution across entries within a tier.  Values balance
+# detail vs. budget: notes are longest (agent-authored curated knowledge),
+# relationship notes are medium, episode summaries shortest.
+# (PR #60 review: inline magic numbers for truncation caps.)
+_MAX_EPISODE_SUMMARY_CHARS: int = 200
+_MAX_RELATIONSHIP_NOTES_CHARS: int = 300
+_MAX_NOTE_CONTENT_CHARS: int = 500
+
+# Trust score defaults for relationship context filtering.
+# A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
+# useful signal to the LLM.  Only inject trust when it has deviated by more
+# than _TRUST_DEVIATION_THRESHOLD from the default.
+# (PR #60 review: unnamed magic numbers in trust comparison.)
+_DEFAULT_TRUST_SCORE: float = 0.5
+_TRUST_DEVIATION_THRESHOLD: float = 0.01
+
+
+def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
+    """Truncate *text* to *max_chars* with word-boundary awareness.
+
+    If *text* fits within *max_chars*, it is returned unchanged.
+    Otherwise it is sliced to *max_chars* and an attempt is made to cut at
+    the last space so the LLM sees a complete word.  If the slice contains
+    no space, the full slice is used.  ``"..."`` is always appended to
+    signal truncation (giving a 3-char overage in the worst case, which
+    is acceptable).
+
+    Extracted from _inject_memory_context() where the same pattern was
+    copy-pasted for episode summaries, relationship notes, and note content.
+    (PR #60 review: truncation pattern duplicated 3 times.)
+    """
+    if len(text) <= max_chars:
+        return text
+    sliced = text[:max_chars]
+    truncated = sliced.rsplit(" ", 1)[0]
+    # Zero-space guard: if the slice has no space, rsplit returns it
+    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
+    if len(truncated) == len(sliced):
+        truncated = sliced
+    return truncated + "..."
+
 
 @dataclass
 class PersonaState:
@@ -1034,20 +1077,9 @@ class _LLMPersonaAgent(PersonaAgent):
                 # truncating here gives fairer distribution across episodes.
                 # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                 # (PR #60 review: unbounded episode summary length.)
-                summary = ep.summary[:200]
-                if len(ep.summary) > 200:
-                    # Word-boundary truncation: prefer cutting at a space so
-                    # the LLM sees a complete word.  Zero-space guard: if the
-                    # 200-char slice contains no space, rsplit returns it
-                    # unchanged (len(truncated) == len(summary)), so we fall
-                    # back to the full slice.  Either way '...' is appended,
-                    # giving a 200-char or 203-char maximum (3-char overage
-                    # for space-free strings is acceptable).
-                    # (PR review: zero-space edge case — '...' always appended.)
-                    truncated = summary.rsplit(" ", 1)[0]
-                    summary = (
-                        truncated if len(truncated) < len(summary) else summary
-                    ) + "..."
+                summary = _truncate_with_ellipsis(
+                    ep.summary, _MAX_EPISODE_SUMMARY_CHARS,
+                )
                 lines.append(f"- {summary}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
@@ -1076,11 +1108,12 @@ class _LLMPersonaAgent(PersonaAgent):
                 lines = [
                     f"Relationship with {rel.other_agent_id}:",
                 ]
-                # Only inject trust when it has deviated from the 0.5 default.
-                # A score of exactly 0.50 provides no useful signal to the LLM
-                # and implies a measured assessment when it's just the initial value.
+                # Only inject trust when it has deviated from the default.
+                # A score of exactly _DEFAULT_TRUST_SCORE provides no useful
+                # signal to the LLM and implies a measured assessment when
+                # it's just the initial value.
                 # (F-60-4: skip default trust injection.)
-                if abs(rel.trust_score - 0.5) > 0.01:
+                if abs(rel.trust_score - _DEFAULT_TRUST_SCORE) > _TRUST_DEVIATION_THRESHOLD:
                     lines.append(f"  Trust: {rel.trust_score:.2f}")
                 lines.append(f"  Interactions: {rel.interaction_count}")
                 if rel.notes:
@@ -1092,16 +1125,9 @@ class _LLMPersonaAgent(PersonaAgent):
                     # usage.  No storage cap exists on rel.notes currently.
                     # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                     # (F-60-5: unbounded relationship notes in prompt.)
-                    rel_notes = rel.notes[:300]
-                    if len(rel.notes) > 300:
-                        # Zero-space guard: if the 300-char slice has no space,
-                        # rsplit returns it unchanged and '...' is still appended
-                        # (giving a 303-char maximum).  Same pattern as episode
-                        # summary truncation — '...' is always appended.
-                        truncated = rel_notes.rsplit(" ", 1)[0]
-                        rel_notes = (
-                            truncated if len(truncated) < len(rel_notes) else rel_notes
-                        ) + "..."
+                    rel_notes = _truncate_with_ellipsis(
+                        rel.notes, _MAX_RELATIONSHIP_NOTES_CHARS,
+                    )
                     lines.append(f"  Notes: {rel_notes}")
                 text = "\n".join(lines)
                 self._working_memory.add_section(ContextSection(
@@ -1136,20 +1162,13 @@ class _LLMPersonaAgent(PersonaAgent):
             for note in notes:
                 # Cap note content to prevent disproportionate token usage.
                 # Notes can be up to 10KB each (_MAX_NOTE_CONTENT_BYTES);
-                # 500 chars balances detail vs budget (longer than episode
-                # summaries since notes are user-authored).
+                # _MAX_NOTE_CONTENT_CHARS balances detail vs budget (longer
+                # than episode summaries since notes are user-authored).
                 # Ellipsis signals truncation to the LLM.  (F-60-R2-3.)
                 # (F-60-1: note content not truncated.)
-                content = note.content[:500]
-                if len(note.content) > 500:
-                    # Zero-space guard: if the 500-char slice has no space,
-                    # rsplit returns it unchanged and '...' is still appended
-                    # (giving a 503-char maximum).  Same pattern as episode
-                    # summary truncation — '...' is always appended.
-                    truncated = content.rsplit(" ", 1)[0]
-                    content = (
-                        truncated if len(truncated) < len(content) else content
-                    ) + "..."
+                content = _truncate_with_ellipsis(
+                    note.content, _MAX_NOTE_CONTENT_CHARS,
+                )
                 lines.append(f"- [{note.topic}] {content}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
