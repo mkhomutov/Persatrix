@@ -860,7 +860,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 |------|--------|
 | `agents/persona.py` | `on_tick()` timeout, prompt injection trust boundary comment, `llm_client` forwarding, `_inject_memory_context()` implementation, per-dispatch timeout in `_handle_send_message()` |
 | `agents/server.py` | Consolidate three agent iteration loops into single loop |
-| `agents/validate.py` | Return `tuple[bool, list[ValidationError]]` instead of `bool` |
+| `agents/validate.py` | Return `tuple[bool, list[ValidationError], int]` (+ `files_checked` per F-60-3) instead of `bool` |
 | `schemas/agent.schema.json` | Agent ID regex fix (allow 1–2 char IDs or document ≥3 requirement), `db_path` minLength |
 | `tests/unit/python/test_persona_runtime.py` | Minimal config prompt test, energy clamp at 1.0 test, tick timeout test |
 | `tests/unit/python/test_event_dispatch_tick.py` | Mentions truncation, no-dispatcher status, min interval clamp, cascade depth unit test |

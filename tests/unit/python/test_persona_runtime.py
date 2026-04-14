@@ -1113,6 +1113,41 @@ class TestBuildToolDefinitionsWithRegistry:
         assert results[0].content == "executed"
         await agent.close_memory()
 
+    async def test_execute_tools_returns_error_for_func_none_memory_tool(self):
+        """_execute_tools must return is_error=True when a ToolDefinition has
+        func=None (e.g. a schema-only declaration injected as a memory tool).
+
+        The guard ``if tool_def is None or tool_def.func is None`` has two
+        branches; only the first (tool_def is None) was covered by the
+        test above.  A ToolDefinition with func=None can arise for schema
+        documentation tools or if create_memory_tools() produces a stub
+        entry.  (PR review: second branch of func=None guard untested.)
+        """
+        from agents.tools.registry import ToolDefinition
+
+        null_func_tool = ToolDefinition(
+            name="ghost",
+            description="Schema-only declaration with no callable",
+            parameters={},
+            func=None,
+        )
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        # Inject the stub directly into the agent's memory-tools list so it
+        # is found by the memory-tool-first lookup path.
+        agent._memory_tools.append(null_func_tool)
+
+        results = await agent._execute_tools([
+            ToolCall(id="tc-ghost", name="ghost", input={}),
+        ])
+
+        assert len(results) == 1
+        assert results[0].is_error is True
+        assert "Unknown tool" in results[0].content
+        await agent.close_memory()
+
 
 # ─── Review finding: handle() without COMPLETE_TASK ──────────
 
@@ -2012,6 +2047,15 @@ class TestInjectMemoryContext:
             sentiment=0.8,
         )
         # Manually set long notes on the relationship.
+        # NOTE: RelationshipMemory has no public setter for the `notes`
+        # column (it accumulates notes through record_interaction() which
+        # does not directly expose the notes field).  Using the raw DB
+        # connection is the only way to inject a controlled long string
+        # without adding a test-only API to production code.  If the
+        # `relationships` table schema changes (e.g. column rename), this
+        # raw execute will fail with an sqlite3.OperationalError rather
+        # than an assertion error — treat that as a reminder to update
+        # the fixture.  (PR review: coupling note for future maintainers.)
         long_notes = "n" * 600
         async with agent._relationship_memory._db.execute(
             "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",

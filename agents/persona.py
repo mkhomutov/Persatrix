@@ -324,6 +324,10 @@ _MAX_MENTIONS_PER_ACTION = 10
 # Prevents a hung target agent from blocking the sender indefinitely.
 # Separate from _DEFAULT_EVENT_TIMEOUT: bounds a single hop, not full event.
 # TODO(v0.3): make configurable via config["dispatch_timeout"].
+# Hard-coded here as a partial fix for F-5b-4 (PR #55 review: no per-dispatch
+# timeout in _handle_send_message()); making it configurable requires the v0.3
+# dispatch config schema and is tracked as a deferred item in the PR 7b section
+# of docs/rfcs/0005-pr-plan.md.
 # (PR #60 review: hard-coded 60s dispatch timeout.)
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
@@ -911,6 +915,14 @@ class _LLMPersonaAgent(PersonaAgent):
         if query is None:
             query = self._format_event(event)
 
+        # Three memory tiers are queried sequentially rather than concurrently
+        # via asyncio.gather() because all three share the same aiosqlite
+        # connection (same db_path).  aiosqlite serialises operations on a
+        # single connection, so concurrent gather() would not increase
+        # throughput and would add complexity.  If the tiers ever move to
+        # separate DB files, this can be revisited.
+        # (PR #60 review: document why sequential rather than gather().)
+
         # 1. Episodic recall — recent episodes matching event content.
         # Skip for TICK events: the boilerplate "Autonomous tick: review
         # your goals..." query matches broadly in FTS5, returning
@@ -941,7 +953,17 @@ class _LLMPersonaAgent(PersonaAgent):
                 # (PR #60 review: unbounded episode summary length.)
                 summary = ep.summary[:200]
                 if len(ep.summary) > 200:
-                    summary = summary.rsplit(" ", 1)[0] + "..."
+                    # Word-boundary truncation: prefer cutting at a space so
+                    # the LLM sees a complete word.  Guard: if the slice has
+                    # no space, rsplit returns a 1-element list whose only
+                    # element is the full 200-char slice — appending '...'
+                    # would then *extend* beyond the cap; fall back to the
+                    # slice itself in that case.  (PR review: zero-space edge
+                    # case silently defeats truncation for hashes/URLs.)
+                    truncated = summary.rsplit(" ", 1)[0]
+                    summary = (
+                        truncated if len(truncated) < len(summary) else summary
+                    ) + "..."
                 lines.append(f"- {summary}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
@@ -988,7 +1010,11 @@ class _LLMPersonaAgent(PersonaAgent):
                     # (F-60-5: unbounded relationship notes in prompt.)
                     rel_notes = rel.notes[:300]
                     if len(rel.notes) > 300:
-                        rel_notes = rel_notes.rsplit(" ", 1)[0] + "..."
+                        # Same zero-space guard as episode summary truncation.
+                        truncated = rel_notes.rsplit(" ", 1)[0]
+                        rel_notes = (
+                            truncated if len(truncated) < len(rel_notes) else rel_notes
+                        ) + "..."
                     lines.append(f"  Notes: {rel_notes}")
                 text = "\n".join(lines)
                 self._working_memory.add_section(ContextSection(
@@ -1020,7 +1046,11 @@ class _LLMPersonaAgent(PersonaAgent):
                 # (F-60-1: note content not truncated.)
                 content = note.content[:500]
                 if len(note.content) > 500:
-                    content = content.rsplit(" ", 1)[0] + "..."
+                    # Same zero-space guard as episode summary truncation.
+                    truncated = content.rsplit(" ", 1)[0]
+                    content = (
+                        truncated if len(truncated) < len(content) else content
+                    ) + "..."
                 lines.append(f"- [{note.topic}] {content}")
             text = "\n".join(lines)
             self._working_memory.add_section(ContextSection(
