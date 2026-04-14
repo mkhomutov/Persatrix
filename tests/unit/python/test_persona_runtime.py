@@ -111,6 +111,40 @@ def _task(payload: str = "do something") -> TaskInput:
     return TaskInput(task_id="t1", workflow_id="w1", payload=payload)
 
 
+# ─── Module Import Smoke Tests ──────────────────────────────
+# Verify each extracted module is independently importable without
+# circular-import errors.  All other tests go through persona.py
+# re-exports, which would mask import-order issues.  (F-64-04)
+
+
+class TestModuleImports:
+    def test_persona_types_importable(self):
+        from agents import persona_types
+
+        assert hasattr(persona_types, "EventType")
+
+    def test_persona_behavior_importable(self):
+        from agents import persona_behavior
+
+        assert hasattr(persona_behavior, "render_behavior")
+
+    def test_dispatch_importable(self):
+        from agents import dispatch
+
+        assert hasattr(dispatch, "EventDispatcher")
+
+    def test_tick_importable(self):
+        from agents import tick
+
+        assert hasattr(tick, "TickScheduler")
+
+    def test_sub_agent_status_reexported(self):
+        """SubAgentStatus must remain importable from persona.py (F-64-01)."""
+        from agents.persona import SubAgentStatus
+
+        assert hasattr(SubAgentStatus, "COMPLETED")
+
+
 # ─── Mood Enum Tests ────────────────────────────────────────
 
 
@@ -299,7 +333,7 @@ class TestRenderBehavior:
 
     def test_unknown_dimension_ignored(self, caplog):
         behavior = {"unknown_dim": "unknown_val"}
-        with caplog.at_level("WARNING", logger="agents.persona"):
+        with caplog.at_level("WARNING", logger="agents.persona_behavior"):
             rendered = render_behavior(behavior)
         # Should still have defaults for known dimensions
         assert "Balances directness with tact" in rendered

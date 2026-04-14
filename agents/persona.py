@@ -47,6 +47,7 @@ from .persona_types import (
     PersonaState,
     SubAgentRequest,
     SubAgentResult,
+    SubAgentStatus,  # noqa: F401 — re-exported for backward compatibility (F-64-01)
 )
 from .tick import TickScheduler  # noqa: F401
 from .tools.builtin import create_memory_tools
