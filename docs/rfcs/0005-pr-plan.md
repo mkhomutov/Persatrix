@@ -12,7 +12,7 @@
 
 RFC 0005 defines the PersonaAgent runtime, three-tier memory system (working, episodic, relationship), agent-initiated memory tools, behavioral dimensions, dynamic persona state, and data-driven TaskAgent consolidation. The RFC spans 6 implementation phases with an estimated ~3,500–4,850 LOC (calibrated at 1.7×) across Python agents, Rust CLI, YAML config, and JSON schemas.
 
-The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **18 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), PRs 7a (memory tier review fixes), 7b (persona + validation review fixes), 7c (CLI review fixes), then PRs 8a (split persona.py), 8b (split episodic.py), 8c (split main.rs into modules), and finally 7d (RFC close).
+The project's PR size limit is <500 lines of meaningful change. This plan splits the work into **19 PRs**: Phase 1 is split into 1a (TaskAgent consolidation + agent type system) and 1b (CLI wiring to v0.1 endpoints), Phase 2 is one PR, Phase 3 is split into 3a (schema migration + episodic memory core), 3b (agent-initiated memory tools), and 3c (episode auto-summarization), Phase 4 is one PR, Phase 5 is split into 5a (persona runtime core) and 5b (event dispatch + tick loop integration), Phase 6 is split into 6a (config validation + schema updates) and 6b (CLI persona commands), PRs 7a (memory tier review fixes), 7b (persona + validation review fixes), 7c (CLI review fixes), then PRs 8a (split persona.py), 8b (split episodic.py), 8c (split main.rs into modules), 8d (extract _LLMPersonaAgent from persona.py), and finally 7d (RFC close).
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -20,7 +20,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0001–0004 fully merged (v0.1 complete). The v0.1 agent infrastructure (`BaseAgent`, `_run_llm_loop()`, `LLMClient`, `server.py` agent loader, permission gate, tool registry) is the foundation for all v0.2 work.
 
-**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 8a** / **PR 8b** / **PR 8c** (all three can parallel — independent module splits) → **PR 7d**.
+**Recommended merge order:** **PR 1a** → **PR 1b** (independent, can parallel with PR 1a and PR 2) → **PR 2** → **PR 3a** → **PR 3b** / **PR 3c** / **PR 4** (all three can parallel; each depends only on PR 3a) → **PR 5a** → **PR 5b** → **PR 6a** → **PR 6b** → **PR 7a** → **PR 7b** / **PR 7c** (can parallel — no code dependency) → **PR 8a** → **PR 8d** (depends on 8a) / **PR 8b** / **PR 8c** (8b, 8c, 8d can parallel — independent module splits) → **PR 7d**.
 
 ---
 
@@ -963,11 +963,11 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 | File | Change |
 |------|--------|
-| `agents/persona_types.py` | **New** — extract `PersonaState`, `Mood` enum, `AgentEvent`, `EventType`, `AgentAction`, `ActionType`, `ToolCall`, `LLMToolResult` dataclasses/enums (~150 lines) |
+| `agents/persona_types.py` | **New** — extract `PersonaState`, `Mood` enum, `AgentEvent`, `EventType`, `AgentAction`, `ActionType` dataclasses/enums (~150 lines). _Note: `ToolCall` and `LLMToolResult` were originally listed for extraction here but are defined in `llm_client.py`, not `persona.py` — not in scope for this PR._ (F-64-DR5-02) |
 | `agents/persona_behavior.py` | **New** — extract `render_behavior()`, `DIMENSION_DESCRIPTIONS` mapping (~80 lines) |
 | `agents/dispatch.py` | **New** — extract `EventDispatcher`, `ActionExecutor` classes (~250 lines) |
 | `agents/tick.py` | **New** — extract `TickScheduler` class (~160 lines) |
-| `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `_LLMPersonaAgent`, `create_persona_agent()` factory (~600 lines). Update imports to reference new modules |
+| `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `_LLMPersonaAgent`, `create_persona_agent()` factory (~1,190 lines actual — `_LLMPersonaAgent` grew during review fix rounds 7b; further splitting tracked as follow-up). Update imports to reference new modules |
 | `agents/__init__.py` | Update re-exports for public API stability |
 | `agents/server.py` | Update imports for `EventDispatcher`, `ActionExecutor`, `TickScheduler` |
 | `tests/unit/python/test_persona_runtime.py` | Update imports |
@@ -976,7 +976,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### Key implementation details
 
-- **Pure move refactoring**: no logic changes, no renames, no behavioral differences. Every function and class body is moved verbatim.
+- **Move refactoring with review fixes**: code moved verbatim, plus minor safety improvements applied during PR review rounds (F-64-DR* findings): `_MIN_INTERVAL` raised to 1.0s, `assert` replaced with `if/raise RuntimeError`, `metadata` deep-copied, unknown dimension value warnings added. (F-64-DR5-03)
 - **Public API preserved**: `agents/__init__.py` re-exports all moved symbols so external imports (`from agents import PersonaState`) continue to work.
 - **Import graph**: `persona.py` imports from `persona_types`, `persona_behavior`, `dispatch`, `tick`. `dispatch.py` imports from `persona_types`. `tick.py` imports from `persona_types` and `dispatch`. No circular dependencies.
 - **Test-verified**: full test suite must pass with zero changes to test assertions — only import paths change.
@@ -988,12 +988,36 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
-- [ ] `ruff check agents/` clean
-- [ ] `persona.py` ≤ 650 lines
-- [ ] No circular imports (each new module importable independently)
-- [ ] `agents/__init__.py` re-exports preserve public API
-- [ ] `git diff --stat` shows only moves + import edits (no logic changes)
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
+- [x] `ruff check agents/` clean
+- [ ] ~~`persona.py` ≤ 650 lines~~ — actual ~1,190 lines. `_LLMPersonaAgent` grew during review fix rounds. Further splitting tracked as follow-up (F-64-DR5-01/28)
+- [x] No circular imports (each new module importable independently)
+- [x] `agents/__init__.py` re-exports preserve public API
+- [x] `git diff --stat` shows moves + import edits + review safety fixes (F-64-DR* findings — see key implementation details)
+
+##### Review findings (PR #64)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-64-SF-1 | Low | Tests still import from `agents.persona` re-exports — should migrate to canonical submodule paths | Migrated in review fix round 2. One backward-compat test (`test_reexports_backward_compat`) retained |
+| F-64-SF-2 | Low | No deprecation plan for re-export paths | Added `TODO(v0.3)` deprecation comment and documented migration plan |
+| F-64-DR-04 | Low | `assert` stripped by `python -O` for dimension dict consistency check | Replaced with `if/raise RuntimeError` |
+| F-64-DR-05 | Low | Unknown dimension _values_ silently ignored in `render_behavior()` | Added WARNING log with valid values listed |
+| F-64-DR-12 | Info | Lock asymmetry between idle and non-idle TickScheduler branches underdocumented | Added inline comment + module docstring Lock Protocol section |
+| F-64-DR-14 | Low | Actions silently discarded when executor is None | Added WARNING log for non-DO_NOTHING actions with no executor |
+| F-64-DR2-02 | Low | `event.metadata` not deep-copied (inconsistent with `event.payload`) | Added `copy.deepcopy(event.metadata)` in `dispatch()` |
+| F-64-DR2-11 | Medium | `_MIN_INTERVAL=0.01` allows 100 Hz cost burst from misconfigured agents | Raised to `_MIN_INTERVAL=1.0` |
+| F-64-DR5-06 | Low | No `__all__` on `persona.py` — inconsistent with extracted modules | Added `__all__` with 17 public symbols |
+
+> All findings above have been addressed in review fix rounds 1–5.
+
+**Open follow-up items (deferred to PR 8d)**:
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-64-DR5-01 | Medium | `persona.py` at ~1,190 lines — still well above 600-line Python policy | Extract `_LLMPersonaAgent` + helpers into `agents/persona_runtime.py` (PR 8d) |
+| F-64-R-SF3 | Low | No test for metadata deep-copy isolation in `EventDispatcher.dispatch()` | Add test: dispatch event, mutate `event.metadata` after dispatch, verify dispatched copy unaffected (PR 8d) |
+| F-64-R-NTH1 | Info | Dense review-finding citations (`F-64-DR-XX`, `PR #NN review`) add cognitive overhead | Trim after RFC 0005 closes — acceptable during active development |
 
 ---
 
@@ -1081,9 +1105,54 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ---
 
+#### PR 8d: `feature/v02-refactor-persona-runtime` — Extract `_LLMPersonaAgent` from `persona.py`
+
+**Depends on**: PR 8a merged (8a splits types/behavior/dispatch/tick; 8d continues the split)
+**Branch**: `feature/v02-refactor-persona-runtime`
+**Estimated size**: ~350–500 lines (move-only + import updates + new test)
+
+> **Rationale**: PR 8a reduced `persona.py` from ~2,091 to ~1,190 lines by extracting types, behavior, dispatch, and tick. The remaining file still exceeds the 600-line Python policy. `_LLMPersonaAgent` (~500+ lines) and its private helpers are self-contained and can be extracted cleanly. This was tracked as F-64-DR5-01/28 during the PR 8a review.
+
+##### Scope
+
+| File | Change |
+|------|--------|
+| `agents/persona_runtime.py` | **New** — extract `_LLMPersonaAgent` concrete class with `_on_event_inner()`, `_build_system_prompt()`, `_format_event()`, `_parse_actions()`, `_validate_action_payload()`, `_execute_tools()`, `_inject_memory_context()`, and helper functions (`_truncate_with_ellipsis`, `_coerce_event_timeout`) (~700 lines) |
+| `agents/persona.py` | **Shrink** — keep `PersonaAgent` ABC, `create_persona_agent()` factory, re-exports (~350–400 lines) |
+| `agents/__init__.py` | Update imports — `_LLMPersonaAgent` now from `persona_runtime` |
+| `agents/server.py` | Update factory import if needed |
+| `tests/unit/python/test_persona_runtime.py` | Update imports — tests for `_LLMPersonaAgent` methods import from new module |
+| `tests/unit/python/test_event_dispatch_tick.py` | Add metadata deep-copy isolation test (F-64-R-SF3) |
+
+##### Key implementation details
+
+- **Pure move refactoring** for `_LLMPersonaAgent` and helpers — no logic changes.
+- **`persona.py` reduced to ~350–400 lines**: `PersonaAgent` ABC definition, `create_persona_agent()` factory function, module-level constants, and re-exports. This meets the 600-line Python policy.
+- **Import graph**: `persona_runtime.py` imports from `persona_types`, `persona_behavior`, `persona` (for ABC), and memory modules. `persona.py` imports `_LLMPersonaAgent` from `persona_runtime` for factory use.
+- **`TYPE_CHECKING` guard**: `persona_runtime.py` uses `TYPE_CHECKING` for cross-references to avoid circular imports where needed.
+- **Metadata deep-copy test** (F-64-R-SF3): dispatch an event, mutate `event.metadata["cascade_depth"]` after dispatch, verify the dispatched copy is unaffected — guards against regression if `copy.deepcopy()` is accidentally removed.
+
+##### Tests
+
+- All existing tests pass with updated imports.
+- Verify `persona_runtime.py` importable independently (no circular dependency).
+- Add metadata deep-copy isolation test (F-64-R-SF3).
+- Add `persona_runtime` to `test_circular_import_isolation()` subprocess test.
+
+##### PR checklist
+
+- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [ ] `ruff check agents/` clean
+- [ ] `persona.py` ≤ 400 lines (ABC + factory + re-exports)
+- [ ] No circular imports (`persona_runtime.py` importable independently)
+- [ ] Metadata deep-copy isolation test added
+- [ ] `agents/__init__.py` re-exports preserve public API
+
+---
+
 #### PR 7d: `feature/v02-rfc0005-close` — RFC Close
 
-**Depends on**: PRs 7a, 7b, 7c, 8a, 8b, 8c merged
+**Depends on**: PRs 7a, 7b, 7c, 8a, 8b, 8c, 8d merged
 **Branch**: `feature/v02-rfc0005-close`
 **Estimated size**: ~50–100 lines (status updates only)
 
@@ -1097,17 +1166,17 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### Key implementation details
 
-- **RFC status transition**: Only after all 18 PRs are merged, all review findings from PRs 7a–7c are addressed, and refactoring PRs 8a–8c have split oversized files
+- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c and 8a are addressed, and refactoring PRs 8a–8d have split oversized files
 - **ROADMAP Component Status**: Update `agents/persona.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion. Add new files from refactoring PRs to component table
 - **Final verification**: `make test` (all suites), `make lint`, `make validate` must pass before merge
 
 ##### PR checklist
 
 - [ ] RFC 0005 status is `✅ Implemented`
-- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 18/18
+- [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 19/19
 - [ ] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
-- [ ] All accumulated review findings addressed in PRs 7a–7c
-- [ ] All oversized files split in PRs 8a–8c
+- [ ] All accumulated review findings addressed in PRs 7a–7c and 8a
+- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d)
 - [ ] `make test` passes (all suites)
 - [ ] `make lint` passes
 - [ ] `make validate` passes
@@ -1135,9 +1204,10 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | 8a | refactor | `feature/v02-refactor-persona` | 350–450 | 7b |
 | 8b | refactor | `feature/v02-refactor-episodic` | 300–400 | 7a |
 | 8c | refactor | `feature/v02-refactor-cli` | 250–350 | 7c |
-| 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7b, 7c, 8a, 8b, 8c |
+| 8d | refactor | `feature/v02-refactor-persona-runtime` | 350–500 | 8a |
+| 7d | — | `feature/v02-rfc0005-close` | 50–100 | 7b, 7c, 8a, 8b, 8c, 8d |
 
-**Total estimated**: ~5,300–7,300 lines across 18 PRs (calibrated at 1.7×).
+**Total estimated**: ~5,650–7,800 lines across 19 PRs (calibrated at 1.7×).
 
 ### Dependency Graph
 
@@ -1155,13 +1225,13 @@ PR 1a (TaskAgent + type system)
                                                     ├── PR 6a (Config Validation) ──────┐
                                                     └── PR 6b (CLI Persona)             │
                                                           └── PR 7a (Memory Review Fixes)
-                                                                ├── PR 7b (Persona + Validation) ──→ PR 8a (Split persona.py) ──┐
-                                                                │                                                               │
-                                                                ├── PR 8b (Split episodic.py) [parallel with 8a, 8c] ──────────┤
-                                                                │                                                               │
-                                                                └── PR 7c (CLI Review) ──→ PR 8c (Split main.rs) ──────────────┤
-                                                                                                                                ↓
-                                                                                                                    PR 7d (Close RFC)
+                                                                ├── PR 7b (Persona + Validation) ──→ PR 8a (Split persona.py) ──→ PR 8d (Extract _LLMPersonaAgent) ──┐
+                                                                │                                                                                              │
+                                                                ├── PR 8b (Split episodic.py) [parallel with 8a, 8c, 8d] ──────────────────────────────────┤
+                                                                │                                                                                              │
+                                                                └── PR 7c (CLI Review) ──→ PR 8c (Split main.rs) ──────────────────────────────────────────┤
+                                                                                                                                                                ↓
+                                                                                                                                                    PR 7d (Close RFC)
 ```
 
 ### Risk Mitigation
@@ -1175,7 +1245,7 @@ PR 1a (TaskAgent + type system)
 | TaskAgent consolidation breaks existing tests | PR 1a regressions | Parametrized tests preserve existing coverage; old test patterns adapted |
 | PRs 3a, 4, 5a, 5b at 500-line boundary | PRs exceed size limit, require mid-implementation splits | Calibrated at 1.7×; PR 5a/5b already pre-split. Monitor during implementation and split further if needed |
 | Follow-up review findings volume (~48 items) | PR 7 exceeds 500-line limit | Split into 4 sub-PRs: 7a (memory), 7b (persona+validation), 7c (CLI), 7d (RFC close). PRs 7b and 7c can parallel |
-| Files grow past maintainable size during incremental PRs | persona.py ~1,800 lines, episodic.py ~1,080 lines, main.rs ~860 lines | Dedicated refactoring PRs (8a, 8b, 8c) after review fixes and before RFC close. v0.3+ policy: refactor when file exceeds 600 Python / 500 Rust lines |
+| Files grow past maintainable size during incremental PRs | persona.py ~1,800 lines, episodic.py ~1,080 lines, main.rs ~860 lines | Dedicated refactoring PRs (8a, 8b, 8c, 8d) after review fixes and before RFC close. PR 8d extracts `_LLMPersonaAgent` to bring persona.py under 400 lines. v0.3+ policy: refactor when file exceeds 600 Python / 500 Rust lines |
 
 ### Deferred to Follow-Up
 

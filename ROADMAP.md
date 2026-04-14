@@ -74,7 +74,11 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
-| `agents/persona.py` | PersonaAgent runtime (persona state, behavior dimensions, LLM event loop, memory integration, event dispatch, tick scheduler) | ✅ Complete (RFC 0005 PR 5a+5b) |
+| `agents/persona.py` | PersonaAgent ABC, _LLMPersonaAgent, create_persona_agent() factory | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a) |
+| `agents/persona_types.py` | Persona type definitions (PersonaState, Mood, AgentEvent, EventType, AgentAction, ActionType) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/persona_behavior.py` | Behavioral dimension rendering (render_behavior, DIMENSION_DESCRIPTIONS) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/dispatch.py` | Event dispatch and action execution (EventDispatcher, ActionExecutor) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/tick.py` | Autonomous tick scheduler (TickScheduler) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
@@ -117,7 +121,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 18 | 13/18 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 14/19 |
 
 ### Dependency Chain
 
@@ -226,6 +230,8 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/15) | 2026-04-13 |
 | [#60](https://github.com/mkhomutov/Orchestr8/pull/60) | feat(persona,validate): persona + validation review fixes (PR 7b) | 0005 (7b/15) | 2026-04-14 |
 | [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
+| [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/18) | 2026-04-14 |
+| [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
 
 ---
 
