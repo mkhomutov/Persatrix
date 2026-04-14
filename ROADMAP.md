@@ -129,12 +129,12 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 20 | 19/20 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
 
 ### Dependency Chain
 
 ```
-RFC 0005 (PersonaAgent + Memory + TaskAgent)   🚧 Implementing (19/20)
+RFC 0005 (PersonaAgent + Memory + TaskAgent)   ✅ Done (20/20)
     ↓
 RFC 0006 (Sub-Agent Spawning)                  Not yet written
     ↓
@@ -245,6 +245,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/20) | 2026-04-14 |
 | [#67](https://github.com/mkhomutov/Orchestr8/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
 | [#68](https://github.com/mkhomutov/Orchestr8/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
+| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs(rfc0005): RFC 0005 close — PR 7d (PR #69 review fixes) | 0005 (7d/20) | 2026-04-14 |
 
 ---
 
