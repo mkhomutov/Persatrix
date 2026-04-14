@@ -74,7 +74,8 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
 | `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, schema migrations, notes, auto-summarization) | ✅ Complete (RFC 0005 PR 3a+3b+3c) |
 | `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
-| `agents/persona.py` | PersonaAgent ABC, _LLMPersonaAgent, create_persona_agent() factory | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a) |
+| `agents/persona.py` | PersonaAgent ABC, create_persona_agent() factory, re-exports | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a+8d) |
+| `agents/persona_runtime.py` | _LLMPersonaAgent concrete class (LLM-powered event loop, memory injection, tool use) | ✅ Complete (RFC 0005 PR 8d) |
 | `agents/persona_types.py` | Persona type definitions (PersonaState, Mood, AgentEvent, EventType, AgentAction, ActionType) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/persona_behavior.py` | Behavioral dimension rendering (render_behavior, DIMENSION_DESCRIPTIONS) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/dispatch.py` | Event dispatch and action execution (EventDispatcher, ActionExecutor) | ✅ Complete (RFC 0005 PR 8a) |
@@ -121,7 +122,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 14/19 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 19 | 16/19 |
 
 ### Dependency Chain
 
@@ -232,6 +233,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
 | [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/18) | 2026-04-14 |
 | [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
+| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/19) | 2026-04-14 |
 
 ---
 
