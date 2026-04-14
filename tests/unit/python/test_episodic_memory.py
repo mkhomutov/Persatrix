@@ -13,8 +13,8 @@ from agents.memory.episodic import (
     _MAX_RECALL_LIMIT,
     Episode,
     EpisodicMemory,
-    _apply_migrations,
 )
+from agents.memory.migrations import _apply_migrations
 from agents.llm_client import LLMResponse, StopReason, Usage
 
 
@@ -1238,7 +1238,7 @@ class TestDeleteOldEpisodes:
 class TestFutureMigration:
     async def test_hypothetical_v4_migration_applied(self):
         """Patch MIGRATIONS with a hypothetical v4 entry, verify v1–v4 applied."""
-        from agents.memory.episodic import MIGRATIONS
+        from agents.memory.migrations import MIGRATIONS
 
         v4 = (
             4,
@@ -1381,7 +1381,7 @@ class TestScoreExpressionSyntax:
 
     async def test_score_expr_is_valid_sql(self, memory):
         """_SCORE_EXPR (table-aliased) should be syntactically valid SQL."""
-        from agents.memory.episodic import _SCORE_EXPR
+        from agents.memory.migrations import _SCORE_EXPR
 
         # Execute inside a SELECT against the real episodes table (aliased as e)
         # with a concrete time parameter to exercise the full expression.
@@ -1393,7 +1393,7 @@ class TestScoreExpressionSyntax:
 
     async def test_score_expr_bare_is_valid_sql(self, memory):
         """_SCORE_EXPR_BARE (no table prefix) should be syntactically valid SQL."""
-        from agents.memory.episodic import _SCORE_EXPR_BARE
+        from agents.memory.migrations import _SCORE_EXPR_BARE
 
         sql = f"SELECT {_SCORE_EXPR_BARE} FROM episodes WHERE agent_id = ? LIMIT 1"
         import time

@@ -1032,10 +1032,10 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 | File | Change |
 |------|--------|
 | `agents/memory/notes.py` | **New** — extract `Note` dataclass, `NoteStore` class with `store_note()`, `recall_notes()`, `update_note()`, `delete_note()`, `count_notes()`, FTS5/LIKE note retrieval, pruning (~300 lines) |
-| `agents/memory/migrations.py` | **New** — extract `MIGRATIONS` list, `_apply_migrations()`, version tracking, `_SCORE_TEMPLATE` scoring constants (~120 lines) |
+| `agents/memory/migrations.py` | **New** — extract `MIGRATIONS` list, `_apply_migrations()`, `_fts5_available()`, FTS5 DDL constants, `_SCORE_TEMPLATE` scoring constants (~231 lines actual; original ~120 estimate excluded FTS5 DDL and availability check) |
 | `agents/memory/episodic.py` | **Shrink** — keep `Episode` dataclass, `EpisodicMemory` class (episode CRUD, recall, summarization, agent state persistence), delegate to `NoteStore` for note operations, import migrations (~550 lines) |
 | `agents/memory/__init__.py` | Update re-exports: add `NoteStore`, `Note` from new locations |
-| `agents/tools/builtin.py` | Update `create_memory_tools()` imports if `Note` moves |
+| `agents/tools/builtin.py` | ~~Update `create_memory_tools()` imports if `Note` moves~~ — no change needed (`builtin.py` imports `EpisodicMemory` only, not `Note` directly) |
 | `tests/unit/python/test_episodic_memory.py` | Update imports |
 | `tests/unit/python/test_memory_tools.py` | Update imports |
 
@@ -1043,7 +1043,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 - **`NoteStore` composition**: `EpisodicMemory` holds a `NoteStore` instance initialized with the same `db` connection and `agent_id`. Public note methods on `EpisodicMemory` delegate to `NoteStore` — existing callers don't need to change.
 - **Shared DB connection**: `NoteStore` receives the connection from `EpisodicMemory` (not a separate connection). Migrations remain centralized — `NoteStore` doesn't run its own migrations.
-- **Scoring constants**: `_SCORE_TEMPLATE`, `_SCORE_EXPR`, `_SCORE_EXPR_BARE` move to `migrations.py` (they depend on table schema). Both `episodic.py` and `notes.py` import from there.
+- **Scoring constants**: `_SCORE_TEMPLATE`, `_SCORE_EXPR`, `_SCORE_EXPR_BARE` move to `migrations.py` (they depend on table schema). Only `episodic.py` imports them — `notes.py` does not use the importance/access/recency scoring formula (notes use FTS5 rank or recency ordering instead).
 - **Pure move refactoring**: no logic changes. Note method signatures, return types, and error behavior are identical.
 
 ##### Tests
@@ -1053,12 +1053,33 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
-- [ ] `ruff check agents/memory/` clean
-- [ ] `episodic.py` ≤ 600 lines
-- [ ] `NoteStore` delegates work correctly (existing note tests pass unchanged)
-- [ ] No circular imports between `episodic.py`, `notes.py`, `migrations.py`
-- [ ] `agents/memory/__init__.py` re-exports preserve public API
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes — 833 passed, 2 skipped
+- [x] `ruff check agents/memory/` clean
+- [ ] `episodic.py` ≤ 600 lines — actual 668 lines (see F-66-01)
+- [x] `NoteStore` delegates work correctly (existing note tests pass unchanged)
+- [x] No circular imports between `episodic.py`, `notes.py`, `migrations.py`
+- [x] `agents/memory/__init__.py` re-exports preserve public API
+
+##### Review findings (PR #66)
+
+| ID | Severity | Finding | Action |
+|----|----------|---------|--------|
+| F-66-01 | Low | `episodic.py` at 668 lines exceeds the 600-line target by 68 lines. Delta from delegation wrappers (~40 lines) and `_ensure_note_store()` helper. Summarization block (~120 lines) and persona state methods (~40 lines) are future extraction candidates. | Acceptable — well under original 1,081. Monitor during v0.3; extract summarization if file grows further |
+| F-66-02 | Nit | `migrations.py` docstring says "shared scoring constants used by both `episodic.py` and `notes.py`" but `notes.py` does not import scoring constants (notes don't use the importance/access/recency formula) | Fix in PR 7d: update docstring to say "used by `episodic.py`" |
+| F-66-03 | Low | `_MAX_RECALL_LIMIT = 100` duplicated in both `notes.py:46` and `episodic.py:73`. Values are identical but now separate constants | Acceptable — the two limits serve different query types (notes vs. episodes) and could legitimately diverge. No action needed |
+| F-66-04 | Low | ROADMAP.md `episodic.py` component status and merged PR table need updating post-merge | Updated in this commit |
+| F-66-05 | Nit | `FILEMAP.md` hand-edited rather than regenerated via `scripts/generate_filemap.py` — risk of drift | No action — file is correct; regeneration is a convenience |
+| F-66-06 | Info | Second commit (`65aa873`) adds `CLAUDE.md` — unrelated to refactoring. Acceptable but ideally a separate PR per trunk-based conventions | No action needed — small docs addition |
+
+> F-66-02 to be addressed in PR 7d close-out. All other findings are informational or acceptable deviations.
+
+**Actual file sizes:**
+
+| File | Estimated | Actual |
+|------|-----------|--------|
+| `notes.py` | ~300 lines | 307 lines |
+| `migrations.py` | ~120 lines | 231 lines (includes FTS5 DDL + `_fts5_available()`, larger than estimated) |
+| `episodic.py` | ~550 lines | 668 lines (delegation wrappers add ~40 lines over estimate) |
 
 ---
 
@@ -1185,8 +1206,9 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### Key implementation details
 
-- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c, 8a, and 8d are addressed, and refactoring PRs 8a–8d have split oversized files
+- **RFC status transition**: Only after all 19 PRs are merged, all review findings from PRs 7a–7c, 8a, 8b, and 8d are addressed, and refactoring PRs 8a–8d have split oversized files
 - **ROADMAP Component Status**: Update `agents/persona.py`, `agents/persona_runtime.py`, `agents/validate.py`, `agents/server.py` to reflect v0.2 completion. Add new files from refactoring PRs to component table
+- **F-66-02 fix**: Update `migrations.py` docstring — change "used by both `episodic.py` and `notes.py`" to "used by `episodic.py`"
 - **Final verification**: `make test` (all suites), `make lint`, `make validate` must pass before merge
 
 ##### PR checklist
@@ -1194,8 +1216,8 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 - [ ] RFC 0005 status is `✅ Implemented`
 - [ ] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 19/19
 - [ ] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
-- [ ] All accumulated review findings addressed in PRs 7a–7c, 8a, and 8d
-- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module)
+- [ ] All accumulated review findings addressed in PRs 7a–7c, 8a, 8b, and 8d (including F-66-02 docstring fix)
+- [ ] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module, `episodic.py` 668 lines after 8b — acceptable per F-66-01)
 - [ ] `make test` passes (all suites)
 - [ ] `make lint` passes
 - [ ] `make validate` passes

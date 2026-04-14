@@ -17,7 +17,7 @@ from typing import Any
 
 import aiosqlite
 
-from .episodic import _apply_migrations
+from .migrations import _apply_migrations
 
 logger = logging.getLogger(__name__)
 
