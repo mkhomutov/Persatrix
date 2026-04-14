@@ -20,7 +20,7 @@ from .persona_types import (
 )
 
 if TYPE_CHECKING:
-    from .persona import _LLMPersonaAgent
+    from .persona_runtime import _LLMPersonaAgent
     from .tick import TickScheduler
 
 logger = logging.getLogger(__name__)

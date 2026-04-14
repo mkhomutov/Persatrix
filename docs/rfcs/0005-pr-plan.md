@@ -1141,12 +1141,12 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `persona.py` ≤ 400 lines (ABC + factory + re-exports)
-- [ ] No circular imports (`persona_runtime.py` importable independently)
-- [ ] Metadata deep-copy isolation test added
-- [ ] `agents/__init__.py` re-exports preserve public API
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `persona.py` ≤ 400 lines (ABC + factory + re-exports)
+- [x] No circular imports (`persona_runtime.py` importable independently)
+- [x] Metadata deep-copy isolation test added
+- [x] `agents/__init__.py` re-exports preserve public API
 
 ---
 

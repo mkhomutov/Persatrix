@@ -30,7 +30,7 @@ from .persona_types import ActionType
 
 if TYPE_CHECKING:
     from .dispatch import ActionExecutor
-    from .persona import _LLMPersonaAgent
+    from .persona_runtime import _LLMPersonaAgent
 
 logger = logging.getLogger(__name__)
 

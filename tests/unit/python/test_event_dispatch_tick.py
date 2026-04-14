@@ -13,7 +13,8 @@ import pytest
 
 from agents.llm_client import LLMClient, LLMResponse
 from agents.dispatch import ActionExecutor, EventDispatcher
-from agents.persona import _LLMPersonaAgent, create_persona_agent
+from agents.persona import create_persona_agent
+from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import (
     ActionType,
     AgentAction,
@@ -618,6 +619,35 @@ class TestEventDispatcher:
         assert original_payload["nested_dict"] is nested_dict
         assert nested_list == [1, 2, 3]
         assert nested_dict == {"inner_key": "inner_value"}
+        await agent.close_memory()
+
+    async def test_metadata_deep_copy_isolation(self):
+        """Dispatch deep-copies metadata so caller's metadata is independent.
+
+        Metadata used to be shallow-spread only (``{**event.metadata}``),
+        which shared nested mutable structures between caller and the
+        dispatched copy.  After the fix (F-64-DR2-02), ``copy.deepcopy()``
+        ensures full isolation — mutating the dispatched copy's metadata
+        must not affect the original event.
+        (F-64-R-SF3: metadata deep-copy isolation test.)
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+
+        inner_meta = {"trace_ids": ["t1", "t2"]}
+        original_metadata = {"cascade_depth": 0, "tracing": inner_meta}
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "test"},
+            metadata=original_metadata,
+        )
+        await dispatcher.dispatch("sarah-chen", event)
+
+        # Original metadata must be untouched — cascade_depth stays 0
+        assert original_metadata["cascade_depth"] == 0
+        # Nested structure must be the same object (not replaced)
+        assert original_metadata["tracing"] is inner_meta
+        assert inner_meta["trace_ids"] == ["t1", "t2"]
         await agent.close_memory()
 
 
