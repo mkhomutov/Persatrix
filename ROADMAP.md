@@ -245,7 +245,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 | [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/20) | 2026-04-14 |
 | [#67](https://github.com/mkhomutov/Orchestr8/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
 | [#68](https://github.com/mkhomutov/Orchestr8/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
-| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs(rfc0005): RFC 0005 close — PR 7d (PR #69 review fixes) | 0005 (7d/20) | 2026-04-14 |
+| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs: close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) | 0005 (7d/20) | 2026-04-14 |
 
 ---
 
