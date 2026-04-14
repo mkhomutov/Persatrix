@@ -1217,14 +1217,23 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [x] `docs/diagrams/` directory created
-- [x] System overview diagram shows CLI ↔ Orchestrator ↔ Agents with protocol labels
-- [x] Persona runtime diagram covers event dispatch, tick loop, and memory injection
-- [x] Memory architecture diagram shows all three tiers with read/write paths
-- [x] Module structure diagram reflects post-refactoring package layout
-- [x] Workflow execution sequence diagram covers end-to-end flow
-- [x] All diagrams render correctly on GitHub (Mermaid syntax valid)
-- [x] Diagram file names follow `NNNN-kebab-description.md` convention
+- [x] PR 9 scope documented in PR plan and development workflow
+
+> **Scope change (PR #68)**: Diagram creation was descoped from PR 9. PR #68
+> (`docs: add documentation & diagrams phase to workflow and PR plan`) added the
+> documentation _plan_ to this PR plan only — actual diagram files
+> (`docs/diagrams/0005-*.md`) were never created. The `docs/diagrams/` directory
+> does not exist in the workspace. Actual diagram creation is tracked as a v0.3
+> follow-up (post-RFC-0005). The items below are unchecked to reflect reality.
+
+- [ ] `docs/diagrams/` directory created
+- [ ] System overview diagram shows CLI ↔ Orchestrator ↔ Agents with protocol labels
+- [ ] Persona runtime diagram covers event dispatch, tick loop, and memory injection
+- [ ] Memory architecture diagram shows all three tiers with read/write paths
+- [ ] Module structure diagram reflects post-refactoring package layout
+- [ ] Workflow execution sequence diagram covers end-to-end flow
+- [ ] All diagrams render correctly on GitHub (Mermaid syntax valid)
+- [ ] Diagram file names follow `NNNN-kebab-description.md` convention
 
 ---
 
@@ -1253,6 +1262,11 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 - [x] RFC 0005 status is `✅ Implemented`
 - [x] ROADMAP RFC tracker: status = `✅ Implemented`, merged = 20/20
+  - **Note**: ROADMAP was deliberately kept at 19/20 / `🚧 Implementing` while this PR
+    was open (PR #69 review finding). **After this PR merges**, update ROADMAP.md:
+    1. RFC Tracker: change `🚧 Implementing | 19/20` → `✅ Implemented | 20/20`
+    2. Dependency chain note: change `🚧 Implementing (19/20)` → `✅ Done (20/20)`
+    3. Merged PR History: add `| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs(rfc0005): RFC 0005 close — PR 7d (PR #69 review fixes) | 0005 (7d/20) | 2026-04-14 |`
 - [x] ROADMAP Component Status tables updated for all v0.2 components (including refactored files)
 - [x] All accumulated review findings addressed in PRs 7a–7c, 8a, 8b, and 8d (including F-66-02 docstring fix)
 - [x] All oversized files split in PRs 8a–8d (`persona.py` ≤ 400 lines after 8d, `persona_runtime.py` ~980 lines — cohesive single-class module, `episodic.py` 668 lines after 8b — acceptable per F-66-01)

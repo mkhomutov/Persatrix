@@ -129,12 +129,12 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | 🚧 Implementing | 20 | 19/20 |
 
 ### Dependency Chain
 
 ```
-RFC 0005 (PersonaAgent + Memory + TaskAgent)   ✅ Done (20/20)
+RFC 0005 (PersonaAgent + Memory + TaskAgent)   🚧 Implementing (19/20)
     ↓
 RFC 0006 (Sub-Agent Spawning)                  Not yet written
     ↓
