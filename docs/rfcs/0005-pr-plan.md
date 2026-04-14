@@ -988,12 +988,12 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
-- [ ] `ruff check agents/` clean
-- [ ] `persona.py` ≤ 650 lines
-- [ ] No circular imports (each new module importable independently)
-- [ ] `agents/__init__.py` re-exports preserve public API
-- [ ] `git diff --stat` shows only moves + import edits (no logic changes)
+- [x] `pytest tests/unit/python/ tests/integration/ -v` passes (zero test changes beyond imports)
+- [x] `ruff check agents/` clean
+- [ ] `persona.py` ≤ 650 lines (actual: ~1190 — `_LLMPersonaAgent` grew during review rounds)
+- [x] No circular imports (each new module importable independently)
+- [x] `agents/__init__.py` re-exports preserve public API
+- [x] `git diff --stat` shows only moves + import edits (no logic changes)
 
 ---
 
