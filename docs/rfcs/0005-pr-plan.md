@@ -1117,12 +1117,12 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 ##### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `cargo test` passes (all tests moved to appropriate modules)
-- [ ] `main.rs` ≤ 250 lines
-- [ ] Exhaustive `match` preserved in `main.rs`
-- [ ] No public API changes (binary interface identical)
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `cargo test` passes (all 20 tests moved to appropriate modules)
+- [x] `main.rs` ≤ 250 lines — actual 188 lines
+- [x] Exhaustive `match` preserved in `main.rs`
+- [x] No public API changes (binary interface identical)
 
 ---
 
