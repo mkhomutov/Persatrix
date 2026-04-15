@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-14  
+> **Last updated**: 2026-04-15  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -11,7 +11,7 @@ This document tracks development progress across all phases. Update it when merg
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete |
+| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete (internal milestone — not publicly released; project renamed to Persatrix before first public release) |
 | **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | � In Progress |
 | **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |
