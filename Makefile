@@ -9,6 +9,8 @@ PROTO_PY_OUT  := agents/generated
 PYTHON        := python3
 PIP           := pip3
 CARGO         := cargo
+# On Windows, executables require the .exe extension; EXE is empty on Unix.
+EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 # ─── Default ────────────────────────────────────────────
 all: proto build
@@ -41,8 +43,8 @@ build: build-orchestrator build-cli ## Build all components
 build-orchestrator: ## Build Go orchestrator binary
 	@echo "→ Building orchestrator..."
 	@mkdir -p $(GO_BIN)
-	go build -o $(GO_BIN)/persatrix-server ./cmd/orchestrator
-	@echo "✓ Orchestrator built → $(GO_BIN)/persatrix-server"
+	go build -o $(GO_BIN)/persatrix-server$(EXE) ./cmd/orchestrator
+	@echo "✓ Orchestrator built → $(GO_BIN)/persatrix-server$(EXE)"
 
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
@@ -57,10 +59,10 @@ build-agents: ## Install Python agent dependencies
 
 # ─── Run ────────────────────────────────────────────────
 run: build ## Run the orchestrator
-	$(GO_BIN)/persatrix-server --config config/
+	$(GO_BIN)/persatrix-server$(EXE) --config config/
 
 run-agent: ## Run a Python agent process (AGENT=coder)
-	cd agents && $(PYTHON) -m persatrix_agents.server --agent $(AGENT)
+	$(PYTHON) -m persatrix_agents.server --agent $(AGENT)
 
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests

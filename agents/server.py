@@ -331,7 +331,13 @@ class AgentServer:
         # TODO(security): enable TLS for production gRPC
         # SF-05: store the actual port so logging is correct when port=0
         # (dynamic allocation) and future self-registration uses the real port.
-        actual_port = self._server.add_insecure_port(bind_address)
+        try:
+            actual_port = self._server.add_insecure_port(bind_address)
+        except RuntimeError as exc:
+            raise SystemExit(
+                f"Failed to bind gRPC server to {bind_address} — "
+                f"is port {self.port} already in use? ({exc})"
+            ) from exc
         self.port = actual_port
         await self._server.start()
 

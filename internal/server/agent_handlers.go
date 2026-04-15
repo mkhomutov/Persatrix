@@ -48,6 +48,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	info := registry.AgentInfo{
 		ID:           req.ID,
+		Name:         req.Name,
 		Address:      req.Address,
 		Capabilities: req.Capabilities,
 		Status:       registry.StatusHealthy, // reachable until first health check fails

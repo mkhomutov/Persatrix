@@ -30,6 +30,7 @@ type workflowRunResponse struct {
 // registerAgentRequest is the JSON request body for POST /api/v1/agents/register.
 type registerAgentRequest struct {
 	ID           string   `json:"id"`
+	Name         string   `json:"name"`
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 }

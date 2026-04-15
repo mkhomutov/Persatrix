@@ -51,6 +51,7 @@ python scripts/pre_commit.py               # run manually (same checks the hook 
 - **Python 3.11+** — Agents
 - **Rust 2021 edition** — CLI
 - **protoc** — Protocol buffer compiler (for gRPC codegen)
+- **Windows only:** `make` — install via [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) or `winget install GnuWin32.Make`, then add `C:\Program Files (x86)\GnuWin32\bin` to your PATH
 
 ### Quick Start
 

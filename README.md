@@ -11,6 +11,7 @@ A general-purpose **agent society engine** — a runtime for creating, connectin
 - Rust 1.80+ (for CLI)
 - Protobuf compiler (`protoc`)
 - Docker & Docker Compose (optional, for local stack)
+- **Windows only:** `make` — install via [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) or `winget install GnuWin32.Make`, then add `C:\Program Files (x86)\GnuWin32\bin` to your PATH
 
 ### Setup
 
