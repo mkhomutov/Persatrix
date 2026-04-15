@@ -103,6 +103,7 @@ Many `internal/` packages are **intentional TODO stubs** for their target phase.
 - Always run `make validate` after editing YAML configs
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `refactor:`, etc.)
 - PRs < 500 lines, squash merge to `main`, trunk-based branching
+- Never add Claude as author or co-author to any commit or PR (no `Co-Authored-By: Claude` trailers, no Claude attribution in PR descriptions)
 
 ## Status Hygiene
 

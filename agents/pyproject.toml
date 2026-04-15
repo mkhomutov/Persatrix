@@ -49,12 +49,27 @@ build-backend = "setuptools.build_meta"
 # Without this, pip install would discover sub-packages (generated, memory, etc.)
 # as top-level packages, and 'python -m persatrix_agents.server' would fail
 # with ModuleNotFoundError since no 'persatrix_agents' package would exist.
+#
+# Packages are listed explicitly because 'packages.find' scans for directories
+# literally named 'persatrix_agents*', which don't exist here (the mapping is
+# agents/ → persatrix_agents). Auto-discovery would leave MAPPING empty in the
+# editable install finder, silently breaking imports.
 [tool.setuptools.package-dir]
 persatrix_agents = "."
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["persatrix_agents*"]
+[tool.setuptools]
+# MAINTAINER NOTE: this list is manually maintained because auto-discovery
+# cannot resolve the agents/ → persatrix_agents mapping (see comment above).
+# When adding a new sub-package (e.g. persatrix_agents.bridges), add it here
+# or imports will silently fail in editable installs.
+packages = [
+    "persatrix_agents",
+    "persatrix_agents.generated",
+    "persatrix_agents.memory",
+    "persatrix_agents.sub_agents",
+    "persatrix_agents.tests",
+    "persatrix_agents.tools",
+]
 
 [tool.ruff]
 line-length = 100

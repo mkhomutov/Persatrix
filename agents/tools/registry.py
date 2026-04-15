@@ -71,21 +71,40 @@ def tool(
         tool_name = name or func.__name__
         sig = inspect.signature(func)
 
-        # Auto-generate parameter schema from type hints
-        params = {}
+        # Auto-generate parameter schema from type hints.
+        # Produces a valid JSON Schema object for use as tool input_schema.
+        known_types = {int: "integer", float: "number", bool: "boolean", str: "string"}
+        properties: dict[str, Any] = {}
+        required: list[str] = []
         for param_name, param in sig.parameters.items():
-            param_type = "string"  # default
-            if param.annotation is int:
-                param_type = "integer"
-            elif param.annotation is float:
-                param_type = "number"
-            elif param.annotation is bool:
-                param_type = "boolean"
+            annotation = param.annotation
+            if annotation in known_types:
+                param_type = known_types[annotation]
+            elif annotation is inspect.Parameter.empty:
+                param_type = "string"
+            else:
+                # (PR #71 deep-review §2.4.7): warn on unrecognized annotations
+                # so future tools with complex types (list[str], Path, etc.) don't
+                # silently degrade to "string" without the author noticing.
+                param_type = "string"
+                logger.warning(
+                    "Tool %r param %r has unrecognized type annotation %r, "
+                    "defaulting to JSON Schema 'string'",
+                    tool_name,
+                    param_name,
+                    annotation,
+                )
 
-            params[param_name] = {
-                "type": param_type,
-                "required": param.default is inspect.Parameter.empty,
-            }
+            properties[param_name] = {"type": param_type}
+            if param.default is inspect.Parameter.empty:
+                required.append(param_name)
+
+        params: dict[str, Any] = {
+            "type": "object",
+            "properties": properties,
+        }
+        if required:
+            params["required"] = required
 
         tool_def = ToolDefinition(
             name=tool_name,

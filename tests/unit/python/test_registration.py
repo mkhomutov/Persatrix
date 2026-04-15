@@ -31,6 +31,7 @@ def _make_server(orchestrator_url: str = "http://127.0.0.1:8080") -> AgentServer
         port=0,
         shutdown_grace=1,
         orchestrator_url=orchestrator_url,
+        advertise_address="127.0.0.1:50051",
     )
     agent = _StubAgent(
         agent_id="test-agent",

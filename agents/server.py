@@ -296,11 +296,18 @@ class AgentServer:
         port: int = 50051,
         shutdown_grace: int = 30,
         orchestrator_url: str = "http://127.0.0.1:8080",
+        advertise_address: str | None = None,
     ):
         self.host = host
         self.port = port
         self.shutdown_grace = shutdown_grace
         self.orchestrator_url = orchestrator_url.rstrip("/")
+        # advertise_address is the address the orchestrator uses to reach this
+        # agent via gRPC. Defaults to host:port (correct for local runs). In
+        # Docker/K8s, pass the service name:port so the orchestrator can connect
+        # back (e.g. "agent-planner:50051").
+        self._advertise_address_explicit = advertise_address is not None
+        self.advertise_address = advertise_address or f"{host}:{port}"
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
         self._session: aiohttp.ClientSession | None = None
@@ -331,8 +338,27 @@ class AgentServer:
         # TODO(security): enable TLS for production gRPC
         # SF-05: store the actual port so logging is correct when port=0
         # (dynamic allocation) and future self-registration uses the real port.
-        actual_port = self._server.add_insecure_port(bind_address)
+        try:
+            actual_port = self._server.add_insecure_port(bind_address)
+        except (RuntimeError, OSError) as exc:
+            # RuntimeError: grpc-internal bind failure.
+            # OSError: address already in use (more common in practice).
+            raise SystemExit(
+                f"Failed to bind gRPC server to {bind_address} — "
+                f"is port {self.port} already in use? ({exc})"
+            ) from exc
         self.port = actual_port
+        # When port=0 (dynamic allocation) and no explicit advertise_address was
+        # provided, the default advertise_address still contains ":0".  Update it
+        # to the actual allocated port so _self_register() advertises a reachable
+        # address.  (PR #71 review finding §4.)
+        # Uses _advertise_address_explicit to avoid clobbering an intentional
+        # advertise address that happens to contain a different host (e.g.
+        # --advertise-address=localhost:0 with --host=0.0.0.0).  The old check
+        # compared against f"{self.host}:0" which missed that case.  (PR #71
+        # deep-review §2.4.5.)
+        if not self._advertise_address_explicit and self.advertise_address.endswith(":0"):
+            self.advertise_address = f"{self.host}:{actual_port}"
         await self._server.start()
 
         logger.info("Agent server listening on %s:%d", self.host, actual_port)
@@ -406,10 +432,7 @@ class AgentServer:
         if self._session is None:
             return
         for agent_id, agent in self.agents.items():
-            # TODO(v0.2): support advertised address for container/K8s
-            # service discovery — bind address may differ from the address
-            # the orchestrator should use to reach this agent.
-            address = f"{self.host}:{self.port}"
+            address = self.advertise_address
             payload = {
                 "id": agent_id,
                 "name": agent.name,
@@ -542,6 +565,12 @@ def main() -> None:
         help="Orchestrator REST API URL for self-registration",
     )
     parser.add_argument(
+        "--advertise-address",
+        default=None,
+        help="gRPC address advertised to the orchestrator (host:port). "
+             "Defaults to bind host:port. Set to Docker service name in containers.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -566,6 +595,7 @@ def main() -> None:
         port=args.port,
         shutdown_grace=args.shutdown_grace,
         orchestrator_url=args.orchestrator_url,
+        advertise_address=args.advertise_address,
     )
     server.register_agent(agent)
 

@@ -47,3 +47,4 @@ htmlcov/
 # PR review reports (local analysis artifacts)
 docs/pr-reviews/
 orchestrator.exe
+.last_run_id

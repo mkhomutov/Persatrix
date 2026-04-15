@@ -898,6 +898,25 @@ func TestRegisterAgentUnknownField(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
 }
 
+// TestRegisterAgentWithName verifies that a registration payload containing
+// "name" (as sent by the Python agent server) is accepted by the strict JSON
+// decoder (DisallowUnknownFields).  Before the Name field was added to
+// registerAgentRequest, this payload was rejected as an unknown field.
+// (PR #71 review finding — missing coverage for the original bug.)
+func TestRegisterAgentWithName(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "code-writer", "name": "Code Writer", "address": "localhost:50051", "capabilities": ["code_generation"]}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "code-writer", resp.ID)
+	assert.Equal(t, "Code Writer", resp.Name)
+	assert.Equal(t, "localhost:50051", resp.Address)
+	assert.Equal(t, []string{"code_generation"}, resp.Capabilities)
+}
+
 func TestRegisterAgentNilCapabilities(t *testing.T) {
 	srv, _ := testServer(t)
 	body := []byte(`{"id": "test-agent", "address": "localhost:50051"}`)
@@ -1673,4 +1692,28 @@ func TestRegisterAgentAddressMaxLength(t *testing.T) {
 	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Address: maxAddr})
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
 	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+// TestRegisterAgentNameTooLong validates max-length enforcement for the
+// display name field.  (PR #71 deep-review §2.3)
+func TestRegisterAgentNameTooLong(t *testing.T) {
+	srv, _ := testServer(t)
+	longName := strings.Repeat("A", 101)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Name: longName, Address: "localhost:50051"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "name exceeds maximum length")
+}
+
+func TestRegisterAgentNameMaxLength(t *testing.T) {
+	srv, _ := testServer(t)
+	// 100 characters should be accepted
+	maxName := strings.Repeat("A", 100)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Name: maxName, Address: "localhost:50051"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, maxName, resp.Name)
 }

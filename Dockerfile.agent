@@ -12,7 +12,9 @@ RUN pip install --no-cache-dir agents/
 
 # Security: run as non-root to limit blast radius if agent code is compromised
 # (agents execute LLM-suggested actions and must be sandboxed).
-RUN useradd -r -s /bin/false appuser
+RUN useradd -r -s /bin/false appuser \
+    && mkdir -p /workspace \
+    && chown appuser:appuser /workspace
 USER appuser
 
 ENTRYPOINT ["python", "-m", "persatrix_agents.server"]

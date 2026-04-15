@@ -29,6 +29,13 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", http.StatusBadRequest)
 		return
 	}
+	// (PR #71 review §2.3): cap display name length to prevent registry pollution
+	// and log bloat. 100 chars is generous for a human-readable label. The name
+	// is display-only — no routing or security decisions depend on it.
+	if len(req.Name) > 100 {
+		writeError(w, "BAD_REQUEST", "name exceeds maximum length of 100 characters", http.StatusBadRequest)
+		return
+	}
 	// TODO(v0.2): validate address format (host:port or URI scheme).
 	// Currently any non-empty string up to 253 characters is accepted per RFC 0002 v0.1 scope.
 	if req.Address == "" {
@@ -48,6 +55,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	info := registry.AgentInfo{
 		ID:           req.ID,
+		Name:         req.Name,
 		Address:      req.Address,
 		Capabilities: req.Capabilities,
 		Status:       registry.StatusHealthy, // reachable until first health check fails
@@ -137,6 +145,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 func agentToResponse(a *registry.AgentInfo) agentResponse {
 	resp := agentResponse{
 		ID:      a.ID,
+		Name:    a.Name,
 		Address: a.Address,
 		Status:  agentStatusString(a.Status),
 	}

@@ -121,7 +121,11 @@ func main() {
 	logger.Info("workflow planner initialized", zap.String("type", "yaml"))
 
 	// 8b. Initialize executor (gRPC task dispatch to agents)
-	exec := executor.NewGRPCExecutor(reg, logger)
+	// NOTE(PR #71 review §2.4.4): this timeout is the gRPC per-call deadline for
+	// agent task dispatch. It must be >= the largest agent timeout_seconds value in
+	// config/agents.yaml (currently code-writer at 300s). If agent configs change,
+	// update this value to match or wire it from the agent config directly.
+	exec := executor.NewGRPCExecutor(reg, logger, executor.WithTimeout(5*time.Minute))
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized")
 

@@ -51,10 +51,11 @@ class TestToolDecorator:
 
         defn = get_tool("calc")
         assert defn is not None
-        assert defn.parameters["x"]["type"] == "integer"
-        assert defn.parameters["y"]["type"] == "number"
-        assert defn.parameters["flag"]["type"] == "boolean"
-        assert defn.parameters["label"]["type"] == "string"
+        props = defn.parameters["properties"]
+        assert props["x"]["type"] == "integer"
+        assert props["y"]["type"] == "number"
+        assert props["flag"]["type"] == "boolean"
+        assert props["label"]["type"] == "string"
 
     def test_required_vs_optional_params(self):
         @tool(name="opt")
@@ -63,8 +64,8 @@ class TestToolDecorator:
 
         defn = get_tool("opt")
         assert defn is not None
-        assert defn.parameters["required_arg"]["required"] is True
-        assert defn.parameters["optional_arg"]["required"] is False
+        assert "required_arg" in defn.parameters.get("required", [])
+        assert "optional_arg" not in defn.parameters.get("required", [])
 
     def test_permissions_stored(self):
         @tool(name="risky", permissions=["shell:exec", "fs:write"])

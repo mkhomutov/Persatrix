@@ -68,8 +68,19 @@ agents:
     timeout_seconds: 300
     permissions:
       filesystem:
-        read: ["/workspace/src/**", "/workspace/tests/**"]
-        write: ["/workspace/src/**", "/workspace/tests/**"]
+        read: ["/workspace", "/workspace/**"]
+        # Write permissions are intentionally broader than just /workspace/src/**
+        # and /workspace/tests/**. fnmatchcase('/workspace', '/workspace/**')
+        # returns False (** requires a path separator), so directories must be
+        # listed explicitly alongside their globs. Root-level globs (*.py, *.md)
+        # allow the agent to create top-level files such as setup.py or README.md.
+        #
+        # Security note (PR #71 deep-review §2.4.3): the bare "/workspace" entry
+        # matches ONLY the exact path "/workspace" (the directory itself) via
+        # fnmatchcase — it does NOT match children like "/workspace/malicious.sh".
+        # File-level write control at the root is governed by the *.py and *.md
+        # globs exclusively.
+        write: ["/workspace", "/workspace/src/**", "/workspace/src", "/workspace/tests/**", "/workspace/tests", "/workspace/*.py", "/workspace/*.md"]
         deny: ["/workspace/.env", "**/.git/**"]
       shell:
         allowed_commands: ["python", "pytest", "ruff", "git diff"]
@@ -109,7 +120,7 @@ agents:
     timeout_seconds: 180
     permissions:
       filesystem:
-        read: ["/workspace/**"]
+        read: ["/workspace", "/workspace/**"]
         write: []
       network:
         allow: ["api.anthropic.com"]

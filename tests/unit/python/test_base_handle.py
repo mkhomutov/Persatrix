@@ -425,7 +425,7 @@ class TestBuildToolDefinitions:
         assert len(defs) == 1
         assert defs[0]["name"] == "my_tool"
         assert defs[0]["description"] == "My tool"
-        assert "path" in defs[0]["parameters"]
+        assert "path" in defs[0]["parameters"]["properties"]
 
     def test_empty_registry(self):
         agent = _TestableAgent(agent_id="t", config={})
