@@ -40,6 +40,7 @@ type registerAgentRequest struct {
 // serialized directly — these snake_case tags match the workflow DTO convention (F-15).
 type agentResponse struct {
 	ID           string   `json:"id"`
+	Name         string   `json:"name"`
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 	Status       string   `json:"status"`

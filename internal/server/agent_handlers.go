@@ -138,6 +138,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 func agentToResponse(a *registry.AgentInfo) agentResponse {
 	resp := agentResponse{
 		ID:      a.ID,
+		Name:    a.Name,
 		Address: a.Address,
 		Status:  agentStatusString(a.Status),
 	}

@@ -58,6 +58,10 @@ build-backend = "setuptools.build_meta"
 persatrix_agents = "."
 
 [tool.setuptools]
+# MAINTAINER NOTE: this list is manually maintained because auto-discovery
+# cannot resolve the agents/ → persatrix_agents mapping (see comment above).
+# When adding a new sub-package (e.g. persatrix_agents.bridges), add it here
+# or imports will silently fail in editable installs.
 packages = [
     "persatrix_agents",
     "persatrix_agents.generated",

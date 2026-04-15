@@ -69,6 +69,11 @@ agents:
     permissions:
       filesystem:
         read: ["/workspace", "/workspace/**"]
+        # Write permissions are intentionally broader than just /workspace/src/**
+        # and /workspace/tests/**. fnmatchcase('/workspace', '/workspace/**')
+        # returns False (** requires a path separator), so directories must be
+        # listed explicitly alongside their globs. Root-level globs (*.py, *.md)
+        # allow the agent to create top-level files such as setup.py or README.md.
         write: ["/workspace", "/workspace/src/**", "/workspace/src", "/workspace/tests/**", "/workspace/tests", "/workspace/*.py", "/workspace/*.md"]
         deny: ["/workspace/.env", "**/.git/**"]
       shell:

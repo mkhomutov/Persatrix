@@ -345,6 +345,12 @@ class AgentServer:
                 f"is port {self.port} already in use? ({exc})"
             ) from exc
         self.port = actual_port
+        # When port=0 (dynamic allocation) and no explicit advertise_address was
+        # provided, the default advertise_address still contains ":0".  Update it
+        # to the actual allocated port so _self_register() advertises a reachable
+        # address.  (PR #71 review finding §4.)
+        if self.advertise_address == f"{self.host}:0":
+            self.advertise_address = f"{self.host}:{actual_port}"
         await self._server.start()
 
         logger.info("Agent server listening on %s:%d", self.host, actual_port)
