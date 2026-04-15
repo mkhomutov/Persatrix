@@ -161,6 +161,10 @@ $$
 
 where $B$ is the step memory/context budget.
 
+**Phase 1 algorithm**: This is a 0/1 knapsack problem (NP-hard in the general case). Phase 1 uses greedy selection by descending relevance-per-token density (`relevance_i / tokens_i`), which is O(n log n) and gives a well-understood approximation. The exact optimum is not required at this stage; heuristic scoring quality (Open Question 1) dominates solution quality far more than the gap between greedy and optimal selection.
+
+**Compression LLM cost accounting**: The abstractive summarization step (pipeline step 3b) requires an LLM call. This call is charged to a separate orchestrator overhead budget — it does not consume from the dispatching task's `budget_input_tokens` or `budget_tool_round_tokens`. Compression calls are recorded in step metadata (`context_compression_tokens`, `context_compression_model`) for observability and cost attribution. If the overhead budget is exhausted, the pipeline falls back to extractive-only compression and emits a warning metric.
+
 ### E. Delegation Contract and Merge Semantics
 
 Define explicit caller-subagent contracts.
@@ -178,9 +182,28 @@ Define explicit caller-subagent contracts.
 1. `summary`
 2. `artifacts` (structured outputs)
 3. `decisions` (assumptions and rationale)
-4. `memory_writes` (suggested durable memory updates)
+4. `memory_writes` (suggested durable memory updates — see schema below)
 5. `risks`
 6. `status`
+
+`memory_writes` entry schema (each element in the list):
+
+```python
+{
+    "tier": "episodic" | "notes",   # which memory tier to write to
+    "key": str | None,              # stable key (required for notes; optional for episodic)
+    "content": str,                 # text content to store
+    "importance": float,            # 0.0–1.0; caller caps unverified sub-agent writes at 0.8
+    "ttl_seconds": int | None,      # None = persist until evicted by size policy
+    "tags": list[str],              # used for retrieval filtering
+    # "source_agent" is injected by the framework; sub-agents must not set it
+}
+```
+
+Caller validation rules for `memory_writes`:
+- Reject entries missing required fields or with `tier` outside the allowed set.
+- Downscale `importance` if it exceeds the caller's configured trust ceiling for this sub-agent.
+- Apply the declared merge strategy (`replace`, `append`, `patch`, `reject_on_conflict`) when an entry with the same `key` already exists.
 
 Merge behavior:
 
@@ -199,6 +222,8 @@ Principles:
 1. Persona active working context stays compact and task-focused.
 2. Most history and procedural state remain in durable memory.
 3. Retrieval is just-in-time per event/tick, not persistent long transcript carryover.
+
+Note: `agents/memory/working.py` already implements section-level pinning via `ContextSection.compressible = False`. The "pinned, non-compressible section" referenced in Security Considerations item 3 maps directly to this existing mechanism on the Python side. The orchestrator-level `ContextPackage` needs a parallel `pinned_sections` field that the compression pipeline passes through untouched — this is new work, but the design pattern is already established.
 
 Optional helper pattern (recommended, not mandatory):
 
@@ -243,6 +268,8 @@ Safety constraints:
 1. Shared memory writes require schema and provenance fields (`source_agent`, `created_at`, `confidence`).
 2. Consumers can filter by trust policy and confidence threshold.
 3. Sensitive memory classes stay isolated regardless of pool settings.
+
+**Default write validation policy for Phase 4**: Writes to shared pools are immediate (no human or validator-role gate), subject to ACL and provenance field requirements enforced at write time. Validator-role review — where a designated agent or operator must approve writes before they become visible to consumers — is a v0.3 or follow-on RFC concern, where multi-node shared memory creates stronger cross-boundary isolation requirements. Open Question 4 tracks whether an earlier opt-in review gate is needed.
 
 ### I. Rollout Timing Recommendation
 
@@ -332,7 +359,7 @@ Dependencies: Phases 2 and 3.
 | Python agents | `agents/task_agent.py` | Memory facade usage for non-persona agents |
 | Python agents | `agents/memory/` | Shared policies, decay/eviction, facade module |
 | Python agents | `agents/sub_agents/` | Contract-aware delegation and merge support |
-| Protos | `proto/task.proto` | Optional typed fields for context budget/package/delegation envelopes |
+| Protos | `proto/task.proto` | No changes in Phase 1–2; Phase 3 adds typed fields for context package and delegation envelopes once the schema is stable (see Open Question 2). Proto changes require RFC review per project policy. |
 | Config | `config/agents.yaml`, `schemas/agent.schema.json` | Task-agent memory policy and shared pool configuration |
 | Tests | `tests/unit/`, `tests/integration/` | Context budget, compression, delegation merge, shared memory policy tests |
 
@@ -347,10 +374,11 @@ Dependencies: Phases 2 and 3.
 ## Open Questions
 
 1. Should context relevance scoring stay heuristic-only in v1, or include optional embedding scoring when available?
-2. Should `TaskRequest.context` remain a map for backward compatibility, or should typed context-package fields be added in proto immediately?
+2. Should `TaskRequest.context` remain a map for backward compatibility, or should typed context-package fields be added in proto immediately? **Proposed default**: defer typed fields to Phase 3; Phase 1 passes the context package as a serialized JSON string in the existing `context` map, avoiding a proto change until the schema is stable. Proto changes require RFC review (per project policy), so deferring until the shape is proven reduces revision churn.
 3. How much compression should be allowed before mandatory human-visible warnings (`compression_ratio` threshold)?
-4. For shared pools, should writes be immediate or review-gated by a validator role?
-5. Should stale procedural memory block execution or just downgrade confidence and continue?
+4. For shared pools, should writes be immediate or review-gated by a validator role? See Section H for the proposed Phase 4 default (immediate writes with ACL enforcement).
+5. Should stale procedural memory block execution or just downgrade confidence and continue? **Proposed default**: downgrade-and-continue; inject the memory at reduced confidence, log a `stale_memory_injection` warning with the measured confidence value, and emit a metric. Blocking execution on stale memory is too disruptive for v1 — operators can set alerting thresholds on the metric and decide whether to evict or revalidate.
+6. RFC 0006 must reach Accepted status before Phase 1 implementation of this RFC begins. If RFC 0006's budget field naming or propagation model changes materially during review, the `budget_*` field names in Section C and the "overhead budget" model in Section D will need revision. Flag this dependency when RFC 0006 review starts.
 
 ## Decision / Next Steps
 
@@ -358,7 +386,7 @@ Decision: Propose this RFC for review as the v0.2 architecture bridge between RF
 
 Next steps:
 
-1. Review and accept sequencing: 0006 -> 0008 -> 0007 implementation order.
+1. Accept sequencing: 0006 → 0008 → 0007 implementation order (RFC 0007 `Depends on` has been updated to reflect this).
 2. Create a PR plan file for RFC 0008 after acceptance.
 3. Implement Phase 1 first to establish measurable context-budget outcomes.
 
