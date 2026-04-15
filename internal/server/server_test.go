@@ -1693,3 +1693,27 @@ func TestRegisterAgentAddressMaxLength(t *testing.T) {
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
+
+// TestRegisterAgentNameTooLong validates max-length enforcement for the
+// display name field.  (PR #71 deep-review §2.3)
+func TestRegisterAgentNameTooLong(t *testing.T) {
+	srv, _ := testServer(t)
+	longName := strings.Repeat("A", 101)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Name: longName, Address: "localhost:50051"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "name exceeds maximum length")
+}
+
+func TestRegisterAgentNameMaxLength(t *testing.T) {
+	srv, _ := testServer(t)
+	// 100 characters should be accepted
+	maxName := strings.Repeat("A", 100)
+	body, _ := json.Marshal(registerAgentRequest{ID: "test-agent", Name: maxName, Address: "localhost:50051"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, maxName, resp.Name)
+}

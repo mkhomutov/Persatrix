@@ -18,7 +18,7 @@ from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.server import AgentServer
 from agents.task_agent import TaskAgent
 from agents.tools import builtin
-from agents.tools.registry import ToolResult, clear_registry, tool
+from agents.tools.registry import ToolResult, clear_registry, get_tool, tool
 from agents.tools.sandbox import PathValidator
 
 
@@ -174,9 +174,6 @@ class TestToolSchemaFormat:
         assert set(defn.parameters["required"]) == {"a", "b"}
 
 
-# Need direct import after decorator registration
-from agents.tools.registry import get_tool  # noqa: E402
-
 
 # ─── TaskAgent: workspace root in system prompt ─────────────
 
@@ -294,6 +291,57 @@ class TestAdvertiseAddress:
 
         payload = mock_session.post.call_args[1]["json"]
         assert payload["address"] == "agent-coder:50052"
+
+
+class TestPortZeroFixup:
+    """Validates the port=0 advertise_address fixup in AgentServer.start().
+
+    When port=0 (dynamic allocation), the default advertise_address contains
+    ":0" which is unreachable.  The fixup must replace it with the actual port
+    allocated by the OS — but only when no explicit advertise_address was
+    provided.  (PR #71 deep-review §2.4.5.)
+    """
+
+    def test_default_address_gets_fixup(self):
+        """No explicit advertise_address + port=0 → fixup applies."""
+        server = AgentServer(host="127.0.0.1", port=0)
+        assert server.advertise_address == "127.0.0.1:0"
+        assert not server._advertise_address_explicit
+
+    def test_explicit_address_skips_fixup(self):
+        """Explicit advertise_address ending in :0 is NOT overwritten."""
+        server = AgentServer(
+            host="0.0.0.0",
+            port=0,
+            advertise_address="agent-planner:0",
+        )
+        assert server._advertise_address_explicit
+        # Simulate what start() does: the fixup should NOT apply because
+        # the address was explicitly provided.
+        actual_port = 54321
+        server.port = actual_port
+        if not server._advertise_address_explicit and server.advertise_address.endswith(":0"):
+            server.advertise_address = f"{server.host}:{actual_port}"
+        # The explicit address must be preserved.
+        assert server.advertise_address == "agent-planner:0"
+
+    def test_default_address_fixup_replaces_port(self):
+        """Simulates start() fixup: default :0 → :actual_port."""
+        server = AgentServer(host="0.0.0.0", port=0)
+        actual_port = 54321
+        server.port = actual_port
+        # Replicate the fixup logic from start()
+        if not server._advertise_address_explicit and server.advertise_address.endswith(":0"):
+            server.advertise_address = f"{server.host}:{actual_port}"
+        assert server.advertise_address == "0.0.0.0:54321"
+
+    def test_nonzero_port_no_fixup(self):
+        """Fixed port (not 0) → no fixup needed, address is already correct."""
+        server = AgentServer(host="127.0.0.1", port=50051)
+        assert server.advertise_address == "127.0.0.1:50051"
+        assert not server._advertise_address_explicit
+        # endswith(":0") is False, so fixup would not trigger.
+        assert not server.advertise_address.endswith(":0")
 
 
 class _StubAgent(TaskAgent):

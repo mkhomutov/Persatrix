@@ -306,6 +306,7 @@ class AgentServer:
         # agent via gRPC. Defaults to host:port (correct for local runs). In
         # Docker/K8s, pass the service name:port so the orchestrator can connect
         # back (e.g. "agent-planner:50051").
+        self._advertise_address_explicit = advertise_address is not None
         self.advertise_address = advertise_address or f"{host}:{port}"
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
@@ -339,7 +340,9 @@ class AgentServer:
         # (dynamic allocation) and future self-registration uses the real port.
         try:
             actual_port = self._server.add_insecure_port(bind_address)
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
+            # RuntimeError: grpc-internal bind failure.
+            # OSError: address already in use (more common in practice).
             raise SystemExit(
                 f"Failed to bind gRPC server to {bind_address} — "
                 f"is port {self.port} already in use? ({exc})"
@@ -349,7 +352,12 @@ class AgentServer:
         # provided, the default advertise_address still contains ":0".  Update it
         # to the actual allocated port so _self_register() advertises a reachable
         # address.  (PR #71 review finding §4.)
-        if self.advertise_address == f"{self.host}:0":
+        # Uses _advertise_address_explicit to avoid clobbering an intentional
+        # advertise address that happens to contain a different host (e.g.
+        # --advertise-address=localhost:0 with --host=0.0.0.0).  The old check
+        # compared against f"{self.host}:0" which missed that case.  (PR #71
+        # deep-review §2.4.5.)
+        if not self._advertise_address_explicit and self.advertise_address.endswith(":0"):
             self.advertise_address = f"{self.host}:{actual_port}"
         await self._server.start()
 
