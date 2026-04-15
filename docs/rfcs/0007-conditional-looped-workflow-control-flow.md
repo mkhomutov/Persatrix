@@ -5,7 +5,7 @@
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
 **Target**: v0.2  
-**Depends on**: RFC 0001, RFC 0003, RFC 0006
+**Depends on**: RFC 0001, RFC 0003, RFC 0006, RFC 0008
 
 ---
 

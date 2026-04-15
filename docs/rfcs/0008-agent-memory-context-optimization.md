@@ -1,0 +1,399 @@
+# RFC 0008 — Agent Memory and Context Optimization
+
+**Type**: architecture  
+**Status**: 📋 Proposed  
+**Author**: Engineering Team  
+**Date**: 2026-04-15  
+**Target**: v0.2  
+**Depends on**: RFC 0005, RFC 0006
+
+---
+
+## Table of Contents
+
+- [Summary](#summary)
+- [Motivation](#motivation)
+- [Goals](#goals)
+- [Non-Goals](#non-goals)
+- [Design / Implementation](#design--implementation)
+  - [A. Current State and Gaps](#a-current-state-and-gaps)
+  - [B. Memory for All Agent Types](#b-memory-for-all-agent-types)
+  - [C. Context Budget as a Scheduler Primitive](#c-context-budget-as-a-scheduler-primitive)
+  - [D. Context Packaging and Compression Pipeline](#d-context-packaging-and-compression-pipeline)
+  - [E. Delegation Contract and Merge Semantics](#e-delegation-contract-and-merge-semantics)
+  - [F. Persona Context Sanity and Helper Agents](#f-persona-context-sanity-and-helper-agents)
+  - [G. Memory Eviction, Decay, and Validation](#g-memory-eviction-decay-and-validation)
+  - [H. Shared vs Isolated Memory](#h-shared-vs-isolated-memory)
+  - [I. Rollout Timing Recommendation](#i-rollout-timing-recommendation)
+- [Security Considerations](#security-considerations)
+- [Phased Implementation Plan](#phased-implementation-plan)
+- [Files Touched (Estimated)](#files-touched-estimated)
+- [Test Strategy](#test-strategy)
+- [Open Questions](#open-questions)
+- [Decision / Next Steps](#decision--next-steps)
+- [Related Documentation](#related-documentation)
+
+---
+
+## Summary
+
+This RFC extends memory and context-optimization from persona agents to all agent types (task, persona, and future sub-agents), and makes context budget allocation explicit in orchestration. The core design is: the caller prepares a minimal context package, delegates to a subtask with an allocated token budget, and receives a structured result envelope that can be merged deterministically.
+
+The objective is to reduce hallucinations and runaway context growth by default: smaller, scoped windows for delegated tasks; aggressive relevance filtering; and compression before prompt injection. This RFC also defines memory decay and eviction rules, plus shared-vs-isolated memory boundaries for swarm safety.
+
+## Motivation
+
+Persatrix already has strong memory building blocks, but they are persona-centric and not yet integrated with orchestrator-level context budgeting.
+
+What already exists:
+
+1. Persona memory stack (working, episodic, relationship) is implemented and used in runtime (`agents/persona_runtime.py`, `agents/memory/*`).
+2. Episodic note tools exist (`store_note`, `recall_notes`, `update_note`, `delete_note`) and are agent-scoped.
+3. Working memory already supports section-level token estimation and compression.
+4. RFC 0006 identifies budget and execution-limit enforcement as a prerequisite to safe scale.
+
+What is missing for this use case:
+
+1. Task agents do not have framework-level memory injection/retrieval strategy; they are largely stateless per request.
+2. Scheduler currently sends broad prior outputs (`context map`) rather than relevance-filtered packages.
+3. No first-class context budget allocator in scheduler/executor for prompt-construction tokens.
+4. No caller-subagent return contract for merge-safe delegated execution.
+5. No unified stale-memory policy (decay/eviction/validation) across memory classes.
+6. No clear shared-memory pools with policy boundaries; current model is mostly isolated per agent ID.
+
+If unchanged, context windows continue to grow organically and delegation quality degrades with scale. This increases hallucination risk and token waste.
+
+## Goals
+
+1. Enable memory usage patterns for non-persona agents without forcing full persona runtime semantics.
+2. Make context budget a first-class orchestration resource, allocated per step/subtask.
+3. Add a caller-owned context packaging pipeline: retrieve, score relevance, compress, and inject only necessary state.
+4. Define a strict delegation return contract with deterministic merge behavior.
+5. Keep persona runtime contexts compact; shift long-lived state to stored memory with quick retrieval.
+6. Implement memory eviction, freshness decay, and optional revalidation for procedural memory.
+7. Support both isolated memory and opt-in shared memory pools with policy guardrails.
+8. Provide observability for context assembly quality, compression ratio, and merge outcomes.
+
+## Non-Goals
+
+- Replacing the existing three-tier memory architecture from RFC 0005.
+- Perfect semantic relevance selection in v1; heuristic scoring is acceptable initially.
+- Vector database dependency in the first implementation slice.
+- Cross-repository or internet-wide shared memory.
+- Full autonomous policy redesign for persona behavior.
+
+---
+
+## Design / Implementation
+
+### A. Current State and Gaps
+
+| Area | Current behavior | Gap |
+|------|------------------|-----|
+| Task agent memory | Stateless `_run_llm_loop` + task payload/context | No memory retrieval/injection policy |
+| Persona memory | Implemented and injected in runtime | Not reusable by task agents via common orchestration path |
+| Scheduler context | Sends accumulated prior outputs | Includes irrelevant history; no budget-aware pruning |
+| Compression | WorkingMemory section compression exists | No orchestrator-level pre-delegation compression step |
+| Delegation | Action type exists; spawner is TODO | No context contract, output envelope, or merge policy |
+| Memory sharing | Agent-scoped storage enforced | No explicit shared pool model for coordinated swarms |
+
+### B. Memory for All Agent Types
+
+Introduce a lightweight `MemoryFacade` abstraction usable by all agents without flattening tier-specific APIs.
+
+Design rules:
+
+1. Keep RFC 0005 tier interfaces (`WorkingMemory`, `EpisodicMemory`, `RelationshipMemory`) intact.
+2. Add orchestration-facing facade methods for common operations:
+   - `retrieve_relevant(query, limit, scope)`
+   - `store_observation(entry, scope, ttl)`
+   - `store_procedure(key, content, confidence, expires_at)`
+   - `list_candidates(task_context)`
+3. For task agents, instantiate `EpisodicMemory` + optional lightweight `WorkingSet` per task execution, without persona state machine.
+4. Relationship memory remains optional and mainly persona-oriented.
+
+This provides memory capability to non-persona agents while preserving existing domain-specific memory classes.
+
+### C. Context Budget as a Scheduler Primitive
+
+Define explicit context budget allocation for each dispatch:
+
+- `budget_total_tokens`
+- `budget_input_tokens`
+- `budget_output_reserve_tokens`
+- `budget_memory_tokens`
+- `budget_tool_round_tokens`
+
+Allocator policy:
+
+1. Workflow budget from RFC 0006 is the hard cap.
+2. Scheduler derives per-step budget from step criticality and estimated complexity.
+3. Delegated subtasks receive independent sub-budgets to prevent parent-context bloat.
+4. Retry attempts consume the same budget pool (no fresh context-budget reset).
+
+This treats token context the same way an OS treats CPU/memory quotas.
+
+### D. Context Packaging and Compression Pipeline
+
+Before dispatching to any agent (especially delegated sub-agents), caller builds a `ContextPackage`.
+
+Pipeline:
+
+1. Candidate collection: depends-on outputs, memory recalls, pinned constraints, and task-local state.
+2. Relevance scoring: dependency proximity + lexical overlap + recency + importance.
+3. Compression:
+   - Extractive pruning first.
+   - Abstractive summarization second if still over budget.
+4. Budget fit check with deterministic truncation order.
+5. Injection into dispatch payload as explicit sections.
+
+Compression objective:
+
+$$
+\text{compression\_ratio} = \frac{\text{tokens\_before}}{\text{tokens\_after}}
+$$
+
+Selection objective:
+
+$$
+\max \sum_i \text{relevance}_i \cdot x_i \quad \text{s.t.} \quad \sum_i \text{tokens}_i \cdot x_i \leq B
+$$
+
+where $B$ is the step memory/context budget.
+
+**Phase 1 algorithm**: This is a 0/1 knapsack problem (NP-hard in the general case). Phase 1 uses greedy selection by descending relevance-per-token density (`relevance_i / tokens_i`), which is O(n log n) and gives a well-understood approximation. The exact optimum is not required at this stage; heuristic scoring quality (Open Question 1) dominates solution quality far more than the gap between greedy and optimal selection.
+
+**Compression LLM cost accounting**: The abstractive summarization step (pipeline step 3b) requires an LLM call. This call is charged to a separate orchestrator overhead budget — it does not consume from the dispatching task's `budget_input_tokens` or `budget_tool_round_tokens`. Compression calls are recorded in step metadata (`context_compression_tokens`, `context_compression_model`) for observability and cost attribution. If the overhead budget is exhausted, the pipeline falls back to extractive-only compression and emits a warning metric.
+
+### E. Delegation Contract and Merge Semantics
+
+Define explicit caller-subagent contracts.
+
+`DelegationRequest` (from caller to sub-agent):
+
+1. Objective and acceptance criteria.
+2. Context package (already filtered/compressed by caller).
+3. Resource budget (tokens, timeout, LLM calls).
+4. Allowed tools and permission scope.
+5. Required output schema.
+
+`DelegationResult` (sub-agent to caller):
+
+1. `summary`
+2. `artifacts` (structured outputs)
+3. `decisions` (assumptions and rationale)
+4. `memory_writes` (suggested durable memory updates — see schema below)
+5. `risks`
+6. `status`
+
+`memory_writes` entry schema (each element in the list):
+
+```python
+{
+    "tier": "episodic" | "notes",   # which memory tier to write to
+    "key": str | None,              # stable key (required for notes; optional for episodic)
+    "content": str,                 # text content to store
+    "importance": float,            # 0.0–1.0; caller caps unverified sub-agent writes at 0.8
+    "ttl_seconds": int | None,      # None = persist until evicted by size policy
+    "tags": list[str],              # used for retrieval filtering
+    # "source_agent" is injected by the framework; sub-agents must not set it
+}
+```
+
+Caller validation rules for `memory_writes`:
+- Reject entries missing required fields or with `tier` outside the allowed set.
+- Downscale `importance` if it exceeds the caller's configured trust ceiling for this sub-agent.
+- Apply the declared merge strategy (`replace`, `append`, `patch`, `reject_on_conflict`) when an entry with the same `key` already exists.
+
+Merge behavior:
+
+1. Schema validation is mandatory before merge.
+2. Merge strategy is declared by caller (`replace`, `append`, `patch`, `reject_on_conflict`).
+3. Conflict events are logged and visible in run metadata.
+
+This avoids implicit, lossy merge behavior and prevents caller context corruption.
+
+### F. Persona Context Sanity and Helper Agents
+
+Persona agents should not keep large active context windows continuously.
+
+Principles:
+
+1. Persona active working context stays compact and task-focused.
+2. Most history and procedural state remain in durable memory.
+3. Retrieval is just-in-time per event/tick, not persistent long transcript carryover.
+
+Note: `agents/memory/working.py` already implements section-level pinning via `ContextSection.compressible = False`. The "pinned, non-compressible section" referenced in Security Considerations item 3 maps directly to this existing mechanism on the Python side. The orchestrator-level `ContextPackage` needs a parallel `pinned_sections` field that the compression pipeline passes through untouched — this is new work, but the design pattern is already established.
+
+Optional helper pattern (recommended, not mandatory):
+
+- Introduce dedicated helper task-agent roles for personas, such as:
+  - `memory-curator` (summarize and deduplicate)
+  - `procedure-validator` (revalidate stale procedural memory)
+  - `context-packer` (prepare delegation packages)
+
+This aligns with the manager-specialist delegation model and keeps persona decision loops lean.
+
+### G. Memory Eviction, Decay, and Validation
+
+Add standardized memory lifecycle policy:
+
+1. **Eviction**:
+   - Hard TTL for low-importance episodic entries.
+   - Size cap with LRU-importance hybrid pruning.
+2. **Decay**:
+   - Procedural memory confidence decays over time.
+   - Confidence refresh on successful reuse.
+3. **Revalidation**:
+   - If confidence falls below threshold, mark memory stale and require validation before injection.
+
+Example decay:
+
+$$
+c_t = c_0 \cdot e^{-\lambda t}
+$$
+
+Inject only if $c_t \ge c_{min}$ or recently validated.
+
+### H. Shared vs Isolated Memory
+
+Support both models with explicit policy:
+
+1. **Isolated (default)**: per-agent namespace, no cross-agent reads/writes.
+2. **Shared pool (opt-in)**: designated group namespace with ACL and provenance tags.
+3. **Hybrid**: isolated writes with curated publish to shared pool.
+
+Safety constraints:
+
+1. Shared memory writes require schema and provenance fields (`source_agent`, `created_at`, `confidence`).
+2. Consumers can filter by trust policy and confidence threshold.
+3. Sensitive memory classes stay isolated regardless of pool settings.
+
+**Default write validation policy for Phase 4**: Writes to shared pools are immediate (no human or validator-role gate), subject to ACL and provenance field requirements enforced at write time. Validator-role review — where a designated agent or operator must approve writes before they become visible to consumers — is a v0.3 or follow-on RFC concern, where multi-node shared memory creates stronger cross-boundary isolation requirements. Open Question 4 tracks whether an earlier opt-in review gate is needed.
+
+### I. Rollout Timing Recommendation
+
+Best timing for implementation:
+
+1. Start design/infra work immediately after RFC 0006 Phase 1 (limit propagation) is merged.
+2. Land core context budget + packaging + compression before broad loop adoption (RFC 0007 implementation), because loops multiply context inefficiency.
+3. Land delegation contract and merge engine before enabling production sub-agent spawning patterns.
+
+Practical sequencing:
+
+- RFC 0006 hardens budgets and limits.
+- RFC 0008 makes context assembly budget-aware and memory-aware.
+- RFC 0007 then benefits from safer looped execution under bounded context discipline.
+
+---
+
+## Security Considerations
+
+1. Context package poisoning: untrusted outputs must be tagged and optionally sanitized before reuse.
+2. Shared-memory contamination: enforce ACL and provenance checks on shared pools.
+3. Over-compression risk: preserve critical constraints in a pinned, non-compressible section.
+4. Merge injection: validate result schema and enforce deterministic merge policies.
+5. Budget bypass attempts: reject negative or malformed budget fields and cap declared values.
+
+## Phased Implementation Plan
+
+### Phase 1: Context Budget and Packaging Foundation
+
+Summary: Add explicit context budget allocation and package assembly in scheduler/executor without changing agent personas.
+
+Deliverables:
+
+1. Add budget fields to dispatch path.
+2. Build candidate-selection and relevance scoring module.
+3. Add extractive compression and deterministic truncation order.
+4. Emit context assembly metrics in step metadata.
+
+Dependencies: RFC 0006 Phase 1.
+
+### Phase 2: Memory Facade for Task Agents
+
+Summary: Enable non-persona memory retrieval/storage flows via `MemoryFacade` and task-agent integration.
+
+Deliverables:
+
+1. Task-agent memory facade wiring.
+2. Config and schema updates for task memory policies.
+3. Basic eviction and TTL policy.
+
+Dependencies: Phase 1.
+
+### Phase 3: Delegation Contract and Merge Engine
+
+Summary: Add structured caller-subagent contract and validated merge semantics.
+
+Deliverables:
+
+1. `DelegationRequest` and `DelegationResult` data contracts.
+2. Merge strategy implementation and conflict handling.
+3. Observability for merge outcomes and dropped fields.
+
+Dependencies: Phase 1.
+
+### Phase 4: Shared Memory Pools and Procedural Revalidation
+
+Summary: Add shared namespaces and stale procedural-memory controls.
+
+Deliverables:
+
+1. Shared pool ACL and provenance policy.
+2. Confidence decay and stale-memory revalidation.
+3. Curated publish workflow from isolated to shared memory.
+
+Dependencies: Phases 2 and 3.
+
+---
+
+## Files Touched (Estimated)
+
+| Component | Files | Change |
+|-----------|-------|--------|
+| Go orchestrator | `internal/scheduler/` | Context budget allocation + package builder integration |
+| Go orchestrator | `internal/executor/` | Dispatch contract extensions for context package + budget |
+| Go orchestrator | `internal/cost/` | Budget accounting extended with context package metrics |
+| Go orchestrator | `internal/state/` | Store context assembly, compression, and merge metadata |
+| Python agents | `agents/task_agent.py` | Memory facade usage for non-persona agents |
+| Python agents | `agents/memory/` | Shared policies, decay/eviction, facade module |
+| Python agents | `agents/sub_agents/` | Contract-aware delegation and merge support |
+| Protos | `proto/task.proto` | No changes in Phase 1–2; Phase 3 adds typed fields for context package and delegation envelopes once the schema is stable (see Open Question 2). Proto changes require RFC review per project policy. |
+| Config | `config/agents.yaml`, `schemas/agent.schema.json` | Task-agent memory policy and shared pool configuration |
+| Tests | `tests/unit/`, `tests/integration/` | Context budget, compression, delegation merge, shared memory policy tests |
+
+## Test Strategy
+
+- **Unit tests**: relevance scoring, compression ordering, decay math, merge conflict policy.
+- **Integration tests**: scheduler -> executor -> agent dispatch with budgeted context package.
+- **Delegation tests**: caller package construction, sub-agent output schema validation, deterministic merge outcomes.
+- **Memory safety tests**: shared pool ACL, provenance filtering, isolation guarantees.
+- **Regression tests**: ensure persona behavior remains stable while task memory support is added.
+
+## Open Questions
+
+1. Should context relevance scoring stay heuristic-only in v1, or include optional embedding scoring when available?
+2. Should `TaskRequest.context` remain a map for backward compatibility, or should typed context-package fields be added in proto immediately? **Proposed default**: defer typed fields to Phase 3; Phase 1 passes the context package as a serialized JSON string in the existing `context` map, avoiding a proto change until the schema is stable. Proto changes require RFC review (per project policy), so deferring until the shape is proven reduces revision churn.
+3. How much compression should be allowed before mandatory human-visible warnings (`compression_ratio` threshold)?
+4. For shared pools, should writes be immediate or review-gated by a validator role? See Section H for the proposed Phase 4 default (immediate writes with ACL enforcement).
+5. Should stale procedural memory block execution or just downgrade confidence and continue? **Proposed default**: downgrade-and-continue; inject the memory at reduced confidence, log a `stale_memory_injection` warning with the measured confidence value, and emit a metric. Blocking execution on stale memory is too disruptive for v1 — operators can set alerting thresholds on the metric and decide whether to evict or revalidate.
+6. RFC 0006 must reach Accepted status before Phase 1 implementation of this RFC begins. If RFC 0006's budget field naming or propagation model changes materially during review, the `budget_*` field names in Section C and the "overhead budget" model in Section D will need revision. Flag this dependency when RFC 0006 review starts.
+
+## Decision / Next Steps
+
+Decision: Propose this RFC for review as the v0.2 architecture bridge between RFC 0006 (limits/budgets) and broader delegation/sub-agent scale.
+
+Next steps:
+
+1. Accept sequencing: 0006 → 0008 → 0007 implementation order (RFC 0007 `Depends on` has been updated to reflect this).
+2. Create a PR plan file for RFC 0008 after acceptance.
+3. Implement Phase 1 first to establish measurable context-budget outcomes.
+
+## Related Documentation
+
+- [RFC 0005](0005-persona-agent-memory.md)
+- [RFC 0006](0006-efficiency-execution-limits.md)
+- [RFC 0007](0007-conditional-looped-workflow-control-flow.md)
+- [Roadmap](../../ROADMAP.md)
+- [Extension Spec](../persatrix-extension-spec.md)
