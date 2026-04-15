@@ -1,7 +1,7 @@
 # RFC 0006 — Efficiency and Execution Limits
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: � Accepted  
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
 **Target**: v0.2  
@@ -306,14 +306,37 @@ This metadata is:
 
 ---
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. **Cache invalidation scope**: Should cache TTL be configurable per-agent or only globally? Global is simpler; per-agent adds complexity but allows tuning for different task types.
-2. **Budget pause UX**: When `on_exceed: pause_and_alert` triggers, how does the operator resume? CLI command? REST endpoint? This may require a follow-up RFC for operator tooling.
-3. **Cost estimation accuracy**: Should estimated cost use prompt token counts (available pre-dispatch) or actual completion token counts (available post-dispatch)? Pre-dispatch enables proactive blocking but is less accurate.
-4. **Persona tick loop integration**: Persona agents have their own `_MAX_SUB_AGENT_TOKENS` and `_MAX_SUB_AGENT_LLM_CALLS` caps. Should these be migrated to the centralized defaults system, or kept as persona-specific overrides?
+### 1. Cache invalidation scope — Global TTL only
 
-Until operator tooling exists, `fail` should remain the default `on_exceed` behavior for implementation PRs. `pause_and_alert` should only ship together with a defined resume path.
+**Decision**: Cache TTL is configured globally in `config/optimization.yaml`, not per-agent.
+
+**Rationale**: The existing configuration architecture cleanly separates agent behavior (`config/agents.yaml`) from optimization/performance tuning (`config/optimization.yaml`). No per-agent cache fields exist in `schemas/agent.schema.json`, and adding them would break this separation. The RFC already specifies that caching is opt-in per task type — persona and autonomous tasks are excluded entirely. This task-type scoping is sufficient granularity without per-agent TTL. Global TTL is simpler to reason about, audit, and adjust at runtime. If future workloads demonstrate a need for finer-grained TTL, a per-profile override (e.g., `cost_optimized` vs `speed_optimized` profiles in `optimization.yaml`) can be added without schema changes to the agent config.
+
+### 2. Budget pause UX — Defer to follow-up RFC; `fail` is the default
+
+**Decision**: `fail` is the only `on_exceed` behavior implemented in this RFC. `pause_and_alert` remains a recognized config value but returns a clear error at enforcement time indicating that the resume path is not yet implemented.
+
+**Rationale**: No pause/resume mechanism exists today — there is no `RunPaused` status in `internal/state/`, no `/api/v1/workflows/{id}/resume` endpoint, and no corresponding CLI command. Implementing `pause_and_alert` properly requires: (a) a new `RunPaused` run status in the state store, (b) a REST resume endpoint, (c) a CLI `orch budget resume` command, and (d) an alerting integration. This is a self-contained feature set that warrants its own RFC (likely RFC 0010+) for operator tooling. Shipping `pause_and_alert` without a defined resume path would create paused workflows that can never be resumed — worse than failing fast. The `BudgetEnforcer` should accept `pause_and_alert` as a valid config value but treat it as `fail` with a warning log until the operator tooling RFC lands.
+
+### 3. Cost estimation accuracy — Post-dispatch actuals with pre-dispatch heuristic guard
+
+**Decision**: Use actual post-dispatch token counts for cost accounting. Add a coarse pre-dispatch budget guard using a heuristic estimate.
+
+**Rationale**: Agents already return accurate `tokens_used` in `TaskOutput.metadata` from their LLM provider responses (Anthropic and OpenAI both report exact input and output token counts). This is 100% accurate, covers all retry and tool-use turns, and requires no new dependencies. Pre-dispatch estimation is inherently unreliable — the orchestrator does not have the rendered prompt (agents construct it from system instructions + payload + tool context), output token counts are non-deterministic, and multi-turn tool use inflates tokens unpredictably.
+
+The pre-dispatch guard works as follows: before dispatching a step, the `BudgetEnforcer` checks whether the remaining budget can accommodate the step's `max_tokens` budget (from the resolved `TaskConfig`). If the remaining budget is less than the step's configured token limit multiplied by the model's per-token cost, the step is rejected before dispatch. This is conservative (it blocks based on the *maximum possible* spend, not the *expected* spend) but requires no token counting library and catches obviously over-budget dispatches without wasting compute.
+
+Both estimated and actual costs are recorded in `StepExecutionMetadata` for operator visibility.
+
+### 4. Persona tick loop integration — Keep persona-specific; migrate later
+
+**Decision**: Persona-specific constants (`_MAX_SUB_AGENT_TOKENS`, `_MAX_SUB_AGENT_TIMEOUT_SECONDS`, `_MAX_SUB_AGENT_LLM_CALLS`) remain in `agents/persona_runtime.py`. They are not migrated to `agents/defaults.py` in this RFC.
+
+**Rationale**: This RFC's non-goals section explicitly states: "Changes to the persona agent tick loop budget model (already has independent caps in `persona_runtime.py`)." The persona sub-agent caps serve a different architectural purpose — they are validation-time clamps on LLM-generated `SPAWN_SUB_AGENT` action payloads, not orchestrator-level execution limits. Sub-agent spawning is not yet wired (the action returns `not_implemented`), so these caps are defensive boundaries for a future feature. Memory truncation constants (`_MAX_EPISODE_SUMMARY_CHARS`, etc.) are persona-specific context-window tuning knobs, not system-wide execution limits.
+
+The `agents/defaults.py` module created in Phase 1 will centralize task agent defaults (`DEFAULT_MAX_LLM_CALLS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_TIMEOUT_SECONDS`). Persona-specific constants will be migrated when sub-agent spawning is production-ready (RFC 0010), at which point the cost model will be mature enough to set informed defaults.
 
 ---
 
