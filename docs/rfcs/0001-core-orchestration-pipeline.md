@@ -2,7 +2,7 @@
 
 **Type**: architecture  
 **Status**: ✅ Implemented  
-**Author**: Orchestr8 team  
+**Author**: Persatrix team  
 **Date**: 2026-04-08  
 **Target**: v0.1 (MVP)  
 **Depends on**: None  
@@ -373,8 +373,8 @@ Once this RFC is accepted:
 ## Related Documentation
 
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — Core MVP specification
-- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — Extension spec (v0.2+ features)
-- [orchestr8-spec-audit.md](../orchestr8-spec-audit.md) — Spec gap audit
+- [persatrix-extension-spec.md](../persatrix-extension-spec.md) — Extension spec (v0.2+ features)
+- [persatrix-spec-audit.md](../persatrix-spec-audit.md) — Spec gap audit
 - [BRANCHING.md](../BRANCHING.md) — Branch naming and PR size guidelines
 - Existing stubs: `internal/planner/planner.go`, `internal/state/state.go`, `internal/registry/registry.go`
 - Workflow fixture: `workflows/feature-builder.yaml`

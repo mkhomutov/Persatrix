@@ -2,7 +2,7 @@
 
 **Type**: architecture
 **Status**: ✅ Implemented
-**Author**: Orchestr8 team
+**Author**: Persatrix team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
 **Depends on**: RFC 0001, RFC 0003
@@ -1201,7 +1201,7 @@ Once this RFC is accepted:
 ## Related Documentation
 
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — §2.1–2.3 Agent Architecture, §3.1–3.2 gRPC Communication, §4.1 Task Agents, §5.1 Tool System
-- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — v0.2 persona agents, memory, sub-agents
+- [persatrix-extension-spec.md](../persatrix-extension-spec.md) — v0.2 persona agents, memory, sub-agents
 - [0001-core-orchestration-pipeline.md](0001-core-orchestration-pipeline.md) — State, Registry, Planner
 - [0002-rest-api-server.md](0002-rest-api-server.md) — REST API, agent registration
 - [0003-scheduler-executor.md](0003-scheduler-executor.md) — Scheduler, GRPCExecutor (Go client side)

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/orchestr8/orchestr8/internal/generated/taskpb"
-	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // Sentinel errors for executor operations.

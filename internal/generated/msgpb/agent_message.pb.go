@@ -143,12 +143,12 @@ type AgentMessage struct {
 	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	SenderId      string                 `protobuf:"bytes,3,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	ThreadId      string                 `protobuf:"bytes,4,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"` // empty if top-level message
-	Type          MessageType            `protobuf:"varint,5,opt,name=type,proto3,enum=orchestr8.v1.MessageType" json:"type,omitempty"`
+	Type          MessageType            `protobuf:"varint,5,opt,name=type,proto3,enum=persatrix.v1.MessageType" json:"type,omitempty"`
 	Content       string                 `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"` // natural language message body
 	Attachments   []*Attachment          `protobuf:"bytes,7,rep,name=attachments,proto3" json:"attachments,omitempty"`
 	Mentions      []string               `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`              // agent IDs mentioned with @
 	ReplyTo       string                 `protobuf:"bytes,9,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"` // message_id being replied to
-	Visibility    Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=orchestr8.v1.Visibility" json:"visibility,omitempty"`
+	Visibility    Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=persatrix.v1.Visibility" json:"visibility,omitempty"`
 	Timestamp     int64                  `protobuf:"varint,11,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -437,7 +437,7 @@ var File_agent_message_proto protoreflect.FileDescriptor
 
 const file_agent_message_proto_rawDesc = "" +
 	"\n" +
-	"\x13agent_message.proto\x12\forchestr8.v1\"\x9a\x03\n" +
+	"\x13agent_message.proto\x12\fpersatrix.v1\"\x9a\x03\n" +
 	"\fAgentMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -445,14 +445,14 @@ const file_agent_message_proto_rawDesc = "" +
 	"channel_id\x18\x02 \x01(\tR\tchannelId\x12\x1b\n" +
 	"\tsender_id\x18\x03 \x01(\tR\bsenderId\x12\x1b\n" +
 	"\tthread_id\x18\x04 \x01(\tR\bthreadId\x12-\n" +
-	"\x04type\x18\x05 \x01(\x0e2\x19.orchestr8.v1.MessageTypeR\x04type\x12\x18\n" +
+	"\x04type\x18\x05 \x01(\x0e2\x19.persatrix.v1.MessageTypeR\x04type\x12\x18\n" +
 	"\acontent\x18\x06 \x01(\tR\acontent\x12:\n" +
-	"\vattachments\x18\a \x03(\v2\x18.orchestr8.v1.AttachmentR\vattachments\x12\x1a\n" +
+	"\vattachments\x18\a \x03(\v2\x18.persatrix.v1.AttachmentR\vattachments\x12\x1a\n" +
 	"\bmentions\x18\b \x03(\tR\bmentions\x12\x19\n" +
 	"\breply_to\x18\t \x01(\tR\areplyTo\x128\n" +
 	"\n" +
 	"visibility\x18\n" +
-	" \x01(\x0e2\x18.orchestr8.v1.VisibilityR\n" +
+	" \x01(\x0e2\x18.persatrix.v1.VisibilityR\n" +
 	"visibility\x12\x1c\n" +
 	"\ttimestamp\x18\v \x01(\x03R\ttimestamp\"_\n" +
 	"\n" +
@@ -487,8 +487,8 @@ const file_agent_message_proto_rawDesc = "" +
 	"\aPRIVATE\x10\x01\x12\x10\n" +
 	"\fCONFIDENTIAL\x10\x022\xa9\x01\n" +
 	"\x0eChannelService\x12L\n" +
-	"\vSendMessage\x12\x1a.orchestr8.v1.AgentMessage\x1a!.orchestr8.v1.SendMessageResponse\x12I\n" +
-	"\tSubscribe\x12\x1e.orchestr8.v1.SubscribeRequest\x1a\x1a.orchestr8.v1.AgentMessage0\x01B9Z7github.com/orchestr8/orchestr8/internal/generated/msgpbb\x06proto3"
+	"\vSendMessage\x12\x1a.persatrix.v1.AgentMessage\x1a!.persatrix.v1.SendMessageResponse\x12I\n" +
+	"\tSubscribe\x12\x1e.persatrix.v1.SubscribeRequest\x1a\x1a.persatrix.v1.AgentMessage0\x01B9Z7github.com/mkhomutov/persatrix/internal/generated/msgpbb\x06proto3"
 
 var (
 	file_agent_message_proto_rawDescOnce sync.Once
@@ -505,21 +505,21 @@ func file_agent_message_proto_rawDescGZIP() []byte {
 var file_agent_message_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_agent_message_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_agent_message_proto_goTypes = []any{
-	(MessageType)(0),            // 0: orchestr8.v1.MessageType
-	(Visibility)(0),             // 1: orchestr8.v1.Visibility
-	(*AgentMessage)(nil),        // 2: orchestr8.v1.AgentMessage
-	(*Attachment)(nil),          // 3: orchestr8.v1.Attachment
-	(*SendMessageResponse)(nil), // 4: orchestr8.v1.SendMessageResponse
-	(*SubscribeRequest)(nil),    // 5: orchestr8.v1.SubscribeRequest
+	(MessageType)(0),            // 0: persatrix.v1.MessageType
+	(Visibility)(0),             // 1: persatrix.v1.Visibility
+	(*AgentMessage)(nil),        // 2: persatrix.v1.AgentMessage
+	(*Attachment)(nil),          // 3: persatrix.v1.Attachment
+	(*SendMessageResponse)(nil), // 4: persatrix.v1.SendMessageResponse
+	(*SubscribeRequest)(nil),    // 5: persatrix.v1.SubscribeRequest
 }
 var file_agent_message_proto_depIdxs = []int32{
-	0, // 0: orchestr8.v1.AgentMessage.type:type_name -> orchestr8.v1.MessageType
-	3, // 1: orchestr8.v1.AgentMessage.attachments:type_name -> orchestr8.v1.Attachment
-	1, // 2: orchestr8.v1.AgentMessage.visibility:type_name -> orchestr8.v1.Visibility
-	2, // 3: orchestr8.v1.ChannelService.SendMessage:input_type -> orchestr8.v1.AgentMessage
-	5, // 4: orchestr8.v1.ChannelService.Subscribe:input_type -> orchestr8.v1.SubscribeRequest
-	4, // 5: orchestr8.v1.ChannelService.SendMessage:output_type -> orchestr8.v1.SendMessageResponse
-	2, // 6: orchestr8.v1.ChannelService.Subscribe:output_type -> orchestr8.v1.AgentMessage
+	0, // 0: persatrix.v1.AgentMessage.type:type_name -> persatrix.v1.MessageType
+	3, // 1: persatrix.v1.AgentMessage.attachments:type_name -> persatrix.v1.Attachment
+	1, // 2: persatrix.v1.AgentMessage.visibility:type_name -> persatrix.v1.Visibility
+	2, // 3: persatrix.v1.ChannelService.SendMessage:input_type -> persatrix.v1.AgentMessage
+	5, // 4: persatrix.v1.ChannelService.Subscribe:input_type -> persatrix.v1.SubscribeRequest
+	4, // 5: persatrix.v1.ChannelService.SendMessage:output_type -> persatrix.v1.SendMessageResponse
+	2, // 6: persatrix.v1.ChannelService.Subscribe:output_type -> persatrix.v1.AgentMessage
 	5, // [5:7] is the sub-list for method output_type
 	3, // [3:5] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

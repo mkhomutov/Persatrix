@@ -283,7 +283,7 @@ func (x *TaskConfig) GetAllowedTools() []string {
 type TaskResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Status        TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=orchestr8.v1.TaskStatus" json:"status,omitempty"`
+	Status        TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=persatrix.v1.TaskStatus" json:"status,omitempty"`
 	Result        string                 `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
 	Metadata      map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // tokens_used, duration_ms, etc.
 	ErrorMessage  string                 `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`                                               // populated if status == FAILED
@@ -359,7 +359,7 @@ func (x *TaskResponse) GetErrorMessage() string {
 type TaskProgress struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Status          TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=orchestr8.v1.TaskStatus" json:"status,omitempty"`
+	Status          TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=persatrix.v1.TaskStatus" json:"status,omitempty"`
 	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                          // human-readable progress update
 	ProgressPercent float32                `protobuf:"fixed32,4,opt,name=progress_percent,json=progressPercent,proto3" json:"progress_percent,omitempty"` // 0.0 – 1.0
 	Timestamp       int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
@@ -478,7 +478,7 @@ func (x *HealthCheckRequest) GetService() string {
 
 type HealthCheckResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        HealthStatus           `protobuf:"varint,1,opt,name=status,proto3,enum=orchestr8.v1.HealthStatus" json:"status,omitempty"`
+	Status        HealthStatus           `protobuf:"varint,1,opt,name=status,proto3,enum=persatrix.v1.HealthStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -525,15 +525,15 @@ var File_task_proto protoreflect.FileDescriptor
 const file_task_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"task.proto\x12\forchestr8.v1\"\xac\x02\n" +
+	"task.proto\x12\fpersatrix.v1\"\xac\x02\n" +
 	"\vTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
 	"workflowId\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12@\n" +
-	"\acontext\x18\x05 \x03(\v2&.orchestr8.v1.TaskRequest.ContextEntryR\acontext\x120\n" +
-	"\x06config\x18\x06 \x01(\v2\x18.orchestr8.v1.TaskConfigR\x06config\x1a:\n" +
+	"\acontext\x18\x05 \x03(\v2&.persatrix.v1.TaskRequest.ContextEntryR\acontext\x120\n" +
+	"\x06config\x18\x06 \x01(\v2\x18.persatrix.v1.TaskConfigR\x06config\x1a:\n" +
 	"\fContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9d\x01\n" +
@@ -546,23 +546,23 @@ const file_task_proto_rawDesc = "" +
 	"\rallowed_tools\x18\x04 \x03(\tR\fallowedTools\"\x99\x02\n" +
 	"\fTaskResponse\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x120\n" +
-	"\x06status\x18\x02 \x01(\x0e2\x18.orchestr8.v1.TaskStatusR\x06status\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x18.persatrix.v1.TaskStatusR\x06status\x12\x16\n" +
 	"\x06result\x18\x03 \x01(\tR\x06result\x12D\n" +
-	"\bmetadata\x18\x04 \x03(\v2(.orchestr8.v1.TaskResponse.MetadataEntryR\bmetadata\x12#\n" +
+	"\bmetadata\x18\x04 \x03(\v2(.persatrix.v1.TaskResponse.MetadataEntryR\bmetadata\x12#\n" +
 	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbc\x01\n" +
 	"\fTaskProgress\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x120\n" +
-	"\x06status\x18\x02 \x01(\x0e2\x18.orchestr8.v1.TaskStatusR\x06status\x12\x18\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x18.persatrix.v1.TaskStatusR\x06status\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12)\n" +
 	"\x10progress_percent\x18\x04 \x01(\x02R\x0fprogressPercent\x12\x1c\n" +
 	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\".\n" +
 	"\x12HealthCheckRequest\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\"I\n" +
 	"\x13HealthCheckResponse\x122\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1a.orchestr8.v1.HealthStatusR\x06status*^\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1a.persatrix.v1.HealthStatusR\x06status*^\n" +
 	"\n" +
 	"TaskStatus\x12\v\n" +
 	"\aPENDING\x10\x00\x12\v\n" +
@@ -577,9 +577,9 @@ const file_task_proto_rawDesc = "" +
 	"\aSERVING\x10\x01\x12\x0f\n" +
 	"\vNOT_SERVING\x10\x022\xf6\x01\n" +
 	"\fAgentService\x12D\n" +
-	"\vExecuteTask\x12\x19.orchestr8.v1.TaskRequest\x1a\x1a.orchestr8.v1.TaskResponse\x12L\n" +
-	"\x11ExecuteTaskStream\x12\x19.orchestr8.v1.TaskRequest\x1a\x1a.orchestr8.v1.TaskProgress0\x01\x12R\n" +
-	"\vHealthCheck\x12 .orchestr8.v1.HealthCheckRequest\x1a!.orchestr8.v1.HealthCheckResponseB:Z8github.com/orchestr8/orchestr8/internal/generated/taskpbb\x06proto3"
+	"\vExecuteTask\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskResponse\x12L\n" +
+	"\x11ExecuteTaskStream\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskProgress0\x01\x12R\n" +
+	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
 
 var (
 	file_task_proto_rawDescOnce sync.Once
@@ -596,30 +596,30 @@ func file_task_proto_rawDescGZIP() []byte {
 var file_task_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_task_proto_goTypes = []any{
-	(TaskStatus)(0),             // 0: orchestr8.v1.TaskStatus
-	(HealthStatus)(0),           // 1: orchestr8.v1.HealthStatus
-	(*TaskRequest)(nil),         // 2: orchestr8.v1.TaskRequest
-	(*TaskConfig)(nil),          // 3: orchestr8.v1.TaskConfig
-	(*TaskResponse)(nil),        // 4: orchestr8.v1.TaskResponse
-	(*TaskProgress)(nil),        // 5: orchestr8.v1.TaskProgress
-	(*HealthCheckRequest)(nil),  // 6: orchestr8.v1.HealthCheckRequest
-	(*HealthCheckResponse)(nil), // 7: orchestr8.v1.HealthCheckResponse
-	nil,                         // 8: orchestr8.v1.TaskRequest.ContextEntry
-	nil,                         // 9: orchestr8.v1.TaskResponse.MetadataEntry
+	(TaskStatus)(0),             // 0: persatrix.v1.TaskStatus
+	(HealthStatus)(0),           // 1: persatrix.v1.HealthStatus
+	(*TaskRequest)(nil),         // 2: persatrix.v1.TaskRequest
+	(*TaskConfig)(nil),          // 3: persatrix.v1.TaskConfig
+	(*TaskResponse)(nil),        // 4: persatrix.v1.TaskResponse
+	(*TaskProgress)(nil),        // 5: persatrix.v1.TaskProgress
+	(*HealthCheckRequest)(nil),  // 6: persatrix.v1.HealthCheckRequest
+	(*HealthCheckResponse)(nil), // 7: persatrix.v1.HealthCheckResponse
+	nil,                         // 8: persatrix.v1.TaskRequest.ContextEntry
+	nil,                         // 9: persatrix.v1.TaskResponse.MetadataEntry
 }
 var file_task_proto_depIdxs = []int32{
-	8, // 0: orchestr8.v1.TaskRequest.context:type_name -> orchestr8.v1.TaskRequest.ContextEntry
-	3, // 1: orchestr8.v1.TaskRequest.config:type_name -> orchestr8.v1.TaskConfig
-	0, // 2: orchestr8.v1.TaskResponse.status:type_name -> orchestr8.v1.TaskStatus
-	9, // 3: orchestr8.v1.TaskResponse.metadata:type_name -> orchestr8.v1.TaskResponse.MetadataEntry
-	0, // 4: orchestr8.v1.TaskProgress.status:type_name -> orchestr8.v1.TaskStatus
-	1, // 5: orchestr8.v1.HealthCheckResponse.status:type_name -> orchestr8.v1.HealthStatus
-	2, // 6: orchestr8.v1.AgentService.ExecuteTask:input_type -> orchestr8.v1.TaskRequest
-	2, // 7: orchestr8.v1.AgentService.ExecuteTaskStream:input_type -> orchestr8.v1.TaskRequest
-	6, // 8: orchestr8.v1.AgentService.HealthCheck:input_type -> orchestr8.v1.HealthCheckRequest
-	4, // 9: orchestr8.v1.AgentService.ExecuteTask:output_type -> orchestr8.v1.TaskResponse
-	5, // 10: orchestr8.v1.AgentService.ExecuteTaskStream:output_type -> orchestr8.v1.TaskProgress
-	7, // 11: orchestr8.v1.AgentService.HealthCheck:output_type -> orchestr8.v1.HealthCheckResponse
+	8, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
+	3, // 1: persatrix.v1.TaskRequest.config:type_name -> persatrix.v1.TaskConfig
+	0, // 2: persatrix.v1.TaskResponse.status:type_name -> persatrix.v1.TaskStatus
+	9, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
+	0, // 4: persatrix.v1.TaskProgress.status:type_name -> persatrix.v1.TaskStatus
+	1, // 5: persatrix.v1.HealthCheckResponse.status:type_name -> persatrix.v1.HealthStatus
+	2, // 6: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
+	2, // 7: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
+	6, // 8: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
+	4, // 9: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
+	5, // 10: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
+	7, // 11: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
 	9, // [9:12] is the sub-list for method output_type
 	6, // [6:9] is the sub-list for method input_type
 	6, // [6:6] is the sub-list for extension type_name

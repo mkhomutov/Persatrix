@@ -19,9 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/registry"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 // testServer creates a Server backed by in-memory store/registry and a real

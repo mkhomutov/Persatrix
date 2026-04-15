@@ -1,4 +1,4 @@
-# Orchestr8 Agent Runtime (Python)
+# Persatrix Agent Runtime (Python)
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir agents/
 RUN useradd -r -s /bin/false appuser
 USER appuser
 
-ENTRYPOINT ["python", "-m", "orchestr8_agents.server"]
+ENTRYPOINT ["python", "-m", "persatrix_agents.server"]

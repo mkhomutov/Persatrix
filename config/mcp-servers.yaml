@@ -1,4 +1,4 @@
-# Orchestr8 MCP Server Configuration
+# Persatrix MCP Server Configuration
 schema_version: "0.1"
 
 mcp_servers:

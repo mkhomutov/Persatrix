@@ -1,4 +1,4 @@
-# Orchestr8 — Project Guidelines
+# Persatrix — Project Guidelines
 
 Polyglot AI agent orchestration framework: **Go** orchestrator, **Python** agent runtime, **Rust** CLI. Agents communicate via gRPC (protobuf) and REST/SSE. Workflows are DAG-based YAML with Jinja2-like templating.
 
@@ -46,7 +46,7 @@ All commands are defined in the [Makefile](../Makefile). Prefer Make targets ove
 make all
 
 # Component builds
-make build-orchestrator    # → bin/orchestr8-server
+make build-orchestrator    # → bin/persatrix-server
 make build-cli             # → cli/target/release/orch
 make build-agents          # pip install -e ".[dev]"
 
@@ -136,8 +136,8 @@ Detailed specs and design decisions live in `docs/`. Refer to these rather than 
 - [ROADMAP.md](../ROADMAP.md) — Development progress, RFC status, component completion, merged PR history
 - [development-workflow.md](../docs/development-workflow.md) — End-to-end development lifecycle (version planning → RFC → PR plan → implementation → follow-ups → refactoring → close)
 - [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md) — Core MVP specification (agents, orchestrator, tasks, workflows, REST API)
-- [orchestr8-extension-spec.md](../docs/orchestr8-extension-spec.md) — Extension spec (personas, channels, bridges, memory, autonomy, blueprints)
-- [orchestr8-spec-audit.md](../docs/orchestr8-spec-audit.md) — Audit of 45 resolved spec gaps
+- [persatrix-extension-spec.md](../docs/persatrix-extension-spec.md) — Extension spec (personas, channels, bridges, memory, autonomy, blueprints)
+- [persatrix-spec-audit.md](../docs/persatrix-spec-audit.md) — Audit of 45 resolved spec gaps
 - [BRANCHING.md](../docs/BRANCHING.md) — Trunk-based branching strategy, naming conventions, PR size limits (<500 lines)
 
 **When completing work**: Update [ROADMAP.md](../ROADMAP.md) with the merged PR, component status changes, and RFC status transitions. Follow the instructions at the bottom of ROADMAP.md.

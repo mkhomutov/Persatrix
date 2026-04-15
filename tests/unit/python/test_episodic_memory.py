@@ -221,7 +221,7 @@ class TestStoreAndRecall:
     async def test_store_and_get_roundtrip(self, memory: EpisodicMemory):
         ep_id = await memory.store_episode(
             summary="Reviewed PR #42",
-            context={"pr": 42, "repo": "orchestr8"},
+            context={"pr": 42, "repo": "Persatrix"},
             outcome="approved",
             importance=0.9,
             tags=["review", "code"],
@@ -229,7 +229,7 @@ class TestStoreAndRecall:
         ep = await memory.get_episode(ep_id)
         assert ep is not None
         assert ep.summary == "Reviewed PR #42"
-        assert ep.context == {"pr": 42, "repo": "orchestr8"}
+        assert ep.context == {"pr": 42, "repo": "Persatrix"}
         assert ep.outcome == "approved"
         assert ep.importance == 0.9
         assert ep.tags == ["review", "code"]

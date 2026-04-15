@@ -1,4 +1,4 @@
-# Orchestr8
+# Persatrix
 
 A general-purpose **agent society engine** — a runtime for creating, connecting, and observing groups of AI agents that behave as individuals within organizational or social structures.
 
@@ -16,8 +16,8 @@ A general-purpose **agent society engine** — a runtime for creating, connectin
 
 ```bash
 # Clone
-git clone https://github.com/mkhomutov/Orchestr8.git
-cd orchestr8
+git clone https://github.com/mkhomutov/Persatrix.git
+cd Persatrix
 
 # Configure
 cp .env.example .env
@@ -83,7 +83,7 @@ CLI (Rust) → Orchestrator (Go) → Agents (Python)
 ## Project Structure
 
 ```
-orchestr8/
+Persatrix/
 ├── cmd/orchestrator/     Go server entry point
 ├── internal/             Go packages (planner, scheduler, registry, security, ...)
 ├── proto/                Protobuf definitions
@@ -114,12 +114,12 @@ See [ROADMAP.md](ROADMAP.md) for detailed progress tracking, RFC status, and com
 
 - [Roadmap & Progress](ROADMAP.md)
 - [MVP Specification](docs/ai-agents-orchestration-spec.md)
-- [Extension Specification](docs/orchestr8-extension-spec.md)
-- [Audit Report](docs/orchestr8-spec-audit.md)
+- [Extension Specification](docs/persatrix-extension-spec.md)
+- [Audit Report](docs/persatrix-spec-audit.md)
 
 ## License
 
-Orchestr8 is distributed under the Business Source License 1.1 (`BUSL-1.1`).
+Persatrix is distributed under the Business Source License 1.1 (`BUSL-1.1`).
 Production use is not granted under the default terms in this repository.
 Each version transitions to Apache License, Version 2.0 four years after its first public release.
 See [LICENSE](LICENSE) for the full terms.

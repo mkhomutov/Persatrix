@@ -2,7 +2,7 @@
 
 **Type**: architecture
 **Status**: ✅ Implemented
-**Author**: Orchestr8 team
+**Author**: Persatrix team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
 **Depends on**: RFC 0001
@@ -29,7 +29,7 @@
 
 ## Summary
 
-Implement the HTTP/REST API server for the Orchestr8 orchestrator. This RFC covers the v0.1 core endpoints: workflow run submission, run status polling, run deletion, agent registry CRUD, and skeleton endpoints for execution logs and cost summary. The server is wired into `cmd/orchestrator/main.go` as step 11 of the initialization sequence, completing the CLI-to-orchestrator communication path for manual workflow triggering.
+Implement the HTTP/REST API server for the Persatrix orchestrator. This RFC covers the v0.1 core endpoints: workflow run submission, run status polling, run deletion, agent registry CRUD, and skeleton endpoints for execution logs and cost summary. The server is wired into `cmd/orchestrator/main.go` as step 11 of the initialization sequence, completing the CLI-to-orchestrator communication path for manual workflow triggering.
 
 ## Motivation
 
@@ -388,7 +388,7 @@ Update `cmd/orchestrator/main.go` to:
    ```
    Note: the `listenAddr` variable from step 3 eliminates the duplicated `fmt.Sprintf` call that would otherwise appear in both the `server.New` and `logger.Info` call sites.
 
-> **Limitation (D-01 — exit code on async Start failure):** Because `Start` runs in a goroutine, a listen failure (e.g. port already bound) results in `logger.Error` + `cancel()` but the process still exits with code 0 (success). The existing `main.go` shutdown path only logs "Orchestr8 Server stopped" on `ctx.Done()` — it does not distinguish a clean shutdown from an error-triggered cancellation. For v0.1 this is acceptable. A future improvement is to propagate the error back to `main` via an `errCh chan error` and call `os.Exit(1)` on receive. Note: `logger.Fatal` is deliberately avoided in the goroutine because it calls `os.Exit(1)` immediately, bypassing deferred cleanup. Implementation should include a `// TODO(v0.2): propagate Start error via errCh for non-zero exit code` comment.
+> **Limitation (D-01 — exit code on async Start failure):** Because `Start` runs in a goroutine, a listen failure (e.g. port already bound) results in `logger.Error` + `cancel()` but the process still exits with code 0 (success). The existing `main.go` shutdown path only logs "Persatrix Server stopped" on `ctx.Done()` — it does not distinguish a clean shutdown from an error-triggered cancellation. For v0.1 this is acceptable. A future improvement is to propagate the error back to `main` via an `errCh chan error` and call `os.Exit(1)` on receive. Note: `logger.Fatal` is deliberately avoided in the goroutine because it calls `os.Exit(1)` immediately, bypassing deferred cleanup. Implementation should include a `// TODO(v0.2): propagate Start error via errCh for non-zero exit code` comment.
 
 This satisfies TODO step 11 ("Start HTTP server") in `main.go`. The existing graceful-shutdown context propagates to `Start`.
 
@@ -461,7 +461,7 @@ All three (`recoveryMiddleware`, `requestIDMiddleware`, and `loggingMiddleware`)
 
 A `--workflows-dir` flag (default: `"workflows/"`) is added to `cmd/orchestrator/main.go`. The server uses this directory as the root for loading workflow YAML files by ID. See [Security Considerations](#security-considerations) for the path traversal protection logic applied to this directory.
 
-> **Warning (P7 — relative default):** The default `"workflows/"` is a relative path resolved against the process working directory (`cwd`) at startup. If the binary is launched from a directory other than the repository root (e.g. `./bin/orchestr8-server`), the path resolves to `./bin/workflows/` and all workflow submissions return `404`. Production and staging deployments should always pass an absolute `--workflows-dir` path. In development, run the binary from the repository root or set the flag explicitly.
+> **Warning (P7 — relative default):** The default `"workflows/"` is a relative path resolved against the process working directory (`cwd`) at startup. If the binary is launched from a directory other than the repository root (e.g. `./bin/persatrix-server`), the path resolves to `./bin/workflows/` and all workflow submissions return `404`. Production and staging deployments should always pass an absolute `--workflows-dir` path. In development, run the binary from the repository root or set the flag explicitly.
 
 ## Security Considerations
 
@@ -648,8 +648,8 @@ Feature branch `feature/v01-rest-api-server` will be created for implementation.
 ## Related Documentation
 
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — §8.3 Orchestrator API (endpoint list)
-- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — v0.2+ streaming and channel endpoints
-- [orchestr8-spec-audit.md](../orchestr8-spec-audit.md) — Spec gap audit
+- [persatrix-extension-spec.md](../persatrix-extension-spec.md) — v0.2+ streaming and channel endpoints
+- [persatrix-spec-audit.md](../persatrix-spec-audit.md) — Spec gap audit
 - [0001-core-orchestration-pipeline.md](0001-core-orchestration-pipeline.md) — State, Registry, Planner (this RFC's dependencies)
 - [BRANCHING.md](../BRANCHING.md) — Branch naming and PR size guidelines
 - Existing stubs: `internal/server/` (does not yet exist; this RFC creates it), `cmd/orchestrator/main.go` TODO step 11

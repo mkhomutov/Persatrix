@@ -2,7 +2,7 @@
 
 ## Context
 
-You are updating documentation for **Orchestr8** — a polyglot AI agent orchestration framework built with Go (orchestrator), Python (agents), and Rust (CLI). The project maintains documentation across architecture, specs, and configuration.
+You are updating documentation for **Persatrix** — a polyglot AI agent orchestration framework built with Go (orchestrator), Python (agents), and Rust (CLI). The project maintains documentation across architecture, specs, and configuration.
 
 ## Core Principles
 
@@ -25,7 +25,7 @@ Before updating any documentation, verify:
 ## Documentation Categories
 
 ### Specification Documents
-**Files**: `docs/ai-agents-orchestration-spec.md`, `docs/orchestr8-extension-spec.md`
+**Files**: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`
 
 When updating:
 - These are the canonical design specs — update when behavior changes
@@ -65,8 +65,8 @@ Use these standardized markers consistently:
 | Topic | Canonical Document |
 |-------|-------------------|
 | Core architecture & API | `docs/ai-agents-orchestration-spec.md` |
-| Extension features (personas, memory, channels) | `docs/orchestr8-extension-spec.md` |
-| Spec gaps & audit | `docs/orchestr8-spec-audit.md` |
+| Extension features (personas, memory, channels) | `docs/persatrix-extension-spec.md` |
+| Spec gaps & audit | `docs/persatrix-spec-audit.md` |
 | Branching strategy | `docs/BRANCHING.md` |
 | Agent configuration | `config/agents.yaml` |
 | Workflow definitions | `workflows/*.yaml` |

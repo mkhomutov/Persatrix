@@ -1,8 +1,8 @@
-# Orchestr8 — Development Workflow
+# Persatrix — Development Workflow
 
 > **Last updated**: 2026-04-14
 
-This document describes the end-to-end development lifecycle for Orchestr8, from version planning through RFC closure. It connects the strategic planning loop to the tactical processes documented in [CONTRIBUTING.md](../CONTRIBUTING.md) (PR process), [BRANCHING.md](BRANCHING.md) (branch naming), and [rfcs/README.md](rfcs/README.md) (RFC format and lifecycle).
+This document describes the end-to-end development lifecycle for Persatrix, from version planning through RFC closure. It connects the strategic planning loop to the tactical processes documented in [CONTRIBUTING.md](../CONTRIBUTING.md) (PR process), [BRANCHING.md](BRANCHING.md) (branch naming), and [rfcs/README.md](rfcs/README.md) (RFC format and lifecycle).
 
 ---
 

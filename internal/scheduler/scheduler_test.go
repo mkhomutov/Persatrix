@@ -15,9 +15,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/orchestr8/orchestr8/internal/executor"
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 // --- Mock executor ---

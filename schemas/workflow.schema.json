@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://orchestr8.dev/schemas/workflow.schema.json",
-  "title": "Orchestr8 Workflow Definition",
+  "$id": "https://persatrix.dev/schemas/workflow.schema.json",
+  "title": "Persatrix Workflow Definition",
   "type": "object",
   "required": ["schema_version", "workflow"],
   "properties": {

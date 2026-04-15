@@ -120,7 +120,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-1b-3 | Low | `AgentCommands::Reload` stub discards `agent_id` with `_` pattern — generic "not yet implemented" message | Capture `agent_id` and include in message: `"Agent reload for '{agent_id}' not yet implemented"` |
 | F-1b-4 | Low | Server URL scheme check is case-sensitive — `HTTP://` would be rejected | Add `.to_lowercase()` before `starts_with` check |
 | F-1b-5 | Info | `WorkflowRunResponse` missing `steps` field — safe due to forward-compatible serde, but needed when step-level display is added | Add `steps: Option<HashMap<String, serde_json::Value>>` when `--steps` flag is needed |
-| F-1b-6 | Info | `--server` flag could support `env = "ORCHESTR8_SERVER"` via clap `#[arg(env)]` | Wire env var fallback when auth headers are also added |
+| F-1b-6 | Info | `--server` flag could support `env = "Persatrix_SERVER"` via clap `#[arg(env)]` | Wire env var fallback when auth headers are also added |
 
 ---
 
@@ -608,7 +608,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 | F-6a-5 | Low | No test for `channels.yaml` validation path — `_SCHEMA_MAP` entry exists but has zero test coverage | Add test writing `channels.yaml` in `config_dir` and validating against `channel.schema.json` |
 | F-6a-6 | Low | Tests only check pass/fail boolean — a schema regression that fails for the *wrong* reason would be invisible | Add at least one test capturing stdout (via `capsys`) and asserting specific error message content |
 
-> Items deferred beyond PR 7 — nice-to-have improvements: asymmetric workflow/config schema error handling pattern (F-6a-3), schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
+> Items deferred beyond PR 7 — nice-to-have improvements: asymmetric workflow/config schema error handling pattern (F-6a-3), schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("Persatrix.validate")`, schema `$ref` splitting into `schemas/definitions/` for maintainability, validator result caching for repeated schema loads.
 
 ---
 
@@ -787,7 +787,7 @@ The original PR 7 (100–200 lines) was split into 4 sub-PRs after accumulated r
 
 > Items F-5b-2 and F-5b-3 already applied in review fix passes (memory init failure isolation, `exclusive()` lock accessor). No further action needed.
 
-> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("orchestr8.validate")`, schema `$ref` splitting into `schemas/definitions/`, `--format json` for persona test output, exit code propagation for `cmd_test_persona` check failures, `--strict` mode for `orch test --persona`, server-side validation endpoint (`POST /api/v1/config/validate`).
+> Items deferred beyond PR 7 — nice-to-have improvements: decouple `ActionExecutor` ↔ `EventDispatcher` via event bus (v0.3 mesh networking), `_handle_send_message()` channel-based routing (v0.2 channels), `TickScheduler.stop()` forced-cancel test, module split (`persona/agent.py`, `persona/dispatch.py`, `persona/tick.py`, `persona/state.py`), config-driven energy thresholds, backpressure mechanism for event dispatch queue (bounded per-agent queue), `_wait_for_stop_or_wake()` task churn reduction (combined `asyncio.Event` or `asyncio.Condition`), typed `AgentEvent.cascade_depth` field replacing `metadata["cascade_depth"]`, `USE_TOOL` as final action path test, `ActionExecutor._execute_one()` catch-all branch test, schema-level `db_path` path traversal pattern, duplicate agent ID detection (custom post-schema check), `goals.primary` as required for persona agents, replace `print()` with `logging.getLogger("Persatrix.validate")`, schema `$ref` splitting into `schemas/definitions/`, `--format json` for persona test output, exit code propagation for `cmd_test_persona` check failures, `--strict` mode for `orch test --persona`, server-side validation endpoint (`POST /api/v1/config/validate`).
 
 #### PR 7a: `feature/v02-memory-review-fixes` — Memory Tier Review Fixes
 

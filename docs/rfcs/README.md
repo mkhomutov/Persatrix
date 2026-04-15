@@ -4,7 +4,7 @@
 > **Last updated**: 2026-04-08
 
 > **Purpose:** Define the types, lifecycle, structure, and conventions for
-> Request for Comments (RFC) documents in the Orchestr8 project. RFCs
+> Request for Comments (RFC) documents in the Persatrix project. RFCs
 > capture significant design decisions, architectural changes, and feature
 > proposals that need cross-cutting review before implementation.
 > "Cross-cutting" means touching multiple components (Go/Python/Rust),

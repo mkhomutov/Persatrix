@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is Orchestr8
+## What is Persatrix
 
 An agent society engine — a runtime for creating, connecting, and observing groups of AI agents via organizational structures. Polyglot: **Go** orchestrator, **Python** agent runtime, **Rust** CLI, connected by **protobuf/gRPC**.
 
@@ -67,7 +67,7 @@ YAML workflow -> `YAMLPlanner` parses DAG + validates (cycle detection) -> topol
 
 ### Python package mapping
 
-The `agents/` directory maps to `orchestr8_agents` import path (configured in `agents/pyproject.toml` via `tool.setuptools.package-dir`). Run Python agents with `python -m orchestr8_agents.server`.
+The `agents/` directory maps to `persatrix_agents` import path (configured in `agents/pyproject.toml` via `tool.setuptools.package-dir`). Run Python agents with `python -m persatrix_agents.server`.
 
 ## Phased Development
 
@@ -114,6 +114,6 @@ When completing work, update ROADMAP.md (merged PR table, component status, RFC 
 - Development lifecycle: `docs/development-workflow.md`
 - Branching: `docs/BRANCHING.md`
 - RFC process: `docs/rfcs/README.md`
-- Specs: `docs/ai-agents-orchestration-spec.md`, `docs/orchestr8-extension-spec.md`
+- Specs: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`
 
 PR review reports (`docs/pr-reviews/`) are local-only artifacts — never reference them in committed documents.

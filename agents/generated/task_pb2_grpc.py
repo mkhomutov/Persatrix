@@ -37,17 +37,17 @@ class AgentServiceStub(object):
             channel: A grpc.Channel.
         """
         self.ExecuteTask = channel.unary_unary(
-                '/orchestr8.v1.AgentService/ExecuteTask',
+                '/persatrix.v1.AgentService/ExecuteTask',
                 request_serializer=task__pb2.TaskRequest.SerializeToString,
                 response_deserializer=task__pb2.TaskResponse.FromString,
                 _registered_method=True)
         self.ExecuteTaskStream = channel.unary_stream(
-                '/orchestr8.v1.AgentService/ExecuteTaskStream',
+                '/persatrix.v1.AgentService/ExecuteTaskStream',
                 request_serializer=task__pb2.TaskRequest.SerializeToString,
                 response_deserializer=task__pb2.TaskProgress.FromString,
                 _registered_method=True)
         self.HealthCheck = channel.unary_unary(
-                '/orchestr8.v1.AgentService/HealthCheck',
+                '/persatrix.v1.AgentService/HealthCheck',
                 request_serializer=task__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=task__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
@@ -99,9 +99,9 @@ def add_AgentServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'orchestr8.v1.AgentService', rpc_method_handlers)
+            'persatrix.v1.AgentService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('orchestr8.v1.AgentService', rpc_method_handlers)
+    server.add_registered_method_handlers('persatrix.v1.AgentService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -124,7 +124,7 @@ class AgentService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orchestr8.v1.AgentService/ExecuteTask',
+            '/persatrix.v1.AgentService/ExecuteTask',
             task__pb2.TaskRequest.SerializeToString,
             task__pb2.TaskResponse.FromString,
             options,
@@ -151,7 +151,7 @@ class AgentService(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/orchestr8.v1.AgentService/ExecuteTaskStream',
+            '/persatrix.v1.AgentService/ExecuteTaskStream',
             task__pb2.TaskRequest.SerializeToString,
             task__pb2.TaskProgress.FromString,
             options,
@@ -178,7 +178,7 @@ class AgentService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orchestr8.v1.AgentService/HealthCheck',
+            '/persatrix.v1.AgentService/HealthCheck',
             task__pb2.HealthCheckRequest.SerializeToString,
             task__pb2.HealthCheckResponse.FromString,
             options,

@@ -52,7 +52,7 @@ This RFC implements the PersonaAgent runtime and three-tier memory system as the
 
 ## Motivation
 
-v0.1 delivers end-to-end workflow execution with task agents that respond to assigned work. v0.2 transforms Orchestr8 into an **agent society engine** where agents have persistent identities, autonomous goals, evolving relationships, and long-term memory.
+v0.1 delivers end-to-end workflow execution with task agents that respond to assigned work. v0.2 transforms Persatrix into an **agent society engine** where agents have persistent identities, autonomous goals, evolving relationships, and long-term memory.
 
 The PersonaAgent + Memory system is the **critical path dependency** for all other v0.2 features:
 
@@ -1753,7 +1753,7 @@ def estimate_tokens(text: str, *, accurate: bool = False) -> int:
     return len(text) // 4
 ```
 
-Add `tiktoken` as an optional dependency in `pyproject.toml` (`pip install orchestr8-agents[tiktoken]`). The `accurate` flag defaults to `False`; callers opt in when precision matters (e.g., billing estimates).
+Add `tiktoken` as an optional dependency in `pyproject.toml` (`pip install Persatrix-agents[tiktoken]`). The `accurate` flag defaults to `False`; callers opt in when precision matters (e.g., billing estimates).
 
 ### Q3: How should old CoderAgent/ReviewerAgent/PlannerAgent imports be handled?
 
@@ -1985,7 +1985,7 @@ All 6 open questions are now resolved. Remaining steps before implementation:
 
 ## Related Documentation
 
-- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — §E2 Persona Model, §E3 Autonomy Levels, §E7 Memory & Shared Knowledge
+- [persatrix-extension-spec.md](../persatrix-extension-spec.md) — §E2 Persona Model, §E3 Autonomy Levels, §E7 Memory & Shared Knowledge
 - [0004-python-agent-grpc-server.md](0004-python-agent-grpc-server.md) — Items Deferred to v0.2 (38 items, this RFC addresses ~15)
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — §2.1–2.3 Agent Architecture
 - [ROADMAP.md](../../ROADMAP.md) — v0.2 planned components

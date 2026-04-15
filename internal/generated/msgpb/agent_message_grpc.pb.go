@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChannelService_SendMessage_FullMethodName = "/orchestr8.v1.ChannelService/SendMessage"
-	ChannelService_Subscribe_FullMethodName   = "/orchestr8.v1.ChannelService/Subscribe"
+	ChannelService_SendMessage_FullMethodName = "/persatrix.v1.ChannelService/SendMessage"
+	ChannelService_Subscribe_FullMethodName   = "/persatrix.v1.ChannelService/Subscribe"
 )
 
 // ChannelServiceClient is the client API for ChannelService service.
@@ -148,7 +148,7 @@ type ChannelService_SubscribeServer = grpc.ServerStreamingServer[AgentMessage]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ChannelService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "orchestr8.v1.ChannelService",
+	ServiceName: "persatrix.v1.ChannelService",
 	HandlerType: (*ChannelServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

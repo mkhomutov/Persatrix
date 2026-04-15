@@ -38,12 +38,12 @@ class ChannelServiceStub(object):
             channel: A grpc.Channel.
         """
         self.SendMessage = channel.unary_unary(
-                '/orchestr8.v1.ChannelService/SendMessage',
+                '/persatrix.v1.ChannelService/SendMessage',
                 request_serializer=agent__message__pb2.AgentMessage.SerializeToString,
                 response_deserializer=agent__message__pb2.SendMessageResponse.FromString,
                 _registered_method=True)
         self.Subscribe = channel.unary_stream(
-                '/orchestr8.v1.ChannelService/Subscribe',
+                '/persatrix.v1.ChannelService/Subscribe',
                 request_serializer=agent__message__pb2.SubscribeRequest.SerializeToString,
                 response_deserializer=agent__message__pb2.AgentMessage.FromString,
                 _registered_method=True)
@@ -84,9 +84,9 @@ def add_ChannelServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'orchestr8.v1.ChannelService', rpc_method_handlers)
+            'persatrix.v1.ChannelService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('orchestr8.v1.ChannelService', rpc_method_handlers)
+    server.add_registered_method_handlers('persatrix.v1.ChannelService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -110,7 +110,7 @@ class ChannelService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orchestr8.v1.ChannelService/SendMessage',
+            '/persatrix.v1.ChannelService/SendMessage',
             agent__message__pb2.AgentMessage.SerializeToString,
             agent__message__pb2.SendMessageResponse.FromString,
             options,
@@ -137,7 +137,7 @@ class ChannelService(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/orchestr8.v1.ChannelService/Subscribe',
+            '/persatrix.v1.ChannelService/Subscribe',
             agent__message__pb2.SubscribeRequest.SerializeToString,
             agent__message__pb2.AgentMessage.FromString,
             options,

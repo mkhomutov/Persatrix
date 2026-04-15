@@ -951,9 +951,9 @@ class TestStructuredErrors:
 
 
 class TestAgentIdRegex:
-    """F-6a-2: agent ID regex allows 1-2 character IDs."""
+    """Agent ID regex requires minimum 2 characters per spec (^[a-z0-9][a-z0-9-]*[a-z0-9]$)."""
 
-    def test_single_char_id_passes(
+    def test_single_char_id_fails(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
         data = {
@@ -970,7 +970,7 @@ class TestAgentIdRegex:
             ],
         }
         _write_agents_yaml(config_dir, data)
-        assert _validate_passes(str(config_dir), str(schemas_dir), str(workflow_dir))
+        assert not _validate_passes(str(config_dir), str(schemas_dir), str(workflow_dir))
 
     def test_two_char_id_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path

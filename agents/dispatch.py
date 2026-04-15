@@ -1,5 +1,5 @@
 """
-Orchestr8 Event Dispatcher and Action Executor.
+Persatrix Event Dispatcher and Action Executor.
 
 Routes events to persona agents and executes agent actions.
 Extracted from ``persona.py`` for modularity — no logic changes.

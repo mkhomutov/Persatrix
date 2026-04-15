@@ -1,6 +1,6 @@
-# Orchestr8 Roadmap
+# Persatrix Roadmap
 
-> **Last updated**: 2026-04-14  
+> **Last updated**: 2026-04-15  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
@@ -11,7 +11,7 @@ This document tracks development progress across all phases. Update it when merg
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete |
+| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete (internal milestone — not publicly released; project renamed to Persatrix before first public release) |
 | **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | � In Progress |
 | **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
 | **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |
@@ -123,7 +123,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 
 **Goal**: Persona-driven agents with autonomous behavior, multi-channel communication, organizational hierarchy, and persistent memory.
 
-**Design**: Fully specified in [orchestr8-extension-spec.md](docs/orchestr8-extension-spec.md).
+**Design**: Fully specified in [persatrix-extension-spec.md](docs/persatrix-extension-spec.md).
 
 ### RFC Tracker
 
@@ -163,7 +163,7 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 
 **Goal**: Multi-node deployment with agent-to-agent networking and distributed workflow execution.
 
-**Design**: Architecture sketched in [orchestr8-extension-spec.md](docs/orchestr8-extension-spec.md). No RFCs written yet.
+**Design**: Architecture sketched in [persatrix-extension-spec.md](docs/persatrix-extension-spec.md). No RFCs written yet.
 
 ### Planned Components
 
@@ -188,64 +188,64 @@ RFC 0008 (Protocols + Organizations)            Not yet written
 
 | PR | Title | RFC | Date |
 |----|-------|-----|------|
-| [#6](https://github.com/mkhomutov/Orchestr8/pull/6) | feat(state): implement InMemoryStateStore | 0001 (1/6) | 2026-04-08 |
-| [#7](https://github.com/mkhomutov/Orchestr8/pull/7) | feat(registry): implement InMemoryRegistry | 0001 (2/6) | 2026-04-08 |
-| [#8](https://github.com/mkhomutov/Orchestr8/pull/8) | feat(planner): YAMLPlanner Parse+DAG+Plan | 0001 (3/6) | 2026-04-08 |
-| [#9](https://github.com/mkhomutov/Orchestr8/pull/9) | feat(planner): ResolveInputs template resolution | 0001 (4/6) | 2026-04-08 |
-| [#10](https://github.com/mkhomutov/Orchestr8/pull/10) | feat(orchestrator): wire into main.go | 0001 (5/6) | 2026-04-08 |
-| [#12](https://github.com/mkhomutov/Orchestr8/pull/12) | fix: review findings follow-up | 0001 (6/6) | 2026-04-09 |
-| [#14](https://github.com/mkhomutov/Orchestr8/pull/14) | feat(server): HTTP scaffolding + workflow handlers | 0002 (1/4) | 2026-04-09 |
-| [#16](https://github.com/mkhomutov/Orchestr8/pull/16) | feat(server): agent registry endpoints | 0002 (2/4) | 2026-04-09 |
-| [#17](https://github.com/mkhomutov/Orchestr8/pull/17) | feat(server): stub endpoints + main.go wiring | 0002 (3/4) | 2026-04-09 |
-| [#18](https://github.com/mkhomutov/Orchestr8/pull/18) | fix: review findings follow-up | 0002 (4/4) | 2026-04-10 |
-| [#21](https://github.com/mkhomutov/Orchestr8/pull/21) | feat(generated): protobuf Go code generation | 0003 (1/7) | 2026-04-10 |
-| [#22](https://github.com/mkhomutov/Orchestr8/pull/22) | feat(executor): GRPCExecutor core with retry logic | 0003 (2/7) | 2026-04-10 |
-| [#23](https://github.com/mkhomutov/Orchestr8/pull/23) | test(executor): retry logic & error classification tests | 0003 (3/7) | 2026-04-10 |
-| [#24](https://github.com/mkhomutov/Orchestr8/pull/24) | feat(state): RunRetrying, SetRunTimestamps, SetRunError | 0003 (4/7) | 2026-04-10 |
-| [#25](https://github.com/mkhomutov/Orchestr8/pull/25) | feat(scheduler): WorkflowScheduler core with polling, parallel stages, dedup | 0003 (5/7) | 2026-04-10 |
-| [#26](https://github.com/mkhomutov/Orchestr8/pull/26) | test(scheduler): step execution, template resolution, error path coverage | 0003 (6/7) | 2026-04-10 |
-| [#27](https://github.com/mkhomutov/Orchestr8/pull/27) | feat(orchestrator): wire scheduler + executor into main.go | 0003 (7/7) | 2026-04-10 |
-| [#28](https://github.com/mkhomutov/Orchestr8/pull/28) | docs: add follow-up PRs 6-9 to RFC 0003 PR plan | 0003 docs | 2026-04-10 |
-| [#29](https://github.com/mkhomutov/Orchestr8/pull/29) | docs(rfc0001): complete PR 6 follow-up scope with carry-forward findings | 0001 docs | 2026-04-10 |
-| [#30](https://github.com/mkhomutov/Orchestr8/pull/30) | fix(state): replace rune-based test IDs (RFC 0001, F-06) | 0001 follow-up (1/1) | 2026-04-10 |
-| [#31](https://github.com/mkhomutov/Orchestr8/pull/31) | fix(executor): additive dial options, cancellation & concurrent retry tests | 0003 follow-up (1/4) | 2026-04-10 |
-| [#32](https://github.com/mkhomutov/Orchestr8/pull/32) | test: observability improvements — concurrent race tests, log assertions, zaptest logger | 0003 follow-up (2/4) | 2026-04-11 |
-| [#33](https://github.com/mkhomutov/Orchestr8/pull/33) | fix(orchestrator): graceful shutdown drain + absolute workflowsDir | 0003 follow-up (3/4) | 2026-04-11 |
-| [#34](https://github.com/mkhomutov/Orchestr8/pull/34) | build(proto): split make proto into go/python targets + CI staleness check | 0003 follow-up (4/4) | 2026-04-11 |
-| [#35](https://github.com/mkhomutov/Orchestr8/pull/35) | docs: RFC 0003/0004 status updates, multi-provider LLM design, v0.2 deferrals | cross-RFC docs | 2026-04-11 |
-| [#36](https://github.com/mkhomutov/Orchestr8/pull/36) | feat(agents): PermissionGate + PathValidator | 0004 (2/7) | 2026-04-11 |
-| [#37](https://github.com/mkhomutov/Orchestr8/pull/37) | feat(agents): built-in tools + PR 2 follow-up fixes | 0004 (3/7) | 2026-04-11 |
-| [#38](https://github.com/mkhomutov/Orchestr8/pull/38) | feat(agents): LLM client + TaskInputConfig + base handle loop | 0004 (4a/7) | 2026-04-11 |
-| [#39](https://github.com/mkhomutov/Orchestr8/pull/39) | feat(agents): CoderAgent, ReviewerAgent, PlannerAgent | 0004 (4b/7) | 2026-04-11 |
-| [#40](https://github.com/mkhomutov/Orchestr8/pull/40) | feat(agents): gRPC server + agent loading + proto stubs + follow-up fixes | 0004 (5a/7) | 2026-04-11 |
-| [#41](https://github.com/mkhomutov/Orchestr8/pull/41) | feat(agents): self-registration + integration tests + follow-up fixes | 0004 (5b/7) | 2026-04-11 |
-| [#42](https://github.com/mkhomutov/Orchestr8/pull/42) | fix(agents): registration follow-ups + RFC 0004 close | 0004 (6/7) | 2026-04-11 |
-| [#44](https://github.com/mkhomutov/Orchestr8/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
-| [#45](https://github.com/mkhomutov/Orchestr8/pull/45) | docs(rfc): RFC 0005 — Persona Agent & Memory System | 0005 (RFC) | 2026-04-12 |
-| [#46](https://github.com/mkhomutov/Orchestr8/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
-| [#47](https://github.com/mkhomutov/Orchestr8/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/20) | 2026-04-12 |
-| [#48](https://github.com/mkhomutov/Orchestr8/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/20) | 2026-04-12 |
-| [#49](https://github.com/mkhomutov/Orchestr8/pull/49) | feat(memory): working memory + token estimation | 0005 (2/20) | 2026-04-12 |
-| [#50](https://github.com/mkhomutov/Orchestr8/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/20) | 2026-04-12 |
-| [#51](https://github.com/mkhomutov/Orchestr8/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/20) | 2026-04-12 |
-| [#52](https://github.com/mkhomutov/Orchestr8/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/20) | 2026-04-12 |
-| [#53](https://github.com/mkhomutov/Orchestr8/pull/53) | feat(memory): relationship memory | 0005 (4/20) | 2026-04-12 |
-| [#54](https://github.com/mkhomutov/Orchestr8/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/20) | 2026-04-13 |
-| [#55](https://github.com/mkhomutov/Orchestr8/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/20) | 2026-04-13 |
-| [#56](https://github.com/mkhomutov/Orchestr8/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/20) | 2026-04-13 |
-| [#57](https://github.com/mkhomutov/Orchestr8/pull/57) | feat(cli): CLI persona commands | 0005 (6b/20) | 2026-04-13 |
-| [#58](https://github.com/mkhomutov/Orchestr8/pull/58) | docs(rfc0005): split PR 7 into 4 sub-PRs (7a-7d) | 0005 docs | 2026-04-13 |
-| [#59](https://github.com/mkhomutov/Orchestr8/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/20) | 2026-04-13 |
-| [#60](https://github.com/mkhomutov/Orchestr8/pull/60) | feat(persona,validate): persona + validation review fixes (PR 7b) | 0005 (7b/20) | 2026-04-14 |
-| [#61](https://github.com/mkhomutov/Orchestr8/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
-| [#62](https://github.com/mkhomutov/Orchestr8/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/20) | 2026-04-14 |
-| [#63](https://github.com/mkhomutov/Orchestr8/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
-| [#64](https://github.com/mkhomutov/Orchestr8/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/20) | 2026-04-14 |
-| [#65](https://github.com/mkhomutov/Orchestr8/pull/65) | refactor(persona): extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) | 0005 (8d/20) | 2026-04-14 |
-| [#66](https://github.com/mkhomutov/Orchestr8/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/20) | 2026-04-14 |
-| [#67](https://github.com/mkhomutov/Orchestr8/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
-| [#68](https://github.com/mkhomutov/Orchestr8/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
-| [#69](https://github.com/mkhomutov/Orchestr8/pull/69) | docs: close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) | 0005 (7d/20) | 2026-04-14 |
+| [#6](https://github.com/mkhomutov/Persatrix/pull/6) | feat(state): implement InMemoryStateStore | 0001 (1/6) | 2026-04-08 |
+| [#7](https://github.com/mkhomutov/Persatrix/pull/7) | feat(registry): implement InMemoryRegistry | 0001 (2/6) | 2026-04-08 |
+| [#8](https://github.com/mkhomutov/Persatrix/pull/8) | feat(planner): YAMLPlanner Parse+DAG+Plan | 0001 (3/6) | 2026-04-08 |
+| [#9](https://github.com/mkhomutov/Persatrix/pull/9) | feat(planner): ResolveInputs template resolution | 0001 (4/6) | 2026-04-08 |
+| [#10](https://github.com/mkhomutov/Persatrix/pull/10) | feat(orchestrator): wire into main.go | 0001 (5/6) | 2026-04-08 |
+| [#12](https://github.com/mkhomutov/Persatrix/pull/12) | fix: review findings follow-up | 0001 (6/6) | 2026-04-09 |
+| [#14](https://github.com/mkhomutov/Persatrix/pull/14) | feat(server): HTTP scaffolding + workflow handlers | 0002 (1/4) | 2026-04-09 |
+| [#16](https://github.com/mkhomutov/Persatrix/pull/16) | feat(server): agent registry endpoints | 0002 (2/4) | 2026-04-09 |
+| [#17](https://github.com/mkhomutov/Persatrix/pull/17) | feat(server): stub endpoints + main.go wiring | 0002 (3/4) | 2026-04-09 |
+| [#18](https://github.com/mkhomutov/Persatrix/pull/18) | fix: review findings follow-up | 0002 (4/4) | 2026-04-10 |
+| [#21](https://github.com/mkhomutov/Persatrix/pull/21) | feat(generated): protobuf Go code generation | 0003 (1/7) | 2026-04-10 |
+| [#22](https://github.com/mkhomutov/Persatrix/pull/22) | feat(executor): GRPCExecutor core with retry logic | 0003 (2/7) | 2026-04-10 |
+| [#23](https://github.com/mkhomutov/Persatrix/pull/23) | test(executor): retry logic & error classification tests | 0003 (3/7) | 2026-04-10 |
+| [#24](https://github.com/mkhomutov/Persatrix/pull/24) | feat(state): RunRetrying, SetRunTimestamps, SetRunError | 0003 (4/7) | 2026-04-10 |
+| [#25](https://github.com/mkhomutov/Persatrix/pull/25) | feat(scheduler): WorkflowScheduler core with polling, parallel stages, dedup | 0003 (5/7) | 2026-04-10 |
+| [#26](https://github.com/mkhomutov/Persatrix/pull/26) | test(scheduler): step execution, template resolution, error path coverage | 0003 (6/7) | 2026-04-10 |
+| [#27](https://github.com/mkhomutov/Persatrix/pull/27) | feat(orchestrator): wire scheduler + executor into main.go | 0003 (7/7) | 2026-04-10 |
+| [#28](https://github.com/mkhomutov/Persatrix/pull/28) | docs: add follow-up PRs 6-9 to RFC 0003 PR plan | 0003 docs | 2026-04-10 |
+| [#29](https://github.com/mkhomutov/Persatrix/pull/29) | docs(rfc0001): complete PR 6 follow-up scope with carry-forward findings | 0001 docs | 2026-04-10 |
+| [#30](https://github.com/mkhomutov/Persatrix/pull/30) | fix(state): replace rune-based test IDs (RFC 0001, F-06) | 0001 follow-up (1/1) | 2026-04-10 |
+| [#31](https://github.com/mkhomutov/Persatrix/pull/31) | fix(executor): additive dial options, cancellation & concurrent retry tests | 0003 follow-up (1/4) | 2026-04-10 |
+| [#32](https://github.com/mkhomutov/Persatrix/pull/32) | test: observability improvements — concurrent race tests, log assertions, zaptest logger | 0003 follow-up (2/4) | 2026-04-11 |
+| [#33](https://github.com/mkhomutov/Persatrix/pull/33) | fix(orchestrator): graceful shutdown drain + absolute workflowsDir | 0003 follow-up (3/4) | 2026-04-11 |
+| [#34](https://github.com/mkhomutov/Persatrix/pull/34) | build(proto): split make proto into go/python targets + CI staleness check | 0003 follow-up (4/4) | 2026-04-11 |
+| [#35](https://github.com/mkhomutov/Persatrix/pull/35) | docs: RFC 0003/0004 status updates, multi-provider LLM design, v0.2 deferrals | cross-RFC docs | 2026-04-11 |
+| [#36](https://github.com/mkhomutov/Persatrix/pull/36) | feat(agents): PermissionGate + PathValidator | 0004 (2/7) | 2026-04-11 |
+| [#37](https://github.com/mkhomutov/Persatrix/pull/37) | feat(agents): built-in tools + PR 2 follow-up fixes | 0004 (3/7) | 2026-04-11 |
+| [#38](https://github.com/mkhomutov/Persatrix/pull/38) | feat(agents): LLM client + TaskInputConfig + base handle loop | 0004 (4a/7) | 2026-04-11 |
+| [#39](https://github.com/mkhomutov/Persatrix/pull/39) | feat(agents): CoderAgent, ReviewerAgent, PlannerAgent | 0004 (4b/7) | 2026-04-11 |
+| [#40](https://github.com/mkhomutov/Persatrix/pull/40) | feat(agents): gRPC server + agent loading + proto stubs + follow-up fixes | 0004 (5a/7) | 2026-04-11 |
+| [#41](https://github.com/mkhomutov/Persatrix/pull/41) | feat(agents): self-registration + integration tests + follow-up fixes | 0004 (5b/7) | 2026-04-11 |
+| [#42](https://github.com/mkhomutov/Persatrix/pull/42) | fix(agents): registration follow-ups + RFC 0004 close | 0004 (6/7) | 2026-04-11 |
+| [#44](https://github.com/mkhomutov/Persatrix/pull/44) | fix(lint): resolve all golangci-lint, ruff, mypy, clippy warnings | v0.1 release prep | 2026-04-11 |
+| [#45](https://github.com/mkhomutov/Persatrix/pull/45) | docs(rfc): RFC 0005 — Persona Agent & Memory System | 0005 (RFC) | 2026-04-12 |
+| [#46](https://github.com/mkhomutov/Persatrix/pull/46) | docs(rfc0005): add PR implementation plan | 0005 (PR plan) | 2026-04-12 |
+| [#47](https://github.com/mkhomutov/Persatrix/pull/47) | feat(agents): data-driven TaskAgent + agent type system | 0005 (1a/20) | 2026-04-12 |
+| [#48](https://github.com/mkhomutov/Persatrix/pull/48) | feat(cli): wire v0.1 REST endpoints | 0005 (1b/20) | 2026-04-12 |
+| [#49](https://github.com/mkhomutov/Persatrix/pull/49) | feat(memory): working memory + token estimation | 0005 (2/20) | 2026-04-12 |
+| [#50](https://github.com/mkhomutov/Persatrix/pull/50) | feat(memory): schema migration + episodic memory core | 0005 (3a/20) | 2026-04-12 |
+| [#51](https://github.com/mkhomutov/Persatrix/pull/51) | feat(memory): agent-initiated memory tools | 0005 (3b/20) | 2026-04-12 |
+| [#52](https://github.com/mkhomutov/Persatrix/pull/52) | feat(memory): episode auto-summarization | 0005 (3c/20) | 2026-04-12 |
+| [#53](https://github.com/mkhomutov/Persatrix/pull/53) | feat(memory): relationship memory | 0005 (4/20) | 2026-04-12 |
+| [#54](https://github.com/mkhomutov/Persatrix/pull/54) | feat(agents): PersonaAgent runtime core | 0005 (5a/20) | 2026-04-13 |
+| [#55](https://github.com/mkhomutov/Persatrix/pull/55) | feat(agents): event dispatch + tick loop integration | 0005 (5b/20) | 2026-04-13 |
+| [#56](https://github.com/mkhomutov/Persatrix/pull/56) | feat(agents): config validation + schema wiring | 0005 (6a/20) | 2026-04-13 |
+| [#57](https://github.com/mkhomutov/Persatrix/pull/57) | feat(cli): CLI persona commands | 0005 (6b/20) | 2026-04-13 |
+| [#58](https://github.com/mkhomutov/Persatrix/pull/58) | docs(rfc0005): split PR 7 into 4 sub-PRs (7a-7d) | 0005 docs | 2026-04-13 |
+| [#59](https://github.com/mkhomutov/Persatrix/pull/59) | fix(memory): memory tier review fixes (RFC 0005, PR 7a) | 0005 (7a/20) | 2026-04-13 |
+| [#60](https://github.com/mkhomutov/Persatrix/pull/60) | feat(persona,validate): persona + validation review fixes (PR 7b) | 0005 (7b/20) | 2026-04-14 |
+| [#61](https://github.com/mkhomutov/Persatrix/pull/61) | docs: add development workflow lifecycle guide | cross-RFC docs | 2026-04-13 |
+| [#62](https://github.com/mkhomutov/Persatrix/pull/62) | fix(cli): Rust CLI review fixes (RFC 0005, PR 7c) | 0005 (7c/20) | 2026-04-14 |
+| [#63](https://github.com/mkhomutov/Persatrix/pull/63) | license: move repository to BUSL 1.1 | cross-RFC license | 2026-04-14 |
+| [#64](https://github.com/mkhomutov/Persatrix/pull/64) | refactor(persona): split persona.py into submodules (RFC 0005, PR 8a) | 0005 (8a/20) | 2026-04-14 |
+| [#65](https://github.com/mkhomutov/Persatrix/pull/65) | refactor(persona): extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) | 0005 (8d/20) | 2026-04-14 |
+| [#66](https://github.com/mkhomutov/Persatrix/pull/66) | refactor(memory): split episodic.py into focused modules (RFC 0005, PR 8b) | 0005 (8b/20) | 2026-04-14 |
+| [#67](https://github.com/mkhomutov/Persatrix/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
+| [#68](https://github.com/mkhomutov/Persatrix/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
+| [#69](https://github.com/mkhomutov/Persatrix/pull/69) | docs: close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) | 0005 (7d/20) | 2026-04-14 |
 
 ---
 

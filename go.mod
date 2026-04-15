@@ -1,4 +1,4 @@
-module github.com/orchestr8/orchestr8
+module github.com/mkhomutov/persatrix
 
 go 1.24.0
 
