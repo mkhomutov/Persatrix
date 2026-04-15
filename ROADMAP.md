@@ -133,7 +133,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
 | [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 📋 Proposed | 0 | 0/0 |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | 📋 Proposed | 0 | 0/0 |
-| 0008 | Sub-Agent Spawning | Not yet written | — | — |
+| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | 📋 Proposed | 0 | 0/0 |
 | 0009 | Channels + Bridges | Not yet written | — | — |
 | 0010 | Protocols + Organizations | Not yet written | — | — |
 
@@ -144,9 +144,9 @@ RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
 RFC 0006 (Efficiency & Execution Limits)                  📋 Proposed
     ↓
-RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006]
+RFC 0008 (Agent Memory & Context Optimization)             📋 Proposed  [depends on 0005, 0006]
     ↓
-RFC 0008 (Sub-Agent Spawning)                             Not yet written
+RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006]
     ↓
 RFC 0009 (Channels + Bridges)                             Not yet written
     ↓
@@ -155,7 +155,7 @@ RFC 0010 (Protocols + Organizations)                      Not yet written
 
 > **Why RFC 0006 before RFC 0007**: Loops and retries magnify every existing execution cost weakness. RFC 0006 hardens budget enforcement, deadline derivation, and execution metadata so that the control-flow constructs in RFC 0007 cannot produce runaway spend. See [RFC 0006 Motivation](docs/rfcs/0006-efficiency-execution-limits.md#motivation) for the detailed justification.
 >
-> **Why both before sub-agents**: Sub-agent spawning (RFC 0008) creates recursive execution paths. Bounded execution and cost tracking (RFC 0006) plus loop guardrails (RFC 0007) must be in place so parent→child agent chains have predictable resource consumption.
+> **Why RFC 0008 before broad loop adoption**: RFC 0008 introduces caller-prepared minimal context packages, memory-aware delegation contracts, and context budgeting discipline. Landing this before large-scale loop patterns (RFC 0007 implementation) reduces token waste and hallucination risk in iterative workflows.
 
 ### Planned Components
 
@@ -166,14 +166,15 @@ RFC 0010 (Protocols + Organizations)                      Not yet written
 | Cost Tracking & Budget Enforcement | `internal/cost/` | — | Token accounting (TokenCounter), per-workflow/per-agent/global budget gates (BudgetEnforcer), cost reporting (CostReporter) | 0006 |
 | Response Caching | `internal/cost/` | — | Exact-match response cache for deterministic tasks | 0006 |
 | Execution Observability | `internal/state/` | — | Per-step token usage, LLM call count, retry count, cost metadata | 0006 |
+| Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/`, `internal/state/` | `agents/memory/`, `agents/task_agent.py`, `agents/sub_agents/` | Memory access for non-persona agents, context budget allocation, caller-prepared context packaging/compression, delegation result merge contracts, shared vs isolated memory policies | 0008 |
 | Condition Evaluation | `internal/scheduler/` | — | Step condition expressions, skip semantics | 0007 |
 | Workflow Loops | `internal/scheduler/`, `internal/planner/` | — | Bounded repeat-until and for-each with mandatory guardrails | 0007 |
 | Channels | `internal/channels/` | — | Internal message routing (groups, DMs, threads) | 0009 |
 | Bridges | `internal/bridges/` | — | External service connectors (Slack, Discord, email, Telegram) | 0009 |
 | Memory | — | `agents/memory/` | Three-tier: episodic (SQLite), relationship (trust/interaction), working (context window) | ✅ 0005 |
-| Sub-agents | — | `agents/sub_agents/` | Ephemeral agent spawning with inherited permissions | 0008 |
+| Sub-agents | — | `agents/sub_agents/` | Ephemeral agent spawning with inherited permissions | 0008+ |
 | Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0010 |
-| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0008 |
+| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0008+ |
 | Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
 
 ---
