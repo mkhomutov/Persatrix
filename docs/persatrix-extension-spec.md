@@ -1,4 +1,4 @@
-﻿# Persatrix — Extension: Agent Societies, Communication & Organizational Modeling
+# Persatrix — Extension: Agent Societies, Communication & Organizational Modeling
 
 > This document extends the core MVP specification with support for rich agent
 > personas, organizational structures, multi-channel communication (including

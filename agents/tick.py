@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Tick Scheduler.
 
 Autonomous tick loop for persona agents with idle detection.

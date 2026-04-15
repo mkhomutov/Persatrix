@@ -1,4 +1,4 @@
-﻿# git-cliff configuration for Persatrix
+# git-cliff configuration for Persatrix
 # Generates changelog from conventional commits.
 # Docs: https://git-cliff.org/docs/configuration
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Agent gRPC Server.
 
 Runs a single agent in a process, exposing it via gRPC for the orchestrator

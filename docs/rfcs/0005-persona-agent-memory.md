@@ -1,4 +1,4 @@
-﻿# RFC 0005 — Persona Agent & Memory System
+# RFC 0005 — Persona Agent & Memory System
 
 **Type**: feature  
 **Status**: ✅ Implemented  

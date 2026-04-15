@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Base Agent Interface.
 
 All agents implement BaseAgent. Task agents override handle().

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix LLM-Powered Persona Agent Runtime.
 
 Contains ``_LLMPersonaAgent``, the concrete ``PersonaAgent`` subclass with

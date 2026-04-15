@@ -1,4 +1,4 @@
-﻿# RFC 0001 — Core Orchestration Pipeline (Planner + State + Registry)
+# RFC 0001 — Core Orchestration Pipeline (Planner + State + Registry)
 
 **Type**: architecture  
 **Status**: ✅ Implemented  

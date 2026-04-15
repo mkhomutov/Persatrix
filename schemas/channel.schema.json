@@ -1,4 +1,4 @@
-﻿{
+{
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/channel.schema.json",
   "title": "Persatrix Channel Configuration (v0.2+)",

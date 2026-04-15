@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Persona Behavioral Dimensions.
 
 Structured behavior dimension descriptions and rendering for LLM prompts.

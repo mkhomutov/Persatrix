@@ -1,4 +1,4 @@
-﻿# Persatrix — AI Agents Orchestration Framework — MVP Specification
+# Persatrix — AI Agents Orchestration Framework — MVP Specification
 
 ## 1. Vision
 

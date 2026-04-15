@@ -1,4 +1,4 @@
-﻿# RFC 0004 — Python Agent gRPC Server (AgentService Implementation)
+# RFC 0004 — Python Agent gRPC Server (AgentService Implementation)
 
 **Type**: architecture
 **Status**: ✅ Implemented

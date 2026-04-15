@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Event Dispatcher and Action Executor.
 
 Routes events to persona agents and executes agent actions.

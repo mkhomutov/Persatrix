@@ -1,4 +1,4 @@
-﻿# Persatrix Roadmap
+# Persatrix Roadmap
 
 > **Last updated**: 2026-04-14  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress

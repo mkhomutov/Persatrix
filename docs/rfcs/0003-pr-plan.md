@@ -1,4 +1,4 @@
-﻿# RFC 0003 — PR Implementation Plan
+# RFC 0003 — PR Implementation Plan
 
 **RFC**: [0003-scheduler-executor.md](0003-scheduler-executor.md)
 **Created**: 2026-04-09

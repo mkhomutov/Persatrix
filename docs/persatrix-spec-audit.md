@@ -1,4 +1,4 @@
-﻿# Persatrix Specification Audit — Findings
+# Persatrix Specification Audit — Findings
 
 > **STATUS: ALL 45 ISSUES RESOLVED** (April 8, 2026)
 >

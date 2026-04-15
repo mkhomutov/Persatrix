@@ -1,4 +1,4 @@
-﻿"""
+"""
 Configuration validator.
 
 Validates YAML configs against JSON schemas in ``schemas/``.

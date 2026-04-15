@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Tool System.
 
 Tools are typed functions that agents can invoke. Three tiers:

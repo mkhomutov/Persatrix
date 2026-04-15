@@ -1,4 +1,4 @@
-﻿# Persatrix — Git Branching Strategy
+# Persatrix — Git Branching Strategy
 
 ## Overview
 

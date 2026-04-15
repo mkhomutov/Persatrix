@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Persona Type Definitions.
 
 Dataclasses, enums, and protocols that form the persona agent type system.

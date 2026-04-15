@@ -1,1 +1,1 @@
-﻿"""Persatrix Sub-Agent System (v0.2+)."""
+"""Persatrix Sub-Agent System (v0.2+)."""

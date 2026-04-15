@@ -1,4 +1,4 @@
-﻿# Persatrix — Development Workflow
+# Persatrix — Development Workflow
 
 > **Last updated**: 2026-04-14
 

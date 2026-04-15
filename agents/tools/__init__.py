@@ -1,1 +1,1 @@
-﻿"""Persatrix Tool System."""
+"""Persatrix Tool System."""

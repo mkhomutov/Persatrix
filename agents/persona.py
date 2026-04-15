@@ -1,4 +1,4 @@
-﻿"""
+"""
 Persatrix Persona Agent Interface (v0.2+).
 
 Extends BaseAgent with async event handling, sub-agent spawning,

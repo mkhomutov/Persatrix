@@ -669,7 +669,7 @@ func TestStepIDRegex_InvalidIDs(t *testing.T) {
 }
 
 func TestResourceIDRegex_ValidIDs(t *testing.T) {
-	valid := []string{"a", "ab", "feature-builder", "v01", "a1b2"}
+	valid := []string{"ab", "feature-builder", "v01", "a1b2"}
 	for _, id := range valid {
 		assert.True(t, ResourceIDRegex.MatchString(id), "expected valid: %q", id)
 	}

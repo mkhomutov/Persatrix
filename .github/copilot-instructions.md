@@ -1,4 +1,4 @@
-﻿# Persatrix — Project Guidelines
+# Persatrix — Project Guidelines
 
 Polyglot AI agent orchestration framework: **Go** orchestrator, **Python** agent runtime, **Rust** CLI. Agents communicate via gRPC (protobuf) and REST/SSE. Workflows are DAG-based YAML with Jinja2-like templating.
 

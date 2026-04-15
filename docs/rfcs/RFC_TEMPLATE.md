@@ -1,4 +1,4 @@
-﻿# RFC NNNN — [Title]
+# RFC NNNN — [Title]
 
 **Type**: feature | architecture | protocol | process  
 **Status**: 📋 Proposed  

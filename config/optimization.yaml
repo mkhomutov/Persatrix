@@ -1,4 +1,4 @@
-﻿# Persatrix Optimization Configuration
+# Persatrix Optimization Configuration
 schema_version: "0.1"
 
 # Active profile: cost_optimized | speed_optimized | quality_optimized | simulation_optimized | custom

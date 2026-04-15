@@ -1,4 +1,4 @@
-﻿# RFC 0005 — PR Implementation Plan
+# RFC 0005 — PR Implementation Plan
 
 **RFC**: [0005-persona-agent-memory.md](0005-persona-agent-memory.md)
 **Created**: 2026-04-12

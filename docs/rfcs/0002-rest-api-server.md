@@ -1,4 +1,4 @@
-﻿# RFC 0002 — REST API Server (HTTP Layer + Workflow Submission)
+# RFC 0002 — REST API Server (HTTP Layer + Workflow Submission)
 
 **Type**: architecture
 **Status**: ✅ Implemented

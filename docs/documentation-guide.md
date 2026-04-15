@@ -1,4 +1,4 @@
-﻿# Documentation Guide
+# Documentation Guide
 
 ## Context
 

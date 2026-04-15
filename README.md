@@ -1,4 +1,4 @@
-﻿# Persatrix
+# Persatrix
 
 A general-purpose **agent society engine** — a runtime for creating, connecting, and observing groups of AI agents that behave as individuals within organizational or social structures.
 

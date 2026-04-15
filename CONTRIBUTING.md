@@ -1,4 +1,4 @@
-﻿# Contributing to Persatrix
+# Contributing to Persatrix
 
 Thank you for your interest in contributing to the Persatrix project!
 

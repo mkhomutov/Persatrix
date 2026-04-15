@@ -1,4 +1,4 @@
-﻿# RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
+# RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
 
 **Type**: architecture
 **Status**: ✅ Implemented
