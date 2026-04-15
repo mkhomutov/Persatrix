@@ -211,7 +211,7 @@ steps:
     step:
       id: review-single
       agent: code-reviewer
-      input: "Review {{ item.file }}"
+      input: "Review {{ file }}"
 ```
 
 - `collection` must resolve to a JSON array.
@@ -219,6 +219,10 @@ steps:
 - `max_concurrency` limits parallel execution.
 - Each expanded step gets its own budget allocation (inherited from workflow or configured per-item).
 - For-each is a bounded parallel workflow construct, not a DAG cycle. It still requires scheduler support for controlled expansion, concurrency limiting, per-item budget accounting, and aggregated result handling.
+
+#### Variable scoping
+
+The `as` field names the loop variable. Inside the step template, the variable is referenced directly by the `as` name: `{{ file }}`, not `{{ item.file }}`. If the collection contains objects, their properties are accessed via the named variable: `{{ file.path }}`, `{{ file.size }}`. There is no implicit `item` namespace.
 
 ### E. Loop Observability and Failure Reporting
 
@@ -331,6 +335,7 @@ For v1 implementations, `fail` should remain the default until `pause` has an op
 3. **For-each failure handling**: If one item in a for-each fails, should the entire for-each fail, or continue with remaining items? Both are valid depending on use case.
 4. **Condition evaluation caching**: If a condition references an unchanged step output, should the evaluator cache the result? Unlikely to matter for v1 given the simple expression language.
 5. **Loop state persistence**: If the orchestrator crashes mid-loop, should it resume from the last completed iteration? Requires checkpointing loop state, which adds significant complexity.
+6. **Expression language extensibility**: The v1 expression language supports `contains`, `startsWith`, `endsWith` for strings, but common agent patterns involve checking structured output (e.g., `"status": "pass"` embedded in larger text). Without regex or JSON path support, users must rely on agents producing precise outputs or use brittle substring matching via `contains`. This does not need to be solved in v1 but should be tracked — a `matches` (regex) or `jsonPath` operator will likely be needed once real workflows exercise the condition system.
 
 ---
 

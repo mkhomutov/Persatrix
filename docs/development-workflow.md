@@ -70,9 +70,9 @@ RFC 0006 (Efficiency & Execution Limits)
 RFC 0007 (Conditional & Looped Control Flow)
     ↓
 RFC 0008 (Sub-Agent Spawning)
-   ↓
+    ↓
 RFC 0009 (Channels + Bridges)
-   ↓
+    ↓
 RFC 0010 (Protocols + Organizations)
 ```
 

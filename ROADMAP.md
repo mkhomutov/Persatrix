@@ -163,7 +163,7 @@ RFC 0010 (Protocols + Organizations)                      Not yet written
 |-----------|-----------|---------------|-------------|------------|
 | PersonaAgent | — | `agents/persona.py` | Event-driven `on_event()` + autonomous `on_tick()` loop | ✅ 0005 |
 | Execution Limits | `internal/defaults/`, `internal/executor/` | `agents/defaults.py` | End-to-end limit propagation, conservative defaults, derived deadlines | 0006 |
-| Budget Enforcement | `internal/cost/` | — | Token accounting, per-workflow/per-agent/global budget gates | 0006 |
+| Cost Tracking & Budget Enforcement | `internal/cost/` | — | Token accounting (TokenCounter), per-workflow/per-agent/global budget gates (BudgetEnforcer), cost reporting (CostReporter) | 0006 |
 | Response Caching | `internal/cost/` | — | Exact-match response cache for deterministic tasks | 0006 |
 | Execution Observability | `internal/state/` | — | Per-step token usage, LLM call count, retry count, cost metadata | 0006 |
 | Condition Evaluation | `internal/scheduler/` | — | Step condition expressions, skip semantics | 0007 |
@@ -175,7 +175,6 @@ RFC 0010 (Protocols + Organizations)                      Not yet written
 | Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0010 |
 | MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0008 |
 | Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
-| Cost Tracking | `internal/cost/` | — | Token accounting and budget enforcement | 0006 |
 
 ---
 

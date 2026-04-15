@@ -101,7 +101,7 @@ workflow step config  →  agent config  →  system defaults
 
 The scheduler passes resolved limits to the executor as part of `ExecuteRequest`. The executor populates all `TaskConfig` fields before gRPC dispatch.
 
-**Impact on proto**: None for the minimum implementation path — `TaskConfig` already defines the limit fields needed for propagation, and existing response metadata is sufficient to carry `tokens_used` and similar counters. A follow-up proto refinement may still be worthwhile if execution metadata such as `llm_call_count`, `retry_count`, or `cache_hit` needs strongly typed fields instead of a string-keyed metadata map.
+**Impact on proto**: None for the minimum implementation path — `TaskConfig` already defines the limit fields needed for propagation, and existing response metadata is sufficient to carry `tokens_used` and similar counters. However, Phase 4 defines `StepExecutionMetadata` with typed fields (`LLMCallCount`, `RetryCount`, `CacheHit`), so a proto update adding strongly typed execution metadata fields is likely in Phase 4 rather than optional. Until then, the existing `map<string,string>` metadata map is sufficient.
 
 ### B. Conservative Defaults
 
@@ -152,7 +152,7 @@ step_deadline = workflow_step.timeout_seconds
 
 rpc_timeout = step_deadline + transport_margin (5s)
 
-workflow_deadline = sum(step_deadlines) × concurrency_factor
+workflow_deadline = sum(stage_deadlines)
                  ?? workflow_config.timeout_seconds
                  ?? system_default (600s)
 ```
@@ -160,7 +160,7 @@ workflow_deadline = sum(step_deadlines) × concurrency_factor
 Rules:
 1. **Step deadline** is the authoritative maximum for one workflow step. Configured per-step, with fallback to agent config, then system default.
 2. **RPC timeout** is computed from step deadline, never independently configured. The 5-second transport margin accounts for gRPC overhead, serialization, and network latency.
-3. **Workflow deadline** is the total run budget. For parallel stages, the concurrency factor adjusts for overlapping execution.
+3. **Workflow deadline** is the total run budget. Each stage deadline is `max(step_deadlines)` for parallel steps within the stage; the workflow deadline is the sum of sequential stage deadlines. This avoids introducing an ill-defined concurrency factor — the topological sort into stages already captures the parallelism structure.
 4. **Retries share the step deadline**. If a step has a 60-second deadline and the first attempt takes 45 seconds, retries get the remaining 15 seconds, not a fresh 60-second window.
 5. The static `WithTimeout(5 * time.Minute)` in `main.go` is removed. The executor's `timeout` field is replaced with a per-dispatch deadline computed from step config.
 
@@ -182,7 +182,7 @@ This intentionally reverses the current executor design, where each dispatch get
 
 **Change**: Implement exact-match response caching for deterministic task shapes.
 
-- Cache key: hash of (agent_id, task_type, task_input, model, system_prompt).
+- Cache key: hash of (agent_id, task_type, task_input, model, system_prompt, sampling_parameters). Sampling parameters (temperature, top_p, etc.) must be included because identical prompts with different sampling settings produce different output distributions.
 - Cache store: in-memory with LRU eviction and configurable TTL.
 - Cache is opt-in per task type. Only pure/deterministic tasks should be cached; persona and autonomous tasks are excluded.
 - Cache hits are recorded in step metadata for observability.
