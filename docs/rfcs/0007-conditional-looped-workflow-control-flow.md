@@ -112,10 +112,13 @@ The evaluator is **not** a general-purpose expression engine. It does not suppor
 
 #### Resolution order
 
-1. Resolve template variables (`{{ steps.X.output }}`, `{{ steps.X.status }}`).
-2. Parse the expression.
-3. Evaluate against resolved values.
-4. Return boolean result. Non-boolean results are an error.
+1. Parse the expression into a restricted AST that identifies operators, literals, and template variable placeholders.
+2. Resolve template variables (`{{ steps.X.output }}`, `{{ steps.X.status }}`) to typed runtime values.
+3. Bind those values into the parsed expression as literals (`string`, `number`, `boolean`, `null`) rather than raw token text.
+4. Evaluate the resulting expression.
+5. Return boolean result. Non-boolean results are an error.
+
+This is intentionally parameterized evaluation, not string interpolation. Resolved step outputs must never be able to introduce new operators or alter parse structure.
 
 #### Error handling
 
@@ -215,7 +218,7 @@ steps:
 - `max_items` caps the expansion to prevent unbounded fan-out.
 - `max_concurrency` limits parallel execution.
 - Each expanded step gets its own budget allocation (inherited from workflow or configured per-item).
-- For-each is syntactic sugar over parallel step expansion — it does not introduce loops.
+- For-each is a bounded parallel workflow construct, not a DAG cycle. It still requires scheduler support for controlled expansion, concurrency limiting, per-item budget accounting, and aggregated result handling.
 
 ### E. Loop Observability and Failure Reporting
 
@@ -238,7 +241,7 @@ Exit reasons are explicit and always surfaced in the workflow status response, s
 
 ## Security Considerations
 
-- **Expression injection**: The condition evaluator must not evaluate arbitrary code. The restricted expression language (comparison + boolean + string operators only) limits the attack surface. Template variables are resolved before parsing, preventing injection of new operators.
+- **Expression injection**: The condition evaluator must not evaluate arbitrary code. The restricted expression language (comparison + boolean + string operators only) limits the attack surface, but only if template values are bound as typed literals after parsing. Raw string substitution before parsing would allow step output text to inject operators or alter boolean structure.
 - **Resource exhaustion via loops**: Mandatory guardrail fields prevent unbounded loops. Validation-time rejection ensures no loop runs without guards.
 - **Budget bypass via loop nesting**: Nested loops are explicitly disallowed in v1. If added later, inner loop budgets must be subtracted from outer loop budgets.
 - **For-each amplification**: A malicious `collection` input could contain millions of items. The `max_items` cap prevents this. Default `max_items` should be conservative (e.g., 100).
@@ -273,6 +276,8 @@ Exit reasons are explicit and always surfaced in the workflow status response, s
 4. Loop-level budget integration with RFC 0006 cost tracking.
 5. `LoopExecutionMetadata` in workflow state and status responses.
 6. `on_budget_exit` behavior (fail / succeed_partial / pause).
+
+For v1 implementations, `fail` should remain the default until `pause` has an operator-visible resume path.
 
 **Dependencies**: Phase 1 (condition evaluator provides `exit_when` evaluation). RFC 0006 Phase 3 (budget enforcement provides loop-level cost tracking).
 

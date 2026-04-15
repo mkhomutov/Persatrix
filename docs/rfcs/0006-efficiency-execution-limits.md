@@ -101,7 +101,7 @@ workflow step config  →  agent config  →  system defaults
 
 The scheduler passes resolved limits to the executor as part of `ExecuteRequest`. The executor populates all `TaskConfig` fields before gRPC dispatch.
 
-**Impact on proto**: None — `TaskConfig` already defines all needed fields. This is a pure implementation change in the executor and scheduler.
+**Impact on proto**: None for the minimum implementation path — `TaskConfig` already defines the limit fields needed for propagation, and existing response metadata is sufficient to carry `tokens_used` and similar counters. A follow-up proto refinement may still be worthwhile if execution metadata such as `llm_call_count`, `retry_count`, or `cache_hit` needs strongly typed fields instead of a string-keyed metadata map.
 
 ### B. Conservative Defaults
 
@@ -110,7 +110,7 @@ The scheduler passes resolved limits to the executor as part of `ExecuteRequest`
 | `max_llm_calls` (task agent) | 10 | 5 | Most v0.1 tasks complete in 1–3 LLM calls. 5 provides headroom for tool use without allowing runaway loops. |
 | `max_tokens` (task agent) | 4096 | 8192 | 4096 is too low for code generation tasks that include context. 8192 covers typical code review and generation. |
 | `max_llm_calls` (persona agent) | 10 | 10 | Persona event handling legitimately requires more turns. No change. |
-| `max_tokens` (persona agent) | 50000 | 50000 | Persona agents manage their own context window. No change. |
+| `max_tokens` (persona agent) | 4096 | 4096 | Persona runtime already defaults to 4096 output tokens for task execution. Keep the LLM output cap aligned with task agents; persona agents separately manage larger working-memory context windows, which are a different budget. |
 
 Defaults are defined in a single `internal/defaults/` package (Go) and `agents/defaults.py` (Python) to eliminate scattered magic numbers.
 
@@ -123,6 +123,8 @@ Implement `internal/cost/` with three components:
 - Accepts step completion events with token counts (from agent response metadata).
 - Maintains running totals per workflow run, per agent, and globally (daily).
 - Thread-safe: concurrent workflow runs update shared counters atomically.
+
+The metadata plumbing is already mostly present: agents populate `tokens_used` in `TaskOutput.metadata`, the gRPC server serializes that metadata into `TaskResponse.metadata`, and the executor already returns `resp.Metadata` in `ExecuteResult`. The missing work is consumption and normalization on the orchestrator side, not a brand-new end-to-end transport path.
 
 #### BudgetEnforcer
 
@@ -161,6 +163,8 @@ Rules:
 3. **Workflow deadline** is the total run budget. For parallel stages, the concurrency factor adjusts for overlapping execution.
 4. **Retries share the step deadline**. If a step has a 60-second deadline and the first attempt takes 45 seconds, retries get the remaining 15 seconds, not a fresh 60-second window.
 5. The static `WithTimeout(5 * time.Minute)` in `main.go` is removed. The executor's `timeout` field is replaced with a per-dispatch deadline computed from step config.
+
+This intentionally reverses the current executor design, where each dispatch gets a fresh timeout window to maximize infrastructure retry resilience. The tradeoff is deliberate: once workflows can loop and branch, bounded cost and predictable runtime are more important than preserving a full retry window after a near-timeout failure.
 
 ### E. Retry Budget Policy
 
@@ -308,6 +312,8 @@ This metadata is:
 2. **Budget pause UX**: When `on_exceed: pause_and_alert` triggers, how does the operator resume? CLI command? REST endpoint? This may require a follow-up RFC for operator tooling.
 3. **Cost estimation accuracy**: Should estimated cost use prompt token counts (available pre-dispatch) or actual completion token counts (available post-dispatch)? Pre-dispatch enables proactive blocking but is less accurate.
 4. **Persona tick loop integration**: Persona agents have their own `_MAX_SUB_AGENT_TOKENS` and `_MAX_SUB_AGENT_LLM_CALLS` caps. Should these be migrated to the centralized defaults system, or kept as persona-specific overrides?
+
+Until operator tooling exists, `fail` should remain the default `on_exceed` behavior for implementation PRs. `pause_and_alert` should only ship together with a defined resume path.
 
 ---
 

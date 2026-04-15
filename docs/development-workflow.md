@@ -65,11 +65,15 @@ Each phase has clear entry/exit criteria and produces specific artifacts. The cy
 ```
 RFC 0005 (PersonaAgent + Memory)
     ↓
-RFC 0006 (Sub-Agent Spawning)
+RFC 0006 (Efficiency & Execution Limits)
     ↓
-RFC 0007 (Channels + Bridges)
+RFC 0007 (Conditional & Looped Control Flow)
     ↓
-RFC 0008 (Protocols + Organizations)
+RFC 0008 (Sub-Agent Spawning)
+   ↓
+RFC 0009 (Channels + Bridges)
+   ↓
+RFC 0010 (Protocols + Organizations)
 ```
 
 ---
