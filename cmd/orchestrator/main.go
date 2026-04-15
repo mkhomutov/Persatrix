@@ -15,12 +15,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/persatrix/persatrix/internal/executor"
-	"github.com/persatrix/persatrix/internal/planner"
-	"github.com/persatrix/persatrix/internal/registry"
-	"github.com/persatrix/persatrix/internal/scheduler"
-	"github.com/persatrix/persatrix/internal/server"
-	"github.com/persatrix/persatrix/internal/state"
+	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/scheduler"
+	"github.com/mkhomutov/persatrix/internal/server"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 const (

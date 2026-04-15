@@ -579,7 +579,7 @@ const file_task_proto_rawDesc = "" +
 	"\fAgentService\x12D\n" +
 	"\vExecuteTask\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskResponse\x12L\n" +
 	"\x11ExecuteTaskStream\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskProgress0\x01\x12R\n" +
-	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponseB:Z8github.com/persatrix/persatrix/internal/generated/taskpbb\x06proto3"
+	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
 
 var (
 	file_task_proto_rawDescOnce sync.Once

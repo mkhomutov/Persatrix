@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tests for EpisodicMemory — long-term episodic storage with SQLite and FTS5.
 
 All tests use in-memory SQLite (:memory:) for isolation and speed.

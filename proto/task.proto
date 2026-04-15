@@ -1,8 +1,8 @@
-﻿syntax = "proto3";
+syntax = "proto3";
 
 package persatrix.v1;
 
-option go_package = "github.com/persatrix/persatrix/internal/generated/taskpb";
+option go_package = "github.com/mkhomutov/persatrix/internal/generated/taskpb";
 
 // ─── Task Execution (orchestrator ↔ agent) ─────────────────
 

@@ -12,9 +12,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/persatrix/persatrix/internal/planner"
-	"github.com/persatrix/persatrix/internal/registry"
-	"github.com/persatrix/persatrix/internal/state"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 // Server is the HTTP/REST API server for the orchestrator.

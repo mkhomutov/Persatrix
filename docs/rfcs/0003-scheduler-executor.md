@@ -655,7 +655,7 @@ proto/task.proto  ──protoc──►  internal/generated/taskpb/task.pb.go
                                internal/generated/taskpb/task_grpc.pb.go
 ```
 
-The generated files live in `internal/generated/taskpb/` — matching the existing `go_package` option (`github.com/persatrix/persatrix/internal/generated/taskpb`) and the Makefile's `PROTO_GO_OUT := internal/generated`. The existing `make proto` target already generates Go stubs; no additional Makefile target is needed.
+The generated files live in `internal/generated/taskpb/` — matching the existing `go_package` option (`github.com/mkhomutov/persatrix/internal/generated/taskpb`) and the Makefile's `PROTO_GO_OUT := internal/generated`. The existing `make proto` target already generates Go stubs; no additional Makefile target is needed.
 
 **Dependencies added to `go.mod`:**
 - `google.golang.org/grpc` — gRPC client and server framework

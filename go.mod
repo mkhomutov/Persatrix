@@ -1,4 +1,4 @@
-module github.com/persatrix/persatrix
+module github.com/mkhomutov/persatrix
 
 go 1.24.0
 

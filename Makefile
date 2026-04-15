@@ -1,7 +1,7 @@
 ﻿.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help
 
 # ─── Config ─────────────────────────────────────────────
-GO_MODULE     := github.com/persatrix/persatrix
+GO_MODULE     := github.com/mkhomutov/persatrix
 GO_BIN        := bin
 PROTO_DIR     := proto
 PROTO_GO_OUT  := internal/generated

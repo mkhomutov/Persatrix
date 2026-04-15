@@ -488,7 +488,7 @@ const file_agent_message_proto_rawDesc = "" +
 	"\fCONFIDENTIAL\x10\x022\xa9\x01\n" +
 	"\x0eChannelService\x12L\n" +
 	"\vSendMessage\x12\x1a.persatrix.v1.AgentMessage\x1a!.persatrix.v1.SendMessageResponse\x12I\n" +
-	"\tSubscribe\x12\x1e.persatrix.v1.SubscribeRequest\x1a\x1a.persatrix.v1.AgentMessage0\x01B9Z7github.com/persatrix/persatrix/internal/generated/msgpbb\x06proto3"
+	"\tSubscribe\x12\x1e.persatrix.v1.SubscribeRequest\x1a\x1a.persatrix.v1.AgentMessage0\x01B9Z7github.com/mkhomutov/persatrix/internal/generated/msgpbb\x06proto3"
 
 var (
 	file_agent_message_proto_rawDescOnce sync.Once
