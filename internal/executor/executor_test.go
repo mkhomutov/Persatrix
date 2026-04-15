@@ -435,6 +435,15 @@ func TestWithTimeout_NegativeClamped(t *testing.T) {
 	assert.Equal(t, time.Second, exec.timeout)
 }
 
+func TestWithTimeout_FiveMinutes(t *testing.T) {
+	// Validates the production config: 5-minute timeout for multi-iteration
+	// LLM tool loops that exceed the default 30s.
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithTimeout(5*time.Minute))
+
+	assert.Equal(t, 5*time.Minute, exec.timeout)
+}
+
 // --- PR 2b: isTransient table-driven tests, retry edge cases ---
 
 func TestIsTransient_TableDriven(t *testing.T) {
