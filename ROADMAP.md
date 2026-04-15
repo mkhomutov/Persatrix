@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-04-15  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress  
-> **Next milestone**: RFC 0006 (Efficiency & Execution Limits)
+> **Next milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -134,9 +134,10 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 📋 Proposed | 0 | 0/0 |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | 📋 Proposed | 0 | 0/0 |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | 📋 Proposed | 0 | 0/0 |
-| 0009 | Sub-Agent Spawning | Not yet written | — | — |
-| 0010 | Channels + Bridges | Not yet written | — | — |
-| 0011 | Protocols + Organizations | Not yet written | — | — |
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | 📋 Proposed | 0 | 0/0 |
+| 0010 | Sub-Agent Spawning | Not yet written | — | — |
+| 0011 | Channels + Bridges | Not yet written | — | — |
+| 0012 | Protocols + Organizations | Not yet written | — | — |
 
 ### Dependency Chain
 
@@ -145,22 +146,26 @@ RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
 RFC 0006 (Efficiency & Execution Limits)                  📋 Proposed
     ↓
-RFC 0008 (Agent Memory & Context Optimization)             📋 Proposed  [depends on 0005, 0006]
+RFC 0008 (Agent Memory & Context Optimization)            📋 Proposed  [depends on 0005, 0006]
     ↓
 RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006, 0008]
+    │
+RFC 0009 (Agent Identity, Security & Sandboxing)          📋 Proposed  [depends on 0004, 0005; Phases 1–2 alongside 0006]
     ↓
-RFC 0009 (Sub-Agent Spawning)                             Not yet written
+RFC 0010 (Sub-Agent Spawning)                             Not yet written
     ↓
-RFC 0010 (Channels + Bridges)                             Not yet written
+RFC 0011 (Channels + Bridges)                             Not yet written
     ↓
-RFC 0011 (Protocols + Organizations)                      Not yet written
+RFC 0012 (Protocols + Organizations)                      Not yet written
 ```
 
 > **Why RFC 0006 before RFC 0008 and RFC 0007**: Loops, delegation, and sub-agent spawning all amplify every existing execution cost weakness. RFC 0006 hardens budget enforcement, deadline derivation, and execution metadata first so that the control-flow and context constructs introduced by RFC 0007 and RFC 0008 cannot produce runaway spend. See [RFC 0006 Motivation](docs/rfcs/0006-efficiency-execution-limits.md#motivation) for the detailed justification.
 >
 > **Why RFC 0008 before RFC 0007 implementation**: RFC 0008 introduces per-step context budget allocation, caller-prepared context packages, and memory-aware delegation contracts. Landing these before large-scale loop patterns (RFC 0007 implementation) prevents each loop iteration from carrying unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows. RFC 0007's `Depends on` reflects this sequencing.
 >
-> **Why RFC 0009 (Sub-Agent Spawning) after RFC 0008**: Sub-agent spawning creates recursive execution paths. RFC 0008's delegation contract and merge semantics (Phase 3) must be in place before production sub-agent patterns are enabled, so spawned agents receive bounded context packages and return structured result envelopes rather than unbounded transcripts.
+> **Why RFC 0009 (Security) runs alongside RFC 0006 and before RFC 0010**: Agent societies dramatically expand the attack surface. RFC 0009 Phases 1–2 (audit logging, rate limiting, input sanitization) can be developed concurrently with RFC 0006. Phases 3–4 (tool validation, agent identity tokens, HITL gates) are prerequisites for sub-agent spawning (RFC 0010) and channel bridge inputs (RFC 0011), which are high-trust injection vectors.
+>
+> **Why RFC 0010 (Sub-Agent Spawning) after RFC 0008 and RFC 0009**: Sub-agent spawning creates recursive execution paths. RFC 0008's delegation contract and merge semantics (Phase 3) must be in place before production sub-agent patterns are enabled. RFC 0009's capability token model ensures spawned agents receive narrowed, orchestrator-issued tokens rather than inheriting parent capabilities.
 
 ### Planned Components
 
@@ -174,12 +179,13 @@ RFC 0011 (Protocols + Organizations)                      Not yet written
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/`, `internal/state/` | `agents/memory/`, `agents/task_agent.py`, `agents/sub_agents/` | Memory access for non-persona agents, context budget allocation, caller-prepared context packaging/compression, delegation result merge contracts, shared vs isolated memory policies | 0008 |
 | Condition Evaluation | `internal/scheduler/` | — | Step condition expressions, skip semantics | 0007 |
 | Workflow Loops | `internal/scheduler/`, `internal/planner/` | — | Bounded repeat-until and for-each with mandatory guardrails | 0007 |
-| Channels | `internal/channels/` | — | Internal message routing (groups, DMs, threads) | 0010 |
-| Bridges | `internal/bridges/` | — | External service connectors (Slack, Discord, email, Telegram) | 0010 |
+| Security & Sandboxing | `internal/security/` | `agents/tools/sandbox.py`, `agents/security.py` | Agent identity tokens, input sanitization, audit logging, rate limiting, HITL gates, resource limits | 0009 |
+| Channels | `internal/channels/` | — | Internal message routing (groups, DMs, threads) | 0011 |
+| Bridges | `internal/bridges/` | — | External service connectors (Slack, Discord, email, Telegram) | 0011 |
 | Memory | — | `agents/memory/` | Three-tier: episodic (SQLite), relationship (trust/interaction), working (context window) | ✅ 0005 |
-| Sub-agents | — | `agents/sub_agents/` | Ephemeral agent spawning with inherited permissions | 0009 |
-| Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0011 |
-| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0009 |
+| Sub-agents | — | `agents/sub_agents/` | Ephemeral agent spawning with inherited permissions | 0010 |
+| Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0012 |
+| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0010 |
 | Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
 
 ---
