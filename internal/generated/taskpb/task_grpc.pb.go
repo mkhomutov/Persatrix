@@ -19,9 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_ExecuteTask_FullMethodName       = "/orchestr8.v1.AgentService/ExecuteTask"
-	AgentService_ExecuteTaskStream_FullMethodName = "/orchestr8.v1.AgentService/ExecuteTaskStream"
-	AgentService_HealthCheck_FullMethodName       = "/orchestr8.v1.AgentService/HealthCheck"
+	AgentService_ExecuteTask_FullMethodName       = "/persatrix.v1.AgentService/ExecuteTask"
+	AgentService_ExecuteTaskStream_FullMethodName = "/persatrix.v1.AgentService/ExecuteTaskStream"
+	AgentService_HealthCheck_FullMethodName       = "/persatrix.v1.AgentService/HealthCheck"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -184,7 +184,7 @@ func _AgentService_HealthCheck_Handler(srv interface{}, ctx context.Context, dec
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AgentService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "orchestr8.v1.AgentService",
+	ServiceName: "persatrix.v1.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

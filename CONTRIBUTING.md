@@ -1,6 +1,6 @@
-# Contributing to Orchestr8
+﻿# Contributing to Persatrix
 
-Thank you for your interest in contributing to the Orchestr8 project!
+Thank you for your interest in contributing to the Persatrix project!
 
 ## Table of Contents
 
@@ -69,7 +69,7 @@ make test
 
 ```bash
 # Go orchestrator
-make build-orchestrator    # → bin/orchestr8-server
+make build-orchestrator    # → bin/persatrix-server
 make test-go               # go test ./internal/... -v -race -cover
 
 # Python agents

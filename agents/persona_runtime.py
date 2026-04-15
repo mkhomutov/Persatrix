@@ -1,5 +1,5 @@
-"""
-Orchestr8 LLM-Powered Persona Agent Runtime.
+﻿"""
+Persatrix LLM-Powered Persona Agent Runtime.
 
 Contains ``_LLMPersonaAgent``, the concrete ``PersonaAgent`` subclass with
 LLM-powered ``on_event()`` decision loop, multi-turn tool use, memory

@@ -1,4 +1,4 @@
-# Security Policy
+﻿# Security Policy
 
 ## Reporting a Vulnerability
 
@@ -26,7 +26,7 @@ Security fixes are applied to the latest release on the `main` branch. Older ver
 
 ## Security Design
 
-Orchestr8 uses deny-by-default security for agent permissions. For details on the security model, see:
+Persatrix uses deny-by-default security for agent permissions. For details on the security model, see:
 
 - [Agent Configuration](config/agents.yaml) — Agent permissions and capabilities
 - [Security Gates](internal/security/) — Go orchestrator security enforcement

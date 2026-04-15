@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/persatrix/persatrix/internal/registry"
 )
 
 // handleRegisterAgent handles POST /api/v1/agents/register.

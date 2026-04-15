@@ -1,8 +1,8 @@
-[package]
+﻿[package]
 name = "orch"
 version = "0.1.0"
 edition = "2021"
-description = "Orchestr8 CLI — manage agents, workflows, and the mesh"
+description = "Persatrix CLI — manage agents, workflows, and the mesh"
 license = "BUSL-1.1"
 
 [dependencies]

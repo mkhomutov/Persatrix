@@ -1,4 +1,4 @@
-# CI pipeline for Orchestr8.
+﻿# CI pipeline for Persatrix.
 #
 # PR review: the Makefile defines test, lint, and validate targets but no CI
 # ran them, meaning PRs could merge with broken imports, syntax errors, or

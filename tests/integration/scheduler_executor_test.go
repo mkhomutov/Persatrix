@@ -15,12 +15,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/orchestr8/orchestr8/internal/executor"
-	"github.com/orchestr8/orchestr8/internal/generated/taskpb"
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/registry"
-	"github.com/orchestr8/orchestr8/internal/scheduler"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/persatrix/persatrix/internal/executor"
+	"github.com/persatrix/persatrix/internal/generated/taskpb"
+	"github.com/persatrix/persatrix/internal/planner"
+	"github.com/persatrix/persatrix/internal/registry"
+	"github.com/persatrix/persatrix/internal/scheduler"
+	"github.com/persatrix/persatrix/internal/state"
 )
 
 const bufSize = 1024 * 1024

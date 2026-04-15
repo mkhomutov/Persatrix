@@ -1,5 +1,5 @@
-"""
-Orchestr8 Tool System.
+﻿"""
+Persatrix Tool System.
 
 Tools are typed functions that agents can invoke. Three tiers:
   - Built-in: bundled with the framework (see builtin.py)

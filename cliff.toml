@@ -1,4 +1,4 @@
-# git-cliff configuration for Orchestr8
+﻿# git-cliff configuration for Persatrix
 # Generates changelog from conventional commits.
 # Docs: https://git-cliff.org/docs/configuration
 
@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.\n
 """
 body = """
 {%- macro remote_url() -%}
-  https://github.com/mkhomutov/Orchestr8
+  https://github.com/mkhomutov/Persatrix
 {%- endmacro -%}
 
 {% if version -%}
@@ -27,7 +27,7 @@ body = """
 """
 footer = """
 {%- macro remote_url() -%}
-  https://github.com/mkhomutov/Orchestr8
+  https://github.com/mkhomutov/Persatrix
 {%- endmacro -%}
 
 {% for release in releases -%}

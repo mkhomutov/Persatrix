@@ -1,5 +1,5 @@
-"""
-Orchestr8 Persona Type Definitions.
+﻿"""
+Persatrix Persona Type Definitions.
 
 Dataclasses, enums, and protocols that form the persona agent type system.
 Extracted from ``persona.py`` for modularity — no logic changes.

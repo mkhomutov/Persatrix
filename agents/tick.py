@@ -1,5 +1,5 @@
-"""
-Orchestr8 Tick Scheduler.
+﻿"""
+Persatrix Tick Scheduler.
 
 Autonomous tick loop for persona agents with idle detection.
 Extracted from ``persona.py`` for modularity — no logic changes.

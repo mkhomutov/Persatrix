@@ -1,4 +1,4 @@
-# Orchestr8 — Local Development Stack
+﻿# Persatrix — Local Development Stack
 # Usage: docker compose up -d
 
 services:
@@ -20,7 +20,7 @@ services:
       - workspace:/workspace
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-      - OTEL_SERVICE_NAME=orchestr8-server
+      - OTEL_SERVICE_NAME=persatrix-server
     depends_on:
       - jaeger
     healthcheck:

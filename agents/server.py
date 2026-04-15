@@ -1,5 +1,5 @@
-"""
-Orchestr8 Agent gRPC Server.
+﻿"""
+Persatrix Agent gRPC Server.
 
 Runs a single agent in a process, exposing it via gRPC for the orchestrator
 to communicate with. Implements AgentServiceServicer (ExecuteTask, HealthCheck,
@@ -34,7 +34,7 @@ from .tools import builtin
 from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator
 
-logger = logging.getLogger("orchestr8.agent.server")
+logger = logging.getLogger("Persatrix.agent.server")
 
 # Agent IDs must match the cross-component contract shared with the Go
 # orchestrator registry.  Validated at load time to prevent routing mismatches.
@@ -518,7 +518,7 @@ class AgentServer:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Orchestr8 Agent Server")
+    parser = argparse.ArgumentParser(description="Persatrix Agent Server")
     parser.add_argument("--agent", required=True, help="Agent ID to run")
     parser.add_argument("--port", type=int, default=50051, help="gRPC port")
     parser.add_argument(

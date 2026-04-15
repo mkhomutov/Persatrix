@@ -1,7 +1,7 @@
-[project]
-name = "orchestr8-agents"
+﻿[project]
+name = "Persatrix-agents"
 version = "0.1.0"
-description = "Orchestr8 AI Agent Runtime"
+description = "Persatrix AI Agent Runtime"
 requires-python = ">=3.11"
 license = {text = "BUSL-1.1"}
 
@@ -39,22 +39,22 @@ accurate-tokens = [
 ]
 
 [project.scripts]
-orchestr8-agent = "orchestr8_agents.server:main"
+Persatrix-agent = "persatrix_agents.server:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
-# Map the agents/ directory to the 'orchestr8_agents' import path.
+# Map the agents/ directory to the 'persatrix_agents' import path.
 # Without this, pip install would discover sub-packages (generated, memory, etc.)
-# as top-level packages, and 'python -m orchestr8_agents.server' would fail
-# with ModuleNotFoundError since no 'orchestr8_agents' package would exist.
+# as top-level packages, and 'python -m persatrix_agents.server' would fail
+# with ModuleNotFoundError since no 'persatrix_agents' package would exist.
 [tool.setuptools.package-dir]
-orchestr8_agents = "."
+persatrix_agents = "."
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["orchestr8_agents*"]
+include = ["persatrix_agents*"]
 
 [tool.ruff]
 line-length = 100

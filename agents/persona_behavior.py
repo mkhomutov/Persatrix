@@ -1,5 +1,5 @@
-"""
-Orchestr8 Persona Behavioral Dimensions.
+﻿"""
+Persatrix Persona Behavioral Dimensions.
 
 Structured behavior dimension descriptions and rendering for LLM prompts.
 Extracted from ``persona.py`` for modularity — no logic changes.

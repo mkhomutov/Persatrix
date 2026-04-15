@@ -1,4 +1,4 @@
-"""Orchestr8 Agent Memory System (v0.2+)."""
+﻿"""Persatrix Agent Memory System (v0.2+)."""
 
 from typing import Protocol, runtime_checkable
 

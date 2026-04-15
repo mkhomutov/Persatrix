@@ -1,8 +1,8 @@
-"""
+﻿"""
 Configuration validator.
 
 Validates YAML configs against JSON schemas in ``schemas/``.
-Usage: python -m orchestr8_agents.validate config/
+Usage: python -m persatrix_agents.validate config/
 """
 
 from __future__ import annotations

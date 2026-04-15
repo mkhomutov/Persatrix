@@ -1,4 +1,4 @@
-# RFC NNNN — [Title]
+﻿# RFC NNNN — [Title]
 
 **Type**: feature | architecture | protocol | process  
 **Status**: 📋 Proposed  
@@ -109,4 +109,4 @@
 <!-- Links to canonical docs affected by or relevant to this RFC. -->
 
 - [Architecture Spec](../ai-agents-orchestration-spec.md)
-- [Extension Spec](../orchestr8-extension-spec.md)
+- [Extension Spec](../persatrix-extension-spec.md)

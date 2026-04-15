@@ -1,7 +1,7 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help
+﻿.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help
 
 # ─── Config ─────────────────────────────────────────────
-GO_MODULE     := github.com/orchestr8/orchestr8
+GO_MODULE     := github.com/persatrix/persatrix
 GO_BIN        := bin
 PROTO_DIR     := proto
 PROTO_GO_OUT  := internal/generated
@@ -41,8 +41,8 @@ build: build-orchestrator build-cli ## Build all components
 build-orchestrator: ## Build Go orchestrator binary
 	@echo "→ Building orchestrator..."
 	@mkdir -p $(GO_BIN)
-	go build -o $(GO_BIN)/orchestr8-server ./cmd/orchestrator
-	@echo "✓ Orchestrator built → $(GO_BIN)/orchestr8-server"
+	go build -o $(GO_BIN)/persatrix-server ./cmd/orchestrator
+	@echo "✓ Orchestrator built → $(GO_BIN)/persatrix-server"
 
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
@@ -57,10 +57,10 @@ build-agents: ## Install Python agent dependencies
 
 # ─── Run ────────────────────────────────────────────────
 run: build ## Run the orchestrator
-	$(GO_BIN)/orchestr8-server --config config/
+	$(GO_BIN)/persatrix-server --config config/
 
 run-agent: ## Run a Python agent process (AGENT=coder)
-	cd agents && $(PYTHON) -m orchestr8_agents.server --agent $(AGENT)
+	cd agents && $(PYTHON) -m persatrix_agents.server --agent $(AGENT)
 
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests

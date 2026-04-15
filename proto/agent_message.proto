@@ -1,8 +1,8 @@
-syntax = "proto3";
+﻿syntax = "proto3";
 
-package orchestr8.v1;
+package persatrix.v1;
 
-option go_package = "github.com/orchestr8/orchestr8/internal/generated/msgpb";
+option go_package = "github.com/persatrix/persatrix/internal/generated/msgpb";
 
 // ─── Agent Communication (agent ↔ agent via channels) ──────
 // This schema is used in v0.2+ for inter-agent messaging.

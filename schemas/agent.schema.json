@@ -1,7 +1,7 @@
-{
+﻿{
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://orchestr8.dev/schemas/agent.schema.json",
-  "title": "Orchestr8 Agent Configuration",
+  "$id": "https://persatrix.dev/schemas/agent.schema.json",
+  "title": "Persatrix Agent Configuration",
   "type": "object",
   "required": ["schema_version", "agents"],
   "properties": {

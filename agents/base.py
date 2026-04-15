@@ -1,5 +1,5 @@
-"""
-Orchestr8 Base Agent Interface.
+﻿"""
+Persatrix Base Agent Interface.
 
 All agents implement BaseAgent. Task agents override handle().
 Persona agents extend PersonaAgent (see persona.py) which adds
@@ -65,7 +65,7 @@ class TaskOutput:
 
 class BaseAgent(ABC):
     """
-    Base class for all Orchestr8 agents.
+    Base class for all Persatrix agents.
 
     Task agents: override handle() for synchronous task execution.
     Persona agents: extend PersonaAgent instead (see persona.py).

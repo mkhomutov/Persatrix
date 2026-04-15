@@ -1,8 +1,8 @@
-# Orchestr8 — Git Branching Strategy
+﻿# Persatrix — Git Branching Strategy
 
 ## Overview
 
-Orchestr8 uses a **trunk-based development** model with short-lived feature
+Persatrix uses a **trunk-based development** model with short-lived feature
 branches and release branches per milestone. This strategy is chosen because:
 
 - The project ships in clear phases (v0.1 → v0.2 → v0.3) with distinct feature sets
@@ -400,10 +400,10 @@ Semantic versioning: `MAJOR.MINOR.PATCH`
 5. Tag: git tag -a vX.Y.Z -m "Release X.Y.Z"
 6. Merge release branch to main (fast-forward)
 7. Build and publish artifacts:
-   - Go binary (orchestr8-server)
-   - Python package (orchestr8-agents on PyPI)
+   - Go binary (persatrix-server)
+   - Python package (Persatrix-agents on PyPI)
    - Rust binary (orch CLI)
-   - Docker images (ghcr.io/orchestr8/*)
+   - Docker images (ghcr.io/Persatrix/*)
 8. GitHub Release with changelog (auto-generated from conventional commits)
 ```
 
@@ -452,7 +452,7 @@ main branch:
   On push:
     1–7 above, plus:
     8. Build Docker images
-    9. Push to staging registry (ghcr.io/orchestr8/*:main)
+    9. Push to staging registry (ghcr.io/Persatrix/*:main)
     10. Deploy to staging environment (if configured)
 
 release/* branches:
@@ -463,7 +463,7 @@ release/* branches:
 
 Tags (vX.Y.Z):
     1. Build release artifacts (binaries + Docker images)
-    2. Push to production registry (ghcr.io/orchestr8/*:vX.Y.Z)
+    2. Push to production registry (ghcr.io/Persatrix/*:vX.Y.Z)
     3. Publish Python package to PyPI
     4. Create GitHub Release with auto-changelog
 ```

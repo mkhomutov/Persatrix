@@ -1,4 +1,4 @@
-# Orchestr8 — AI Agents Orchestration Framework — MVP Specification
+﻿# Persatrix — AI Agents Orchestration Framework — MVP Specification
 
 ## 1. Vision
 
@@ -9,7 +9,7 @@ through multi-channel systems (internal and external), and can be organized into
 hierarchies, teams, or flat networks. Use cases range from software development
 teams, to business simulations, to social science experiments.
 
-> See `orchestr8-extension-spec.md` for the full Agent Societies extension
+> See `persatrix-extension-spec.md` for the full Agent Societies extension
 > covering personas, organizational topologies, communication architecture,
 > external bridges (email, Slack, Discord, Telegram), interaction protocols,
 > observer/experiment controls, and use case blueprints.
@@ -301,7 +301,7 @@ Bundled with the framework, always available:
 User-defined tools registered via Python functions:
 
 ```python
-from orchestr8.tools import tool, ToolResult
+from Persatrix.tools import tool, ToolResult
 
 @tool(
     name="query_database",
@@ -723,7 +723,7 @@ external_input:
 - Plugin marketplace
 
 > **Full post-MVP roadmap** including agent societies (v0.2), distributed mesh
-> (v0.3), and beyond (v0.4+) is in `orchestr8-extension-spec.md`.
+> (v0.3), and beyond (v0.4+) is in `persatrix-extension-spec.md`.
 
 ---
 
@@ -989,7 +989,7 @@ User ──► CLI ──► Orchestrator
 ## 10. Project Structure
 
 ```
-orchestr8/
+Persatrix/
 ├── cmd/                        # Go entry points
 │   └── orchestrator/
 │       └── main.go
@@ -1207,7 +1207,7 @@ Structured JSON logs with OTEL trace correlation:
 {
   "timestamp": "2026-04-08T12:34:56.789Z",
   "level": "INFO",
-  "logger": "orchestr8.executor",
+  "logger": "Persatrix.executor",
   "message": "Agent completed task",
   "trace_id": "abc123def456",
   "span_id": "789ghi",

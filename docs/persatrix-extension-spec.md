@@ -1,4 +1,4 @@
-# Orchestr8 — Extension: Agent Societies, Communication & Organizational Modeling
+﻿# Persatrix — Extension: Agent Societies, Communication & Organizational Modeling
 
 > This document extends the core MVP specification with support for rich agent
 > personas, organizational structures, multi-channel communication (including
@@ -766,7 +766,7 @@ bridges:
         require_approval: true
         approval_agent: "ceo"
         from_address: "team@ourcompany.com"
-        footer: "-- Sent by AI agent via Orchestr8"
+        footer: "-- Sent by AI agent via Persatrix"
 
   # Slack bridge
   - id: "slack"
@@ -956,7 +956,7 @@ deployed anywhere: a local process, a container in the cloud, a Raspberry Pi in
 someone's home lab, or a server behind a corporate firewall. As long as a
 communication channel can reach it, it participates in the society.
 
-This transforms Orchestr8 from a single-machine runtime into a **distributed
+This transforms Persatrix from a single-machine runtime into a **distributed
 agent mesh**.
 
 ### E6.1 Deployment Topology
@@ -964,7 +964,7 @@ agent mesh**.
 ```
                     ┌───────────────────────────┐
                     │    Orchestrator (Go)       │
-                    │    mesh.orchestr8.io       │
+                    │    mesh.Persatrix.io       │
                     │                            │
                     │  Registry · Router · State │
                     └─────────┬─────────────────┘
@@ -993,7 +993,7 @@ models) or minimal (a lightweight relay that proxies to a cloud LLM API).
 
 ### E6.2 Node Architecture
 
-A **node** is a machine (or container) running the Orchestr8 agent runtime. Each
+A **node** is a machine (or container) running the Persatrix agent runtime. Each
 node registers with the orchestrator and manages the agents deployed to it.
 
 ```yaml
@@ -1008,9 +1008,9 @@ node:
     protocol: "grpc"                    # grpc | grpc-web | websocket
     tls:
       enabled: true
-      cert_path: "/etc/orchestr8/certs/node.crt"
-      key_path: "/etc/orchestr8/certs/node.key"
-      ca_path: "/etc/orchestr8/certs/ca.crt"
+      cert_path: "/etc/Persatrix/certs/node.crt"
+      key_path: "/etc/Persatrix/certs/node.key"
+      ca_path: "/etc/Persatrix/certs/ca.crt"
     keepalive_seconds: 30
     reconnect:
       max_attempts: 10
@@ -1026,7 +1026,7 @@ node:
     firewall:
       inbound: [9090]                   # gRPC port
       outbound:
-        allow: ["api.anthropic.com:443", "mesh.orchestr8.io:443"]
+        allow: ["api.anthropic.com:443", "mesh.Persatrix.io:443"]
         deny: ["*"]
   
   # ─── Resources ───────────────────────────────────
@@ -1167,9 +1167,9 @@ mesh:
     # Mutual TLS — nodes and orchestrator authenticate each other
     authentication:
       method: "mtls"                    # mtls | token | certificate_pinning
-      ca: "/etc/orchestr8/certs/ca.crt"
-      node_cert: "/etc/orchestr8/certs/node.crt"
-      node_key: "/etc/orchestr8/certs/node.key"
+      ca: "/etc/Persatrix/certs/ca.crt"
+      node_cert: "/etc/Persatrix/certs/node.crt"
+      node_key: "/etc/Persatrix/certs/node.key"
       # Alternatively, short-lived tokens for simpler setups
       # method: "token"
       # token: "${NODE_AUTH_TOKEN}"
@@ -1276,7 +1276,7 @@ deployment:
 deployment:
   mode: "hub_and_spoke"
   orchestrator:
-    address: "mesh.orchestr8.io:443"
+    address: "mesh.Persatrix.io:443"
   nodes:
     - { id: "node-aws-01", address: "10.0.1.10:9090" }
     - { id: "node-tokyo-01", address: "agent.tokyo.example.com:9090" }
@@ -1288,7 +1288,7 @@ deployment:
 deployment:
   mode: "full_mesh"
   orchestrator:
-    address: "mesh.orchestr8.io:443"
+    address: "mesh.Persatrix.io:443"
     role: "registry_and_fallback"       # only used for discovery + relay
   nodes:
     - { id: "node-aws-01", address: "10.0.1.10:9090", peer_address: "node-aws-01.mesh.local:9091" }
@@ -1442,7 +1442,7 @@ as core architectural layers.
 
 ### E8.1 Design Philosophy
 
-Orchestr8 does not reinvent observability, tracing, or inter-agent
+Persatrix does not reinvent observability, tracing, or inter-agent
 communication. Instead, it emits **standards-compliant telemetry** and supports
 **protocol adapters** that let it plug into whatever tooling or ecosystem the
 user already has. The framework is opinionated about its internal model (personas,
@@ -1450,7 +1450,7 @@ channels, sub-agents) but unopinionated about how you observe and integrate it.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                     Orchestr8 Agent Runtime                            │
+│                     Persatrix Agent Runtime                            │
 │                                                                        │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │                 Instrumentation Layer                             │  │
@@ -1496,8 +1496,8 @@ Trace: workflow execution "feature-builder-run-42"
 ├─ Span: invoke_agent "sarah-chen" (kind: CLIENT)
 │  │  gen_ai.agent.name: "sarah-chen"
 │  │  gen_ai.operation.name: "invoke_agent"
-│  │  orchestr8.agent.persona.title: "VP of Engineering"
-│  │  orchestr8.agent.autonomy_level: "semi-autonomous"
+│  │  Persatrix.agent.persona.title: "VP of Engineering"
+│  │  Persatrix.agent.autonomy_level: "semi-autonomous"
 │  │
 │  ├─ Span: gen_ai.chat "claude-sonnet-4" (kind: CLIENT)
 │  │  │  gen_ai.request.model: "claude-sonnet-4-20250514"
@@ -1511,19 +1511,19 @@ Trace: workflow execution "feature-builder-run-42"
 │  ├─ Span: gen_ai.tool "file_read" (kind: INTERNAL)
 │  │     gen_ai.tool.name: "file_read"
 │  │     gen_ai.tool.call.id: "call_abc123"
-│  │     orchestr8.tool.tier: "builtin"
-│  │     orchestr8.permission.check: "allowed"
+│  │     Persatrix.tool.tier: "builtin"
+│  │     Persatrix.permission.check: "allowed"
 │  │
 │  ├─ Span: gen_ai.tool "mcp:github/get_pull_request" (kind: CLIENT)
 │  │     gen_ai.tool.name: "get_pull_request"
-│  │     orchestr8.tool.tier: "mcp"
-│  │     orchestr8.mcp.server_id: "github"
+│  │     Persatrix.tool.tier: "mcp"
+│  │     Persatrix.mcp.server_id: "github"
 │  │
 │  └─ Span: invoke_agent "sub:code_reviewer" (kind: INTERNAL)
 │     │  gen_ai.agent.name: "code_reviewer"
-│     │  orchestr8.sub_agent: true
-│     │  orchestr8.sub_agent.parent: "sarah-chen"
-│     │  orchestr8.sub_agent.depth: 1
+│     │  Persatrix.sub_agent: true
+│     │  Persatrix.sub_agent.parent: "sarah-chen"
+│     │  Persatrix.sub_agent.depth: 1
 │     │
 │     ├─ Span: gen_ai.chat "claude-sonnet-4" (kind: CLIENT)
 │     │     gen_ai.usage.input_tokens: 5200
@@ -1532,9 +1532,9 @@ Trace: workflow execution "feature-builder-run-42"
 │     └─ Span: gen_ai.tool "git_diff" (kind: INTERNAL)
 │
 ├─ Span: channel.message "eng-general" (kind: INTERNAL)
-│     orchestr8.channel.id: "eng-general"
-│     orchestr8.message.type: "DECISION"
-│     orchestr8.message.sender: "sarah-chen"
+│     Persatrix.channel.id: "eng-general"
+│     Persatrix.message.type: "DECISION"
+│     Persatrix.message.sender: "sarah-chen"
 │
 └─ Span: invoke_agent "mike-torres" (kind: CLIENT)
       ...
@@ -1542,50 +1542,50 @@ Trace: workflow execution "feature-builder-run-42"
 
 #### Custom Semantic Attributes
 
-Orchestr8 extends OTEL GenAI conventions with framework-specific attributes
-under the `orchestr8.*` namespace:
+Persatrix extends OTEL GenAI conventions with framework-specific attributes
+under the `Persatrix.*` namespace:
 
 ```yaml
 # Agent attributes
-orchestr8.agent.persona.title: str        # "VP of Engineering"
-orchestr8.agent.autonomy_level: str       # "semi-autonomous"
-orchestr8.agent.mood: str                 # "focused" (if dynamic state enabled)
-orchestr8.agent.node_id: str              # "node-aws-01" (distributed mesh)
+Persatrix.agent.persona.title: str        # "VP of Engineering"
+Persatrix.agent.autonomy_level: str       # "semi-autonomous"
+Persatrix.agent.mood: str                 # "focused" (if dynamic state enabled)
+Persatrix.agent.node_id: str              # "node-aws-01" (distributed mesh)
 
 # Sub-agent attributes
-orchestr8.sub_agent: bool                 # true if this is an ephemeral sub-agent
-orchestr8.sub_agent.parent: str           # parent agent ID
-orchestr8.sub_agent.depth: int            # nesting depth (0 = persona, 1 = sub, etc.)
-orchestr8.sub_agent.template: str         # "code_reviewer", "researcher", etc.
+Persatrix.sub_agent: bool                 # true if this is an ephemeral sub-agent
+Persatrix.sub_agent.parent: str           # parent agent ID
+Persatrix.sub_agent.depth: int            # nesting depth (0 = persona, 1 = sub, etc.)
+Persatrix.sub_agent.template: str         # "code_reviewer", "researcher", etc.
 
 # Tool attributes
-orchestr8.tool.tier: str                  # "builtin" | "custom" | "mcp"
-orchestr8.tool.mcp_server: str            # MCP server ID (if tier=mcp)
-orchestr8.permission.check: str           # "allowed" | "denied"
-orchestr8.permission.denial_reason: str   # why access was denied
+Persatrix.tool.tier: str                  # "builtin" | "custom" | "mcp"
+Persatrix.tool.mcp_server: str            # MCP server ID (if tier=mcp)
+Persatrix.permission.check: str           # "allowed" | "denied"
+Persatrix.permission.denial_reason: str   # why access was denied
 
 # Communication attributes
-orchestr8.channel.id: str                 # channel identifier
-orchestr8.channel.type: str               # "group" | "direct" | "broadcast"
-orchestr8.message.type: str               # "TEXT" | "DECISION" | "ESCALATION" etc.
-orchestr8.message.visibility: str         # "channel" | "private" | "confidential"
-orchestr8.protocol.name: str              # "standup" | "debate" | "consensus"
-orchestr8.protocol.phase: str             # current phase within protocol
+Persatrix.channel.id: str                 # channel identifier
+Persatrix.channel.type: str               # "group" | "direct" | "broadcast"
+Persatrix.message.type: str               # "TEXT" | "DECISION" | "ESCALATION" etc.
+Persatrix.message.visibility: str         # "channel" | "private" | "confidential"
+Persatrix.protocol.name: str              # "standup" | "debate" | "consensus"
+Persatrix.protocol.phase: str             # current phase within protocol
 
 # Organization attributes
-orchestr8.org.id: str                     # organization identifier
-orchestr8.org.topology: str               # "hierarchy" | "flat" | "matrix"
-orchestr8.delegation.from: str            # agent who delegated
-orchestr8.delegation.to: str              # agent who received delegation
+Persatrix.org.id: str                     # organization identifier
+Persatrix.org.topology: str               # "hierarchy" | "flat" | "matrix"
+Persatrix.delegation.from: str            # agent who delegated
+Persatrix.delegation.to: str              # agent who received delegation
 
 # Bridge attributes (external comms)
-orchestr8.bridge.id: str                  # "email" | "slack" | "discord"
-orchestr8.bridge.direction: str           # "inbound" | "outbound"
-orchestr8.bridge.approval_status: str     # "pending" | "approved" | "denied"
+Persatrix.bridge.id: str                  # "email" | "slack" | "discord"
+Persatrix.bridge.direction: str           # "inbound" | "outbound"
+Persatrix.bridge.approval_status: str     # "pending" | "approved" | "denied"
 
 # Cost attributes
-orchestr8.cost.usd: float                # estimated cost of this operation
-orchestr8.cost.budget_remaining: float   # remaining budget for this agent/workflow
+Persatrix.cost.usd: float                # estimated cost of this operation
+Persatrix.cost.budget_remaining: float   # remaining budget for this agent/workflow
 ```
 
 ### E8.3 Metrics
@@ -1601,49 +1601,49 @@ metrics:
     dimensions: [agent_id, model, operation, status]
 
   # ─── Cost ───────────────────────────────────
-  orchestr8.cost.total:                    # counter, USD
+  Persatrix.cost.total:                    # counter, USD
     dimensions: [agent_id, model, workflow_id]
-  orchestr8.cost.by_tier:                  # counter, USD
+  Persatrix.cost.by_tier:                  # counter, USD
     dimensions: [tier]                     # builtin, custom, mcp, llm
 
   # ─── Agent Activity ─────────────────────────
-  orchestr8.agent.actions.total:           # counter
+  Persatrix.agent.actions.total:           # counter
     dimensions: [agent_id, action_type]    # llm_call, tool_use, message_send, delegate, spawn_sub
-  orchestr8.agent.active_count:            # gauge
+  Persatrix.agent.active_count:            # gauge
     dimensions: [node_id, autonomy_level]
-  orchestr8.sub_agent.spawns.total:        # counter
+  Persatrix.sub_agent.spawns.total:        # counter
     dimensions: [parent_agent_id, template]
-  orchestr8.sub_agent.active_count:        # gauge
+  Persatrix.sub_agent.active_count:        # gauge
     dimensions: [parent_agent_id]
 
   # ─── Communication ──────────────────────────
-  orchestr8.messages.total:                # counter
+  Persatrix.messages.total:                # counter
     dimensions: [channel_id, message_type, sender_id]
-  orchestr8.messages.latency:              # histogram, seconds
+  Persatrix.messages.latency:              # histogram, seconds
     dimensions: [channel_id, source_node, dest_node]
-  orchestr8.bridge.messages.total:         # counter
+  Persatrix.bridge.messages.total:         # counter
     dimensions: [bridge_id, direction, approval_status]
 
   # ─── Workflow / Task ────────────────────────
-  orchestr8.workflow.duration:             # histogram, seconds
+  Persatrix.workflow.duration:             # histogram, seconds
     dimensions: [workflow_id, status]
-  orchestr8.task.duration:                 # histogram, seconds
+  Persatrix.task.duration:                 # histogram, seconds
     dimensions: [agent_id, status]
-  orchestr8.task.retries.total:            # counter
+  Persatrix.task.retries.total:            # counter
     dimensions: [agent_id, workflow_id]
 
   # ─── Security ───────────────────────────────
-  orchestr8.permission.checks.total:       # counter
+  Persatrix.permission.checks.total:       # counter
     dimensions: [agent_id, result]         # allowed, denied
-  orchestr8.permission.denials.total:      # counter (alert on this)
+  Persatrix.permission.denials.total:      # counter (alert on this)
     dimensions: [agent_id, tool, reason]
 
   # ─── Mesh (distributed) ─────────────────────
-  orchestr8.mesh.node.health:              # gauge (0=down, 1=degraded, 2=healthy)
+  Persatrix.mesh.node.health:              # gauge (0=down, 1=degraded, 2=healthy)
     dimensions: [node_id, region]
-  orchestr8.mesh.message.latency:          # histogram, milliseconds
+  Persatrix.mesh.message.latency:          # histogram, milliseconds
     dimensions: [source_node, dest_node]
-  orchestr8.mesh.queue.depth:              # gauge
+  Persatrix.mesh.queue.depth:              # gauge
     dimensions: [node_id]                  # messages queued for offline nodes
 ```
 
@@ -1743,9 +1743,9 @@ evaluations:
 
 The **Agent2Agent (A2A) protocol**, launched by Google and now under the Linux
 Foundation, is the emerging standard for inter-agent communication across
-vendors and platforms. Orchestr8 supports A2A at two levels:
+vendors and platforms. Persatrix supports A2A at two levels:
 
-#### Level 1: Orchestr8 Agents as A2A Servers
+#### Level 1: Persatrix Agents as A2A Servers
 
 Any persona agent can be exposed as an A2A-compatible remote agent, allowing
 external agents (from any framework) to discover and collaborate with it.
@@ -1778,10 +1778,10 @@ a2a:
               tags: ["management", "agile"]
           authentication:
             schemes: ["bearer"]
-          # A2A protocol maps to internal Orchestr8 concepts:
-          # A2A Task → Orchestr8 TaskInput to the persona agent
-          # A2A Message → Orchestr8 channel message
-          # A2A Artifact → Orchestr8 TaskOutput attachment
+          # A2A protocol maps to internal Persatrix concepts:
+          # A2A Task → Persatrix TaskInput to the persona agent
+          # A2A Message → Persatrix channel message
+          # A2A Artifact → Persatrix TaskOutput attachment
 
       - agent_id: "support-l1"
         agent_card:
@@ -1795,7 +1795,7 @@ a2a:
 
 #### Level 2: External A2A Agents as Peers
 
-Orchestr8 can discover and delegate to **external A2A agents** from other
+Persatrix can discover and delegate to **external A2A agents** from other
 platforms, treating them as peers in the organization.
 
 ```yaml
@@ -1826,7 +1826,7 @@ The framework implements the full modern agent communication stack:
 
 ```
 ┌────────────────────────────────────────────────┐
-│         Orchestr8 Communication Stack           │
+│         Persatrix Communication Stack           │
 │                                                  │
 │  ┌──────────────────────────────────────────┐   │
 │  │  A2A Protocol                             │   │
@@ -1835,7 +1835,7 @@ The framework implements the full modern agent communication stack:
 │  └──────────────────────────────────────────┘   │
 │                                                  │
 │  ┌──────────────────────────────────────────┐   │
-│  │  Internal Channels (Orchestr8-native)     │   │
+│  │  Internal Channels (Persatrix-native)     │   │
 │  │  Agent ↔ Agent (within the society)       │   │
 │  │  DMs, groups, meetings, protocols         │   │
 │  └──────────────────────────────────────────┘   │
@@ -1870,7 +1870,7 @@ observability:
     headers:
       Authorization: "Bearer ${OTEL_TOKEN}"
     resource_attributes:
-      service.name: "orchestr8"
+      service.name: "Persatrix"
       deployment.environment: "production"
     sampling:
       strategy: "parent_based_always_on"    # or ratio-based for high-volume
@@ -1881,7 +1881,7 @@ observability:
     agentops:
       enabled: false
       api_key: "${AGENTOPS_API_KEY}"
-      # Maps Orchestr8 sessions → AgentOps sessions
+      # Maps Persatrix sessions → AgentOps sessions
       # Maps agent runs → AgentOps agent spans
       # Maps tool calls → AgentOps tool events
       # Enables session replay in AgentOps dashboard
@@ -1897,7 +1897,7 @@ observability:
     langsmith:
       enabled: false
       api_key: "${LANGSMITH_API_KEY}"
-      project: "orchestr8"
+      project: "Persatrix"
 
     datadog:
       enabled: false
@@ -2583,29 +2583,29 @@ The framework tracks optimization effectiveness so you can see what's working:
 
 ```yaml
 optimization_metrics:
-  # Emitted as OTEL metrics under orchestr8.optimization.*
+  # Emitted as OTEL metrics under Persatrix.optimization.*
   metrics:
-    orchestr8.optimization.cache.hit_rate:          # gauge, 0-1
+    Persatrix.optimization.cache.hit_rate:          # gauge, 0-1
       dimensions: [cache_type, agent_id]
-    orchestr8.optimization.cache.tokens_saved:      # counter
+    Persatrix.optimization.cache.tokens_saved:      # counter
       dimensions: [cache_type]
-    orchestr8.optimization.cache.cost_saved_usd:    # counter
+    Persatrix.optimization.cache.cost_saved_usd:    # counter
       dimensions: [cache_type]
-    orchestr8.optimization.summarization.ratio:     # gauge, compression ratio
+    Persatrix.optimization.summarization.ratio:     # gauge, compression ratio
       dimensions: [content_type]                    # channel_history, tool_output, memory
-    orchestr8.optimization.summarization.tokens_saved: # counter
+    Persatrix.optimization.summarization.tokens_saved: # counter
       dimensions: [content_type]
-    orchestr8.optimization.context.utilization:     # gauge, % of budget used
+    Persatrix.optimization.context.utilization:     # gauge, % of budget used
       dimensions: [agent_id]
-    orchestr8.optimization.context.items_dropped:   # counter
+    Persatrix.optimization.context.items_dropped:   # counter
       dimensions: [agent_id, priority_level]
-    orchestr8.optimization.model_routing.downgrades: # counter
+    Persatrix.optimization.model_routing.downgrades: # counter
       dimensions: [from_model, to_model, reason]
-    orchestr8.optimization.skip.steps_skipped:      # counter
+    Persatrix.optimization.skip.steps_skipped:      # counter
       dimensions: [workflow_id, reason]
-    orchestr8.optimization.dedup.messages_suppressed: # counter
+    Persatrix.optimization.dedup.messages_suppressed: # counter
       dimensions: [channel_id]
-    orchestr8.optimization.mesh.bytes_saved:        # counter
+    Persatrix.optimization.mesh.bytes_saved:        # counter
       dimensions: [compression_type, node_id]
 ```
 
@@ -2903,7 +2903,7 @@ Also includes foundational observability:
 | 1 external bridge              | Email (SMTP/IMAP) as the first external bridge       |
 | Blueprints                     | Software team + social experiment as starter blueprints |
 | Session replay                 | Step-through replay via CLI with agent filtering     |
-| Orchestr8 OTEL attributes      | Custom `orchestr8.*` span attributes for personas, channels, sub-agents |
+| Persatrix OTEL attributes      | Custom `Persatrix.*` span attributes for personas, channels, sub-agents |
 | Inline evaluators              | Schema validation + safety check gates               |
 | Budget enforcement             | Per-agent and per-workflow spend limits with alerts   |
 | Environment configs            | Dev/staging/prod profiles for content capture and budgets |
@@ -3044,7 +3044,7 @@ Also includes foundational observability:
 | At-least-once delivery | Retry until ACK (default) | Safe default for agent communication; exactly-once is optional upgrade |
 | Federated mode | Independent orchestrators peering | Enables multi-org collaboration without surrendering control |
 | OTEL as native telemetry | OpenTelemetry GenAI semconv | Industry standard; any backend works; no vendor lock-in |
-| Orchestr8.* namespace | Custom OTEL attributes | Extends GenAI semconv for persona/channel/mesh concepts without breaking standard |
+| Persatrix.* namespace | Custom OTEL attributes | Extends GenAI semconv for persona/channel/mesh concepts without breaking standard |
 | A2A for external interop | Client + server support | Linux Foundation standard; enables cross-vendor agent collaboration |
 | MCP + A2A + Channels | Three complementary layers | MCP for tools, A2A for external agents, channels for internal society |
 | Content capture off by default | Privacy-first in production | LLM prompts/responses contain PII; opt-in per environment |

@@ -1,4 +1,4 @@
-// Package main is the entry point for the Orchestr8 orchestrator server.
+// Package main is the entry point for the Persatrix orchestrator server.
 package main
 
 import (
@@ -15,12 +15,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/executor"
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/registry"
-	"github.com/orchestr8/orchestr8/internal/scheduler"
-	"github.com/orchestr8/orchestr8/internal/server"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/persatrix/persatrix/internal/executor"
+	"github.com/persatrix/persatrix/internal/planner"
+	"github.com/persatrix/persatrix/internal/registry"
+	"github.com/persatrix/persatrix/internal/scheduler"
+	"github.com/persatrix/persatrix/internal/server"
+	"github.com/persatrix/persatrix/internal/state"
 )
 
 const (
@@ -90,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Infow("Orchestr8 Server starting",
+	log.Infow("Persatrix Server starting",
 		"config", *configDir,
 		"grpcPort", *port,
 		"httpPort", *httpPort,
@@ -202,5 +202,5 @@ func main() {
 	// TODO: Notify agents to wrap up
 	// TODO: Persist state
 
-	log.Info("Orchestr8 Server stopped")
+	log.Info("Persatrix Server stopped")
 }

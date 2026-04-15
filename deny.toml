@@ -1,4 +1,4 @@
-# cargo-deny configuration for Orchestr8 Rust CLI
+﻿# cargo-deny configuration for Persatrix Rust CLI
 # https://embarkstudios.github.io/cargo-deny/
 #
 # This file configures automated dependency auditing for the Rust CLI crate.

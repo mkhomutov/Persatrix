@@ -1,4 +1,4 @@
-mod commands;
+﻿mod commands;
 mod types;
 
 use clap::{Parser, Subcommand};
@@ -9,7 +9,7 @@ use commands::logs::cmd_logs;
 use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
 
-/// Orchestr8 CLI — manage agents, workflows, and the mesh.
+/// Persatrix CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
 #[command(name = "orch", version, about)]
 struct Cli {

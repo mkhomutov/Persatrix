@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/orchestr8/orchestr8/internal/generated/taskpb"
-	"github.com/orchestr8/orchestr8/internal/registry"
+	"github.com/persatrix/persatrix/internal/generated/taskpb"
+	"github.com/persatrix/persatrix/internal/registry"
 )
 
 const bufSize = 1024 * 1024

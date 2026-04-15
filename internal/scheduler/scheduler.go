@@ -11,10 +11,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/executor"
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/registry"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/persatrix/persatrix/internal/executor"
+	"github.com/persatrix/persatrix/internal/planner"
+	"github.com/persatrix/persatrix/internal/registry"
+	"github.com/persatrix/persatrix/internal/state"
 )
 
 // Scheduler drives workflow execution by polling for pending runs and

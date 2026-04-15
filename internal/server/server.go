@@ -1,4 +1,4 @@
-// Package server implements the HTTP/REST API server for the Orchestr8 orchestrator.
+// Package server implements the HTTP/REST API server for the Persatrix orchestrator.
 package server
 
 import (
@@ -12,9 +12,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/registry"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/persatrix/persatrix/internal/planner"
+	"github.com/persatrix/persatrix/internal/registry"
+	"github.com/persatrix/persatrix/internal/state"
 )
 
 // Server is the HTTP/REST API server for the orchestrator.

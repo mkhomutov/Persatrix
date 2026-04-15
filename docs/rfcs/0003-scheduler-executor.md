@@ -1,8 +1,8 @@
-# RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
+﻿# RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
 
 **Type**: architecture
 **Status**: ✅ Implemented
-**Author**: Orchestr8 team
+**Author**: Persatrix team
 **Date**: 2026-04-09
 **Target**: v0.1 (MVP)
 **Depends on**: RFC 0001, RFC 0002
@@ -655,7 +655,7 @@ proto/task.proto  ──protoc──►  internal/generated/taskpb/task.pb.go
                                internal/generated/taskpb/task_grpc.pb.go
 ```
 
-The generated files live in `internal/generated/taskpb/` — matching the existing `go_package` option (`github.com/orchestr8/orchestr8/internal/generated/taskpb`) and the Makefile's `PROTO_GO_OUT := internal/generated`. The existing `make proto` target already generates Go stubs; no additional Makefile target is needed.
+The generated files live in `internal/generated/taskpb/` — matching the existing `go_package` option (`github.com/persatrix/persatrix/internal/generated/taskpb`) and the Makefile's `PROTO_GO_OUT := internal/generated`. The existing `make proto` target already generates Go stubs; no additional Makefile target is needed.
 
 **Dependencies added to `go.mod`:**
 - `google.golang.org/grpc` — gRPC client and server framework
@@ -901,7 +901,7 @@ Once this RFC is accepted:
 ## Related Documentation
 
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — §2.3 Tasks, §2.5 Workflows, §3.1–3.2 gRPC Communication, §6.7 Resilience, §9 Execution Flow
-- [orchestr8-extension-spec.md](../orchestr8-extension-spec.md) — v0.2+ streaming, channels, memory
+- [persatrix-extension-spec.md](../persatrix-extension-spec.md) — v0.2+ streaming, channels, memory
 - [0001-core-orchestration-pipeline.md](0001-core-orchestration-pipeline.md) — State, Registry, Planner
 - [0002-rest-api-server.md](0002-rest-api-server.md) — REST API, workflow submission
 - [BRANCHING.md](../BRANCHING.md) — Branch naming and PR size guidelines

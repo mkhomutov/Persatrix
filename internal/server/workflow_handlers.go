@@ -9,8 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/orchestr8/orchestr8/internal/planner"
-	"github.com/orchestr8/orchestr8/internal/state"
+	"github.com/persatrix/persatrix/internal/planner"
+	"github.com/persatrix/persatrix/internal/state"
 )
 
 // resourceIDRegex is imported from the planner package to ensure a single source
