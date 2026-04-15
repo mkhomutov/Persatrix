@@ -68,8 +68,8 @@ agents:
     timeout_seconds: 300
     permissions:
       filesystem:
-        read: ["/workspace/src/**", "/workspace/tests/**"]
-        write: ["/workspace/src/**", "/workspace/tests/**"]
+        read: ["/workspace", "/workspace/**"]
+        write: ["/workspace", "/workspace/src/**", "/workspace/src", "/workspace/tests/**", "/workspace/tests", "/workspace/*.py", "/workspace/*.md"]
         deny: ["/workspace/.env", "**/.git/**"]
       shell:
         allowed_commands: ["python", "pytest", "ruff", "git diff"]
@@ -109,7 +109,7 @@ agents:
     timeout_seconds: 180
     permissions:
       filesystem:
-        read: ["/workspace/**"]
+        read: ["/workspace", "/workspace/**"]
         write: []
       network:
         allow: ["api.anthropic.com"]

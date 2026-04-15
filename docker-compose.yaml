@@ -35,7 +35,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
-    command: ["--agent", "planner", "--port", "50051", "--host", "0.0.0.0"]
+    command: ["--agent", "planner", "--port", "50051", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-planner:50051"]
     ports:
       - "50051:50051"
     volumes:
@@ -58,7 +58,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
-    command: ["--agent", "code-writer", "--port", "50052", "--host", "0.0.0.0"]
+    command: ["--agent", "code-writer", "--port", "50052", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-coder:50052"]
     ports:
       - "50052:50052"
     volumes:
@@ -81,7 +81,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
-    command: ["--agent", "code-reviewer", "--port", "50053", "--host", "0.0.0.0"]
+    command: ["--agent", "code-reviewer", "--port", "50053", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-reviewer:50053"]
     ports:
       - "50053:50053"
     volumes:
@@ -100,7 +100,7 @@ services:
 
   # ─── Observability: Jaeger (OTEL-compatible) ─────
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:latest
     ports:
       - "16686:16686"   # Jaeger UI
       - "4317:4317"     # OTLP gRPC

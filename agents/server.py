@@ -296,11 +296,17 @@ class AgentServer:
         port: int = 50051,
         shutdown_grace: int = 30,
         orchestrator_url: str = "http://127.0.0.1:8080",
+        advertise_address: str | None = None,
     ):
         self.host = host
         self.port = port
         self.shutdown_grace = shutdown_grace
         self.orchestrator_url = orchestrator_url.rstrip("/")
+        # advertise_address is the address the orchestrator uses to reach this
+        # agent via gRPC. Defaults to host:port (correct for local runs). In
+        # Docker/K8s, pass the service name:port so the orchestrator can connect
+        # back (e.g. "agent-planner:50051").
+        self.advertise_address = advertise_address or f"{host}:{port}"
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
         self._session: aiohttp.ClientSession | None = None
@@ -412,10 +418,7 @@ class AgentServer:
         if self._session is None:
             return
         for agent_id, agent in self.agents.items():
-            # TODO(v0.2): support advertised address for container/K8s
-            # service discovery — bind address may differ from the address
-            # the orchestrator should use to reach this agent.
-            address = f"{self.host}:{self.port}"
+            address = self.advertise_address
             payload = {
                 "id": agent_id,
                 "name": agent.name,
@@ -548,6 +551,12 @@ def main() -> None:
         help="Orchestrator REST API URL for self-registration",
     )
     parser.add_argument(
+        "--advertise-address",
+        default=None,
+        help="gRPC address advertised to the orchestrator (host:port). "
+             "Defaults to bind host:port. Set to Docker service name in containers.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -572,6 +581,7 @@ def main() -> None:
         port=args.port,
         shutdown_grace=args.shutdown_grace,
         orchestrator_url=args.orchestrator_url,
+        advertise_address=args.advertise_address,
     )
     server.register_agent(agent)
 

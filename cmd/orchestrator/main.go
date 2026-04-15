@@ -121,7 +121,7 @@ func main() {
 	logger.Info("workflow planner initialized", zap.String("type", "yaml"))
 
 	// 8b. Initialize executor (gRPC task dispatch to agents)
-	exec := executor.NewGRPCExecutor(reg, logger)
+	exec := executor.NewGRPCExecutor(reg, logger, executor.WithTimeout(5*time.Minute))
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized")
 

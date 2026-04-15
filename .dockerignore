@@ -9,8 +9,6 @@
 # Build artifacts
 bin/
 cli/target/
-internal/generated/
-agents/generated/
 
 # Dependencies / caches
 vendor/
