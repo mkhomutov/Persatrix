@@ -110,7 +110,8 @@ func WithDialOptions(opts ...grpc.DialOption) Option {
 // In "derived" mode, the timeout is computed from the step's TimeoutSeconds
 // + DefaultTransportMargin, and retries share the step deadline.
 // In "static" mode, the per-executor timeout is used (pre-PR 2 behavior).
-// Unrecognized values are treated as "static" with a warning log at construction.
+// Unrecognized values are treated as "static" with a warning log at
+// construction time (validated in NewGRPCExecutor).
 func WithDeadlineMode(mode DeadlineMode) Option {
 	return func(e *GRPCExecutor) {
 		e.deadlineMode = mode
@@ -125,6 +126,7 @@ type GRPCExecutor struct {
 	maxRetries   int
 	dialOpts     []grpc.DialOption
 	deadlineMode DeadlineMode
+	tokenParser  func(error) int64
 }
 
 // NewGRPCExecutor creates a new GRPCExecutor with the given registry and options.
@@ -138,10 +140,22 @@ func NewGRPCExecutor(reg registry.Registry, logger *zap.Logger, opts ...Option) 
 		timeout:      30 * time.Second,
 		maxRetries:   3,
 		deadlineMode: DeadlineModeStatic,
+		tokenParser:  parseTokensUsed,
 	}
 	for _, opt := range opts {
 		opt(e)
 	}
+
+	// Validate deadline mode after all options are applied.
+	// Unrecognized values fall back to static mode with a warning so that
+	// typos in config/CLI flags don't silently change retry semantics.
+	if e.deadlineMode != DeadlineModeDerived && e.deadlineMode != DeadlineModeStatic {
+		e.logger.Warn("unrecognized deadline mode, falling back to static",
+			zap.String("mode", string(e.deadlineMode)),
+		)
+		e.deadlineMode = DeadlineModeStatic
+	}
+
 	return e
 }
 
@@ -215,7 +229,9 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 				)
 				break
 			}
-			// Update dispatch timeout to remaining time + transport margin.
+			// Update dispatch timeout: remaining step budget + transport margin.
+			// `remaining` is the time left until the step deadline (stepDeadline - elapsed),
+			// so this gives the RPC the full remaining budget plus overhead.
 			dispatchTimeout = remaining + time.Duration(defaults.DefaultTransportMargin)*time.Second
 		}
 
@@ -242,7 +258,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 
 		// Track token usage from failed attempts for budget accounting.
 		if e.deadlineMode == DeadlineModeDerived {
-			cumulativeTokens += parseTokensUsed(err)
+			cumulativeTokens += e.tokenParser(err)
 		}
 
 		lastErr = err

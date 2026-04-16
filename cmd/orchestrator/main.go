@@ -40,6 +40,7 @@ var (
 	httpBind     = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
+	deadlineMode = flag.String("deadline-mode", "derived", "Deadline mode: derived (step-based deadlines) or static (per-executor fixed timeout)")
 )
 
 func main() {
@@ -124,12 +125,14 @@ func main() {
 	// RFC 0006 PR 2: In derived deadline mode, the per-dispatch timeout is
 	// computed from step.TimeoutSeconds + transport margin, so the static
 	// per-executor timeout is only used as a fallback in static mode.
+	// The --deadline-mode flag allows runtime switching without code changes
+	// (interim until config loading from environment YAML is wired up).
 	exec := executor.NewGRPCExecutor(reg, logger,
 		executor.WithTimeout(5*time.Minute),
-		executor.WithDeadlineMode(executor.DeadlineModeDerived),
+		executor.WithDeadlineMode(executor.DeadlineMode(*deadlineMode)),
 	)
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
-	logger.Info("executor initialized", zap.String("deadlineMode", string(executor.DeadlineModeDerived)))
+	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir)

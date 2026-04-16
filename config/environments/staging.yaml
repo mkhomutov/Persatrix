@@ -3,6 +3,10 @@ environment: "staging"
 deployment:
   mode: "local"
 
+execution:
+  # Valid values: "derived" (step-based deadlines) or "static" (per-executor fixed timeout).
+  deadline_mode: "derived"
+
 observability:
   otlp:
     endpoint: "http://otel-collector:4318"

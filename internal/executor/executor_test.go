@@ -1066,6 +1066,47 @@ func TestDerivedDeadline_TokenBudgetCutoff(t *testing.T) {
 	assert.Equal(t, int64(0), parseTokensUsed(status.Error(codes.Unavailable, "unavailable")))
 }
 
+// TestDerivedDeadline_TokenBudgetCutoff_WithInjectedParser exercises the actual
+// token budget cutoff logic by injecting a tokenParser that reports high token
+// usage. When cumulative tokens exceed (1 - MinRetryBudgetFraction) of MaxTokens,
+// the retry should be skipped.
+func TestDerivedDeadline_TokenBudgetCutoff_WithInjectedParser(t *testing.T) {
+	callCount := 0
+	maxTokens := 8192
+
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			return nil, status.Error(codes.Unavailable, "unavailable")
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithMaxRetries(3),
+	)
+
+	// Inject a tokenParser that reports 7000 tokens per failed attempt.
+	// After 1 attempt: cumulativeTokens = 7000, remaining = 1192.
+	// minTokens = 8192 * 0.25 = 2048. remaining (1192) < minTokens (2048) → skip.
+	env.executor.tokenParser = func(_ error) int64 {
+		return 7000
+	}
+
+	registerHealthyAgent(t, env.reg, "token-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "token-agent",
+		Payload: "token budget test",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      maxTokens,
+			TimeoutSeconds: 60, // long enough that time budget is not the constraint
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "retries exhausted")
+	assert.Equal(t, 1, callCount, "should skip retry when token budget is insufficient")
+}
+
 func TestStaticMode_PreservesOriginalBehavior(t *testing.T) {
 	// In static mode, each dispatch gets the per-executor timeout, not derived.
 	var callDeadline time.Duration
@@ -1221,4 +1262,54 @@ func TestNewGRPCExecutor_DefaultsToStaticMode(t *testing.T) {
 	reg := registry.NewInMemoryRegistry(zap.NewNop())
 	exec := NewGRPCExecutor(reg, zap.NewNop())
 	assert.Equal(t, DeadlineModeStatic, exec.deadlineMode)
+}
+
+// TestNewGRPCExecutor_UnrecognizedDeadlineMode verifies that an unrecognized
+// deadline mode string falls back to static mode with a warning log, matching
+// the documented contract on WithDeadlineMode.
+func TestNewGRPCExecutor_UnrecognizedDeadlineMode(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithDeadlineMode("invalid"))
+
+	assert.Equal(t, DeadlineModeStatic, exec.deadlineMode,
+		"unrecognized mode should fall back to static")
+}
+
+// TestNewGRPCExecutor_UnrecognizedDeadlineMode_BehavesAsStatic verifies end-to-end
+// that an executor constructed with an unrecognized mode dispatches with static
+// timeout semantics (uses the per-executor timeout, not step-derived deadline).
+func TestNewGRPCExecutor_UnrecognizedDeadlineMode_BehavesAsStatic(t *testing.T) {
+	var callDeadline time.Duration
+	env := setupTestEnv(t,
+		func(ctx context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			deadline, ok := ctx.Deadline()
+			if ok {
+				callDeadline = time.Until(deadline)
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "ok",
+			}, nil
+		},
+		WithDeadlineMode("typo-derived"),
+		WithTimeout(10*time.Second),
+		WithMaxRetries(0),
+	)
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "unrecognized mode test",
+		Limits: StepLimits{
+			TimeoutSeconds: 60, // would give 65s in derived mode
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok", result.Output)
+	// Should use static 10s timeout, not derived 65s.
+	assert.Less(t, callDeadline, 12*time.Second, "unrecognized mode should behave as static")
+	assert.Greater(t, callDeadline, 8*time.Second, "unrecognized mode should behave as static")
 }
