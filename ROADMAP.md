@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-04-16  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress  
-> **Next milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
 
 This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
 
@@ -145,7 +145,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  📋 Proposed
+RFC 0006 (Efficiency & Execution Limits)                  � Implementing
     ↓
 RFC 0008 (Agent Memory & Context Optimization)            � Accepted  [depends on 0005, 0006]
     ↓

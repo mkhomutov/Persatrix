@@ -22,7 +22,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0005 fully merged (20/20 PRs). The persona agent, memory system, task agent, and tool infrastructure are the foundation for execution limit enforcement.
 
-**Recommended merge order**: **PR 1a** → **PR 1b** → **PR 1c** (can parallel with PR 1b — no Go dependency) → **PR 2** → **PR 3a** → **PR 3b** → **PR 4a** → **PR 4b** (can parallel with PR 4a — independent code paths) → **PR 5** → **PR 6**.
+**Recommended merge order**: **PR 1a** → **PR 1b** → **PR 1c** (can parallel with PR 1b — no Go dependency; both must merge before PR 2 starts) → **PR 2** → **PR 3a** → **PR 3b** → **PR 4a** → **PR 4b** (can parallel with PR 4a — independent code paths) → **PR 5** → **PR 6**.
 
 ---
 
@@ -141,7 +141,7 @@ PR 6 (RFC close)
 
 ### PR 1c: `feature/v02-python-defaults-validation` — Python Defaults + Agent Limit Validation
 
-**Depends on**: PR 1a merged (schema changes ensure consistent contract). Can parallel with PR 1b — no Go dependency.
+**Depends on**: PR 1a merged (schema changes ensure consistent contract). Can parallel with PR 1b — no Go dependency (both must merge before PR 2 starts).
 **Branch**: `feature/v02-python-defaults-validation`
 **Estimated size**: ~200–350 lines (implementation + tests)
 
@@ -161,6 +161,8 @@ PR 6 (RFC close)
 - Persona agent constants (`_MAX_SUB_AGENT_TOKENS`, etc.) remain in `persona_runtime.py` per RFC Open Question 4 — not migrated here.
 - `_run_llm_loop()` validation: if `max_llm_calls < 0` or `max_tokens < 0`, raise `ValueError("Negative execution limits are not allowed")`.
 - Zero values continue to mean "use default" — existing behavior preserved.
+- **Breaking change**: `max_llm_calls` default drops from 10 → 5. Agents performing complex multi-tool operations that relied on the 10-call default may need explicit step-level `max_llm_calls` overrides. Document this in CHANGELOG.md as a breaking behavioral change and consider logging a warning when an agent hits the default limit.
+- **Note**: Python-side `context_budget` handling is deferred to RFC 0008 implementation. PR 1a adds the field to Go structs and workflow schema, but no Python-side constant or validation is introduced here — that is RFC 0008's scope.
 
 #### Tests
 
@@ -385,6 +387,7 @@ PR 6 (RFC close)
 #### Key implementation details
 
 - Cache key: SHA-256 hash of the full `TaskRequest` content minus volatile fields (`task_id`, `workflow_id`). This future-proofs against proto evolution.
+- **Permission isolation**: The cache key includes `agent_id`, which partitions cache entries per agent. This satisfies RFC 0006 Security Consideration that cache entries must not be shared across agents with different permission sets — agents with different permissions have different IDs and therefore different cache keys.
 - Cache store: `map[string]cacheEntry` with LRU eviction (doubly-linked list) and per-entry TTL from `config/optimization.yaml` (`caching.exact.ttl_seconds: 3600`, `caching.exact.max_entries: 10000`).
 - Cache is checked only for steps with `cacheable: true` in workflow YAML. Persona and autonomous tasks are never cached.
 - Cache hit → return stored result, set `CacheHit = true` in metadata, skip gRPC dispatch.
