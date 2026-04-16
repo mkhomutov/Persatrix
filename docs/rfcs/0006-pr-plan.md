@@ -216,6 +216,18 @@ PR 6 (RFC close)
 - [x] `_run_llm_loop()` rejects negative limits
 - [x] No inline magic numbers remain in `base.py` for `max_llm_calls`/`max_tokens`
 
+#### Review Findings (PR #83)
+
+**Deferred to PR 5:**
+
+1. **M1 (Medium) — `ValueError` vs `TaskOutput(FAILED)` inconsistency** — Negative limits raise `ValueError`, but all other error conditions in `_run_llm_loop()` (missing model, LLM provider errors) return `TaskOutput(status=FAILED)`. A `ValueError` propagates through the gRPC servicer as an opaque gRPC error, while `TaskOutput.FAILED` is the expected reporting mechanism. Consider returning `TaskOutput(FAILED)` instead, or documenting the intentional fail-fast distinction. *(Location: `agents/base.py` L250–251)*
+2. **M2 (Medium) — `DEFAULT_TIMEOUT_SECONDS` defined but unused** — The constant is exported and tested but never referenced in `base.py` or anywhere else. Wire it up as a timeout fallback or add a comment noting it is a forward-declared constant for PR 2. *(Location: `agents/defaults.py` L30)*
+3. **L2 (Low) — No loop-exhaustion test for new default** — Tests verify zero resolves to defaults and explicit values are used, but no test confirms the loop actually stops after `DEFAULT_MAX_LLM_CALLS` (5) iterations. Add a test that passes `max_llm_calls=0` with a mock always returning `TOOL_USE`, then assert exactly 5 LLM calls. *(Location: `tests/unit/python/test_agents.py`)*
+
+**Info (no action required):**
+
+4. **L3 — Breaking change documented** — CHANGELOG correctly documents `max_llm_calls` 10→5 as a breaking change. Good.
+
 ---
 
 ### PR 2: `feature/v02-deadline-derivation` — Deadline Derivation + Retry Budget Policy
