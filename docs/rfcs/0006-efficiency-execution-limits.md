@@ -1,7 +1,7 @@
 # RFC 0006 — Efficiency and Execution Limits
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: � Accepted  
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
 **Target**: v0.2  
@@ -17,7 +17,7 @@
 - [Non-Goals](#non-goals)
 - [Design / Implementation](#design--implementation)
   - [A. Task Execution Limit Propagation](#a-task-execution-limit-propagation)
-  - [B. Conservative Defaults](#b-conservative-defaults)
+  - [B. Revised Defaults](#b-revised-defaults)
   - [C. Budget Enforcement](#c-budget-enforcement)
   - [D. Timeout Policy and Deadline Derivation](#d-timeout-policy-and-deadline-derivation)
   - [E. Retry Budget Policy](#e-retry-budget-policy)
@@ -74,7 +74,7 @@ These weaknesses are tolerable in manual testing but become genuine risks as:
 3. **Replace guessed timeouts**: derive RPC deadlines from step-level timeout config with a transport margin, eliminating the static executor timeout constant.
 4. **Bound retry cost**: retries consume from the step's deadline and token budget, not from fresh allocations.
 5. **Expose execution metadata**: per-step token usage, LLM call count, retry count, and cache hit/miss are recorded in workflow run state and surfaced in status responses.
-6. **Lower permissive defaults**: task agent defaults move from 10 LLM calls / 4096 tokens to values justified by observed v0.1 usage patterns.
+6. **Revise defaults**: task agent defaults move from 10 LLM calls / 4096 tokens to values justified by observed v0.1 usage patterns (`max_llm_calls` lowered to 5; `max_tokens` raised to 8192 for code generation headroom).
 
 ## Non-Goals
 
@@ -103,7 +103,11 @@ The scheduler passes resolved limits to the executor as part of `ExecuteRequest`
 
 **Impact on proto**: None for the minimum implementation path — `TaskConfig` already defines the limit fields needed for propagation, and existing response metadata is sufficient to carry `tokens_used` and similar counters. However, Phase 4 defines `StepExecutionMetadata` with typed fields (`LLMCallCount`, `RetryCount`, `CacheHit`), so a proto update adding strongly typed execution metadata fields is likely in Phase 4 rather than optional. Until then, the existing `map<string,string>` metadata map is sufficient.
 
-### B. Conservative Defaults
+**Clarification on `StepExecutionMetadata` scope**: In Phase 4, `StepExecutionMetadata` is initially a Go-only struct stored in the state store and surfaced via the REST API (JSON). It is *not* a proto message — agents do not need to produce or consume it. If a future need arises for agents or CLI to consume structured execution metadata via gRPC (e.g., for sub-agent cost awareness), a proto message can be added at that point. This avoids a cross-language proto regeneration in Phase 4 while keeping the extension path open.
+
+### B. Revised Defaults
+
+Most defaults below are lowered to be more conservative. The exception is `max_tokens`, which is *increased* from 4096 to 8192 because observed v0.1 code generation tasks routinely truncate at 4096. This is a less restrictive default for that parameter, justified by practical necessity rather than conservatism.
 
 | Parameter | Current default | Proposed default | Justification |
 |-----------|----------------|------------------|---------------|
@@ -132,6 +136,8 @@ The metadata plumbing is already mostly present: agents populate `tokens_used` i
 - Checks running totals against thresholds from `config/optimization.yaml`.
 - Returns one of: `allow`, `reject` (fail the step), or `pause` (hold for manual review).
 - Configurable behavior per threshold level (`on_exceed` field).
+
+**Concurrency note**: The pre-dispatch budget check has an inherent TOCTOU (time-of-check-time-of-use) race when multiple workflows run concurrently — two workflows may both pass the budget check before either dispatches, causing the combined spend to exceed the threshold. This is acceptable for v0.2: post-dispatch actuals catch the overshoot on the next dispatch cycle, and the per-workflow budget provides a secondary bound. If tighter enforcement is needed in production, a compare-and-swap reservation mechanism can be added as a follow-up without changing the `BudgetEnforcer` interface.
 
 #### CostReporter
 
@@ -170,10 +176,14 @@ This intentionally reverses the current executor design, where each dispatch get
 
 **Current state**: 3 retries with exponential backoff, each retry gets a fresh timeout window. No limit on total tokens consumed across retries.
 
+**Important distinction — per-call limit vs step-level budget**: The `max_tokens` field in `TaskConfig` serves as the per-LLM-call output token limit (passed to the LLM API). For retry budgeting, we introduce a separate concept: the **step token budget**, which is the total tokens (input + output) that a step may consume across all attempts. The step token budget is tracked by the orchestrator via `tokens_used` reported in agent response metadata, not by the `max_tokens` LLM parameter. The `max_tokens` per-call cap remains unchanged across retries; it is the *cumulative spend* that is bounded.
+
+Note that input tokens are not bounded by `max_tokens` — they depend on prompt construction inside the agent. The post-dispatch actuals (which include both input and output tokens from LLM provider responses) are the authoritative cost measure. The pre-dispatch heuristic guard (Section C) uses `max_tokens` as a conservative proxy and will systematically underestimate potential cost for steps with large input contexts. This is an acceptable tradeoff: the guard catches obviously over-budget dispatches, while post-dispatch actuals provide the true enforcement.
+
 **Change**:
 1. Retries consume from the step deadline (see section D).
-2. Retries consume from the step token budget — if the first attempt used 3000 of 8192 tokens, retries get the remaining 5192.
-3. A retry is only attempted if sufficient budget (time and tokens) remains for a meaningful attempt. "Meaningful" means at least 25% of the original budget.
+2. Retries consume from the step token budget (cumulative `tokens_used` across attempts). If the first attempt consumed 3000 tokens (input + output as reported by the agent), and the step token budget is 8192, retries may consume the remaining 5192.
+3. A retry is only attempted if sufficient budget (time and tokens) remains for a meaningful attempt. "Meaningful" means at least 25% of the original budget. This threshold is a heuristic balancing two risks: too low and retries waste compute on attempts that cannot complete meaningful work; too high and retries are suppressed even when they could succeed. 25% was chosen because most v0.1 tasks complete in 1–3 LLM calls — a quarter of the budget is sufficient for at least one additional LLM round-trip with tool use. This threshold is defined as a constant in `internal/defaults/` and can be tuned based on production retry success rates.
 4. Provider-level retries (in `llm_client.py`) and executor-level retries are tracked separately. Executor retries are for infrastructure failures (gRPC unavailable); provider retries are for API rate limits. Both count against the step deadline.
 
 ### F. Response Caching
@@ -182,9 +192,9 @@ This intentionally reverses the current executor design, where each dispatch get
 
 **Change**: Implement exact-match response caching for deterministic task shapes.
 
-- Cache key: hash of (agent_id, task_type, task_input, model, system_prompt, sampling_parameters). Sampling parameters (temperature, top_p, etc.) must be included because identical prompts with different sampling settings produce different output distributions.
+- Cache key: hash of (agent_id, task_type, task_input, **context** (prior step outputs), model, system_prompt, sampling_parameters, allowed_tools). Sampling parameters (temperature, top_p, etc.) must be included because identical prompts with different sampling settings produce different output distributions. The `context` map must be included because the same agent invoked with identical input but different prior step outputs would produce different results. The `allowed_tools` list must be included because tool availability affects agent behavior. In practice, the cache key should hash the full `TaskRequest` content minus volatile fields (`task_id`, `workflow_id`) rather than cherry-picking fields — this ensures correctness as the proto evolves.
 - Cache store: in-memory with LRU eviction and configurable TTL.
-- Cache is opt-in per task type. Only pure/deterministic tasks should be cached; persona and autonomous tasks are excluded.
+- Cache is opt-in per task type. Only pure/deterministic tasks should be cached; persona and autonomous tasks are excluded. The opt-in mechanism is a `cacheable` boolean field on workflow step definitions — steps must explicitly opt in, and the cache implementation skips any step without this flag.
 - Cache hits are recorded in step metadata for observability.
 
 ### G. Execution Observability
@@ -227,11 +237,13 @@ This metadata is:
 
 **Deliverables**:
 1. Create `internal/defaults/` package with centralized system defaults.
-2. Scheduler resolves step limits (workflow step config → agent config → system defaults) and passes to executor.
-3. Executor populates all `TaskConfig` fields (`max_llm_calls`, `max_tokens`, `timeout_seconds`) before dispatch.
-4. Agent `handle()` loop validates received limits and rejects negative values.
-5. Lower task agent defaults per section B.
-6. Add `agents/defaults.py` for Python-side default constants.
+2. Add `timeout_seconds`, `max_llm_calls`, and `max_tokens` fields to the `Step` struct in `internal/planner/planner.go` and to the step definition in `schemas/workflow.schema.json`. These fields are optional — zero/omitted means "inherit from agent config or system defaults."
+3. Add limit fields to `ExecuteRequest` (or a new `StepLimits` struct) so the scheduler can pass resolved limits to the executor.
+4. Scheduler resolves step limits (workflow step config → agent config → system defaults) and passes to executor.
+5. Executor populates all `TaskConfig` fields (`max_llm_calls`, `max_tokens`, `timeout_seconds`) before dispatch.
+6. Agent `handle()` loop validates received limits and rejects negative values.
+7. Lower task agent defaults per section B.
+8. Add `agents/defaults.py` for Python-side default constants.
 
 **Dependencies**: None.
 
@@ -247,6 +259,8 @@ This metadata is:
 5. Track token consumption across retries.
 
 **Dependencies**: Phase 1 (limit propagation provides the step timeout values).
+
+**Rollback note**: Phase 2 intentionally reverses the current executor design (fresh timeout per dispatch → shared deadline). To mitigate regression risk, the derived deadline mode should be gated behind a configuration flag (e.g., `execution.deadline_mode: "derived" | "static"` in environment config) so operators can revert to the Phase 1 static-with-config behavior without a code rollback. The flag can be removed once derived deadlines are validated in production.
 
 ### Phase 3: Budget Enforcement (Cost Package)
 
@@ -281,6 +295,7 @@ This metadata is:
 | Component | Files | Change |
 |-----------|-------|--------|
 | Go orchestrator | `internal/defaults/defaults.go` (new) | Centralized system default constants |
+| Go orchestrator | `internal/planner/planner.go` | Add `timeout_seconds`, `max_llm_calls`, `max_tokens` fields to `Step` struct |
 | Go orchestrator | `internal/executor/executor.go` | Populate full TaskConfig, derived deadlines, retry budget |
 | Go orchestrator | `internal/scheduler/scheduler.go` | Resolve step limits, pass to executor, pre-dispatch budget check |
 | Go orchestrator | `internal/cost/cost.go` | Implement TokenCounter, BudgetEnforcer, CostReporter |
@@ -290,6 +305,7 @@ This metadata is:
 | Python agents | `agents/defaults.py` (new) | Centralized Python default constants |
 | Python agents | `agents/base.py` | Import defaults, validate received limits |
 | Config | `config/optimization.yaml` | No schema changes needed (budget fields already defined) |
+| Config | `schemas/workflow.schema.json` | Add step-level `timeout_seconds`, `max_llm_calls`, `max_tokens` properties |
 | Config | `schemas/agent.schema.json` | Add step-level timeout and limit fields to schema |
 
 ---
@@ -306,14 +322,41 @@ This metadata is:
 
 ---
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. **Cache invalidation scope**: Should cache TTL be configurable per-agent or only globally? Global is simpler; per-agent adds complexity but allows tuning for different task types.
-2. **Budget pause UX**: When `on_exceed: pause_and_alert` triggers, how does the operator resume? CLI command? REST endpoint? This may require a follow-up RFC for operator tooling.
-3. **Cost estimation accuracy**: Should estimated cost use prompt token counts (available pre-dispatch) or actual completion token counts (available post-dispatch)? Pre-dispatch enables proactive blocking but is less accurate.
-4. **Persona tick loop integration**: Persona agents have their own `_MAX_SUB_AGENT_TOKENS` and `_MAX_SUB_AGENT_LLM_CALLS` caps. Should these be migrated to the centralized defaults system, or kept as persona-specific overrides?
+### 1. Cache invalidation scope — Global TTL only
 
-Until operator tooling exists, `fail` should remain the default `on_exceed` behavior for implementation PRs. `pause_and_alert` should only ship together with a defined resume path.
+**Decision**: Cache TTL is configured globally in `config/optimization.yaml`, not per-agent.
+
+**Rationale**: The existing configuration architecture cleanly separates agent behavior (`config/agents.yaml`) from optimization/performance tuning (`config/optimization.yaml`). No per-agent cache fields exist in `schemas/agent.schema.json`, and adding them would break this separation. The RFC already specifies that caching is opt-in per task type — persona and autonomous tasks are excluded entirely. This task-type scoping is sufficient granularity without per-agent TTL. Global TTL is simpler to reason about, audit, and adjust at runtime. If future workloads demonstrate a need for finer-grained TTL, a per-profile override (e.g., `cost_optimized` vs `speed_optimized` profiles in `optimization.yaml`) can be added without schema changes to the agent config.
+
+### 2. Budget pause UX — Defer to follow-up RFC; `fail` is the default
+
+**Decision**: `fail` is the only `on_exceed` behavior implemented in this RFC. `pause_and_alert` remains a recognized config value but returns a clear error at enforcement time indicating that the resume path is not yet implemented.
+
+**Rationale**: No pause/resume mechanism exists today — there is no `RunPaused` status in `internal/state/`, no `/api/v1/workflows/{id}/resume` endpoint, and no corresponding CLI command. Implementing `pause_and_alert` properly requires: (a) a new `RunPaused` run status in the state store, (b) a REST resume endpoint, (c) a CLI `orch budget resume` command, and (d) an alerting integration. This is a self-contained feature set that warrants its own RFC (likely RFC 0010+) for operator tooling. Shipping `pause_and_alert` without a defined resume path would create paused workflows that can never be resumed — worse than failing fast. The `BudgetEnforcer` should accept `pause_and_alert` as a valid config value but treat it as `fail` with a warning log until the operator tooling RFC lands. Additionally, the degraded behavior should be surfaced at config load time (startup), not only at enforcement time — this prevents operators from deploying with `pause_and_alert` expecting pause behavior without seeing a clear warning.
+
+### 3. Cost estimation accuracy — Post-dispatch actuals with pre-dispatch heuristic guard
+
+**Decision**: Use actual post-dispatch token counts for cost accounting. Add a coarse pre-dispatch budget guard using a heuristic estimate.
+
+**Rationale**: Agents already return accurate `tokens_used` in `TaskOutput.metadata` from their LLM provider responses (Anthropic and OpenAI both report exact input and output token counts). This is 100% accurate, covers all retry and tool-use turns, and requires no new dependencies. Pre-dispatch estimation is inherently unreliable — the orchestrator does not have the rendered prompt (agents construct it from system instructions + payload + tool context), output token counts are non-deterministic, and multi-turn tool use inflates tokens unpredictably.
+
+The pre-dispatch guard works as follows: before dispatching a step, the `BudgetEnforcer` checks whether the remaining budget can accommodate the step's `max_tokens` budget (from the resolved `TaskConfig`). If the remaining budget is less than the step's configured token limit multiplied by the model's per-token cost, the step is rejected before dispatch. This is conservative (it blocks based on the *maximum possible* spend, not the *expected* spend) but requires no token counting library and catches obviously over-budget dispatches without wasting compute.
+
+Both estimated and actual costs are recorded in `StepExecutionMetadata` for operator visibility.
+
+**Acknowledged limitation**: The pre-dispatch heuristic uses `max_tokens` (output token cap) as the cost proxy, but input tokens — which depend on prompt construction inside the agent — are not bounded by this field. A step with `max_tokens=8192` may consume 8192 output tokens plus a much larger number of input tokens. This means the pre-dispatch guard systematically underestimates potential cost. This is accepted as the right tradeoff: the guard is a fast, dependency-free check that catches obviously over-budget dispatches, while post-dispatch actuals (which include both input and output tokens from LLM provider responses) serve as the authoritative enforcement. If underestimation becomes a production problem, an input token multiplier can be added to the heuristic without changing the `BudgetEnforcer` interface.
+
+### 4. Persona tick loop integration — Keep persona-specific; migrate later
+
+**Decision**: Persona-specific constants (`_MAX_SUB_AGENT_TOKENS`, `_MAX_SUB_AGENT_TIMEOUT_SECONDS`, `_MAX_SUB_AGENT_LLM_CALLS`) remain in `agents/persona_runtime.py`. They are not migrated to `agents/defaults.py` in this RFC.
+
+**Rationale**: This RFC's non-goals section explicitly states: "Changes to the persona agent tick loop budget model (already has independent caps in `persona_runtime.py`)." The persona sub-agent caps serve a different architectural purpose — they are validation-time clamps on LLM-generated `SPAWN_SUB_AGENT` action payloads, not orchestrator-level execution limits. Sub-agent spawning is not yet wired (the action returns `not_implemented`), so these caps are defensive boundaries for a future feature. Memory truncation constants (`_MAX_EPISODE_SUMMARY_CHARS`, etc.) are persona-specific context-window tuning knobs, not system-wide execution limits.
+
+The `agents/defaults.py` module created in Phase 1 will centralize task agent defaults (`DEFAULT_MAX_LLM_CALLS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_TIMEOUT_SECONDS`). Persona-specific constants will be migrated when sub-agent spawning is production-ready (RFC 0010), at which point the cost model will be mature enough to set informed defaults.
+
+**Known risk for RFC 0010**: The persona sub-agent constants (`_MAX_SUB_AGENT_TOKENS = 100,000`, `_MAX_SUB_AGENT_LLM_CALLS = 50`) are dramatically higher than the system defaults proposed here (`max_tokens = 8192`, `max_llm_calls = 5`). When sub-agent spawning is wired, a persona agent could spawn a sub-agent consuming up to 12× the system default token budget, entirely outside the `BudgetEnforcer` framework. RFC 0010 must integrate sub-agent spawning with budget enforcement from day one — sub-agent resource consumption must count against the parent workflow's budget.
 
 ---
 
