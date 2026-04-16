@@ -27,6 +27,15 @@ var (
 	ErrUnexpectedStatus = errors.New("unexpected task status from agent")
 )
 
+// StepLimits holds resolved execution limits for a single step dispatch.
+// These are populated by the scheduler's three-level cascade (step config →
+// agent config → system defaults) before being passed to the executor.
+type StepLimits struct {
+	MaxLLMCalls    int
+	MaxTokens      int
+	TimeoutSeconds int
+}
+
 // ExecuteRequest contains the parameters for a task dispatch.
 type ExecuteRequest struct {
 	TaskID     string
@@ -34,6 +43,7 @@ type ExecuteRequest struct {
 	AgentID    string
 	Payload    string
 	Context    map[string]string
+	Limits     StepLimits
 }
 
 // ExecuteResult contains the outcome of a task dispatch.
@@ -141,7 +151,9 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		Payload:    req.Payload,
 		Context:    req.Context,
 		Config: &taskpb.TaskConfig{
-			TimeoutSeconds: int32(e.timeout.Seconds()),
+			MaxLlmCalls:    int32(req.Limits.MaxLLMCalls),
+			MaxTokens:      int32(req.Limits.MaxTokens),
+			TimeoutSeconds: int32(req.Limits.TimeoutSeconds),
 		},
 	}
 

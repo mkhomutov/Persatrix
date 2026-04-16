@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -360,11 +361,13 @@ func (s *WorkflowScheduler) executeStep(
 
 	// Dispatch to executor.
 	// TODO(v0.2): evaluate step conditions
+	limits := s.resolveStepLimits(ctx, step)
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
 		WorkflowID: workflowID,
 		AgentID:    step.AgentID,
 		Payload:    resolved,
 		Context:    outputsCopy,
+		Limits:     limits,
 	})
 	if err != nil {
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
@@ -387,6 +390,51 @@ func (s *WorkflowScheduler) executeStep(
 	}
 
 	return result.Output, nil
+}
+
+// resolveStepLimits implements the three-level cascade for execution limits:
+// workflow step config → agent config → system defaults (RFC 0006 Section A).
+// Zero values at any level mean "not configured" and fall through to the next level.
+func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.Step) executor.StepLimits {
+	limits := executor.StepLimits{
+		MaxLLMCalls:    defaults.DefaultMaxLLMCalls,
+		MaxTokens:      defaults.DefaultMaxTokens,
+		TimeoutSeconds: defaults.DefaultTimeoutSeconds,
+	}
+
+	// Middle tier: agent config overrides system defaults.
+	if s.registry != nil {
+		agent, err := s.registry.Get(ctx, step.AgentID)
+		if err == nil {
+			if agent.MaxLLMCalls > 0 {
+				limits.MaxLLMCalls = agent.MaxLLMCalls
+			}
+			if agent.MaxTokens > 0 {
+				limits.MaxTokens = agent.MaxTokens
+			}
+			if agent.TimeoutSeconds > 0 {
+				limits.TimeoutSeconds = agent.TimeoutSeconds
+			}
+		} else {
+			s.logger.Warn("failed to look up agent config for limit resolution, using defaults",
+				zap.String("agentID", step.AgentID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Highest tier: step config overrides agent config.
+	if step.MaxLLMCalls > 0 {
+		limits.MaxLLMCalls = step.MaxLLMCalls
+	}
+	if step.MaxTokens > 0 {
+		limits.MaxTokens = step.MaxTokens
+	}
+	if step.TimeoutSeconds > 0 {
+		limits.TimeoutSeconds = step.TimeoutSeconds
+	}
+
+	return limits
 }
 
 // markStepFailed updates the step state to failed with the given error message.
