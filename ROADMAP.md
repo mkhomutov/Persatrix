@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-16  
+> **Last updated**: 2026-04-16 (RFC 0014 added)  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress  
 > **Current milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
 
@@ -139,6 +139,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | 0011 | Channels + Bridges | Not yet written | — | — |
 | 0012 | Protocols + Organizations | Not yet written | — | — |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | 📋 Proposed | 0 | 0/0 |
+| [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | 📋 Proposed | 0 | 0/0 |
 
 ### Dependency Chain
 
@@ -154,6 +155,7 @@ RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depend
 RFC 0009 (Agent Identity, Security & Sandboxing)          📋 Proposed  [depends on 0004, 0005; Phases 1–2 alongside 0006]
     ↓
 RFC 0013 (Legal, Ethical & Regulatory Compliance)         📋 Proposed  [depends on 0009; Phases 1–2 alongside 0009]
+RFC 0014 (Agent Skill Registry & Lifecycle)               📋 Proposed  [depends on 0008, 0009; Phases 1–2 alongside 0013]
     ↓
 RFC 0010 (Sub-Agent Spawning)                             Not yet written
     ↓
@@ -171,6 +173,8 @@ RFC 0012 (Protocols + Organizations)                      Not yet written
 > **Why RFC 0010 (Sub-Agent Spawning) after RFC 0008 and RFC 0009**: Sub-agent spawning creates recursive execution paths. RFC 0008's delegation contract and merge semantics (Phase 3) must be in place before production sub-agent patterns are enabled. RFC 0009's capability token model ensures spawned agents receive narrowed, orchestrator-issued tokens rather than inheriting parent capabilities.
 >
 > **Why RFC 0013 (Legal, Ethical & Regulatory Compliance) alongside RFC 0009**: RFC 0009 establishes the technical security infrastructure (audit logging, HITL gates, capability tokens). RFC 0013 builds the compliance layer on top: data classification, consent tracking, right to erasure, ethical guardrails, and regulatory audit extensions. Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's AuditLogger and HITL gates. RFC 0013 must be substantially complete before RFC 0011 (Channels + Bridges) ships, since bridge inputs are the primary vector for external user data entering the system.
+>
+> **Why RFC 0014 (Skill Registry) after RFC 0008 and RFC 0009, before RFC 0010**: The skill registry is the capability-management layer that RFC 0010 (Sub-Agent Spawning) depends on for routing — when the orchestrator spawns a sub-agent, it uses the `SkillCatalogue` to select the agent with the required skill and to issue a narrowed skill set to the child. RFC 0014's Phase 1–2 (registry infrastructure and skill validation) can develop alongside RFC 0013, as both depend on RFC 0009 Phase 1 (audit logging) but are otherwise independent. RFC 0014 Phase 3 (lifecycle governance and `SkillGrant` records) must land before RFC 0010, which relies on dynamic skill injection semantics for safe sub-agent scoping.
 
 ### Planned Components
 
@@ -193,6 +197,7 @@ RFC 0012 (Protocols + Organizations)                      Not yet written
 | MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0010 |
 | Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
 | Compliance & Privacy | `internal/security/` | `agents/compliance.py` | Data classification, consent tracking, erasure, ethical policy, audit extensions | 0013 |
+| Skill Registry & Lifecycle | `internal/registry/` | `agents/skills/` | SkillSpec data model, SkillRegistry, SkillCatalogue, skill validation, failure modes, fallback chains, observability, meta-skills | 0014 |
 
 ---
 
