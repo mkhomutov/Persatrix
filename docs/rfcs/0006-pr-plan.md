@@ -527,7 +527,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
 | 1b | 1 | ~200–300 lines | ~340–510 lines | In review (PR #81) |
 | 1c | 1 | ~130–200 lines | ~220–340 lines | In review (PR #83) |
-| 2 | 2 | ~200–300 lines | ~340–510 lines | Not started |
+| 2 | 2 | ~200–300 lines | ~340–510 lines | In review |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | Not started |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | Not started |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | Not started |

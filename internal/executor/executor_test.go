@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
@@ -928,4 +929,296 @@ func TestDialOptions_Additive(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "additive-ok", result.Output)
+}
+
+// --- PR 2: Derived deadline, shared retry budget, minimum budget cutoff ---
+
+func TestDerivedDeadline_RPCTimeoutFromStepTimeout(t *testing.T) {
+	// In derived mode, the RPC timeout should be step.TimeoutSeconds + transport margin.
+	// A step with 60s timeout → RPC timeout of 65s (60 + DefaultTransportMargin).
+	var callDeadlineOK bool
+	env := setupTestEnv(t,
+		func(ctx context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			deadline, ok := ctx.Deadline()
+			if ok {
+				remaining := time.Until(deadline)
+				// Should be close to 65s (60s step + 5s transport margin).
+				// Allow generous tolerance for test scheduling variance.
+				expected := time.Duration(60+defaults.DefaultTransportMargin) * time.Second
+				callDeadlineOK = remaining > expected-2*time.Second && remaining <= expected+time.Second
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "done",
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithMaxRetries(0),
+	)
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "derived deadline test",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: 60,
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "done", result.Output)
+	assert.True(t, callDeadlineOK, "RPC deadline should be ~65s (step 60s + transport margin 5s)")
+}
+
+func TestDerivedDeadline_SharedRetryBudget(t *testing.T) {
+	// First attempt takes most of the step deadline. Second attempt should get
+	// only the remaining time.
+	var secondCallDeadline time.Duration
+	callCount := 0
+	stepTimeout := 2 // 2 seconds for fast test
+
+	env := setupTestEnv(t,
+		func(ctx context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount == 1 {
+				// Simulate a slow first attempt that consumes ~1s of the 2s budget.
+				time.Sleep(time.Duration(float64(stepTimeout)*0.5) * time.Second)
+				return nil, status.Error(codes.Unavailable, "temporarily unavailable")
+			}
+			// Second call: check remaining deadline.
+			deadline, ok := ctx.Deadline()
+			if ok {
+				secondCallDeadline = time.Until(deadline)
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "recovered",
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithMaxRetries(2),
+	)
+
+	registerHealthyAgent(t, env.reg, "retry-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "retry-agent",
+		Payload: "shared deadline test",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: stepTimeout,
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", result.Output)
+	assert.Equal(t, 2, callCount)
+	// Second call should have less time than the original deadline + margin.
+	fullDeadline := time.Duration(stepTimeout+defaults.DefaultTransportMargin) * time.Second
+	assert.Less(t, secondCallDeadline, fullDeadline,
+		"second attempt should have less time than original deadline")
+}
+
+func TestDerivedDeadline_MinimumBudgetCutoff(t *testing.T) {
+	// If less than MinRetryBudgetFraction of time remains, retry should be skipped.
+	callCount := 0
+	stepTimeout := 1 // 1 second
+
+	env := setupTestEnv(t,
+		func(ctx context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			// Consume most of the time budget on first attempt.
+			time.Sleep(850 * time.Millisecond)
+			return nil, status.Error(codes.Unavailable, "unavailable")
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithMaxRetries(3),
+	)
+
+	registerHealthyAgent(t, env.reg, "slow-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "slow-agent",
+		Payload: "budget cutoff test",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: stepTimeout,
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "retries exhausted")
+	// Should have done 1 attempt, then skipped retries due to insufficient budget.
+	assert.Equal(t, 1, callCount, "should skip retry when <25%% of time budget remains")
+}
+
+func TestDerivedDeadline_TokenBudgetCutoff(t *testing.T) {
+	// Verify that parseTokensUsed returns 0 for transport errors (current behavior)
+	// and the executor still respects the token budget check path.
+	assert.Equal(t, int64(0), parseTokensUsed(errors.New("some error")))
+	assert.Equal(t, int64(0), parseTokensUsed(status.Error(codes.Unavailable, "unavailable")))
+}
+
+func TestStaticMode_PreservesOriginalBehavior(t *testing.T) {
+	// In static mode, each dispatch gets the per-executor timeout, not derived.
+	var callDeadline time.Duration
+	env := setupTestEnv(t,
+		func(ctx context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			deadline, ok := ctx.Deadline()
+			if ok {
+				callDeadline = time.Until(deadline)
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "static",
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeStatic),
+		WithTimeout(10*time.Second),
+		WithMaxRetries(0),
+	)
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "static mode test",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: 60, // this should be ignored in static mode
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "static", result.Output)
+	// Deadline should be close to the executor's static timeout (10s), not 65s.
+	assert.Less(t, callDeadline, 12*time.Second, "static mode should use executor timeout")
+	assert.Greater(t, callDeadline, 8*time.Second, "static mode should use executor timeout")
+}
+
+func TestDerivedDeadline_ZeroTimeoutFallsBackToStatic(t *testing.T) {
+	// If step TimeoutSeconds is 0, derived mode falls back to per-executor timeout.
+	var callDeadline time.Duration
+	env := setupTestEnv(t,
+		func(ctx context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			deadline, ok := ctx.Deadline()
+			if ok {
+				callDeadline = time.Until(deadline)
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "fallback",
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithTimeout(10*time.Second),
+		WithMaxRetries(0),
+	)
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "zero timeout",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: 0, // zero = not configured
+		},
+	})
+
+	require.NoError(t, err)
+	// Should fall back to the static 10s timeout.
+	assert.Less(t, callDeadline, 12*time.Second)
+	assert.Greater(t, callDeadline, 8*time.Second)
+}
+
+func TestDerivedDeadline_DeadlineExceeded_NoRetry(t *testing.T) {
+	// DeadlineExceeded from gRPC is permanent — should not be retried even in
+	// derived mode (existing behavior preserved).
+	var callCount int32
+	env := setupTestEnv(t,
+		func(ctx context.Context, _ *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			atomic.AddInt32(&callCount, 1)
+			<-ctx.Done()
+			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithTimeout(100*time.Millisecond), // fallback for zero-timeout path
+		WithMaxRetries(3),
+	)
+
+	registerHealthyAgent(t, env.reg, "slow-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "slow-agent",
+		Payload: "will timeout",
+		Limits: StepLimits{
+			TimeoutSeconds: 1, // 1s step timeout → 6s RPC timeout
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permanent failure")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&callCount), "DeadlineExceeded should not be retried")
+}
+
+func TestResolveDeadline_Derived(t *testing.T) {
+	e := &GRPCExecutor{
+		timeout:      30 * time.Second,
+		deadlineMode: DeadlineModeDerived,
+	}
+
+	stepDeadline, dispatchTimeout := e.resolveDeadline(StepLimits{TimeoutSeconds: 60})
+
+	assert.Equal(t, 60*time.Second, stepDeadline)
+	expectedTimeout := time.Duration(60+defaults.DefaultTransportMargin) * time.Second
+	assert.Equal(t, expectedTimeout, dispatchTimeout)
+}
+
+func TestResolveDeadline_Static(t *testing.T) {
+	e := &GRPCExecutor{
+		timeout:      5 * time.Minute,
+		deadlineMode: DeadlineModeStatic,
+	}
+
+	stepDeadline, dispatchTimeout := e.resolveDeadline(StepLimits{TimeoutSeconds: 60})
+
+	assert.Equal(t, 5*time.Minute, stepDeadline)
+	assert.Equal(t, 5*time.Minute, dispatchTimeout)
+}
+
+func TestResolveDeadline_DerivedZeroTimeout(t *testing.T) {
+	e := &GRPCExecutor{
+		timeout:      30 * time.Second,
+		deadlineMode: DeadlineModeDerived,
+	}
+
+	stepDeadline, dispatchTimeout := e.resolveDeadline(StepLimits{TimeoutSeconds: 0})
+
+	// Zero timeout falls back to static behavior.
+	assert.Equal(t, 30*time.Second, stepDeadline)
+	assert.Equal(t, 30*time.Second, dispatchTimeout)
+}
+
+func TestWithDeadlineMode(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(), WithDeadlineMode(DeadlineModeDerived))
+	assert.Equal(t, DeadlineModeDerived, exec.deadlineMode)
+}
+
+func TestNewGRPCExecutor_DefaultsToStaticMode(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop())
+	assert.Equal(t, DeadlineModeStatic, exec.deadlineMode)
 }

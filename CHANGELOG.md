@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(orchestrator)* Derived deadline mode: RPC timeouts computed from step config
+  (`step.TimeoutSeconds + transport_margin`) instead of a static per-executor timeout.
+  Retries share the step deadline — each attempt gets remaining time, not a fresh window.
+  Minimum budget check (25% remaining) prevents wasteful retries. Configurable via
+  `execution.deadline_mode: "derived"|"static"` (RFC 0006 PR 2)
 - *(agents)* Centralize execution limit defaults in `agents/defaults.py`
   (`DEFAULT_MAX_LLM_CALLS=5`, `DEFAULT_MAX_TOKENS=8192`, `DEFAULT_TIMEOUT_SECONDS=60`)
   replacing inline magic numbers in `base.py` (RFC 0006 PR 1c, #83)

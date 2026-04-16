@@ -3,6 +3,9 @@ environment: "development"
 deployment:
   mode: "local"
 
+execution:
+  deadline_mode: "derived"
+
 observability:
   otlp:
     endpoint: "http://localhost:4318"

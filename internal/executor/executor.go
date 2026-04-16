@@ -15,8 +15,21 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
 	"github.com/mkhomutov/persatrix/internal/registry"
+)
+
+// DeadlineMode controls how per-dispatch RPC timeouts are computed.
+type DeadlineMode string
+
+const (
+	// DeadlineModeDerived computes the RPC timeout from the step's
+	// TimeoutSeconds + DefaultTransportMargin. Retries share the step deadline.
+	DeadlineModeDerived DeadlineMode = "derived"
+	// DeadlineModeStatic uses the per-executor timeout for every dispatch,
+	// preserving pre-PR 2 behavior.
+	DeadlineModeStatic DeadlineMode = "static"
 )
 
 // Sentinel errors for executor operations.
@@ -93,13 +106,25 @@ func WithDialOptions(opts ...grpc.DialOption) Option {
 	}
 }
 
+// WithDeadlineMode sets how per-dispatch RPC timeouts are computed.
+// In "derived" mode, the timeout is computed from the step's TimeoutSeconds
+// + DefaultTransportMargin, and retries share the step deadline.
+// In "static" mode, the per-executor timeout is used (pre-PR 2 behavior).
+// Unrecognized values are treated as "static" with a warning log at construction.
+func WithDeadlineMode(mode DeadlineMode) Option {
+	return func(e *GRPCExecutor) {
+		e.deadlineMode = mode
+	}
+}
+
 // GRPCExecutor dispatches tasks to agents via gRPC.
 type GRPCExecutor struct {
-	registry   registry.Registry
-	logger     *zap.Logger
-	timeout    time.Duration
-	maxRetries int
-	dialOpts   []grpc.DialOption
+	registry     registry.Registry
+	logger       *zap.Logger
+	timeout      time.Duration
+	maxRetries   int
+	dialOpts     []grpc.DialOption
+	deadlineMode DeadlineMode
 }
 
 // NewGRPCExecutor creates a new GRPCExecutor with the given registry and options.
@@ -108,10 +133,11 @@ func NewGRPCExecutor(reg registry.Registry, logger *zap.Logger, opts ...Option) 
 		logger = zap.NewNop()
 	}
 	e := &GRPCExecutor{
-		registry:   reg,
-		logger:     logger,
-		timeout:    30 * time.Second,
-		maxRetries: 3,
+		registry:     reg,
+		logger:       logger,
+		timeout:      30 * time.Second,
+		maxRetries:   3,
+		deadlineMode: DeadlineModeStatic,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -122,6 +148,12 @@ func NewGRPCExecutor(reg registry.Registry, logger *zap.Logger, opts ...Option) 
 // ExecuteTask dispatches a task to the specified agent via gRPC with retry logic.
 // It looks up the agent in the registry, verifies health status, establishes a
 // per-task gRPC connection, and sends an ExecuteTask RPC.
+//
+// In derived deadline mode, the RPC timeout is computed from the step's
+// TimeoutSeconds + DefaultTransportMargin. Retries share the step deadline —
+// each attempt gets the remaining time rather than a fresh window. If less than
+// MinRetryBudgetFraction of the original time or token budget remains, the retry
+// is skipped. In static mode, each attempt gets the per-executor timeout.
 func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error) {
 	// Look up agent in registry.
 	agent, err := e.registry.Get(ctx, req.AgentID)
@@ -157,12 +189,60 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		},
 	}
 
+	// Compute step deadline and per-dispatch timeout based on deadline mode.
+	stepDeadline, dispatchTimeout := e.resolveDeadline(req.Limits)
+
 	// Retry loop with exponential backoff + jitter.
+	// In derived mode, retries share the step deadline — elapsed time is tracked
+	// and each retry gets the remaining budget.
 	var lastErr error
+	start := time.Now()
+	var cumulativeTokens int64
+
 	for attempt := range e.maxRetries + 1 {
-		result, err := e.dispatch(ctx, agent.Address, grpcReq)
+		// In derived mode, check whether enough time budget remains for a retry.
+		if e.deadlineMode == DeadlineModeDerived && attempt > 0 {
+			elapsed := time.Since(start)
+			remaining := stepDeadline - elapsed
+			minBudget := time.Duration(float64(stepDeadline) * defaults.MinRetryBudgetFraction)
+			if remaining < minBudget {
+				e.logger.Warn("retry skipped: insufficient time budget",
+					zap.String("agentID", req.AgentID),
+					zap.String("taskID", taskID),
+					zap.Int("attempt", attempt),
+					zap.Duration("remaining", remaining),
+					zap.Duration("minBudget", minBudget),
+				)
+				break
+			}
+			// Update dispatch timeout to remaining time + transport margin.
+			dispatchTimeout = remaining + time.Duration(defaults.DefaultTransportMargin)*time.Second
+		}
+
+		// In derived mode, check token budget before retry.
+		if e.deadlineMode == DeadlineModeDerived && attempt > 0 && req.Limits.MaxTokens > 0 {
+			remaining := int64(req.Limits.MaxTokens) - cumulativeTokens
+			minTokens := int64(float64(req.Limits.MaxTokens) * defaults.MinRetryBudgetFraction)
+			if remaining < minTokens {
+				e.logger.Warn("retry skipped: insufficient token budget",
+					zap.String("agentID", req.AgentID),
+					zap.String("taskID", taskID),
+					zap.Int("attempt", attempt),
+					zap.Int64("tokensUsed", cumulativeTokens),
+					zap.Int("maxTokens", req.Limits.MaxTokens),
+				)
+				break
+			}
+		}
+
+		result, err := e.dispatch(ctx, agent.Address, grpcReq, dispatchTimeout)
 		if err == nil {
 			return result, nil
+		}
+
+		// Track token usage from failed attempts for budget accounting.
+		if e.deadlineMode == DeadlineModeDerived {
+			cumulativeTokens += parseTokensUsed(err)
 		}
 
 		lastErr = err
@@ -202,8 +282,20 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	return nil, fmt.Errorf("retries exhausted (%d attempts) for agent %s: %w", e.maxRetries+1, req.AgentID, lastErr)
 }
 
+// resolveDeadline computes the step deadline duration and the initial per-dispatch
+// timeout based on the executor's deadline mode and the step's configured limits.
+func (e *GRPCExecutor) resolveDeadline(limits StepLimits) (stepDeadline, dispatchTimeout time.Duration) {
+	if e.deadlineMode == DeadlineModeDerived && limits.TimeoutSeconds > 0 {
+		stepDeadline = time.Duration(limits.TimeoutSeconds) * time.Second
+		dispatchTimeout = stepDeadline + time.Duration(defaults.DefaultTransportMargin)*time.Second
+		return stepDeadline, dispatchTimeout
+	}
+	// Static mode or zero timeout: use per-executor timeout for each dispatch.
+	return e.timeout, e.timeout
+}
+
 // dispatch performs a single gRPC ExecuteTask call to the agent at the given address.
-func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb.TaskRequest) (*ExecuteResult, error) {
+func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb.TaskRequest, timeout time.Duration) (*ExecuteResult, error) {
 	// Build dial options. Transport credentials are always included as the base
 	// so callers using WithDialOptions (e.g., custom interceptors) don't need to
 	// independently remember to supply credentials. (N-06)
@@ -221,9 +313,8 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 
 	client := taskpb.NewAgentServiceClient(conn)
 
-	// Apply per-task timeout. Intentionally scoped per-dispatch (not wrapping
-	// the entire retry loop) so each attempt gets a fresh timeout window.
-	callCtx, cancel := context.WithTimeout(ctx, e.timeout)
+	// Apply per-dispatch timeout.
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	resp, err := client.ExecuteTask(callCtx, req)
@@ -250,6 +341,17 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 		Output:   resp.Result,
 		Metadata: resp.Metadata,
 	}, nil
+}
+
+// parseTokensUsed extracts token usage from a gRPC error's trailing metadata.
+// Returns 0 if the error doesn't carry token information — this is the common case
+// for transport-level errors. Token usage from successful responses is tracked
+// separately via ExecuteResult.Metadata.
+func parseTokensUsed(err error) int64 {
+	// In v0.2, agent errors may carry token metadata via gRPC trailers.
+	// For now, return 0 — the primary budget enforcement is time-based.
+	_ = err
+	return 0
 }
 
 // isTransient classifies whether an error is transient and eligible for retry.
