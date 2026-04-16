@@ -4,7 +4,7 @@
 **Status**: � Accepted  
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
-**Target**: v0.2  
+**Target**: v0.3.0  
 **Depends on**: RFC 0005, RFC 0006
 
 ---

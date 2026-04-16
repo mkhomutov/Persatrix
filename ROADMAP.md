@@ -1,29 +1,58 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-16 (RFC 0014 added)  
-> **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
+> **Last updated**: 2026-04-16 (versioning strategy revised — versions defined by capability, not RFC completion)  
+> **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PRs 1c through 4a are the v0.2.0 critical path
 
-This document tracks development progress across all phases. Update it when merging PRs or completing milestones.
-
----
-
-## Phase Overview
-
-| Version | Scope | Status |
-|---------|-------|--------|
-| **v0.1** | Core engine: orchestrator, task agents, workflows, REST API, gRPC dispatch, tools | ✅ Complete (internal milestone — not publicly released; project renamed to Persatrix before first public release) |
-| **v0.2** | Agent societies: personas, channels, protocols, bridges, memory, sub-agents | � In Progress |
-| **v0.3** | Distributed mesh: multi-node, A2A protocol, platform integrations | 📋 Planned |
-| **v0.4+** | Autonomous agents, simulation controls, web dashboard | 📋 Future |
+This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
 ---
 
-## v0.1 — MVP Core Engine
+## Version Map
 
-**Goal**: End-to-end workflow execution — submit a YAML workflow via CLI/REST, orchestrator plans and schedules stages, dispatches tasks to Python agents over gRPC, agents call LLMs and tools, results flow back.
+A version is ready when a developer can do something meaningful they could not do before. Versions are defined by what a user **can do** — not by which RFCs are internally complete.
 
-### RFC Tracker
+| Version | What a user can do | Status |
+|---------|-------------------|--------|
+| **v0.1.0** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
+| **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | 🚧 In Progress — first public release |
+| **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
+| **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
+| **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
+| **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
+
+---
+
+## RFC Master Index
+
+Internal RFCs are the engineering planning tool. They do not drive version numbers. The table below shows each RFC's target public version.
+
+| RFC | Title | Target Version | Status |
+|-----|-------|----------------|--------|
+| [0001](docs/rfcs/0001-core-orchestration-pipeline.md) | Core Orchestration Pipeline | v0.1.0 | ✅ Implemented |
+| [0002](docs/rfcs/0002-rest-api-server.md) | REST API Server | v0.1.0 | ✅ Implemented |
+| [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor | v0.1.0 | ✅ Implemented |
+| [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server | v0.1.0 | ✅ Implemented |
+| [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | v0.2.0 | ✅ Implemented |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | 🚧 Implementing |
+| [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | v0.3.0 | 📋 Proposed |
+| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 👍 Accepted |
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 📋 Proposed |
+| 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
+| 0011 | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | Not yet written |
+| 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
+| [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
+| [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
+
+---
+
+## v0.1.0 — Core Engine
+
+**What a user can do**: Submit YAML workflows via CLI, orchestrator plans and schedules stages, dispatches tasks to Python agents over gRPC, agents call LLMs and tools, results flow back.
+
+**Status**: ✅ Complete — internal baseline. Not publicly released; project was renamed to Persatrix before first public release.
+
+### RFC Scope
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
@@ -43,7 +72,7 @@ RFC 0003 (Scheduler + Executor + gRPC)        ✅ Done (7 core + 4 follow-up = 1
     ↓
 RFC 0004 (Python Agent Server + Tools)        ✅ Done (7/7)
     ↓
-v0.1 Complete ─ end-to-end execution working
+v0.1.0 complete — end-to-end execution working
 ```
 
 ### Component Status
@@ -60,9 +89,9 @@ v0.1 Complete ─ end-to-end execution working
 | `internal/executor/` | gRPC task dispatch to agents | ✅ Complete (96.1% coverage) |
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
-| `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.2+) |
-| `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2+) |
-| `internal/cost/` | Token/cost tracking aggregation | 🔲 TODO stub (v0.2+) |
+| `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
+| `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
+| `internal/cost/` | Token/cost tracking aggregation | 🔲 TODO stub — RFC 0006 implementing |
 
 #### Python Agents (`agents/`)
 
@@ -72,18 +101,6 @@ v0.1 Complete ─ end-to-end execution working
 | `agents/llm_client.py` | Multi-provider LLM client (Anthropic + OpenAI) | ✅ Complete (RFC 0004 PR 4a) |
 | `agents/server.py` | gRPC service entry point + self-registration | ✅ Complete (RFC 0004 PR 5a+5b) |
 | `agents/task_agent.py` | Data-driven task agent (replaces CoderAgent, ReviewerAgent, PlannerAgent) | ✅ Complete (RFC 0005 PR 1a) |
-| `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
-| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, episode CRUD, recall, summarization, agent state persistence, delegates notes to NoteStore) | ✅ Complete (RFC 0005 PR 3a+3b+3c, split in PR 8b) |
-| `agents/memory/notes.py` | Agent-initiated note storage (NoteStore class, note CRUD, FTS5/LIKE search, pruning) | ✅ Complete (RFC 0005 PR 8b) |
-| `agents/memory/migrations.py` | Schema migrations, FTS5 DDL, scoring SQL constants | ✅ Complete (RFC 0005 PR 8b) |
-| `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
-| `agents/persona.py` | PersonaAgent ABC, create_persona_agent() factory, re-exports | ✅ Complete (RFC 0005 PR 5a+5b, split in PR 8a+8d) |
-| `agents/persona_runtime.py` | _LLMPersonaAgent concrete class (LLM-powered event loop, memory injection, tool use) | ✅ Complete (RFC 0005 PR 8d) |
-| `agents/persona_types.py` | Persona type definitions (PersonaState, Mood, AgentEvent, EventType, AgentAction, ActionType) | ✅ Complete (RFC 0005 PR 8a) |
-| `agents/persona_behavior.py` | Behavioral dimension rendering (render_behavior, DIMENSION_DESCRIPTIONS) | ✅ Complete (RFC 0005 PR 8a) |
-| `agents/dispatch.py` | Event dispatch and action execution (EventDispatcher, ActionExecutor) | ✅ Complete (RFC 0005 PR 8a) |
-| `agents/tick.py` | Autonomous tick scheduler (TickScheduler) | ✅ Complete (RFC 0005 PR 8a) |
-| `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry) |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
@@ -94,14 +111,14 @@ v0.1 Complete ─ end-to-end execution working
 
 | Module | Purpose | Status |
 |--------|---------|--------|
-| `cli/src/main.rs` | CLI entry point, clap definitions, command dispatch | ✅ Functional (RFC 0005 PR 8c split) |
-| `cli/src/types.rs` | API request/response types, shared validation helpers | ✅ Complete (RFC 0005 PR 8c) |
-| `cli/src/commands/workflow.rs` | Workflow commands (run, status) | ✅ Complete (RFC 0005 PR 8c) |
-| `cli/src/commands/agent.rs` | Agent commands (list, info, reload, test persona) | ✅ Complete (RFC 0005 PR 8c) |
-| `cli/src/commands/logs.rs` | Execution log viewing | ✅ Complete (RFC 0005 PR 8c) |
-| `cli/src/commands/validate.rs` | Config validation (Python subprocess) | ✅ Complete (RFC 0005 PR 8c) |
+| `cli/src/main.rs` | CLI entry point, clap definitions, command dispatch | ✅ Functional |
+| `cli/src/types.rs` | API request/response types, shared validation helpers | ✅ Complete |
+| `cli/src/commands/workflow.rs` | Workflow commands (run, status) | ✅ Complete |
+| `cli/src/commands/agent.rs` | Agent commands (list, info, reload, test persona) | ✅ Complete |
+| `cli/src/commands/logs.rs` | Execution log viewing | ✅ Complete |
+| `cli/src/commands/validate.rs` | Config validation (Python subprocess) | ✅ Complete |
 
-### What Works Today
+### What Works in v0.1.0
 
 1. Submit a workflow via CLI → `POST /api/v1/workflows/run`
 2. Orchestrator receives request, planner parses YAML, validates DAG, generates execution plan
@@ -112,117 +129,268 @@ v0.1 Complete ─ end-to-end execution working
 7. Poll `GET /api/v1/workflows/{id}/status` → returns Running/Completed/Failed with step details
 8. CRUD operations on agents via REST API
 
-### What's Missing for v0.1
-
-Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
-
-> Submitted runs are picked up by the scheduler and driven to completion. All three task agents (CoderAgent, ReviewerAgent, PlannerAgent) are implemented with LLM integration. The gRPC server (AgentServiceServicer) is fully wired with agent loading from YAML config. Agents self-register with the orchestrator at startup and de-register on shutdown. End-to-end gRPC integration tests pass with mock LLM.
-
 ---
 
-## v0.2 — Agent Societies
+## v0.2.0 — Persona Core ⭐ First Public Release
 
-**Goal**: Persona-driven agents with autonomous behavior, multi-channel communication, organizational hierarchy, and persistent memory.
+**What a user can do**: Run persistent AI agents with real personalities, memory, and evolving relationships from a terminal.
 
-**Design**: Fully specified in [persatrix-extension-spec.md](docs/persatrix-extension-spec.md).
+### What ships in v0.2.0
 
-### RFC Tracker
+- **PersonaAgent** — full behavioral model: personality dimensions, mood, stress, goals (RFC 0005)
+- **Three-tier memory** — episodic (SQLite + FTS5), relationship (trust + interaction history), working (context window management) (RFC 0005)
+- **Autonomous tick loop** — agents act without being prompted (RFC 0005)
+- **Relationship dynamics** — trust scores that evolve based on interactions (RFC 0005)
+- **Budget controls** — token caps, spend limits, deadline enforcement, pre-dispatch budget gating (RFC 0006)
+- **Execution observability** — per-step token usage, LLM call count, retry count, estimated cost in API responses (RFC 0006)
+- **CLI** — `run`, `inspect`, and `observe` persona agents from the terminal (RFC 0005)
+
+### What does not ship in v0.2.0
+
+- Agent-to-agent conversations and channels (RFC 0011) → v0.3.0
+- Conditional and looped workflow control flow (RFC 0007) → v0.3.0
+- Agent memory and context optimization for non-persona agents (RFC 0008) → v0.3.0
+- Security hardening beyond existing deny-by-default tool gates (RFC 0009) → v0.3.0
+- Sub-agent spawning (RFC 0010) → v0.4.0
+- Organizational hierarchy, roles, escalation (RFC 0012) → v0.4.0
+- Skill registry and lifecycle governance (RFC 0014) → v0.4.0
+- External bridges — Slack, Discord, Telegram, email (RFC 0011) → v0.5.0
+- Compliance and privacy layer (RFC 0013) → v0.5.0
+- Distributed mesh (v0.6.0)
+- Web dashboard
+
+### RFC Scope
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 0/10 |
-| [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | 📋 Proposed | 0 | 0/0 |
-| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | � Accepted | 0 | 0/0 |
-| [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | 📋 Proposed | 0 | 0/0 |
-| 0010 | Sub-Agent Spawning | Not yet written | — | — |
-| 0011 | Channels + Bridges | Not yet written | — | — |
-| 0012 | Protocols + Organizations | Not yet written | — | — |
-| [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | 📋 Proposed | 0 | 0/0 |
-| [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | 📋 Proposed | 0 | 0/0 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 2/10 |
 
-### Dependency Chain
+### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  � Implementing
+RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (2/10)
+    PR 1a — defaults package + Step limits + schema       ✅ #79
+    PR 1b — executor + scheduler limit wiring             ✅ #81
+    PR 1c — Python defaults + validation                  ⬜ next
+    PR 2  — deadline derivation + retry budget            ⬜
+    PR 3a — TokenCounter + BudgetEnforcer                 ⬜
+    PR 3b — CostReporter + scheduler budget integration   ⬜
+    PR 4a — StepExecutionMetadata + observability         ⬜ v0.2.0 critical path ends here
+    PR 4b — response cache + cost endpoint                ⬜ lowest priority; slips to v0.3.0 if needed
+    PR 5  — review follow-ups                             ⬜
+    PR 6  — RFC close                                     ⬜
     ↓
-RFC 0008 (Agent Memory & Context Optimization)            � Accepted  [depends on 0005, 0006]
-    ↓
-RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006, 0008]
-    │
-RFC 0009 (Agent Identity, Security & Sandboxing)          📋 Proposed  [depends on 0004, 0005; Phases 1–2 alongside 0006]
-    ↓
-RFC 0013 (Legal, Ethical & Regulatory Compliance)         📋 Proposed  [depends on 0009; Phases 1–2 alongside 0009]
-RFC 0014 (Agent Skill Registry & Lifecycle)               📋 Proposed  [depends on 0008, 0009; Phases 1–2 alongside 0013]
-    ↓
-RFC 0010 (Sub-Agent Spawning)                             Not yet written
-    ↓
-RFC 0011 (Channels + Bridges)                             Not yet written
-    ↓
-RFC 0012 (Protocols + Organizations)                      Not yet written
+v0.2.0 complete
 ```
 
-> **Why RFC 0006 before RFC 0008 and RFC 0007**: Loops, delegation, and sub-agent spawning all amplify every existing execution cost weakness. RFC 0006 hardens budget enforcement, deadline derivation, and execution metadata first so that the control-flow and context constructs introduced by RFC 0007 and RFC 0008 cannot produce runaway spend. See [RFC 0006 Motivation](docs/rfcs/0006-efficiency-execution-limits.md#motivation) for the detailed justification.
->
-> **Why RFC 0008 before RFC 0007 implementation**: RFC 0008 introduces per-step context budget allocation, caller-prepared context packages, and memory-aware delegation contracts. Landing these before large-scale loop patterns (RFC 0007 implementation) prevents each loop iteration from carrying unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows. RFC 0007's `Depends on` reflects this sequencing.
->
-> **Why RFC 0009 (Security) runs alongside RFC 0006 and before RFC 0010**: Agent societies dramatically expand the attack surface. RFC 0009 Phases 1–2 (audit logging, rate limiting, input sanitization) can be developed concurrently with RFC 0006. Phases 3–4 (tool validation, agent identity tokens, HITL gates) are prerequisites for sub-agent spawning (RFC 0010) and channel bridge inputs (RFC 0011), which are high-trust injection vectors.
->
-> **Why RFC 0010 (Sub-Agent Spawning) after RFC 0008 and RFC 0009**: Sub-agent spawning creates recursive execution paths. RFC 0008's delegation contract and merge semantics (Phase 3) must be in place before production sub-agent patterns are enabled. RFC 0009's capability token model ensures spawned agents receive narrowed, orchestrator-issued tokens rather than inheriting parent capabilities.
->
-> **Why RFC 0013 (Legal, Ethical & Regulatory Compliance) alongside RFC 0009**: RFC 0009 establishes the technical security infrastructure (audit logging, HITL gates, capability tokens). RFC 0013 builds the compliance layer on top: data classification, consent tracking, right to erasure, ethical guardrails, and regulatory audit extensions. Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's AuditLogger and HITL gates. RFC 0013 must be substantially complete before RFC 0011 (Channels + Bridges) ships, since bridge inputs are the primary vector for external user data entering the system.
->
-> **Why RFC 0014 (Skill Registry) after RFC 0008 and RFC 0009, before RFC 0010**: The skill registry is the capability-management layer that RFC 0010 (Sub-Agent Spawning) depends on for routing — when the orchestrator spawns a sub-agent, it uses the `SkillCatalogue` to select the agent with the required skill and to issue a narrowed skill set to the child. RFC 0014's Phase 1–2 (registry infrastructure and skill validation) can develop alongside RFC 0013, as both depend on RFC 0009 Phase 1 (audit logging) but are otherwise independent. RFC 0014 Phase 3 (lifecycle governance and `SkillGrant` records) must land before RFC 0010, which relies on dynamic skill injection semantics for safe sub-agent scoping.
+> PRs 1c through 4a are the v0.2.0 critical path. PR 4b (response cache) is the lowest-priority item and may slip to v0.3.0 without affecting the first public release story — budget enforcement and observability are what matters.
 
-### Planned Components
+### Component Status
 
-| Component | Go Package | Python Module | Description | Target RFC |
-|-----------|-----------|---------------|-------------|------------|
-| PersonaAgent | — | `agents/persona.py` | Event-driven `on_event()` + autonomous `on_tick()` loop | ✅ 0005 |
-| Execution Limits | `internal/defaults/`, `internal/executor/` | `agents/defaults.py` | End-to-end limit propagation, conservative defaults, derived deadlines | 0006 |
-| Cost Tracking & Budget Enforcement | `internal/cost/` | — | Token accounting (TokenCounter), per-workflow/per-agent/global budget gates (BudgetEnforcer), cost reporting (CostReporter) | 0006 |
-| Response Caching | `internal/cost/` | — | Exact-match response cache for deterministic tasks | 0006 |
-| Execution Observability | `internal/state/` | — | Per-step token usage, LLM call count, retry count, cost metadata | 0006 |
-| Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/`, `internal/state/` | `agents/memory/`, `agents/task_agent.py`, `agents/sub_agents/` | Memory access for non-persona agents, context budget allocation, caller-prepared context packaging/compression, delegation result merge contracts, shared vs isolated memory policies | 0008 |
-| Condition Evaluation | `internal/scheduler/` | — | Step condition expressions, skip semantics | 0007 |
-| Workflow Loops | `internal/scheduler/`, `internal/planner/` | — | Bounded repeat-until and for-each with mandatory guardrails | 0007 |
-| Security & Sandboxing | `internal/security/` | `agents/tools/sandbox.py`, `agents/security.py` | Agent identity tokens, input sanitization, audit logging, rate limiting, HITL gates, resource limits | 0009 |
-| Channels | `internal/channels/` | — | Internal message routing (groups, DMs, threads) | 0011 |
-| Bridges | `internal/bridges/` | — | External service connectors (Slack, Discord, email, Telegram) | 0011 |
-| Memory | — | `agents/memory/` | Three-tier: episodic (SQLite), relationship (trust/interaction), working (context window) | ✅ 0005 |
-| Sub-agents | — | `agents/sub_agents/` | Ephemeral agent spawning with inherited permissions | 0010 |
-| Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0012 |
-| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0010 |
-| Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
-| Compliance & Privacy | `internal/security/` | `agents/compliance.py` | Data classification, consent tracking, erasure, ethical policy, audit extensions | 0013 |
-| Skill Registry & Lifecycle | `internal/registry/` | `agents/skills/` | SkillSpec data model, SkillRegistry, SkillCatalogue, skill validation, failure modes, fallback chains, observability, meta-skills | 0014 |
+#### Go Orchestrator (`internal/`) — v0.2.0 additions
+
+| Package | Purpose | Status |
+|---------|---------|--------|
+| `internal/defaults/` | Centralized execution limit constants | ✅ Complete (RFC 0006 PR 1a) |
+| `internal/planner/` | Step-level limit fields (`TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`) | ✅ Updated (RFC 0006 PR 1a) |
+| `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b done; PR 2, 4a, 4b pending |
+| `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b done; PR 3b pending |
+| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🔲 PRs 3a, 3b, 4b pending |
+| `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cost, wall time) | 🔲 PR 4a pending |
+| `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | 🔲 PR 4b pending |
+| `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
+
+#### Python Agents (`agents/`) — v0.2.0 additions
+
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `agents/memory/working.py` | Working memory (context window management, priority retention, compression) | ✅ Complete (RFC 0005 PR 2) |
+| `agents/memory/episodic.py` | Episodic memory (SQLite, FTS5, episode CRUD, recall, summarization, delegates notes to NoteStore) | ✅ Complete (RFC 0005 PR 3a+3b+3c, refactored PR 8b) |
+| `agents/memory/notes.py` | Agent-initiated note storage (NoteStore, CRUD, FTS5/LIKE search, pruning) | ✅ Complete (RFC 0005 PR 8b) |
+| `agents/memory/migrations.py` | Schema migrations, FTS5 DDL, scoring SQL constants | ✅ Complete (RFC 0005 PR 8b) |
+| `agents/memory/relationship.py` | Relationship memory (trust tracking, interaction history, bidirectional decay) | ✅ Complete (RFC 0005 PR 4) |
+| `agents/persona.py` | PersonaAgent ABC, `create_persona_agent()` factory, re-exports | ✅ Complete (RFC 0005 PR 5a+5b, refactored PR 8a+8d) |
+| `agents/persona_runtime.py` | `_LLMPersonaAgent` concrete class (LLM-powered event loop, memory injection, tool use) | ✅ Complete (RFC 0005 PR 8d) |
+| `agents/persona_types.py` | Persona type definitions (`PersonaState`, `Mood`, `AgentEvent`, `EventType`, `AgentAction`, `ActionType`) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/persona_behavior.py` | Behavioral dimension rendering (`render_behavior`, `DIMENSION_DESCRIPTIONS`) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/dispatch.py` | Event dispatch and action execution (`EventDispatcher`, `ActionExecutor`) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/tick.py` | Autonomous tick scheduler (`TickScheduler`) | ✅ Complete (RFC 0005 PR 8a) |
+| `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
+| `agents/defaults.py` | Python execution limit constants (centralizes magic numbers from `base.py`) | 🔲 RFC 0006 PR 1c pending |
+
+### What Works in v0.2.0 (RFC 0005 complete)
+
+1. Configure a persona agent in `config/agents.yaml` with personality dimensions, mood, goals, and memory settings
+2. Start the agent gRPC server — agent self-registers with the orchestrator
+3. Agent's autonomous tick loop fires on a configurable interval — it generates actions and events without external prompts
+4. Events (user messages, tick events, relationship events) are dispatched to `on_event()`
+5. Each interaction persists to episodic memory (SQLite) and updates the relationship trust score for the sender
+6. Working memory manages the context window — high-priority items are retained, excess is summarized
+7. CLI commands: `persatrix agent test-persona`, `persatrix agent info`, `persatrix agent list`
+8. Relationships evolve over time: trust decays when agents don't interact, grows with positive interactions
 
 ---
 
-## v0.3 — Distributed Mesh
+## v0.3.0 — Agent Conversations
 
-**Goal**: Multi-node deployment with agent-to-agent networking and distributed workflow execution.
+**What a user can do**: Give agents a shared channel and watch them talk, negotiate, and form opinions about each other over time.
+
+### What ships in v0.3.0
+
+- **Internal channels** — group messages, DMs, threads; agents can address each other and reply (RFC 0011, internal part)
+- **Channel history** visible to agents via memory integration
+- **Multi-agent conversation routing** — message delivery, acknowledgement, threading
+- **Conditional and looped workflow control flow** — skip semantics, bounded repeat-until, for-each (RFC 0007)
+- **Agent memory and context optimization** — per-step context budget allocation, caller-prepared context packaging, delegation result merge contracts (RFC 0008)
+- **Security hardening Phases 1–2** — audit logging, rate limiting, input sanitization (RFC 0009)
+- **Response cache and cost endpoint** (RFC 0006 PR 4b, if deferred from v0.2.0)
+
+### RFC Scope
+
+| RFC | Title | Target scope | Status |
+|-----|-------|--------------|--------|
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Response cache + cost endpoint (PR 4b) | If deferred from v0.2.0 | 🚧 Implementing |
+| [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
+| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 👍 Accepted |
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
+| 0011 | Channels + Bridges | Internal channels only | Not yet written |
+
+### Dependency Chain (v0.3.0)
+
+```
+v0.2.0 complete
+    ↓
+RFC 0008 (Memory & Context Optimization)          [start alongside RFC 0007 authoring]
+    ↓
+RFC 0007 (Conditional & Looped Control Flow)      [depends on RFC 0006 + RFC 0008]
+    │
+RFC 0009 Phases 1–2 (Audit, Rate Limiting)        [runs alongside 0007/0008 — no blocking dependency]
+    ↓
+RFC 0011 — internal channels only                 [depends on 0007, 0008, 0009 P1–2]
+    ↓
+v0.3.0 complete
+```
+
+> **Why RFC 0008 before RFC 0007**: Context budget allocation and per-step memory packaging (RFC 0008) must land before large-scale loop patterns (RFC 0007 implementation). Each loop iteration would otherwise carry unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows.
+
+> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0008 dependency. They can develop concurrently. Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
+
+### Planned Components (v0.3.0)
+
+| Component | Go Package | Python Module | Target RFC |
+|-----------|-----------|---------------|------------|
+| Condition Evaluation | `internal/scheduler/` | — | 0007 |
+| Workflow Loops | `internal/scheduler/`, `internal/planner/` | — | 0007 |
+| Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
+| Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
+| Internal Channels | `internal/channels/` | — | 0011 |
+| Response Cache | `internal/cost/` | — | 0006 PR 4b |
+| Telemetry | `internal/telemetry/` | — | 0006+ |
+
+---
+
+## v0.4.0 — Agent Organizations
+
+**What a user can do**: Define a company, research lab, or team with roles and hierarchy — and let it run.
+
+### What ships in v0.4.0
+
+- **Organizational topologies** — hierarchy, flat, matrix; authority rules and escalation paths (RFC 0012 partial)
+- **Sub-agent spawning** — ephemeral agents with narrowed, orchestrator-issued permission tokens (RFC 0010)
+- **Security Phases 3–4** — tool validation, agent identity tokens, HITL gates (RFC 0009)
+- **Skill Registry** — `SkillSpec` model, `SkillCatalogue`, skill validation, failure modes, fallback chains (RFC 0014)
+- **Meeting and negotiation protocol scaffolding** (RFC 0012 partial)
+
+### RFC Scope
+
+| RFC | Title | Target scope | Status |
+|-----|-------|--------------|--------|
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 3–4 (identity tokens, HITL gates) | 📋 Proposed |
+| 0010 | Sub-Agent Spawning | Full RFC | Not yet written |
+| 0012 | Protocols + Organizations | Partial: org topologies, authority, spawning | Not yet written |
+| [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | Full RFC | 📋 Proposed |
+
+### Dependency Chain (v0.4.0)
+
+```
+v0.3.0 complete
+    ↓
+RFC 0009 Phases 3–4 (identity tokens, HITL)       [builds on P1–2 from v0.3.0]
+    │
+RFC 0014 Phases 1–2 (skill registry + validation)  [depends on RFC 0009 P1; runs alongside P3–4]
+    ↓
+RFC 0014 Phase 3 (SkillGrant + lifecycle)           [prerequisite for RFC 0010]
+    ↓
+RFC 0010 (Sub-Agent Spawning)                       [depends on RFC 0008, RFC 0009 all phases, RFC 0014]
+    ↓
+RFC 0012 partial (org topologies + authority)       [depends on RFC 0010]
+    ↓
+v0.4.0 complete
+```
+
+> **Why RFC 0014 before RFC 0010**: The skill registry is the capability-management layer RFC 0010 depends on for routing. When spawning a sub-agent the orchestrator uses `SkillCatalogue` to select and narrow the child's capabilities via `SkillGrant` records. RFC 0014 Phase 3 must land before RFC 0010's dynamic skill injection semantics are implemented.
+
+> **Why RFC 0009 Phases 3–4 before RFC 0010**: Sub-agent spawning creates recursive execution paths. The capability token model (RFC 0009 Phase 4) ensures spawned agents receive narrowed, orchestrator-issued tokens rather than inheriting parent capabilities — a hard prerequisite for safe sub-agent scoping.
+
+### Planned Components (v0.4.0)
+
+| Component | Go Package | Python Module | Target RFC |
+|-----------|-----------|---------------|------------|
+| Security & Sandboxing (P3–4) | `internal/security/` | `agents/security.py` | 0009 |
+| Skill Registry & Lifecycle | `internal/registry/` | `agents/skills/` | 0014 |
+| Sub-agents | — | `agents/sub_agents/` | 0010 |
+| MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | 0010 |
+| Organizations (partial) | `internal/protocols/` | — | 0012 |
+
+---
+
+## v0.5.0 — Connected Agents
+
+**What a user can do**: Bridge your agent society into Slack, Discord, or email — agents receive and send real messages.
+
+### What ships in v0.5.0
+
+- **External bridges** — Slack, Discord, Telegram, email connectors (RFC 0011, external part)
+- **Full compliance and privacy layer** — data classification, consent tracking, PII detection, right to erasure, ethical guardrails (RFC 0013)
+- **RFC 0012 remainder** — meeting and negotiation protocol completion, advanced organizational features
+
+### RFC Scope
+
+| RFC | Title | Target scope | Status |
+|-----|-------|--------------|--------|
+| 0011 | Channels + Bridges | External bridges | Not yet written |
+| 0012 | Protocols + Organizations | Remainder (meeting/negotiation protocols) | Not yet written |
+| [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | Full RFC | 📋 Proposed |
+
+> **Why RFC 0013 lands here and not earlier**: Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel with v0.4.0 work. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's `AuditLogger` and HITL gates. RFC 0013 must be substantially complete before external bridges ship — bridge inputs are the primary vector for external user data entering the system.
+
+### Planned Components (v0.5.0)
+
+| Component | Go Package | Python Module | Target RFC |
+|-----------|-----------|---------------|------------|
+| External Bridges | `internal/bridges/` | — | 0011 |
+| Compliance & Privacy | `internal/security/` | `agents/compliance.py` | 0013 |
+| Organizations (remainder) | `internal/protocols/` | — | 0012 |
+
+---
+
+## v0.6.0 — Distributed Mesh
+
+**What a user can do**: Run agent societies across multiple nodes and networks.
 
 **Design**: Architecture sketched in [persatrix-extension-spec.md](docs/persatrix-extension-spec.md). No RFCs written yet.
 
-### Planned Components
+### Planned Components (v0.6.0)
 
 | Component | Package | Description |
 |-----------|---------|-------------|
 | Mesh Networking | `internal/mesh/` | Multi-node peer discovery and communication |
 | A2A Protocol | `internal/a2a/` | Agent-to-agent networking across nodes |
 | Agent Migration | — | Move agents between nodes for load balancing |
-
----
-
-## v0.4+ — Future
-
-- Advanced simulation controls and evaluation framework
-- Web dashboard for observation and control
-- Extended autonomy models
-- Platform integrations
+| Data Residency | — | Per-node data controls |
 
 ---
 
@@ -288,6 +456,18 @@ RFC 0012 (Protocols + Organizations)                      Not yet written
 | [#67](https://github.com/mkhomutov/Persatrix/pull/67) | refactor(cli): split main.rs into modules (RFC 0005, PR 8c) | 0005 (8c/20) | 2026-04-14 |
 | [#68](https://github.com/mkhomutov/Persatrix/pull/68) | docs: add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) | 0005 (9/20) | 2026-04-14 |
 | [#69](https://github.com/mkhomutov/Persatrix/pull/69) | docs: close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) | 0005 (7d/20) | 2026-04-14 |
+| [#70](https://github.com/mkhomutov/Persatrix/pull/70) | refactor: rename project from Orchestr8 to Persatrix | cross-project rename | 2026-04-14 |
+| [#71](https://github.com/mkhomutov/Persatrix/pull/71) | fix: resolve Windows setup, Docker service discovery, and tool schema bugs | cross-RFC bugfix | 2026-04-15 |
+| [#72](https://github.com/mkhomutov/Persatrix/pull/72) | docs(rfc): propose RFC 0006 (Efficiency & Execution Limits) and RFC 0007 (Conditional & Looped Control Flow) | 0006+0007 (RFC) | 2026-04-15 |
+| [#73](https://github.com/mkhomutov/Persatrix/pull/73) | docs(rfc): add RFC 0008 — Agent Memory & Context Optimization | 0008 (RFC) | 2026-04-15 |
+| [#74](https://github.com/mkhomutov/Persatrix/pull/74) | docs(rfc): add RFC 0009 — Agent Identity, Security & Sandboxing | 0009 (RFC) | 2026-04-15 |
+| [#75](https://github.com/mkhomutov/Persatrix/pull/75) | docs(rfc0006): resolve open questions, accept RFC | 0006 accept | 2026-04-15 |
+| [#76](https://github.com/mkhomutov/Persatrix/pull/76) | docs(rfc0008): resolve open questions and accept RFC | 0008 accept | 2026-04-15 |
+| [#77](https://github.com/mkhomutov/Persatrix/pull/77) | docs(rfc): RFC 0013 — Legal, Ethical & Regulatory Compliance Framework | 0013 (RFC) | 2026-04-15 |
+| [#78](https://github.com/mkhomutov/Persatrix/pull/78) | docs(rfc0006): add PR implementation plan for Efficiency & Execution Limits | 0006 (PR plan) | 2026-04-16 |
+| [#79](https://github.com/mkhomutov/Persatrix/pull/79) | feat: add defaults package, step limit fields, and schema updates (RFC 0006 PR 1a) | 0006 (1a/10) | 2026-04-16 |
+| [#80](https://github.com/mkhomutov/Persatrix/pull/80) | docs(rfc): RFC 0014 — Agent Skill Registry & Lifecycle | 0014 (RFC) | 2026-04-16 |
+| [#81](https://github.com/mkhomutov/Persatrix/pull/81) | feat: wire execution limits through executor and scheduler (RFC 0006 PR 1b) | 0006 (1b/10) | 2026-04-16 |
 
 ---
 
@@ -297,16 +477,17 @@ This file must be reviewed and updated **during every task**, not just at comple
 
 ### On every task (before starting and after finishing)
 
-1. Verify the **RFC Tracker** table matches reality — correct status, correct merged count.
+1. Verify the **RFC Scope** tables match reality — correct status, correct merged count.
 2. Verify the **Component Status** tables — any component you touched should reflect current state.
 3. Update the **Last updated** date at the top.
 
 ### When a PR is merged
 
 1. Add the PR to the **Merged PR History** table.
-2. Increment the merged count in the **RFC Tracker** table.
+2. Increment the merged count in the relevant **RFC Scope** table.
 3. If all PRs for an RFC are now merged, change its status to `✅ Implemented` here **and** in the RFC file.
-4. Move completed components from "TODO stub" → "Complete" in component tables.
+4. Move completed components from "TODO stub" / "🔲 pending" → "✅ Complete" in component tables.
+5. Update the **RFC Master Index** table status.
 
 ### When starting RFC implementation
 
@@ -314,7 +495,13 @@ This file must be reviewed and updated **during every task**, not just at comple
 
 ### When creating a new RFC
 
-1. Add a row to the **RFC Tracker** table with status `📋 Proposed` and PR count `0/N`.
+1. Add a row to the **RFC Master Index** table with status `📋 Proposed`.
+2. Add a row to the relevant version's **RFC Scope** table.
+
+### When a version ships
+
+1. Update the **Version Map** table status from `🚧 In Progress` → `✅ Complete`.
+2. Update the header "Current phase" line.
 
 ### Status markers (from [RFC README](docs/rfcs/README.md))
 

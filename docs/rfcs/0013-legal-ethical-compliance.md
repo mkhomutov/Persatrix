@@ -4,7 +4,7 @@
 **Status**: 📋 Proposed  
 **Author**: Engineering Team  
 **Date**: 2026-04-16  
-**Target**: v0.2  
+**Target**: v0.5.0  
 **Depends on**: RFC 0009
 
 ---
