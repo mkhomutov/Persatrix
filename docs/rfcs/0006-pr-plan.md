@@ -92,6 +92,24 @@ PR 6 (RFC close)
 - [ ] `Step` struct includes `TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`
 - [ ] Negative limits rejected during parse
 
+#### Review Findings (PR #79)
+
+**Should Fix (before merge):**
+
+1. **Add boundary-value test for minimum valid limits** — Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies the schema `minimum: 1` boundary is correctly parsed by Go. Catches future off-by-one errors if validation changes to `<= 0` rejection. *(Location: `internal/planner/planner_test.go`)*
+2. **Add TODO(RFC-0008) marker for ContextBudget enforcement** — Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in the `Step` struct. Makes deferred work searchable via `grep TODO` and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`, `Step` struct)*
+
+**Deferred to PR 5:**
+
+3. **Multi-step limit inheritance test** — Add a test with 2+ steps where step A has limits and step B does not, verifying both parse correctly in the same workflow. Exercises the partial-inheritance scenario that PR 1b's cascade logic will depend on.
+4. **Schema description parity** — Add `"description"` attributes to the four new workflow schema properties (matching the agent schema style) for consistency and tooling support (e.g., VS Code YAML extension hover hints).
+5. **Document schema zero-value behavior** — Add `"description"` to the workflow schema's `max_llm_calls` property noting: "Minimum 1 when specified. Omit to inherit from agent config or system defaults." Clarifies the `minimum: 1` constraint for users.
+
+**Info (no action required):**
+
+6. **`MinRetryBudgetFraction` is untyped constant** — Go handles this correctly (inferred as `float64` in comparisons). An explicit `float64` type would clarify intent, but untyped is idiomatic and allows use with both float32/float64. No change needed.
+7. **Schema `minimum: 1` vs Go `>= 0` divergence** — Intentional design: schema prevents ambiguous explicit zeros while Go treats zero as "inherit". Good design choice, no change needed.
+
 ---
 
 ### PR 1b: `feature/v02-executor-limit-propagation` — Executor TaskConfig + Scheduler Limit Resolution
@@ -428,6 +446,14 @@ PR 6 (RFC close)
 
 Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR in the sections above during implementation. This PR addresses all deferred Medium and Low findings.
 
+#### Accumulated Findings
+
+| Source | # | Finding | Severity |
+|--------|---|---------|----------|
+| PR 1a (#79) | 3 | Multi-step limit inheritance test (2+ steps, partial limits) | Low |
+| PR 1a (#79) | 4 | Schema description parity — add `description` to workflow schema step-limit fields | Low |
+| PR 1a (#79) | 5 | Document zero-value behavior in workflow schema `max_llm_calls` description | Low |
+
 #### PR checklist
 
 - [ ] All deferred Medium findings addressed
@@ -467,7 +493,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 
 | PR | Phase | Naive estimate | Calibrated (1.7×) | Status |
 |----|-------|----------------|--------------------|--------|
-| 1a | 1 | ~200–270 lines | ~340–460 lines | Not started |
+| 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
 | 1b | 1 | ~200–300 lines | ~340–510 lines | Not started |
 | 1c | 1 | ~130–200 lines | ~220–340 lines | Not started |
 | 2 | 2 | ~200–300 lines | ~340–510 lines | Not started |
