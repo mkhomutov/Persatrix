@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.base import TaskInput, TaskStatus
+from agents.base import TaskInput, TaskInputConfig, TaskStatus
+from agents.defaults import DEFAULT_MAX_LLM_CALLS, DEFAULT_MAX_TOKENS
 from agents.llm_client import (
     LLMClient,
     LLMResponse,
@@ -322,3 +323,89 @@ class TestCrossAgent:
         output = await agent.handle(_task())
         assert output.status == TaskStatus.COMPLETED
         assert output.metadata["tokens_used"] == "300"
+
+
+# ─── Execution Limit Validation Tests (RFC 0006 PR 1c) ──────
+
+
+def _task_with_config(config: TaskInputConfig) -> TaskInput:
+    return TaskInput(task_id="t1", workflow_id="w1", payload="do something", config=config)
+
+
+_LIMIT_CONFIG: dict = {
+    "model": "test-model",
+    "role": "Limit test role",
+}
+
+
+class TestExecutionLimitValidation:
+    """Verify RFC 0006 §B: negative limits rejected, zero resolved to defaults."""
+
+    async def test_negative_max_llm_calls_raises(self):
+        client = _make_client()
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
+            await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-1)))
+
+    async def test_negative_max_tokens_raises(self):
+        client = _make_client()
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
+            await agent.handle(_task_with_config(TaskInputConfig(max_tokens=-1)))
+
+    async def test_negative_both_raises(self):
+        client = _make_client()
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
+            await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-5, max_tokens=-100)))
+
+    async def test_zero_max_llm_calls_resolves_to_default(self):
+        """Zero max_llm_calls falls through to DEFAULT_MAX_LLM_CALLS (5)."""
+        # Agent config has no max_llm_calls — zero must reach the system default.
+        response = LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))
+        client = _make_client(responses=[response])
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=0)))
+        assert output.status == TaskStatus.COMPLETED
+        # Exactly one LLM call was made (loop ran, ended on END_TURN).
+        assert client._provider.create_message.call_count == 1
+
+    async def test_zero_max_tokens_resolves_to_default(self):
+        """Zero max_tokens falls through to DEFAULT_MAX_TOKENS (8192)."""
+        response = LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))
+        client = _make_client(responses=[response])
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_tokens=0)))
+        assert output.status == TaskStatus.COMPLETED
+        call_kwargs = client._provider.create_message.call_args[1]
+        assert call_kwargs["max_tokens"] == DEFAULT_MAX_TOKENS
+
+    async def test_explicit_max_llm_calls_used_as_is(self):
+        """Positive max_llm_calls from TaskInputConfig is used without modification."""
+        response = LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))
+        client = _make_client(responses=[response])
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=3)))
+        assert output.status == TaskStatus.COMPLETED
+
+    async def test_explicit_max_tokens_used_as_is(self):
+        """Positive max_tokens from TaskInputConfig is passed to the LLM call."""
+        response = LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))
+        client = _make_client(responses=[response])
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_tokens=512)))
+        assert output.status == TaskStatus.COMPLETED
+        call_kwargs = client._provider.create_message.call_args[1]
+        assert call_kwargs["max_tokens"] == 512
+
+    async def test_zero_limits_agent_config_overrides_default(self):
+        """When TaskInputConfig is zero, agent-level config takes priority over system default."""
+        response = LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))
+        client = _make_client(responses=[response])
+        config = {**_LIMIT_CONFIG, "max_tokens": 2048}
+        agent = TaskAgent(agent_id="test-agent", config=config, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_tokens=0)))
+        assert output.status == TaskStatus.COMPLETED
+        call_kwargs = client._provider.create_message.call_args[1]
+        # Agent config (2048) should take priority over system default (8192).
+        assert call_kwargs["max_tokens"] == 2048

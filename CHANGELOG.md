@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### ⚠️ Breaking Changes
+
+- *(agents)* `max_llm_calls` default for task agents lowered from **10 → 5** (RFC 0006 §B).
+  Agents performing complex multi-tool operations that relied on the 10-call default must set
+  an explicit `max_llm_calls` override in their step config or agent config. A warning is logged
+  when an agent exhausts its LLM call budget (`Max LLM call iterations exceeded`).
+
+### 🚀 Features
+
+- *(agents)* Centralize execution limit defaults in `agents/defaults.py`
+  (`DEFAULT_MAX_LLM_CALLS=5`, `DEFAULT_MAX_TOKENS=8192`, `DEFAULT_TIMEOUT_SECONDS=60`)
+  replacing inline magic numbers in `base.py` (RFC 0006 PR 1c, #83)
+- *(agents)* Raise `max_tokens` task agent default from 4096 → **8192** — covers typical
+  code review and generation without truncation (RFC 0006 §B, #83)
+- *(agents)* `_run_llm_loop()` now rejects negative `max_llm_calls` / `max_tokens` values
+  from `TaskInputConfig` with `ValueError` (RFC 0006 PR 1c, #83)
+
+---
+
 ## [0.1.0] - 2026-04-11
 
 ### 🚀 Features

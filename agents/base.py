@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .defaults import DEFAULT_MAX_LLM_CALLS, DEFAULT_MAX_TOKENS
 from .llm_client import (
     LLMClient,
     LLMResponse,
@@ -244,10 +245,18 @@ class BaseAgent(ABC):
         total_tokens = 0
         tool_calls_count = 0
 
+        # Reject negative limits immediately — they are not a valid sentinel
+        # and indicate a misconfigured TaskConfig from the orchestrator.
+        if task.config.max_llm_calls < 0 or task.config.max_tokens < 0:
+            raise ValueError("Negative execution limits are not allowed")
+
         # 0 is the sentinel for "not set" (falsy), so `or` falls through
-        # to the agent-level default.  See TaskInputConfig docstring.
-        max_llm_calls = task.config.max_llm_calls or self.config.get("max_llm_calls", 10)
-        max_tokens = task.config.max_tokens or self.config.get("max_tokens", 4096)
+        # to the agent-level default, then to the system default.
+        # See TaskInputConfig docstring and RFC 0006 §B.
+        max_llm_calls = task.config.max_llm_calls or self.config.get(
+            "max_llm_calls", DEFAULT_MAX_LLM_CALLS
+        )
+        max_tokens = task.config.max_tokens or self.config.get("max_tokens", DEFAULT_MAX_TOKENS)
 
         for _ in range(max_llm_calls):
             # review-fix S1: catch provider SDK exceptions (rate limits, auth
