@@ -85,19 +85,19 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/defaults/ -v -race` passes
-- [ ] `go test ./internal/planner/ -v -race` passes
-- [ ] `make validate` passes
-- [ ] `internal/defaults/` exports all constants listed in RFC 0006 Section B
-- [ ] `Step` struct includes `TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`
-- [ ] Negative limits rejected during parse
+- [x] `go test ./internal/defaults/ -v -race` passes
+- [x] `go test ./internal/planner/ -v -race` passes
+- [x] `make validate` passes
+- [x] `internal/defaults/` exports all constants listed in RFC 0006 Section B
+- [x] `Step` struct includes `TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`
+- [x] Negative limits rejected during parse
 
 #### Review Findings (PR #79)
 
 **Should Fix (before merge):**
 
-1. **Add boundary-value test for minimum valid limits** — Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies the schema `minimum: 1` boundary is correctly parsed by Go. Catches future off-by-one errors if validation changes to `<= 0` rejection. *(Location: `internal/planner/planner_test.go`)*
-2. **Add TODO(RFC-0008) marker for ContextBudget enforcement** — Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in the `Step` struct. Makes deferred work searchable via `grep TODO` and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`, `Step` struct)*
+- [ ] Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies schema `minimum: 1` boundary is correctly parsed by Go. *(Location: `internal/planner/planner_test.go`)*
+- [ ] Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in `Step` struct — makes deferred work searchable and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`)*
 
 **Deferred to PR 5:**
 
