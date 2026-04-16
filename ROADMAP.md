@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-15  
+> **Last updated**: 2026-04-16  
 > **Current phase**: v0.2 (Agent Societies) — 🚧 In Progress  
 > **Next milestone**: RFC 0006 (Efficiency & Execution Limits) + RFC 0009 (Security & Sandboxing, Phases 1–2 concurrent)
 
@@ -133,7 +133,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
 | [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | � Accepted | 0 | 0/0 |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | 📋 Proposed | 0 | 0/0 |
-| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | 📋 Proposed | 0 | 0/0 |
+| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | � Accepted | 0 | 0/0 |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | 📋 Proposed | 0 | 0/0 |
 | 0010 | Sub-Agent Spawning | Not yet written | — | — |
 | 0011 | Channels + Bridges | Not yet written | — | — |
@@ -146,7 +146,7 @@ RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
 RFC 0006 (Efficiency & Execution Limits)                  📋 Proposed
     ↓
-RFC 0008 (Agent Memory & Context Optimization)            📋 Proposed  [depends on 0005, 0006]
+RFC 0008 (Agent Memory & Context Optimization)            � Accepted  [depends on 0005, 0006]
     ↓
 RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006, 0008]
     │
