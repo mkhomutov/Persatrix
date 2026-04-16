@@ -148,12 +148,28 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `go test ./internal/scheduler/ -v -race` passes
-- [ ] `go test ./internal/registry/ -v -race` passes
-- [ ] `ExecuteRequest` includes `StepLimits`
-- [ ] `TaskConfig` fully populated (no zero-value `MaxLlmCalls`/`MaxTokens`)
-- [ ] Three-level cascade verified in tests
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `go test ./internal/scheduler/ -v -race` passes
+- [x] `go test ./internal/registry/ -v -race` passes
+- [x] `ExecuteRequest` includes `StepLimits`
+- [x] `TaskConfig` fully populated (no zero-value `MaxLlmCalls`/`MaxTokens`)
+- [x] Three-level cascade verified in tests
+
+#### Review Findings (PR #81)
+
+**Addressed in PR 2 (planned):**
+
+1. **F-01 (Medium) — gRPC call timeout vs `TaskConfig.TimeoutSeconds` mismatch** — `e.timeout` (30s default) controls the actual `context.WithTimeout` in `dispatch()`, while `req.Limits.TimeoutSeconds` (now correctly populated from the three-level cascade) is only sent in the `TaskConfig` proto. An agent configured with a 300s step timeout receives that value in `TaskConfig` but gets its gRPC call cancelled after 30s. PR 2 explicitly replaces static per-executor timeouts with derived deadlines (`rpc_timeout = step.TimeoutSeconds + transport_margin`) — this finding is subsumed by that work. *(Location: `internal/executor/executor.go` L156, L226)*
+
+**Deferred to PR 5:**
+
+2. **F-02 (Low) — `int` → `int32` truncation without bounds check** — `MaxLlmCalls`, `MaxTokens`, and `TimeoutSeconds` are cast from `int` to `int32` without overflow guards. Values exceeding `math.MaxInt32` would silently wrap. In practice bounded by config, but a clamp or validation in the planner is safer. *(Location: `internal/executor/executor.go` L154–156)*
+3. **F-04 (Low) — Negative limit values silently ignored** — Negative step/agent config values pass the `> 0` check as false and fall through to defaults without any warning. While the planner rejects negative values at parse time (PR 1a), agent-level limits come from the registry and are not validated. Add negative-value rejection to `resolveStepLimits()` or to `AgentInfo` registration. *(Location: `internal/scheduler/scheduler.go` L407–430)*
+4. **F-05 (Nit) — Redundant `TestExecuteTask_PopulatesTaskConfig_AllFields`** — Nearly identical to the updated `TestExecuteTask_PopulatesTaskConfig`; both verify `StepLimits` → `TaskConfig` field mapping with different numbers. Consolidate or delete the duplicate to reduce maintenance surface. *(Location: `internal/executor/executor_test.go`)*
+
+**Info (no action required):**
+
+5. **F-03 (Design) — Zero as "not configured" prevents explicit zero limits** — The `> 0` cascade convention means it is impossible to set a limit to 0 at the agent or step level. Intentional for v0.1/v0.2; would require pointer types or sentinel values to change. No action.
 
 ---
 
@@ -453,6 +469,9 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR 1a (#79) | 3 | Multi-step limit inheritance test (2+ steps, partial limits) | Low |
 | PR 1a (#79) | 4 | Schema description parity — add `description` to workflow schema step-limit fields | Low |
 | PR 1a (#79) | 5 | Document zero-value behavior in workflow schema `max_llm_calls` description | Low |
+| PR 1b (#81) | F-02 | `int` → `int32` truncation without overflow guard in `executor.go` L154–156 | Low |
+| PR 1b (#81) | F-04 | Negative agent-level limit values in `resolveStepLimits()` silently ignored; add rejection or warning | Low |
+| PR 1b (#81) | F-05 | Redundant `TestExecuteTask_PopulatesTaskConfig_AllFields` — consolidate with existing all-fields test | Nit |
 
 #### PR checklist
 
@@ -494,7 +513,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR | Phase | Naive estimate | Calibrated (1.7×) | Status |
 |----|-------|----------------|--------------------|--------|
 | 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
-| 1b | 1 | ~200–300 lines | ~340–510 lines | Not started |
+| 1b | 1 | ~200–300 lines | ~340–510 lines | In review (PR #81) |
 | 1c | 1 | ~130–200 lines | ~220–340 lines | Not started |
 | 2 | 2 | ~200–300 lines | ~340–510 lines | Not started |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | Not started |
