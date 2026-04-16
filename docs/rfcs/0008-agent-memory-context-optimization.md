@@ -1,7 +1,7 @@
 # RFC 0008 — Agent Memory and Context Optimization
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: � Accepted  
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
 **Target**: v0.2  
@@ -371,14 +371,61 @@ Dependencies: Phases 2 and 3.
 - **Memory safety tests**: shared pool ACL, provenance filtering, isolation guarantees.
 - **Regression tests**: ensure persona behavior remains stable while task memory support is added.
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. Should context relevance scoring stay heuristic-only in v1, or include optional embedding scoring when available?
-2. Should `TaskRequest.context` remain a map for backward compatibility, or should typed context-package fields be added in proto immediately? **Proposed default**: defer typed fields to Phase 3; Phase 1 passes the context package as a serialized JSON string in the existing `context` map, avoiding a proto change until the schema is stable. Proto changes require RFC review (per project policy), so deferring until the shape is proven reduces revision churn.
-3. How much compression should be allowed before mandatory human-visible warnings (`compression_ratio` threshold)?
-4. For shared pools, should writes be immediate or review-gated by a validator role? See Section H for the proposed Phase 4 default (immediate writes with ACL enforcement).
-5. Should stale procedural memory block execution or just downgrade confidence and continue? **Proposed default**: downgrade-and-continue; inject the memory at reduced confidence, log a `stale_memory_injection` warning with the measured confidence value, and emit a metric. Blocking execution on stale memory is too disruptive for v1 — operators can set alerting thresholds on the metric and decide whether to evict or revalidate.
-6. RFC 0006 must reach Accepted status before Phase 1 implementation of this RFC begins. If RFC 0006's budget field naming or propagation model changes materially during review, the `budget_*` field names in Section C and the "overhead budget" model in Section D will need revision. Flag this dependency when RFC 0006 review starts.
+### 1. Relevance scoring approach — Heuristic-only in Phase 1; pluggable scoring interface
+
+**Decision**: Context relevance scoring is heuristic-only in Phase 1. The scoring module exposes a `RelevanceScorer` protocol so that embedding-based scoring can be swapped in as an alternative backend without changing the selection pipeline.
+
+**Rationale**: The RFC's Non-Goals already state "Perfect semantic relevance selection in v1; heuristic scoring is acceptable initially" and "Vector database dependency in the first implementation slice." The existing episodic memory (`agents/memory/episodic.py`) already demonstrates that FTS5 + BM25 combined with importance/recency/access-count weighting produces useful relevance ranking without embeddings. Section D's knapsack analysis confirms that "heuristic scoring quality dominates solution quality far more than the gap between greedy and optimal selection" — investing in embedding infrastructure before the heuristic is proven in production would be premature optimization.
+
+The Phase 1 heuristic combines four signals: (a) dependency proximity (steps directly upstream score highest), (b) lexical overlap via FTS5 match scoring, (c) recency (more recent outputs score higher), and (d) importance tags from memory entries. This covers the dominant retrieval patterns for task delegation contexts. A `RelevanceScorer` protocol with a `score(candidate, query_context) -> float` signature allows a future embedding backend (RFC 0005 already identifies "Semantic Search via Vector Embeddings" as a future episodic memory enhancement) to be plugged in without modifying the selection or knapsack logic.
+
+### 2. Proto context fields — Defer typed fields to Phase 3; use existing `context` map in Phases 1–2
+
+**Decision**: `TaskRequest.context` remains a `map<string, string>` through Phases 1–2. Phase 1 passes the `ContextPackage` as a serialized JSON string under a reserved key (`_context_package`) in the existing map. Typed proto fields for `ContextPackage` and `DelegationEnvelope` are added in Phase 3 after the schema shape is proven.
+
+**Rationale**: Proto changes are cross-language (Go + Python), require RFC review per project policy, and create a versioning obligation. The `ContextPackage` schema will evolve during Phase 1–2 implementation as real compression ratios, relevance scoring behavior, and budget allocation patterns are observed. Changing the proto prematurely risks multiple revision cycles. The existing `context` map already carries arbitrary string key-value pairs between orchestrator and agents — adding a `_context_package` key with a JSON-serialized payload is backward-compatible and requires zero proto changes. Agents that do not understand the key ignore it; agents that do parse it gain structured context. The underscore prefix signals a framework-managed key that agents should not set directly.
+
+Phase 3 introduces `DelegationRequest` and `DelegationResult` contracts (Section E) which define the most demanding proto requirements. By that point, the `ContextPackage` shape will have been validated through two implementation phases, and a single proto change can introduce both typed context and delegation envelope fields together — reducing total proto revision count.
+
+### 3. Compression warning threshold — Warn at 4:1, hard-cap at 10:1
+
+**Decision**: Emit a `high_compression_ratio` warning metric when `compression_ratio ≥ 4.0` (75% token reduction). Hard-cap compression at `10:1` (90% reduction) — if extractive + abstractive compression exceeds this ratio, the pipeline preserves the 10:1 output and logs an `extreme_compression_capped` event. Pinned sections (Section F, `compressible = False`) are excluded from ratio calculation.
+
+**Rationale**: The existing working memory compression (`agents/memory/working.py`) already guards against summaries that are larger than the original, but has no upper-bound quality check. A 4:1 ratio means 75% of the source tokens were removed — at this level, abstractive summarization is likely discarding substantive content rather than just removing redundancy. The warning threshold creates operator visibility without blocking execution.
+
+The 10:1 hard-cap prevents pathological compression where a multi-page context is reduced to a single sentence. At 90% reduction, the compression output is essentially a headline — insufficient for reliable downstream agent reasoning. When the cap triggers, the pipeline stops compressing further and emits the capped output, giving the agent a degraded but bounded context rather than a useless one. The cap is conservative; operators can adjust it via configuration (`optimization.yaml`) once production compression patterns are observed.
+
+Pinned sections are excluded from the ratio because they are non-compressible by design (Section F maps to `ContextSection.compressible = False` in working memory). Including them would artificially lower the observed ratio and mask aggressive compression of the compressible sections.
+
+### 4. Shared pool write policy — Immediate writes with ACL enforcement; validator-role gating deferred
+
+**Decision**: Writes to shared memory pools in Phase 4 are immediate, subject to ACL checks and mandatory provenance fields (`source_agent`, `created_at`, `confidence`) enforced at write time. Validator-role review gating is deferred to v0.3 or a follow-on RFC.
+
+**Rationale**: Section H already proposes this default and the reasoning is sound: Phase 4 shared memory operates within a single orchestrator node where all agents are locally managed and their permissions are deny-by-default. ACL enforcement ensures that only agents with explicit shared-pool write permission can publish, and provenance fields enable consumer-side trust filtering (e.g., "only read entries with `confidence ≥ 0.7` from agents in my organization"). This provides sufficient safety for single-node v0.2 deployment.
+
+Validator-role review — where a designated agent or human operator must approve writes before they become visible — introduces async approval workflows, queue semantics, and potential deadlocks (what if the validator agent is also waiting on shared memory?). This complexity is justified in v0.3's multi-node mesh where shared memory crosses trust boundaries between separately administered nodes, but is premature for v0.2's single-node model. RFC 0009 (Security & Sandboxing) Phase 3 will introduce capability tokens that can further restrict shared-pool access — landing those controls before validator gating provides a stronger foundation for the review mechanism.
+
+### 5. Stale procedural memory — Downgrade confidence and continue; do not block
+
+**Decision**: Stale procedural memory is injected at its decayed confidence value with a `stale_memory_injection` warning log and metric. Execution is not blocked. Operators can configure a `stale_confidence_alert_threshold` (default `0.3`) that triggers an alert when injected memory confidence falls below the threshold.
+
+**Rationale**: The decay formula in Section G ($c_t = c_0 \cdot e^{-\lambda t}$) already provides a continuous confidence signal — blocking at an arbitrary threshold would turn a gradient into a cliff edge, creating unpredictable execution failures when memory ages past the cutoff. Downgrade-and-continue preserves the agent's ability to use partially-relevant context while making the degradation visible through metrics.
+
+The `stale_memory_injection` metric carries the measured confidence value, the memory key, and the agent ID. Operators can set alerting rules on this metric (e.g., "alert if any injection has `confidence < 0.2`") and decide whether to trigger manual revalidation or eviction. This is consistent with RFC 0006's cost observability approach: make resource usage visible and actionable, don't block execution on heuristic thresholds.
+
+Blocking execution would also create a cascading failure risk: if a workflow step depends on procedural memory that has decayed past the threshold, the step fails, which may fail the entire workflow — even if the stale memory was only supplementary context and the agent could have completed the task without it. The confidence value in the injection metadata lets the agent itself decide how much weight to give the memory in its reasoning.
+
+### 6. RFC 0006 dependency — Satisfied; field alignment verified
+
+**Decision**: This dependency is satisfied. RFC 0006 has reached `👍 Accepted` status with all open questions resolved. The `budget_*` field names in Section C are compatible with RFC 0006's `TaskConfig` fields and budget enforcement model. No revision needed.
+
+**Rationale**: RFC 0006's resolved open questions confirm: (a) budget enforcement uses actual post-dispatch token counts with a pre-dispatch heuristic guard based on `max_tokens`, (b) cost tracking operates at the orchestrator level via `BudgetEnforcer` and `TokenCounter`, and (c) per-step execution metadata records token usage and cost. RFC 0008's `budget_total_tokens`, `budget_input_tokens`, and `budget_output_reserve_tokens` extend this model to context assembly — they are *additional* budget dimensions that the scheduler allocates alongside RFC 0006's execution limits, not replacements for them.
+
+The "overhead budget" model in Section D (compression LLM calls charged to a separate orchestrator budget) is orthogonal to RFC 0006's per-task budget — RFC 0006 budgets govern agent execution cost, while the compression overhead budget governs orchestrator-side context preparation cost. Both feed into the same `CostReporter` for aggregate tracking, but their enforcement paths are independent.
+
+At Phase 1 implementation start, verify that RFC 0006's `TaskConfig` field names (`max_llm_calls`, `max_tokens`, `timeout_seconds`) have not been renamed during implementation. If they have, update Section C's field names to match.
 
 ## Decision / Next Steps
 
