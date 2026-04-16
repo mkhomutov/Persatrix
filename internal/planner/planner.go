@@ -63,6 +63,17 @@ type Step struct {
 	OutputKey string   `yaml:"output_key"`
 	DependsOn []string `yaml:"depends_on"`
 	Condition string   `yaml:"condition"`
+
+	// Execution limit fields (RFC 0006). Zero means "inherit from agent
+	// config or system defaults". Negative values are rejected during Parse.
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	MaxLLMCalls    int `yaml:"max_llm_calls"`
+	MaxTokens      int `yaml:"max_tokens"`
+
+	// ContextBudget is a step-level context window budget in tokens (RFC 0008).
+	// Added here alongside RFC 0006 fields to avoid a separate schema migration.
+	// No enforcement logic in this PR — that is RFC 0008's scope.
+	ContextBudget int `yaml:"context_budget"`
 }
 
 // ExecutionPlan is a topologically sorted list of execution stages.
@@ -205,6 +216,20 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 				return fmt.Errorf("step %q: duplicate output_key %q (already used by step %q)", step.ID, step.OutputKey, existing)
 			}
 			outputKeys[step.OutputKey] = step.ID
+		}
+
+		// Reject negative execution limits (RFC 0006). Zero means "inherit".
+		if step.TimeoutSeconds < 0 {
+			return fmt.Errorf("step %q: timeout_seconds must not be negative", step.ID)
+		}
+		if step.MaxLLMCalls < 0 {
+			return fmt.Errorf("step %q: max_llm_calls must not be negative", step.ID)
+		}
+		if step.MaxTokens < 0 {
+			return fmt.Errorf("step %q: max_tokens must not be negative", step.ID)
+		}
+		if step.ContextBudget < 0 {
+			return fmt.Errorf("step %q: context_budget must not be negative", step.ID)
 		}
 	}
 

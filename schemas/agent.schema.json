@@ -53,6 +53,14 @@
         "timeout_seconds": {
           "type": "integer", "minimum": 1, "default": 120
         },
+        "max_llm_calls": {
+          "type": "integer", "minimum": 1,
+          "description": "Maximum number of LLM calls per task (agent-level default for cascade)"
+        },
+        "max_tokens": {
+          "type": "integer", "minimum": 1,
+          "description": "Maximum output tokens per LLM call (agent-level default for cascade)"
+        },
         "permissions": { "$ref": "#/definitions/permissions" },
         "persona": { "$ref": "#/definitions/persona" },
         "autonomy": { "$ref": "#/definitions/autonomy" },

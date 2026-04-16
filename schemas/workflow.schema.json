@@ -26,7 +26,11 @@
               "depends_on": { "type": "array", "items": { "type": "string" } },
               "condition": { "type": "string" },
               "approval_required": { "type": "boolean" },
-              "approval_timeout": { "type": "integer" }
+              "approval_timeout": { "type": "integer" },
+              "timeout_seconds": { "type": "integer", "minimum": 1 },
+              "max_llm_calls": { "type": "integer", "minimum": 1 },
+              "max_tokens": { "type": "integer", "minimum": 1 },
+              "context_budget": { "type": "integer", "minimum": 1 }
             }
           }
         }
