@@ -209,12 +209,24 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` passes
-- [ ] `agents/defaults.py` exports all constants listed in RFC 0006 Section B
-- [ ] `_run_llm_loop()` rejects negative limits
-- [ ] No inline magic numbers remain in `base.py` for `max_llm_calls`/`max_tokens`
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` passes
+- [x] `agents/defaults.py` exports all constants listed in RFC 0006 Section B
+- [x] `_run_llm_loop()` rejects negative limits
+- [x] No inline magic numbers remain in `base.py` for `max_llm_calls`/`max_tokens`
+
+#### Review Findings (PR #83)
+
+**Deferred to PR 5:**
+
+1. **M1 (Medium) — `ValueError` vs `TaskOutput(FAILED)` inconsistency** — Negative limits raise `ValueError`, but all other error conditions in `_run_llm_loop()` (missing model, LLM provider errors) return `TaskOutput(status=FAILED)`. A `ValueError` propagates through the gRPC servicer as an opaque gRPC error, while `TaskOutput.FAILED` is the expected reporting mechanism. Consider returning `TaskOutput(FAILED)` instead, or documenting the intentional fail-fast distinction. *(Location: `agents/base.py` L250–251)*
+2. **M2 (Medium) — `DEFAULT_TIMEOUT_SECONDS` defined but unused** — The constant is exported and tested but never referenced in `base.py` or anywhere else. Wire it up as a timeout fallback or add a comment noting it is a forward-declared constant for PR 2. *(Location: `agents/defaults.py` L30)*
+3. **L2 (Low) — No loop-exhaustion test for new default** — Tests verify zero resolves to defaults and explicit values are used, but no test confirms the loop actually stops after `DEFAULT_MAX_LLM_CALLS` (5) iterations. Add a test that passes `max_llm_calls=0` with a mock always returning `TOOL_USE`, then assert exactly 5 LLM calls. *(Location: `tests/unit/python/test_agents.py`)*
+
+**Info (no action required):**
+
+4. **L3 — Breaking change documented** — CHANGELOG correctly documents `max_llm_calls` 10→5 as a breaking change. Good.
 
 ---
 
@@ -514,7 +526,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 |----|-------|----------------|--------------------|--------|
 | 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
 | 1b | 1 | ~200–300 lines | ~340–510 lines | In review (PR #81) |
-| 1c | 1 | ~130–200 lines | ~220–340 lines | Not started |
+| 1c | 1 | ~130–200 lines | ~220–340 lines | In review (PR #83) |
 | 2 | 2 | ~200–300 lines | ~340–510 lines | Not started |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | Not started |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | Not started |
