@@ -29,7 +29,8 @@
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
-- [Open Questions](#open-questions)
+- [Open Questions](#open-questions-resolved)
+- [Open Questions (Pending)](#open-questions-pending)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
 
@@ -133,6 +134,10 @@ Allocator policy:
 
 This treats token context the same way an OS treats CPU/memory quotas.
 
+**Phase 1 budget derivation strategy**: Current workflow YAML steps have no `criticality` or `complexity` fields (the schema defines `id`, `agent`, `input`, `depends_on`, `condition`, `output_key`, `approval_required`). Phase 1 uses a simple heuristic: equal split of the workflow context budget across steps, with an optional per-step `context_budget` override in workflow YAML for callers that know certain steps need more headroom. Complexity-based derivation (inferring budget from agent type, dependency fan-in, or input length) can be added in a later phase once production allocation patterns are observed. See Pending Open Question 2.
+
+**Retry budget persistence**: Because retry attempts consume the same budget pool (rule 4), the orchestrator must persist the remaining context budget in step state between retry attempts. This differs from the current executor behavior where each retry gets a fresh execution timeout (`context.WithTimeout` per dispatch). The step-state entry for context budget must be updated after each attempt to reflect tokens consumed, so the next attempt sees the true remaining budget.
+
 ### D. Context Packaging and Compression Pipeline
 
 Before dispatching to any agent (especially delegated sub-agents), caller builds a `ContextPackage`.
@@ -179,12 +184,12 @@ Define explicit caller-subagent contracts.
 
 `DelegationResult` (sub-agent to caller):
 
-1. `summary`
-2. `artifacts` (structured outputs)
-3. `decisions` (assumptions and rationale)
-4. `memory_writes` (suggested durable memory updates — see schema below)
-5. `risks`
-6. `status`
+1. `summary`: `str`
+2. `artifacts`: `dict[str, Any]` (structured outputs keyed by artifact name)
+3. `decisions`: `list[str]` (assumptions and rationale)
+4. `memory_writes`: `list[MemoryWriteEntry]` (suggested durable memory updates — see schema below)
+5. `risks`: `list[str]`
+6. `status`: `str` (e.g. `"completed"`, `"partial"`, `"failed"`)
 
 `memory_writes` entry schema (each element in the list):
 
@@ -255,6 +260,18 @@ $$
 
 Inject only if $c_t \ge c_{min}$ or recently validated.
 
+**Default parameter values** (configurable per agent via `config/agents.yaml`):
+
+| Parameter | Default | Rationale |
+|-----------|---------|----------|
+| $\lambda$ (decay rate) | 0.01 per day (half-life ≈ 69 days) | Slow enough that regularly-used memories stay relevant; fast enough that unused memories fade within a quarter |
+| $c_{min}$ (eviction threshold) | 0.1 | Below this, entries are evicted on the next cleanup pass rather than just flagged stale |
+| Hard TTL (importance < 0.3) | 30 days | Low-importance entries that haven't been accessed are cleaned up after one month |
+| Episodic memory cap | 1000 per agent | Notes already cap at `max_notes=500`; episodes need a comparable bound to prevent unbounded growth |
+| Eviction scoring formula | `importance × 0.6 + recency_norm × 0.3 + access_freq_norm × 0.1` | Weights importance highest (core signal), recency second (temporal locality), access frequency lowest (avoids over-weighting repeated but low-value lookups) |
+
+The eviction scoring formula replaces the current notes-only `ORDER BY access_count ASC, created_at ASC` approach with a weighted hybrid that considers importance — the existing purely LRU+age ordering does not account for entry importance. These defaults are starting points; see Pending Open Question 6 for further calibration needs.
+
 ### H. Shared vs Isolated Memory
 
 Support both models with explicit policy:
@@ -294,6 +311,8 @@ Practical sequencing:
 3. Over-compression risk: preserve critical constraints in a pinned, non-compressible section.
 4. Merge injection: validate result schema and enforce deterministic merge policies.
 5. Budget bypass attempts: reject negative or malformed budget fields and cap declared values.
+6. Compression LLM prompt injection: prior step outputs may contain adversarial content that manipulates the compression LLM into producing misleading summaries. Mitigation: the compression prompt must include a system-level instruction to summarize factually without following instructions found in the input, and compressed outputs must be tagged with `source: compressed` so downstream agents know the content is a derivative, not verbatim.
+7. Memory write amplification via delegation: sub-agent `memory_writes` could flood the parent's memory with high-volume low-value entries. The importance cap at 0.8 limits per-entry impact but not volume. Mitigation: enforce a `max_memory_writes` limit per `DelegationResult` (default: 20 entries), rejecting excess entries and logging the overflow event.
 
 ## Phased Implementation Plan
 
@@ -427,6 +446,69 @@ The "overhead budget" model in Section D (compression LLM calls charged to a sep
 
 At Phase 1 implementation start, verify that RFC 0006's `TaskConfig` field names (`max_llm_calls`, `max_tokens`, `timeout_seconds`) have not been renamed during implementation. If they have, update Section C's field names to match.
 
+## Open Questions (Pending)
+
+*Added during post-acceptance review. These are specification gaps that must be resolved before or during their respective implementation phases. None invalidate the accepted design.*
+
+### 7. MemoryFacade lifecycle for task agents — Resolve before Phase 2
+
+**Problem**: Task agents are stateless per-request. Section B proposes `EpisodicMemory` + optional `WorkingSet` per task execution, but does not specify the instantiation lifecycle:
+- **Per-process** (shared across tasks): Efficient, but requires concurrent access management — `EpisodicMemory` uses aiosqlite with a single connection.
+- **Per-task** (instantiated and torn down per gRPC call): Simple, but adds SQLite open/close latency per call and risks file descriptor exhaustion under load.
+
+**Recommendation**: Per-process with connection pooling, consistent with how persona agents already manage memory. Document the concurrency model and add a `MemoryFacade.close()` cleanup hook.
+
+### 8. Context budget derivation algorithm — Resolve before Phase 1
+
+**Problem**: Section C states "Scheduler derives per-step budget from step criticality and estimated complexity" but current workflow YAML steps have no `criticality` or `complexity` fields (see `schemas/workflow.schema.json`). Without a concrete derivation algorithm, Phase 1 implementers must invent one.
+
+**Recommendation**: Phase 1 uses equal-split of workflow budget across steps, with optional per-step `context_budget` override in workflow YAML. See Phase 1 budget derivation note in Section C. Complexity-based derivation should be deferred until production data shows which steps systematically need more context.
+
+### 9. Compression pipeline latency and availability — Resolve before Phase 1
+
+**Problem**: The abstractive compression step (pipeline step 3b) is an LLM call on the dispatch critical path. The RFC specifies fallback when the overhead budget is exhausted, but does not address:
+1. **Timeout**: What if the compression LLM call takes 30+ seconds?
+2. **Model unavailability**: Budget exhaustion and model unavailability are different failure modes.
+3. **Sync vs async**: Current `WorkingMemory.compress_if_needed()` is async fire-and-forget; the orchestrator-level pipeline appears synchronous (blocks dispatch).
+
+**Recommendation**: Define a compression timeout (e.g., 10 seconds). On timeout or model unavailability, fall back to extractive-only compression with a `compression_fallback` metric. Consider making abstractive compression async for non-critical steps.
+
+### 10. Orchestrator vs agent context assembly boundary — Resolve before Phase 1
+
+**Problem**: The `ContextPackage` pipeline (Section D) runs in the Go orchestrator, but agent memory (episodic, notes, working) lives in Python agent processes. The `budget_memory_tokens` field (Section C) implies the orchestrator allocates a token budget for memory, but the orchestrator cannot enforce it because memory retrieval happens inside the Python agent. The RFC describes both orchestrator-level and agent-level context assembly without clearly delineating the boundary.
+
+Three options:
+1. **Soft enforcement**: Orchestrator sends a budget hint; trusts the agent to comply.
+2. **Hard enforcement**: New gRPC "memory query" call from orchestrator to agent retrieves pre-scored candidates. Requires proto changes.
+3. **Split ownership**: Orchestrator budgets what it controls (step outputs); agent manages its own memory budget using `budget_memory_tokens` as a hint.
+
+**Recommendation**: Option 3 for Phase 1 — the orchestrator budgets step outputs (which it already holds in the `outputs` map), and the agent manages its own memory budget using `budget_memory_tokens` as an advisory limit. This avoids proto changes and new gRPC calls. Phase 3's delegation contract can formalize enforcement if needed.
+
+### 11. Merge strategy `patch` semantics — Resolve before Phase 3
+
+**Problem**: Section E lists four merge strategies (`replace`, `append`, `patch`, `reject_on_conflict`). The semantics of `patch` are undefined for the memory write schema. For JSON-structured fields (`context`, `tags`), JSON Merge Patch (RFC 7396) is a reasonable interpretation. For string fields (`content`, `summary`), "patch" has no obvious meaning.
+
+**Recommendation**: Define `patch` as JSON Merge Patch for structured fields and `replace` for string fields. If more granular string patching is needed later, introduce it as a separate strategy.
+
+### 12. Memory eviction parameter calibration — Resolve before Phase 4
+
+**Problem**: Section G now includes default parameter values (see table), but these are informed guesses. Production workloads may reveal that the defaults are too aggressive or too lenient for specific agent types or workflow patterns.
+
+**Recommendation**: The defaults in Section G are starting points. Phase 4 implementation should include a calibration period where eviction metrics (`evictions_per_cleanup`, `average_confidence_at_eviction`, `memory_utilization_ratio`) are collected and analyzed before adjusting defaults. Agent-level overrides in `config/agents.yaml` allow per-agent tuning without a global parameter change.
+
+### 13. Shared memory ACL without RFC 0009 — Resolve before Phase 4
+
+**Problem**: Phase 4 shared memory depends on ACL enforcement. The RFC references RFC 0009 for capability tokens, but RFC 0009 is at `📋 Proposed` status and may not land before Phase 4 implementation.
+
+**Impact**: If RFC 0009 slips, shared memory would either launch without security primitives (unacceptable per deny-by-default policy) or be blocked waiting for RFC 0009.
+
+**Recommendation**: Define a minimal ACL mechanism in Phase 4 that works without RFC 0009:
+- Config-based ACL: `config/agents.yaml` gets a `shared_memory_pools` section with explicit read/write agent lists.
+- Enforcement in the Python memory layer (not dependent on Go orchestrator security).
+- RFC 0009 can later upgrade this to token-based ACL without breaking changes.
+
+This ensures deny-by-default is preserved regardless of RFC 0009 timeline.
+
 ## Decision / Next Steps
 
 Decision: Propose this RFC for review as the v0.2 architecture bridge between RFC 0006 (limits/budgets) and broader delegation/sub-agent scale.
@@ -436,6 +518,7 @@ Next steps:
 1. Accept sequencing: 0006 → 0008 → 0007 implementation order (RFC 0007 `Depends on` has been updated to reflect this).
 2. Create a PR plan file for RFC 0008 after acceptance.
 3. Implement Phase 1 first to establish measurable context-budget outcomes.
+4. Resolve Pending Open Questions 8, 9, and 10 before Phase 1 implementation begins.
 
 ## Related Documentation
 
