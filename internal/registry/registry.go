@@ -25,6 +25,12 @@ type AgentInfo struct {
 	Address      string // gRPC address (host:port)
 	NodeID       string // empty for local deployment
 	Status       AgentStatus
+
+	// Execution limit fields (RFC 0006). Zero means "not configured at agent
+	// level" — the scheduler falls through to system defaults.
+	MaxLLMCalls    int
+	MaxTokens      int
+	TimeoutSeconds int
 }
 
 type AgentStatus int
@@ -81,12 +87,15 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 
 	// Store an internal copy with Capabilities slice deep-copied.
 	stored := &AgentInfo{
-		ID:      agent.ID,
-		Name:    agent.Name,
-		Role:    agent.Role,
-		Address: agent.Address,
-		NodeID:  agent.NodeID,
-		Status:  agent.Status,
+		ID:             agent.ID,
+		Name:           agent.Name,
+		Role:           agent.Role,
+		Address:        agent.Address,
+		NodeID:         agent.NodeID,
+		Status:         agent.Status,
+		MaxLLMCalls:    agent.MaxLLMCalls,
+		MaxTokens:      agent.MaxTokens,
+		TimeoutSeconds: agent.TimeoutSeconds,
 	}
 	stored.Capabilities = make([]string, len(agent.Capabilities))
 	copy(stored.Capabilities, agent.Capabilities)
@@ -176,12 +185,15 @@ func (r *InMemoryRegistry) FindByCapability(_ context.Context, capability string
 // Capabilities slice to prevent shared backing-array mutation.
 func deepCopyAgent(agent *AgentInfo) *AgentInfo {
 	cp := &AgentInfo{
-		ID:      agent.ID,
-		Name:    agent.Name,
-		Role:    agent.Role,
-		Address: agent.Address,
-		NodeID:  agent.NodeID,
-		Status:  agent.Status,
+		ID:             agent.ID,
+		Name:           agent.Name,
+		Role:           agent.Role,
+		Address:        agent.Address,
+		NodeID:         agent.NodeID,
+		Status:         agent.Status,
+		MaxLLMCalls:    agent.MaxLLMCalls,
+		MaxTokens:      agent.MaxTokens,
+		TimeoutSeconds: agent.TimeoutSeconds,
 	}
 	cp.Capabilities = make([]string, len(agent.Capabilities))
 	copy(cp.Capabilities, agent.Capabilities)

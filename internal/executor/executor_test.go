@@ -290,11 +290,76 @@ func TestExecuteTask_PopulatesTaskConfig(t *testing.T) {
 	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
 		AgentID: "test-agent",
 		Payload: "config check",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: 15,
+		},
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, receivedConfig, "TaskConfig should be populated in gRPC request")
+	assert.Equal(t, int32(5), receivedConfig.MaxLlmCalls)
+	assert.Equal(t, int32(8192), receivedConfig.MaxTokens)
 	assert.Equal(t, int32(15), receivedConfig.TimeoutSeconds)
+}
+
+func TestExecuteTask_PopulatesTaskConfig_AllFields(t *testing.T) {
+	var receivedConfig *taskpb.TaskConfig
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		receivedConfig = req.Config
+		return &taskpb.TaskResponse{
+			TaskId: req.TaskId,
+			Status: taskpb.TaskStatus_COMPLETED,
+			Result: "done",
+		}, nil
+	})
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "full config",
+		Limits: StepLimits{
+			MaxLLMCalls:    3,
+			MaxTokens:      4096,
+			TimeoutSeconds: 120,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, receivedConfig)
+	assert.Equal(t, int32(3), receivedConfig.MaxLlmCalls, "MaxLlmCalls should match Limits.MaxLLMCalls")
+	assert.Equal(t, int32(4096), receivedConfig.MaxTokens, "MaxTokens should match Limits.MaxTokens")
+	assert.Equal(t, int32(120), receivedConfig.TimeoutSeconds, "TimeoutSeconds should match Limits.TimeoutSeconds")
+}
+
+func TestExecuteTask_ZeroLimits_SentAsZero(t *testing.T) {
+	// Zero limits in ExecuteRequest are sent as-is — the scheduler is responsible
+	// for resolving defaults before calling the executor.
+	var receivedConfig *taskpb.TaskConfig
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		receivedConfig = req.Config
+		return &taskpb.TaskResponse{
+			TaskId: req.TaskId,
+			Status: taskpb.TaskStatus_COMPLETED,
+			Result: "done",
+		}, nil
+	})
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "test-agent",
+		Payload: "zero limits",
+		// Limits left as zero-value StepLimits
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, receivedConfig)
+	assert.Equal(t, int32(0), receivedConfig.MaxLlmCalls)
+	assert.Equal(t, int32(0), receivedConfig.MaxTokens)
+	assert.Equal(t, int32(0), receivedConfig.TimeoutSeconds)
 }
 
 func TestExecuteTask_GeneratesTaskID(t *testing.T) {
