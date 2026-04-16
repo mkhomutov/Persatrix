@@ -138,6 +138,7 @@ Nothing — all RFC 0004 PRs (7/7) are merged. v0.1 MVP is feature-complete.
 | 0010 | Sub-Agent Spawning | Not yet written | — | — |
 | 0011 | Channels + Bridges | Not yet written | — | — |
 | 0012 | Protocols + Organizations | Not yet written | — | — |
+| [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | 📋 Proposed | 0 | 0/0 |
 
 ### Dependency Chain
 
@@ -151,6 +152,8 @@ RFC 0008 (Agent Memory & Context Optimization)            � Accepted  [depends
 RFC 0007 (Conditional & Looped Workflow Control Flow)     📋 Proposed  [depends on 0006, 0008]
     │
 RFC 0009 (Agent Identity, Security & Sandboxing)          📋 Proposed  [depends on 0004, 0005; Phases 1–2 alongside 0006]
+    ↓
+RFC 0013 (Legal, Ethical & Regulatory Compliance)         📋 Proposed  [depends on 0009; Phases 1–2 alongside 0009]
     ↓
 RFC 0010 (Sub-Agent Spawning)                             Not yet written
     ↓
@@ -166,6 +169,8 @@ RFC 0012 (Protocols + Organizations)                      Not yet written
 > **Why RFC 0009 (Security) runs alongside RFC 0006 and before RFC 0010**: Agent societies dramatically expand the attack surface. RFC 0009 Phases 1–2 (audit logging, rate limiting, input sanitization) can be developed concurrently with RFC 0006. Phases 3–4 (tool validation, agent identity tokens, HITL gates) are prerequisites for sub-agent spawning (RFC 0010) and channel bridge inputs (RFC 0011), which are high-trust injection vectors.
 >
 > **Why RFC 0010 (Sub-Agent Spawning) after RFC 0008 and RFC 0009**: Sub-agent spawning creates recursive execution paths. RFC 0008's delegation contract and merge semantics (Phase 3) must be in place before production sub-agent patterns are enabled. RFC 0009's capability token model ensures spawned agents receive narrowed, orchestrator-issued tokens rather than inheriting parent capabilities.
+>
+> **Why RFC 0013 (Legal, Ethical & Regulatory Compliance) alongside RFC 0009**: RFC 0009 establishes the technical security infrastructure (audit logging, HITL gates, capability tokens). RFC 0013 builds the compliance layer on top: data classification, consent tracking, right to erasure, ethical guardrails, and regulatory audit extensions. Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's AuditLogger and HITL gates. RFC 0013 must be substantially complete before RFC 0011 (Channels + Bridges) ships, since bridge inputs are the primary vector for external user data entering the system.
 
 ### Planned Components
 
@@ -187,6 +192,7 @@ RFC 0012 (Protocols + Organizations)                      Not yet written
 | Organizations | `internal/protocols/` | — | Hierarchy, roles, meeting/negotiation protocols | 0012 |
 | MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | External MCP server connections | 0010 |
 | Telemetry | `internal/telemetry/` | — | OTEL span instrumentation | 0006+ |
+| Compliance & Privacy | `internal/security/` | `agents/compliance.py` | Data classification, consent tracking, erasure, ethical policy, audit extensions | 0013 |
 
 ---
 
