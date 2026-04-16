@@ -1,7 +1,7 @@
 # RFC 0006 — Efficiency and Execution Limits
 
 **Type**: architecture  
-**Status**: � Accepted  
+**Status**: 🚧 Implementing  
 **Author**: Engineering Team  
 **Date**: 2026-04-15  
 **Target**: v0.2  
