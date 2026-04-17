@@ -423,6 +423,7 @@ func (s *WorkflowScheduler) executeStep(
 		Payload:    resolved,
 		Context:    outputsCopy,
 		Limits:     limits,
+		Cacheable:  step.Cacheable,
 	})
 	if err != nil {
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
@@ -686,7 +687,7 @@ func (s *WorkflowScheduler) buildStepMetadata(result *executor.ExecuteResult, re
 		TokensUsed:       tokensUsed,
 		LLMCallCount:     llmCallCount,
 		RetryCount:       result.RetryCount,
-		CacheHit:         false, // Always false until PR 4b implements response cache.
+		CacheHit:         result.CacheHit,
 		WallTimeMs:       result.WallTimeMs,
 		EstimatedCostUSD: estimatedCostUSD,
 	}

@@ -422,18 +422,25 @@ PR 6 (RFC close)
 2. **S-02 (Low) — No concurrent `CheckBudget` + `RecordUsage` race test** — From PR 3a finding C6, still unaddressed. Spawn goroutines that interleave `CheckBudget` and `RecordUsage` calls; run under `-race` to validate the TOCTOU gap is benign. *(Location: `internal/cost/cost_test.go`)*
 3. **S-03 (Low) — `ResetDaily` TODO missing tracking reference** — The TODO at `cmd/orchestrator/main.go` says `(PR #86 review S-05)` but doesn't reference a tracking issue or future PR. Add `// TODO(v0.2): Wire to midnight timer — see RFC 0006 PR 5 review follow-ups` for traceability. *(Location: `cmd/orchestrator/main.go`)*
 
+**Deferred to PR 5 (from deep review):**
+
+4. **S-04 (Low) — Reporter/Counter data asymmetry when `costReporter` is nil** — When `costReporter` is nil but `tokenCounter` is non-nil, `RecordUsage()` fires but `RecordStepCost()` is skipped. Counter totals include data that reporter step entries don't. Intentional (nil-safe design) but creates potential confusion if reporter summaries are compared against counter totals. Add an inline comment documenting this asymmetry. *(Location: `internal/scheduler/scheduler.go` → `recordStepUsage()` L598)*
+5. **S-05 (Low) — `perWorkflowSteps` unbounded map growth** — The `perWorkflowSteps` map grows without bound until `ResetDaily()`. For long-running orchestrators processing many workflows, this could consume significant memory. The 10,000-entry warning (reporter.go L116) provides visibility but no eviction. Add TTL-based eviction or document an operational runbook for monitoring and manual reset. *(Location: `internal/cost/reporter.go`)*
+6. **S-06 (Low) — No test for `CostReporter` with nil `config`** — `NewCostReporter` doesn't validate `config`. The `reporter.config` field is unused in current code but could become a bug if future reporter methods reference it. Add a nil-config constructor test or validate at construction. *(Location: `internal/cost/reporter.go` → `NewCostReporter()`)*
+7. **S-07 (Nit) — No test for `sortAgentsBySpend` with empty slice** — `sort.SliceStable` handles empty slices correctly, but explicit coverage would be more thorough and serve as documentation. *(Location: `internal/cost/reporter_test.go`)*
+
 **Nice to Have (follow-up):**
 
-4. **N-01 (Low) — Atomic snapshot for multi-scope budget check** — Replace three separate lock acquisitions (Global → Workflow → Agent) in `CheckBudget` with a single `snapshot()` method. Pre-existing finding C4 from PR 3a. *(Location: `internal/cost/cost.go`)*
-5. **N-02 (Low) — Config validation for budget thresholds** — Validate `MaxDailyUSD >= 0`, `DefaultMaxUSD >= 0`, and `OnExceed` enum at config load time. Pre-existing finding C7 from PR 3a. *(Location: `internal/cost/config.go`)*
-6. **N-03 (Low) — Structured error type for budget rejection** — Replace `fmt.Errorf("%w: %s", ErrBudgetExceeded, reason)` with a `BudgetError` struct containing `Scope`, `Spent`, `Limit`, `Estimated` fields. Enables structured 429 responses in PR 4b. *(Location: `internal/cost/cost.go`, `internal/scheduler/scheduler.go`)*
+8. **N-01 (Low) — Atomic snapshot for multi-scope budget check** — Replace three separate lock acquisitions (Global → Workflow → Agent) in `CheckBudget` with a single `snapshot()` method. Pre-existing finding C4 from PR 3a. *(Location: `internal/cost/cost.go`)*
+9. **N-02 (Low) — Config validation for budget thresholds** — Validate `MaxDailyUSD >= 0`, `DefaultMaxUSD >= 0`, and `OnExceed` enum at config load time. Pre-existing finding C7 from PR 3a. *(Location: `internal/cost/config.go`)*
+10. **N-03 (Low) — Structured `BudgetError` type for budget rejection** — Replace `fmt.Errorf("%w: %s", ErrBudgetExceeded, reason)` with a `BudgetError` struct containing `Scope`, `Spent`, `Limit`, `Estimated` fields. Enables structured 429 responses in PR 4b. *(Location: `internal/cost/cost.go`, `internal/scheduler/scheduler.go`)*
 
 **Positive (no action required):**
 
-7. **Excellent inline comments** — TOCTOU documentation, `ResetDaily` ordering rationale, negative-token clamping security note, and pessimistic `tokens_used` fallback explanation are all high quality.
-8. **Nil-safe optional injection** — `WithCostComponents()` pattern with nil checks maintains backward compatibility. `TestNoCostComponents_NoPanic` validates this.
-9. **Comprehensive test coverage** — 12 reporter tests + 14 scheduler budget tests covering happy path, rejection, error wrapping, concurrency, fallback, security clamping, and observability.
-10. **Boundary compliance** — PR stays within Go orchestrator boundary. No LLM logic, no Python changes, no proto modifications.
+11. **Excellent inline comments** — TOCTOU documentation, `ResetDaily` ordering rationale, negative-token clamping security note, and pessimistic `tokens_used` fallback explanation are all high quality.
+12. **Nil-safe optional injection** — `WithCostComponents()` pattern with nil checks maintains backward compatibility. `TestNoCostComponents_NoPanic` validates this.
+13. **Comprehensive test coverage** — 12 reporter tests + 14 scheduler budget tests covering happy path, rejection, error wrapping, concurrency, fallback, security clamping, and observability.
+14. **Boundary compliance** — PR stays within Go orchestrator boundary. No LLM logic, no Python changes, no proto modifications.
 
 ---
 
@@ -598,6 +605,10 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR 3b (#86) | N-01 | Atomic snapshot for multi-scope `CheckBudget` (pre-existing C4) | Low |
 | PR 3b (#86) | N-02 | Config validation for budget thresholds (pre-existing C7) | Low |
 | PR 3b (#86) | N-03 | Structured `BudgetError` type for budget rejection (enables 429 responses) | Low |
+| PR 3b (#86) | S-04 | Reporter/Counter data asymmetry when `costReporter` nil — document the intentional asymmetry | Low |
+| PR 3b (#86) | S-05 | `perWorkflowSteps` unbounded map growth — add TTL eviction or operational runbook | Low |
+| PR 3b (#86) | S-06 | No test for `CostReporter` with nil `config` — validate or test | Low |
+| PR 3b (#86) | S-07 | No test for `sortAgentsBySpend` with empty slice | Nit |
 | PR 4a (#87) | M-01 | Cost estimation inconsistency: `buildStepMetadata` returns $0 when agent only reports `tokens_used` | Medium |
 | PR 4a (#87) | M-02 | No deep copy of Metadata pointer on write in `UpdateStepState` (asymmetric with `CreateRun`) | Low |
 | PR 4a (#87) | M-03 | Empty step ID in `buildStepMetadata` warning logs makes them undiagnosable | Low |
@@ -650,8 +661,8 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 2 | 2 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #84) |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
-| 4a | 4 | ~180–260 lines | ~310–440 lines | 🟡 In review (PR #87) |
-| 4b | 4 | ~200–300 lines | ~340–510 lines | Not started |
+| 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
+| 4b | 4 | ~200–300 lines | ~340–510 lines | 🟡 In review |
 | 5 | Follow-up | TBD | TBD | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,540–2,290** | **~2,630–3,820** | |

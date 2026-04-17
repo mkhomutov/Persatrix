@@ -74,6 +74,11 @@ type Step struct {
 	// Added here alongside RFC 0006 fields to avoid a separate schema migration.
 	// No enforcement logic in this PR — that is RFC 0008's scope.
 	ContextBudget int `yaml:"context_budget"`
+
+	// Cacheable marks this step as eligible for response caching (RFC 0006 PR 4b).
+	// When true, the executor checks the response cache before dispatch and stores
+	// results on cache miss. Persona and autonomous tasks should not be cached.
+	Cacheable bool `yaml:"cacheable"`
 }
 
 // ExecutionPlan is a topologically sorted list of execution stages.
