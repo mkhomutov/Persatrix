@@ -13,7 +13,6 @@ import logging
 import re
 from typing import Any
 
-from ..defaults import DEFAULT_MAX_LLM_CALLS, DEFAULT_MAX_TOKENS
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
@@ -41,6 +40,16 @@ __all__ = ["_ActionLoopMixin"]
 _MAX_SUB_AGENT_TOKENS: int = 100_000
 _MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
 _MAX_SUB_AGENT_LLM_CALLS: int = 50
+
+# Persona-runtime fallback limits for LLM calls and output tokens.
+# These intentionally differ from the task-agent defaults in defaults.py
+# (DEFAULT_MAX_LLM_CALLS=5, DEFAULT_MAX_TOKENS=8192): persona agents run
+# multi-turn tool-use loops that typically need more iterations, and their
+# output tokens were historically capped lower.  Keeping persona defaults
+# separate preserves the original persona_runtime.py behavior.
+# (PR #95 review: shared defaults silently changed persona fallback values.)
+_PERSONA_DEFAULT_MAX_LLM_CALLS: int = 10
+_PERSONA_DEFAULT_MAX_TOKENS: int = 4096
 
 
 # ─── Mixin ─────────────────────────────────────────────────
@@ -343,8 +352,8 @@ class _ActionLoopMixin:
             self._build_tool_definitions()
         )
 
-        max_llm_calls = self.config.get("max_llm_calls", DEFAULT_MAX_LLM_CALLS)
-        max_tokens = self.config.get("max_tokens", DEFAULT_MAX_TOKENS)
+        max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
+        max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
 
         response: LLMResponse | None = None
         for _ in range(max_llm_calls):
