@@ -13,6 +13,15 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(cost)* `CostReporter` aggregates per-workflow and global cost summaries from `TokenCounter`
+  data — provides `WorkflowCostSummary` (per-step breakdown, estimated USD) and
+  `GlobalCostSummary` (daily totals, top agents by spend) (RFC 0006 PR 3b)
+- *(scheduler)* Pre-dispatch budget gating: `BudgetEnforcer.CheckBudget()` called before
+  `ExecuteTask()` — steps fail immediately with "budget exceeded" when over budget
+  (RFC 0006 PR 3b)
+- *(scheduler)* Post-dispatch token recording: `TokenCounter.RecordUsage()` called after
+  successful dispatch, parsing `input_tokens`/`output_tokens` from response metadata
+  (RFC 0006 PR 3b)
 - *(orchestrator)* Derived deadline mode: RPC timeouts computed from step config
   (`step.TimeoutSeconds + transport_margin`) instead of a static per-executor timeout.
   Retries share the step deadline — each attempt gets remaining time, not a fresh window.

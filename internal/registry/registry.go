@@ -25,6 +25,7 @@ type AgentInfo struct {
 	Address      string // gRPC address (host:port)
 	NodeID       string // empty for local deployment
 	Status       AgentStatus
+	Model        string // LLM model identifier for cost estimation (e.g., "claude-sonnet")
 
 	// Execution limit fields (RFC 0006). Zero means "not configured at agent
 	// level" — the scheduler falls through to system defaults.
@@ -93,6 +94,7 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 		Address:        agent.Address,
 		NodeID:         agent.NodeID,
 		Status:         agent.Status,
+		Model:          agent.Model,
 		MaxLLMCalls:    agent.MaxLLMCalls,
 		MaxTokens:      agent.MaxTokens,
 		TimeoutSeconds: agent.TimeoutSeconds,
@@ -191,6 +193,7 @@ func deepCopyAgent(agent *AgentInfo) *AgentInfo {
 		Address:        agent.Address,
 		NodeID:         agent.NodeID,
 		Status:         agent.Status,
+		Model:          agent.Model,
 		MaxLLMCalls:    agent.MaxLLMCalls,
 		MaxTokens:      agent.MaxTokens,
 		TimeoutSeconds: agent.TimeoutSeconds,

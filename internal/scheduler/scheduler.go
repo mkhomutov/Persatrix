@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
@@ -40,6 +42,11 @@ type WorkflowScheduler struct {
 	pollInterval  time.Duration
 	maxConcurrent int
 	inFlight      sync.Map // runID → struct{} — prevents duplicate execution
+
+	// Cost components (optional — nil-safe). Wired in PR 3b.
+	tokenCounter   *cost.TokenCounter
+	budgetEnforcer *cost.BudgetEnforcer
+	costReporter   *cost.CostReporter
 }
 
 // Option configures a WorkflowScheduler.
@@ -60,6 +67,17 @@ func WithMaxConcurrent(n int) Option {
 		if n > 0 {
 			s.maxConcurrent = n
 		}
+	}
+}
+
+// WithCostComponents injects cost tracking and budget enforcement into the scheduler.
+// When provided, the scheduler performs pre-dispatch budget checks and post-dispatch
+// token recording for each step.
+func WithCostComponents(counter *cost.TokenCounter, enforcer *cost.BudgetEnforcer, reporter *cost.CostReporter) Option {
+	return func(s *WorkflowScheduler) {
+		s.tokenCounter = counter
+		s.budgetEnforcer = enforcer
+		s.costReporter = reporter
 	}
 }
 
@@ -362,6 +380,18 @@ func (s *WorkflowScheduler) executeStep(
 	// Dispatch to executor.
 	// TODO(v0.2): evaluate step conditions
 	limits := s.resolveStepLimits(ctx, step)
+
+	// Pre-dispatch budget check (RFC 0006 PR 3b).
+	if s.budgetEnforcer != nil {
+		model := s.resolveAgentModel(ctx, step.AgentID)
+		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, model, int64(limits.MaxTokens))
+		if budgetResult.Decision == cost.BudgetReject {
+			errMsg := fmt.Sprintf("budget exceeded: %s", budgetResult.Reason)
+			s.markStepFailed(ctx, runID, step.ID, startedAt, errMsg)
+			return "", fmt.Errorf("%s", errMsg)
+		}
+	}
+
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
 		WorkflowID: workflowID,
 		AgentID:    step.AgentID,
@@ -373,6 +403,9 @@ func (s *WorkflowScheduler) executeStep(
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
+
+	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
+	s.recordStepUsage(workflowID, step, result)
 
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
@@ -486,6 +519,95 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 		return "", fmt.Errorf("invalid workflow ID format: %q", workflowID)
 	}
 	return filepath.Join(workflowsDir, workflowID+".yaml"), nil
+}
+
+// recordStepUsage records token usage from a completed step dispatch.
+// Parses tokens_used from the response metadata and records it in the
+// TokenCounter and CostReporter. Missing or unparseable metadata is
+// handled gracefully with a warning log.
+func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult) {
+	if s.tokenCounter == nil || result == nil {
+		return
+	}
+
+	var inputTokens, outputTokens int64
+	if result.Metadata != nil {
+		inputTokens = parseMetadataInt64(result.Metadata, "input_tokens", s.logger, step.ID)
+		outputTokens = parseMetadataInt64(result.Metadata, "output_tokens", s.logger, step.ID)
+
+		// Fall back to combined "tokens_used" if per-direction tokens are absent.
+		if inputTokens == 0 && outputTokens == 0 {
+			outputTokens = parseMetadataInt64(result.Metadata, "tokens_used", s.logger, step.ID)
+		}
+	}
+
+	if inputTokens == 0 && outputTokens == 0 {
+		s.logger.Warn("no token usage in step response metadata, recording zero",
+			zap.String("stepID", step.ID),
+			zap.String("agentID", step.AgentID),
+		)
+	}
+
+	model := ""
+	if result.Metadata != nil {
+		model = result.Metadata["model"]
+	}
+	if model == "" {
+		model = s.resolveAgentModel(context.Background(), step.AgentID)
+	}
+
+	s.tokenCounter.RecordUsage(cost.UsageRecord{
+		WorkflowID:   workflowID,
+		AgentID:      step.AgentID,
+		Model:        model,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+	})
+
+	if s.costReporter != nil {
+		estimatedCost := s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
+		s.costReporter.RecordStepCost(workflowID, cost.StepCostEntry{
+			StepID:       step.ID,
+			AgentID:      step.AgentID,
+			Model:        model,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			EstimatedUSD: estimatedCost,
+		})
+	}
+}
+
+// resolveAgentModel looks up the model configured for an agent in the registry.
+// Returns an empty string if the agent is not found (graceful degradation).
+func (s *WorkflowScheduler) resolveAgentModel(ctx context.Context, agentID string) string {
+	if s.registry == nil {
+		return ""
+	}
+	agent, err := s.registry.Get(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	return agent.Model
+}
+
+// parseMetadataInt64 parses an int64 value from a metadata map.
+// Returns 0 if the key is absent or the value is not a valid integer.
+func parseMetadataInt64(metadata map[string]string, key string, logger *zap.Logger, stepID string) int64 {
+	val, ok := metadata[key]
+	if !ok || val == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		logger.Warn("failed to parse metadata value as int64",
+			zap.String("stepID", stepID),
+			zap.String("key", key),
+			zap.String("value", val),
+			zap.Error(err),
+		)
+		return 0
+	}
+	return n
 }
 
 // TODO(post-v0.1): Implement retry logic with circuit breaker integration

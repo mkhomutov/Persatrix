@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -1267,4 +1268,256 @@ func newTestSchedulerWithRegistry(t *testing.T, store state.Store, exec executor
 	logger := zap.NewNop()
 	plan := planner.NewYAMLPlanner(logger)
 	return NewWorkflowScheduler(store, reg, plan, exec, logger, workflowsDir, opts...)
+}
+
+// --- PR 3b: Budget integration tests ---
+
+func testCostConfig() *cost.CostConfig {
+	return &cost.CostConfig{
+		Pricing: map[string]cost.ModelPricing{
+			"claude-sonnet": {
+				InputPer1MTokens:  3.00,
+				OutputPer1MTokens: 15.00,
+			},
+		},
+		Budgets: cost.BudgetThresholds{
+			Global:      cost.GlobalBudget{MaxDailyUSD: 100.00, OnExceed: "fail"},
+			PerWorkflow: cost.PerWorkflowBudget{DefaultMaxUSD: 10.00},
+			PerAgent:    cost.PerAgentBudget{DefaultMaxUSD: 5.00},
+		},
+	}
+}
+
+func TestBudgetCheck_UnderBudget_DispatchProceeds(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID: "t1",
+			Output: "ok",
+			Metadata: map[string]string{
+				"input_tokens":  "100",
+				"output_tokens": "50",
+				"model":         "claude-sonnet",
+			},
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "budget-ok", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "budget-ok", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, state.RunCompleted, run.Status)
+
+	// Verify tokens were recorded.
+	input, output, _ := tc.GlobalUsage()
+	assert.Equal(t, int64(100), input)
+	assert.Equal(t, int64(50), output)
+}
+
+func TestBudgetCheck_Rejected_StepFails(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	// Set a tiny per-agent budget that will be exceeded by the estimated cost.
+	cfg.Budgets.PerAgent.DefaultMaxUSD = 0.00001
+
+	// Verify the budget check rejects directly (sanity check).
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	directResult := be.CheckBudget("test-wf", "test-agent", "claude-sonnet", 8192)
+	require.Equal(t, cost.BudgetReject, directResult.Decision, "sanity: direct budget check should reject")
+
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	var executorCalled atomic.Bool
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		executorCalled.Store(true)
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	reg := newTestRegistry(t)
+	err := reg.Register(context.Background(), registry.AgentInfo{
+		ID:      "test-agent",
+		Name:    "test-agent",
+		Address: "passthrough:///test",
+		Status:  registry.StatusHealthy,
+		Model:   "claude-sonnet",
+	})
+	require.NoError(t, err)
+
+	sched := newTestSchedulerWithRegistry(t, store, exec, reg, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "budget-fail", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "budget-fail", state.RunFailed, 5*time.Second)
+	assert.Equal(t, state.RunFailed, run.Status)
+	assert.Contains(t, run.Error, "budget exceeded")
+	assert.False(t, executorCalled.Load(), "executor should not be called when budget is rejected")
+
+	// Step should also be marked as failed.
+	step, ok := run.Steps["step1"]
+	require.True(t, ok)
+	assert.Equal(t, state.RunFailed, step.Status)
+	assert.Contains(t, step.Error, "budget exceeded")
+}
+
+func TestTokenRecording_MissingMetadata_GracefulDegradation(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		// No token metadata in response.
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "no-meta", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "no-meta", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, state.RunCompleted, run.Status)
+
+	// Tokens should be zero (graceful degradation, no panic).
+	input, output, _ := tc.GlobalUsage()
+	assert.Equal(t, int64(0), input)
+	assert.Equal(t, int64(0), output)
+}
+
+func TestTokenRecording_TokensUsedFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID: "t1",
+			Output: "ok",
+			Metadata: map[string]string{
+				"tokens_used": "500",
+			},
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "fallback-meta", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "fallback-meta", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, state.RunCompleted, run.Status)
+
+	// tokens_used should be recorded as output tokens (fallback path).
+	_, output, _ := tc.GlobalUsage()
+	assert.Equal(t, int64(500), output)
+}
+
+func TestCostReporter_StepCostRecorded(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID: "t1",
+			Output: "ok",
+			Metadata: map[string]string{
+				"input_tokens":  "1000",
+				"output_tokens": "500",
+				"model":         "claude-sonnet",
+			},
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "reporter-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	waitForRunStatus(t, store, "reporter-run", state.RunCompleted, 5*time.Second)
+
+	// CostReporter should have step-level data.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, "step1", summary.Steps[0].StepID)
+	assert.Equal(t, int64(1000), summary.Steps[0].InputTokens)
+	assert.Equal(t, int64(500), summary.Steps[0].OutputTokens)
+	assert.Equal(t, "claude-sonnet", summary.Steps[0].Model)
+	assert.Greater(t, summary.Steps[0].EstimatedUSD, 0.0)
+}
+
+func TestNoCostComponents_NoPanic(t *testing.T) {
+	// When cost components are nil (not injected), scheduler should work normally.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	// No WithCostComponents — all cost fields remain nil.
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "no-cost", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "no-cost", state.RunCompleted, 5*time.Second)
+	assert.Equal(t, state.RunCompleted, run.Status)
 }

@@ -407,12 +407,12 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/cost/ -v -race` passes
-- [ ] `go test ./internal/scheduler/ -v -race` passes
-- [ ] Pre-dispatch budget check wired into scheduler
-- [ ] Post-dispatch token recording wired into scheduler
-- [ ] `CostReporter` produces workflow and global summaries
-- [ ] `main.go` wires cost components into scheduler
+- [x] `go test ./internal/cost/ -v -race` passes
+- [x] `go test ./internal/scheduler/ -v -race` passes
+- [x] Pre-dispatch budget check wired into scheduler
+- [x] Post-dispatch token recording wired into scheduler
+- [x] `CostReporter` produces workflow and global summaries
+- [x] `main.go` wires cost components into scheduler
 
 ---
 

@@ -128,6 +128,11 @@ func (tc *TokenCounter) GlobalUsage() (inputTokens, outputTokens int64, estimate
 	return tc.global.InputTokens, tc.global.OutputTokens, tc.global.EstimatedUSD
 }
 
+// Config returns the cost configuration used by this counter.
+func (tc *TokenCounter) Config() *CostConfig {
+	return tc.config
+}
+
 // ResetDaily clears all counters. Intended to be called at midnight for daily budget resets.
 func (tc *TokenCounter) ResetDaily() {
 	tc.mu.Lock()
