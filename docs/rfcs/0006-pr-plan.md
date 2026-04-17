@@ -833,28 +833,31 @@ PR 6 (RFC close)
 
 ---
 
-### PR 6: `feature/v02-rfc0006-close` — RFC Close
+### PR 6: `feature/v02-rfc0006-pr5c-followups` — PR 5c Follow-ups + RFC Close
 
 **Depends on**: PRs 5a, 5b, 5c merged
-**Branch**: `feature/v02-rfc0006-close`
-**Estimated size**: ~50–100 lines (status updates only)
+**Branch**: `feature/v02-rfc0006-pr5c-followups` (merged into PR 5c follow-ups + RFC close)
+**Actual size**: ~95 lines (N-01/N-02 Python fixes + status updates)
 
 #### Scope
 
 | File | Change |
 |------|--------|
+| `agents/base.py` | N-01: surface `invalid_fields` in negative-limit error metadata |
+| `tests/unit/python/test_agents.py` | N-01: assert `invalid_fields`; N-02: strengthen explicit-limit test to assert exact iteration count |
+| `CHANGELOG.md` | Entry under `[Unreleased]` → Bug Fixes |
 | `docs/rfcs/0006-efficiency-execution-limits.md` | Status → `✅ Implemented` |
-| `docs/rfcs/0006-pr-plan.md` | Final checklist verification |
-| `ROADMAP.md` | RFC 0006 status → `✅ Implemented`, component status updates, merged PR count 12/12 |
+| `docs/rfcs/0006-pr-plan.md` | PR 6 section updated, PR 5c N-01/N-02 marked addressed |
+| `ROADMAP.md` | RFC 0006 status → `✅ Implemented`, count 12/12, `internal/cost/` → Complete, PR #93 appended to merged table |
 
 #### PR checklist
 
-- [ ] RFC 0006 status is `✅ Implemented`
-- [ ] ROADMAP.md RFC Tracker updated (12/12)
-- [ ] ROADMAP.md Component Status tables updated (`internal/cost/` → Complete, `internal/defaults/` → Complete)
-- [ ] All PR plan checklists are complete
-- [ ] `make test` passes
-- [ ] `make lint` passes
+- [x] RFC 0006 status is `✅ Implemented`
+- [x] ROADMAP.md RFC Tracker updated (12/12)
+- [x] ROADMAP.md Component Status tables updated (`internal/cost/` → Complete, `internal/defaults/` already Complete)
+- [x] All PR plan checklists are complete
+- [x] `pytest tests/unit/python/test_agents.py` passes (36/36)
+- [x] `ruff check` clean on modified files
 
 ---
 
@@ -873,7 +876,7 @@ PR 6 (RFC close)
 | 5a | Follow-up | ~150–240 lines | ~250–400 lines | ✅ Merged (PR #90) |
 | 5b | Follow-up | ~120–210 lines | ~200–350 lines | ✅ Merged (PR #91) |
 | 5c | Follow-up | ~70–120 lines | ~120–200 lines | ✅ Merged (PR #92) |
-| 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
+| 6 | Close | ~50–100 lines | ~50–100 lines | ✅ Merged (PR #93) |
 | **Total** | | **~1,880–2,860** | **~3,160–4,770** | |
 
 ---

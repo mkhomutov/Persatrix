@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-17 (RFC 0006 PR 5c merged)  
+> **Last updated**: 2026-04-17 (RFC 0006 closed, 12/12)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PR 6 remains
+> **Current milestone**: v0.2.0 release validation — RFC 0005 + RFC 0006 both implemented
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -34,7 +34,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor | v0.1.0 | ✅ Implemented |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server | v0.1.0 | ✅ Implemented |
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | v0.2.0 | ✅ Implemented |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | 🚧 Implementing (11/12) |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | ✅ Implemented |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | v0.3.0 | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 📋 Proposed |
@@ -91,7 +91,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
 | `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
-| `internal/cost/` | Token/cost tracking aggregation | 🔲 TODO stub — RFC 0006 implementing |
+| `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
 
@@ -164,14 +164,14 @@ v0.1.0 complete — end-to-end execution working
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 12 | 11/12 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | ✅ Implemented | 12 | 12/12 |
 
 ### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (11/12)
+RFC 0006 (Efficiency & Execution Limits)                  ✅ Done (12/12)
     PR 1a — defaults package + Step limits + schema       ✅ #79
     PR 1b — executor + scheduler limit wiring             ✅ #81
     PR 1c — Python defaults + validation                  ✅ #83
@@ -183,12 +183,12 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (11/
     PR 5a — executor + scheduler + state follow-ups       ✅ #90
     PR 5b — cost package hardening                        ✅ #91
     PR 5c — planner/schema + Python fixes                 ✅ #92
-    PR 6  — RFC close                                     ⬜
+    PR 6  — PR 5c follow-ups + RFC close                  ✅ #93
     ↓
 v0.2.0 complete
 ```
 
-> PRs 5a–5c merged. PR 6 (RFC close) remains.
+> All 12 PRs merged. RFC 0006 closed.
 
 ### Component Status
 
@@ -477,6 +477,7 @@ v0.4.0 complete
 | [#90](https://github.com/mkhomutov/Persatrix/pull/90) | fix(executor,scheduler,state): RFC 0006 PR 5a — execution follow-up fixes | 0006 (5a/12) | 2026-04-17 |
 | [#91](https://github.com/mkhomutov/Persatrix/pull/91) | fix(cost): atomic budget snapshot, BudgetError struct, config validation (RFC 0006 PR 5b) | 0006 (5b/12) | 2026-04-17 |
 | [#92](https://github.com/mkhomutov/Persatrix/pull/92) | fix(planner,agents): RFC 0006 PR 5c — Planner/Schema + Python Fixes | 0006 (5c/12) | 2026-04-17 |
+| [#93](https://github.com/mkhomutov/Persatrix/pull/93) | fix(agents): surface invalid_fields in negative-limit error metadata + RFC 0006 close | 0006 (6/12) | 2026-04-17 |
 
 ---
 
