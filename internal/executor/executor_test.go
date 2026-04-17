@@ -1367,3 +1367,65 @@ func TestDerivedDeadline_ConcurrentDispatch(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("derived-concurrent-derived-task-%d", i), results[i].Output)
 	}
 }
+
+// TestDerivedDeadline_ZeroTimeout_WithRetries verifies that zero-timeout steps in
+// derived mode get fully static retry behavior — retries proceed without budget
+// accounting. resolveDeadline returns (e.timeout, e.timeout) for zero-timeout, and
+// the time budget check is skipped via the TimeoutSeconds > 0 guard so that the
+// retry semantics are consistent with the static dispatch fallback.
+func TestDerivedDeadline_ZeroTimeout_WithRetries(t *testing.T) {
+	callCount := 0
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			callCount++
+			if callCount <= 2 {
+				return nil, status.Error(codes.Unavailable, "temporarily unavailable")
+			}
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "recovered",
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithTimeout(10*time.Second),
+		WithMaxRetries(3),
+	)
+
+	registerHealthyAgent(t, env.reg, "zero-timeout-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		AgentID: "zero-timeout-agent",
+		Payload: "zero timeout with retries",
+		Limits: StepLimits{
+			MaxLLMCalls:    5,
+			MaxTokens:      8192,
+			TimeoutSeconds: 0, // zero = not configured → static fallback
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", result.Output)
+	// All 3 attempts should have executed: 2 transient failures + 1 success.
+	// Without the TimeoutSeconds > 0 guard, the budget check would have used
+	// e.timeout as stepDeadline in derived mode — potentially cutting off retries
+	// inconsistently with the static dispatch fallback from resolveDeadline.
+	assert.Equal(t, 3, callCount, "zero-timeout derived mode should retry like static mode")
+}
+
+// TestWithTokenParser_Nil verifies that passing nil to WithTokenParser preserves the
+// default parseTokensUsed function rather than causing a nil-pointer panic on retry.
+func TestWithTokenParser_Nil(t *testing.T) {
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, zap.NewNop(),
+		WithDeadlineMode(DeadlineModeDerived),
+		WithTokenParser(nil),
+	)
+
+	// The nil guard in WithTokenParser should have preserved the default parser.
+	assert.NotNil(t, exec.tokenParser, "WithTokenParser(nil) should preserve default parser")
+
+	// Verify the default parser returns 0 (not a panic).
+	result := exec.tokenParser(errors.New("test error"))
+	assert.Equal(t, int64(0), result, "default parser should return 0")
+}

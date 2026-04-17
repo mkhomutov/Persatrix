@@ -218,6 +218,12 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	// Compute step deadline and per-dispatch timeout based on deadline mode.
 	stepDeadline, dispatchTimeout := e.resolveDeadline(req.Limits)
 
+	// Precompute minimum budget thresholds for derived-mode retry decisions.
+	// These are constant across retry iterations — they depend on the step's
+	// configured limits, not the attempt number.
+	minBudget := time.Duration(float64(stepDeadline) * defaults.MinRetryBudgetFraction)
+	minTokens := int64(float64(req.Limits.MaxTokens) * defaults.MinRetryBudgetFraction)
+
 	// Retry loop with exponential backoff + jitter.
 	// In derived mode, retries share the step deadline — elapsed time is tracked
 	// and each retry gets the remaining budget.
@@ -227,10 +233,13 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 
 	for attempt := range e.maxRetries + 1 {
 		// In derived mode, check whether enough time budget remains for a retry.
-		if e.deadlineMode == DeadlineModeDerived && attempt > 0 {
+		// Guarded on TimeoutSeconds > 0 so that zero-timeout steps — which fall
+		// back to static dispatch in resolveDeadline — also get fully static retry
+		// behavior without budget accounting. This mirrors the MaxTokens > 0 guard
+		// on the token budget check below.
+		if e.deadlineMode == DeadlineModeDerived && attempt > 0 && req.Limits.TimeoutSeconds > 0 {
 			elapsed := time.Since(start)
 			remaining := stepDeadline - elapsed
-			minBudget := time.Duration(float64(stepDeadline) * defaults.MinRetryBudgetFraction)
 			if remaining < minBudget {
 				e.logger.Warn("retry skipped: insufficient time budget",
 					zap.String("agentID", req.AgentID),
@@ -253,7 +262,6 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		// The logic is exercised via WithTokenParser injection in tests.
 		if e.deadlineMode == DeadlineModeDerived && attempt > 0 && req.Limits.MaxTokens > 0 {
 			remaining := int64(req.Limits.MaxTokens) - cumulativeTokens
-			minTokens := int64(float64(req.Limits.MaxTokens) * defaults.MinRetryBudgetFraction)
 			if remaining < minTokens {
 				e.logger.Warn("retry skipped: insufficient token budget",
 					zap.String("agentID", req.AgentID),
