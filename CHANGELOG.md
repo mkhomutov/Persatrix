@@ -93,6 +93,10 @@ All notable changes to this project will be documented in this file.
 - *(orchestrator)* Graceful shutdown drain + absolute workflowsDir (RFC 0003, PR 8) (#33)
 - *(agents)* Registration follow-ups + RFC 0004 close (PR 6/7) (#42)
 - *(lint)* Resolve all golangci-lint, ruff, mypy, clippy warnings (#44)
+- *(agents)* Surface `invalid_fields` in `TaskOutput.metadata` when negative
+  execution limits are rejected, to aid operator diagnosis of misconfigured
+  `TaskConfig` values. Strengthen explicit-limit test to verify the loop is
+  capped at the configured value (RFC 0006 PR 5c follow-ups N-01, N-02)
 
 ### 📚 Documentation
 

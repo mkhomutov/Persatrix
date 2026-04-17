@@ -247,11 +247,21 @@ class BaseAgent(ABC):
 
         # Reject negative limits immediately — they are not a valid sentinel
         # and indicate a misconfigured TaskConfig from the orchestrator.
-        if task.config.max_llm_calls < 0 or task.config.max_tokens < 0:
+        # Surface which field(s) were invalid via metadata to aid operator
+        # diagnosis of misconfigured TaskConfigs (RFC 0006 PR 5c N-01).
+        invalid_fields: list[str] = []
+        if task.config.max_llm_calls < 0:
+            invalid_fields.append("max_llm_calls")
+        if task.config.max_tokens < 0:
+            invalid_fields.append("max_tokens")
+        if invalid_fields:
             return TaskOutput(
                 status=TaskStatus.FAILED,
                 result="Negative execution limits are not allowed",
-                metadata={"error_type": "permanent"},
+                metadata={
+                    "error_type": "permanent",
+                    "invalid_fields": ",".join(invalid_fields),
+                },
             )
 
         # 0 is the sentinel for "not set" (falsy), so `or` falls through
