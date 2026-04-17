@@ -473,13 +473,34 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/state/ -v -race` passes
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `go test ./internal/server/ -v -race` passes
-- [ ] `StepExecutionMetadata` struct defined with all 6 fields
-- [ ] Executor populates metadata after each step
-- [ ] Status API includes per-step metadata
-- [ ] Metadata logged at INFO level
+- [x] `go test ./internal/state/ -v -race` passes
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `go test ./internal/server/ -v -race` passes
+- [x] `StepExecutionMetadata` struct defined with all 6 fields
+- [x] Executor populates metadata after each step
+- [x] Status API includes per-step metadata
+- [x] Metadata logged at INFO level
+
+#### Review Findings (PR #87)
+
+**Should Fix (quality improvement):**
+
+1. **M-01 (Medium) — Cost estimation inconsistency between `recordStepUsage` and `buildStepMetadata`** — When an agent only reports `tokens_used` (no `input_tokens`/`output_tokens`), `recordStepUsage` maps it to `outputTokens` and computes a pessimistic cost. But `buildStepMetadata` passes `input_tokens=0, output_tokens=0` to `EstimateCost`, resulting in `$0` cost in the metadata — despite non-zero `TokensUsed` in the same struct. Fix: use resolved `tokensUsed` as `outputTokens` fallback in `buildStepMetadata`, or extract a shared token resolution function for both callers. *(Location: `internal/scheduler/scheduler.go` → `buildStepMetadata()` lines 670–685)*
+2. **M-02 (Low) — No deep copy of Metadata pointer on write in `UpdateStepState`** — Stores caller's pointer directly. Asymmetric with `CreateRun` which deep-copies. A future caller reusing a metadata pointer would silently corrupt store state. Fix: add `if step.Metadata != nil { metaCopy := *step.Metadata; step.Metadata = &metaCopy }` before `run.Steps[step.StepID] = step`. *(Location: `internal/state/state.go` → `UpdateStepState()` L201)*
+3. **M-03 (Low) — Empty step ID in `buildStepMetadata` warning logs** — `parseMetadataInt64` calls inside `buildStepMetadata` pass `""` as step ID, making warning logs undiagnosable ("failed to parse metadata value as int64, stepID="). Fix: add `stepID string` parameter to `buildStepMetadata` and pass `step.ID` from the call site. *(Location: `internal/scheduler/scheduler.go` → `buildStepMetadata()` L650)*
+4. **M-04 (Low) — Missing write-isolation test for metadata** — `TestGetRunDeepCopy_MetadataIsolation` tests read isolation only. No test verifies that mutating input metadata after `UpdateStepState` doesn't affect the store. Fix: add `TestUpdateStepState_WriteIsolation`. *(Location: `internal/state/state_test.go`)*
+
+**Nice to Have (follow-up):**
+
+5. **N-01 — Extract shared `resolveStepTokenData` helper** — Merge duplicated metadata parsing in `recordStepUsage` and `buildStepMetadata` into a single function returning a struct with `TokensUsed`, `InputTokens`, `OutputTokens`, `LLMCallCount`, `Model`, `EstimatedCostUSD`. Eliminates divergence risk. *(Location: `internal/scheduler/scheduler.go`)*
+6. **N-02 — Add `WallTimeMs` accuracy test** — Inject a mock agent with a fixed delay and assert `result.WallTimeMs >= delay`. Validates the measurement mechanism rather than just checking non-zero. *(Location: `internal/executor/executor_test.go`)*
+
+**Info (no action required):**
+
+7. **`int64` → `int` narrowing in `buildStepMetadata`** — `tokensUsed = int(parseMetadataInt64(...))` narrows int64 to int. On 64-bit platforms this is a no-op. Low risk given server deployment targets.
+8. **Redundant nil check in `buildStepMetadata`** — `result.Metadata != nil` rechecked inside an outer condition that already guarantees non-nil. Harmless but redundant.
+9. **`WallTimeMs` set only on success** — Failed steps have no wall time metadata. Acceptable for v0.2 since metadata is observability-only.
+10. **`CacheHit` hardcoded to `false`** — Correct forward-declaration for PR 4b. The constant `false` with a comment is better than omitting the field.
 
 ---
 
@@ -577,6 +598,12 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR 3b (#86) | N-01 | Atomic snapshot for multi-scope `CheckBudget` (pre-existing C4) | Low |
 | PR 3b (#86) | N-02 | Config validation for budget thresholds (pre-existing C7) | Low |
 | PR 3b (#86) | N-03 | Structured `BudgetError` type for budget rejection (enables 429 responses) | Low |
+| PR 4a (#87) | M-01 | Cost estimation inconsistency: `buildStepMetadata` returns $0 when agent only reports `tokens_used` | Medium |
+| PR 4a (#87) | M-02 | No deep copy of Metadata pointer on write in `UpdateStepState` (asymmetric with `CreateRun`) | Low |
+| PR 4a (#87) | M-03 | Empty step ID in `buildStepMetadata` warning logs makes them undiagnosable | Low |
+| PR 4a (#87) | M-04 | Missing write-isolation test for metadata in `state_test.go` | Low |
+| PR 4a (#87) | N-01 | Extract shared `resolveStepTokenData` helper to eliminate duplicated metadata parsing | Low |
+| PR 4a (#87) | N-02 | Add `WallTimeMs` accuracy test with injected delay | Low |
 
 #### PR checklist
 
@@ -622,8 +649,8 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 1c | 1 | ~130–200 lines | ~220–340 lines | ✅ Merged (PR #83) |
 | 2 | 2 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #84) |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
-| 3b | 3 | ~180–260 lines | ~310–440 lines | 🟡 In review (PR #86) |
-| 4a | 4 | ~180–260 lines | ~310–440 lines | Not started |
+| 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
+| 4a | 4 | ~180–260 lines | ~310–440 lines | 🟡 In review (PR #87) |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | Not started |
 | 5 | Follow-up | TBD | TBD | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
