@@ -154,7 +154,7 @@ func main() {
 	}
 
 	// 9. Initialize cost tracker
-	costCfg, err := cost.LoadCostConfig(*configDir)
+	costCfg, err := cost.LoadCostConfig(*configDir, cost.WithLogger(logger))
 	if err != nil {
 		logger.Warn("failed to load cost config, budget enforcement disabled",
 			zap.String("configDir", *configDir),
@@ -165,7 +165,8 @@ func main() {
 	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
 	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow
 	// unboundedly in long-running processes. Until then, ResetDaily() is only
-	// callable programmatically (e.g., from tests). (PR #86 review S-05)
+	// callable programmatically (e.g., from tests).
+	// See RFC 0006 PR 5 review follow-ups for tracking.
 	var schedOpts []scheduler.Option
 	var srvOpts []server.ServerOption
 	if costCfg != nil {

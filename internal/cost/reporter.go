@@ -75,6 +75,11 @@ type CostReporter struct {
 // The primary caller is WithCostComponents which always provides a valid counter,
 // but the constructor is exported and must be safe to call directly.
 // (PR #86 review: must-fix nil-guard)
+//
+// config may be nil — the reporter does not currently reference config, but the
+// parameter is retained for future use (e.g., per-workflow budget display in
+// summaries). Nil config is safe and does not affect any current behavior.
+// (PR 3a finding S-06: nil-config guard)
 func NewCostReporter(counter *TokenCounter, config *CostConfig, logger *zap.Logger) *CostReporter {
 	if counter == nil {
 		panic("cost: NewCostReporter requires a non-nil TokenCounter")

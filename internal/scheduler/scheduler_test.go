@@ -1425,7 +1425,7 @@ func TestBudgetCheck_ErrorWrapping(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrBudgetExceeded), "error should wrap ErrBudgetExceeded sentinel")
 	assert.Contains(t, err.Error(), "budget exceeded")
-	assert.Contains(t, err.Error(), "per-agent budget exceeded")
+	assert.Contains(t, err.Error(), "per_agent budget exceeded")
 }
 
 func TestTokenRecording_MissingMetadata_GracefulDegradation(t *testing.T) {

@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(orchestrator)* `TokenCounter` and `BudgetEnforcer` implement per-workflow, per-agent, and
+  global daily budget tracking with pre-dispatch cost gating. Atomic multi-scope snapshot
+  prevents torn reads in budget checks. Structured `BudgetError` type enables programmatic
+  handling of budget rejections (RFC 0006 PR 3a, PR 5b)
 - *(orchestrator)* In-memory LRU response cache for cacheable workflow steps: SHA-256 keyed by
   agent ID + payload + context, with configurable max entries and TTL. Steps opt in via
   `cacheable: true` in workflow YAML. Cache hit skips gRPC dispatch entirely (RFC 0006 PR 4b)
