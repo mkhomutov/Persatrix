@@ -13,6 +13,7 @@ import logging
 import re
 from typing import Any
 
+from ..defaults import DEFAULT_MAX_LLM_CALLS, DEFAULT_MAX_TOKENS
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
@@ -342,8 +343,8 @@ class _ActionLoopMixin:
             self._build_tool_definitions()
         )
 
-        max_llm_calls = self.config.get("max_llm_calls", 10)
-        max_tokens = self.config.get("max_tokens", 4096)
+        max_llm_calls = self.config.get("max_llm_calls", DEFAULT_MAX_LLM_CALLS)
+        max_tokens = self.config.get("max_tokens", DEFAULT_MAX_TOKENS)
 
         response: LLMResponse | None = None
         for _ in range(max_llm_calls):

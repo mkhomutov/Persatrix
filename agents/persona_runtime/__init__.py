@@ -5,9 +5,9 @@ Contains ``_LLMPersonaAgent``, the concrete ``PersonaAgent`` subclass with
 LLM-powered ``on_event()`` decision loop, multi-turn tool use, memory
 context injection, and state persistence.
 
-Extracted from ``persona.py`` to bring the file under the 600-line Python
-policy.  ``persona.py`` retains the ``PersonaAgent`` ABC and the
-``create_persona_agent()`` factory.
+Extracted from ``persona.py`` to bring the file under the 500-line code
+file-size limit (see ``scripts/checks/file_size.py``).  ``persona.py``
+retains the ``PersonaAgent`` ABC and the ``create_persona_agent()`` factory.
 
 Type definitions live in ``persona_types``, behavioral dimension
 rendering in ``persona_behavior``, event dispatch in ``dispatch``,

@@ -91,7 +91,7 @@ class _MemoryContextMixin:
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
 
-    # Also uses _format_event() from _ActionLoopMixin (via composition).
+    # Also uses _format_event() from _LLMPersonaAgent in __init__.py (via composition).
 
     async def _inject_memory_context(
         self, event: AgentEvent, *, query: str | None = None,

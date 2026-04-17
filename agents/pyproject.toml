@@ -66,6 +66,7 @@ packages = [
     "persatrix_agents",
     "persatrix_agents.generated",
     "persatrix_agents.memory",
+    "persatrix_agents.persona_runtime",
     "persatrix_agents.sub_agents",
     "persatrix_agents.tests",
     "persatrix_agents.tools",
