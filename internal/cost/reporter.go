@@ -56,6 +56,11 @@ type CostReporter struct {
 	// handling many workflows, completed entries accumulate until the next reset.
 	perWorkflowSteps map[string][]StepCostEntry
 
+	// workflowCountWarned tracks whether the high-workflow-count warning has
+	// been emitted this reset cycle, to avoid log spam.
+	// (PR #86 review: make perWorkflowSteps growth concern more visible to operators)
+	workflowCountWarned bool
+
 	counter *TokenCounter
 	config  *CostConfig
 	logger  *zap.Logger
@@ -64,7 +69,16 @@ type CostReporter struct {
 // NewCostReporter creates a new CostReporter backed by the given TokenCounter.
 // Accepts a logger for consistency with TokenCounter and BudgetEnforcer.
 // (PR #86 review S-02: adding logger now avoids a breaking constructor change later.)
+//
+// Panics if counter is nil — a nil counter is a programming error (would cause
+// nil-pointer panics in WorkflowSummary, GlobalSummary, and ResetDaily).
+// The primary caller is WithCostComponents which always provides a valid counter,
+// but the constructor is exported and must be safe to call directly.
+// (PR #86 review: must-fix nil-guard)
 func NewCostReporter(counter *TokenCounter, config *CostConfig, logger *zap.Logger) *CostReporter {
+	if counter == nil {
+		panic("cost: NewCostReporter requires a non-nil TokenCounter")
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -82,6 +96,19 @@ func (r *CostReporter) RecordStepCost(workflowID string, entry StepCostEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.perWorkflowSteps[workflowID] = append(r.perWorkflowSteps[workflowID], entry)
+
+	// Warn once per reset cycle when the number of tracked workflows exceeds
+	// a threshold. This alerts operators to potential memory growth in long-running
+	// deployments before the v0.2 TTL/eviction feature is implemented.
+	// (PR #86 review: perWorkflowSteps unbounded growth concern)
+	const workflowCountThreshold = 10000
+	if !r.workflowCountWarned && len(r.perWorkflowSteps) > workflowCountThreshold {
+		r.workflowCountWarned = true
+		r.logger.Warn("high workflow count in cost reporter, consider increasing ResetDaily frequency",
+			zap.Int("workflowCount", len(r.perWorkflowSteps)),
+			zap.Int("threshold", workflowCountThreshold),
+		)
+	}
 }
 
 // WorkflowSummary returns a cost summary for the given workflow, including
@@ -153,6 +180,7 @@ func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 func (r *CostReporter) ResetDaily() {
 	r.mu.Lock()
 	r.perWorkflowSteps = make(map[string][]StepCostEntry)
+	r.workflowCountWarned = false
 	r.mu.Unlock()
 	r.counter.ResetDaily()
 	r.logger.Info("daily cost reporter data reset")

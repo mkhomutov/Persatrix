@@ -387,14 +387,20 @@ func (s *WorkflowScheduler) executeStep(
 	// TODO(v0.2): evaluate step conditions
 	limits := s.resolveStepLimits(ctx, step)
 
+	// Resolve agent model once for both budget check and post-dispatch cost recording.
+	// The model from the registry won't change between pre-dispatch and post-dispatch
+	// within the same step execution. Post-dispatch recording may override this with
+	// the model from response metadata if present. (PR #86 review: eliminate redundant
+	// resolveAgentModel call per step)
+	registryModel := s.resolveAgentModel(ctx, step.AgentID)
+
 	// Pre-dispatch budget check (RFC 0006 PR 3b).
 	// NOTE: Budget check is optimistic — parallel steps within a stage may all
 	// pass budget checks simultaneously and collectively exceed the budget.
 	// Total potential overspend is bounded by (parallel_steps × max_token_cost).
 	// TODO(v0.3): Consider pessimistic budget reservation for high-value workflows.
 	if s.budgetEnforcer != nil {
-		model := s.resolveAgentModel(ctx, step.AgentID)
-		if model == "" {
+		if registryModel == "" {
 			// NOTE: Empty model means EstimateCost returns 0, making the budget check
 			// a no-op for this step. This happens when the registry is nil or the agent
 			// is not registered. Log a warning so operators can detect misconfiguration.
@@ -403,7 +409,7 @@ func (s *WorkflowScheduler) executeStep(
 				zap.String("stepID", step.ID),
 			)
 		}
-		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, model, int64(limits.MaxTokens))
+		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, registryModel, int64(limits.MaxTokens))
 		if budgetResult.Decision == cost.BudgetReject {
 			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Reason)
 			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
@@ -424,7 +430,7 @@ func (s *WorkflowScheduler) executeStep(
 	}
 
 	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
-	s.recordStepUsage(ctx, workflowID, step, result)
+	s.recordStepUsage(workflowID, step, result, registryModel)
 
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
@@ -544,7 +550,12 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 // Parses tokens_used from the response metadata and records it in the
 // TokenCounter and CostReporter. Missing or unparseable metadata is
 // handled gracefully with a warning log.
-func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID string, step planner.Step, result *executor.ExecuteResult) {
+//
+// registryModel is the model resolved from the agent registry before dispatch.
+// It is used as a fallback when the executor response metadata does not include
+// a "model" key. This avoids a redundant registry lookup post-dispatch.
+// (PR #86 review: reduce double resolveAgentModel call)
+func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult, registryModel string) {
 	if s.tokenCounter == nil || result == nil {
 		return
 	}
@@ -586,7 +597,7 @@ func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID stri
 		model = result.Metadata["model"]
 	}
 	if model == "" {
-		model = s.resolveAgentModel(ctx, step.AgentID)
+		model = registryModel
 	}
 
 	s.tokenCounter.RecordUsage(cost.UsageRecord{

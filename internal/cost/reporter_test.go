@@ -1,12 +1,14 @@
 package cost
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestCostReporter_WorkflowSummary_WithSteps(t *testing.T) {
@@ -293,4 +295,56 @@ func TestCostReporter_ResetDaily_ResetsCounter(t *testing.T) {
 
 	// Reporter step data should be reset.
 	assert.Empty(t, reporter.WorkflowSummary("wf-1").Steps)
+}
+
+// TestNewCostReporter_NilCounter_Panics verifies that NewCostReporter panics
+// when given a nil TokenCounter, since a nil counter would cause nil-pointer
+// panics in WorkflowSummary, GlobalSummary, and ResetDaily.
+// (PR #86 review: must-fix nil-guard)
+func TestNewCostReporter_NilCounter_Panics(t *testing.T) {
+	cfg := testConfig()
+	assert.Panics(t, func() {
+		NewCostReporter(nil, cfg, zap.NewNop())
+	}, "NewCostReporter should panic with nil counter")
+}
+
+// TestCostReporter_WorkflowCountWarning verifies that RecordStepCost emits
+// a warning when the number of tracked workflows exceeds the threshold.
+// This tests the operational safety guard for unbounded perWorkflowSteps growth.
+// (PR #86 review: perWorkflowSteps growth concern)
+func TestCostReporter_WorkflowCountWarning(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+
+	core, logs := observer.New(zap.WarnLevel)
+	reporterLogger := zap.New(core)
+	reporter := NewCostReporter(tc, cfg, reporterLogger)
+
+	// Record step costs for more than 10000 unique workflows.
+	for i := 0; i <= 10000; i++ {
+		wfID := fmt.Sprintf("wf-%d", i)
+		reporter.RecordStepCost(wfID, StepCostEntry{StepID: "s1", AgentID: "a"})
+	}
+
+	// Verify warning was emitted.
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.Message == "high workflow count in cost reporter, consider increasing ResetDaily frequency" {
+			found = true
+			assert.Equal(t, zap.WarnLevel, entry.Level)
+			break
+		}
+	}
+	assert.True(t, found, "expected warning log for high workflow count")
+
+	// After reset, the warning should be re-armed.
+	reporter.ResetDaily()
+	initialLogCount := logs.Len()
+
+	for i := 0; i <= 10000; i++ {
+		wfID := fmt.Sprintf("wf-post-reset-%d", i)
+		reporter.RecordStepCost(wfID, StepCostEntry{StepID: "s1", AgentID: "a"})
+	}
+
+	assert.Greater(t, logs.Len(), initialLogCount, "warning should fire again after reset")
 }
