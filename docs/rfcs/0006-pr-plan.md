@@ -12,7 +12,7 @@
 
 RFC 0006 defines execution limit propagation, budget enforcement, deadline derivation, retry budget policy, response caching, and execution observability. The RFC spans 4 implementation phases across Go orchestrator, Python agents, YAML config, and JSON schemas.
 
-This plan splits the work into **10 PRs**: Phase 1 is split into 1a (Go defaults + planner Step limits + schema), 1b (executor + scheduler limit wiring), and 1c (Python defaults + agent validation). Phase 2 is one PR (deadline derivation + retry budget). Phase 3 is split into 3a (TokenCounter + BudgetEnforcer) and 3b (CostReporter + scheduler budget integration). Phase 4 is split into 4a (StepExecutionMetadata + observability) and 4b (response cache + cost summary endpoint). PR 5 is reserved for review follow-ups. PR 6 closes the RFC.
+This plan splits the work into **12 PRs**: Phase 1 is split into 1a (Go defaults + planner Step limits + schema), 1b (executor + scheduler limit wiring), and 1c (Python defaults + agent validation). Phase 2 is one PR (deadline derivation + retry budget). Phase 3 is split into 3a (TokenCounter + BudgetEnforcer) and 3b (CostReporter + scheduler budget integration). Phase 4 is split into 4a (StepExecutionMetadata + observability) and 4b (response cache + cost summary endpoint). PRs 5a–5c address review follow-ups (grouped by component). PR 6 closes the RFC.
 
 Each PR is independently mergeable and leaves the codebase in a passing-tests, lint-clean state.
 
@@ -22,7 +22,7 @@ Each PR is independently mergeable and leaves the codebase in a passing-tests, l
 
 **Prerequisite**: RFC 0005 fully merged (20/20 PRs). The persona agent, memory system, task agent, and tool infrastructure are the foundation for execution limit enforcement.
 
-**Recommended merge order**: **PR 1a** → **PR 1b** → **PR 1c** (can parallel with PR 1b — no Go dependency; both must merge before PR 2 starts) → **PR 2** → **PR 3a** → **PR 3b** → **PR 4a** → **PR 4b** (can parallel with PR 4a — independent code paths) → **PR 5** → **PR 6**.
+**Recommended merge order**: **PR 1a** → **PR 1b** → **PR 1c** (can parallel with PR 1b — no Go dependency; both must merge before PR 2 starts) → **PR 2** → **PR 3a** → **PR 3b** → **PR 4a** → **PR 4b** (can parallel with PR 4a — independent code paths) → **PR 5a** / **PR 5b** / **PR 5c** (parallel — independent component groups) → **PR 6**.
 
 ---
 
@@ -41,8 +41,12 @@ PR 3b (CostReporter + scheduler budget integration)
   ↓
 PR 4a (StepExecutionMetadata)    PR 4b (response cache + cost endpoint)
   ↓                                ↓
-PR 5 (review follow-ups) ←────────┘
-  ↓
+  └──────────┬─────────────────────┘
+             ↓
+PR 5a (executor + scheduler + state fixes)
+PR 5b (cost package hardening)          ← all three parallel, independent components
+PR 5c (planner/schema + Python fixes)
+             ↓
 PR 6 (RFC close)
 ```
 
@@ -552,83 +556,226 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/cost/ -v -race` passes
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `go test ./internal/server/ -v -race` passes
-- [ ] `make validate` passes with `cacheable` field
-- [ ] Cache respects opt-in (`cacheable: true` only)
-- [ ] Cache key includes all relevant request fields
-- [ ] LRU eviction and TTL expiry working
-- [ ] Cost summary endpoint registered and tested
+- [x] `go test ./internal/cost/ -v -race` passes
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `go test ./internal/server/ -v -race` passes
+- [x] `make validate` passes with `cacheable` field
+- [x] Cache respects opt-in (`cacheable: true` only)
+- [x] Cache key includes all relevant request fields
+- [x] LRU eviction and TTL expiry working
+- [x] Cost summary endpoint registered and tested
 
 ---
 
-### PR 5: `feature/v02-rfc0006-review-followups` — Review Follow-Ups
+### PR 5a: `feature/v02-rfc0006-followups-execution` — Executor + Scheduler + State Follow-Ups
 
 **Depends on**: All core PRs (1a–4b) merged
-**Branch**: `feature/v02-rfc0006-review-followups`
-**Estimated size**: TBD (populated during review)
+**Branch**: `feature/v02-rfc0006-followups-execution`
+**Estimated size**: ~250–400 lines (fixes + tests)
 
 #### Scope
 
-Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR in the sections above during implementation. This PR addresses all deferred Medium and Low findings.
+| File | Change |
+|------|--------|
+| `internal/scheduler/scheduler.go` | Fix cost estimation inconsistency in `buildStepMetadata` (M-01): use resolved `tokensUsed` as `outputTokens` fallback — or extract shared `resolveStepTokenData` helper used by both `recordStepUsage` and `buildStepMetadata` (N-01). Pass `stepID` to `buildStepMetadata` so warning logs are diagnosable (M-03). Add inline comment documenting Reporter/Counter data asymmetry when `costReporter` is nil (S-04). |
+| `internal/scheduler/scheduler_test.go` | Add test for `buildStepMetadata` cost estimation with `tokens_used`-only metadata (verifies M-01 fix). |
+| `internal/state/state.go` | Deep copy `Metadata` pointer on write in `UpdateStepState` (M-02): `if step.Metadata != nil { metaCopy := *step.Metadata; step.Metadata = &metaCopy }` before storing. |
+| `internal/state/state_test.go` | Add `TestUpdateStepState_WriteIsolation` — mutate input metadata after `UpdateStepState` and verify store is unaffected (M-04). |
+| `internal/executor/executor.go` | Add overflow guard for `int` → `int32` casts: clamp to `math.MaxInt32` with warning log (F-02). Add clarifying comment for transport margin invariant in retry timeout calculation (S6). Add backoff-aware budget check: verify `remaining - backoff_duration >= minBudget` before sleeping (S9). Add upper-bound validation: clamp `TimeoutSeconds > 3600` to 3600 with warning log (S10). |
+| `internal/executor/executor_test.go` | Add `TestDerivedDeadline_TokenBudgetCutoff_TimeAllowed` — inject high-token parser with long step timeout, verify retry skipped due to token budget not time (S7). Add `TestDerivedDeadline_MaxTokensZero` — verify `MaxTokens = 0` guard prevents token budget evaluation (S12). Add `TestExecuteTask_WallTimeMs_Accuracy` — inject mock agent with fixed delay, assert `WallTimeMs >= delay` (N-02). Consolidate redundant `TestExecuteTask_PopulatesTaskConfig_AllFields` with existing all-fields test (F-05). |
+| `internal/scheduler/scheduler.go` | Add negative-value rejection or warning in `resolveStepLimits()` for agent-level limits (F-04). |
+| `cmd/orchestrator/main.go` | Extract `resolveDeadlineMode(explicit, env string) string` function for testable deadline mode inference (S11). |
+| `cmd/orchestrator/main_test.go` | Unit test for `resolveDeadlineMode()` covering explicit, env, and default cases (S11). |
 
-#### Accumulated Findings
+#### Key implementation details
 
-| Source | # | Finding | Severity |
-|--------|---|---------|----------|
-| PR 1a (#79) | 3 | Multi-step limit inheritance test (2+ steps, partial limits) | Low |
-| PR 1a (#79) | 4 | Schema description parity — add `description` to workflow schema step-limit fields | Low |
-| PR 1a (#79) | 5 | Document zero-value behavior in workflow schema `max_llm_calls` description | Low |
-| PR 1b (#81) | F-02 | `int` → `int32` truncation without overflow guard in `executor.go` L154–156 | Low |
-| PR 1b (#81) | F-04 | Negative agent-level limit values in `resolveStepLimits()` silently ignored; add rejection or warning | Low |
-| PR 1b (#81) | F-05 | Redundant `TestExecuteTask_PopulatesTaskConfig_AllFields` — consolidate with existing all-fields test | Nit |
-| PR 1c (#83) | M1 | `ValueError` vs `TaskOutput(FAILED)` inconsistency for negative limits | Medium |
-| PR 1c (#83) | M2 | `DEFAULT_TIMEOUT_SECONDS` defined but unused — wire up or add forward-declaration comment | Medium |
-| PR 1c (#83) | L2 | No loop-exhaustion test for new default (5 iterations) | Low |
-| PR 2 (#84) | S6 | Clarifying comment for transport margin in retry timeout invariant | Low |
-| PR 2 (#84) | S7 | Test independent token budget cutoff (time allows, tokens block) | Low |
+- **Shared token resolution (M-01 + N-01)**: Extract `resolveStepTokenData(result *ExecuteResult) StepTokenData` returning a struct with `TokensUsed`, `InputTokens`, `OutputTokens`, `LLMCallCount`, `Model`, `EstimatedCostUSD`. Both `recordStepUsage()` and `buildStepMetadata()` call this function, eliminating the divergence where one used `tokens_used` as `outputTokens` but the other passed zeros.
+- **Metadata deep copy (M-02)**: Matches the existing `CreateRun` deep-copy behavior. Prevents future callers from accidentally corrupting state by reusing a metadata pointer.
+- **int32 overflow guard (F-02)**: `if val > math.MaxInt32 { val = math.MaxInt32; logger.Warn(...) }` before each `int32()` cast. In practice bounded by config, but defends against programmatic misuse.
+- **Backoff-aware budget check (S9)**: Before `time.Sleep(backoff)`, check `remaining - backoff >= minBudget`. If not, skip retry. Window is small (max ~400ms backoff vs 60s+ deadlines) but closes a theoretical waste gap.
+- **Upper-bound validation (S10)**: Clamp `TimeoutSeconds > 3600` to `3600` with a Warn-level log. Prevents absurd deadlines. The 3600s cap is a reasonable maximum for a single step; workflows with longer operations should use multiple steps or streaming.
+- **Negative agent-level limits (F-04)**: Add `if val < 0 { logger.Warn("negative agent limit, using default", ...); val = 0 }` in `resolveStepLimits()`. Planner already rejects negative step limits; this covers the agent-config path.
+
+#### Addressed findings
+
+| Source | ID | Finding | Severity |
+|--------|----|---------|----------|
+| PR 4a (#87) | M-01 | Cost estimation inconsistency between `recordStepUsage` and `buildStepMetadata` | Medium |
+| PR 4a (#87) | M-02 | No deep copy of Metadata pointer on write in `UpdateStepState` | Low |
+| PR 4a (#87) | M-03 | Empty step ID in `buildStepMetadata` warning logs | Low |
+| PR 4a (#87) | M-04 | Missing write-isolation test for metadata | Low |
+| PR 4a (#87) | N-01 | Extract shared `resolveStepTokenData` helper | Low |
+| PR 4a (#87) | N-02 | `WallTimeMs` accuracy test with injected delay | Low |
+| PR 1b (#81) | F-02 | `int` → `int32` truncation without overflow guard | Low |
+| PR 1b (#81) | F-04 | Negative agent-level limit values silently ignored | Low |
+| PR 1b (#81) | F-05 | Redundant `TestExecuteTask_PopulatesTaskConfig_AllFields` | Nit |
+| PR 2 (#84) | S6 | Clarifying comment for transport margin in retry timeout | Low |
+| PR 2 (#84) | S7 | Test independent token budget cutoff | Low |
 | PR 2 (#84) | S9 | Backoff-aware budget check before retry sleep | Low |
-| PR 2 (#84) | S10 | Upper-bound validation for `TimeoutSeconds` (e.g., 3600s cap) | Low |
+| PR 2 (#84) | S10 | Upper-bound validation for `TimeoutSeconds` (3600s cap) | Low |
 | PR 2 (#84) | S11 | Extract `--deadline-mode` inference into testable function | Low |
 | PR 2 (#84) | S12 | Test `MaxTokens = 0` with derived mode + token parser | Low |
-| PR 3a (#85) | C1 | Missing CHANGELOG entry for TokenCounter + BudgetEnforcer | Low |
-| PR 3a (#85) | C2 | `pause_and_alert` warning log not verified in test — use zaptest | Low |
-| PR 3a (#85) | C3 | No Debug log for unknown model in `EstimateCost` | Low |
-| PR 3a (#85) | C4 | Non-atomic multi-scope snapshot in `CheckBudget` (TOCTOU tightening) | Low |
-| PR 3a (#85) | C5 | Explicit `ResetDaily` agent-scope assertion in test | Low |
-| PR 3a (#85) | C6 | Test concurrent `CheckBudget` + `RecordUsage` under `-race` | Low |
-| PR 3a (#85) | C7 | Config validation for budget thresholds (`MaxDailyUSD >= 0`, `OnExceed` enum) | Low |
-| PR 3b (#86) | S-01 | No parallel budget overspend test (N parallel steps exceed budget collectively) | Low |
-| PR 3b (#86) | S-02 | No concurrent `CheckBudget` + `RecordUsage` race test (C6 still unaddressed) | Low |
-| PR 3b (#86) | S-03 | `ResetDaily` TODO missing tracking reference — add RFC 0006 PR 5 ref | Low |
-| PR 3b (#86) | N-01 | Atomic snapshot for multi-scope `CheckBudget` (pre-existing C4) | Low |
-| PR 3b (#86) | N-02 | Config validation for budget thresholds (pre-existing C7) | Low |
-| PR 3b (#86) | N-03 | Structured `BudgetError` type for budget rejection (enables 429 responses) | Low |
-| PR 3b (#86) | S-04 | Reporter/Counter data asymmetry when `costReporter` nil — document the intentional asymmetry | Low |
-| PR 3b (#86) | S-05 | `perWorkflowSteps` unbounded map growth — add TTL eviction or operational runbook | Low |
-| PR 3b (#86) | S-06 | No test for `CostReporter` with nil `config` — validate or test | Low |
-| PR 3b (#86) | S-07 | No test for `sortAgentsBySpend` with empty slice | Nit |
-| PR 4a (#87) | M-01 | Cost estimation inconsistency: `buildStepMetadata` returns $0 when agent only reports `tokens_used` | Medium |
-| PR 4a (#87) | M-02 | No deep copy of Metadata pointer on write in `UpdateStepState` (asymmetric with `CreateRun`) | Low |
-| PR 4a (#87) | M-03 | Empty step ID in `buildStepMetadata` warning logs makes them undiagnosable | Low |
-| PR 4a (#87) | M-04 | Missing write-isolation test for metadata in `state_test.go` | Low |
-| PR 4a (#87) | N-01 | Extract shared `resolveStepTokenData` helper to eliminate duplicated metadata parsing | Low |
-| PR 4a (#87) | N-02 | Add `WallTimeMs` accuracy test with injected delay | Low |
+| PR 3b (#86) | S-04 | Reporter/Counter data asymmetry comment | Low |
+
+#### Tests
+
+- Shared token resolution: `tokens_used`-only metadata → consistent cost in both `recordStepUsage` and `buildStepMetadata`.
+- State write isolation: mutate metadata after `UpdateStepState` → store unaffected.
+- int32 overflow: limit > `math.MaxInt32` → clamped to `math.MaxInt32` with warning.
+- Upper-bound timeout: `TimeoutSeconds = 7200` → clamped to 3600 with warning.
+- Token budget cutoff: long timeout + high tokens → retry skipped on token budget, not time.
+- `MaxTokens = 0` guard: zero `MaxTokens` → token budget evaluation skipped entirely.
+- WallTimeMs accuracy: injected 50ms delay → `WallTimeMs >= 50`.
+- Backoff-aware budget: `remaining - backoff < minBudget` → retry skipped.
+- Negative agent limit: `-5` in agent config → resolved to system default with warning.
+- `resolveDeadlineMode`: explicit "static" → "static"; env "derived" → "derived"; neither → "derived".
 
 #### PR checklist
 
-- [ ] All deferred Medium findings addressed
-- [ ] All deferred Low findings addressed (or explicitly deferred to next RFC)
-- [ ] `make test` passes
-- [ ] `make lint` passes
+- [ ] `go test ./internal/executor/ -v -race` passes
+- [ ] `go test ./internal/scheduler/ -v -race` passes
+- [ ] `go test ./internal/state/ -v -race` passes
+- [ ] `go test ./cmd/orchestrator/ -v -race` passes
+- [ ] M-01 cost estimation divergence eliminated
+- [ ] M-02 metadata deep copy on write
+- [ ] All 16 addressed findings resolved
+
+---
+
+### PR 5b: `feature/v02-rfc0006-followups-cost` — Cost Package Hardening
+
+**Depends on**: All core PRs (1a–4b) merged. Can parallel with PR 5a and PR 5c — independent code paths.
+**Branch**: `feature/v02-rfc0006-followups-cost`
+**Estimated size**: ~200–350 lines (fixes + tests)
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/cost/cost.go` | Implement atomic multi-scope snapshot: add internal `snapshot()` method that reads global, per-workflow, and per-agent totals under a single lock acquisition, used by `CheckBudget()` (C4/N-01). Implement `BudgetError` struct with `Scope`, `Spent`, `Limit`, `Estimated` fields — replaces `fmt.Errorf` in `CheckBudget()` rejection path (N-03). |
+| `internal/cost/cost_test.go` | Add `TestBudgetEnforcer_PauseAndAlert_WarningLogged` — use `zaptest.NewLogger(t)` to observe warning emission (C2). Add `TestTokenCounter_ResetDaily_AgentScope` — explicit agent-scope reset assertion (C5). Add `TestConcurrent_CheckBudget_RecordUsage` — interleaved goroutines under `-race` (C6/S-02). Add `TestParallelSteps_CollectiveBudgetOverspend` — N parallel steps pass budget checks and collectively exceed budget, documenting known optimistic behavior (S-01). |
+| `internal/cost/config.go` | Add `Debug`-level log when model not found in pricing table during `EstimateCost()` (C3). Add config validation in `LoadCostConfig()`: reject `MaxDailyUSD < 0`, `DefaultMaxUSD < 0`, validate `OnExceed` is `"fail"` or `"pause_and_alert"` (C7/N-02). |
+| `internal/cost/config_test.go` | Test config validation: negative `MaxDailyUSD` → error. Unknown `OnExceed` → error. Valid config → no error. |
+| `internal/cost/reporter.go` | Add TTL-based eviction comment or operational note for `perWorkflowSteps` unbounded growth (S-05). Add nil-config guard in `NewCostReporter` constructor (S-06). |
+| `internal/cost/reporter_test.go` | Add `TestNewCostReporter_NilConfig` — verify constructor handles nil config gracefully (S-06). Add `TestSortAgentsBySpend_EmptySlice` — verify empty input produces empty output (S-07). |
+| `cmd/orchestrator/main.go` | Update `ResetDaily` TODO comment to reference RFC 0006 PR 5 for traceability (S-03). |
+| `CHANGELOG.md` | Add missing entry for TokenCounter + BudgetEnforcer under `[Unreleased]` (C1). |
+
+#### Key implementation details
+
+- **Atomic snapshot (C4/N-01)**: Add `func (tc *TokenCounter) snapshot(workflowID, agentID string) (globalTotal, wfTotal, agentTotal float64)` — acquires `tc.mu` once, reads all three scopes, returns. `CheckBudget()` calls `snapshot()` instead of three separate locked reads. Public API unchanged.
+- **Structured BudgetError (N-03)**: `type BudgetError struct { Scope string; Spent, Limit, Estimated float64 }` implementing `error`. Enables structured 429 responses in cost summary endpoint. `CheckBudget()` returns `BudgetCheckResult` with `Error *BudgetError` instead of string reason.
+- **Config validation (C7/N-02)**: Validation runs at config load time (fail-fast). Negative budget thresholds are rejected; unknown `OnExceed` values produce a descriptive error. This prevents silent misconfiguration where negative values disable enforcement.
+- **Debug log for unknown model (C3)**: `logger.Debug("model not found in pricing table", zap.String("model", model))`. Helps operators diagnose `$0` cost tracking for agents with model name mismatches between config and usage.
+- **perWorkflowSteps growth (S-05)**: Document the existing 10,000-entry warning as the primary control. Add inline comment noting that `ResetDaily()` is the eviction mechanism (resets map) and that TTL-based eviction is deferred until production load profiling justifies the complexity.
+
+#### Addressed findings
+
+| Source | ID | Finding | Severity |
+|--------|----|---------|----------|
+| PR 3a (#85) | C1 | Missing CHANGELOG entry for TokenCounter + BudgetEnforcer | Low |
+| PR 3a (#85) | C2 | `pause_and_alert` warning log not verified in test | Low |
+| PR 3a (#85) | C3 | No Debug log for unknown model in `EstimateCost` | Low |
+| PR 3a (#85) | C4 | Non-atomic multi-scope snapshot in `CheckBudget` | Low |
+| PR 3a (#85) | C5 | Explicit `ResetDaily` agent-scope assertion | Low |
+| PR 3a (#85) | C6 | Test concurrent `CheckBudget` + `RecordUsage` | Low |
+| PR 3a (#85) | C7 | Config validation for budget thresholds | Low |
+| PR 3b (#86) | S-01 | No parallel budget overspend test | Low |
+| PR 3b (#86) | S-02 | Concurrent `CheckBudget` + `RecordUsage` race test | Low |
+| PR 3b (#86) | S-03 | `ResetDaily` TODO missing tracking reference | Low |
+| PR 3b (#86) | N-01 | Atomic snapshot for multi-scope `CheckBudget` | Low |
+| PR 3b (#86) | N-02 | Config validation for budget thresholds | Low |
+| PR 3b (#86) | N-03 | Structured `BudgetError` type for budget rejection | Low |
+| PR 3b (#86) | S-05 | `perWorkflowSteps` unbounded map growth | Low |
+| PR 3b (#86) | S-06 | No test for `CostReporter` with nil `config` | Low |
+| PR 3b (#86) | S-07 | No test for `sortAgentsBySpend` with empty slice | Nit |
+
+> **Note**: C4=N-01, C6=S-02, C7=N-02 are duplicate findings across PR reviews. De-duplicated to 13 unique items.
+
+#### Tests
+
+- Atomic snapshot: concurrent budget checks produce consistent scope reads (no torn reads under `-race`).
+- BudgetError: budget rejection returns structured error with `Scope`, `Spent`, `Limit`, `Estimated` fields.
+- Config validation: negative `MaxDailyUSD` → error at load time.
+- Config validation: unknown `OnExceed` value → error at load time.
+- Config validation: valid config → loads without error.
+- `pause_and_alert` warning: constructor and enforcement-time warnings observed via `zaptest.NewLogger(t)`.
+- `ResetDaily` agent scope: explicit assertion that per-agent map is cleared.
+- Concurrent `CheckBudget` + `RecordUsage`: 100 goroutines interleaving both operations under `-race` — no data races.
+- Parallel overspend: 10 steps each estimating 15% of budget → all pass individually, collectively exceed 100%. Documents known optimistic-check behavior.
+- Nil config: `NewCostReporter(nil, ...)` → no panic, reporter functions correctly.
+- Empty slice sort: `sortAgentsBySpend([]AgentSpend{})` → empty result.
+- Unknown model: `EstimateCost("unknown-model", ...)` → `$0` with Debug-level log.
+
+#### PR checklist
+
+- [ ] `go test ./internal/cost/ -v -race` passes
+- [ ] `go test ./cmd/orchestrator/ -v -race` passes
+- [ ] `CheckBudget` uses single-lock snapshot
+- [ ] `BudgetError` struct replaces string reason
+- [ ] Config validation rejects invalid thresholds
+- [ ] CHANGELOG updated with cost tracking entry
+- [ ] All 13 unique addressed findings resolved
+
+---
+
+### PR 5c: `feature/v02-rfc0006-followups-planner-python` — Planner/Schema + Python Fixes
+
+**Depends on**: All core PRs (1a–4b) merged. Can parallel with PR 5a and PR 5b — independent code paths.
+**Branch**: `feature/v02-rfc0006-followups-planner-python`
+**Estimated size**: ~120–200 lines (fixes + tests)
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| `internal/planner/planner_test.go` | Add multi-step limit inheritance test: workflow with 2 steps where step A has limits and step B does not — verify both parse correctly (finding 3). |
+| `schemas/workflow.schema.json` | Add `"description"` attributes to `timeout_seconds`, `max_llm_calls`, `max_tokens`, `context_budget` step properties (finding 4). Add description for `max_llm_calls` noting: "Minimum 1 when specified. Omit to inherit from agent config or system defaults." (finding 5). |
+| `agents/base.py` | Replace `ValueError` for negative limits with `TaskOutput(status=FAILED, error="Negative execution limits are not allowed")` — aligns with all other error conditions in `_run_llm_loop()` that return `TaskOutput(FAILED)` rather than raising exceptions (M1). |
+| `agents/defaults.py` | Add forward-declaration comment to `DEFAULT_TIMEOUT_SECONDS`: `# Used by executor deadline derivation (PR 2); Python-side timeout wiring deferred to RFC 0008.` (M2). |
+| `tests/unit/python/test_agents.py` | Update negative-limits test to expect `TaskOutput(FAILED)` instead of `ValueError` (M1). Add loop-exhaustion test: pass `max_llm_calls=0` with a mock always returning `TOOL_USE`, assert exactly `DEFAULT_MAX_LLM_CALLS` (5) LLM calls (L2). |
+
+#### Key implementation details
+
+- **ValueError → TaskOutput(FAILED) (M1)**: The current `raise ValueError("Negative execution limits are not allowed")` propagates through the gRPC servicer as an opaque gRPC error. Changing to `return TaskOutput(status=FAILED, error="Negative execution limits are not allowed", error_type="permanent")` aligns with the error reporting pattern used for all other `_run_llm_loop()` failures (missing model, provider errors, tool execution failures). This ensures the orchestrator receives a structured `TaskOutput` with a `FAILED` status rather than an unexpected gRPC exception.
+- **DEFAULT_TIMEOUT_SECONDS comment (M2)**: The constant is intentionally exported for cross-language consistency (Go `DefaultTimeoutSeconds` = 60, Python `DEFAULT_TIMEOUT_SECONDS` = 60). The forward-declaration comment prevents future contributors from deleting it as dead code.
+- **Schema descriptions (findings 4, 5)**: Adds `"description"` fields to all four step-level limit properties in the workflow schema. These descriptions appear in VS Code YAML extension hover hints, improving DX for workflow authors. Example: `"max_llm_calls": { "type": "integer", "minimum": 1, "description": "Maximum LLM calls for this step. Minimum 1 when specified. Omit to inherit from agent config or system defaults." }`.
+- **Multi-step inheritance test (finding 3)**: Validates that the partial-inheritance scenario works correctly — step A with explicit limits and step B with zero values (inherit) in the same workflow both parse without error and have the expected field values.
+
+#### Addressed findings
+
+| Source | ID | Finding | Severity |
+|--------|----|---------|----------|
+| PR 1c (#83) | M1 | `ValueError` vs `TaskOutput(FAILED)` inconsistency for negative limits | Medium |
+| PR 1c (#83) | M2 | `DEFAULT_TIMEOUT_SECONDS` defined but unused | Medium |
+| PR 1c (#83) | L2 | No loop-exhaustion test for new default (5 iterations) | Low |
+| PR 1a (#79) | 3 | Multi-step limit inheritance test | Low |
+| PR 1a (#79) | 4 | Schema description parity | Low |
+| PR 1a (#79) | 5 | Document zero-value behavior in schema description | Low |
+
+#### Tests
+
+- Negative `max_llm_calls` → `TaskOutput(status=FAILED)` with permanent error type (not `ValueError`).
+- Negative `max_tokens` → `TaskOutput(status=FAILED)` with permanent error type.
+- Loop exhaustion: mock LLM always returns `TOOL_USE` with `max_llm_calls=0` (resolves to 5) → exactly 5 LLM calls made.
+- Multi-step inheritance: step A with `max_llm_calls: 10, timeout_seconds: 120`, step B with no limits → step A has 10/120, step B has 0/0 (inherit).
+- Schema: `make validate` passes with updated descriptions.
+
+#### PR checklist
+
+- [ ] `pytest tests/unit/python/ -v` passes
+- [ ] `ruff check agents/` clean
+- [ ] `mypy agents/` passes
+- [ ] `go test ./internal/planner/ -v -race` passes
 - [ ] `make validate` passes
+- [ ] M1 negative-limit error reporting aligned with `_run_llm_loop()` pattern
+- [ ] All 6 addressed findings resolved
 
 ---
 
 ### PR 6: `feature/v02-rfc0006-close` — RFC Close
 
-**Depends on**: PR 5 merged
+**Depends on**: PRs 5a, 5b, 5c merged
 **Branch**: `feature/v02-rfc0006-close`
 **Estimated size**: ~50–100 lines (status updates only)
 
@@ -638,12 +785,12 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 |------|--------|
 | `docs/rfcs/0006-efficiency-execution-limits.md` | Status → `✅ Implemented` |
 | `docs/rfcs/0006-pr-plan.md` | Final checklist verification |
-| `ROADMAP.md` | RFC 0006 status → `✅ Implemented`, component status updates, merged PR count |
+| `ROADMAP.md` | RFC 0006 status → `✅ Implemented`, component status updates, merged PR count 12/12 |
 
 #### PR checklist
 
 - [ ] RFC 0006 status is `✅ Implemented`
-- [ ] ROADMAP.md RFC Tracker updated
+- [ ] ROADMAP.md RFC Tracker updated (12/12)
 - [ ] ROADMAP.md Component Status tables updated (`internal/cost/` → Complete, `internal/defaults/` → Complete)
 - [ ] All PR plan checklists are complete
 - [ ] `make test` passes
@@ -662,10 +809,12 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
-| 4b | 4 | ~200–300 lines | ~340–510 lines | 🟡 In review |
-| 5 | Follow-up | TBD | TBD | Not started |
+| 4b | 4 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #88) |
+| 5a | Follow-up | ~150–240 lines | ~250–400 lines | Not started |
+| 5b | Follow-up | ~120–210 lines | ~200–350 lines | Not started |
+| 5c | Follow-up | ~70–120 lines | ~120–200 lines | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
-| **Total** | | **~1,540–2,290** | **~2,630–3,820** | |
+| **Total** | | **~1,880–2,860** | **~3,160–4,770** | |
 
 ---
 
@@ -675,18 +824,28 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 |------|-----|
 | `internal/defaults/defaults.go` (new) | 1a |
 | `internal/planner/planner.go` | 1a |
-| `internal/executor/executor.go` | 1b, 2, 4a, 4b |
-| `internal/scheduler/scheduler.go` | 1b, 3b |
-| `internal/cost/cost.go` | 3a |
-| `internal/cost/config.go` (new) | 3a |
-| `internal/cost/reporter.go` (new) | 3b |
+| `internal/planner/planner_test.go` | 1a, 5c |
+| `internal/executor/executor.go` | 1b, 2, 4a, 4b, 5a |
+| `internal/executor/executor_test.go` | 1b, 2, 4a, 4b, 5a |
+| `internal/scheduler/scheduler.go` | 1b, 3b, 5a |
+| `internal/scheduler/scheduler_test.go` | 1b, 3b, 5a |
+| `internal/cost/cost.go` | 3a, 5b |
+| `internal/cost/cost_test.go` | 3a, 5b |
+| `internal/cost/config.go` (new) | 3a, 5b |
+| `internal/cost/config_test.go` (new) | 5b |
+| `internal/cost/reporter.go` (new) | 3b, 5b |
+| `internal/cost/reporter_test.go` (new) | 3b, 5b |
 | `internal/cost/cache.go` (new) | 4b |
-| `internal/state/state.go` | 4a |
+| `internal/state/state.go` | 4a, 5a |
+| `internal/state/state_test.go` | 4a, 5a |
 | `internal/server/workflow_handlers.go` | 4a |
 | `internal/server/cost_handlers.go` (new) | 4b |
-| `cmd/orchestrator/main.go` | 2, 3b |
-| `agents/defaults.py` (new) | 1c |
-| `agents/base.py` | 1c |
-| `schemas/workflow.schema.json` | 1a, 4b |
+| `cmd/orchestrator/main.go` | 2, 3b, 5a, 5b |
+| `cmd/orchestrator/main_test.go` | 5a |
+| `agents/defaults.py` (new) | 1c, 5c |
+| `agents/base.py` | 1c, 5c |
+| `tests/unit/python/test_agents.py` | 1c, 5c |
+| `schemas/workflow.schema.json` | 1a, 4b, 5c |
 | `schemas/agent.schema.json` | 1a |
 | `config/environments/development.yaml` | 2 |
+| `CHANGELOG.md` | 5b |
