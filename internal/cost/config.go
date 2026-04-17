@@ -88,6 +88,9 @@ func LoadCostConfig(configDir string) (*CostConfig, error) {
 // EstimateCost computes the estimated cost in USD for a given model and token counts.
 // Returns 0 if the model is not in the pricing table (graceful degradation).
 func (c *CostConfig) EstimateCost(model string, inputTokens, outputTokens int64) float64 {
+	if c.Pricing == nil {
+		return 0
+	}
 	pricing, ok := c.Pricing[model]
 	if !ok {
 		return 0

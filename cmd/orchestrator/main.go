@@ -163,7 +163,10 @@ func main() {
 	// 9. Initialize cost tracker
 	costCfg, err := cost.LoadCostConfig(*configDir)
 	if err != nil {
-		logger.Warn("failed to load cost config, budget enforcement disabled", zap.Error(err))
+		logger.Warn("failed to load cost config, budget enforcement disabled",
+			zap.String("configDir", *configDir),
+			zap.Error(err),
+		)
 	}
 
 	var schedOpts []scheduler.Option

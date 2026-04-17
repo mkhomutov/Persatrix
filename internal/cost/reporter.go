@@ -134,9 +134,11 @@ func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 }
 
 // ResetDaily clears per-workflow step cost data and resets the underlying
-// TokenCounter. Calling this single method ensures both components reset
-// atomically from the caller's perspective, preventing state divergence where
-// one is reset but the other is not. (PR #86 review S-05)
+// TokenCounter. Calling this single method ensures both components reset in
+// a single call from the caller's perspective, preventing state divergence
+// from independent resets. Note: the two resets are not atomically serialized
+// — a concurrent reader may briefly observe a partially-reset state between
+// the TokenCounter reset and the reporter map clear. (PR #86 review S-05)
 //
 // For long-running orchestrators, this prevents unbounded memory growth in
 // the perWorkflowSteps map (review finding: grows without per-key eviction).

@@ -23,6 +23,7 @@ import (
 // ErrBudgetExceeded is returned when a step dispatch is rejected by the budget enforcer.
 // Callers can use errors.Is(err, ErrBudgetExceeded) to programmatically distinguish
 // budget failures from agent execution failures without string matching.
+// The REST API layer (PR 4b) maps this to HTTP 429 with a structured error body.
 var ErrBudgetExceeded = errors.New("budget exceeded")
 
 // Scheduler drives workflow execution by polling for pending runs and
@@ -387,6 +388,10 @@ func (s *WorkflowScheduler) executeStep(
 	limits := s.resolveStepLimits(ctx, step)
 
 	// Pre-dispatch budget check (RFC 0006 PR 3b).
+	// NOTE: Budget check is optimistic — parallel steps within a stage may all
+	// pass budget checks simultaneously and collectively exceed the budget.
+	// Total potential overspend is bounded by (parallel_steps × max_token_cost).
+	// TODO(v0.3): Consider pessimistic budget reservation for high-value workflows.
 	if s.budgetEnforcer != nil {
 		model := s.resolveAgentModel(ctx, step.AgentID)
 		if model == "" {
