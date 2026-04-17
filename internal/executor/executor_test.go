@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -1503,21 +1504,45 @@ func TestExecuteTask_MetadataFailure_NoMetadata(t *testing.T) {
 }
 
 // TestExecuteTask_Int32OverflowGuard verifies that limit values exceeding
-// math.MaxInt32 are clamped rather than silently wrapping to negative. (PR 5a, F-02)
+// math.MaxInt32 are clamped rather than silently wrapping to negative, and
+// that a warning log is emitted for each clamped field. (PR 5a, F-02)
 func TestExecuteTask_Int32OverflowGuard(t *testing.T) {
+	// Set up zap observer to capture warning logs for clamping assertions.
+	// Follows the pattern from TestParseMetadataInt64_NegativeValue and
+	// TestResolveStepLimits_NegativeAgentLimits in scheduler_test.go.
+	core, logs := observer.New(zap.WarnLevel)
+	observedLogger := zap.New(core)
+
+	// Construct the test env manually (instead of setupTestEnv) to inject
+	// the observer logger — setupTestEnv hardcodes zap.NewNop().
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+
 	var receivedConfig *taskpb.TaskConfig
-	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
-		receivedConfig = req.Config
-		return &taskpb.TaskResponse{
-			TaskId: req.TaskId,
-			Status: taskpb.TaskStatus_COMPLETED,
-			Result: "clamped",
-		}, nil
+	taskpb.RegisterAgentServiceServer(srv, &mockAgentServer{
+		handler: func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			receivedConfig = req.Config
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "clamped",
+			}, nil
+		},
 	})
 
-	registerHealthyAgent(t, env.reg, "test-agent")
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() { srv.GracefulStop(); lis.Close() })
 
-	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+	reg := registry.NewInMemoryRegistry(zap.NewNop())
+	exec := NewGRPCExecutor(reg, observedLogger,
+		WithDialOptions(grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		})),
+	)
+
+	registerHealthyAgent(t, reg, "test-agent")
+
+	_, err := exec.ExecuteTask(context.Background(), ExecuteRequest{
 		AgentID: "test-agent",
 		Payload: "overflow test",
 		Limits: StepLimits{
@@ -1535,6 +1560,18 @@ func TestExecuteTask_Int32OverflowGuard(t *testing.T) {
 		"MaxTokens should be clamped to MaxInt32")
 	assert.Equal(t, int32(math.MaxInt32), receivedConfig.TimeoutSeconds,
 		"TimeoutSeconds should be clamped to MaxInt32")
+
+	// Verify all three clamping warnings were emitted — prevents accidental
+	// removal of the diagnostic log statements without test failure.
+	require.Equal(t, 3, logs.Len(), "expected exactly 3 clamping warnings")
+	expectedFields := []string{"MaxLLMCalls", "MaxTokens", "TimeoutSeconds"}
+	for i, entry := range logs.All() {
+		assert.Equal(t, zap.WarnLevel, entry.Level)
+		assert.Contains(t, entry.Message, expectedFields[i],
+			"warning %d should reference %s", i, expectedFields[i])
+		assert.Equal(t, int64(math.MaxInt32), entry.ContextMap()["clamped"],
+			"warning %d should log clamped value as MaxInt32", i)
+	}
 }
 
 // TestDerivedDeadline_TokenBudgetCutoff_TimeAllowed verifies that the token

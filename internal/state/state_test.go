@@ -424,20 +424,30 @@ func TestConcurrentUpdateStepStateSameRun(t *testing.T) {
 	const steps = 20
 
 	// Simulate parallel stage execution: multiple goroutines updating
-	// different step IDs on the same run concurrently.
+	// different step IDs on the same run concurrently. Half the steps
+	// include Metadata pointers to exercise the M-02 deep-copy under -race.
 	for i := 0; i < steps; i++ {
 		wg.Add(1)
 		stepID := fmt.Sprintf("step-%d", i)
-		go func(sid string) {
+		go func(sid string, idx int) {
 			defer wg.Done()
-			err := store.UpdateStepState(ctx, "css-1", StepState{
+			step := StepState{
 				StepID:    sid,
 				Status:    RunCompleted,
 				Output:    "output-" + sid,
 				StartedAt: time.Now(),
-			})
+			}
+			// Even-numbered steps carry metadata pointers.
+			if idx%2 == 0 {
+				step.Metadata = &StepExecutionMetadata{
+					TokensUsed:       100 * (idx + 1),
+					WallTimeMs:       int64(50 * (idx + 1)),
+					EstimatedCostUSD: 0.01 * float64(idx+1),
+				}
+			}
+			err := store.UpdateStepState(ctx, "css-1", step)
 			assert.NoError(t, err)
-		}(stepID)
+		}(stepID, i)
 	}
 
 	wg.Wait()
@@ -446,6 +456,18 @@ func TestConcurrentUpdateStepStateSameRun(t *testing.T) {
 	got, err := store.GetRun(ctx, "css-1")
 	require.NoError(t, err)
 	assert.Len(t, got.Steps, steps)
+
+	// Verify metadata on even-numbered steps survived the concurrent writes.
+	for i := 0; i < steps; i++ {
+		sid := fmt.Sprintf("step-%d", i)
+		step := got.Steps[sid]
+		if i%2 == 0 {
+			require.NotNil(t, step.Metadata, "step %s should have metadata", sid)
+			assert.Equal(t, 100*(i+1), step.Metadata.TokensUsed)
+		} else {
+			assert.Nil(t, step.Metadata, "step %s should have no metadata", sid)
+		}
+	}
 }
 
 func TestConcurrentCreateAndDelete(t *testing.T) {
