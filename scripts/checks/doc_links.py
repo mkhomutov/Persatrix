@@ -65,8 +65,15 @@ class BrokenLink(NamedTuple):
 
 
 def _collect_md_files(repo_root: Path) -> list[Path]:
-    """Return all markdown files in docs/ (recursive) and repo root (depth <=1)."""
+    """Return all markdown files in docs/ (recursive) and repo root (depth <=1).
+
+    Skips ``docs/pr-reviews/`` — per project convention (see
+    ``.github/copilot-instructions.md``) PR review reports are local-only
+    artifacts, are listed in ``.gitignore``, and may contain repo-root-relative
+    links that look broken from the ``docs/pr-reviews/`` subdirectory.
+    """
     docs_dir = repo_root / "docs"
+    pr_reviews_dir = (docs_dir / "pr-reviews").resolve()
     files: list[Path] = []
 
     if docs_dir.is_dir():
@@ -84,6 +91,12 @@ def _collect_md_files(repo_root: Path) -> list[Path]:
             and os.path.normcase(str(f.resolve())) != docs_resolved
         }
     files.extend(sorted(root_files))
+
+    pr_reviews_prefix = os.path.normcase(str(pr_reviews_dir)) + os.sep
+    files = [
+        f for f in files
+        if not os.path.normcase(str(f.resolve())).startswith(pr_reviews_prefix)
+    ]
 
     return files
 
