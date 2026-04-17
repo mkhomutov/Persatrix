@@ -40,7 +40,7 @@ var (
 	httpBind     = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
-	deadlineMode = flag.String("deadline-mode", "derived", "Deadline mode: derived (step-based deadlines) or static (per-executor fixed timeout)")
+	deadlineMode = flag.String("deadline-mode", "", "Deadline mode: derived|static (default: inferred from --env)")
 )
 
 func main() {
@@ -52,6 +52,31 @@ func main() {
 	case "development", "staging", "production":
 	default:
 		fmt.Fprintln(os.Stderr, "invalid --env value: "+*env+" (must be development|staging|production)")
+		os.Exit(1)
+	}
+
+	// PR #84 F-01: Resolve deadline mode default from --env when not explicitly set.
+	// Until environment YAML config loading is wired, infer from --env to match
+	// the documented per-environment policies (production.yaml → static,
+	// development/staging.yaml → derived). An explicit --deadline-mode flag
+	// still overrides this.
+	if *deadlineMode == "" {
+		switch *env {
+		case "production":
+			*deadlineMode = "static"
+		default:
+			*deadlineMode = "derived"
+		}
+	}
+
+	// PR #84 F-02: Validate --deadline-mode at startup (same pattern as --env
+	// validation above). Without this, a typo like --deadline-mode=dervied would
+	// silently fall back to static inside the executor while the startup log
+	// still reports the invalid raw string — misleading during incident analysis.
+	switch *deadlineMode {
+	case "derived", "static":
+	default:
+		fmt.Fprintln(os.Stderr, "invalid --deadline-mode value: "+*deadlineMode+" (must be derived|static)")
 		os.Exit(1)
 	}
 
