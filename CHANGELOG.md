@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(orchestrator)* In-memory LRU response cache for cacheable workflow steps: SHA-256 keyed by
+  agent ID + payload + context, with configurable max entries and TTL. Steps opt in via
+  `cacheable: true` in workflow YAML. Cache hit skips gRPC dispatch entirely (RFC 0006 PR 4b)
+- *(server)* `GET /api/v1/cost/summary` endpoint: returns global daily cost totals, per-agent
+  breakdown sorted by spend, and report timestamp. Returns 503 when cost tracking is not
+  configured (RFC 0006 PR 4b)
 - *(orchestrator)* Per-step execution metadata: `StepExecutionMetadata` captures `tokens_used`,
   `llm_call_count`, `retry_count`, `cache_hit`, `wall_time_ms`, and `estimated_cost_usd` for
   every completed step. Exposed in `GET /api/v1/workflows/{id}/status` response and logged at

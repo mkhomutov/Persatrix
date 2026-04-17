@@ -1295,12 +1295,12 @@ func TestGetLogsStub(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
 }
 
-func TestGetCostSummaryStub(t *testing.T) {
+func TestGetCostSummary_NoCostReporter(t *testing.T) {
 	srv, _ := testServer(t)
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/cost/summary", nil)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assert.Contains(t, rec.Body.String(), "NOT_IMPLEMENTED")
-	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "SERVICE_UNAVAILABLE")
+	assert.Contains(t, rec.Body.String(), "cost tracking is not configured")
 }
 
 // NOTE(review-F09): Wrong-method tests document the HTTP method contract for

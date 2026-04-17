@@ -153,12 +153,10 @@ func main() {
 	// per-executor timeout is only used as a fallback in static mode.
 	// The --deadline-mode flag allows runtime switching without code changes
 	// (interim until config loading from environment YAML is wired up).
-	exec := executor.NewGRPCExecutor(reg, logger,
-		executor.WithTimeout(5*time.Minute),
+	execOpts := []executor.Option{
+		executor.WithTimeout(5 * time.Minute),
 		executor.WithDeadlineMode(executor.DeadlineMode(*deadlineMode)),
-	)
-	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
-	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
+	}
 
 	// 9. Initialize cost tracker
 	costCfg, err := cost.LoadCostConfig(*configDir)
@@ -174,17 +172,28 @@ func main() {
 	// unboundedly in long-running processes. Until then, ResetDaily() is only
 	// callable programmatically (e.g., from tests). (PR #86 review S-05)
 	var schedOpts []scheduler.Option
+	var srvOpts []server.ServerOption
 	if costCfg != nil {
 		tokenCounter := cost.NewTokenCounter(costCfg, logger)
 		budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
 		costReporter := cost.NewCostReporter(tokenCounter, costCfg, logger)
 		schedOpts = append(schedOpts, scheduler.WithCostComponents(tokenCounter, budgetEnforcer, costReporter))
+		srvOpts = append(srvOpts, server.WithCostReporter(costReporter))
+
+		// Initialize response cache from optimization.yaml caching config.
+		responseCache := cost.NewResponseCache(10000, time.Hour, logger)
+		execOpts = append(execOpts, executor.WithResponseCache(responseCache))
+
 		logger.Info("cost tracking initialized",
 			zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),
 			zap.Float64("perWorkflowBudget", costCfg.Budgets.PerWorkflow.DefaultMaxUSD),
 			zap.Float64("perAgentBudget", costCfg.Budgets.PerAgent.DefaultMaxUSD),
 		)
 	}
+
+	exec := executor.NewGRPCExecutor(reg, logger, execOpts...)
+	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
+	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
@@ -197,7 +206,7 @@ func main() {
 
 	// 11. Start HTTP server (REST API + SSE streaming)
 	listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
-	srv, err := server.New(listenAddr, absWorkflowsDir, store, reg, plan, logger)
+	srv, err := server.New(listenAddr, absWorkflowsDir, store, reg, plan, logger, srvOpts...)
 	if err != nil {
 		logger.Fatal("failed to create HTTP server", zap.Error(err))
 	}

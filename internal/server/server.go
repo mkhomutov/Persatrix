@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
@@ -26,11 +27,24 @@ type Server struct {
 	planner      planner.Planner
 	logger       *zap.Logger
 	mux          *http.ServeMux
+
+	// Cost components (optional — nil when cost tracking is not configured).
+	costReporter *cost.CostReporter
+}
+
+// ServerOption configures optional Server dependencies.
+type ServerOption func(*Server)
+
+// WithCostReporter injects a CostReporter for the cost summary endpoint.
+func WithCostReporter(reporter *cost.CostReporter) ServerOption {
+	return func(s *Server) {
+		s.costReporter = reporter
+	}
 }
 
 // New validates that workflowsDir is accessible and returns a configured Server.
 // Returns an error if the workflows directory is missing, inaccessible, or not a directory.
-func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger) (*Server, error) {
+func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger, opts ...ServerOption) (*Server, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -66,6 +80,9 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 		logger:       logger,
 		mux:          http.NewServeMux(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	s.registerRoutes()
 	return s, nil
@@ -91,7 +108,9 @@ func (s *Server) registerRoutes() {
 
 	// Stub endpoints — deferred to future RFCs (Phase 3)
 	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleGetLogs)
-	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummary)
+
+	// Cost summary endpoint (RFC 0006 PR 4b)
+	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummaryImpl)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)

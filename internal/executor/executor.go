@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -57,6 +58,7 @@ type ExecuteRequest struct {
 	Payload    string
 	Context    map[string]string
 	Limits     StepLimits
+	Cacheable  bool
 }
 
 // ExecuteResult contains the outcome of a task dispatch.
@@ -66,6 +68,7 @@ type ExecuteResult struct {
 	Metadata   map[string]string
 	RetryCount int
 	WallTimeMs int64
+	CacheHit   bool
 }
 
 // Executor defines the interface for dispatching tasks to agents.
@@ -132,6 +135,15 @@ func WithTokenParser(parser func(error) int64) Option {
 	}
 }
 
+// WithResponseCache sets the response cache for cacheable step dispatch.
+// When set, cacheable steps check the cache before gRPC dispatch and store
+// results on cache miss.
+func WithResponseCache(cache *cost.ResponseCache) Option {
+	return func(e *GRPCExecutor) {
+		e.cache = cache
+	}
+}
+
 // GRPCExecutor dispatches tasks to agents via gRPC.
 type GRPCExecutor struct {
 	registry     registry.Registry
@@ -141,6 +153,7 @@ type GRPCExecutor struct {
 	dialOpts     []grpc.DialOption
 	deadlineMode DeadlineMode
 	tokenParser  func(error) int64
+	cache        *cost.ResponseCache
 }
 
 // NewGRPCExecutor creates a new GRPCExecutor with the given registry and options.
@@ -183,6 +196,22 @@ func NewGRPCExecutor(reg registry.Registry, logger *zap.Logger, opts ...Option) 
 // MinRetryBudgetFraction of the original time or token budget remains, the retry
 // is skipped. In static mode, each attempt gets the per-executor timeout.
 func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error) {
+	// Check cache for cacheable steps before any network I/O.
+	if req.Cacheable && e.cache != nil {
+		cacheKey := cost.CacheKey(req.AgentID, req.Payload, req.Context)
+		if cached, ok := e.cache.Get(cacheKey); ok {
+			e.logger.Info("cache hit, skipping gRPC dispatch",
+				zap.String("agentID", req.AgentID),
+			)
+			return &ExecuteResult{
+				TaskID:   req.TaskID,
+				Output:   cached.Output,
+				Metadata: cached.Metadata,
+				CacheHit: true,
+			}, nil
+		}
+	}
+
 	// Look up agent in registry.
 	agent, err := e.registry.Get(ctx, req.AgentID)
 	if err != nil {
@@ -287,6 +316,16 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 				zap.Int("retryCount", attempt),
 				zap.Int64("wallTimeMs", wallTimeMs),
 			)
+
+			// Store result in cache for cacheable steps.
+			if req.Cacheable && e.cache != nil {
+				cacheKey := cost.CacheKey(req.AgentID, req.Payload, req.Context)
+				e.cache.Put(cacheKey, cost.CachedResponse{
+					Output:   result.Output,
+					Metadata: result.Metadata,
+				})
+			}
+
 			return result, nil
 		}
 

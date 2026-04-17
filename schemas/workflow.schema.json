@@ -30,7 +30,8 @@
               "timeout_seconds": { "type": "integer", "minimum": 1 },
               "max_llm_calls": { "type": "integer", "minimum": 1 },
               "max_tokens": { "type": "integer", "minimum": 1 },
-              "context_budget": { "type": "integer", "minimum": 1 }
+              "context_budget": { "type": "integer", "minimum": 1 },
+              "cacheable": { "type": "boolean" }
             }
           }
         }

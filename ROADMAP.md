@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-16 (versioning strategy revised — versions defined by capability, not RFC completion)  
+> **Last updated**: 2026-04-17 (RFC 0006 PR 4b in review)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PRs 4a through 4b are the v0.2.0 critical path
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PR 4b in review, PRs 5–6 remain
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -164,29 +164,29 @@ v0.1.0 complete — end-to-end execution working
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 5/10 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 7/10 |
 
 ### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (6/10)
+RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/10)
     PR 1a — defaults package + Step limits + schema       ✅ #79
     PR 1b — executor + scheduler limit wiring             ✅ #81
     PR 1c — Python defaults + validation                  ✅ #83
     PR 2  — deadline derivation + retry budget            ✅ #84
     PR 3a — TokenCounter + BudgetEnforcer                 ✅ #85
-    PR 3b — CostReporter + scheduler budget integration   🟡 #86
-    PR 4a — StepExecutionMetadata + observability         ⬜ v0.2.0 critical path ends here
-    PR 4b — response cache + cost endpoint                ⬜ lowest priority; slips to v0.3.0 if needed
+    PR 3b — CostReporter + scheduler budget integration   ✅ #86
+    PR 4a — StepExecutionMetadata + observability         ✅ #87
+    PR 4b — response cache + cost endpoint                🟡 in review
     PR 5  — review follow-ups                             ⬜
     PR 6  — RFC close                                     ⬜
     ↓
 v0.2.0 complete
 ```
 
-> PRs 3b through 4a are the v0.2.0 critical path. PR 4b (response cache) is the lowest-priority item and may slip to v0.3.0 without affecting the first public release story — budget enforcement and observability are what matters.
+> PRs 5–6 (review follow-ups and RFC close) remain. All core implementation PRs are complete or in review.
 
 ### Component Status
 
@@ -196,11 +196,11 @@ v0.2.0 complete
 |---------|---------|--------|
 | `internal/defaults/` | Centralized execution limit constants | ✅ Complete (RFC 0006 PR 1a) |
 | `internal/planner/` | Step-level limit fields (`TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`) | ✅ Updated (RFC 0006 PR 1a) |
-| `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b+2 done; PR 4a, 4b pending |
-| `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b done; 3b in review (#86); PR 4a pending |
-| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🚧 PR 3a done, 3b in review (#86); PR 4b pending |
-| `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cost, wall time) | 🔲 PR 4a pending |
-| `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | 🔲 PR 4b pending |
+| `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry, response cache | ✅ Complete (RFC 0006 PRs 1b+2+4a+4b) |
+| `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording, metadata | ✅ Complete (RFC 0006 PRs 1b+3b+4a) |
+| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
+| `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
+| `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
 | `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
@@ -246,13 +246,11 @@ v0.2.0 complete
 - **Conditional and looped workflow control flow** — skip semantics, bounded repeat-until, for-each (RFC 0007)
 - **Agent memory and context optimization** — per-step context budget allocation, caller-prepared context packaging, delegation result merge contracts (RFC 0008)
 - **Security hardening Phases 1–2** — audit logging, rate limiting, input sanitization (RFC 0009)
-- **Response cache and cost endpoint** (RFC 0006 PR 4b, if deferred from v0.2.0)
 
 ### RFC Scope
 
 | RFC | Title | Target scope | Status |
 |-----|-------|--------------|--------|
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Response cache + cost endpoint (PR 4b) | If deferred from v0.2.0 | 🚧 Implementing |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
@@ -287,7 +285,6 @@ v0.3.0 complete
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/` | — | 0011 |
-| Response Cache | `internal/cost/` | — | 0006 PR 4b |
 | Telemetry | `internal/telemetry/` | — | 0006+ |
 
 ---
@@ -472,6 +469,8 @@ v0.4.0 complete
 | [#83](https://github.com/mkhomutov/Persatrix/pull/83) | feat: implement Python defaults and limit validation (RFC 0006 PR 1c) | 0006 (1c/10) | 2026-04-16 |
 | [#84](https://github.com/mkhomutov/Persatrix/pull/84) | feat(executor): derived deadline mode with shared retry budget (RFC 0006 PR 2) | 0006 (2/10) | 2026-04-17 |
 | [#85](https://github.com/mkhomutov/Persatrix/pull/85) | feat(cost): implement TokenCounter and BudgetEnforcer (RFC 0006 PR 3a) | 0006 (3a/10) | 2026-04-17 |
+| [#86](https://github.com/mkhomutov/Persatrix/pull/86) | feat(cost): CostReporter + scheduler budget integration (RFC 0006 PR 3b) | 0006 (3b/10) | 2026-04-17 |
+| [#87](https://github.com/mkhomutov/Persatrix/pull/87) | feat(state): StepExecutionMetadata + observability (RFC 0006 PR 4a) | 0006 (4a/10) | 2026-04-17 |
 
 ---
 

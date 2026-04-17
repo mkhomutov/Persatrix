@@ -650,8 +650,8 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 2 | 2 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #84) |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
-| 4a | 4 | ~180–260 lines | ~310–440 lines | 🟡 In review (PR #87) |
-| 4b | 4 | ~200–300 lines | ~340–510 lines | Not started |
+| 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
+| 4b | 4 | ~200–300 lines | ~340–510 lines | 🟡 In review |
 | 5 | Follow-up | TBD | TBD | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,540–2,290** | **~2,630–3,820** | |
