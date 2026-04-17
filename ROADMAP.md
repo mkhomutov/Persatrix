@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-17 (RFC 0006 PR 4b in review)  
+> **Last updated**: 2026-04-17 (RFC 0006 follow-up PRs planned)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PR 4b in review, PRs 5–6 remain
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — core PRs complete, PRs 5a–5c + 6 remain
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -164,14 +164,14 @@ v0.1.0 complete — end-to-end execution working
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 7/10 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 12 | 8/12 |
 
 ### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/10)
+RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/12)
     PR 1a — defaults package + Step limits + schema       ✅ #79
     PR 1b — executor + scheduler limit wiring             ✅ #81
     PR 1c — Python defaults + validation                  ✅ #83
@@ -179,14 +179,16 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/1
     PR 3a — TokenCounter + BudgetEnforcer                 ✅ #85
     PR 3b — CostReporter + scheduler budget integration   ✅ #86
     PR 4a — StepExecutionMetadata + observability         ✅ #87
-    PR 4b — response cache + cost endpoint                🟡 in review
-    PR 5  — review follow-ups                             ⬜
+    PR 4b — response cache + cost endpoint                ✅ #88
+    PR 5a — executor + scheduler + state follow-ups       ⬜
+    PR 5b — cost package hardening                        ⬜
+    PR 5c — planner/schema + Python fixes                 ⬜
     PR 6  — RFC close                                     ⬜
     ↓
 v0.2.0 complete
 ```
 
-> PRs 5–6 (review follow-ups and RFC close) remain. All core implementation PRs are complete or in review.
+> PRs 5a–5c (review follow-ups, parallel) and PR 6 (RFC close) remain. All core implementation PRs are merged.
 
 ### Component Status
 
@@ -462,15 +464,16 @@ v0.4.0 complete
 | [#76](https://github.com/mkhomutov/Persatrix/pull/76) | docs(rfc0008): resolve open questions and accept RFC | 0008 accept | 2026-04-15 |
 | [#77](https://github.com/mkhomutov/Persatrix/pull/77) | docs(rfc): RFC 0013 — Legal, Ethical & Regulatory Compliance Framework | 0013 (RFC) | 2026-04-15 |
 | [#78](https://github.com/mkhomutov/Persatrix/pull/78) | docs(rfc0006): add PR implementation plan for Efficiency & Execution Limits | 0006 (PR plan) | 2026-04-16 |
-| [#79](https://github.com/mkhomutov/Persatrix/pull/79) | feat: add defaults package, step limit fields, and schema updates (RFC 0006 PR 1a) | 0006 (1a/10) | 2026-04-16 |
+| [#79](https://github.com/mkhomutov/Persatrix/pull/79) | feat: add defaults package, step limit fields, and schema updates (RFC 0006 PR 1a) | 0006 (1a/12) | 2026-04-16 |
 | [#80](https://github.com/mkhomutov/Persatrix/pull/80) | docs(rfc): RFC 0014 — Agent Skill Registry & Lifecycle | 0014 (RFC) | 2026-04-16 |
-| [#81](https://github.com/mkhomutov/Persatrix/pull/81) | feat: wire execution limits through executor and scheduler (RFC 0006 PR 1b) | 0006 (1b/10) | 2026-04-16 |
+| [#81](https://github.com/mkhomutov/Persatrix/pull/81) | feat: wire execution limits through executor and scheduler (RFC 0006 PR 1b) | 0006 (1b/12) | 2026-04-16 |
 | [#82](https://github.com/mkhomutov/Persatrix/pull/82) | docs(roadmap): restructure versioning strategy for release velocity | cross-RFC docs | 2026-04-16 |
-| [#83](https://github.com/mkhomutov/Persatrix/pull/83) | feat: implement Python defaults and limit validation (RFC 0006 PR 1c) | 0006 (1c/10) | 2026-04-16 |
-| [#84](https://github.com/mkhomutov/Persatrix/pull/84) | feat(executor): derived deadline mode with shared retry budget (RFC 0006 PR 2) | 0006 (2/10) | 2026-04-17 |
-| [#85](https://github.com/mkhomutov/Persatrix/pull/85) | feat(cost): implement TokenCounter and BudgetEnforcer (RFC 0006 PR 3a) | 0006 (3a/10) | 2026-04-17 |
-| [#86](https://github.com/mkhomutov/Persatrix/pull/86) | feat(cost): CostReporter + scheduler budget integration (RFC 0006 PR 3b) | 0006 (3b/10) | 2026-04-17 |
-| [#87](https://github.com/mkhomutov/Persatrix/pull/87) | feat(state): StepExecutionMetadata + observability (RFC 0006 PR 4a) | 0006 (4a/10) | 2026-04-17 |
+| [#83](https://github.com/mkhomutov/Persatrix/pull/83) | feat: implement Python defaults and limit validation (RFC 0006 PR 1c) | 0006 (1c/12) | 2026-04-16 |
+| [#84](https://github.com/mkhomutov/Persatrix/pull/84) | feat(executor): derived deadline mode with shared retry budget (RFC 0006 PR 2) | 0006 (2/12) | 2026-04-17 |
+| [#85](https://github.com/mkhomutov/Persatrix/pull/85) | feat(cost): implement TokenCounter and BudgetEnforcer (RFC 0006 PR 3a) | 0006 (3a/12) | 2026-04-17 |
+| [#86](https://github.com/mkhomutov/Persatrix/pull/86) | feat(cost): CostReporter + scheduler budget integration (RFC 0006 PR 3b) | 0006 (3b/12) | 2026-04-17 |
+| [#87](https://github.com/mkhomutov/Persatrix/pull/87) | feat(state): StepExecutionMetadata + observability (RFC 0006 PR 4a) | 0006 (4a/12) | 2026-04-17 |
+| [#88](https://github.com/mkhomutov/Persatrix/pull/88) | feat(cost): response cache + cost summary endpoint (RFC 0006 PR 4b) | 0006 (4b/12) | 2026-04-17 |
 
 ---
 
