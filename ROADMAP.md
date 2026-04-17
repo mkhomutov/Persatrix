@@ -177,7 +177,7 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (6/1
     PR 1c — Python defaults + validation                  ✅ #83
     PR 2  — deadline derivation + retry budget            ✅ #84
     PR 3a — TokenCounter + BudgetEnforcer                 ✅ #85
-    PR 3b — CostReporter + scheduler budget integration   ⬜ next
+    PR 3b — CostReporter + scheduler budget integration   🟡 #86
     PR 4a — StepExecutionMetadata + observability         ⬜ v0.2.0 critical path ends here
     PR 4b — response cache + cost endpoint                ⬜ lowest priority; slips to v0.3.0 if needed
     PR 5  — review follow-ups                             ⬜
@@ -198,7 +198,7 @@ v0.2.0 complete
 | `internal/planner/` | Step-level limit fields (`TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`) | ✅ Updated (RFC 0006 PR 1a) |
 | `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b+2 done; PR 4a, 4b pending |
 | `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b done; 3b in review (#86); PR 4a pending |
-| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🚧 PR 3a+3b done; PR 4b pending |
+| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🚧 PR 3a done, 3b in review (#86); PR 4b pending |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cost, wall time) | 🔲 PR 4a pending |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | 🔲 PR 4b pending |
 | `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |

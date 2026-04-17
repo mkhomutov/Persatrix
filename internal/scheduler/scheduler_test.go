@@ -1819,3 +1819,126 @@ func TestParseMetadataInt64_NegativeValue(t *testing.T) {
 	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
 	assert.Equal(t, int64(-500), entry.ContextMap()["value"])
 }
+
+// TestUnpricedModel_DebugLog validates the S-04 diagnostic log: when a step
+// response contains a model not in the pricing table with non-zero tokens,
+// a Debug-level log is emitted with "model not in pricing table". This prevents
+// accidental removal of the observability signal that helps operators detect
+// unpriced models. (PR #86 review S-04)
+func TestUnpricedModel_DebugLog(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+
+	// Use DebugLevel observer on the scheduler logger to capture Debug-level logs.
+	core, logs := observer.New(zap.DebugLevel)
+	schedLogger := zap.New(core)
+
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID: "t1",
+			Output: "ok",
+			Metadata: map[string]string{
+				"input_tokens":  "1000",
+				"output_tokens": "500",
+				"model":         "unknown-model-xyz",
+			},
+		}, nil
+	}}
+
+	plan := planner.NewYAMLPlanner(zap.NewNop())
+	sched := NewWorkflowScheduler(store, nil, plan, exec, schedLogger, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "unpriced-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	waitForRunStatus(t, store, "unpriced-run", state.RunCompleted, 5*time.Second)
+
+	// Find the Debug-level log about unpriced model.
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.Message == "model not in pricing table, step cost recorded as $0" {
+			found = true
+			assert.Equal(t, zap.DebugLevel, entry.Level)
+			assert.Equal(t, "unknown-model-xyz", entry.ContextMap()["model"])
+			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
+			break
+		}
+	}
+	assert.True(t, found, "expected Debug log for unpriced model")
+
+	// Step cost should be recorded with $0 for unknown model.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, 0.0, summary.Steps[0].EstimatedUSD)
+	assert.Equal(t, "unknown-model-xyz", summary.Steps[0].Model)
+}
+
+// TestTokensUsedFallback_LogMessage validates that when the legacy "tokens_used"
+// fallback path is taken, an Info-level log is emitted so operators can identify
+// agents that need to provide granular input_tokens/output_tokens data.
+// (PR #86 review: observability regression protection)
+func TestTokensUsedFallback_LogMessage(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+
+	// Use InfoLevel observer to capture the fallback log.
+	core, logs := observer.New(zap.InfoLevel)
+	schedLogger := zap.New(core)
+
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID: "t1",
+			Output: "ok",
+			Metadata: map[string]string{
+				"tokens_used": "750",
+				"model":       "claude-sonnet",
+			},
+		}, nil
+	}}
+
+	plan := planner.NewYAMLPlanner(zap.NewNop())
+	sched := NewWorkflowScheduler(store, nil, plan, exec, schedLogger, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "fallback-log", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	waitForRunStatus(t, store, "fallback-log", state.RunCompleted, 5*time.Second)
+
+	// Find the Info-level log about tokens_used fallback.
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.Message == "using tokens_used fallback (all tokens mapped to output, cost may be overestimated)" {
+			found = true
+			assert.Equal(t, zap.InfoLevel, entry.Level)
+			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
+			assert.Equal(t, "test-agent", entry.ContextMap()["agentID"])
+			assert.Equal(t, int64(750), entry.ContextMap()["tokensUsed"])
+			break
+		}
+	}
+	assert.True(t, found, "expected Info log for tokens_used fallback")
+}

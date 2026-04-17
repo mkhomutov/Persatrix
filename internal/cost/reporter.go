@@ -51,6 +51,9 @@ type CostReporter struct {
 	mu sync.Mutex
 
 	// perWorkflowSteps tracks step-level cost entries per workflow ID.
+	// TODO(v0.2): Add per-key eviction or TTL to prevent unbounded growth.
+	// Currently only cleared by ResetDaily(). For long-running orchestrators
+	// handling many workflows, completed entries accumulate until the next reset.
 	perWorkflowSteps map[string][]StepCostEntry
 
 	counter *TokenCounter
@@ -137,16 +140,21 @@ func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 // TokenCounter. Calling this single method ensures both components reset in
 // a single call from the caller's perspective, preventing state divergence
 // from independent resets. Note: the two resets are not atomically serialized
-// — a concurrent reader may briefly observe a partially-reset state between
-// the TokenCounter reset and the reporter map clear. (PR #86 review S-05)
+// — a concurrent reader may briefly observe a partially-reset state.
+//
+// Order rationale (PR #86 review): reporter map is cleared before the counter
+// so that a concurrent reader sees either (old counter + old steps) or
+// (old counter + empty steps), but never (empty counter + old steps). The
+// latter case would produce zero totals with non-zero steps, which is more
+// confusing than the reverse (totals briefly exceeding step sums).
 //
 // For long-running orchestrators, this prevents unbounded memory growth in
 // the perWorkflowSteps map (review finding: grows without per-key eviction).
 func (r *CostReporter) ResetDaily() {
-	r.counter.ResetDaily()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.perWorkflowSteps = make(map[string][]StepCostEntry)
+	r.mu.Unlock()
+	r.counter.ResetDaily()
 	r.logger.Info("daily cost reporter data reset")
 }
 
