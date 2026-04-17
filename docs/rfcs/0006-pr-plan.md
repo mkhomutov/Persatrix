@@ -100,8 +100,8 @@ PR 6 (RFC close)
 
 **Should Fix (before merge):**
 
-- [ ] Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies schema `minimum: 1` boundary is correctly parsed by Go. *(Location: `internal/planner/planner_test.go`)*
-- [ ] Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in `Step` struct — makes deferred work searchable and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`)*
+- [x] Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies schema `minimum: 1` boundary is correctly parsed by Go. *(Location: `internal/planner/planner_test.go`)* — Addressed in PR 5c
+- [x] Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in `Step` struct — makes deferred work searchable and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`)* — Addressed in PR 5c
 
 **Deferred to PR 5:**
 
@@ -809,13 +809,27 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` passes
-- [ ] `go test ./internal/planner/ -v -race` passes
-- [ ] `make validate` passes
-- [ ] M1 negative-limit error reporting aligned with `_run_llm_loop()` pattern
-- [ ] All 6 addressed findings resolved
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` passes
+- [x] `go test ./internal/planner/ -v -race` passes
+- [x] `make validate` passes
+- [x] M1 negative-limit error reporting aligned with `_run_llm_loop()` pattern
+- [x] All 6 addressed findings resolved
+
+#### Review Findings (PR #92)
+
+**Should Fix (quality improvement):**
+
+1. **S-01 (Low) — Misleading test method names** — `test_negative_max_llm_calls_raises`, `test_negative_max_tokens_raises`, `test_negative_both_raises` no longer raise exceptions — they now return `TaskOutput(FAILED)`. Names should be `test_negative_max_llm_calls_returns_failed`, `test_negative_max_tokens_returns_failed`, `test_negative_both_returns_failed` to match actual behavior. Test names are the first thing developers read during failures; misleading names cause debugging confusion. *(Location: `tests/unit/python/test_agents.py` lines 341, 349, 357)*
+
+2. **S-02 (Low) — Unregistered "noop" tool in loop exhaustion test** — `test_loop_exhaustion_uses_default_max_llm_calls` uses `ToolCall(name="noop")` but no "noop" tool is registered. The test works because `_execute_tools` handles unknown tools gracefully (returns "Unknown tool: noop" error), but this couples the test to an implementation detail. If `_execute_tools` changes to raise on unknown tools, this test breaks unexpectedly. Fix: register an explicit `@tool(name="noop", description="No-op tool")` fixture before creating the mock responses. *(Location: `tests/unit/python/test_agents.py` line 428)*
+
+**Nice to Have (follow-up):**
+
+3. **N-01 — Distinguish which limit was negative in error metadata** — The combined `max_llm_calls < 0 or max_tokens < 0` guard reports one generic error message. Adding `metadata["invalid_fields"] = [...]` would help operators diagnose misconfigured TaskConfigs. Very low priority since the `permanent` error_type already prevents retries. *(Location: `agents/base.py` line 250)*
+
+4. **N-02 — Add explicit loop iteration assertion to `test_explicit_max_llm_calls_used_as_is`** — The test (line 393) only verifies `COMPLETED` status but does not assert that the loop ran with `max_llm_calls=3` (the configured value). Adding a TOOL_USE scenario with exactly 3 iterations would strengthen coverage. Low priority since the zero-resolution and exhaustion tests already validate the loop mechanics. *(Location: `tests/unit/python/test_agents.py` line 393)*
 
 ---
 
@@ -856,9 +870,9 @@ PR 6 (RFC close)
 | 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #88) |
-| 5a | Follow-up | ~150–240 lines | ~250–400 lines | Not started |
-| 5b | Follow-up | ~120–210 lines | ~200–350 lines | ⬜ In review |
-| 5c | Follow-up | ~70–120 lines | ~120–200 lines | Not started |
+| 5a | Follow-up | ~150–240 lines | ~250–400 lines | ✅ Merged (PR #90) |
+| 5b | Follow-up | ~120–210 lines | ~200–350 lines | ✅ Merged (PR #91) |
+| 5c | Follow-up | ~70–120 lines | ~120–200 lines | ✅ Merged (PR #92) |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,880–2,860** | **~3,160–4,770** | |
 

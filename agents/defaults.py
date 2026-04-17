@@ -28,4 +28,6 @@ DEFAULT_MAX_TOKENS: int = 8192
 # Agents that do not receive an explicit timeout from TaskConfig fall back
 # to this value. Orchestrator-side default is defined in
 # internal/defaults/defaults.go as DefaultTimeoutSeconds (60).
+# Used by executor deadline derivation (PR 2); Python-side timeout wiring
+# deferred to RFC 0008.
 DEFAULT_TIMEOUT_SECONDS: int = 60
