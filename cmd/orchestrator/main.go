@@ -62,12 +62,7 @@ func main() {
 	// development/staging.yaml → derived). An explicit --deadline-mode flag
 	// still overrides this.
 	if *deadlineMode == "" {
-		switch *env {
-		case "production":
-			*deadlineMode = "static"
-		default:
-			*deadlineMode = "derived"
-		}
+		*deadlineMode = resolveDeadlineMode("", *env)
 	}
 
 	// PR #84 F-02: Validate --deadline-mode at startup (same pattern as --env
@@ -271,4 +266,19 @@ func main() {
 	// TODO: Persist state
 
 	log.Info("Persatrix Server stopped")
+}
+
+// resolveDeadlineMode returns the deadline mode to use based on an explicit
+// flag value and the environment. An explicit non-empty value always wins;
+// the caller is responsible for validating the returned value.
+// Otherwise, production defaults to "static" and all other environments to
+// "derived". Extracted from main() for testability. (PR 5a, S11)
+func resolveDeadlineMode(explicit, env string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if env == "production" {
+		return "static"
+	}
+	return "derived"
 }

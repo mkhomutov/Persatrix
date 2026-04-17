@@ -27,3 +27,10 @@ const DefaultTransportMargin = 5
 // Below this threshold, retries are skipped to avoid wasting compute
 // on attempts that cannot complete meaningful work.
 const MinRetryBudgetFraction = 0.25
+
+// MaxTimeoutSeconds is the recommended upper bound for per-step timeouts.
+// Steps with longer timeouts should be split into multiple steps or use
+// streaming. This constant is not currently enforced as a hard limit —
+// it is available for future timeout validation and for documentation.
+// (PR 5a, S10: added to defaults for discoverability)
+const MaxTimeoutSeconds = 3600

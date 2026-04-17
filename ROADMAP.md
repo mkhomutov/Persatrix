@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-17 (RFC 0006 follow-up PRs planned)  
+> **Last updated**: 2026-04-17 (RFC 0006 PR 5a merged)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — core PRs complete, PRs 5a–5c + 6 remain
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PRs 5b–5c + 6 remain
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -34,7 +34,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0003](docs/rfcs/0003-scheduler-executor.md) | Scheduler & Executor | v0.1.0 | ✅ Implemented |
 | [0004](docs/rfcs/0004-python-agent-grpc-server.md) | Python Agent gRPC Server | v0.1.0 | ✅ Implemented |
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | v0.2.0 | ✅ Implemented |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | 🚧 Implementing |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | 🚧 Implementing (9/12) |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | v0.3.0 | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 📋 Proposed |
@@ -164,14 +164,14 @@ v0.1.0 complete — end-to-end execution working
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 12 | 8/12 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 12 | 9/12 |
 
 ### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/12)
+RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (9/12)
     PR 1a — defaults package + Step limits + schema       ✅ #79
     PR 1b — executor + scheduler limit wiring             ✅ #81
     PR 1c — Python defaults + validation                  ✅ #83
@@ -180,7 +180,7 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/1
     PR 3b — CostReporter + scheduler budget integration   ✅ #86
     PR 4a — StepExecutionMetadata + observability         ✅ #87
     PR 4b — response cache + cost endpoint                ✅ #88
-    PR 5a — executor + scheduler + state follow-ups       ⬜
+    PR 5a — executor + scheduler + state follow-ups       ✅ #90
     PR 5b — cost package hardening                        ⬜
     PR 5c — planner/schema + Python fixes                 ⬜
     PR 6  — RFC close                                     ⬜
@@ -188,7 +188,7 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (8/1
 v0.2.0 complete
 ```
 
-> PRs 5a–5c (review follow-ups, parallel) and PR 6 (RFC close) remain. All core implementation PRs are merged.
+> PR 5a merged. PRs 5b–5c (review follow-ups, parallel) and PR 6 (RFC close) remain.
 
 ### Component Status
 
@@ -474,6 +474,7 @@ v0.4.0 complete
 | [#86](https://github.com/mkhomutov/Persatrix/pull/86) | feat(cost): CostReporter + scheduler budget integration (RFC 0006 PR 3b) | 0006 (3b/12) | 2026-04-17 |
 | [#87](https://github.com/mkhomutov/Persatrix/pull/87) | feat(state): StepExecutionMetadata + observability (RFC 0006 PR 4a) | 0006 (4a/12) | 2026-04-17 |
 | [#88](https://github.com/mkhomutov/Persatrix/pull/88) | feat(cost): response cache + cost summary endpoint (RFC 0006 PR 4b) | 0006 (4b/12) | 2026-04-17 |
+| [#90](https://github.com/mkhomutov/Persatrix/pull/90) | fix(executor,scheduler,state): RFC 0006 PR 5a — execution follow-up fixes | 0006 (5a/12) | 2026-04-17 |
 
 ---
 

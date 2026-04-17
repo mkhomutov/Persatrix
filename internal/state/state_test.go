@@ -424,20 +424,30 @@ func TestConcurrentUpdateStepStateSameRun(t *testing.T) {
 	const steps = 20
 
 	// Simulate parallel stage execution: multiple goroutines updating
-	// different step IDs on the same run concurrently.
+	// different step IDs on the same run concurrently. Half the steps
+	// include Metadata pointers to exercise the M-02 deep-copy under -race.
 	for i := 0; i < steps; i++ {
 		wg.Add(1)
 		stepID := fmt.Sprintf("step-%d", i)
-		go func(sid string) {
+		go func(sid string, idx int) {
 			defer wg.Done()
-			err := store.UpdateStepState(ctx, "css-1", StepState{
+			step := StepState{
 				StepID:    sid,
 				Status:    RunCompleted,
 				Output:    "output-" + sid,
 				StartedAt: time.Now(),
-			})
+			}
+			// Even-numbered steps carry metadata pointers.
+			if idx%2 == 0 {
+				step.Metadata = &StepExecutionMetadata{
+					TokensUsed:       100 * (idx + 1),
+					WallTimeMs:       int64(50 * (idx + 1)),
+					EstimatedCostUSD: 0.01 * float64(idx+1),
+				}
+			}
+			err := store.UpdateStepState(ctx, "css-1", step)
 			assert.NoError(t, err)
-		}(stepID)
+		}(stepID, i)
 	}
 
 	wg.Wait()
@@ -446,6 +456,18 @@ func TestConcurrentUpdateStepStateSameRun(t *testing.T) {
 	got, err := store.GetRun(ctx, "css-1")
 	require.NoError(t, err)
 	assert.Len(t, got.Steps, steps)
+
+	// Verify metadata on even-numbered steps survived the concurrent writes.
+	for i := 0; i < steps; i++ {
+		sid := fmt.Sprintf("step-%d", i)
+		step := got.Steps[sid]
+		if i%2 == 0 {
+			require.NotNil(t, step.Metadata, "step %s should have metadata", sid)
+			assert.Equal(t, 100*(i+1), step.Metadata.TokensUsed)
+		} else {
+			assert.Nil(t, step.Metadata, "step %s should have no metadata", sid)
+		}
+	}
 }
 
 func TestConcurrentCreateAndDelete(t *testing.T) {
@@ -807,4 +829,44 @@ func TestGetRunDeepCopy_MetadataIsolation(t *testing.T) {
 	got2, err := store.GetRun(ctx, "meta-iso")
 	require.NoError(t, err)
 	assert.Equal(t, 100, got2.Steps["step-1"].Metadata.TokensUsed)
+}
+
+// TestUpdateStepState_WriteIsolation verifies that mutating a metadata pointer
+// AFTER calling UpdateStepState does not corrupt the store's internal state.
+// This complements TestGetRunDeepCopy_MetadataIsolation (read isolation) by
+// testing the write path. (PR 5a, M-02 fix)
+func TestUpdateStepState_WriteIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{
+		ID: "write-iso", WorkflowID: "wf-1",
+	}))
+
+	meta := &StepExecutionMetadata{
+		TokensUsed:       200,
+		WallTimeMs:       1000,
+		EstimatedCostUSD: 0.05,
+	}
+	require.NoError(t, store.UpdateStepState(ctx, "write-iso", StepState{
+		StepID:   "step-1",
+		Status:   RunCompleted,
+		Metadata: meta,
+	}))
+
+	// Mutate the original metadata pointer AFTER UpdateStepState.
+	meta.TokensUsed = 9999
+	meta.WallTimeMs = 0
+	meta.EstimatedCostUSD = 999.99
+
+	// Store's internal copy should be unaffected.
+	got, err := store.GetRun(ctx, "write-iso")
+	require.NoError(t, err)
+	require.NotNil(t, got.Steps["step-1"].Metadata)
+	assert.Equal(t, 200, got.Steps["step-1"].Metadata.TokensUsed,
+		"store metadata should not be affected by caller mutation")
+	assert.Equal(t, int64(1000), got.Steps["step-1"].Metadata.WallTimeMs,
+		"store metadata should not be affected by caller mutation")
+	assert.InDelta(t, 0.05, got.Steps["step-1"].Metadata.EstimatedCostUSD, 0.001,
+		"store metadata should not be affected by caller mutation")
 }

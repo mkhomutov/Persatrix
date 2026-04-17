@@ -11,6 +11,9 @@ func TestDefaults_AllPositive(t *testing.T) {
 	assert.Greater(t, DefaultMaxTokens, 0, "DefaultMaxTokens must be positive")
 	assert.Greater(t, DefaultTimeoutSeconds, 0, "DefaultTimeoutSeconds must be positive")
 	assert.Greater(t, DefaultTransportMargin, 0, "DefaultTransportMargin must be positive")
+	// PR 5a review: MaxTimeoutSeconds was added but not covered by this test.
+	assert.Greater(t, MaxTimeoutSeconds, 0, "MaxTimeoutSeconds must be positive")
+	assert.GreaterOrEqual(t, MaxTimeoutSeconds, DefaultTimeoutSeconds, "MaxTimeoutSeconds must be >= DefaultTimeoutSeconds")
 }
 
 func TestDefaults_MinRetryBudgetFraction_InRange(t *testing.T) {

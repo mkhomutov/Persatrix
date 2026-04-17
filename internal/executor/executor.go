@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"time"
 
@@ -233,6 +234,34 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	}
 
 	// Build gRPC request.
+	// F-02: Clamp int → int32 casts to prevent silent wraparound to negative
+	// values in protobuf. Without this, values > math.MaxInt32 (e.g., from
+	// programmatic misuse) would wrap negative and be interpreted by the agent
+	// as extremely restrictive limits.
+	maxLLMCalls := req.Limits.MaxLLMCalls
+	maxTokens := req.Limits.MaxTokens
+	timeoutSeconds := req.Limits.TimeoutSeconds
+	if maxLLMCalls > math.MaxInt32 {
+		e.logger.Warn("MaxLLMCalls exceeds int32 range, clamping to max",
+			zap.Int("original", maxLLMCalls),
+			zap.Int("clamped", math.MaxInt32),
+		)
+		maxLLMCalls = math.MaxInt32
+	}
+	if maxTokens > math.MaxInt32 {
+		e.logger.Warn("MaxTokens exceeds int32 range, clamping to max",
+			zap.Int("original", maxTokens),
+			zap.Int("clamped", math.MaxInt32),
+		)
+		maxTokens = math.MaxInt32
+	}
+	if timeoutSeconds > math.MaxInt32 {
+		e.logger.Warn("TimeoutSeconds exceeds int32 range, clamping to max",
+			zap.Int("original", timeoutSeconds),
+			zap.Int("clamped", math.MaxInt32),
+		)
+		timeoutSeconds = math.MaxInt32
+	}
 	grpcReq := &taskpb.TaskRequest{
 		TaskId:     taskID,
 		WorkflowId: req.WorkflowID,
@@ -240,9 +269,9 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		Payload:    req.Payload,
 		Context:    req.Context,
 		Config: &taskpb.TaskConfig{
-			MaxLlmCalls:    int32(req.Limits.MaxLLMCalls),
-			MaxTokens:      int32(req.Limits.MaxTokens),
-			TimeoutSeconds: int32(req.Limits.TimeoutSeconds),
+			MaxLlmCalls:    int32(maxLLMCalls),
+			MaxTokens:      int32(maxTokens),
+			TimeoutSeconds: int32(timeoutSeconds),
 		},
 	}
 
@@ -284,6 +313,12 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			// Update dispatch timeout: remaining step budget + transport margin.
 			// `remaining` is the time left until the step deadline (stepDeadline - elapsed),
 			// so this gives the RPC the full remaining budget plus overhead.
+			// S6 invariant: dispatchTimeout > remaining always holds because
+			// DefaultTransportMargin > 0. This ensures the gRPC context deadline
+			// outlives the logical step deadline, so the agent sees context
+			// cancellation from the step deadline, not from the transport layer.
+			// If transport margin were 0, the gRPC deadline and step deadline
+			// would race, producing non-deterministic timeout vs cancellation errors.
 			dispatchTimeout = remaining + time.Duration(defaults.DefaultTransportMargin)*time.Second
 		}
 
@@ -359,6 +394,10 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			zap.Error(err),
 		)
 
+		// TODO(deferred-S9): Consider checking remaining - delay >= minBudget
+		// before sleeping, to avoid wasting the backoff window when the time
+		// budget is nearly exhausted. Deferred: marginal benefit (~500ms
+		// window vs 60s+ deadlines). See PR 5a review.
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

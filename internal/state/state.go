@@ -197,6 +197,14 @@ func (s *InMemoryStore) UpdateStepState(_ context.Context, runID string, step St
 		return ErrRunNotFound
 	}
 
+	// Deep copy metadata pointer to prevent caller from mutating store-internal
+	// state via a shared pointer. Matches CreateRun and deepCopyRun deep-copy
+	// behavior — all write paths now consistently own their data. (PR 5a, M-02)
+	if step.Metadata != nil {
+		metaCopy := *step.Metadata
+		step.Metadata = &metaCopy
+	}
+
 	run.Steps[step.StepID] = step
 	s.logger.Debug("step state updated", zap.String("runID", runID), zap.String("stepID", step.StepID))
 	return nil

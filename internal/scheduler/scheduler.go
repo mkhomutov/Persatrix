@@ -434,7 +434,7 @@ func (s *WorkflowScheduler) executeStep(
 	s.recordStepUsage(workflowID, step, result, registryModel)
 
 	// Build execution metadata for observability (RFC 0006 PR 4a).
-	metadata := s.buildStepMetadata(result, registryModel)
+	metadata := s.buildStepMetadata(result, registryModel, step.ID)
 
 	s.logger.Info("step completed",
 		zap.String("runID", runID),
@@ -478,6 +478,29 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 	if s.registry != nil {
 		agent, err := s.registry.Get(ctx, step.AgentID)
 		if err == nil {
+			// F-04: Warn on negative agent-level limits. The planner rejects
+			// negative step-level limits at parse time, but agent config values
+			// arrive via the registry without validation. Negative values fail
+			// the > 0 check and silently fall through to defaults; log a warning
+			// so operators can detect misconfiguration.
+			if agent.MaxLLMCalls < 0 {
+				s.logger.Warn("negative agent-level MaxLLMCalls, using default",
+					zap.String("agentID", step.AgentID),
+					zap.Int("value", agent.MaxLLMCalls),
+				)
+			}
+			if agent.MaxTokens < 0 {
+				s.logger.Warn("negative agent-level MaxTokens, using default",
+					zap.String("agentID", step.AgentID),
+					zap.Int("value", agent.MaxTokens),
+				)
+			}
+			if agent.TimeoutSeconds < 0 {
+				s.logger.Warn("negative agent-level TimeoutSeconds, using default",
+					zap.String("agentID", step.AgentID),
+					zap.Int("value", agent.TimeoutSeconds),
+				)
+			}
 			if agent.MaxLLMCalls > 0 {
 				limits.MaxLLMCalls = agent.MaxLLMCalls
 			}
@@ -561,9 +584,9 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 }
 
 // recordStepUsage records token usage from a completed step dispatch.
-// Parses tokens_used from the response metadata and records it in the
-// TokenCounter and CostReporter. Missing or unparseable metadata is
-// handled gracefully with a warning log.
+// Uses resolveStepTokenData to parse tokens and compute cost — the same helper
+// used by buildStepMetadata — ensuring parity between what's recorded in the
+// cost system and what's reported in step metadata. (PR 5a, M-01 fix)
 //
 // registryModel is the model resolved from the agent registry before dispatch.
 // It is used as a fallback when the executor response metadata does not include
@@ -574,122 +597,140 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 		return
 	}
 
-	var inputTokens, outputTokens int64
-	if result.Metadata != nil {
-		inputTokens = parseMetadataInt64(result.Metadata, "input_tokens", s.logger, step.ID)
-		outputTokens = parseMetadataInt64(result.Metadata, "output_tokens", s.logger, step.ID)
+	data := s.resolveStepTokenData(result, registryModel, step.ID)
 
-		// Fall back to combined "tokens_used" if per-direction tokens are absent.
-		// NOTE: tokens_used is mapped entirely to outputTokens — this intentionally
-		// overestimates cost because output tokens are priced higher than input tokens.
-		// The pessimistic estimate propagates into both TokenCounter running totals
-		// and CostReporter step entries, which makes subsequent budget checks more
-		// conservative. This is the safe default for budget enforcement.
-		if inputTokens == 0 && outputTokens == 0 {
-			outputTokens = parseMetadataInt64(result.Metadata, "tokens_used", s.logger, step.ID)
-			// Log the fallback so operators can identify agents that should be updated
-			// to provide granular input_tokens/output_tokens data. (PR #86 review S-03)
-			if outputTokens > 0 {
-				s.logger.Info("using tokens_used fallback (all tokens mapped to output, cost may be overestimated)",
-					zap.String("stepID", step.ID),
-					zap.String("agentID", step.AgentID),
-					zap.Int64("tokensUsed", outputTokens),
-				)
-			}
-		}
+	// Log when using tokens_used fallback so operators can identify agents that
+	// should provide granular input_tokens/output_tokens data. (PR #86 review S-03)
+	if data.usedTokensFallback {
+		s.logger.Info("using tokens_used fallback (all tokens mapped to output, cost may be overestimated)",
+			zap.String("stepID", step.ID),
+			zap.String("agentID", step.AgentID),
+			zap.Int64("tokensUsed", data.outputTokens),
+		)
 	}
 
-	if inputTokens == 0 && outputTokens == 0 {
+	if data.inputTokens == 0 && data.outputTokens == 0 {
 		s.logger.Warn("no token usage in step response metadata, recording zero",
 			zap.String("stepID", step.ID),
 			zap.String("agentID", step.AgentID),
 		)
 	}
 
-	model := ""
-	if result.Metadata != nil {
-		model = result.Metadata["model"]
-	}
-	if model == "" {
-		model = registryModel
-	}
-
 	s.tokenCounter.RecordUsage(cost.UsageRecord{
 		WorkflowID:   workflowID,
 		AgentID:      step.AgentID,
-		Model:        model,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
+		Model:        data.model,
+		InputTokens:  data.inputTokens,
+		OutputTokens: data.outputTokens,
 	})
 
+	// NOTE (S-04): When costReporter is nil but tokenCounter is non-nil, the
+	// TokenCounter running totals include data that CostReporter step entries
+	// don't. This is expected — the counter tracks all usage for budget
+	// enforcement, while the reporter tracks per-step cost entries for the cost
+	// endpoint. Comparing counter totals vs reporter sums will show a discrepancy.
 	if s.costReporter != nil {
-		estimatedCost := s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
 		// PR #86 review S-04: Log when a non-empty model has no pricing entry,
 		// causing $0 cost despite non-zero tokens. Helps operators diagnose
 		// unpriced models without adding a logger to CostConfig.EstimateCost.
-		if estimatedCost == 0 && model != "" && (inputTokens > 0 || outputTokens > 0) {
+		if data.estimatedCostUSD == 0 && data.model != "" && (data.inputTokens > 0 || data.outputTokens > 0) {
 			s.logger.Debug("model not in pricing table, step cost recorded as $0",
 				zap.String("stepID", step.ID),
-				zap.String("model", model),
-				zap.Int64("inputTokens", inputTokens),
-				zap.Int64("outputTokens", outputTokens),
+				zap.String("model", data.model),
+				zap.Int64("inputTokens", data.inputTokens),
+				zap.Int64("outputTokens", data.outputTokens),
 			)
 		}
 		s.costReporter.RecordStepCost(workflowID, cost.StepCostEntry{
 			StepID:       step.ID,
 			AgentID:      step.AgentID,
-			Model:        model,
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			EstimatedUSD: estimatedCost,
+			Model:        data.model,
+			InputTokens:  data.inputTokens,
+			OutputTokens: data.outputTokens,
+			EstimatedUSD: data.estimatedCostUSD,
 		})
 	}
 }
 
+// stepTokenData holds resolved token, model, and cost data for a completed step.
+// Both recordStepUsage and buildStepMetadata use this to ensure cost estimation
+// parity. Without this shared helper, buildStepMetadata computed $0 cost when
+// only tokens_used was reported while recordStepUsage correctly fell back to the
+// pessimistic tokens_used → outputTokens mapping. (PR 5a, M-01 fix)
+type stepTokenData struct {
+	inputTokens        int64
+	outputTokens       int64
+	tokensUsed         int // total for display (tokens_used or input+output)
+	llmCallCount       int
+	model              string
+	estimatedCostUSD   float64
+	usedTokensFallback bool // true when tokens_used was mapped to outputTokens
+}
+
+// resolveStepTokenData parses token usage, model, and cost from an executor result.
+// It implements the tokens_used → outputTokens pessimistic fallback (see
+// recordStepUsage doc) and computes the estimated cost from the pricing table.
+// stepID is included in warning logs for diagnosability (M-03 fix).
+func (s *WorkflowScheduler) resolveStepTokenData(result *executor.ExecuteResult, registryModel, stepID string) stepTokenData {
+	var data stepTokenData
+	if result == nil || result.Metadata == nil {
+		return data
+	}
+
+	data.inputTokens = parseMetadataInt64(result.Metadata, "input_tokens", s.logger, stepID)
+	data.outputTokens = parseMetadataInt64(result.Metadata, "output_tokens", s.logger, stepID)
+	rawTokensUsed := parseMetadataInt64(result.Metadata, "tokens_used", s.logger, stepID)
+
+	// Fall back to combined tokens_used → outputTokens when per-direction tokens
+	// are absent. Output tokens are priced higher than input tokens, so this
+	// intentionally overestimates cost — making budget checks more conservative.
+	if data.inputTokens == 0 && data.outputTokens == 0 {
+		data.outputTokens = rawTokensUsed
+		data.usedTokensFallback = rawTokensUsed > 0
+	}
+
+	// Total for display: prefer explicit tokens_used (more accurate total from
+	// agent when both per-direction and total are reported), fall back to sum.
+	if rawTokensUsed > 0 {
+		data.tokensUsed = int(rawTokensUsed)
+	} else if data.inputTokens > 0 || data.outputTokens > 0 {
+		data.tokensUsed = int(data.inputTokens + data.outputTokens)
+	}
+
+	data.llmCallCount = int(parseMetadataInt64(result.Metadata, "llm_call_count", s.logger, stepID))
+
+	// Resolve model: prefer response metadata, fall back to registry.
+	data.model = result.Metadata["model"]
+	if data.model == "" {
+		data.model = registryModel
+	}
+
+	// Compute estimated cost from pricing table.
+	if s.tokenCounter != nil {
+		data.estimatedCostUSD = s.tokenCounter.Config().EstimateCost(data.model, data.inputTokens, data.outputTokens)
+	}
+
+	return data
+}
+
 // buildStepMetadata constructs a StepExecutionMetadata from the executor result
-// and cost data. Missing metadata fields degrade gracefully to zero values.
-func (s *WorkflowScheduler) buildStepMetadata(result *executor.ExecuteResult, registryModel string) *state.StepExecutionMetadata {
+// and cost data. Uses resolveStepTokenData to ensure cost estimation is consistent
+// with recordStepUsage. Missing metadata fields degrade gracefully to zero values.
+// stepID is passed for diagnosable warning logs (M-03 fix).
+func (s *WorkflowScheduler) buildStepMetadata(result *executor.ExecuteResult, registryModel, stepID string) *state.StepExecutionMetadata {
 	if result == nil {
 		return nil
 	}
 
-	var tokensUsed int
-	var llmCallCount int
-	if result.Metadata != nil {
-		tokensUsed = int(parseMetadataInt64(result.Metadata, "tokens_used", s.logger, ""))
-		llmCallCount = int(parseMetadataInt64(result.Metadata, "llm_call_count", s.logger, ""))
-		// If per-direction tokens are available, sum them for total.
-		if tokensUsed == 0 {
-			input := parseMetadataInt64(result.Metadata, "input_tokens", s.logger, "")
-			output := parseMetadataInt64(result.Metadata, "output_tokens", s.logger, "")
-			if input > 0 || output > 0 {
-				tokensUsed = int(input + output)
-			}
-		}
-	}
-
-	// Compute estimated cost from the pricing table if available.
-	var estimatedCostUSD float64
-	if s.tokenCounter != nil && result.Metadata != nil {
-		inputTokens := parseMetadataInt64(result.Metadata, "input_tokens", s.logger, "")
-		outputTokens := parseMetadataInt64(result.Metadata, "output_tokens", s.logger, "")
-		model := ""
-		if result.Metadata != nil {
-			model = result.Metadata["model"]
-		}
-		if model == "" {
-			model = registryModel
-		}
-		estimatedCostUSD = s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
-	}
+	data := s.resolveStepTokenData(result, registryModel, stepID)
 
 	return &state.StepExecutionMetadata{
-		TokensUsed:       tokensUsed,
-		LLMCallCount:     llmCallCount,
+		TokensUsed:       data.tokensUsed,
+		LLMCallCount:     data.llmCallCount,
 		RetryCount:       result.RetryCount,
 		CacheHit:         result.CacheHit,
 		WallTimeMs:       result.WallTimeMs,
-		EstimatedCostUSD: estimatedCostUSD,
+		EstimatedCostUSD: data.estimatedCostUSD,
 	}
 }
 
