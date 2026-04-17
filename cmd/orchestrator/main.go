@@ -170,7 +170,7 @@ func main() {
 	if costCfg != nil {
 		tokenCounter := cost.NewTokenCounter(costCfg, logger)
 		budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
-		costReporter := cost.NewCostReporter(tokenCounter, costCfg)
+		costReporter := cost.NewCostReporter(tokenCounter, costCfg, logger)
 		schedOpts = append(schedOpts, scheduler.WithCostComponents(tokenCounter, budgetEnforcer, costReporter))
 		logger.Info("cost tracking initialized",
 			zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),

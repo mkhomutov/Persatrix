@@ -1296,7 +1296,7 @@ func TestBudgetCheck_UnderBudget_DispatchProceeds(t *testing.T) {
 	cfg := testCostConfig()
 	tc := cost.NewTokenCounter(cfg, zap.NewNop())
 	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
@@ -1344,7 +1344,7 @@ func TestBudgetCheck_Rejected_StepFails(t *testing.T) {
 	directResult := be.CheckBudget("test-wf", "test-agent", "claude-sonnet", 8192)
 	require.Equal(t, cost.BudgetReject, directResult.Decision, "sanity: direct budget check should reject")
 
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	var executorCalled atomic.Bool
@@ -1396,7 +1396,7 @@ func TestBudgetCheck_ErrorWrapping(t *testing.T) {
 
 	tc := cost.NewTokenCounter(cfg, zap.NewNop())
 	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
@@ -1435,7 +1435,7 @@ func TestTokenRecording_MissingMetadata_GracefulDegradation(t *testing.T) {
 	cfg := testCostConfig()
 	tc := cost.NewTokenCounter(cfg, zap.NewNop())
 	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
@@ -1469,7 +1469,7 @@ func TestTokenRecording_TokensUsedFallback(t *testing.T) {
 	cfg := testCostConfig()
 	tc := cost.NewTokenCounter(cfg, zap.NewNop())
 	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
@@ -1507,7 +1507,7 @@ func TestCostReporter_StepCostRecorded(t *testing.T) {
 	cfg := testCostConfig()
 	tc := cost.NewTokenCounter(cfg, zap.NewNop())
 	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
-	cr := cost.NewCostReporter(tc, cfg)
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
 
 	store := state.NewInMemoryStore(zap.NewNop())
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
@@ -1585,4 +1585,29 @@ func TestParseMetadataInt64_MalformedValue(t *testing.T) {
 	assert.Equal(t, "step-x", entry.ContextMap()["stepID"])
 	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
 	assert.Equal(t, "not-a-number", entry.ContextMap()["value"])
+}
+
+// TestParseMetadataInt64_NegativeValue verifies that negative token values are
+// clamped to zero with a warning log. This prevents adversarial agents from
+// reporting negative tokens to decrease the running budget total.
+// (PR #86 review F-01: security fix)
+func TestParseMetadataInt64_NegativeValue(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	logger := zap.New(core)
+
+	metadata := map[string]string{
+		"input_tokens": "-500",
+	}
+
+	result := parseMetadataInt64(metadata, "input_tokens", logger, "step-neg")
+	assert.Equal(t, int64(0), result)
+
+	// Verify warning log was emitted for the clamped value.
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zap.WarnLevel, entry.Level)
+	assert.Contains(t, entry.Message, "negative token value clamped to zero")
+	assert.Equal(t, "step-neg", entry.ContextMap()["stepID"])
+	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
+	assert.Equal(t, int64(-500), entry.ContextMap()["value"])
 }

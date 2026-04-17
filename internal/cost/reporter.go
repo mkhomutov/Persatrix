@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // StepCostEntry captures cost data for a single workflow step.
@@ -53,14 +55,21 @@ type CostReporter struct {
 
 	counter *TokenCounter
 	config  *CostConfig
+	logger  *zap.Logger
 }
 
 // NewCostReporter creates a new CostReporter backed by the given TokenCounter.
-func NewCostReporter(counter *TokenCounter, config *CostConfig) *CostReporter {
+// Accepts a logger for consistency with TokenCounter and BudgetEnforcer.
+// (PR #86 review S-02: adding logger now avoids a breaking constructor change later.)
+func NewCostReporter(counter *TokenCounter, config *CostConfig, logger *zap.Logger) *CostReporter {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &CostReporter{
 		perWorkflowSteps: make(map[string][]StepCostEntry),
 		counter:          counter,
 		config:           config,
+		logger:           logger,
 	}
 }
 
@@ -124,13 +133,19 @@ func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 	}
 }
 
-// ResetDaily clears per-workflow step cost data. Should be called alongside
-// TokenCounter.ResetDaily() to prevent unbounded memory growth in long-running
-// orchestrators (review finding: perWorkflowSteps grows without cleanup).
+// ResetDaily clears per-workflow step cost data and resets the underlying
+// TokenCounter. Calling this single method ensures both components reset
+// atomically from the caller's perspective, preventing state divergence where
+// one is reset but the other is not. (PR #86 review S-05)
+//
+// For long-running orchestrators, this prevents unbounded memory growth in
+// the perWorkflowSteps map (review finding: grows without per-key eviction).
 func (r *CostReporter) ResetDaily() {
+	r.counter.ResetDaily()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.perWorkflowSteps = make(map[string][]StepCostEntry)
+	r.logger.Info("daily cost reporter data reset")
 }
 
 // sortAgentsBySpend sorts agent entries by EstimatedUSD descending.

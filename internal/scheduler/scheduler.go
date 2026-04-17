@@ -557,6 +557,15 @@ func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID stri
 		// conservative. This is the safe default for budget enforcement.
 		if inputTokens == 0 && outputTokens == 0 {
 			outputTokens = parseMetadataInt64(result.Metadata, "tokens_used", s.logger, step.ID)
+			// Log the fallback so operators can identify agents that should be updated
+			// to provide granular input_tokens/output_tokens data. (PR #86 review S-03)
+			if outputTokens > 0 {
+				s.logger.Info("using tokens_used fallback (all tokens mapped to output, cost may be overestimated)",
+					zap.String("stepID", step.ID),
+					zap.String("agentID", step.AgentID),
+					zap.Int64("tokensUsed", outputTokens),
+				)
+			}
 		}
 	}
 
@@ -623,6 +632,17 @@ func parseMetadataInt64(metadata map[string]string, key string, logger *zap.Logg
 			zap.String("key", key),
 			zap.String("value", val),
 			zap.Error(err),
+		)
+		return 0
+	}
+	// Security: clamp negative values to zero to prevent adversarial agents from
+	// reporting negative token counts, which would decrease the running total in
+	// TokenCounter and effectively bypass budget enforcement. (PR #86 review F-01)
+	if n < 0 {
+		logger.Warn("negative token value clamped to zero",
+			zap.String("stepID", stepID),
+			zap.String("key", key),
+			zap.Int64("value", n),
 		)
 		return 0
 	}

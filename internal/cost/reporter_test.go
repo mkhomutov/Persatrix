@@ -12,7 +12,7 @@ import (
 func TestCostReporter_WorkflowSummary_WithSteps(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	// Record usage via counter (aggregated totals).
 	tc.RecordUsage(UsageRecord{
@@ -47,7 +47,7 @@ func TestCostReporter_WorkflowSummary_WithSteps(t *testing.T) {
 func TestCostReporter_WorkflowSummary_NoSteps(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	summary := reporter.WorkflowSummary("nonexistent")
 	assert.Equal(t, "nonexistent", summary.WorkflowID)
@@ -60,7 +60,7 @@ func TestCostReporter_WorkflowSummary_NoSteps(t *testing.T) {
 func TestCostReporter_GlobalSummary_DailyTotals(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	tc.RecordUsage(UsageRecord{
 		WorkflowID: "wf-1", AgentID: "agent-a", Model: "claude-sonnet",
@@ -81,7 +81,7 @@ func TestCostReporter_GlobalSummary_DailyTotals(t *testing.T) {
 func TestCostReporter_GlobalSummary_TopAgents(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	// agent-a spends more (sonnet pricing) than agent-b (haiku pricing).
 	tc.RecordUsage(UsageRecord{
@@ -104,7 +104,7 @@ func TestCostReporter_GlobalSummary_TopAgents(t *testing.T) {
 func TestCostReporter_GlobalSummary_Empty(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	summary := reporter.GlobalSummary()
 	assert.Equal(t, int64(0), summary.DailyInputTokens)
@@ -116,7 +116,7 @@ func TestCostReporter_GlobalSummary_Empty(t *testing.T) {
 func TestCostReporter_RecordStepCost_MultipleWorkflows(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	reporter.RecordStepCost("wf-1", StepCostEntry{StepID: "s1", AgentID: "a"})
 	reporter.RecordStepCost("wf-2", StepCostEntry{StepID: "s2", AgentID: "b"})
@@ -145,7 +145,7 @@ func TestSortAgentsBySpend(t *testing.T) {
 func TestCostReporter_Concurrent(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	const goroutines = 20
 	const opsPerGoroutine = 50
@@ -194,7 +194,7 @@ func TestCostReporter_Concurrent(t *testing.T) {
 func TestCostReporter_ResetDaily(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	reporter.RecordStepCost("wf-1", StepCostEntry{StepID: "s1", AgentID: "a"})
 	reporter.RecordStepCost("wf-2", StepCostEntry{StepID: "s2", AgentID: "b"})
@@ -213,7 +213,7 @@ func TestCostReporter_ResetDaily(t *testing.T) {
 func TestCostReporter_ResetDaily_Concurrent(t *testing.T) {
 	cfg := testConfig()
 	tc := NewTokenCounter(cfg, zap.NewNop())
-	reporter := NewCostReporter(tc, cfg)
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
 
 	const goroutines = 10
 	const opsPerGoroutine = 50
@@ -255,4 +255,42 @@ func TestSortAgentsBySpend_EqualSpend(t *testing.T) {
 	assert.Equal(t, "alpha", agents[0].AgentID)
 	assert.Equal(t, "bravo", agents[1].AgentID)
 	assert.Equal(t, "charlie", agents[2].AgentID)
+}
+
+// TestCostReporter_ResetDaily_ResetsCounter verifies that CostReporter.ResetDaily()
+// also resets the underlying TokenCounter, preventing state divergence where
+// per-step data is cleared but aggregated totals remain stale.
+// (PR #86 review S-05: coordinate ResetDaily calls)
+func TestCostReporter_ResetDaily_ResetsCounter(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+	reporter := NewCostReporter(tc, cfg, zap.NewNop())
+
+	// Record usage in both components.
+	tc.RecordUsage(UsageRecord{
+		WorkflowID: "wf-1", AgentID: "agent-a", Model: "claude-sonnet",
+		InputTokens: 1000, OutputTokens: 500,
+	})
+	reporter.RecordStepCost("wf-1", StepCostEntry{
+		StepID: "step-1", AgentID: "agent-a", Model: "claude-sonnet",
+		InputTokens: 1000, OutputTokens: 500, EstimatedUSD: 0.0105,
+	})
+
+	// Verify data exists before reset.
+	input, output, _ := tc.GlobalUsage()
+	require.Greater(t, input, int64(0))
+	require.Greater(t, output, int64(0))
+	require.Len(t, reporter.WorkflowSummary("wf-1").Steps, 1)
+
+	// Single ResetDaily call should clear both components.
+	reporter.ResetDaily()
+
+	// TokenCounter should be reset.
+	input, output, usd := tc.GlobalUsage()
+	assert.Equal(t, int64(0), input)
+	assert.Equal(t, int64(0), output)
+	assert.Equal(t, 0.0, usd)
+
+	// Reporter step data should be reset.
+	assert.Empty(t, reporter.WorkflowSummary("wf-1").Steps)
 }
