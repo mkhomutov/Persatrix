@@ -678,13 +678,13 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `go test ./internal/scheduler/ -v -race` passes
-- [ ] `go test ./internal/state/ -v -race` passes
-- [ ] `go test ./cmd/orchestrator/ -v -race` passes
-- [ ] M-01 cost estimation divergence eliminated
-- [ ] M-02 metadata deep copy on write
-- [ ] All 16 addressed findings resolved
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `go test ./internal/scheduler/ -v -race` passes
+- [x] `go test ./internal/state/ -v -race` passes
+- [x] `go test ./cmd/orchestrator/ -v -race` passes
+- [x] M-01 cost estimation divergence eliminated
+- [x] M-02 metadata deep copy on write
+- [x] All 16 addressed findings resolved
 
 ---
 
