@@ -269,7 +269,8 @@ func main() {
 }
 
 // resolveDeadlineMode returns the deadline mode to use based on an explicit
-// flag value and the environment. An explicit non-empty value always wins.
+// flag value and the environment. An explicit non-empty value always wins;
+// the caller is responsible for validating the returned value.
 // Otherwise, production defaults to "static" and all other environments to
 // "derived". Extracted from main() for testability. (PR 5a, S11)
 func resolveDeadlineMode(explicit, env string) string {

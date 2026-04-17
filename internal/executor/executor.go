@@ -394,6 +394,10 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			zap.Error(err),
 		)
 
+		// TODO(deferred-S9): Consider checking remaining - delay >= minBudget
+		// before sleeping, to avoid wasting the backoff window when the time
+		// budget is nearly exhausted. Deferred: marginal benefit (~500ms
+		// window vs 60s+ deadlines). See PR 5a review.
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
