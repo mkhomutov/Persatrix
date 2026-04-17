@@ -341,7 +341,7 @@ _LIMIT_CONFIG: dict = {
 class TestExecutionLimitValidation:
     """Verify RFC 0006 §B: negative limits rejected, zero resolved to defaults."""
 
-    async def test_negative_max_llm_calls_raises(self):
+    async def test_negative_max_llm_calls_returns_failed(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
         output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-1)))
@@ -349,7 +349,7 @@ class TestExecutionLimitValidation:
         assert output.result == "Negative execution limits are not allowed"
         assert output.metadata["error_type"] == "permanent"
 
-    async def test_negative_max_tokens_raises(self):
+    async def test_negative_max_tokens_returns_failed(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
         output = await agent.handle(_task_with_config(TaskInputConfig(max_tokens=-1)))
@@ -357,7 +357,7 @@ class TestExecutionLimitValidation:
         assert output.result == "Negative execution limits are not allowed"
         assert output.metadata["error_type"] == "permanent"
 
-    async def test_negative_both_raises(self):
+    async def test_negative_both_returns_failed(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
         output = await agent.handle(
@@ -420,6 +420,12 @@ class TestExecutionLimitValidation:
 
     async def test_loop_exhaustion_uses_default_max_llm_calls(self):
         """With max_llm_calls=0 and LLM always returning TOOL_USE, loop runs DEFAULT_MAX_LLM_CALLS times."""
+        # Register a noop tool so the test doesn't depend on _execute_tools'
+        # graceful handling of unknown tools (which returns an error result).
+        @tool(name="noop", description="No-op tool for loop exhaustion test")
+        async def noop_tool() -> ToolResult:
+            return ToolResult(success=True, data="no-op")
+
         tool_response = LLMResponse(
             text=None,
             stop_reason=StopReason.TOOL_USE,
