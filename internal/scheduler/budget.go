@@ -1,3 +1,4 @@
+// budget.go contains execution-limit resolution, token recording, and cost metadata helpers.
 package scheduler
 
 import (

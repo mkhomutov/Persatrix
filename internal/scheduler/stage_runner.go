@@ -1,3 +1,4 @@
+// stage_runner.go contains per-stage fan-out and per-step dispatch logic.
 package scheduler
 
 import (
