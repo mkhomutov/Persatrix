@@ -809,13 +809,13 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` passes
-- [ ] `go test ./internal/planner/ -v -race` passes
-- [ ] `make validate` passes
-- [ ] M1 negative-limit error reporting aligned with `_run_llm_loop()` pattern
-- [ ] All 6 addressed findings resolved
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` passes
+- [x] `go test ./internal/planner/ -v -race` passes
+- [x] `make validate` passes
+- [x] M1 negative-limit error reporting aligned with `_run_llm_loop()` pattern
+- [x] All 6 addressed findings resolved
 
 #### Review Findings (PR #92)
 
@@ -872,7 +872,7 @@ PR 6 (RFC close)
 | 4b | 4 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #88) |
 | 5a | Follow-up | ~150–240 lines | ~250–400 lines | ✅ Merged (PR #90) |
 | 5b | Follow-up | ~120–210 lines | ~200–350 lines | ✅ Merged (PR #91) |
-| 5c | Follow-up | ~70–120 lines | ~120–200 lines | Open (PR #92) |
+| 5c | Follow-up | ~70–120 lines | ~120–200 lines | ✅ Merged (PR #92) |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,880–2,860** | **~3,160–4,770** | |
 
