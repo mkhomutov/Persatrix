@@ -144,6 +144,29 @@ class TestModuleImports:
 
         assert hasattr(persona_runtime, "_LLMPersonaAgent")
 
+    def test_action_loop_submodule_importable(self):
+        """Each persona_runtime submodule is independently importable.
+
+        Guards against packaging errors (e.g. bad relative import in one
+        submodule) that would be masked by the __init__.py import order.
+        (PR #95 review: submodule-level import smoke tests.)
+        """
+        from agents.persona_runtime import action_loop
+
+        assert hasattr(action_loop, "_ActionLoopMixin")
+
+    def test_memory_context_submodule_importable(self):
+        """See test_action_loop_submodule_importable."""
+        from agents.persona_runtime import memory_context
+
+        assert hasattr(memory_context, "_MemoryContextMixin")
+
+    def test_state_persistence_submodule_importable(self):
+        """See test_action_loop_submodule_importable."""
+        from agents.persona_runtime import state_persistence
+
+        assert hasattr(state_persistence, "_StatePersistenceMixin")
+
     def test_sub_agent_status_reexported(self):
         """SubAgentStatus must remain importable from persona.py (F-64-01)."""
         from agents.persona import SubAgentStatus
@@ -251,7 +274,10 @@ class TestModuleImports:
             "import importlib; "
             "[importlib.import_module(m) for m in "
             "('agents.persona_types', 'agents.persona_behavior', "
-            "'agents.dispatch', 'agents.tick', 'agents.persona_runtime')]"
+            "'agents.dispatch', 'agents.tick', 'agents.persona_runtime', "
+            "'agents.persona_runtime.action_loop', "
+            "'agents.persona_runtime.memory_context', "
+            "'agents.persona_runtime.state_persistence')]"
         )
         result = subprocess.run(
             [sys.executable, "-c", script],
@@ -1065,6 +1091,59 @@ class TestMaxLLMCallsExhaustion:
         # instead of an empty COMPLETE_TASK
         assert actions[0].action_type == ActionType.COMPLETE_TASK
         assert "Max LLM call budget exhausted" in actions[0].payload["result"]
+        await agent.close_memory()
+
+
+# ─── PR #95 review: persona fallback limits regression test ──
+
+
+class TestPersonaDefaultFallbackLimits:
+    """Persona agents that omit max_llm_calls / max_tokens must fall back to
+    the original persona-runtime defaults (10 / 4096), NOT the task-agent
+    defaults in defaults.py (5 / 8192).
+
+    (PR #95 review finding: shared defaults silently changed persona behavior.)
+    """
+
+    async def test_fallback_max_llm_calls_is_10(self):
+        """Without explicit max_llm_calls the persona loop runs up to 10 times."""
+        client = _make_client()
+        config = {k: v for k, v in _PERSONA_CONFIG.items() if k != "max_llm_calls"}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hello"},
+            sender_id="test",
+        )
+        await agent.on_event(event)
+        # Single END_TURN response means 1 call, but the loop limit must be 10.
+        # Verify via the action_loop constant directly.
+        from agents.persona_runtime.action_loop import _PERSONA_DEFAULT_MAX_LLM_CALLS
+        assert _PERSONA_DEFAULT_MAX_LLM_CALLS == 10
+        await agent.close_memory()
+
+    async def test_fallback_max_tokens_is_4096(self):
+        """Without explicit max_tokens the persona loop uses 4096."""
+        client = _make_client()
+        config = {k: v for k, v in _PERSONA_CONFIG.items() if k != "max_tokens"}
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=client,
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hello"},
+            sender_id="test",
+        )
+        await agent.on_event(event)
+        # Verify the LLM was called with max_tokens=4096 (the persona default)
+        call_kwargs = client._provider.create_message.call_args
+        assert call_kwargs.kwargs.get("max_tokens") == 4096 or call_kwargs[1].get("max_tokens") == 4096
         await agent.close_memory()
 
 
