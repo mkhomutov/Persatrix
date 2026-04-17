@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// TODO: Implement CostReporter (attribution by agent/workflow/model)
 // TODO: Implement AlertManager (threshold-based cost alerts)
 
 // UsageRecord captures a single token usage event for recording.
@@ -126,6 +125,25 @@ func (tc *TokenCounter) GlobalUsage() (inputTokens, outputTokens int64, estimate
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	return tc.global.InputTokens, tc.global.OutputTokens, tc.global.EstimatedUSD
+}
+
+// AgentUsages returns a snapshot of per-agent usage data.
+// The returned slice is a copy — callers may read it without holding any lock.
+// This method exists to decouple CostReporter from TokenCounter internals
+// (review finding: avoid direct access to unexported fields across components).
+func (tc *TokenCounter) AgentUsages() []AgentCostEntry {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	entries := make([]AgentCostEntry, 0, len(tc.perAgent))
+	for agentID, totals := range tc.perAgent {
+		entries = append(entries, AgentCostEntry{
+			AgentID:      agentID,
+			InputTokens:  totals.InputTokens,
+			OutputTokens: totals.OutputTokens,
+			EstimatedUSD: totals.EstimatedUSD,
+		})
+	}
+	return entries
 }
 
 // Config returns the cost configuration used by this counter.

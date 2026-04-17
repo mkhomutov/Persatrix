@@ -1,6 +1,7 @@
 package cost
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -137,4 +138,71 @@ func TestSortAgentsBySpend(t *testing.T) {
 	assert.Equal(t, "high", agents[0].AgentID)
 	assert.Equal(t, "mid", agents[1].AgentID)
 	assert.Equal(t, "low", agents[2].AgentID)
+}
+
+// TestCostReporter_Concurrent validates that CostReporter's mutex protection
+// is correct under concurrent access. Run with -race to detect data races.
+func TestCostReporter_Concurrent(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+	reporter := NewCostReporter(tc, cfg)
+
+	const goroutines = 20
+	const opsPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < opsPerGoroutine; j++ {
+				// Mix writes and reads concurrently.
+				tc.RecordUsage(UsageRecord{
+					WorkflowID:   "wf-concurrent",
+					AgentID:      "agent-concurrent",
+					Model:        "claude-sonnet",
+					InputTokens:  10,
+					OutputTokens: 5,
+				})
+				reporter.RecordStepCost("wf-concurrent", StepCostEntry{
+					StepID:       "step",
+					AgentID:      "agent-concurrent",
+					Model:        "claude-sonnet",
+					InputTokens:  10,
+					OutputTokens: 5,
+					EstimatedUSD: 0.001,
+				})
+				_ = reporter.WorkflowSummary("wf-concurrent")
+				_ = reporter.GlobalSummary()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify data is present (exact values don't matter — the test validates
+	// the absence of data races under -race).
+	summary := reporter.GlobalSummary()
+	assert.Greater(t, summary.DailyInputTokens, int64(0))
+	assert.Greater(t, summary.DailyOutputTokens, int64(0))
+
+	wfSummary := reporter.WorkflowSummary("wf-concurrent")
+	assert.Greater(t, len(wfSummary.Steps), 0)
+}
+
+func TestCostReporter_ResetDaily(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+	reporter := NewCostReporter(tc, cfg)
+
+	reporter.RecordStepCost("wf-1", StepCostEntry{StepID: "s1", AgentID: "a"})
+	reporter.RecordStepCost("wf-2", StepCostEntry{StepID: "s2", AgentID: "b"})
+	require.Len(t, reporter.WorkflowSummary("wf-1").Steps, 1)
+	require.Len(t, reporter.WorkflowSummary("wf-2").Steps, 1)
+
+	reporter.ResetDaily()
+
+	assert.Empty(t, reporter.WorkflowSummary("wf-1").Steps)
+	assert.Empty(t, reporter.WorkflowSummary("wf-2").Steps)
 }

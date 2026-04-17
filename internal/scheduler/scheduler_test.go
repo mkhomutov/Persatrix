@@ -1521,3 +1521,24 @@ func TestNoCostComponents_NoPanic(t *testing.T) {
 	run := waitForRunStatus(t, store, "no-cost", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
 }
+
+func TestParseMetadataInt64_MalformedValue(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	logger := zap.New(core)
+
+	metadata := map[string]string{
+		"input_tokens": "not-a-number",
+	}
+
+	result := parseMetadataInt64(metadata, "input_tokens", logger, "step-x")
+	assert.Equal(t, int64(0), result)
+
+	// Verify warning log was emitted.
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zap.WarnLevel, entry.Level)
+	assert.Contains(t, entry.Message, "failed to parse metadata value")
+	assert.Equal(t, "step-x", entry.ContextMap()["stepID"])
+	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
+	assert.Equal(t, "not-a-number", entry.ContextMap()["value"])
+}

@@ -1,6 +1,7 @@
 package cost
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -73,6 +74,12 @@ func (r *CostReporter) RecordStepCost(workflowID string, entry StepCostEntry) {
 
 // WorkflowSummary returns a cost summary for the given workflow, including
 // per-step breakdown and totals from the TokenCounter.
+//
+// NOTE: The returned data may be slightly inconsistent under concurrent writes.
+// WorkflowUsage (TokenCounter lock) and per-step data (CostReporter lock) are
+// acquired sequentially — a concurrent RecordStepCost + RecordUsage between the
+// two acquisitions can produce a TotalEstimated that does not match the sum of
+// Steps[*].EstimatedUSD. Acceptable for informational display.
 func (r *CostReporter) WorkflowSummary(workflowID string) WorkflowCostSummary {
 	input, output, usd := r.counter.WorkflowUsage(workflowID)
 
@@ -92,21 +99,18 @@ func (r *CostReporter) WorkflowSummary(workflowID string) WorkflowCostSummary {
 
 // GlobalSummary returns a cost summary across all workflows and agents,
 // including the top agents by estimated spend.
+//
+// NOTE: The returned data may be slightly inconsistent under concurrent writes.
+// GlobalUsage() and AgentUsages() acquire the TokenCounter lock separately — a
+// concurrent RecordUsage between the two calls can produce a DailyEstimatedUSD
+// that does not match the sum of TopAgents[*].EstimatedUSD. Acceptable for
+// informational display (same TOCTOU pattern as BudgetEnforcer.CheckBudget).
 func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 	input, output, usd := r.counter.GlobalUsage()
 
-	// Build per-agent entries from the counter's per-agent data.
-	r.counter.mu.Lock()
-	agents := make([]AgentCostEntry, 0, len(r.counter.perAgent))
-	for agentID, totals := range r.counter.perAgent {
-		agents = append(agents, AgentCostEntry{
-			AgentID:      agentID,
-			InputTokens:  totals.InputTokens,
-			OutputTokens: totals.OutputTokens,
-			EstimatedUSD: totals.EstimatedUSD,
-		})
-	}
-	r.counter.mu.Unlock()
+	// Build per-agent entries via the public AgentUsages() snapshot method.
+	// This avoids direct access to TokenCounter's unexported fields (mu, perAgent).
+	agents := r.counter.AgentUsages()
 
 	// Sort by estimated USD descending (top spenders first).
 	sortAgentsBySpend(agents)
@@ -120,12 +124,18 @@ func (r *CostReporter) GlobalSummary() GlobalCostSummary {
 	}
 }
 
+// ResetDaily clears per-workflow step cost data. Should be called alongside
+// TokenCounter.ResetDaily() to prevent unbounded memory growth in long-running
+// orchestrators (review finding: perWorkflowSteps grows without cleanup).
+func (r *CostReporter) ResetDaily() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.perWorkflowSteps = make(map[string][]StepCostEntry)
+}
+
 // sortAgentsBySpend sorts agent entries by EstimatedUSD descending.
 func sortAgentsBySpend(agents []AgentCostEntry) {
-	// Simple insertion sort — expected to have < 100 agents.
-	for i := 1; i < len(agents); i++ {
-		for j := i; j > 0 && agents[j].EstimatedUSD > agents[j-1].EstimatedUSD; j-- {
-			agents[j], agents[j-1] = agents[j-1], agents[j]
-		}
-	}
+	sort.Slice(agents, func(i, j int) bool {
+		return agents[i].EstimatedUSD > agents[j].EstimatedUSD
+	})
 }

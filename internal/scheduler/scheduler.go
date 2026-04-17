@@ -405,7 +405,7 @@ func (s *WorkflowScheduler) executeStep(
 	}
 
 	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
-	s.recordStepUsage(workflowID, step, result)
+	s.recordStepUsage(ctx, workflowID, step, result)
 
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
@@ -525,7 +525,7 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 // Parses tokens_used from the response metadata and records it in the
 // TokenCounter and CostReporter. Missing or unparseable metadata is
 // handled gracefully with a warning log.
-func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult) {
+func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID string, step planner.Step, result *executor.ExecuteResult) {
 	if s.tokenCounter == nil || result == nil {
 		return
 	}
@@ -553,7 +553,7 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 		model = result.Metadata["model"]
 	}
 	if model == "" {
-		model = s.resolveAgentModel(context.Background(), step.AgentID)
+		model = s.resolveAgentModel(ctx, step.AgentID)
 	}
 
 	s.tokenCounter.RecordUsage(cost.UsageRecord{
