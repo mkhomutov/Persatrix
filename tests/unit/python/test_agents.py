@@ -344,20 +344,28 @@ class TestExecutionLimitValidation:
     async def test_negative_max_llm_calls_raises(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
-        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
-            await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-1)))
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-1)))
+        assert output.status == TaskStatus.FAILED
+        assert output.result == "Negative execution limits are not allowed"
+        assert output.metadata["error_type"] == "permanent"
 
     async def test_negative_max_tokens_raises(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
-        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
-            await agent.handle(_task_with_config(TaskInputConfig(max_tokens=-1)))
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_tokens=-1)))
+        assert output.status == TaskStatus.FAILED
+        assert output.result == "Negative execution limits are not allowed"
+        assert output.metadata["error_type"] == "permanent"
 
     async def test_negative_both_raises(self):
         client = _make_client()
         agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
-        with pytest.raises(ValueError, match="Negative execution limits are not allowed"):
-            await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=-5, max_tokens=-100)))
+        output = await agent.handle(
+            _task_with_config(TaskInputConfig(max_llm_calls=-5, max_tokens=-100))
+        )
+        assert output.status == TaskStatus.FAILED
+        assert output.result == "Negative execution limits are not allowed"
+        assert output.metadata["error_type"] == "permanent"
 
     async def test_zero_max_llm_calls_resolves_to_default(self):
         """Zero max_llm_calls falls through to DEFAULT_MAX_LLM_CALLS (5)."""
@@ -409,3 +417,20 @@ class TestExecutionLimitValidation:
         call_kwargs = client._provider.create_message.call_args[1]
         # Agent config (2048) should take priority over system default (8192).
         assert call_kwargs["max_tokens"] == 2048
+
+    async def test_loop_exhaustion_uses_default_max_llm_calls(self):
+        """With max_llm_calls=0 and LLM always returning TOOL_USE, loop runs DEFAULT_MAX_LLM_CALLS times."""
+        tool_response = LLMResponse(
+            text=None,
+            stop_reason=StopReason.TOOL_USE,
+            usage=Usage(10, 20),
+            tool_calls=[ToolCall(id="tc1", name="noop", input={})],
+        )
+        # Provide enough responses for DEFAULT_MAX_LLM_CALLS iterations.
+        responses = [tool_response] * DEFAULT_MAX_LLM_CALLS
+        client = _make_client(responses=responses)
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=0)))
+        assert output.status == TaskStatus.FAILED
+        assert "Max LLM call iterations exceeded" in output.result
+        assert client._provider.create_message.call_count == DEFAULT_MAX_LLM_CALLS

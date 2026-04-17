@@ -27,10 +27,10 @@
               "condition": { "type": "string" },
               "approval_required": { "type": "boolean" },
               "approval_timeout": { "type": "integer" },
-              "timeout_seconds": { "type": "integer", "minimum": 1 },
-              "max_llm_calls": { "type": "integer", "minimum": 1 },
-              "max_tokens": { "type": "integer", "minimum": 1 },
-              "context_budget": { "type": "integer", "minimum": 1 },
+              "timeout_seconds": { "type": "integer", "minimum": 1, "description": "Per-step wall-clock timeout in seconds. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
+              "max_llm_calls": { "type": "integer", "minimum": 1, "description": "Maximum LLM calls for this step. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
+              "max_tokens": { "type": "integer", "minimum": 1, "description": "Maximum output tokens per LLM call for this step. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
+              "context_budget": { "type": "integer", "minimum": 1, "description": "Context window budget in tokens for this step (RFC 0008). Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
               "cacheable": { "type": "boolean" }
             }
           }

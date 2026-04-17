@@ -100,8 +100,8 @@ PR 6 (RFC close)
 
 **Should Fix (before merge):**
 
-- [ ] Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies schema `minimum: 1` boundary is correctly parsed by Go. *(Location: `internal/planner/planner_test.go`)*
-- [ ] Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in `Step` struct — makes deferred work searchable and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`)*
+- [x] Add `TestParse_StepLimits_MinimumValidValues` with `timeout_seconds: 1`, `max_llm_calls: 1`, `max_tokens: 1`, `context_budget: 1`. Verifies schema `minimum: 1` boundary is correctly parsed by Go. *(Location: `internal/planner/planner_test.go`)* — Addressed in PR 5c
+- [x] Add `// TODO(RFC-0008): Enforce context budget during execution.` to the `ContextBudget` field comment in `Step` struct — makes deferred work searchable and consistent with project phase stub convention. *(Location: `internal/planner/planner.go`)* — Addressed in PR 5c
 
 **Deferred to PR 5:**
 
@@ -856,8 +856,8 @@ PR 6 (RFC close)
 | 3b | 3 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #86) |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #88) |
-| 5a | Follow-up | ~150–240 lines | ~250–400 lines | Not started |
-| 5b | Follow-up | ~120–210 lines | ~200–350 lines | ⬜ In review |
+| 5a | Follow-up | ~150–240 lines | ~250–400 lines | ✅ Merged (PR #90) |
+| 5b | Follow-up | ~120–210 lines | ~200–350 lines | ✅ Merged (PR #91) |
 | 5c | Follow-up | ~70–120 lines | ~120–200 lines | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,880–2,860** | **~3,160–4,770** | |

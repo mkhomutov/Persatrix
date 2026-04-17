@@ -72,7 +72,7 @@ type Step struct {
 
 	// ContextBudget is a step-level context window budget in tokens (RFC 0008).
 	// Added here alongside RFC 0006 fields to avoid a separate schema migration.
-	// No enforcement logic in this PR — that is RFC 0008's scope.
+	// TODO(RFC-0008): Enforce context budget during execution.
 	ContextBudget int `yaml:"context_budget"`
 
 	// Cacheable marks this step as eligible for response caching (RFC 0006 PR 4b).

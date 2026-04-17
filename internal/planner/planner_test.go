@@ -830,6 +830,67 @@ workflow:
 	assert.Equal(t, 0, wf.Steps[0].ContextBudget, "absent limit should be zero")
 }
 
+func TestParse_StepLimits_MultiStepInheritance(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Multi-step inheritance"
+  steps:
+    - id: "with-limits"
+      agent: "coder"
+      input: "implement feature"
+      max_llm_calls: 10
+      timeout_seconds: 120
+    - id: "no-limits"
+      agent: "reviewer"
+      input: "review code"
+      depends_on: ["with-limits"]
+`
+	p := newTestPlanner()
+	wf, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.NoError(t, err)
+	require.Len(t, wf.Steps, 2)
+
+	// Step A: explicit limits preserved.
+	assert.Equal(t, 10, wf.Steps[0].MaxLLMCalls)
+	assert.Equal(t, 120, wf.Steps[0].TimeoutSeconds)
+	assert.Equal(t, 0, wf.Steps[0].MaxTokens, "absent limit should be zero")
+	assert.Equal(t, 0, wf.Steps[0].ContextBudget, "absent limit should be zero")
+
+	// Step B: all limits zero (inherit from agent config or system defaults).
+	assert.Equal(t, 0, wf.Steps[1].MaxLLMCalls)
+	assert.Equal(t, 0, wf.Steps[1].TimeoutSeconds)
+	assert.Equal(t, 0, wf.Steps[1].MaxTokens)
+	assert.Equal(t, 0, wf.Steps[1].ContextBudget)
+}
+
+func TestParse_StepLimits_MinimumValidValues(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Minimum boundary"
+  steps:
+    - id: "s1"
+      agent: "planner"
+      input: "hello"
+      timeout_seconds: 1
+      max_llm_calls: 1
+      max_tokens: 1
+      context_budget: 1
+`
+	p := newTestPlanner()
+	wf, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.NoError(t, err)
+	require.Len(t, wf.Steps, 1)
+
+	assert.Equal(t, 1, wf.Steps[0].TimeoutSeconds)
+	assert.Equal(t, 1, wf.Steps[0].MaxLLMCalls)
+	assert.Equal(t, 1, wf.Steps[0].MaxTokens)
+	assert.Equal(t, 1, wf.Steps[0].ContextBudget)
+}
+
 // --- Helper ---
 
 func writeTempYAML(t *testing.T, content string) string {

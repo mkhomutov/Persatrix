@@ -248,7 +248,11 @@ class BaseAgent(ABC):
         # Reject negative limits immediately — they are not a valid sentinel
         # and indicate a misconfigured TaskConfig from the orchestrator.
         if task.config.max_llm_calls < 0 or task.config.max_tokens < 0:
-            raise ValueError("Negative execution limits are not allowed")
+            return TaskOutput(
+                status=TaskStatus.FAILED,
+                result="Negative execution limits are not allowed",
+                metadata={"error_type": "permanent"},
+            )
 
         # 0 is the sentinel for "not set" (falsy), so `or` falls through
         # to the agent-level default, then to the system default.

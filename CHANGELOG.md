@@ -48,8 +48,13 @@ All notable changes to this project will be documented in this file.
   replacing inline magic numbers in `base.py` (RFC 0006 PR 1c, #83)
 - *(agents)* Raise `max_tokens` task agent default from 4096 → **8192** — covers typical
   code review and generation without truncation (RFC 0006 §B, #83)
-- *(agents)* `_run_llm_loop()` now rejects negative `max_llm_calls` / `max_tokens` values
-  from `TaskInputConfig` with `ValueError` (RFC 0006 PR 1c, #83)
+- *(schema)* Add `description` attributes to step-level execution limit properties
+  (`timeout_seconds`, `max_llm_calls`, `max_tokens`, `context_budget`) in
+  `schemas/workflow.schema.json` for VS Code YAML extension hover hints (RFC 0006 PR 5c)
+- *(agents)* `_run_llm_loop()` rejects negative `max_llm_calls` / `max_tokens` values
+  from `TaskInputConfig` with `TaskOutput(FAILED, error_type="permanent")` — aligns with
+  all other error conditions in the loop that return structured `TaskOutput` rather than
+  raising exceptions (RFC 0006 PRs 1c+5c)
 
 ---
 
