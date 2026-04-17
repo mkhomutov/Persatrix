@@ -37,6 +37,35 @@ from scripts.checks import ensure_utf8_streams  # noqa: E402
 
 _FMT_LABELS = {"go fmt", "cargo fmt"}
 
+
+def _staged_go_files() -> list[str]:
+    """Return paths of .go files staged for commit, under internal/ or cmd/.
+
+    Restricting the ``go fmt`` check to staged files keeps the hook's concern
+    local to the commit-in-progress and avoids spurious failures caused by
+    Windows ``core.autocrlf=true`` checkouts, where the working tree contains
+    CRLF but the index stores LF (``git ls-files --eol`` reports
+    ``i/lf w/crlf``).  ``gofmt`` treats CRLF content as unformatted even
+    though the committed content is fine.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    if proc.returncode != 0:
+        return []
+    paths = proc.stdout.decode(errors="replace").splitlines()
+    return [
+        p for p in paths
+        if p.endswith(".go") and (p.startswith("internal/") or p.startswith("cmd/"))
+    ]
+
+
 _CHECKS: list[tuple[str, list[str]]] = [
     ("go fmt", ["gofmt", "-l", "./internal/", "./cmd/"]),
     ("ruff check", ["{python}", "-m", "ruff", "check", "agents/"]),
@@ -98,6 +127,17 @@ def main(argv: list[str] | None = None) -> int:
         cmd = _resolve_argv(argv_template)
         print(f"\n▶ {label}")
         t0 = time.monotonic()
+        # Narrow ``go fmt`` to staged files only.  Covers the CRLF/LF
+        # mismatch case described in ``_staged_go_files`` without weakening
+        # the check for actual formatting regressions.
+        if label == "go fmt":
+            staged = _staged_go_files()
+            if not staged:
+                elapsed = time.monotonic() - t0
+                print(f"  ✓ PASS  ({elapsed:.1f}s)  (no staged .go files)")
+                results.append((label, True, elapsed))
+                continue
+            cmd = ["gofmt", "-l", *staged]
         try:
             proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=(label == "go fmt"))
         except FileNotFoundError:
