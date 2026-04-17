@@ -210,10 +210,30 @@ func runToResponse(run *state.WorkflowRun) workflowRunResponse {
 		WorkflowID: run.WorkflowID,
 		Status:     runStatusString(run.Status),
 		Error:      run.Error,
-		// TODO(v0.2): populate from run.Steps — step state data is now written by
-		// the Scheduler (RFC 0003), but the wire format for per-step status/output
-		// needs to be defined before exposing it.
-		Steps: make(map[string]any),
+		Steps:      make(map[string]any),
+	}
+
+	// Populate per-step data including execution metadata (RFC 0006 PR 4a).
+	for stepID, step := range run.Steps {
+		stepData := map[string]any{
+			"status": runStatusString(step.Status),
+		}
+		if step.Output != "" {
+			stepData["output"] = step.Output
+		}
+		if step.Error != "" {
+			stepData["error"] = step.Error
+		}
+		if !step.StartedAt.IsZero() {
+			stepData["started_at"] = step.StartedAt.UTC()
+		}
+		if !step.FinishedAt.IsZero() {
+			stepData["finished_at"] = step.FinishedAt.UTC()
+		}
+		if step.Metadata != nil {
+			stepData["metadata"] = step.Metadata
+		}
+		resp.Steps[stepID] = stepData
 	}
 
 	if !run.StartedAt.IsZero() {

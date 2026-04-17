@@ -1717,3 +1717,96 @@ func TestRegisterAgentNameMaxLength(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, maxName, resp.Name)
 }
+
+// --- StepExecutionMetadata in API response (RFC 0006 PR 4a) ---
+
+func TestGetWorkflowStatus_StepMetadata(t *testing.T) {
+	srv, dir := testServer(t)
+	writeWorkflowFixture(t, dir, "test-wf")
+
+	// Submit a run.
+	body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "test-wf"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var createResp submitWorkflowRunResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &createResp))
+
+	// Manually update step state with metadata via the store.
+	meta := &state.StepExecutionMetadata{
+		TokensUsed:       1200,
+		LLMCallCount:     2,
+		RetryCount:       1,
+		CacheHit:         false,
+		WallTimeMs:       3500,
+		EstimatedCostUSD: 0.012,
+	}
+	err := srv.store.UpdateStepState(context.Background(), createResp.RunID, state.StepState{
+		StepID:   "design",
+		Status:   state.RunCompleted,
+		Output:   "design output",
+		Metadata: meta,
+	})
+	require.NoError(t, err)
+
+	// Get status and verify metadata appears in response.
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/"+createResp.RunID+"/status", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+
+	var steps map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw["steps"], &steps))
+
+	var stepData map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(steps["design"], &stepData))
+
+	// Verify step fields.
+	assert.JSONEq(t, `"completed"`, string(stepData["status"]))
+	assert.JSONEq(t, `"design output"`, string(stepData["output"]))
+
+	// Verify metadata.
+	var gotMeta state.StepExecutionMetadata
+	require.NoError(t, json.Unmarshal(stepData["metadata"], &gotMeta))
+	assert.Equal(t, 1200, gotMeta.TokensUsed)
+	assert.Equal(t, 2, gotMeta.LLMCallCount)
+	assert.Equal(t, 1, gotMeta.RetryCount)
+	assert.False(t, gotMeta.CacheHit)
+	assert.Equal(t, int64(3500), gotMeta.WallTimeMs)
+	assert.InDelta(t, 0.012, gotMeta.EstimatedCostUSD, 1e-9)
+}
+
+func TestGetWorkflowStatus_StepWithoutMetadata(t *testing.T) {
+	srv, dir := testServer(t)
+	writeWorkflowFixture(t, dir, "test-wf")
+
+	body, _ := json.Marshal(submitWorkflowRunRequest{WorkflowID: "test-wf"})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/workflows/run", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var createResp submitWorkflowRunResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &createResp))
+
+	// Step without metadata (pre-PR 4a behavior).
+	err := srv.store.UpdateStepState(context.Background(), createResp.RunID, state.StepState{
+		StepID: "design",
+		Status: state.RunRunning,
+	})
+	require.NoError(t, err)
+
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/workflows/"+createResp.RunID+"/status", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+
+	var steps map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw["steps"], &steps))
+
+	var stepData map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(steps["design"], &stepData))
+
+	assert.JSONEq(t, `"running"`, string(stepData["status"]))
+	// Metadata should not be present when nil.
+	_, hasMetadata := stepData["metadata"]
+	assert.False(t, hasMetadata, "metadata should not appear in response when nil")
+}

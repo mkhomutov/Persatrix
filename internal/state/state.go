@@ -44,6 +44,18 @@ type WorkflowRun struct {
 	Inputs     map[string]string
 }
 
+// StepExecutionMetadata captures observability data for a completed step.
+// This is a Go struct (not a proto message per RFC 0006 Section A) — stored
+// in StepState and serialized to JSON in API responses.
+type StepExecutionMetadata struct {
+	TokensUsed       int     `json:"tokens_used"`
+	LLMCallCount     int     `json:"llm_call_count"`
+	RetryCount       int     `json:"retry_count"`
+	CacheHit         bool    `json:"cache_hit"`
+	WallTimeMs       int64   `json:"wall_time_ms"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+}
+
 // StepState tracks the state of a single step within a workflow run.
 type StepState struct {
 	StepID     string
@@ -52,6 +64,7 @@ type StepState struct {
 	Error      string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	Metadata   *StepExecutionMetadata
 }
 
 // Store defines the interface for workflow run state persistence.
@@ -260,6 +273,10 @@ func deepCopyRun(run *WorkflowRun) *WorkflowRun {
 
 	cp.Steps = make(map[string]StepState, len(run.Steps))
 	for k, v := range run.Steps {
+		if v.Metadata != nil {
+			metaCopy := *v.Metadata
+			v.Metadata = &metaCopy
+		}
 		cp.Steps[k] = v
 	}
 

@@ -432,6 +432,18 @@ func (s *WorkflowScheduler) executeStep(
 	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
 	s.recordStepUsage(workflowID, step, result, registryModel)
 
+	// Build execution metadata for observability (RFC 0006 PR 4a).
+	metadata := s.buildStepMetadata(result, registryModel)
+
+	s.logger.Info("step completed",
+		zap.String("runID", runID),
+		zap.String("stepID", step.ID),
+		zap.Int("tokensUsed", metadata.TokensUsed),
+		zap.Int("retryCount", metadata.RetryCount),
+		zap.Int64("wallTimeMs", metadata.WallTimeMs),
+		zap.Float64("estimatedCostUSD", metadata.EstimatedCostUSD),
+	)
+
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
 		StepID:     step.ID,
@@ -439,6 +451,7 @@ func (s *WorkflowScheduler) executeStep(
 		Output:     result.Output,
 		StartedAt:  startedAt,
 		FinishedAt: time.Now(),
+		Metadata:   metadata,
 	}); err != nil {
 		s.logger.Error("failed to update step state to completed",
 			zap.String("runID", runID),
@@ -629,6 +642,53 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 			OutputTokens: outputTokens,
 			EstimatedUSD: estimatedCost,
 		})
+	}
+}
+
+// buildStepMetadata constructs a StepExecutionMetadata from the executor result
+// and cost data. Missing metadata fields degrade gracefully to zero values.
+func (s *WorkflowScheduler) buildStepMetadata(result *executor.ExecuteResult, registryModel string) *state.StepExecutionMetadata {
+	if result == nil {
+		return nil
+	}
+
+	var tokensUsed int
+	var llmCallCount int
+	if result.Metadata != nil {
+		tokensUsed = int(parseMetadataInt64(result.Metadata, "tokens_used", s.logger, ""))
+		llmCallCount = int(parseMetadataInt64(result.Metadata, "llm_call_count", s.logger, ""))
+		// If per-direction tokens are available, sum them for total.
+		if tokensUsed == 0 {
+			input := parseMetadataInt64(result.Metadata, "input_tokens", s.logger, "")
+			output := parseMetadataInt64(result.Metadata, "output_tokens", s.logger, "")
+			if input > 0 || output > 0 {
+				tokensUsed = int(input + output)
+			}
+		}
+	}
+
+	// Compute estimated cost from the pricing table if available.
+	var estimatedCostUSD float64
+	if s.tokenCounter != nil && result.Metadata != nil {
+		inputTokens := parseMetadataInt64(result.Metadata, "input_tokens", s.logger, "")
+		outputTokens := parseMetadataInt64(result.Metadata, "output_tokens", s.logger, "")
+		model := ""
+		if result.Metadata != nil {
+			model = result.Metadata["model"]
+		}
+		if model == "" {
+			model = registryModel
+		}
+		estimatedCostUSD = s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
+	}
+
+	return &state.StepExecutionMetadata{
+		TokensUsed:       tokensUsed,
+		LLMCallCount:     llmCallCount,
+		RetryCount:       result.RetryCount,
+		CacheHit:         false, // Always false until PR 4b implements response cache.
+		WallTimeMs:       result.WallTimeMs,
+		EstimatedCostUSD: estimatedCostUSD,
 	}
 }
 

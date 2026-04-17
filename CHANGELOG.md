@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(orchestrator)* Per-step execution metadata: `StepExecutionMetadata` captures `tokens_used`,
+  `llm_call_count`, `retry_count`, `cache_hit`, `wall_time_ms`, and `estimated_cost_usd` for
+  every completed step. Exposed in `GET /api/v1/workflows/{id}/status` response and logged at
+  INFO level on step completion (RFC 0006 PR 4a)
+- *(server)* Workflow status API now populates per-step data (status, output, error, timestamps,
+  metadata) — previously returned an empty steps map (RFC 0006 PR 4a)
 - *(cost)* `CostReporter` aggregates per-workflow and global cost summaries from `TokenCounter`
   data — provides `WorkflowCostSummary` (per-step breakdown, estimated USD) and
   `GlobalCostSummary` (daily totals, top agents by spend) (RFC 0006 PR 3b)
