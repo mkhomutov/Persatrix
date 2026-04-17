@@ -6,17 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
+
+// ErrBudgetExceeded is returned when a step dispatch is rejected by the budget enforcer.
+// Callers can use errors.Is(err, ErrBudgetExceeded) to programmatically distinguish
+// budget failures from agent execution failures without string matching.
+// The REST API layer (PR 4b) maps this to HTTP 429 with a structured error body.
+var ErrBudgetExceeded = errors.New("budget exceeded")
 
 // Scheduler drives workflow execution by polling for pending runs and
 // dispatching tasks to agents via the Executor.
@@ -40,6 +48,11 @@ type WorkflowScheduler struct {
 	pollInterval  time.Duration
 	maxConcurrent int
 	inFlight      sync.Map // runID → struct{} — prevents duplicate execution
+
+	// Cost components (optional — nil-safe). Wired in PR 3b.
+	tokenCounter   *cost.TokenCounter
+	budgetEnforcer *cost.BudgetEnforcer
+	costReporter   *cost.CostReporter
 }
 
 // Option configures a WorkflowScheduler.
@@ -60,6 +73,17 @@ func WithMaxConcurrent(n int) Option {
 		if n > 0 {
 			s.maxConcurrent = n
 		}
+	}
+}
+
+// WithCostComponents injects cost tracking and budget enforcement into the scheduler.
+// When provided, the scheduler performs pre-dispatch budget checks and post-dispatch
+// token recording for each step.
+func WithCostComponents(counter *cost.TokenCounter, enforcer *cost.BudgetEnforcer, reporter *cost.CostReporter) Option {
+	return func(s *WorkflowScheduler) {
+		s.tokenCounter = counter
+		s.budgetEnforcer = enforcer
+		s.costReporter = reporter
 	}
 }
 
@@ -362,6 +386,37 @@ func (s *WorkflowScheduler) executeStep(
 	// Dispatch to executor.
 	// TODO(v0.2): evaluate step conditions
 	limits := s.resolveStepLimits(ctx, step)
+
+	// Resolve agent model once for both budget check and post-dispatch cost recording.
+	// The model from the registry won't change between pre-dispatch and post-dispatch
+	// within the same step execution. Post-dispatch recording may override this with
+	// the model from response metadata if present. (PR #86 review: eliminate redundant
+	// resolveAgentModel call per step)
+	registryModel := s.resolveAgentModel(ctx, step.AgentID)
+
+	// Pre-dispatch budget check (RFC 0006 PR 3b).
+	// NOTE: Budget check is optimistic — parallel steps within a stage may all
+	// pass budget checks simultaneously and collectively exceed the budget.
+	// Total potential overspend is bounded by (parallel_steps × max_token_cost).
+	// TODO(v0.3): Consider pessimistic budget reservation for high-value workflows.
+	if s.budgetEnforcer != nil {
+		if registryModel == "" {
+			// NOTE: Empty model means EstimateCost returns 0, making the budget check
+			// a no-op for this step. This happens when the registry is nil or the agent
+			// is not registered. Log a warning so operators can detect misconfiguration.
+			s.logger.Warn("could not resolve model for budget check, cost estimate will be zero",
+				zap.String("agentID", step.AgentID),
+				zap.String("stepID", step.ID),
+			)
+		}
+		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, registryModel, int64(limits.MaxTokens))
+		if budgetResult.Decision == cost.BudgetReject {
+			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Reason)
+			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
+			return "", err
+		}
+	}
+
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
 		WorkflowID: workflowID,
 		AgentID:    step.AgentID,
@@ -373,6 +428,9 @@ func (s *WorkflowScheduler) executeStep(
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
+
+	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
+	s.recordStepUsage(workflowID, step, result, registryModel)
 
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
@@ -486,6 +544,145 @@ func resolveWorkflowPath(workflowsDir, workflowID string) (string, error) {
 		return "", fmt.Errorf("invalid workflow ID format: %q", workflowID)
 	}
 	return filepath.Join(workflowsDir, workflowID+".yaml"), nil
+}
+
+// recordStepUsage records token usage from a completed step dispatch.
+// Parses tokens_used from the response metadata and records it in the
+// TokenCounter and CostReporter. Missing or unparseable metadata is
+// handled gracefully with a warning log.
+//
+// registryModel is the model resolved from the agent registry before dispatch.
+// It is used as a fallback when the executor response metadata does not include
+// a "model" key. This avoids a redundant registry lookup post-dispatch.
+// (PR #86 review: reduce double resolveAgentModel call)
+func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult, registryModel string) {
+	if s.tokenCounter == nil || result == nil {
+		return
+	}
+
+	var inputTokens, outputTokens int64
+	if result.Metadata != nil {
+		inputTokens = parseMetadataInt64(result.Metadata, "input_tokens", s.logger, step.ID)
+		outputTokens = parseMetadataInt64(result.Metadata, "output_tokens", s.logger, step.ID)
+
+		// Fall back to combined "tokens_used" if per-direction tokens are absent.
+		// NOTE: tokens_used is mapped entirely to outputTokens — this intentionally
+		// overestimates cost because output tokens are priced higher than input tokens.
+		// The pessimistic estimate propagates into both TokenCounter running totals
+		// and CostReporter step entries, which makes subsequent budget checks more
+		// conservative. This is the safe default for budget enforcement.
+		if inputTokens == 0 && outputTokens == 0 {
+			outputTokens = parseMetadataInt64(result.Metadata, "tokens_used", s.logger, step.ID)
+			// Log the fallback so operators can identify agents that should be updated
+			// to provide granular input_tokens/output_tokens data. (PR #86 review S-03)
+			if outputTokens > 0 {
+				s.logger.Info("using tokens_used fallback (all tokens mapped to output, cost may be overestimated)",
+					zap.String("stepID", step.ID),
+					zap.String("agentID", step.AgentID),
+					zap.Int64("tokensUsed", outputTokens),
+				)
+			}
+		}
+	}
+
+	if inputTokens == 0 && outputTokens == 0 {
+		s.logger.Warn("no token usage in step response metadata, recording zero",
+			zap.String("stepID", step.ID),
+			zap.String("agentID", step.AgentID),
+		)
+	}
+
+	model := ""
+	if result.Metadata != nil {
+		model = result.Metadata["model"]
+	}
+	if model == "" {
+		model = registryModel
+	}
+
+	s.tokenCounter.RecordUsage(cost.UsageRecord{
+		WorkflowID:   workflowID,
+		AgentID:      step.AgentID,
+		Model:        model,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+	})
+
+	if s.costReporter != nil {
+		estimatedCost := s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
+		// PR #86 review S-04: Log when a non-empty model has no pricing entry,
+		// causing $0 cost despite non-zero tokens. Helps operators diagnose
+		// unpriced models without adding a logger to CostConfig.EstimateCost.
+		if estimatedCost == 0 && model != "" && (inputTokens > 0 || outputTokens > 0) {
+			s.logger.Debug("model not in pricing table, step cost recorded as $0",
+				zap.String("stepID", step.ID),
+				zap.String("model", model),
+				zap.Int64("inputTokens", inputTokens),
+				zap.Int64("outputTokens", outputTokens),
+			)
+		}
+		s.costReporter.RecordStepCost(workflowID, cost.StepCostEntry{
+			StepID:       step.ID,
+			AgentID:      step.AgentID,
+			Model:        model,
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			EstimatedUSD: estimatedCost,
+		})
+	}
+}
+
+// resolveAgentModel looks up the model configured for an agent in the registry.
+// Returns an empty string if the registry is nil or the agent is not found
+// (graceful degradation — empty model makes EstimateCost return $0, effectively
+// skipping the budget check for that step).
+func (s *WorkflowScheduler) resolveAgentModel(ctx context.Context, agentID string) string {
+	if s.registry == nil {
+		return ""
+	}
+	agent, err := s.registry.Get(ctx, agentID)
+	if err != nil {
+		// PR #86 review S-01: Log at Debug level when registry lookup fails.
+		// This covers the non-nil-registry error path (e.g., agent deregistered
+		// between scheduling and dispatch) and aids test coverage validation.
+		s.logger.Debug("agent not found in registry for model resolution",
+			zap.String("agentID", agentID),
+			zap.Error(err),
+		)
+		return ""
+	}
+	return agent.Model
+}
+
+// parseMetadataInt64 parses an int64 value from a metadata map.
+// Returns 0 if the key is absent or the value is not a valid integer.
+func parseMetadataInt64(metadata map[string]string, key string, logger *zap.Logger, stepID string) int64 {
+	val, ok := metadata[key]
+	if !ok || val == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		logger.Warn("failed to parse metadata value as int64",
+			zap.String("stepID", stepID),
+			zap.String("key", key),
+			zap.String("value", val),
+			zap.Error(err),
+		)
+		return 0
+	}
+	// Security: clamp negative values to zero to prevent adversarial agents from
+	// reporting negative token counts, which would decrease the running total in
+	// TokenCounter and effectively bypass budget enforcement. (PR #86 review F-01)
+	if n < 0 {
+		logger.Warn("negative token value clamped to zero",
+			zap.String("stepID", stepID),
+			zap.String("key", key),
+			zap.Int64("value", n),
+		)
+		return 0
+	}
+	return n
 }
 
 // TODO(post-v0.1): Implement retry logic with circuit breaker integration

@@ -407,12 +407,33 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/cost/ -v -race` passes
-- [ ] `go test ./internal/scheduler/ -v -race` passes
-- [ ] Pre-dispatch budget check wired into scheduler
-- [ ] Post-dispatch token recording wired into scheduler
-- [ ] `CostReporter` produces workflow and global summaries
-- [ ] `main.go` wires cost components into scheduler
+- [x] `go test ./internal/cost/ -v -race` passes
+- [x] `go test ./internal/scheduler/ -v -race` passes
+- [x] Pre-dispatch budget check wired into scheduler
+- [x] Post-dispatch token recording wired into scheduler
+- [x] `CostReporter` produces workflow and global summaries
+- [x] `main.go` wires cost components into scheduler
+
+#### Review Findings (PR #86)
+
+**Should Fix (quality improvement):**
+
+1. **S-01 (Low) — No parallel budget overspend test** — Missing test where N parallel steps within a stage all pass budget checks and collectively exceed the budget. Would document the known optimistic check behavior under `-race`. *(Location: `internal/scheduler/scheduler_test.go`)*
+2. **S-02 (Low) — No concurrent `CheckBudget` + `RecordUsage` race test** — From PR 3a finding C6, still unaddressed. Spawn goroutines that interleave `CheckBudget` and `RecordUsage` calls; run under `-race` to validate the TOCTOU gap is benign. *(Location: `internal/cost/cost_test.go`)*
+3. **S-03 (Low) — `ResetDaily` TODO missing tracking reference** — The TODO at `cmd/orchestrator/main.go` says `(PR #86 review S-05)` but doesn't reference a tracking issue or future PR. Add `// TODO(v0.2): Wire to midnight timer — see RFC 0006 PR 5 review follow-ups` for traceability. *(Location: `cmd/orchestrator/main.go`)*
+
+**Nice to Have (follow-up):**
+
+4. **N-01 (Low) — Atomic snapshot for multi-scope budget check** — Replace three separate lock acquisitions (Global → Workflow → Agent) in `CheckBudget` with a single `snapshot()` method. Pre-existing finding C4 from PR 3a. *(Location: `internal/cost/cost.go`)*
+5. **N-02 (Low) — Config validation for budget thresholds** — Validate `MaxDailyUSD >= 0`, `DefaultMaxUSD >= 0`, and `OnExceed` enum at config load time. Pre-existing finding C7 from PR 3a. *(Location: `internal/cost/config.go`)*
+6. **N-03 (Low) — Structured error type for budget rejection** — Replace `fmt.Errorf("%w: %s", ErrBudgetExceeded, reason)` with a `BudgetError` struct containing `Scope`, `Spent`, `Limit`, `Estimated` fields. Enables structured 429 responses in PR 4b. *(Location: `internal/cost/cost.go`, `internal/scheduler/scheduler.go`)*
+
+**Positive (no action required):**
+
+7. **Excellent inline comments** — TOCTOU documentation, `ResetDaily` ordering rationale, negative-token clamping security note, and pessimistic `tokens_used` fallback explanation are all high quality.
+8. **Nil-safe optional injection** — `WithCostComponents()` pattern with nil checks maintains backward compatibility. `TestNoCostComponents_NoPanic` validates this.
+9. **Comprehensive test coverage** — 12 reporter tests + 14 scheduler budget tests covering happy path, rejection, error wrapping, concurrency, fallback, security clamping, and observability.
+10. **Boundary compliance** — PR stays within Go orchestrator boundary. No LLM logic, no Python changes, no proto modifications.
 
 ---
 
@@ -550,6 +571,12 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR 3a (#85) | C5 | Explicit `ResetDaily` agent-scope assertion in test | Low |
 | PR 3a (#85) | C6 | Test concurrent `CheckBudget` + `RecordUsage` under `-race` | Low |
 | PR 3a (#85) | C7 | Config validation for budget thresholds (`MaxDailyUSD >= 0`, `OnExceed` enum) | Low |
+| PR 3b (#86) | S-01 | No parallel budget overspend test (N parallel steps exceed budget collectively) | Low |
+| PR 3b (#86) | S-02 | No concurrent `CheckBudget` + `RecordUsage` race test (C6 still unaddressed) | Low |
+| PR 3b (#86) | S-03 | `ResetDaily` TODO missing tracking reference — add RFC 0006 PR 5 ref | Low |
+| PR 3b (#86) | N-01 | Atomic snapshot for multi-scope `CheckBudget` (pre-existing C4) | Low |
+| PR 3b (#86) | N-02 | Config validation for budget thresholds (pre-existing C7) | Low |
+| PR 3b (#86) | N-03 | Structured `BudgetError` type for budget rejection (enables 429 responses) | Low |
 
 #### PR checklist
 
@@ -595,7 +622,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 1c | 1 | ~130–200 lines | ~220–340 lines | ✅ Merged (PR #83) |
 | 2 | 2 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #84) |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
-| 3b | 3 | ~180–260 lines | ~310–440 lines | Not started |
+| 3b | 3 | ~180–260 lines | ~310–440 lines | 🟡 In review (PR #86) |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | Not started |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | Not started |
 | 5 | Follow-up | TBD | TBD | Not started |

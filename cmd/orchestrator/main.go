@@ -15,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -159,11 +160,35 @@ func main() {
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
-	// 8c. Initialize scheduler (workflow run polling + execution)
-	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir)
-	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
-
 	// 9. Initialize cost tracker
+	costCfg, err := cost.LoadCostConfig(*configDir)
+	if err != nil {
+		logger.Warn("failed to load cost config, budget enforcement disabled",
+			zap.String("configDir", *configDir),
+			zap.Error(err),
+		)
+	}
+
+	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
+	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow
+	// unboundedly in long-running processes. Until then, ResetDaily() is only
+	// callable programmatically (e.g., from tests). (PR #86 review S-05)
+	var schedOpts []scheduler.Option
+	if costCfg != nil {
+		tokenCounter := cost.NewTokenCounter(costCfg, logger)
+		budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
+		costReporter := cost.NewCostReporter(tokenCounter, costCfg, logger)
+		schedOpts = append(schedOpts, scheduler.WithCostComponents(tokenCounter, budgetEnforcer, costReporter))
+		logger.Info("cost tracking initialized",
+			zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),
+			zap.Float64("perWorkflowBudget", costCfg.Budgets.PerWorkflow.DefaultMaxUSD),
+			zap.Float64("perAgentBudget", costCfg.Budgets.PerAgent.DefaultMaxUSD),
+		)
+	}
+
+	// 8c. Initialize scheduler (workflow run polling + execution)
+	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
+	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
 	// 10. Start gRPC server (agent communication)
 
 	// Graceful shutdown on SIGTERM/SIGINT
