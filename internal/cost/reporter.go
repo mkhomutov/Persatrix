@@ -134,8 +134,13 @@ func (r *CostReporter) ResetDaily() {
 }
 
 // sortAgentsBySpend sorts agent entries by EstimatedUSD descending.
+// Uses stable sort with AgentID as a secondary key for deterministic ordering
+// when agents have equal spend (aids debugging and snapshot testing).
 func sortAgentsBySpend(agents []AgentCostEntry) {
-	sort.Slice(agents, func(i, j int) bool {
-		return agents[i].EstimatedUSD > agents[j].EstimatedUSD
+	sort.SliceStable(agents, func(i, j int) bool {
+		if agents[i].EstimatedUSD != agents[j].EstimatedUSD {
+			return agents[i].EstimatedUSD > agents[j].EstimatedUSD
+		}
+		return agents[i].AgentID < agents[j].AgentID
 	})
 }

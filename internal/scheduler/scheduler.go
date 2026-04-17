@@ -20,6 +20,11 @@ import (
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
+// ErrBudgetExceeded is returned when a step dispatch is rejected by the budget enforcer.
+// Callers can use errors.Is(err, ErrBudgetExceeded) to programmatically distinguish
+// budget failures from agent execution failures without string matching.
+var ErrBudgetExceeded = errors.New("budget exceeded")
+
 // Scheduler drives workflow execution by polling for pending runs and
 // dispatching tasks to agents via the Executor.
 type Scheduler interface {
@@ -384,11 +389,20 @@ func (s *WorkflowScheduler) executeStep(
 	// Pre-dispatch budget check (RFC 0006 PR 3b).
 	if s.budgetEnforcer != nil {
 		model := s.resolveAgentModel(ctx, step.AgentID)
+		if model == "" {
+			// NOTE: Empty model means EstimateCost returns 0, making the budget check
+			// a no-op for this step. This happens when the registry is nil or the agent
+			// is not registered. Log a warning so operators can detect misconfiguration.
+			s.logger.Warn("could not resolve model for budget check, cost estimate will be zero",
+				zap.String("agentID", step.AgentID),
+				zap.String("stepID", step.ID),
+			)
+		}
 		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, model, int64(limits.MaxTokens))
 		if budgetResult.Decision == cost.BudgetReject {
-			errMsg := fmt.Sprintf("budget exceeded: %s", budgetResult.Reason)
-			s.markStepFailed(ctx, runID, step.ID, startedAt, errMsg)
-			return "", fmt.Errorf("%s", errMsg)
+			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Reason)
+			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
+			return "", err
 		}
 	}
 
@@ -536,6 +550,11 @@ func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID stri
 		outputTokens = parseMetadataInt64(result.Metadata, "output_tokens", s.logger, step.ID)
 
 		// Fall back to combined "tokens_used" if per-direction tokens are absent.
+		// NOTE: tokens_used is mapped entirely to outputTokens — this intentionally
+		// overestimates cost because output tokens are priced higher than input tokens.
+		// The pessimistic estimate propagates into both TokenCounter running totals
+		// and CostReporter step entries, which makes subsequent budget checks more
+		// conservative. This is the safe default for budget enforcement.
 		if inputTokens == 0 && outputTokens == 0 {
 			outputTokens = parseMetadataInt64(result.Metadata, "tokens_used", s.logger, step.ID)
 		}

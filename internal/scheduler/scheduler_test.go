@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1382,6 +1383,49 @@ func TestBudgetCheck_Rejected_StepFails(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, state.RunFailed, step.Status)
 	assert.Contains(t, step.Error, "budget exceeded")
+}
+
+func TestBudgetCheck_ErrorWrapping(t *testing.T) {
+	// Verify that budget rejection errors wrap ErrBudgetExceeded, enabling
+	// programmatic detection via errors.Is without string matching.
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	cfg.Budgets.PerAgent.DefaultMaxUSD = 0.00001
+
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok"}, nil
+	}}
+
+	reg := newTestRegistry(t)
+	require.NoError(t, reg.Register(context.Background(), registry.AgentInfo{
+		ID: "test-agent", Name: "test-agent", Address: "passthrough:///test",
+		Status: registry.StatusHealthy, Model: "claude-sonnet",
+	}))
+
+	sched := newTestSchedulerWithRegistry(t, store, exec, reg, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+
+	// Call executeStep directly to inspect the returned error.
+	createPendingRun(t, store, "sentinel-run", "test-wf", nil)
+	step := planner.Step{ID: "step1", AgentID: "test-agent", Input: "do something"}
+	var mu sync.Mutex
+	outputs := map[string]string{}
+	vars := map[string]string{}
+
+	_, err := sched.executeStep(context.Background(), "sentinel-run", "test-wf", step, outputs, vars, &mu)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrBudgetExceeded), "error should wrap ErrBudgetExceeded sentinel")
+	assert.Contains(t, err.Error(), "budget exceeded")
+	assert.Contains(t, err.Error(), "per-agent budget exceeded")
 }
 
 func TestTokenRecording_MissingMetadata_GracefulDegradation(t *testing.T) {

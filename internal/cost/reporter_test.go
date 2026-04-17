@@ -206,3 +206,53 @@ func TestCostReporter_ResetDaily(t *testing.T) {
 	assert.Empty(t, reporter.WorkflowSummary("wf-1").Steps)
 	assert.Empty(t, reporter.WorkflowSummary("wf-2").Steps)
 }
+
+// TestCostReporter_ResetDaily_Concurrent validates that ResetDaily is safe
+// to call concurrently with RecordStepCost and WorkflowSummary reads.
+// Run with -race to detect data races.
+func TestCostReporter_ResetDaily_Concurrent(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+	reporter := NewCostReporter(tc, cfg)
+
+	const goroutines = 10
+	const opsPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < opsPerGoroutine; j++ {
+				// Mix writes, reads, and resets concurrently.
+				reporter.RecordStepCost("wf-reset", StepCostEntry{
+					StepID:  "step",
+					AgentID: "agent",
+				})
+				_ = reporter.WorkflowSummary("wf-reset")
+				_ = reporter.GlobalSummary()
+				if j%10 == 0 {
+					reporter.ResetDaily()
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	// No data race detected = pass. Exact values don't matter.
+}
+
+// TestSortAgentsBySpend_EqualSpend verifies deterministic ordering when
+// agents have identical spend (secondary sort by AgentID ascending).
+func TestSortAgentsBySpend_EqualSpend(t *testing.T) {
+	agents := []AgentCostEntry{
+		{AgentID: "charlie", EstimatedUSD: 0.05},
+		{AgentID: "alpha", EstimatedUSD: 0.05},
+		{AgentID: "bravo", EstimatedUSD: 0.05},
+	}
+	sortAgentsBySpend(agents)
+	assert.Equal(t, "alpha", agents[0].AgentID)
+	assert.Equal(t, "bravo", agents[1].AgentID)
+	assert.Equal(t, "charlie", agents[2].AgentID)
+}
