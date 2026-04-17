@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-04-16 (versioning strategy revised — versions defined by capability, not RFC completion)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PRs 1c through 4a are the v0.2.0 critical path
+> **Current milestone**: RFC 0006 (Efficiency & Execution Limits) — PRs 3b through 4a are the v0.2.0 critical path
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -164,20 +164,20 @@ v0.1.0 complete — end-to-end execution working
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0005](docs/rfcs/0005-persona-agent-memory.md) | Persona Agent & Memory System | ✅ Implemented | 20 | 20/20 |
-| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 2/10 |
+| [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | 🚧 Implementing | 10 | 5/10 |
 
 ### RFC 0006 — Execution Progress
 
 ```
 RFC 0005 (PersonaAgent + Memory + TaskAgent)              ✅ Done (20/20)
     ↓
-RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (2/10)
+RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (5/10)
     PR 1a — defaults package + Step limits + schema       ✅ #79
     PR 1b — executor + scheduler limit wiring             ✅ #81
-    PR 1c — Python defaults + validation                  ⬜ next
-    PR 2  — deadline derivation + retry budget            ⬜
-    PR 3a — TokenCounter + BudgetEnforcer                 ⬜
-    PR 3b — CostReporter + scheduler budget integration   ⬜
+    PR 1c — Python defaults + validation                  ✅ #83
+    PR 2  — deadline derivation + retry budget            ✅ #84
+    PR 3a — TokenCounter + BudgetEnforcer                 ✅ #85
+    PR 3b — CostReporter + scheduler budget integration   ⬜ next
     PR 4a — StepExecutionMetadata + observability         ⬜ v0.2.0 critical path ends here
     PR 4b — response cache + cost endpoint                ⬜ lowest priority; slips to v0.3.0 if needed
     PR 5  — review follow-ups                             ⬜
@@ -186,7 +186,7 @@ RFC 0006 (Efficiency & Execution Limits)                  🚧 Implementing (2/1
 v0.2.0 complete
 ```
 
-> PRs 1c through 4a are the v0.2.0 critical path. PR 4b (response cache) is the lowest-priority item and may slip to v0.3.0 without affecting the first public release story — budget enforcement and observability are what matters.
+> PRs 3b through 4a are the v0.2.0 critical path. PR 4b (response cache) is the lowest-priority item and may slip to v0.3.0 without affecting the first public release story — budget enforcement and observability are what matters.
 
 ### Component Status
 
@@ -196,9 +196,9 @@ v0.2.0 complete
 |---------|---------|--------|
 | `internal/defaults/` | Centralized execution limit constants | ✅ Complete (RFC 0006 PR 1a) |
 | `internal/planner/` | Step-level limit fields (`TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`) | ✅ Updated (RFC 0006 PR 1a) |
-| `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b done; PR 2, 4a, 4b pending |
+| `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b+2 done; PR 4a, 4b pending |
 | `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b done; PR 3b pending |
-| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🔲 PRs 3a, 3b, 4b pending |
+| `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🚧 PR 3a done; PRs 3b, 4b pending |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cost, wall time) | 🔲 PR 4a pending |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | 🔲 PR 4b pending |
 | `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
@@ -219,7 +219,7 @@ v0.2.0 complete
 | `agents/dispatch.py` | Event dispatch and action execution (`EventDispatcher`, `ActionExecutor`) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/tick.py` | Autonomous tick scheduler (`TickScheduler`) | ✅ Complete (RFC 0005 PR 8a) |
 | `agents/validate.py` | Config validation (JSON Schema) | ✅ Complete (RFC 0005 PR 6a) |
-| `agents/defaults.py` | Python execution limit constants (centralizes magic numbers from `base.py`) | 🔲 RFC 0006 PR 1c pending |
+| `agents/defaults.py` | Python execution limit constants (centralizes magic numbers from `base.py`) | ✅ Complete (RFC 0006 PR 1c) |
 
 ### What Works in v0.2.0 (RFC 0005 complete)
 
@@ -468,6 +468,10 @@ v0.4.0 complete
 | [#79](https://github.com/mkhomutov/Persatrix/pull/79) | feat: add defaults package, step limit fields, and schema updates (RFC 0006 PR 1a) | 0006 (1a/10) | 2026-04-16 |
 | [#80](https://github.com/mkhomutov/Persatrix/pull/80) | docs(rfc): RFC 0014 — Agent Skill Registry & Lifecycle | 0014 (RFC) | 2026-04-16 |
 | [#81](https://github.com/mkhomutov/Persatrix/pull/81) | feat: wire execution limits through executor and scheduler (RFC 0006 PR 1b) | 0006 (1b/10) | 2026-04-16 |
+| [#82](https://github.com/mkhomutov/Persatrix/pull/82) | docs(roadmap): restructure versioning strategy for release velocity | cross-RFC docs | 2026-04-16 |
+| [#83](https://github.com/mkhomutov/Persatrix/pull/83) | feat: implement Python defaults and limit validation (RFC 0006 PR 1c) | 0006 (1c/10) | 2026-04-16 |
+| [#84](https://github.com/mkhomutov/Persatrix/pull/84) | feat(executor): derived deadline mode with shared retry budget (RFC 0006 PR 2) | 0006 (2/10) | 2026-04-17 |
+| [#85](https://github.com/mkhomutov/Persatrix/pull/85) | feat(cost): implement TokenCounter and BudgetEnforcer (RFC 0006 PR 3a) | 0006 (3a/10) | 2026-04-17 |
 
 ---
 

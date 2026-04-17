@@ -343,13 +343,13 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/cost/ -v -race` passes
-- [ ] `TokenCounter` is thread-safe (race detector clean)
-- [ ] `BudgetEnforcer` implements `on_exceed: "fail"` behavior
-- [ ] `on_exceed: "pause_and_alert"` degrades to `"fail"` with warning
-- [ ] Config loads from `config/optimization.yaml` budget section
-- [ ] Pricing table used for cost estimation
-- [ ] All TODO comments in `cost.go` replaced with implementation
+- [x] `go test ./internal/cost/ -v -race` passes
+- [x] `TokenCounter` is thread-safe (race detector clean)
+- [x] `BudgetEnforcer` implements `on_exceed: "fail"` behavior
+- [x] `on_exceed: "pause_and_alert"` degrades to `"fail"` with warning
+- [x] Config loads from `config/optimization.yaml` budget section
+- [x] Pricing table used for cost estimation
+- [x] All TODO comments in `cost.go` replaced with implementation
 
 ---
 
@@ -554,11 +554,11 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 
 | PR | Phase | Naive estimate | Calibrated (1.7×) | Status |
 |----|-------|----------------|--------------------|--------|
-| 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
-| 1b | 1 | ~200–300 lines | ~340–510 lines | In review (PR #81) |
-| 1c | 1 | ~130–200 lines | ~220–340 lines | In review (PR #83) |
-| 2 | 2 | ~200–300 lines | ~340–510 lines | In review |
-| 3a | 3 | ~200–300 lines | ~340–510 lines | Not started |
+| 1a | 1 | ~200–270 lines | ~340–460 lines | ✅ Merged (PR #79) |
+| 1b | 1 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #81) |
+| 1c | 1 | ~130–200 lines | ~220–340 lines | ✅ Merged (PR #83) |
+| 2 | 2 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #84) |
+| 3a | 3 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #85) |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | Not started |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | Not started |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | Not started |
