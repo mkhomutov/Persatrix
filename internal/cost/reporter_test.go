@@ -348,3 +348,36 @@ func TestCostReporter_WorkflowCountWarning(t *testing.T) {
 
 	assert.Greater(t, logs.Len(), initialLogCount, "warning should fire again after reset")
 }
+
+// --- S-06: NewCostReporter with nil config ---
+
+// TestNewCostReporter_NilConfig verifies that the constructor handles nil config
+// gracefully. The config parameter is retained for future use (e.g., per-workflow
+// budget display in summaries) but is not currently referenced.
+func TestNewCostReporter_NilConfig(t *testing.T) {
+	cfg := testConfig()
+	tc := NewTokenCounter(cfg, zap.NewNop())
+
+	// Should not panic with nil config.
+	reporter := NewCostReporter(tc, nil, zap.NewNop())
+	require.NotNil(t, reporter)
+
+	// Basic operations should work normally.
+	reporter.RecordStepCost("wf-1", StepCostEntry{
+		StepID: "step-1", AgentID: "agent-a",
+	})
+
+	summary := reporter.WorkflowSummary("wf-1")
+	assert.Len(t, summary.Steps, 1)
+
+	global := reporter.GlobalSummary()
+	assert.NotNil(t, global)
+}
+
+// --- S-07: sortAgentsBySpend with empty slice ---
+
+func TestSortAgentsBySpend_EmptySlice(t *testing.T) {
+	agents := []AgentCostEntry{}
+	sortAgentsBySpend(agents)
+	assert.Empty(t, agents)
+}

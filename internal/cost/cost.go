@@ -2,6 +2,7 @@
 package cost
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -151,6 +152,23 @@ func (tc *TokenCounter) Config() *CostConfig {
 	return tc.config
 }
 
+// usageSnapshot reads global, per-workflow, and per-agent estimated USD totals
+// under a single lock acquisition. This ensures the three scope reads are atomic
+// with respect to concurrent RecordUsage calls, eliminating torn reads where
+// (e.g.) the global total reflects a write that the per-workflow total does not.
+func (tc *TokenCounter) usageSnapshot(workflowID, agentID string) (globalUSD, workflowUSD, agentUSD float64) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	globalUSD = tc.global.EstimatedUSD
+	if wf, ok := tc.perWorkflow[workflowID]; ok {
+		workflowUSD = wf.EstimatedUSD
+	}
+	if ag, ok := tc.perAgent[agentID]; ok {
+		agentUSD = ag.EstimatedUSD
+	}
+	return
+}
+
 // ResetDaily clears all counters. Intended to be called at midnight for daily budget resets.
 func (tc *TokenCounter) ResetDaily() {
 	tc.mu.Lock()
@@ -182,10 +200,25 @@ func (d BudgetDecision) String() string {
 	}
 }
 
-// BudgetCheckResult contains the decision and a human-readable reason when rejected.
+// BudgetError is a structured error returned when a budget check rejects a dispatch.
+// It carries the scope that triggered the rejection along with the numeric details,
+// enabling structured 429 responses and programmatic budget-exceeded handling.
+type BudgetError struct {
+	Scope     string  // "global", "per_workflow", or "per_agent"
+	Spent     float64 // amount already spent in this scope
+	Limit     float64 // configured budget limit for this scope
+	Estimated float64 // estimated cost of the rejected dispatch
+}
+
+func (e *BudgetError) Error() string {
+	return fmt.Sprintf("%s budget exceeded: spent=%.6f, limit=%.6f, estimated=%.6f",
+		e.Scope, e.Spent, e.Limit, e.Estimated)
+}
+
+// BudgetCheckResult contains the decision and a structured error when rejected.
 type BudgetCheckResult struct {
 	Decision BudgetDecision
-	Reason   string
+	Error    *BudgetError
 }
 
 // BudgetEnforcer performs pre-dispatch budget checks against configured thresholds.
@@ -221,16 +254,26 @@ func NewBudgetEnforcer(counter *TokenCounter, config *CostConfig, logger *zap.Lo
 // with the estimated maximum token usage would exceed any budget threshold.
 // The estimatedMaxTokens parameter is typically the step's MaxTokens limit.
 // The model parameter is used to look up per-token pricing for cost estimation.
+//
+// All three scope totals (global, per-workflow, per-agent) are read in a single
+// atomic snapshot to prevent torn reads from concurrent RecordUsage calls.
 func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimatedMaxTokens int64) BudgetCheckResult {
 	// Estimate the worst-case cost of this dispatch using output tokens as proxy.
 	// Input tokens for the estimate are unknown pre-dispatch; use output only.
 	estimatedCost := be.config.EstimateCost(model, 0, estimatedMaxTokens)
 
+	// Atomic snapshot: read all three scope totals under one lock.
+	globalSpent, wfSpent, agSpent := be.counter.usageSnapshot(workflowID, agentID)
+
 	// Check global daily budget.
-	_, _, globalSpent := be.counter.GlobalUsage()
 	globalLimit := be.config.Budgets.Global.MaxDailyUSD
 	if globalLimit > 0 && globalSpent+estimatedCost > globalLimit {
-		reason := "global daily budget exceeded"
+		budgetErr := &BudgetError{
+			Scope:     "global",
+			Spent:     globalSpent,
+			Limit:     globalLimit,
+			Estimated: estimatedCost,
+		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "global"),
 			zap.String("workflowID", workflowID),
@@ -248,14 +291,18 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 			)
 		}
 
-		return BudgetCheckResult{Decision: BudgetReject, Reason: reason}
+		return BudgetCheckResult{Decision: BudgetReject, Error: budgetErr}
 	}
 
 	// Check per-workflow budget.
-	_, _, wfSpent := be.counter.WorkflowUsage(workflowID)
 	wfLimit := be.config.Budgets.PerWorkflow.DefaultMaxUSD
 	if wfLimit > 0 && wfSpent+estimatedCost > wfLimit {
-		reason := "per-workflow budget exceeded"
+		budgetErr := &BudgetError{
+			Scope:     "per_workflow",
+			Spent:     wfSpent,
+			Limit:     wfLimit,
+			Estimated: estimatedCost,
+		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "per_workflow"),
 			zap.String("workflowID", workflowID),
@@ -263,14 +310,18 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 			zap.Float64("estimatedCost", estimatedCost),
 			zap.Float64("limit", wfLimit),
 		)
-		return BudgetCheckResult{Decision: BudgetReject, Reason: reason}
+		return BudgetCheckResult{Decision: BudgetReject, Error: budgetErr}
 	}
 
 	// Check per-agent budget.
-	_, _, agSpent := be.counter.AgentUsage(agentID)
 	agLimit := be.config.Budgets.PerAgent.DefaultMaxUSD
 	if agLimit > 0 && agSpent+estimatedCost > agLimit {
-		reason := "per-agent budget exceeded"
+		budgetErr := &BudgetError{
+			Scope:     "per_agent",
+			Spent:     agSpent,
+			Limit:     agLimit,
+			Estimated: estimatedCost,
+		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "per_agent"),
 			zap.String("agentID", agentID),
@@ -278,7 +329,7 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 			zap.Float64("estimatedCost", estimatedCost),
 			zap.Float64("limit", agLimit),
 		)
-		return BudgetCheckResult{Decision: BudgetReject, Reason: reason}
+		return BudgetCheckResult{Decision: BudgetReject, Error: budgetErr}
 	}
 
 	return BudgetCheckResult{Decision: BudgetAllow}

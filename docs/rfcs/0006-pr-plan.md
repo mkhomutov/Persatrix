@@ -755,13 +755,13 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/cost/ -v -race` passes
-- [ ] `go test ./cmd/orchestrator/ -v -race` passes
-- [ ] `CheckBudget` uses single-lock snapshot
-- [ ] `BudgetError` struct replaces string reason
-- [ ] Config validation rejects invalid thresholds
-- [ ] CHANGELOG updated with cost tracking entry
-- [ ] All 13 unique addressed findings resolved
+- [x] `go test ./internal/cost/ -v -race` passes
+- [x] `go test ./cmd/orchestrator/ -v -race` passes
+- [x] `CheckBudget` uses single-lock snapshot
+- [x] `BudgetError` struct replaces string reason
+- [x] Config validation rejects invalid thresholds
+- [x] CHANGELOG updated with cost tracking entry
+- [x] All 13 unique addressed findings resolved
 
 ---
 
@@ -857,7 +857,7 @@ PR 6 (RFC close)
 | 4a | 4 | ~180–260 lines | ~310–440 lines | ✅ Merged (PR #87) |
 | 4b | 4 | ~200–300 lines | ~340–510 lines | ✅ Merged (PR #88) |
 | 5a | Follow-up | ~150–240 lines | ~250–400 lines | Not started |
-| 5b | Follow-up | ~120–210 lines | ~200–350 lines | Not started |
+| 5b | Follow-up | ~120–210 lines | ~200–350 lines | ⬜ In review |
 | 5c | Follow-up | ~70–120 lines | ~120–200 lines | Not started |
 | 6 | Close | ~50–100 lines | ~50–100 lines | Not started |
 | **Total** | | **~1,880–2,860** | **~3,160–4,770** | |

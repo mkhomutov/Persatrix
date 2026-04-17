@@ -411,7 +411,7 @@ func (s *WorkflowScheduler) executeStep(
 		}
 		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, registryModel, int64(limits.MaxTokens))
 		if budgetResult.Decision == cost.BudgetReject {
-			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Reason)
+			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Error)
 			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 			return "", err
 		}
