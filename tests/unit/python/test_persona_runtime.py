@@ -144,6 +144,29 @@ class TestModuleImports:
 
         assert hasattr(persona_runtime, "_LLMPersonaAgent")
 
+    def test_action_loop_submodule_importable(self):
+        """Each persona_runtime submodule is independently importable.
+
+        Guards against packaging errors (e.g. bad relative import in one
+        submodule) that would be masked by the __init__.py import order.
+        (PR #95 review: submodule-level import smoke tests.)
+        """
+        from agents.persona_runtime import action_loop
+
+        assert hasattr(action_loop, "_ActionLoopMixin")
+
+    def test_memory_context_submodule_importable(self):
+        """See test_action_loop_submodule_importable."""
+        from agents.persona_runtime import memory_context
+
+        assert hasattr(memory_context, "_MemoryContextMixin")
+
+    def test_state_persistence_submodule_importable(self):
+        """See test_action_loop_submodule_importable."""
+        from agents.persona_runtime import state_persistence
+
+        assert hasattr(state_persistence, "_StatePersistenceMixin")
+
     def test_sub_agent_status_reexported(self):
         """SubAgentStatus must remain importable from persona.py (F-64-01)."""
         from agents.persona import SubAgentStatus
@@ -251,7 +274,10 @@ class TestModuleImports:
             "import importlib; "
             "[importlib.import_module(m) for m in "
             "('agents.persona_types', 'agents.persona_behavior', "
-            "'agents.dispatch', 'agents.tick', 'agents.persona_runtime')]"
+            "'agents.dispatch', 'agents.tick', 'agents.persona_runtime', "
+            "'agents.persona_runtime.action_loop', "
+            "'agents.persona_runtime.memory_context', "
+            "'agents.persona_runtime.state_persistence')]"
         )
         result = subprocess.run(
             [sys.executable, "-c", script],

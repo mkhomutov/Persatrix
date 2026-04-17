@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncio
 
 from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
@@ -42,7 +45,7 @@ class _StatePersistenceMixin:
     _episodic_memory: EpisodicMemory
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
-    _lock: Any  # asyncio.Lock — avoid import for type annotation only
+    _lock: asyncio.Lock
 
     # ─── State persistence ─────────────────────────────
 
