@@ -264,13 +264,43 @@ PR 6 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `go test ./cmd/orchestrator/ -v -race` passes (if applicable)
-- [ ] Static `WithTimeout(5*time.Minute)` removed from `main.go`
-- [ ] Derived deadline computed from step config + transport margin
-- [ ] Retries share step deadline (not fresh windows)
-- [ ] Minimum budget check prevents wasteful retries
-- [ ] Config flag `execution.deadline_mode` controls behavior
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `go test ./cmd/orchestrator/ -v -race` passes (if applicable)
+- [x] Static `WithTimeout(5*time.Minute)` retained as fallback (used in static mode and zero-timeout derived mode); `--deadline-mode` flag added for runtime mode selection
+- [x] Derived deadline computed from step config + transport margin
+- [x] Retries share step deadline (not fresh windows)
+- [x] Minimum budget check prevents wasteful retries
+- [x] Config flag `execution.deadline_mode` controls behavior
+
+#### Review Findings (PR #84)
+
+**Applied:**
+
+1. **S1 (Low) — PR plan checklist wording** — Checklist item 3 said "Static `WithTimeout(5*time.Minute)` removed from `main.go`" but the timeout is intentionally retained as a fallback for static mode and zero-timeout derived mode. Reworded and checked. *(Location: this section)*
+2. **S2 (Low) — `WithTokenParser` option for clean test injection** — Tests directly mutated `env.executor.tokenParser` (unexported field). Added `WithTokenParser` option following the established `With*` pattern. *(Location: `internal/executor/executor.go`)*
+3. **S3 (Low) — Concurrent derived-mode dispatch test** — Existing `TestExecuteTask_ConcurrentDispatch` used static mode only. Added `TestDerivedDeadline_ConcurrentDispatch` to validate `time.Since(start)` goroutine isolation under race detector. *(Location: `internal/executor/executor_test.go`)*
+4. **S4 (Info) — Token budget cutoff documented as infrastructure-only** — Added inline comment at the token budget check in the retry loop noting that `parseTokensUsed` returns 0 until gRPC trailer metadata parsing is implemented. *(Location: `internal/executor/executor.go`)*
+5. **S5 (Info) — Debug logging for derived deadline computation** — Added DEBUG-level log when derived mode computes step deadline and dispatch timeout. Aids production debugging without code changes. *(Location: `internal/executor/executor.go`)*
+
+**Should Fix (from deep review):**
+
+6. **S6 (Low) — Clarifying comment for transport margin in retry timeout** — Each retry dispatch timeout is `remaining + transport_margin`, which could appear to extend beyond the original deadline. Total wall-clock is bounded because `remaining ≤ stepDeadline`, so `remaining + margin ≤ stepDeadline + margin` (original dispatch timeout). Add an inline comment at `ExecuteTask()` ~L221 explaining this invariant to prevent future confusion. *(Location: `internal/executor/executor.go`)*
+7. **S7 (Low) — Test independent token budget cutoff** — No test where token budget blocks retry but time budget allows. Add `TestDerivedDeadline_TokenBudgetCutoff_TimeAllowed` — inject a parser returning high tokens with a long step timeout (60s). Verify retry is skipped due to token budget, not time budget. Validates that both constraints are independently evaluated. *(Location: `internal/executor/executor_test.go`)*
+8. **S8 (Low) — Verify ROADMAP status consistency** — ROADMAP.md shows PR 1c (#83) as `⬜ next` but PR plan shows review findings for it, suggesting it was reviewed. Verify PR 1c merge status and update ROADMAP accordingly before merging PR 2. The Go/Python code changes are independent, but the logical dependency (Python validates limits before orchestrator changes deadline semantics) should be acknowledged. *(Location: `ROADMAP.md`)*
+
+**Deferred to PR 5:**
+
+9. **S9 (Low) — Backoff-aware budget check** — Before sleeping for backoff, check if `remaining - backoff_duration` still exceeds `minBudget`. Low priority since the window is small (max ~400ms backoff vs typical 60s+ step deadlines).
+10. **S10 (Low) — Upper-bound validation for `TimeoutSeconds`** — No upper bound on `TimeoutSeconds`. A reasonable cap (e.g., 3600s) in the planner or schema would prevent absurd deadlines. Low priority since proto int32 bounds and workflow deadlines (future) provide natural limits.
+11. **S11 (Low) — Extract `--deadline-mode` inference into testable function** — The inference logic in `main.go` (lines 64–72) is straightforward but untestable in isolation. Extracting into `func resolveDeadlineMode(explicit, env string) string` would enable unit testing. Low priority since the logic is trivial. *(Location: `cmd/orchestrator/main.go`)*
+12. **S12 (Low) — Test `MaxTokens = 0` with derived mode + token parser** — Verify the `MaxTokens > 0` guard explicitly prevents token budget evaluation when `MaxTokens` is unresolved. Validates the zero-value guard independently. *(Location: `internal/executor/executor_test.go`)*
+
+**Info (no action required):**
+
+13. **`parseTokensUsed` always returns 0** — By design. Token budget infrastructure is wired end-to-end and tested via injected parser. Production parsing deferred to PR 3a when gRPC trailer metadata is available.
+14. **`development.yaml` config is documentation-only** — No code reads `execution.deadline_mode` from YAML yet; `--deadline-mode` CLI flag is the sole mechanism. Documented in YAML comments. Config loading tracked for follow-up.
+15. **`int` → `int32` cast without overflow guard** — Pre-existing from PR 1b (deferred finding F-02). `int32(req.Limits.MaxLLMCalls)` et al. could silently overflow for values > 2^31. In practice bounded by planner validation and schema `minimum: 1`. Tracked in PR 1b findings.
+16. **Dual-layer mode validation is intentional defense-in-depth** — `main.go` validates at startup (fail-fast); constructor validates and falls back (programmatic misuse guard). Matches existing `--env` pattern.
 
 ---
 
@@ -527,7 +557,7 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | 1a | 1 | ~200–270 lines | ~340–460 lines | In review (PR #79) |
 | 1b | 1 | ~200–300 lines | ~340–510 lines | In review (PR #81) |
 | 1c | 1 | ~130–200 lines | ~220–340 lines | In review (PR #83) |
-| 2 | 2 | ~200–300 lines | ~340–510 lines | Not started |
+| 2 | 2 | ~200–300 lines | ~340–510 lines | In review |
 | 3a | 3 | ~200–300 lines | ~340–510 lines | Not started |
 | 3b | 3 | ~180–260 lines | ~310–440 lines | Not started |
 | 4a | 4 | ~180–260 lines | ~310–440 lines | Not started |

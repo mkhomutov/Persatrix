@@ -3,6 +3,12 @@ environment: "development"
 deployment:
   mode: "local"
 
+execution:
+  # Valid values: "derived" (step-based deadlines) or "static" (per-executor fixed timeout).
+  # Currently read via --deadline-mode CLI flag; will be wired from config when
+  # environment YAML loading is implemented.
+  deadline_mode: "derived"
+
 observability:
   otlp:
     endpoint: "http://localhost:4318"

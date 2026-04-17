@@ -40,6 +40,7 @@ var (
 	httpBind     = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
+	deadlineMode = flag.String("deadline-mode", "", "Deadline mode: derived|static (default: inferred from --env)")
 )
 
 func main() {
@@ -51,6 +52,31 @@ func main() {
 	case "development", "staging", "production":
 	default:
 		fmt.Fprintln(os.Stderr, "invalid --env value: "+*env+" (must be development|staging|production)")
+		os.Exit(1)
+	}
+
+	// PR #84 F-01: Resolve deadline mode default from --env when not explicitly set.
+	// Until environment YAML config loading is wired, infer from --env to match
+	// the documented per-environment policies (production.yaml → static,
+	// development/staging.yaml → derived). An explicit --deadline-mode flag
+	// still overrides this.
+	if *deadlineMode == "" {
+		switch *env {
+		case "production":
+			*deadlineMode = "static"
+		default:
+			*deadlineMode = "derived"
+		}
+	}
+
+	// PR #84 F-02: Validate --deadline-mode at startup (same pattern as --env
+	// validation above). Without this, a typo like --deadline-mode=dervied would
+	// silently fall back to static inside the executor while the startup log
+	// still reports the invalid raw string — misleading during incident analysis.
+	switch *deadlineMode {
+	case "derived", "static":
+	default:
+		fmt.Fprintln(os.Stderr, "invalid --deadline-mode value: "+*deadlineMode+" (must be derived|static)")
 		os.Exit(1)
 	}
 
@@ -121,13 +147,17 @@ func main() {
 	logger.Info("workflow planner initialized", zap.String("type", "yaml"))
 
 	// 8b. Initialize executor (gRPC task dispatch to agents)
-	// NOTE(PR #71 review §2.4.4): this timeout is the gRPC per-call deadline for
-	// agent task dispatch. It must be >= the largest agent timeout_seconds value in
-	// config/agents.yaml (currently code-writer at 300s). If agent configs change,
-	// update this value to match or wire it from the agent config directly.
-	exec := executor.NewGRPCExecutor(reg, logger, executor.WithTimeout(5*time.Minute))
+	// RFC 0006 PR 2: In derived deadline mode, the per-dispatch timeout is
+	// computed from step.TimeoutSeconds + transport margin, so the static
+	// per-executor timeout is only used as a fallback in static mode.
+	// The --deadline-mode flag allows runtime switching without code changes
+	// (interim until config loading from environment YAML is wired up).
+	exec := executor.NewGRPCExecutor(reg, logger,
+		executor.WithTimeout(5*time.Minute),
+		executor.WithDeadlineMode(executor.DeadlineMode(*deadlineMode)),
+	)
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
-	logger.Info("executor initialized")
+	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir)

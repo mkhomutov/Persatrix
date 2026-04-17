@@ -3,6 +3,11 @@ environment: "production"
 deployment:
   mode: "hub_and_spoke"
 
+execution:
+  # Valid values: "derived" (step-based deadlines) or "static" (per-executor fixed timeout).
+  # Conservative: use static mode in production until derived mode is validated in staging.
+  deadline_mode: "static"
+
 observability:
   otlp:
     endpoint: "http://otel-collector:4318"
