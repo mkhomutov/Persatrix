@@ -351,6 +351,26 @@ PR 6 (RFC close)
 - [x] Pricing table used for cost estimation
 - [x] All TODO comments in `cost.go` replaced with implementation
 
+#### Review Findings (PR #85)
+
+**Should Fix (quality improvement):**
+
+1. **C1 (Low) — Missing CHANGELOG entry** — The `[Unreleased]` section does not include the cost/budget feature. Previous PRs in this RFC (PR 2, PR 1c) have entries. Add: `*(orchestrator)* Implement TokenCounter and BudgetEnforcer: per-workflow, per-agent, and global daily budget tracking with pre-dispatch cost gating (RFC 0006 PR 3a, #85)`. *(Location: `CHANGELOG.md`)*
+2. **C2 (Low) — `pause_and_alert` warning log not verified in test** — `TestBudgetEnforcer_PauseAndAlert_TreatedAsFail` uses `zap.NewNop()`, so the constructor warning and enforcement-time warning logs are not observed. Use `zaptest.NewLogger(t)` or `zap.NewDevelopment()` sink to assert warnings are emitted. *(Location: `internal/cost/cost_test.go`)*
+3. **C3 (Low) — No Debug log for unknown model in `EstimateCost`** — Unknown models return `$0` silently, meaning all dispatches for unrecognized models bypass budget checks. Add a `Debug`-level log when a model is not found in the pricing table. Helps operators diagnose cost tracking showing $0 for certain agents (e.g., model name mismatch between config and usage). *(Location: `internal/cost/config.go` → `EstimateCost()`)*
+
+**Deferred to PR 5:**
+
+4. **C4 (Low) — Non-atomic multi-scope snapshot in `CheckBudget`** — Three separate lock acquisitions per budget check (Global → Workflow → Agent) creates non-atomic scope reads. Accepted per RFC TOCTOU note, but could be tightened with an internal `snapshot()` method reading all three totals under a single lock without changing the public API. *(Location: `internal/cost/cost.go` → `CheckBudget()`)*
+5. **C5 (Low) — Explicit `ResetDaily` agent-scope assertion in test** — `TestTokenCounter_ResetDaily` verifies global and workflow reset but not agent-scope reset explicitly. The `perAgent` map is reassigned so it's implicitly tested, but an explicit assertion would be more thorough. *(Location: `internal/cost/cost_test.go`)*
+6. **C6 (Low) — Test concurrent `CheckBudget` + `RecordUsage`** — No test exercises `CheckBudget` racing against `RecordUsage`. Would validate the TOCTOU gap is benign under `-race`. *(Location: `internal/cost/cost_test.go`)*
+7. **C7 (Low) — Config validation for budget thresholds** — No validation that `MaxDailyUSD >= 0`, `DefaultMaxUSD >= 0`, or `OnExceed` is one of `"fail"` or `"pause_and_alert"` at config load time. Negative values silently disable enforcement and unknown `on_exceed` values are silently accepted. *(Location: `internal/cost/config.go` → `LoadCostConfig()`)*
+
+**Positive deviation (no action required):**
+
+8. **`CheckBudget` API improved over plan** — Plan specified `CheckBudget(workflowID, agentID string, estimatedMaxTokens int64) BudgetDecision`. Implementation adds `model` parameter (necessary for pricing lookup) and returns `BudgetCheckResult` (wraps `BudgetDecision` + `Reason` for better error messages). `PauseNotImplemented` return value correctly omitted — `pause_and_alert` degrades to `BudgetReject` with warning. All improvements.
+9. **Float64 cost accumulation** — Acceptable for v0.2 internal cost estimation (not billing). Thousands of micro-cost events could accumulate rounding errors at production scale, but not a concern for current phase.
+
 ---
 
 ### PR 3b: `feature/v02-cost-reporter-scheduler-budget` — CostReporter + Scheduler Budget Integration
@@ -514,6 +534,22 @@ Review findings accumulated during PRs 1a–4b. Findings will be recorded per-PR
 | PR 1b (#81) | F-02 | `int` → `int32` truncation without overflow guard in `executor.go` L154–156 | Low |
 | PR 1b (#81) | F-04 | Negative agent-level limit values in `resolveStepLimits()` silently ignored; add rejection or warning | Low |
 | PR 1b (#81) | F-05 | Redundant `TestExecuteTask_PopulatesTaskConfig_AllFields` — consolidate with existing all-fields test | Nit |
+| PR 1c (#83) | M1 | `ValueError` vs `TaskOutput(FAILED)` inconsistency for negative limits | Medium |
+| PR 1c (#83) | M2 | `DEFAULT_TIMEOUT_SECONDS` defined but unused — wire up or add forward-declaration comment | Medium |
+| PR 1c (#83) | L2 | No loop-exhaustion test for new default (5 iterations) | Low |
+| PR 2 (#84) | S6 | Clarifying comment for transport margin in retry timeout invariant | Low |
+| PR 2 (#84) | S7 | Test independent token budget cutoff (time allows, tokens block) | Low |
+| PR 2 (#84) | S9 | Backoff-aware budget check before retry sleep | Low |
+| PR 2 (#84) | S10 | Upper-bound validation for `TimeoutSeconds` (e.g., 3600s cap) | Low |
+| PR 2 (#84) | S11 | Extract `--deadline-mode` inference into testable function | Low |
+| PR 2 (#84) | S12 | Test `MaxTokens = 0` with derived mode + token parser | Low |
+| PR 3a (#85) | C1 | Missing CHANGELOG entry for TokenCounter + BudgetEnforcer | Low |
+| PR 3a (#85) | C2 | `pause_and_alert` warning log not verified in test — use zaptest | Low |
+| PR 3a (#85) | C3 | No Debug log for unknown model in `EstimateCost` | Low |
+| PR 3a (#85) | C4 | Non-atomic multi-scope snapshot in `CheckBudget` (TOCTOU tightening) | Low |
+| PR 3a (#85) | C5 | Explicit `ResetDaily` agent-scope assertion in test | Low |
+| PR 3a (#85) | C6 | Test concurrent `CheckBudget` + `RecordUsage` under `-race` | Low |
+| PR 3a (#85) | C7 | Config validation for budget thresholds (`MaxDailyUSD >= 0`, `OnExceed` enum) | Low |
 
 #### PR checklist
 
