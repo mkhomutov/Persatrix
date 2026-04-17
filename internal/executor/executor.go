@@ -118,6 +118,18 @@ func WithDeadlineMode(mode DeadlineMode) Option {
 	}
 }
 
+// WithTokenParser sets the function used to extract token usage from gRPC
+// errors during retry budget accounting. Primarily useful for testing —
+// the default parseTokensUsed returns 0 until gRPC trailer metadata
+// parsing is implemented (see PR 3a).
+func WithTokenParser(parser func(error) int64) Option {
+	return func(e *GRPCExecutor) {
+		if parser != nil {
+			e.tokenParser = parser
+		}
+	}
+}
+
 // GRPCExecutor dispatches tasks to agents via gRPC.
 type GRPCExecutor struct {
 	registry     registry.Registry
@@ -236,6 +248,9 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		}
 
 		// In derived mode, check token budget before retry.
+		// Note: token budget cutoff is currently infrastructure-only — parseTokensUsed
+		// returns 0 until gRPC trailer metadata parsing is implemented in PR 3a.
+		// The logic is exercised via WithTokenParser injection in tests.
 		if e.deadlineMode == DeadlineModeDerived && attempt > 0 && req.Limits.MaxTokens > 0 {
 			remaining := int64(req.Limits.MaxTokens) - cumulativeTokens
 			minTokens := int64(float64(req.Limits.MaxTokens) * defaults.MinRetryBudgetFraction)
@@ -304,6 +319,11 @@ func (e *GRPCExecutor) resolveDeadline(limits StepLimits) (stepDeadline, dispatc
 	if e.deadlineMode == DeadlineModeDerived && limits.TimeoutSeconds > 0 {
 		stepDeadline = time.Duration(limits.TimeoutSeconds) * time.Second
 		dispatchTimeout = stepDeadline + time.Duration(defaults.DefaultTransportMargin)*time.Second
+		e.logger.Debug("derived deadline computed",
+			zap.Duration("stepDeadline", stepDeadline),
+			zap.Duration("dispatchTimeout", dispatchTimeout),
+			zap.Int("timeoutSeconds", limits.TimeoutSeconds),
+		)
 		return stepDeadline, dispatchTimeout
 	}
 	// Static mode or zero timeout: use per-executor timeout for each dispatch.

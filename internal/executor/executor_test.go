@@ -1074,6 +1074,9 @@ func TestDerivedDeadline_TokenBudgetCutoff_WithInjectedParser(t *testing.T) {
 	callCount := 0
 	maxTokens := 8192
 
+	// Inject a tokenParser via WithTokenParser that reports 7000 tokens per
+	// failed attempt. After 1 attempt: cumulativeTokens = 7000, remaining = 1192.
+	// minTokens = 8192 * 0.25 = 2048. remaining (1192) < minTokens (2048) → skip.
 	env := setupTestEnv(t,
 		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
 			callCount++
@@ -1081,14 +1084,10 @@ func TestDerivedDeadline_TokenBudgetCutoff_WithInjectedParser(t *testing.T) {
 		},
 		WithDeadlineMode(DeadlineModeDerived),
 		WithMaxRetries(3),
+		WithTokenParser(func(_ error) int64 {
+			return 7000
+		}),
 	)
-
-	// Inject a tokenParser that reports 7000 tokens per failed attempt.
-	// After 1 attempt: cumulativeTokens = 7000, remaining = 1192.
-	// minTokens = 8192 * 0.25 = 2048. remaining (1192) < minTokens (2048) → skip.
-	env.executor.tokenParser = func(_ error) int64 {
-		return 7000
-	}
 
 	registerHealthyAgent(t, env.reg, "token-agent")
 
@@ -1216,6 +1215,7 @@ func TestDerivedDeadline_DeadlineExceeded_NoRetry(t *testing.T) {
 
 func TestResolveDeadline_Derived(t *testing.T) {
 	e := &GRPCExecutor{
+		logger:       zap.NewNop(),
 		timeout:      30 * time.Second,
 		deadlineMode: DeadlineModeDerived,
 	}
@@ -1241,6 +1241,7 @@ func TestResolveDeadline_Static(t *testing.T) {
 
 func TestResolveDeadline_DerivedZeroTimeout(t *testing.T) {
 	e := &GRPCExecutor{
+		logger:       zap.NewNop(),
 		timeout:      30 * time.Second,
 		deadlineMode: DeadlineModeDerived,
 	}
@@ -1312,4 +1313,57 @@ func TestNewGRPCExecutor_UnrecognizedDeadlineMode_BehavesAsStatic(t *testing.T) 
 	// Should use static 10s timeout, not derived 65s.
 	assert.Less(t, callDeadline, 12*time.Second, "unrecognized mode should behave as static")
 	assert.Greater(t, callDeadline, 8*time.Second, "unrecognized mode should behave as static")
+}
+
+// TestDerivedDeadline_ConcurrentDispatch validates that derived-mode deadline
+// computation is goroutine-safe under the race detector. Each goroutine tracks
+// its own `time.Since(start)` for the shared retry budget — this test ensures
+// no accidental state sharing across concurrent dispatches.
+func TestDerivedDeadline_ConcurrentDispatch(t *testing.T) {
+	env := setupTestEnv(t,
+		func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+			return &taskpb.TaskResponse{
+				TaskId: req.TaskId,
+				Status: taskpb.TaskStatus_COMPLETED,
+				Result: "derived-concurrent-" + req.TaskId,
+			}, nil
+		},
+		WithDeadlineMode(DeadlineModeDerived),
+		WithTimeout(5*time.Second),
+		WithMaxRetries(1),
+	)
+
+	registerHealthyAgent(t, env.reg, "concurrent-agent")
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	results := make([]*ExecuteResult, numGoroutines)
+	errs := make([]error, numGoroutines)
+
+	for i := range numGoroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = env.executor.ExecuteTask(
+				context.Background(),
+				ExecuteRequest{
+					TaskID:  fmt.Sprintf("derived-task-%d", idx),
+					AgentID: "concurrent-agent",
+					Payload: fmt.Sprintf("payload-%d", idx),
+					Limits: StepLimits{
+						MaxLLMCalls:    5,
+						MaxTokens:      8192,
+						TimeoutSeconds: 30,
+					},
+				},
+			)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range numGoroutines {
+		require.NoError(t, errs[i], "goroutine %d should not error", i)
+		assert.Equal(t, fmt.Sprintf("derived-concurrent-derived-task-%d", i), results[i].Output)
+	}
 }
