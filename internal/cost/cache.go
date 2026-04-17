@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"sync"
 	"time"
 
@@ -83,11 +84,17 @@ func CacheKey(agentID, payload string, context map[string]string) string {
 	h.Write([]byte(payload))
 	h.Write([]byte{0})
 	// Include context keys in sorted order for deterministic hashing.
+	// Go map iteration is non-deterministic, so we must sort explicitly.
 	// Context is typically small (< 10 entries), so a simple sort suffices.
-	for k, v := range context {
+	keys := make([]string, 0, len(context))
+	for k := range context {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
 		h.Write([]byte(k))
 		h.Write([]byte{0})
-		h.Write([]byte(v))
+		h.Write([]byte(context[k]))
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))

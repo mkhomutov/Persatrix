@@ -43,6 +43,28 @@ func TestCacheKey_NilContext(t *testing.T) {
 	assert.Equal(t, k1, k2)
 }
 
+// TestCacheKey_MultiKeyContext_Deterministic verifies that CacheKey produces the
+// same hash regardless of Go map iteration order when context has multiple keys.
+// This is a regression test for a bug where context keys were iterated without
+// sorting, producing non-deterministic hashes that caused cache misses.
+// (PR #91 review: pre-existing CacheKey non-determinism from PR #88)
+func TestCacheKey_MultiKeyContext_Deterministic(t *testing.T) {
+	// Use multiple keys to increase the chance of non-deterministic iteration.
+	ctx := map[string]string{
+		"model":     "gpt-4",
+		"task_type": "code_review",
+		"language":  "go",
+		"priority":  "high",
+	}
+	// Run many iterations — with unsorted iteration, different runs would
+	// produce different hashes with high probability for 4+ keys.
+	first := CacheKey("agent-a", "payload", ctx)
+	for i := 0; i < 100; i++ {
+		assert.Equal(t, first, CacheKey("agent-a", "payload", ctx),
+			"CacheKey must be deterministic across calls (iteration %d)", i)
+	}
+}
+
 // --- ResponseCache Get/Put ---
 
 func TestResponseCache_PutAndGet(t *testing.T) {

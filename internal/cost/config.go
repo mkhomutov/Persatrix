@@ -41,10 +41,9 @@ type PerAgentBudget struct {
 
 // CostConfig holds pricing and budget configuration loaded from optimization.yaml.
 type CostConfig struct {
-	Pricing    map[string]ModelPricing `yaml:"-"`
-	Budgets    BudgetThresholds        `yaml:"-"`
-	rawPricing rawPricingSection       `yaml:"-"`
-	logger     *zap.Logger
+	Pricing map[string]ModelPricing `yaml:"-"`
+	Budgets BudgetThresholds        `yaml:"-"`
+	logger  *zap.Logger
 }
 
 // validOnExceedValues defines the accepted values for the on_exceed config field.
