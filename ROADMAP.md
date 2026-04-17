@@ -197,7 +197,7 @@ v0.2.0 complete
 | `internal/defaults/` | Centralized execution limit constants | ✅ Complete (RFC 0006 PR 1a) |
 | `internal/planner/` | Step-level limit fields (`TimeoutSeconds`, `MaxLLMCalls`, `MaxTokens`, `ContextBudget`) | ✅ Updated (RFC 0006 PR 1a) |
 | `internal/executor/` | Full `TaskConfig` population, derived deadlines, shared-deadline retry | 🚧 PR 1b+2 done; PR 4a, 4b pending |
-| `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b+3b done; PR 4a pending |
+| `internal/scheduler/` | Limit cascade (step → agent → defaults), pre-dispatch budget gate, token recording | 🚧 PR 1b done; 3b in review (#86); PR 4a pending |
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | 🚧 PR 3a+3b done; PR 4b pending |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cost, wall time) | 🔲 PR 4a pending |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | 🔲 PR 4b pending |

@@ -599,6 +599,17 @@ func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID stri
 
 	if s.costReporter != nil {
 		estimatedCost := s.tokenCounter.Config().EstimateCost(model, inputTokens, outputTokens)
+		// PR #86 review S-04: Log when a non-empty model has no pricing entry,
+		// causing $0 cost despite non-zero tokens. Helps operators diagnose
+		// unpriced models without adding a logger to CostConfig.EstimateCost.
+		if estimatedCost == 0 && model != "" && (inputTokens > 0 || outputTokens > 0) {
+			s.logger.Debug("model not in pricing table, step cost recorded as $0",
+				zap.String("stepID", step.ID),
+				zap.String("model", model),
+				zap.Int64("inputTokens", inputTokens),
+				zap.Int64("outputTokens", outputTokens),
+			)
+		}
 		s.costReporter.RecordStepCost(workflowID, cost.StepCostEntry{
 			StepID:       step.ID,
 			AgentID:      step.AgentID,
@@ -611,13 +622,22 @@ func (s *WorkflowScheduler) recordStepUsage(ctx context.Context, workflowID stri
 }
 
 // resolveAgentModel looks up the model configured for an agent in the registry.
-// Returns an empty string if the agent is not found (graceful degradation).
+// Returns an empty string if the registry is nil or the agent is not found
+// (graceful degradation — empty model makes EstimateCost return $0, effectively
+// skipping the budget check for that step).
 func (s *WorkflowScheduler) resolveAgentModel(ctx context.Context, agentID string) string {
 	if s.registry == nil {
 		return ""
 	}
 	agent, err := s.registry.Get(ctx, agentID)
 	if err != nil {
+		// PR #86 review S-01: Log at Debug level when registry lookup fails.
+		// This covers the non-nil-registry error path (e.g., agent deregistered
+		// between scheduling and dispatch) and aids test coverage validation.
+		s.logger.Debug("agent not found in registry for model resolution",
+			zap.String("agentID", agentID),
+			zap.Error(err),
+		)
 		return ""
 	}
 	return agent.Model

@@ -169,6 +169,10 @@ func main() {
 		)
 	}
 
+	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
+	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow
+	// unboundedly in long-running processes. Until then, ResetDaily() is only
+	// callable programmatically (e.g., from tests). (PR #86 review S-05)
 	var schedOpts []scheduler.Option
 	if costCfg != nil {
 		tokenCounter := cost.NewTokenCounter(costCfg, logger)
