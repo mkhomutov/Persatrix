@@ -723,3 +723,88 @@ func TestRunStatusValues(t *testing.T) {
 	assert.Equal(t, RunStatus(4), RunCancelled)
 	assert.Equal(t, RunStatus(5), RunRetrying)
 }
+
+// --- StepExecutionMetadata tests (RFC 0006 PR 4a) ---
+
+func TestUpdateStepState_WithMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{
+		ID: "meta-1", WorkflowID: "wf-1",
+	}))
+
+	meta := &StepExecutionMetadata{
+		TokensUsed:       1500,
+		LLMCallCount:     3,
+		RetryCount:       1,
+		CacheHit:         false,
+		WallTimeMs:       2500,
+		EstimatedCostUSD: 0.0045,
+	}
+	err := store.UpdateStepState(ctx, "meta-1", StepState{
+		StepID:   "step-1",
+		Status:   RunCompleted,
+		Output:   "done",
+		Metadata: meta,
+	})
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "meta-1")
+	require.NoError(t, err)
+	require.NotNil(t, got.Steps["step-1"].Metadata)
+	assert.Equal(t, 1500, got.Steps["step-1"].Metadata.TokensUsed)
+	assert.Equal(t, 3, got.Steps["step-1"].Metadata.LLMCallCount)
+	assert.Equal(t, 1, got.Steps["step-1"].Metadata.RetryCount)
+	assert.False(t, got.Steps["step-1"].Metadata.CacheHit)
+	assert.Equal(t, int64(2500), got.Steps["step-1"].Metadata.WallTimeMs)
+	assert.InDelta(t, 0.0045, got.Steps["step-1"].Metadata.EstimatedCostUSD, 1e-9)
+}
+
+func TestUpdateStepState_NilMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{
+		ID: "meta-nil", WorkflowID: "wf-1",
+	}))
+
+	err := store.UpdateStepState(ctx, "meta-nil", StepState{
+		StepID: "step-1",
+		Status: RunCompleted,
+	})
+	require.NoError(t, err)
+
+	got, err := store.GetRun(ctx, "meta-nil")
+	require.NoError(t, err)
+	assert.Nil(t, got.Steps["step-1"].Metadata)
+}
+
+func TestGetRunDeepCopy_MetadataIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{
+		ID: "meta-iso", WorkflowID: "wf-1",
+	}))
+
+	meta := &StepExecutionMetadata{
+		TokensUsed: 100,
+		WallTimeMs: 500,
+	}
+	require.NoError(t, store.UpdateStepState(ctx, "meta-iso", StepState{
+		StepID:   "step-1",
+		Status:   RunCompleted,
+		Metadata: meta,
+	}))
+
+	// Get a copy and mutate its metadata.
+	got, err := store.GetRun(ctx, "meta-iso")
+	require.NoError(t, err)
+	got.Steps["step-1"].Metadata.TokensUsed = 9999
+
+	// Original in store should be unchanged.
+	got2, err := store.GetRun(ctx, "meta-iso")
+	require.NoError(t, err)
+	assert.Equal(t, 100, got2.Steps["step-1"].Metadata.TokensUsed)
+}

@@ -1942,3 +1942,156 @@ func TestTokensUsedFallback_LogMessage(t *testing.T) {
 	}
 	assert.True(t, found, "expected Info log for tokens_used fallback")
 }
+
+// --- StepExecutionMetadata tests (RFC 0006 PR 4a) ---
+
+func TestStepMetadata_PopulatedOnCompletion(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID:     "t1",
+			Output:     "done",
+			RetryCount: 2,
+			WallTimeMs: 1500,
+			Metadata: map[string]string{
+				"tokens_used":    "800",
+				"llm_call_count": "3",
+			},
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+	)
+	createPendingRun(t, store, "meta-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "meta-run", state.RunCompleted, 5*time.Second)
+
+	step := run.Steps["step1"]
+	require.NotNil(t, step.Metadata, "step should have execution metadata")
+	assert.Equal(t, 800, step.Metadata.TokensUsed)
+	assert.Equal(t, 3, step.Metadata.LLMCallCount)
+	assert.Equal(t, 2, step.Metadata.RetryCount)
+	assert.False(t, step.Metadata.CacheHit)
+	assert.Equal(t, int64(1500), step.Metadata.WallTimeMs)
+}
+
+func TestStepMetadata_GracefulDegradation(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		// No metadata fields — simulates an agent that doesn't report observability data.
+		return &executor.ExecuteResult{
+			TaskID:     "t1",
+			Output:     "done",
+			WallTimeMs: 200,
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+	)
+	createPendingRun(t, store, "meta-empty", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "meta-empty", state.RunCompleted, 5*time.Second)
+
+	step := run.Steps["step1"]
+	require.NotNil(t, step.Metadata, "step should have metadata even with no agent-reported fields")
+	assert.Equal(t, 0, step.Metadata.TokensUsed)
+	assert.Equal(t, 0, step.Metadata.LLMCallCount)
+	assert.Equal(t, 0, step.Metadata.RetryCount)
+	assert.False(t, step.Metadata.CacheHit)
+	assert.Equal(t, int64(200), step.Metadata.WallTimeMs)
+}
+
+func TestStepMetadata_PerDirectionTokens(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID:     "t1",
+			Output:     "done",
+			WallTimeMs: 500,
+			Metadata: map[string]string{
+				"input_tokens":  "300",
+				"output_tokens": "200",
+			},
+		}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+	)
+	createPendingRun(t, store, "meta-dir", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "meta-dir", state.RunCompleted, 5*time.Second)
+
+	step := run.Steps["step1"]
+	require.NotNil(t, step.Metadata)
+	assert.Equal(t, 500, step.Metadata.TokensUsed, "should sum input + output tokens")
+}
+
+func TestStepMetadata_InfoLogOnCompletion(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			TaskID:     "t1",
+			Output:     "done",
+			RetryCount: 1,
+			WallTimeMs: 750,
+			Metadata: map[string]string{
+				"tokens_used": "500",
+			},
+		}, nil
+	}}
+
+	// Use observed logger to capture log output.
+	core, logs := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	plan := planner.NewYAMLPlanner(logger)
+	sched := NewWorkflowScheduler(store, nil, plan, exec, logger, dir,
+		WithPollInterval(50*time.Millisecond),
+	)
+	createPendingRun(t, store, "meta-log", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	waitForRunStatus(t, store, "meta-log", state.RunCompleted, 5*time.Second)
+
+	var found bool
+	for _, entry := range logs.All() {
+		if entry.Message == "step completed" {
+			found = true
+			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
+			assert.Equal(t, int64(500), entry.ContextMap()["tokensUsed"])
+			assert.Equal(t, int64(1), entry.ContextMap()["retryCount"])
+			assert.Equal(t, int64(750), entry.ContextMap()["wallTimeMs"])
+			break
+		}
+	}
+	assert.True(t, found, "expected 'step completed' Info log with metadata fields")
+}

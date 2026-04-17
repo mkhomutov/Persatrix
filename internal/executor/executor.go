@@ -61,9 +61,11 @@ type ExecuteRequest struct {
 
 // ExecuteResult contains the outcome of a task dispatch.
 type ExecuteResult struct {
-	TaskID   string
-	Output   string
-	Metadata map[string]string
+	TaskID     string
+	Output     string
+	Metadata   map[string]string
+	RetryCount int
+	WallTimeMs int64
 }
 
 // Executor defines the interface for dispatching tasks to agents.
@@ -276,6 +278,15 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 
 		result, err := e.dispatch(ctx, agent.Address, grpcReq, dispatchTimeout)
 		if err == nil {
+			wallTimeMs := time.Since(start).Milliseconds()
+			result.RetryCount = attempt
+			result.WallTimeMs = wallTimeMs
+			e.logger.Info("step dispatched",
+				zap.String("agentID", req.AgentID),
+				zap.String("taskID", taskID),
+				zap.Int("retryCount", attempt),
+				zap.Int64("wallTimeMs", wallTimeMs),
+			)
 			return result, nil
 		}
 

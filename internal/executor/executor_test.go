@@ -1429,3 +1429,74 @@ func TestWithTokenParser_Nil(t *testing.T) {
 	result := exec.tokenParser(errors.New("test error"))
 	assert.Equal(t, int64(0), result, "default parser should return 0")
 }
+
+// --- StepExecutionMetadata tests (RFC 0006 PR 4a) ---
+
+func TestExecuteTask_MetadataWallTime(t *testing.T) {
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		return &taskpb.TaskResponse{
+			TaskId: req.TaskId,
+			Status: taskpb.TaskStatus_COMPLETED,
+			Result: "ok",
+		}, nil
+	})
+
+	registerHealthyAgent(t, env.reg, "test-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		TaskID:  "task-wall",
+		AgentID: "test-agent",
+	})
+
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, result.WallTimeMs, int64(0))
+	assert.Equal(t, 0, result.RetryCount)
+}
+
+func TestExecuteTask_MetadataRetryCount(t *testing.T) {
+	var calls atomic.Int32
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		n := calls.Add(1)
+		if n <= 2 {
+			return nil, status.Errorf(codes.Unavailable, "transient error %d", n)
+		}
+		return &taskpb.TaskResponse{
+			TaskId: req.TaskId,
+			Status: taskpb.TaskStatus_COMPLETED,
+			Result: "ok after retries",
+		}, nil
+	}, WithMaxRetries(3), WithTimeout(5*time.Second))
+
+	registerHealthyAgent(t, env.reg, "retry-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		TaskID:  "task-retry",
+		AgentID: "retry-agent",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok after retries", result.Output)
+	assert.Equal(t, 2, result.RetryCount)
+	assert.Greater(t, result.WallTimeMs, int64(0))
+}
+
+func TestExecuteTask_MetadataFailure_NoMetadata(t *testing.T) {
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		return &taskpb.TaskResponse{
+			TaskId:       req.TaskId,
+			Status:       taskpb.TaskStatus_FAILED,
+			ErrorMessage: "something broke",
+		}, nil
+	})
+
+	registerHealthyAgent(t, env.reg, "fail-agent")
+
+	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		TaskID:  "task-fail",
+		AgentID: "fail-agent",
+	})
+
+	// Failure should not return metadata — only successful dispatches get metadata.
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTaskFailed))
+}
