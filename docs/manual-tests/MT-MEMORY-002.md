@@ -123,7 +123,9 @@ asyncio.run(main())
 EOF
 ```
 
-**Expected Result**: Each update moves the score by exactly ±0.2 maximum; score never exceeds 1.0.
+**Expected Result**: The first three updates apply `delta=0.15` without clamping (each increases
+the score by exactly 0.15). The oversized `delta=0.5` update is capped to 0.2. Score never
+exceeds 1.0.
 
 **Verification**:
 - [ ] Scores print as increasing values after each `+0.15` update

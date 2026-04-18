@@ -63,7 +63,10 @@ is reset (woken) on receipt of the message.
 **Action**: Health-check the persona agent's gRPC endpoint:
 
 ```bash
-grpcurl -plaintext localhost:50054 \
+grpcurl -plaintext \
+  -import-path proto/ \
+  -proto task.proto \
+  localhost:50054 \
   persatrix.v1.AgentService/HealthCheck
 ```
 
@@ -81,6 +84,8 @@ grpcurl -plaintext localhost:50054 \
 
 ```bash
 grpcurl -plaintext \
+  -import-path proto/ \
+  -proto agent_message.proto \
   -d '{
     "message_id": "test-msg-001",
     "channel_id": "general",
@@ -110,7 +115,7 @@ grpcurl -plaintext \
 `tee` file, or the terminal where the agent is running):
 
 ```bash
-grep -E "event|message|sarah-chen" /tmp/persona-001.log | tail -20
+grep -E "event|message|sarah-chen" logs/persona-001.log | tail -20
 ```
 
 **Expected Result**: Log entries show the agent received and began processing the event. Exact
@@ -129,7 +134,7 @@ message text depends on implementation, but should include the agent ID and even
 next tick should fire immediately rather than being skipped:
 
 ```bash
-grep "idle" /tmp/persona-001.log | tail -5
+grep "idle" logs/persona-001.log | tail -5
 ```
 
 **Expected Result**: Any `"idle"` skip messages stop appearing in the log immediately after the
@@ -175,5 +180,8 @@ for `"gRPC server listening on"` to find the actual port and retry.
 
 - The persona agent's gRPC port is configurable. If the default differs from 50054, update the
   `grpcurl` commands with the correct port.
+- All `grpcurl` commands use `-import-path proto/ -proto <file>` to resolve method descriptors
+  without requiring server-side gRPC reflection. Run them from the **repo root** so that the
+  `proto/` path resolves correctly.
 - If `grpcurl` is not available, the equivalent test can be run with a small Python script using
   the generated `msgpb` stubs in `agents/generated/`.

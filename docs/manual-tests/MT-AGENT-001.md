@@ -68,7 +68,7 @@ self-contains all fixtures. No external files needed.
 **Action**:
 
 ```bash
-python3 -c "from agents.tools.builtin import file_write; print('OK')"
+python3 -c "from persatrix_agents.tools.builtin import file_write; print('OK')"
 ```
 
 Run from the repo root. If this fails, run `make build-agents` first.
@@ -170,7 +170,7 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | `agents.tools.builtin` imports cleanly | ☐ |
+| 1 | `persatrix_agents.tools.builtin` imports cleanly | ☐ |
 | 2 | `test_task_with_tool_use` PASSED | ☐ |
 | 3 | Tool-use assertions (`COMPLETED`, `tool_calls==1`) pass | ☐ |
 | 4 | All `TestEndToEndExecution` tests PASSED | ☐ |

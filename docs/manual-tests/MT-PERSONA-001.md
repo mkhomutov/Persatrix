@@ -53,6 +53,12 @@ initialises with the configured interval, and ticks fire and are logged without 
 
 ### Test Data
 
+Create the log directory before starting the agent (works on all platforms):
+
+```bash
+mkdir -p logs
+```
+
 Temporarily reduce the tick interval in `config/agents.yaml` for the `sarah-chen` persona to speed
 up the test:
 
@@ -70,7 +76,7 @@ autonomy:
 **Action**: In a dedicated terminal, start the `sarah-chen` persona agent and capture its output:
 
 ```bash
-make run-agent AGENT=sarah-chen 2>&1 | tee /tmp/persona-001.log
+make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
 ```
 
 **Expected Result**: Agent starts without errors; gRPC server binds successfully.
@@ -86,12 +92,12 @@ make run-agent AGENT=sarah-chen 2>&1 | tee /tmp/persona-001.log
 **Action**: Inspect the captured log for the scheduler startup message:
 
 ```bash
-grep "Tick scheduler started" /tmp/persona-001.log
+grep "Tick scheduler started" logs/persona-001.log
 ```
 
 **Expected Result**: Exactly one line matching:
 ```
-Tick scheduler started for sarah-chen (interval=5.0s, idle_after=10)
+Tick scheduler started for sarah-chen (interval=5s, idle_after=10)
 ```
 
 **Verification**:
@@ -107,7 +113,7 @@ Tick scheduler started for sarah-chen (interval=5.0s, idle_after=10)
 
 ```bash
 sleep 10
-grep -c "tick" /tmp/persona-001.log
+grep -c "tick" logs/persona-001.log
 ```
 
 **Expected Result**: Count is ≥ 1; the LLM tick loop has fired at least once.
@@ -125,7 +131,7 @@ check for idle skip messages:
 
 ```bash
 sleep 60
-grep "idle" /tmp/persona-001.log | tail -5
+grep "idle" logs/persona-001.log | tail -5
 ```
 
 **Expected Result**: After 10 consecutive `DO_NOTHING` ticks the scheduler logs:
@@ -186,5 +192,7 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 ## Notes
 
 - Restore `tick_interval_seconds: 60` in `config/agents.yaml` after completing this test.
+- Remove the log file after testing: `rm logs/persona-001.log` (the file is `.gitignore`d via
+  `logs/`; verify with `git check-ignore logs/persona-001.log` if unsure).
 - A single `"Tick error"` during startup (before the LLM client initialises) is acceptable;
   repeated errors on every tick indicate a configuration problem.

@@ -104,8 +104,8 @@ they are connected):
 curl -s http://127.0.0.1:8080/api/v1/agents | python3 -m json.tool
 ```
 
-**Expected Result**: JSON array containing entries for `planner`, `coder`, and `reviewer` (or
-whatever agent IDs are defined in `config/agents.yaml`).
+**Expected Result**: JSON array containing entries for `planner`, `code-writer`, and
+`code-reviewer` — the IDs defined in `config/agents.yaml` (confirmed via `grep "id:" config/agents.yaml`).
 
 **Verification**:
 - [ ] Response is a JSON array
