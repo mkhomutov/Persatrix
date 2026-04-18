@@ -222,6 +222,7 @@ not having been run or a stale Docker layer — rebuild with `--no-cache`.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Not run | Requires `ANTHROPIC_API_KEY` (not set in this environment). Docker is available. |
+| 2026-04-18 | mkhomutov | Windows 11 | Not run | Retest — still requires `ANTHROPIC_API_KEY`. Docker available. No blocking infrastructure issues. |
 
 ---
 

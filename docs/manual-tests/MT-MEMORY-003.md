@@ -203,6 +203,7 @@ still triggers correctly (conservative token estimates may cause earlier-than-ne
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 (threshold detection): 1 212 tokens > 1 000 limit, PASS. Steps 2–3 require `ANTHROPIC_API_KEY` (not set). Doc fixes: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`, `_sections.items()` → iterate list directly. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Step 1 confirms 1 212 tokens > 1 000 limit. API fixed scripts verified correct. Steps 2–3 still require `ANTHROPIC_API_KEY`. |
 
 ---
 

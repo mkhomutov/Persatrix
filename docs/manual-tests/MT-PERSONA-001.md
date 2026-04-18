@@ -76,23 +76,23 @@ autonomy:
 **Action**: In a dedicated terminal, start the `sarah-chen` persona agent and capture its output:
 
 ```bash
-PYTHONPATH="agents/generated" make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
+make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
 ```
 
-> **Fix (2026-04-18 code issue)**: `make run-agent` without `PYTHONPATH=agents/generated` fails
-> immediately with `ModuleNotFoundError: No module named 'task_pb2'`. The Makefile target does not
-> set `PYTHONPATH`. See MT-AGENT-001 Notes for the root cause.
+> **Fix (2026-04-18, resolved)**: `make run-agent` previously failed with
+> `ModuleNotFoundError: No module named 'task_pb2'` without a manual `PYTHONPATH=agents/generated`
+> prefix. Fixed in the Makefile — `PYTHONPATH` is now set automatically by the `run-agent` target.
 >
-> Additionally, if port 50051 (the default agent gRPC port) is already in use by another process,
-> the agent prints `Failed to bind gRPC server to 127.0.0.1:50051`. Pass `--port 50055` (or any
-> free port) to `make run-agent` in that case:
-> `PYTHONPATH="agents/generated" python3 -m persatrix_agents.server --agent sarah-chen --port 50055`
+> If port 50051 (the default agent gRPC port) is already in use by another process,
+> the agent prints `Failed to bind gRPC server to 127.0.0.1:50051`. Use the direct invocation
+> with an explicit port instead:
+> `python3 -m persatrix_agents.server --agent sarah-chen --port 50055`
 
 **Expected Result**: Agent starts without errors; gRPC server binds successfully.
 
 **Verification**:
-- [ ] No Python traceback in the first 5 seconds of output
-- [ ] Log line contains `"Tick scheduler started for sarah-chen"`
+- [x] No Python traceback in the first 5 seconds of output
+- [x] Log line contains `"Tick scheduler started for sarah-chen"`
 
 ---
 
@@ -110,9 +110,9 @@ Tick scheduler started for sarah-chen (interval=5s, idle_after=10)
 ```
 
 **Verification**:
-- [ ] Line is present
-- [ ] `interval` matches the value set in preconditions
-- [ ] `idle_after` matches `autonomy.idle_after_ticks` from config (default 10)
+- [x] Line is present
+- [x] `interval` matches the value set in preconditions
+- [x] `idle_after` matches `autonomy.idle_after_ticks` from config (default 10)
 
 ---
 
@@ -170,11 +170,11 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Agent starts; no early traceback | ☐ |
-| 2 | Tick scheduler startup log present with correct interval | ☐ |
-| 3 | At least one tick fired; no tick errors | ☐ |
-| 4 | Idle-skip log appears after 10 idle ticks (or LLM stays active) | ☐ |
-| 5 | Graceful shutdown; scheduler-stopped log present | ☐ |
+| 1 | Agent starts; no early traceback | ☑ |
+| 2 | Tick scheduler startup log present with correct interval | ☑ |
+| 3 | At least one tick fired; no tick errors | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 4 | Idle-skip log appears after 10 idle ticks (or LLM stays active) | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 5 | Graceful shutdown; scheduler-stopped log present | ☐ (requires `ANTHROPIC_API_KEY`) |
 
 ---
 
@@ -195,6 +195,7 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 startup verified with `PYTHONPATH=agents/generated --port 50055`. Agent starts; gRPC binds; tick scheduler and FTS5 log lines confirmed. Steps 2–5 (tick fires, idle, graceful shutdown) not exercised — require `ANTHROPIC_API_KEY`. Code issue: `make run-agent` fails without PYTHONPATH; port 50051 occupied in test environment. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Steps 1–2 pass. `make run-agent` PYTHONPATH issue resolved (Makefile fix). Port 50051 still in use; used `--port 50056`. Agent starts cleanly: gRPC on 50056, FTS5 enabled, `"Tick scheduler started for sarah-chen (interval=60s, idle_after=10)"`. Steps 3–5 require `ANTHROPIC_API_KEY`. |
 
 ---
 

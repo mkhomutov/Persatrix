@@ -50,6 +50,11 @@ enforces the ±0.2 per-call delta cap, persists scores across close/re-open, and
 
 - ☐ No orchestrator required — library-level test.
 - ☐ `data/` directory writable: `mkdir -p data`
+- ☐ No leftover test database from a previous run (remove DB and SQLite WAL files):
+
+```bash
+rm -f data/mt-memory-002.db data/mt-memory-002.db-shm data/mt-memory-002.db-wal
+```
 
 ---
 
@@ -221,7 +226,7 @@ EOF
 ### Step 5: Clean Up
 
 ```bash
-rm data/mt-memory-002.db
+rm -f data/mt-memory-002.db data/mt-memory-002.db-shm data/mt-memory-002.db-wal
 ```
 
 ---
@@ -254,3 +259,4 @@ rm data/mt-memory-002.db
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | All 5 steps pass. Doc fix: replaced `get_relationship()` (does not exist) with `get_trust()` (Step 1) and `get_relationship_summary()` (Steps 3/4). Delta cap, persistence, and decay all verified. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 5 steps pass. Doc fixes: added pre-run cleanup step (remove stale DB + `.db-shm`/`.db-wal` WAL files); updated Step 5 cleanup to include WAL files. |

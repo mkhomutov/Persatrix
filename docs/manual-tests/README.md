@@ -90,6 +90,28 @@ Executed by mkhomutov on Windows 11. All testable tests run from clean state.
 
 ---
 
+## 2026-04-18 Retest Pass Summary
+
+Executed by mkhomutov on Windows 11 after code fix (`PYTHONPATH` in Makefile + `conftest.py`).
+
+| ID | Result | Notes |
+|----|--------|-------|
+| MT-CONFIG-001 | **Pass** | All 5 mutation steps + teardown pass. No new issues. |
+| MT-AGENT-001 | **Pass** | All 7 tests pass via `make test-integration` (no manual PYTHONPATH needed). PYTHONPATH code issue resolved. |
+| MT-MEMORY-001 | **Pass** | All 4 steps pass. Scripts verified correct. |
+| MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: added pre-run cleanup step (remove stale DB + WAL files). |
+| MT-MEMORY-003 | **Partial** | Step 1 (1 212 tokens > 1 000 threshold) pass. Steps 2–3 require API key. |
+| MT-WORKFLOW-001 | **Pass** | HTTP 201, terminal `failed` (<1 s), all required fields present. |
+| MT-WORKFLOW-002 | **Pass** | All 5 error cases pass. |
+| MT-CLI-001 | **Pass** | All 5 steps pass. `make run-agent` PYTHONPATH fix verified. |
+| MT-COST-001 | **Partial** | Step 1: port 8080 (stale instance) → 503; port 8081 (fresh instance) → 200 with correct shape. **Doc fix**: summary table Step 1 corrected to `☑`. Steps 2–4 require API key. |
+| MT-COST-002 | **Partial** | Fixture created and validated. Steps 1–2 pass (HTTP 201, terminal failed). Steps 3–5 require API key. |
+| MT-PERSONA-001 | **Partial** | Steps 1–2 pass (`make run-agent` PYTHONPATH fixed, port 50056 used). Steps 3–5 require API key. **Doc fix**: Step 1 command updated; notes updated to reflect resolved code issue. |
+| MT-PERSONA-002 | **Not run** | Requires live persona + API key. |
+| MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
+
+---
+
 ## Conventions
 
 - **Test IDs** are unique across all areas and never reused after deprecation.

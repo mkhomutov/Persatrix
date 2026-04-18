@@ -330,6 +330,7 @@ API still returns a well-formed JSON response — no 500 or panic.
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | End-to-end run completed successfully; submit returned HTTP 201 with valid `run_id`, terminal status reached, and run present in list endpoint. |
 | 2026-04-18 | Copilot | Windows 11 | Pass | API terminal-state mode (no agents registered). Submit → HTTP 201 `run_id=c2b67fc9`, status transitioned to `failed` in <1 s with `"agent not found in registry: planner"`. All required response fields present. Run confirmed in list endpoint. |
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | API terminal-state mode re-run. Submit → HTTP 201 `run_id=3f0dc322`, terminal `failed` in <1 s. All required fields (`run_id`, `workflow_id`, `status`, `started_at`, `finished_at`, `steps`, `error`) present. Run in list endpoint confirmed. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Retest — API terminal-state mode. Submit → HTTP 201 `run_id=de821804`, terminal `failed` (<1 s, "agent not found in registry: planner"). All required fields present. Run confirmed in list (10 total). |
 
 ---
 

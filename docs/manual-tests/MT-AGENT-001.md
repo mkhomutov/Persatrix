@@ -95,10 +95,9 @@ PYTHONPATH="agents/generated" python3 -m pytest tests/integration/test_agent_ser
   -v --tb=short -c agents/pyproject.toml
 ```
 
-> **Note (2026-04-18 code issue)**: `PYTHONPATH=agents/generated` is required. The protoc-generated
-> `*_grpc.py` files use bare `import task_pb2` (not a relative import), which fails unless
-> `agents/generated/` is in `sys.path`. This also affects `make test-integration` and
-> `make run-agent`. See [code issue log](#notes) for details.
+> **Note (2026-04-18, resolved)**: `PYTHONPATH=agents/generated` was previously required as a
+> manual prefix. The Makefile and `tests/conftest.py` now set this automatically — the command
+> above works as-is.
 
 **Expected Result**: The test passes. Output includes `PASSED`.
 
@@ -223,9 +222,7 @@ PYTHONPATH="agents/generated" python3 -m pytest tests/integration/test_agent_ser
   `agents/tools/builtin.py`. In the integration test, a lightweight mock replaces the real
   filesystem write; permission enforcement is still exercised through the tool registry.
 - To run all Python tests at once (unit + integration): `make test-python`.
-- **Code issue (2026-04-18)**: `make test-integration` and `make run-agent` both fail with
-  `ModuleNotFoundError: No module named 'task_pb2'` unless `PYTHONPATH=agents/generated` is set.
-  Root cause: protoc-generated `*_grpc.py` files use a bare `import task_pb2` (not a relative
-  import), which requires `agents/generated/` to be on the Python path. The Makefile does not
-  set this. Workaround: prefix commands with `PYTHONPATH="agents/generated"` or add
-  `agents/generated/` to a `conftest.py` `sys.path` insert.
+- **Code fix (2026-04-18)**: `make test-integration` and `make run-agent` previously failed with
+  `ModuleNotFoundError: No module named 'task_pb2'` without a manual `PYTHONPATH=agents/generated`
+  prefix. Fixed: `PYTHONPATH="agents/generated"` is now set in both Makefile targets, and
+  `tests/conftest.py` inserts `agents/generated/` into `sys.path` at pytest collection time.

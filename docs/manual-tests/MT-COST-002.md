@@ -218,6 +218,7 @@ should not crash permanently — it should recover for subsequent tasks.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Precondition fixture fixed (wrong YAML format); Step 1 HTTP code corrected (200→201). Steps 1–5 skipped — require live agents and `ANTHROPIC_API_KEY`. Fixture validated OK with corrected format. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — fixture created at `workflows/budget-test.yaml`, `make validate` passes (4 files). Step 1: HTTP 201 `run_id=1551cf89` on port 8081. Step 2: terminal `failed` (no `planner` registered — expected). Steps 3–5 require live agents + `ANTHROPIC_API_KEY`. |
 
 ---
 

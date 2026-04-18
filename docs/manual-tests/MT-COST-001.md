@@ -151,10 +151,10 @@ print(json.dumps(d, indent=2))
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Cost tracking enabled; 200 OK | ☐ |
-| 2 | Workflow run completes; `run_id` obtained | ☐ |
-| 3 | Cost summary returns non-empty JSON with token/cost fields | ☐ |
-| 4 | Token usage is non-zero after a completed run | ☐ |
+| 1 | Cost tracking enabled; 200 OK | ☑ |
+| 2 | Workflow run completes; `run_id` obtained | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 3 | Cost summary returns non-empty JSON with token/cost fields | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 4 | Token usage is non-zero after a completed run | ☐ (requires `ANTHROPIC_API_KEY`) |
 
 ---
 
@@ -175,3 +175,4 @@ No panic or 500 error.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1: HTTP 200 with cost summary structure confirmed (all fields present, counts zero). Steps 2–4 skipped — require live agents and `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Step 1: port 8080 (stale instance) returns HTTP 503; port 8081 (fresh `make run` instance) returns HTTP 200 `{"daily_input_tokens":0,"daily_output_tokens":0,"daily_estimated_usd":0,"top_agents":[],"reported_at":"..."}`. Summary table fixed: Step 1 marked `☑`. Steps 2–4 still require `ANTHROPIC_API_KEY`. |
