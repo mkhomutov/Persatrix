@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-17 (RFC 0006 closed, 12/12)  
+> **Last updated**: 2026-04-18 (v0.2.0 release prep: PR 2 merged, PR 3 open)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: v0.2.0 release validation — RFC 0005 + RFC 0006 both implemented
+> **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -478,6 +478,9 @@ v0.4.0 complete
 | [#91](https://github.com/mkhomutov/Persatrix/pull/91) | fix(cost): atomic budget snapshot, BudgetError struct, config validation (RFC 0006 PR 5b) | 0006 (5b/12) | 2026-04-17 |
 | [#92](https://github.com/mkhomutov/Persatrix/pull/92) | fix(planner,agents): RFC 0006 PR 5c — Planner/Schema + Python Fixes | 0006 (5c/12) | 2026-04-17 |
 | [#93](https://github.com/mkhomutov/Persatrix/pull/93) | fix(agents): surface invalid_fields in negative-limit error metadata + RFC 0006 close | 0006 (6/12) | 2026-04-17 |
+| [#94](https://github.com/mkhomutov/Persatrix/pull/94) | docs: add v0.2.0 release preparation plan | v0.2 release prep | 2026-04-17 |
+| [#95](https://github.com/mkhomutov/Persatrix/pull/95) | refactor(agents): split persona_runtime.py into package | v0.2 release prep (A-1) | 2026-04-17 |
+| [#96](https://github.com/mkhomutov/Persatrix/pull/96) | refactor(scheduler): split scheduler.go into stage_runner.go and budget.go | v0.2 release prep (A-2) | 2026-04-18 |
 
 ---
 

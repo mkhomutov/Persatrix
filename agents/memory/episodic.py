@@ -16,16 +16,27 @@ import logging
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
+from .episodic_queries import (
+    _EPISODE_SELECT,
+    _MAX_RECALL_LIMIT,
+    Episode,
+    get_interaction_count,
+    increment_interaction_count,
+    load_agent_state,
+    persist_agent_state,
+    recall_fts5,
+    recall_like,
+    recall_recency,
+    reset_interaction_count,
+    row_to_episode,
+)
 from .migrations import (
     _FTS5_DDL,
     _NOTES_FTS5_DDL,
-    _SCORE_EXPR,
-    _SCORE_EXPR_BARE,
     _apply_migrations,
     _fts5_available,
 )
@@ -35,42 +46,6 @@ if TYPE_CHECKING:
     from ..llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-# ─── Data model ─────────────────────────────────────────────
-
-
-@dataclass
-class Episode:
-    """A single episodic memory entry."""
-
-    id: str
-    agent_id: str
-    summary: str
-    context: dict[str, Any]
-    outcome: str | None
-    importance: float
-    access_count: int
-    last_accessed_at: float | None
-    tags: list[str]
-    created_at: float
-    compressed_at: float | None
-    compression_level: int  # 0=raw, 1=summarized, 2=distilled
-
-
-# Column list for SELECT queries — keeps _row_to_episode() positional
-# mapping stable when future migrations add columns to the episodes table.
-_EPISODE_COLS = (
-    "id", "agent_id", "summary", "context_json", "outcome",
-    "importance", "access_count", "last_accessed_at",
-    "tags_json", "created_at", "compressed_at", "compression_level",
-)
-_EPISODE_SELECT = ", ".join(_EPISODE_COLS)
-_EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
-
-# Maximum number of episodes returned by recall() to prevent unbounded
-# result sets and resource exhaustion.
-_MAX_RECALL_LIMIT = 100
 
 
 # ─── EpisodicMemory ────────────────────────────────────────
@@ -214,13 +189,13 @@ class EpisodicMemory:
         db = self._ensure_db()
 
         if query and self._fts5:
-            rows = await self._recall_fts5(db, query, limit, min_importance)
+            rows = await recall_fts5(db, self._agent_id, query, limit, min_importance)
         elif query:
-            rows = await self._recall_like(db, query, limit, min_importance)
+            rows = await recall_like(db, self._agent_id, query, limit, min_importance)
         else:
-            rows = await self._recall_recency(db, limit, min_importance)
+            rows = await recall_recency(db, self._agent_id, limit, min_importance)
 
-        episodes = [self._row_to_episode(row) for row in rows]
+        episodes = [row_to_episode(row) for row in rows]
 
         # Increment access_count and update last_accessed_at
         if episodes:
@@ -240,114 +215,6 @@ class EpisodicMemory:
 
         return episodes
 
-    async def _recall_fts5(
-        self,
-        db: aiosqlite.Connection,
-        query: str,
-        limit: int,
-        min_importance: float,
-    ) -> list[aiosqlite.Row]:
-        """FTS5 search with composite BM25 x importance x access x recency scoring.
-
-        Falls back to LIKE search if the query contains malformed FTS5 syntax
-        (e.g. lone ``*``, unbalanced quotes, bare ``NOT``).
-        """
-        try:
-            async with db.execute(
-                f"""
-                SELECT {_EPISODE_SELECT_ALIASED}
-                FROM episodes_fts fts
-                JOIN episodes e ON e.rowid = fts.rowid
-                WHERE episodes_fts MATCH ?
-                  AND e.agent_id = ?
-                  AND e.importance >= ?
-                ORDER BY
-                    (fts.rank * -1)
-                    * {_SCORE_EXPR}
-                    DESC
-                LIMIT ?
-                """,
-                # params: MATCH=1, agent_id=2, min_importance=3, _SCORE_EXPR.time=4, LIMIT=5
-                (query, self._agent_id, min_importance, time.time(), limit),
-            ) as cursor:
-                return await cursor.fetchall()
-        except sqlite3.OperationalError as exc:
-            logger.warning(
-                "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
-            )
-            return await self._recall_like(db, query, limit, min_importance)
-
-    async def _recall_like(
-        self,
-        db: aiosqlite.Connection,
-        query: str,
-        limit: int,
-        min_importance: float,
-    ) -> list[aiosqlite.Row]:
-        """LIKE fallback when FTS5 is unavailable.
-
-        Escapes LIKE wildcard characters (``%``, ``_``) in the query so they
-        are matched literally rather than treated as pattern metacharacters.
-        """
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped}%"
-        async with db.execute(
-            f"""
-            SELECT {_EPISODE_SELECT}
-            FROM episodes
-            WHERE agent_id = ?
-              AND importance >= ?
-              AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
-            ORDER BY
-                {_SCORE_EXPR_BARE}
-                DESC
-            LIMIT ?
-            """,
-            # params: agent_id=1, min_importance=2, LIKE=3+4, _SCORE_EXPR_BARE.time=5, LIMIT=6
-            (self._agent_id, min_importance, pattern, pattern, time.time(), limit),
-        ) as cursor:
-            return await cursor.fetchall()
-
-    async def _recall_recency(
-        self,
-        db: aiosqlite.Connection,
-        limit: int,
-        min_importance: float,
-    ) -> list[aiosqlite.Row]:
-        """No query text — rank by importance x access x recency only."""
-        async with db.execute(
-            f"""
-            SELECT {_EPISODE_SELECT}
-            FROM episodes
-            WHERE agent_id = ?
-              AND importance >= ?
-            ORDER BY
-                {_SCORE_EXPR_BARE}
-                DESC
-            LIMIT ?
-            """,
-            # params: agent_id=1, min_importance=2, _SCORE_EXPR_BARE.time=3, LIMIT=4
-            (self._agent_id, min_importance, time.time(), limit),
-        ) as cursor:
-            return await cursor.fetchall()
-
-    def _row_to_episode(self, row: aiosqlite.Row) -> Episode:
-        """Convert a database row to an Episode dataclass."""
-        return Episode(
-            id=row[0],
-            agent_id=row[1],
-            summary=row[2],
-            context=json.loads(row[3]) if row[3] else {},
-            outcome=row[4],
-            importance=row[5],
-            access_count=row[6],
-            last_accessed_at=row[7],
-            tags=json.loads(row[8]) if row[8] else [],
-            created_at=row[9],
-            compressed_at=row[10],
-            compression_level=row[11],
-        )
-
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""
         db = self._ensure_db()
@@ -358,7 +225,7 @@ class EpisodicMemory:
             row = await cursor.fetchone()
         if row is None:
             return None
-        return self._row_to_episode(row)
+        return row_to_episode(row)
 
     async def count_episodes(self) -> int:
         """Return the number of episodes for this agent."""
@@ -430,7 +297,7 @@ class EpisodicMemory:
 
         summarized = 0
         for row in rows:
-            episode = self._row_to_episode(row)
+            episode = row_to_episode(row)
             prompt = (
                 f"Summarize the following episode concisely, preserving key facts "
                 f"and outcomes.\n\n"
@@ -573,96 +440,31 @@ class EpisodicMemory:
         """Return the number of notes for this agent."""
         return await self._ensure_note_store().count_notes()
 
-    # ─── Interaction counter (auto_reflect_after) ───────────
+    # ─── Interaction counter ─────────────────────────────────
 
     async def get_interaction_count(self) -> int:
         """Get the current interaction count for this agent."""
-        db = self._ensure_db()
-        async with db.execute(
-            "SELECT interaction_count FROM agent_state WHERE agent_id = ?",
-            (self._agent_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        return row[0] if row else 0
+        return await get_interaction_count(self._ensure_db(), self._agent_id)
 
     async def increment_interaction_count(self) -> int:
-        """Increment and return the new interaction count.
-
-        Creates the agent_state row if it doesn't exist (upsert).
-        Uses RETURNING to get the post-upsert count in a single round-trip,
-        eliminating a read-after-write race (F-3b-2).  Requires SQLite >= 3.35
-        (Python 3.11+ ships >= 3.39).
-        """
-        db = self._ensure_db()
-        now = time.time()
-        cursor = await db.execute(
-            """
-            INSERT INTO agent_state (agent_id, interaction_count, updated_at)
-            VALUES (?, 1, ?)
-            ON CONFLICT(agent_id) DO UPDATE
-                SET interaction_count = interaction_count + 1,
-                    updated_at = ?
-            RETURNING interaction_count
-            """,
-            (self._agent_id, now, now),
-        )
-        row = await cursor.fetchone()
-        await db.commit()
-        return row[0] if row else 0
+        """Increment and return the new interaction count."""
+        return await increment_interaction_count(self._ensure_db(), self._agent_id)
 
     async def reset_interaction_count(self) -> None:
         """Reset the interaction counter to zero."""
-        db = self._ensure_db()
-        now = time.time()
-        await db.execute(
-            """
-            INSERT INTO agent_state (agent_id, interaction_count, updated_at)
-            VALUES (?, 0, ?)
-            ON CONFLICT(agent_id) DO UPDATE
-                SET interaction_count = 0,
-                    updated_at = ?
-            """,
-            (self._agent_id, now, now),
-        )
-        await db.commit()
+        await reset_interaction_count(self._ensure_db(), self._agent_id)
 
     # ─── Persona state persistence ──────────────────────────
 
     async def persist_agent_state(
         self, agent_id: str, state_json: str,
     ) -> None:
-        """Persist opaque agent state JSON to the agent_state table.
-
-        Uses INSERT … ON CONFLICT to upsert only the persona_state_json
-        and updated_at columns, preserving interaction_count managed by
-        the interaction counter methods above.
-        """
-        db = self._ensure_db()
-        now = time.time()
-        await db.execute(
-            """
-            INSERT INTO agent_state
-                (agent_id, interaction_count, persona_state_json, updated_at)
-            VALUES (?, 0, ?, ?)
-            ON CONFLICT(agent_id) DO UPDATE
-                SET persona_state_json = ?,
-                    updated_at = ?
-            """,
-            (agent_id, state_json, now, state_json, now),
-        )
-        await db.commit()
+        """Persist opaque agent state JSON to the agent_state table."""
+        await persist_agent_state(self._ensure_db(), agent_id, state_json)
 
     async def load_agent_state(self, agent_id: str) -> str | None:
         """Load opaque agent state JSON from the agent_state table.
 
         Returns ``None`` if no state has been persisted for this agent.
         """
-        db = self._ensure_db()
-        async with db.execute(
-            "SELECT persona_state_json FROM agent_state WHERE agent_id = ?",
-            (agent_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        if row and row[0]:
-            return row[0]
-        return None
+        return await load_agent_state(self._ensure_db(), agent_id)

@@ -337,7 +337,7 @@ def _write_agent_config(tmp: Path, agents: list[dict]) -> str:
 class TestLoadAgent:
     """Tests for load_agent()."""
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_load_planner(self, mock_create):
         mock_create.return_value = MagicMock()
         with tempfile.TemporaryDirectory() as tmp:
@@ -358,7 +358,7 @@ class TestLoadAgent:
             assert isinstance(agent, TaskAgent)
             assert agent.agent_id == "planner"
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_load_coder(self, mock_create):
         mock_create.return_value = MagicMock()
         with tempfile.TemporaryDirectory() as tmp:
@@ -378,7 +378,7 @@ class TestLoadAgent:
             agent = load_agent("code-writer", config_path, tmp)
             assert isinstance(agent, TaskAgent)
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_load_reviewer(self, mock_create):
         mock_create.return_value = MagicMock()
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,7 +418,7 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="Invalid YAML"):
                 load_agent("planner", str(bad_path), tmp)
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_unknown_type_raises_system_exit(self, mock_create):
         """Unknown agent type in config raises SystemExit (not ValueError)."""
         mock_create.return_value = MagicMock()
@@ -476,7 +476,7 @@ class TestLoadAgent:
             with pytest.raises(SystemExit, match="Invalid agent ID"):
                 load_agent("agent-", config_path, tmp)
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_missing_model_field(self, mock_create):
         """SF-08: missing 'model' key gives a clear SystemExit at startup."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -724,7 +724,7 @@ class TestToolDefinitionFiltering:
 class TestPermissionWiring:
     """S-16: verify load_agent wires permission_gate and path_validator."""
 
-    @patch("agents.server.create_provider")
+    @patch("agents.server_persona.create_provider")
     def test_permissions_wired_after_load(self, mock_create):
         """After load_agent(), builtin.permission_gate and builtin.path_validator are set."""
         mock_create.return_value = MagicMock()
