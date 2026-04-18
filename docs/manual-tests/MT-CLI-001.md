@@ -17,8 +17,9 @@ the result, exercising the full Rust CLI → REST → orchestrator round-trip.
 **Scope**: `orch run`, `orch status`, and `orch validate` subcommands against a locally running
 orchestrator.
 
-**Out of Scope**: Agent LLM execution quality; `orch` subcommands that are stubs in v0.1
-(`init`, `replay`, `cost`, `state`, `node`, `mesh`).
+**Out of Scope**: Agent LLM execution quality; stub subcommands not yet implemented:
+- v0.2 stubs (print "not yet implemented", exit 0): `init`, `replay`, `cost`, `state`
+- v0.3+ stubs (labeled in help, print "not yet implemented", exit 0): `node`, `mesh`
 
 ---
 
@@ -76,8 +77,8 @@ orchestrator.
 `agent`, `logs`, `test`, and others.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] Subcommand list includes at least `run`, `status`, `validate`, `agent`
+- [x] Exit code 0
+- [x] Subcommand list includes at least `run`, `status`, `validate`, `agent`
 
 ---
 
@@ -92,8 +93,8 @@ orchestrator.
 **Expected Result**: Command exits 0 with a message indicating all files are valid.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] Output does not contain `error` or `invalid`
+- [x] Exit code 0
+- [x] Output does not contain `error` or `invalid`
 
 ---
 
@@ -108,13 +109,18 @@ orchestrator.
 (If the orchestrator is not on the default `http://localhost:8080`, pass
 `--server http://127.0.0.1:8080`.)
 
-**Expected Result**: The CLI prints a run ID and initial status. The command may block until the
-run completes or return immediately with a run ID depending on implementation.
+**Expected Result**: The command is non-blocking: it submits the run and returns immediately with
+the run ID and initial status:
 
+```
+OK Workflow feature-builder submitted (run_id: <uuid>)
+  Status: pending
+```
 **Verification**:
-- [ ] Exit code 0
-- [ ] Output contains a `run_id` (UUID format) or a clear status line
-- [ ] No panic or unhandled Rust `unwrap` backtrace in output
+- [x] Exit code 0
+- [x] Output contains `run_id:` followed by a UUID
+- [x] `Status:` line shows `pending` (or `running`)
+- [x] No panic or unhandled Rust `unwrap` backtrace in output
 
 ---
 
@@ -126,20 +132,19 @@ run completes or return immediately with a run ID depending on implementation.
 ./bin/orch status <RUN_ID>
 ```
 
-If Step 3 blocks until completion, use the run ID from its output. If no specific run ID is
-available, `orch status` with no argument lists all runs:
+If no specific run ID is available, `orch status` with no argument lists all runs:
 
 ```bash
 ./bin/orch status
 ```
 
-**Expected Result**: Status output includes `run_id`, `workflow_id`, and a `status` field
-(`running`, `completed`, or `failed`).
+**Expected Result**: Human-readable status output includes `Run ID`, `Workflow`, and `Status`
+fields (`running`, `completed`, or `failed`).
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] Output contains a status value from the expected set
-- [ ] JSON or structured output is well-formed (no partial output or truncation)
+- [x] Exit code 0
+- [x] Output contains a status value from the expected set
+- [x] JSON or structured output is well-formed (no partial output or truncation)
 
 ---
 
@@ -151,12 +156,16 @@ available, `orch status` with no argument lists all runs:
 ./bin/orch agent list
 ```
 
-**Expected Result**: A list (possibly empty if no agents are registered) printed without error.
+**Expected Result**: Exit 0 with either:
+- `No agents registered.` — when no agents are connected, or
+- A formatted table of agents — when agents are registered.
+
+Output is always human-readable text, never raw JSON.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] Output is a valid JSON array or a human-readable table
-- [ ] No 500 error or panic text
+- [x] Exit code 0
+- [x] Output is `No agents registered.` (empty case) or a formatted table (populated case)
+- [x] No 500 error or panic text
 
 ---
 
@@ -164,11 +173,11 @@ available, `orch status` with no argument lists all runs:
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | `orch --help` prints subcommand list | ☐ |
-| 2 | `orch validate config/` exits 0 | ☐ |
-| 3 | `orch run` returns a run ID | ☐ |
-| 4 | `orch status <id>` returns run status | ☐ |
-| 5 | `orch agent list` exits 0 | ☐ |
+| 1 | `orch --help` prints subcommand list | ☑ |
+| 2 | `orch validate config/` exits 0 | ☑ |
+| 3 | `orch run` returns a run ID | ☑ |
+| 4 | `orch status <id>` returns run status | ☑ |
+| 5 | `orch agent list` exits 0 | ☑ |
 
 ---
 
@@ -187,13 +196,26 @@ It must not panic.
 
 **Expected Behavior**: CLI prints the orchestrator's error response (4xx) and exits non-zero.
 
+### Edge Case 3: Missing `<WORKFLOW>` Argument
+
+**Scenario**: `orch run` invoked with no arguments.
+
+**Expected Behavior**: clap prints a usage error to stderr and exits non-zero:
+```
+error: the following required arguments were not provided:
+  <WORKFLOW>
+
+Usage: orch.exe run <WORKFLOW>
+```
+
 ---
 
 ## Test Results
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | Copilot | Windows 11 | Pass | All 5 steps passed. `--help` exit 0 with full subcommand list. `validate config/` → "Validation passed (3 file(s) checked)". `run feature-builder` → HTTP 201, `run_id=a1badf22`, status `pending`. `status <id>` → structured output showing `failed` (no agents registered, expected). `agent list` → "No agents registered.", exit 0. |
+| 2026-04-18 | Copilot | Windows 11 | Pass | Re-verified Steps 1-5 and Edge Cases 1-3 against live orchestrator. `run feature-builder` output now prints ASCII-safe `OK Workflow ...` marker (fixed Windows mojibake issue from Unicode checkmark). Latest run: `run_id=7d846bcc-bc3d-4590-9ef6-e7e84c0acd4b`, `Status: pending`; `status` then shows terminal `failed` due no `planner` agent registered (expected in this setup). |
 
 ---
 
@@ -201,5 +223,7 @@ It must not panic.
 
 - Build the CLI with `make all` or `make build-cli` (runs `cargo build --release` in `cli/`).
 - The CLI binary path is `bin/orch` on Unix and `bin/orch.exe` on Windows.
-- Stub subcommands (`init`, `replay`, `cost`, `state`, `node`, `mesh`) are intentionally not
-  tested here — they are v0.3+ features.
+- Stub subcommands are intentionally not tested here:
+  - `init`, `replay`, `cost`, `state` — v0.2 stubs: accept arguments, print
+    `Command 'X' not yet implemented` (yellow), and exit 0.
+  - `node`, `mesh` — v0.3+ stubs (labeled as such in `--help`): same behavior.

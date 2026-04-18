@@ -53,7 +53,7 @@ pub(crate) async fn cmd_run(
 
     println!(
         "{} Workflow {} submitted (run_id: {})",
-        "✓".green().bold(),
+        "OK".green().bold(),
         data.workflow_id.bold(),
         data.run_id
     );

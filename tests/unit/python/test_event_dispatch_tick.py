@@ -995,7 +995,7 @@ class TestAgentServerPersonaLifecycle:
         # close memory so start() can re-initialize
         await agent.close_memory()
 
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         # Mock gRPC server and network calls
@@ -1013,7 +1013,7 @@ class TestAgentServerPersonaLifecycle:
     async def test_persona_agent_memory_closed_on_stop(self):
         """Persona agents have memory closed during server.stop()."""
         agent = await _make_agent()
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         agent.close_memory = AsyncMock()  # type: ignore[method-assign]
@@ -1037,7 +1037,7 @@ class TestAgentServerPersonaLifecycle:
             llm_client=_make_client(),
         )
 
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
@@ -1062,7 +1062,7 @@ class TestAgentServerPersonaLifecycle:
             llm_client=_make_client(),
         )
 
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
@@ -1089,7 +1089,7 @@ class TestAgentServerPersonaLifecycle:
             llm_client=_make_client(),
         )
 
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
@@ -1123,7 +1123,7 @@ class TestAgentServerPersonaLifecycle:
             llm_client=_make_client(),
         )
 
-        server = AgentServer()
+        server = AgentServer(port=0)
         server.agents["sarah-chen"] = agent
 
         # Force initialize_memory() to fail
