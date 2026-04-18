@@ -32,8 +32,11 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 | **Cost tracking & budgets** — token counting, per-run enforcement, `GET /api/v1/cost/summary` | [internal/cost/](internal/cost/), [internal/server/cost_handlers.go](internal/server/cost_handlers.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Execution limits** — `max_llm_calls`, derived per-call deadlines, shared retry budget | [internal/executor/](internal/executor/), [internal/scheduler/](internal/scheduler/) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Response cache** — in-memory cache keyed on prompt + config | [internal/cost/cache.go](internal/cost/cache.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
-| **MCP bridge** — use Model Context Protocol servers as agent tools | [agents/tools/](agents/tools/) | [RFC 0004](docs/rfcs/0004-python-agent-grpc-server.md) |
 | **OTEL tracing** — spans flowing through orchestrator → agents, visible in Jaeger | [internal/](internal/) | — |
+
+> The MCP bridge ([agents/tools/mcp_bridge.py](agents/tools/mcp_bridge.py)) is
+> scaffolded but not yet functional — tracked as a follow-up to v0.2. Agents that
+> reference MCP tools emit a startup warning and run without them.
 
 > **Upgrade note from v0.1 baseline:** `max_llm_calls` default changed from `10` to
 > `5`. See [CHANGELOG.md](CHANGELOG.md).
@@ -109,12 +112,14 @@ make run-agent AGENT=sarah-chen
 # 3. Ping it through the orchestrator
 orch agent test --persona sarah-chen
 
-# 4. Inspect what it's done
-orch logs --agent sarah-chen
+# 4. Inspect its registration and status
+orch agent info sarah-chen
 ```
 
+Live tick-loop output — decisions, memory writes, tool calls — streams in the
+terminal where `make run-agent` (or the `agent-*` compose service) is running.
 The persona's tick loop fires every `autonomy.tick_interval_seconds`, reads
-episodic and relationship memory, decides on up to `max_actions_per_tick`
+episodic and relationship memory, decides on up to `autonomy.max_actions_per_tick`
 actions, and writes results back. State survives process restarts.
 
 ### Inspect Cost & Budget (v0.2)
@@ -144,8 +149,8 @@ make test-integration   # end-to-end tests
 CLI (Rust) ── REST ──► Orchestrator (Go) ── gRPC ──► Agents (Python)
                             │                            │
                             │                      LLM APIs, tools,
-                      workflow planning,           MCP servers,
-                      scheduling, state,           three-tier memory
+                      workflow planning,           three-tier memory
+                      scheduling, state,
                       cost, OTEL spans
 ```
 
@@ -162,7 +167,9 @@ logic is server-side.
 an RFC.
 
 For the full set of architecture diagrams — system overview, persona runtime
-loop, memory tiers, workflow execution — see [docs/diagrams/](docs/diagrams/).
+loop, memory tiers, workflow execution — see [docs/diagrams/](docs/diagrams/)
+(Mermaid source embedded in `.md` files; render in-place in any Mermaid-aware
+viewer such as GitHub or VS Code).
 
 ## Project Structure
 
@@ -183,7 +190,7 @@ Persatrix/
 │   ├── persona.py          Persona agent entrypoint
 │   ├── persona_runtime/    Memory context, action loop, state persistence
 │   ├── memory/             Episodic, relationship, working memory (v0.2)
-│   ├── tools/              @tool registry, built-ins, MCP bridge, sandbox
+│   ├── tools/              @tool registry, built-ins, sandbox
 │   └── server.py           gRPC servicer
 ├── cli/                    Rust CLI
 ├── config/                 YAML configuration (schema in schemas/)
