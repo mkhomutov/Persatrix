@@ -12,7 +12,7 @@ import inspect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,12 @@ def tool(
     def decorator(func: Callable) -> Callable:
         tool_name = name or func.__name__
         sig = inspect.signature(func)
+        # Resolve postponed annotations (PEP 563 / ``from __future__ import annotations``)
+        # so built-in scalar types map correctly to JSON Schema.
+        try:
+            resolved_hints = get_type_hints(func)
+        except Exception:
+            resolved_hints = {}
 
         # Auto-generate parameter schema from type hints.
         # Produces a valid JSON Schema object for use as tool input_schema.
@@ -77,7 +83,7 @@ def tool(
         properties: dict[str, Any] = {}
         required: list[str] = []
         for param_name, param in sig.parameters.items():
-            annotation = param.annotation
+            annotation = resolved_hints.get(param_name, param.annotation)
             if annotation in known_types:
                 param_type = known_types[annotation]
             elif annotation is inspect.Parameter.empty:

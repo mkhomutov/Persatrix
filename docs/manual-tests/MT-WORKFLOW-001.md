@@ -34,6 +34,10 @@ response envelope shape, and workflow state transitions.
 **Related Automated Tests**:
 - Integration tests: `tests/integration/test_workflow.py`
 
+> **Note**: As of 2026-04-18 the file contains only TODO stubs (no implemented test functions).
+> The manual steps in this document remain the primary verification path until those stubs are
+> implemented.
+
 ---
 
 ## Preconditions
@@ -290,8 +294,8 @@ curl -s http://127.0.0.1:8080/api/v1/workflows | python3 -m json.tool
 **Expected Result**: The response is a JSON array. The array includes the run submitted in Step 2.
 
 **Verification**:
-- [ ] Response is a JSON array (not an error object)
-- [ ] Array contains an element whose `run_id` matches the value from Step 2
+- [x] Response is a JSON array (not an error object)
+- [x] Array contains an element whose `run_id` matches the value from Step 2
 
 ---
 
@@ -324,6 +328,7 @@ API still returns a well-formed JSON response — no 500 or panic.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | End-to-end run completed successfully; submit returned HTTP 201 with valid `run_id`, terminal status reached, and run present in list endpoint. |
+| 2026-04-18 | Copilot | Windows 11 | Pass | API terminal-state mode (no agents registered). Submit → HTTP 201 `run_id=c2b67fc9`, status transitioned to `failed` in <1 s with `"agent not found in registry: planner"`. All required response fields present. Run confirmed in list endpoint. |
 
 ---
 

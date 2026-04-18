@@ -251,6 +251,7 @@ outside the core "inline payload only" path above.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | All negative-path checks passed: unknown workflow returned 404 JSON error, malformed/empty/missing-field payloads returned 400 JSON errors, and `/healthz` remained 200 afterward. |
+| 2026-04-18 | Copilot | Windows 11 | Pass | Re-verified. Step 1: `404 {"error":"workflow not found","code":"NOT_FOUND"}`. Step 2: `400 {"error":"invalid or malformed JSON body","code":"BAD_REQUEST"}`. Step 3 (empty body): same 400 error. Step 4 (missing field): `400 {"error":"workflow_id is required","code":"BAD_REQUEST"}`. Step 5: `/healthz` returned 200. |
 
 ---
 

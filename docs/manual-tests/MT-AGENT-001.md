@@ -76,8 +76,13 @@ Run from the repo root. If this fails, run `make build-agents` first.
 **Expected Result**: Prints `OK` with exit code 0.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] No `ModuleNotFoundError` or import error
+- [x] Exit code 0
+- [x] No `ModuleNotFoundError` or import error
+
+> **Note**: Prior to the fix in `agents/tools/registry.py` (resolved 2026-04-18), this step also
+> emitted `WARNING: Tool … param … has unrecognized type annotation 'str'` lines for every
+> builtin tool. These are gone after applying `get_type_hints()` resolution in the tool
+> decorator. The import completes cleanly and prints only `OK`.
 
 ---
 
@@ -99,9 +104,9 @@ tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_to
 ```
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] Test status is `PASSED`
-- [ ] No `AssertionError` or unexpected exception in the output
+- [x] Exit code 0
+- [x] Test status is `PASSED`
+- [x] No `AssertionError` or unexpected exception in the output
 
 ---
 
@@ -128,8 +133,8 @@ grep -n "COMPLETED\|tool_calls" tests/integration/test_agent_server.py
 `resp.status == task_pb2.COMPLETED` and one checking `resp.metadata["tool_calls"] == "1"`.
 
 **Verification**:
-- [ ] `assert resp.status == task_pb2.COMPLETED` is present in the test source
-- [ ] `assert resp.metadata["tool_calls"] == "1"` is present in the test source
+- [x] `assert resp.status == task_pb2.COMPLETED` is present in the test source
+- [x] `assert resp.metadata["tool_calls"] == "1"` is present in the test source
 
 ---
 
@@ -145,8 +150,8 @@ python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution 
 **Expected Result**: All tests in `TestEndToEndExecution` pass.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] All methods in `TestEndToEndExecution` are listed as `PASSED`
+- [x] Exit code 0
+- [x] All methods in `TestEndToEndExecution` are listed as `PASSED`
 
 ---
 
@@ -161,8 +166,8 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
 **Expected Result**: All tests pass, including `TestEmptyModelGuard::test_empty_model_raises_system_exit`.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] All tests listed as `PASSED`
+- [x] Exit code 0
+- [x] All tests listed as `PASSED`
 
 ---
 
@@ -170,11 +175,11 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | `persatrix_agents.tools.builtin` imports cleanly | ☐ |
-| 2 | `test_task_with_tool_use` PASSED | ☐ |
-| 3 | Tool-use assertions (`COMPLETED`, `tool_calls==1`) pass | ☐ |
-| 4 | All `TestEndToEndExecution` tests PASSED | ☐ |
-| 5 | Full `test_agent_server.py` suite PASSED | ☐ |
+| 1 | `persatrix_agents.tools.builtin` imports cleanly | ☑ |
+| 2 | `test_task_with_tool_use` PASSED | ☑ |
+| 3 | Tool-use assertions (`COMPLETED`, `tool_calls==1`) pass | ☑ |
+| 4 | All `TestEndToEndExecution` tests PASSED | ☑ |
+| 5 | Full `test_agent_server.py` suite PASSED | ☑ |
 
 ---
 
@@ -201,7 +206,7 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 7 tests in `test_agent_server.py` passed. Step 1 initially emitted tool-annotation warnings; fixed in `agents/tools/registry.py` by resolving postponed annotations via `get_type_hints()`. Import is now clean. |
 
 ---
 
