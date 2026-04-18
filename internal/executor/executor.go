@@ -310,6 +310,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	// In derived mode, retries share the step deadline — elapsed time is tracked
 	// and each retry gets the remaining budget.
 	var lastErr error
+	var lastResult *ExecuteResult // preserves metadata from the last dispatch attempt for cost recording
 	start := time.Now()
 	var cumulativeTokens int64
 
@@ -399,12 +400,14 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		}
 
 		lastErr = err
+		lastResult = result // may carry response metadata even on agent-side failure
 
 		// Don't retry on non-transient errors or if retries exhausted.
 		if !isTransient(err) {
 			span.RecordError(err)
 			span.SetStatus(otelcodes.Error, err.Error())
-			return nil, fmt.Errorf("permanent failure dispatching to agent %s: %w", req.AgentID, err)
+			// Propagate partial result so callers can record token usage from metadata.
+			return result, fmt.Errorf("permanent failure dispatching to agent %s: %w", req.AgentID, err)
 		}
 
 		if attempt == e.maxRetries {
@@ -444,7 +447,8 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		span.RecordError(lastErr)
 		span.SetStatus(otelcodes.Error, lastErr.Error())
 	}
-	return nil, fmt.Errorf("retries exhausted (%d attempts) for agent %s: %w", e.maxRetries+1, req.AgentID, lastErr)
+	// Propagate partial result so callers can record token usage from metadata.
+	return lastResult, fmt.Errorf("retries exhausted (%d attempts) for agent %s: %w", e.maxRetries+1, req.AgentID, lastErr)
 }
 
 // resolveDeadline computes the step deadline duration and the initial per-dispatch
@@ -500,7 +504,12 @@ func (e *GRPCExecutor) dispatch(ctx context.Context, address string, req *taskpb
 		if errMsg == "" {
 			errMsg = "unknown error"
 		}
-		return nil, fmt.Errorf("%w: %s", ErrTaskFailed, errMsg)
+		// Return metadata alongside the error so callers can record token usage
+		// from LLM calls the agent completed before failing.
+		return &ExecuteResult{
+			TaskID:   resp.TaskId,
+			Metadata: resp.Metadata,
+		}, fmt.Errorf("%w: %s", ErrTaskFailed, errMsg)
 	}
 	if resp.Status != taskpb.TaskStatus_COMPLETED {
 		return nil, fmt.Errorf("%w: %s", ErrUnexpectedStatus, resp.Status)

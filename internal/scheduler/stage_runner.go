@@ -167,6 +167,12 @@ func (s *WorkflowScheduler) executeStep(
 		Cacheable:  step.Cacheable,
 	})
 	if err != nil {
+		// Record token usage from any metadata the agent returned before failing.
+		// This preserves cost tracking for runs aborted by LLM truncation or other
+		// agent-side errors where the LLM call completed but the step did not.
+		if result != nil {
+			s.recordStepUsage(workflowID, step, result, registryModel)
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
