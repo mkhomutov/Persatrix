@@ -172,7 +172,7 @@ for `"gRPC server listening on"` to find the actual port and retry.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Not run | Requires `ANTHROPIC_API_KEY` and a live persona agent. MT-PERSONA-001 code issue (PYTHONPATH + port conflict) must be resolved first. |
 
 ---
 

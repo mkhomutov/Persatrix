@@ -90,11 +90,11 @@ curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
 ```
 
 **Verification**:
-- [ ] HTTP status is `404`
-- [ ] Response `Content-Type` is `application/json`
-- [ ] Body is valid JSON
-- [ ] Body contains an `"error"` key with a non-empty string value
-- [ ] No stack trace or Go panic text in the body
+- [x] HTTP status is `404`
+- [x] Response `Content-Type` is `application/json`
+- [x] Body is valid JSON
+- [x] Body contains an `"error"` key with a non-empty string value
+- [x] No stack trace or Go panic text in the body
 
 Note: For this payload, `workflow_id` format is valid and the workflow file is missing,
 so the expected code path is `NOT_FOUND` (`404`).
@@ -126,10 +126,10 @@ curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
 **Expected Result**: HTTP 400 with a JSON error body.
 
 **Verification**:
-- [ ] HTTP status is `400`
-- [ ] Response body is valid JSON with an `"error"` key
-- [ ] No 500 Internal Server Error
-- [ ] Server continues to serve subsequent requests (not crashed)
+- [x] HTTP status is `400`
+- [x] Response body is valid JSON with an `"error"` key
+- [x] No 500 Internal Server Error
+- [x] Server continues to serve subsequent requests (not crashed)
 
 ---
 
@@ -158,9 +158,9 @@ curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
 **Expected Result**: HTTP 400 with a JSON error body indicating malformed JSON.
 
 **Verification**:
-- [ ] HTTP status is `400`
-- [ ] Response body is valid JSON with an `"error"` key
-- [ ] Error message indicates malformed JSON (for example: `invalid or malformed JSON body`)
+- [x] HTTP status is `400`
+- [x] Response body is valid JSON with an `"error"` key
+- [x] Error message indicates malformed JSON (for example: `invalid or malformed JSON body`)
 
 ---
 
@@ -189,9 +189,9 @@ curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
 **Expected Result**: HTTP 400 with a JSON error body.
 
 **Verification**:
-- [ ] HTTP status is `400`
-- [ ] Response body is valid JSON with an `"error"` key
-- [ ] No panic, no stack trace in response body
+- [x] HTTP status is `400`
+- [x] Response body is valid JSON with an `"error"` key
+- [x] No panic, no stack trace in response body
 
 ---
 
@@ -214,8 +214,8 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8080/healthz
 **Expected Result**: HTTP 200 — the server did not crash during the error-case steps above.
 
 **Verification**:
-- [ ] `curl` exits 0
-- [ ] Response confirms server is healthy
+- [x] `curl` exits 0
+- [x] Response confirms server is healthy
 
 ---
 
@@ -252,6 +252,7 @@ outside the core "inline payload only" path above.
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | All negative-path checks passed: unknown workflow returned 404 JSON error, malformed/empty/missing-field payloads returned 400 JSON errors, and `/healthz` remained 200 afterward. |
 | 2026-04-18 | Copilot | Windows 11 | Pass | Re-verified. Step 1: `404 {"error":"workflow not found","code":"NOT_FOUND"}`. Step 2: `400 {"error":"invalid or malformed JSON body","code":"BAD_REQUEST"}`. Step 3 (empty body): same 400 error. Step 4 (missing field): `400 {"error":"workflow_id is required","code":"BAD_REQUEST"}`. Step 5: `/healthz` returned 200. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Re-verified all 5 steps. All responses match expected envelopes with `"error"` and `"code"` fields. Server remained healthy throughout. |
 
 ---
 

@@ -68,6 +68,28 @@ Results for a release execution run are recorded in `v0.2-execution-report.md` (
 
 ---
 
+## 2026-04-18 Full Pass Summary
+
+Executed by mkhomutov on Windows 11. All testable tests run from clean state.
+
+| ID | Result | Notes |
+|----|--------|-------|
+| MT-CONFIG-001 | **Pass** | All 5 mutation steps pass. |
+| MT-CLI-001 | **Pass** | All 5 steps + 3 edge cases pass. |
+| MT-WORKFLOW-001 | **Pass** | API terminal-state mode; terminal `failed` in <1 s. |
+| MT-WORKFLOW-002 | **Pass** | All 4 error cases and health check pass. |
+| MT-AGENT-001 | **Pass** | All 7 integration tests pass with `PYTHONPATH=agents/generated`. **Code issue**: `make test-integration` / `make run-agent` fail without PYTHONPATH (grpc stub bare import). |
+| MT-COST-001 | **Partial** | Step 1 (endpoint shape) pass; Steps 2–4 require live agents + API key. |
+| MT-COST-002 | **Partial** | Fixture YAML corrected (wrong format); Step 1 HTTP code corrected (200→201). Steps 1–5 require live agents + API key. |
+| MT-MEMORY-001 | **Pass** | All 4 steps pass. **Doc fix**: Step 2 needs `logging.basicConfig()`. |
+| MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: `get_relationship()` replaced with `get_trust()` / `get_relationship_summary()`. |
+| MT-MEMORY-003 | **Partial** | Step 1 (threshold detection) pass. Steps 2–3 require API key. **Doc fix**: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`. |
+| MT-PERSONA-001 | **Partial** | Startup log verified with PYTHONPATH fix. Steps 2–5 require API key. **Code issue**: `make run-agent` fails without `PYTHONPATH=agents/generated`; port 50051 may conflict. |
+| MT-PERSONA-002 | **Not run** | Requires live persona + API key. |
+| MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
+
+---
+
 ## Conventions
 
 - **Test IDs** are unique across all areas and never reused after deprecation.

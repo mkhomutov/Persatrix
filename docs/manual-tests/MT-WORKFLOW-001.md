@@ -101,8 +101,8 @@ curl -s http://127.0.0.1:8080/healthz
 **Expected Result**: HTTP 200 with body `{"status":"ok"}` (or equivalent).
 
 **Verification**:
-- [ ] `curl` exits 0
-- [ ] Response body confirms server is healthy
+- [x] `curl` exits 0
+- [x] Response body confirms server is healthy
 
 Optional agent check:
 
@@ -154,10 +154,10 @@ curl -s -w "\nHTTP %{http_code}\n" \
 ```
 
 **Verification**:
-- [ ] HTTP status code is `201`
-- [ ] Response JSON contains `run_id` (non-empty string)
-- [ ] Response JSON contains `workflow_id: "feature-builder"`
-- [ ] `status` field is `"running"` or `"pending"` (not already `"completed"`)
+- [x] HTTP status code is `201`
+- [x] Response JSON contains `run_id` (non-empty string)
+- [x] Response JSON contains `workflow_id: "feature-builder"`
+- [x] `status` field is `"running"` or `"pending"` (not already `"completed"`)
 
 Note the `run_id` value for the next steps.
 
@@ -232,11 +232,11 @@ fi
 terminal transition itself is under test here.
 
 **Verification**:
-- [ ] Loop terminates (does not run indefinitely)
-- [ ] Final `status` is `"completed"` or `"failed"` — never stuck at `"running"` or `"pending"`
-- [ ] `started_at` field is a non-null ISO-8601 timestamp
-- [ ] `finished_at` field is a non-null ISO-8601 timestamp
-- [ ] `steps` field is present (may be empty map `{}` if run failed early)
+- [x] Loop terminates (does not run indefinitely)
+- [x] Final `status` is `"completed"` or `"failed"` — never stuck at `"running"` or `"pending"`
+- [x] `started_at` field is a non-null ISO-8601 timestamp
+- [x] `finished_at` field is a non-null ISO-8601 timestamp
+- [x] `steps` field is present (may be empty map `{}` if run failed early)
 
 ---
 
@@ -269,9 +269,9 @@ curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m jso
 | `error` | string | only if `status == "failed"` |
 
 **Verification**:
-- [ ] All required fields present
-- [ ] No extra `500`-level or unhandled-exception text in the body
-- [ ] If `status == "failed"`, the `error` field is a non-empty human-readable string
+- [x] All required fields present
+- [x] No extra `500`-level or unhandled-exception text in the body
+- [x] If `status == "failed"`, the `error` field is a non-empty human-readable string
 
 ---
 
@@ -329,6 +329,7 @@ API still returns a well-formed JSON response — no 500 or panic.
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | End-to-end run completed successfully; submit returned HTTP 201 with valid `run_id`, terminal status reached, and run present in list endpoint. |
 | 2026-04-18 | Copilot | Windows 11 | Pass | API terminal-state mode (no agents registered). Submit → HTTP 201 `run_id=c2b67fc9`, status transitioned to `failed` in <1 s with `"agent not found in registry: planner"`. All required response fields present. Run confirmed in list endpoint. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | API terminal-state mode re-run. Submit → HTTP 201 `run_id=3f0dc322`, terminal `failed` in <1 s. All required fields (`run_id`, `workflow_id`, `status`, `started_at`, `finished_at`, `steps`, `error`) present. Run in list endpoint confirmed. |
 
 ---
 

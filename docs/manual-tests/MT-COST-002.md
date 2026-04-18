@@ -61,17 +61,23 @@ Create a budget-constrained workflow fixture at `workflows/budget-test.yaml`:
 
 ```yaml
 schema_version: "0.1"
-id: budget-test
-name: Budget Abort Test
-steps:
-  - id: constrained-step
-    agent: planner
-    task: "Write a detailed 10-page report on the history of computing."
-    config:
+
+workflow:
+  id: budget-test
+  name: Budget Abort Test
+  steps:
+    - id: constrained-step
+      agent: planner
+      input: "Write a detailed 10-page report on the history of computing."
       max_llm_calls: 1     # forces abort after the very first LLM call
       max_tokens: 50       # extremely low output cap
       timeout_seconds: 60
 ```
+
+> **Fix (2026-04-18)**: The original fixture used `id:`, `name:`, and `steps:` at the top level,
+> with `task:` instead of `input:` and a nested `config:` wrapper. The actual schema requires a
+> `workflow:` envelope and flat step-level fields (`input:`, `max_llm_calls`, `max_tokens`).
+> `make validate` will fail on the old format.
 
 Run `make validate` to confirm the fixture is valid before proceeding.
 
@@ -90,10 +96,14 @@ curl -s -w "\nHTTP %{http_code}\n" \
   -d '{"workflow_id":"budget-test","inputs":{}}'
 ```
 
-**Expected Result**: HTTP 200 with a `run_id`.
+**Expected Result**: HTTP 201 (`Created`) with a `run_id`.
+
+> **Fix (2026-04-18)**: The workflow submission endpoint returns HTTP **201**, not 200.
+> The `POST /api/v1/workflows/run` endpoint always responds 201 on success (confirmed in
+> MT-WORKFLOW-001 and live testing).
 
 **Verification**:
-- [ ] HTTP status 200
+- [ ] HTTP status 201
 - [ ] `run_id` present in response body
 
 Note the `run_id` for the following steps.
@@ -207,7 +217,7 @@ should not crash permanently — it should recover for subsequent tasks.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Precondition fixture fixed (wrong YAML format); Step 1 HTTP code corrected (200→201). Steps 1–5 skipped — require live agents and `ANTHROPIC_API_KEY`. Fixture validated OK with corrected format. |
 
 ---
 

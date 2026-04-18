@@ -71,8 +71,8 @@ echo "Exit code: $?"
 **Expected Result**: Exit code 0; no error output.
 
 **Verification**:
-- [ ] Exit code 0
-- [ ] No validation errors printed
+- [x] Exit code 0
+- [x] No validation errors printed
 
 ---
 
@@ -100,10 +100,10 @@ echo "Exit code: $?"
 `config/agents.yaml`, the affected agent, and the missing `name` property.
 
 **Verification**:
-- [ ] Exit code is non-zero
-- [ ] Validation output names `config/agents.yaml`
-- [ ] Error message mentions `name` or `required` property
-- [ ] No Python traceback (clean error, not a crash)
+- [x] Exit code is non-zero
+- [x] Validation output names `config/agents.yaml`
+- [x] Error message mentions `name` or `required` property
+- [x] No Python traceback (clean error, not a crash)
 
 ---
 
@@ -125,9 +125,9 @@ echo "Exit code: $?"
 **Expected Result**: Exit code 1. Error message references the `id` field pattern violation.
 
 **Verification**:
-- [ ] Exit code is non-zero
-- [ ] Error message mentions `id` or `pattern`
-- [ ] No Python traceback
+- [x] Exit code is non-zero
+- [x] Error message mentions `id` or `pattern`
+- [x] No Python traceback
 
 ---
 
@@ -148,9 +148,9 @@ echo "Exit code: $?"
 **Expected Result**: Exit code 1. Error message references the `type` field enum violation.
 
 **Verification**:
-- [ ] Exit code is non-zero
-- [ ] Error message mentions `type` or `enum`
-- [ ] No Python traceback
+- [x] Exit code is non-zero
+- [x] Error message mentions `type` or `enum`
+- [x] No Python traceback
 
 ---
 
@@ -171,9 +171,9 @@ echo "Exit code: $?"
 **Expected Result**: Exit code 1. Error output mentions YAML parse error (not a schema error).
 
 **Verification**:
-- [ ] Exit code is non-zero
-- [ ] Error output references the file and an invalid YAML construct
-- [ ] No unhandled Python exception / traceback visible to the tester
+- [x] Exit code is non-zero
+- [x] Error output references the file and an invalid YAML construct
+- [x] No unhandled Python exception / traceback visible to the tester
 
 ---
 
@@ -189,8 +189,8 @@ echo "Exit code: $?"
 ```
 
 **Verification**:
-- [ ] Exit code 0 after restore
-- [ ] No backup file remains in `config/`
+- [x] Exit code 0 after restore
+- [x] No backup file remains in `config/`
 
 ---
 
@@ -198,12 +198,12 @@ echo "Exit code: $?"
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Baseline `make validate` exits 0 | ☐ |
-| 2 | Missing `name` field → non-zero exit + error mentioning `name` | ☐ |
-| 3 | Invalid agent `id` → non-zero exit + error mentioning `id` | ☐ |
-| 4 | Invalid `type` value → non-zero exit + error mentioning `type` | ☐ |
-| 5 | YAML syntax error → non-zero exit + parse error | ☐ |
-| Teardown | Config restored, `make validate` returns to 0 | ☐ |
+| 1 | Baseline `make validate` exits 0 | ☑ |
+| 2 | Missing `name` field → non-zero exit + error mentioning `name` | ☑ |
+| 3 | Invalid agent `id` → non-zero exit + error mentioning `id` | ☑ |
+| 4 | Invalid `type` value → non-zero exit + error mentioning `type` | ☑ |
+| 5 | YAML syntax error → non-zero exit + parse error | ☑ |
+| Teardown | Config restored, `make validate` returns to 0 | ☑ |
 
 ---
 
@@ -222,7 +222,7 @@ The exit code is still non-zero.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 5 mutation steps pass. Step 2: `'name' is a required property`. Step 3: `does not match '^[a-z0-9][a-z0-9-]*[a-z0-9]$'`. Step 4: `'unknown' is not one of ['task', 'persona']`. Step 5: YAML parse error, line + column cited. Teardown: config restored, exit 0. |
 
 ---
 

@@ -76,8 +76,17 @@ autonomy:
 **Action**: In a dedicated terminal, start the `sarah-chen` persona agent and capture its output:
 
 ```bash
-make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
+PYTHONPATH="agents/generated" make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
 ```
+
+> **Fix (2026-04-18 code issue)**: `make run-agent` without `PYTHONPATH=agents/generated` fails
+> immediately with `ModuleNotFoundError: No module named 'task_pb2'`. The Makefile target does not
+> set `PYTHONPATH`. See MT-AGENT-001 Notes for the root cause.
+>
+> Additionally, if port 50051 (the default agent gRPC port) is already in use by another process,
+> the agent prints `Failed to bind gRPC server to 127.0.0.1:50051`. Pass `--port 50055` (or any
+> free port) to `make run-agent` in that case:
+> `PYTHONPATH="agents/generated" python3 -m persatrix_agents.server --agent sarah-chen --port 50055`
 
 **Expected Result**: Agent starts without errors; gRPC server binds successfully.
 
@@ -185,7 +194,7 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 startup verified with `PYTHONPATH=agents/generated --port 50055`. Agent starts; gRPC binds; tick scheduler and FTS5 log lines confirmed. Steps 2–5 (tick fires, idle, graceful shutdown) not exercised — require `ANTHROPIC_API_KEY`. Code issue: `make run-agent` fails without PYTHONPATH; port 50051 occupied in test environment. |
 
 ---
 

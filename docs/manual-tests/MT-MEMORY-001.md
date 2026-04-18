@@ -92,19 +92,21 @@ EOF
 **Expected Result**: Three episodes stored; database closed without error.
 
 **Verification**:
-- [ ] Script exits 0
-- [ ] Three "Stored episode N: <uuid>" lines printed
-- [ ] File `data/mt-memory-001.db` exists on disk: `ls -lh data/mt-memory-001.db`
+- [x] Script exits 0
+- [x] Three "Stored episode N: <uuid>" lines printed
+- [x] File `data/mt-memory-001.db` exists on disk: `ls -lh data/mt-memory-001.db`
 
 ---
 
 ### Step 2: Confirm FTS5 Availability
 
-**Action**: Check the agent startup log or the script output from Step 1 for the FTS5 notice:
+**Action**: Check the agent startup log or the script output from Step 1 for the FTS5 notice.
+The message is logged at INFO level, so `logging.basicConfig()` must be configured:
 
 ```bash
 python3 -c "
-import asyncio
+import asyncio, logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s %(message)s')
 from persatrix_agents.memory.episodic import EpisodicMemory
 async def main():
     m = EpisodicMemory('probe', db_path='data/mt-memory-001.db')
@@ -114,13 +116,17 @@ asyncio.run(main())
 " 2>&1 | grep -i fts5
 ```
 
+> **Fix (2026-04-18)**: The original script omitted `logging.basicConfig()`, so the INFO-level
+> FTS5 message was silently suppressed. The `grep` returned exit 1 with no output. Adding
+> `logging.basicConfig(level=logging.INFO)` makes the message visible.
+
 **Expected Result**: One of:
 - `"FTS5 enabled for episodic memory"` — full-text search active.
 - `"FTS5 not available — falling back to LIKE-based queries"` — fallback mode; recall still works.
 
 **Verification**:
-- [ ] One of the two messages above is present (or neither, if the message goes to a log file)
-- [ ] Script exits 0
+- [x] One of the two messages above is present (or neither, if the message goes to a log file)
+- [x] Script exits 0
 
 ---
 
@@ -153,9 +159,9 @@ EOF
 **Expected Result**: All three episodes from Step 1 are returned.
 
 **Verification**:
-- [ ] `"Recalled 3 episode(s)"` printed
-- [ ] All three summaries (`"Resolved critical issue #1/2/3 in the pipeline"`) present
-- [ ] Episodes ordered by relevance score (most important / most relevant first)
+- [x] `"Recalled 3 episode(s)"` printed
+- [x] All three summaries (`"Resolved critical issue #1/2/3 in the pipeline"`) present
+- [x] Episodes ordered by relevance score (most important / most relevant first)
 
 ---
 
@@ -168,7 +174,7 @@ rm data/mt-memory-001.db
 ```
 
 **Verification**:
-- [ ] File removed
+- [x] File removed
 
 ---
 
@@ -176,10 +182,10 @@ rm data/mt-memory-001.db
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Three episodes stored; DB file created | ☐ |
-| 2 | FTS5 status logged; no error | ☐ |
-| 3 | All three episodes recalled after re-open | ☐ |
-| 4 | Test DB cleaned up | ☐ |
+| 1 | Three episodes stored; DB file created | ☑ |
+| 2 | FTS5 status logged; no error | ☑ |
+| 3 | All three episodes recalled after re-open | ☑ |
+| 4 | Test DB cleaned up | ☑ |
 
 ---
 
@@ -198,7 +204,7 @@ episodes are still returned (lower ranking fidelity is acceptable for this test)
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 4 steps pass. FTS5 enabled. Three episodes stored, recalled in importance order (#3 first). Doc fix: Step 2 script required `logging.basicConfig()` to surface the INFO-level FTS5 message. |
 
 ---
 

@@ -66,7 +66,7 @@ python3 - <<'EOF'
 import asyncio, logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-from persatrix_agents.memory.working import WorkingMemory
+from persatrix_agents.memory.working import WorkingMemory, ContextSection
 from persatrix_agents.llm_client import LLMClient
 
 # Use a small threshold to trigger compression without adding 100 k tokens.
@@ -77,12 +77,14 @@ async def main():
     # Approximately 300 tokens each (chars / 4 ≈ 300)
     filler = "The quick brown fox jumps over the lazy dog. " * 27  # ~300 tokens
 
-    mem.set_section("history",    filler, priority=1)
-    mem.set_section("recent",     filler, priority=2)
-    mem.set_section("background", filler, priority=3)
-    mem.set_section("goals",      filler, priority=4)
+    for name, priority in [("history", 1), ("recent", 2), ("background", 3), ("goals", 4)]:
+        token_count = len(filler) // 4
+        mem.add_section(ContextSection(
+            name=name, content=filler, priority=priority,
+            token_count=token_count, compressible=True,
+        ))
 
-    total = sum(len(s.content) // 4 for s in mem._sections.values())
+    total = mem.total_tokens()
     print(f"Total estimated tokens before compression: {total}")
     assert total > MAX_TOKENS, "Pre-condition: content must exceed threshold"
 
@@ -98,12 +100,19 @@ async def main():
     client = LLMClient()  # reads ANTHROPIC_API_KEY from environment
     await mem.compress_if_needed(client)
 
-    total_after = sum(len(s.content) // 4 for s in mem._sections.values())
+    total_after = mem.total_tokens()
     print(f"Total estimated tokens after compression: {total_after}")
 
 asyncio.run(main())
 EOF
 ```
+
+> **Fix (2026-04-18)**: Three API errors in the original script:
+> 1. `mem.set_section(name, content, priority=N)` does not exist — use
+>    `mem.add_section(ContextSection(name=..., content=..., priority=..., token_count=..., compressible=True))`.
+> 2. `mem._sections.values()` is wrong — `_sections` is a `list`, not a dict. Use
+>    `mem.total_tokens()` instead of manually summing.
+> 3. `ContextSection` must be imported from `persatrix_agents.memory.working`.
 
 **Expected Result**: Compression fires; total tokens after is lower than before.
 
@@ -141,11 +150,14 @@ python3 <the script above> 2>&1 | grep -E "Compression|Compressed|section"
 Add to the script from Step 1 (after `await mem.compress_if_needed(client)`):
 
 ```python
-    for name, section in mem._sections.items():
-        assert len(section.content) > 0, f"Section '{name}' has empty content after compression"
-        print(f"Section '{name}': {len(section.content)} chars remaining")
+    for section in mem._sections:
+        assert len(section.content) > 0, f"Section '{section.name}' has empty content after compression"
+        print(f"Section '{section.name}': {len(section.content)} chars remaining")
     print("PASS")
 ```
+
+> **Fix (2026-04-18)**: `mem._sections` is a `list[ContextSection]`, not a dict.
+> Iterate it directly; access the name via `section.name`.
 
 **Expected Result**: All sections retain non-empty content.
 
@@ -153,15 +165,18 @@ Add to the script from Step 1 (after `await mem.compress_if_needed(client)`):
 - [ ] Each section reports a positive char count
 - [ ] Script prints `"PASS"`
 
+> **Note**: Steps 2 and 3 require `ANTHROPIC_API_KEY` and cannot be fully verified without it.
+> Step 1 (threshold detection) was verified without an API key (total 1 212 tokens > 1 000 limit).
+
 ---
 
 ## Expected Results Summary
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Compression triggered; token count reduced | ☐ |
-| 2 | Compression log lines present; no failure warnings | ☐ |
-| 3 | All sections retain non-empty content | ☐ |
+| 1 | Compression triggered; token count reduced | ☑ (threshold detection only; LLM call skipped — no API key) |
+| 2 | Compression log lines present; no failure warnings | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 3 | All sections retain non-empty content | ☐ (requires `ANTHROPIC_API_KEY`) |
 
 ---
 
@@ -187,7 +202,7 @@ still triggers correctly (conservative token estimates may cause earlier-than-ne
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 (threshold detection): 1 212 tokens > 1 000 limit, PASS. Steps 2–3 require `ANTHROPIC_API_KEY` (not set). Doc fixes: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`, `_sections.items()` → iterate list directly. |
 
 ---
 

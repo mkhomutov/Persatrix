@@ -73,8 +73,14 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
      "message" is NOT a field on that struct — a previous version of this doc had the wrong key. -->
 
 **Verification**:
-- [ ] HTTP 200 → cost tracking enabled; proceed to Step 2.
+- [x] HTTP 200 → cost tracking enabled; proceed to Step 2.
 - [ ] HTTP 503 → cost tracking not configured; check orchestrator startup config and re-run.
+
+> **Note (2026-04-18)**: The default orchestrator started by `make run` returns HTTP 200 with cost
+> tracking enabled (`globalDailyBudget: 100`, `perWorkflowBudget: 10`). The 200 response shape is
+> `{"daily_input_tokens":0,"daily_output_tokens":0,"daily_estimated_usd":0,"top_agents":[],"reported_at":"..."}`.
+> Steps 2–4 require `ANTHROPIC_API_KEY` and live agents; those steps could not be executed in
+> this run (no agents registered, no API key set).
 
 ---
 
@@ -168,4 +174,4 @@ No panic or 500 error.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1: HTTP 200 with cost summary structure confirmed (all fields present, counts zero). Steps 2–4 skipped — require live agents and `ANTHROPIC_API_KEY`. |

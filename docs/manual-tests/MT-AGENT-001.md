@@ -91,9 +91,14 @@ Run from the repo root. If this fails, run `make build-agents` first.
 **Action**:
 
 ```bash
-python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_tool_use \
+PYTHONPATH="agents/generated" python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_tool_use \
   -v --tb=short -c agents/pyproject.toml
 ```
+
+> **Note (2026-04-18 code issue)**: `PYTHONPATH=agents/generated` is required. The protoc-generated
+> `*_grpc.py` files use bare `import task_pb2` (not a relative import), which fails unless
+> `agents/generated/` is in `sys.path`. This also affects `make test-integration` and
+> `make run-agent`. See [code issue log](#notes) for details.
 
 **Expected Result**: The test passes. Output includes `PASSED`.
 
@@ -143,7 +148,7 @@ grep -n "COMPLETED\|tool_calls" tests/integration/test_agent_server.py
 **Action**: Run all tests in the class to confirm no regressions across all execution paths:
 
 ```bash
-python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution \
+PYTHONPATH="agents/generated" python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution \
   -v --tb=short -c agents/pyproject.toml
 ```
 
@@ -160,7 +165,7 @@ python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution 
 **Action**: Run the full integration file including `TestEmptyModelGuard`:
 
 ```bash
-python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents/pyproject.toml
+PYTHONPATH="agents/generated" python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents/pyproject.toml
 ```
 
 **Expected Result**: All tests pass, including `TestEmptyModelGuard::test_empty_model_raises_system_exit`.
@@ -207,6 +212,7 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | All 7 tests in `test_agent_server.py` passed. Step 1 initially emitted tool-annotation warnings; fixed in `agents/tools/registry.py` by resolving postponed annotations via `get_type_hints()`. Import is now clean. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Re-verified all 7 tests pass with `PYTHONPATH=agents/generated`. Without it, collection fails with `ModuleNotFoundError: No module named 'task_pb2'` (code issue — see Notes). |
 
 ---
 
@@ -217,3 +223,9 @@ python3 -m pytest tests/integration/test_agent_server.py -v --tb=short -c agents
   `agents/tools/builtin.py`. In the integration test, a lightweight mock replaces the real
   filesystem write; permission enforcement is still exercised through the tool registry.
 - To run all Python tests at once (unit + integration): `make test-python`.
+- **Code issue (2026-04-18)**: `make test-integration` and `make run-agent` both fail with
+  `ModuleNotFoundError: No module named 'task_pb2'` unless `PYTHONPATH=agents/generated` is set.
+  Root cause: protoc-generated `*_grpc.py` files use a bare `import task_pb2` (not a relative
+  import), which requires `agents/generated/` to be on the Python path. The Makefile does not
+  set this. Workaround: prefix commands with `PYTHONPATH="agents/generated"` or add
+  `agents/generated/` to a `conftest.py` `sys.path` insert.
