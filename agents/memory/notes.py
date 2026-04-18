@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 import uuid
@@ -37,6 +38,12 @@ class Note:
     created_at: float = 0.0
     updated_at: float = 0.0
 
+
+# FTS5 MATCH operator characters that cause parse errors when present in
+# freeform (LLM-generated) queries. Colons are the most critical: FTS5
+# interprets "word:phrase" as a column filter, failing with "no such column"
+# when the word isn't a declared FTS5 column (e.g. "tick: scheduler").
+_FTS5_SPECIAL = re.compile(r'[":*^()]+')
 
 # Maximum content size for a single note (10 KB).
 _MAX_NOTE_CONTENT_BYTES = 10_240
@@ -231,6 +238,9 @@ class NoteStore:
         limit: int,
     ) -> list[aiosqlite.Row]:
         """FTS5 search across topic, content, and tags."""
+        safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
+        if not safe_query:
+            return await self._recall_notes_like(query, limit)
         try:
             async with self._db.execute(
                 f"""
@@ -242,13 +252,14 @@ class NoteStore:
                 ORDER BY fts.rank * -1 DESC
                 LIMIT ?
                 """,
-                (query, self._agent_id, limit),
+                (safe_query, self._agent_id, limit),
             ) as cursor:
                 return await cursor.fetchall()
         except sqlite3.OperationalError as exc:
             logger.warning(
-                "Notes FTS5 query failed for %r, falling back to LIKE: %s",
+                "Notes FTS5 query failed for %r (sanitized: %r), falling back to LIKE: %s",
                 query,
+                safe_query,
                 exc,
             )
             return await self._recall_notes_like(query, limit)

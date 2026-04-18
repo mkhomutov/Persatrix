@@ -20,8 +20,9 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .dispatch import EventDispatcher
-from .generated import task_pb2, task_pb2_grpc
+from .generated import agent_message_pb2, agent_message_pb2_grpc, task_pb2, task_pb2_grpc
 from .persona_runtime import _LLMPersonaAgent
+from .persona_types import AgentEvent, EventType
 from .server_persona import (
     initialize_persona_agents,
     load_agent,
@@ -150,6 +151,56 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         context.set_details("Streaming execution not implemented in v0.1")
 
 
+# ─── ChannelServiceServicer ──────────────────────────────────
+
+
+class ChannelServiceServicer(agent_message_pb2_grpc.ChannelServiceServicer):
+    """Receives inbound AgentMessage and routes it to persona agents.
+
+    Routes to agents listed in ``mentions``; if empty, broadcasts to all
+    agents on this server. Returns delivered=True as soon as the event is
+    queued — LLM processing happens asynchronously via the EventDispatcher.
+    """
+
+    def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher) -> None:
+        self._agents = agents
+        self._dispatcher = dispatcher
+
+    async def SendMessage(
+        self,
+        request: agent_message_pb2.AgentMessage,
+        context: grpc.aio.ServicerContext,
+    ) -> agent_message_pb2.SendMessageResponse:
+        targets = list(request.mentions) if request.mentions else list(self._agents.keys())
+        if not targets:
+            return agent_message_pb2.SendMessageResponse(
+                message_id=request.message_id,
+                delivered=False,
+            )
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": request.content, "channel_id": request.channel_id},
+            channel_id=request.channel_id or None,
+            sender_id=request.sender_id or None,
+            message_id=request.message_id or None,
+        )
+        for target_id in targets:
+            asyncio.create_task(self._dispatcher.dispatch(target_id, event))
+        return agent_message_pb2.SendMessageResponse(
+            message_id=request.message_id,
+            delivered=True,
+        )
+
+    async def Subscribe(
+        self,
+        request: agent_message_pb2.SubscribeRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> None:
+        # TODO(v0.3): implement server-side streaming channel subscriptions
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Channel subscriptions not yet implemented")
+
+
 # ─── AgentServer ─────────────────────────────────────────────
 
 
@@ -199,6 +250,10 @@ class AgentServer:
         self._server = grpc.aio.server()
         servicer = AgentServiceServicer(self.agents)
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, self._server)
+        channel_servicer = ChannelServiceServicer(self.agents, self._dispatcher)
+        agent_message_pb2_grpc.add_ChannelServiceServicer_to_server(
+            channel_servicer, self._server
+        )
 
         bind_address = f"{self.host}:{self.port}"
         # TODO(security): enable TLS for production gRPC
