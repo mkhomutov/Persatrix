@@ -166,10 +166,15 @@ logic is server-side.
 **gRPC/protobuf** (`proto/`) is the cross-language contract. Changes go through
 an RFC.
 
-For the full set of architecture diagrams — system overview, persona runtime
-loop, memory tiers, workflow execution — see [docs/diagrams/](docs/diagrams/)
-(Mermaid source embedded in `.md` files; render in-place in any Mermaid-aware
-viewer such as GitHub or VS Code).
+For architecture diagrams — see [docs/diagrams/](docs/diagrams/) for the
+full index:
+[system overview](docs/diagrams/system-overview.md),
+[component architecture](docs/diagrams/component-architecture.md),
+[workflow execution](docs/diagrams/workflow-execution.md),
+[persona runtime](docs/diagrams/persona-runtime.md), and
+[memory architecture](docs/diagrams/memory-architecture.md)
+(Mermaid source embedded in `.md` files; renders in any Mermaid-aware viewer
+such as GitHub or VS Code).
 
 ## Project Structure
 
@@ -222,7 +227,7 @@ completion.
 - [Roadmap & Progress](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 - [Persona agents & memory guide](docs/guides/persona-agents.md) — declaring personas, memory tiers, cost budgets
-- [Architecture diagrams](docs/diagrams/)
+- [Architecture diagrams](docs/diagrams/README.md) — system, components, workflow, persona runtime, memory tiers
 - [Manual test suite](docs/manual-tests/README.md)
 - [RFCs](docs/rfcs/README.md) — engineering design docs
 - [Development workflow](docs/development-workflow.md)

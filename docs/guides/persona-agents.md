@@ -369,4 +369,6 @@ is visible through the workflow-run APIs and OTEL spans
   [docs/manual-tests/README.md](../manual-tests/README.md) — in particular the
   `MT-PERSONA-*`, `MT-MEMORY-*`, and `MT-COST-*` suites.
 - **Architecture diagrams** for persona runtime and memory tier interaction:
-  [docs/diagrams/](../diagrams/).
+  [docs/diagrams/persona-runtime.md](../diagrams/persona-runtime.md) and
+  [docs/diagrams/memory-architecture.md](../diagrams/memory-architecture.md)
+  (see [docs/diagrams/README.md](../diagrams/README.md) for the full index).
