@@ -62,6 +62,7 @@ The repository ships with `sarah-chen`, a "VP of Engineering" persona
       expressiveness: reserved     # reserved | moderate | expressive
     quirks:
       - "Starts every Monday with 'Alright, what's on fire?'"
+      - "Hates meetings longer than 30 minutes"
     goals:
       primary: "Ship v2.0 on time with acceptable quality"
       secondary: ["Reduce tech debt by 20%"]
@@ -148,7 +149,12 @@ a decision or interaction, and `recall(query, limit=10, min_importance=0.0)`
 to retrieve ranked matches.
 
 - **Ranking** uses FTS5 BM25 combined with `importance × access_count × recency`
-  when FTS5 is available, falling back to LIKE or recency alone otherwise
+  when both a query string and FTS5 are available. If the query syntax is
+  malformed (`recall_fts5` raises) the code falls back to a LIKE search
+  with the same `importance × access_count × recency` ordering; if FTS5 is
+  unavailable on the SQLite build, LIKE is used directly; and when no
+  query string is supplied, the ordering is `importance × access_count ×
+  recency` alone via `recall_recency`
   ([agents/memory/episodic_queries.py:103–191](../../agents/memory/episodic_queries.py#L103-L191)).
 - **Retention**: `memory.episodic.retention_days` (default 90) applies to
   compressed episodes only. Raw (uncompressed) episodes are preserved until
@@ -189,14 +195,24 @@ longer) and a rough `token_count`.
   lowest-priority end once cumulative tokens exceed `max_tokens`
   ([agents/memory/working.py:99–136](../../agents/memory/working.py#L99-L136)).
 - `compress_if_needed(llm_client)` kicks in when the buffer overflows.
-  It picks the lowest-priority compressible section, asks Claude Haiku to
-  summarise it, and only keeps the summary if it is strictly shorter than
-  the original (guards against the model producing longer output)
+  It walks compressible sections in ascending-priority order and asks
+  Claude Haiku to summarise each one, stopping as soon as the total fits
+  within `max_tokens`. A replacement is only kept if the summary is
+  strictly shorter than the original, which guards against a model
+  producing longer output and prevents retry loops
   ([agents/memory/working.py:160–245](../../agents/memory/working.py#L160-L245)).
 
-Typical priorities used by the runtime: system prompt = 100, persona
-description = 90, relationship context = 8, episodic recall = 7, notes = 6,
-conversation = 5.
+Priorities used by the runtime for the `ContextSection` entries injected
+into working memory: relationship context = 8, episodic recall = 7, notes
+= 6
+([agents/persona_runtime/memory_context.py:185,233,274](../../agents/persona_runtime/memory_context.py#L185)).
+The system prompt and persona description are assembled as a plain string
+by `_build_system_prompt()` in
+[action_loop.py:327–345](../../agents/persona_runtime/action_loop.py#L327-L345)
+and concatenated with the retrieved memory sections before the LLM call —
+they are not stored as `ContextSection` objects and therefore do not
+appear in the priority ordering above. User events are passed as a
+separate `messages` list and are likewise outside working memory.
 
 ### A minimal walkthrough
 
@@ -272,7 +288,7 @@ cost:
     global:
       max_daily_usd: 100.00
       alert_at_percent: [50, 80, 95]
-      on_exceed: "pause_and_alert"
+      on_exceed: "pause_and_alert"   # NOTE: placeholder in v0.2 — currently logged and treated as "fail"
     per_workflow:
       default_max_usd: 10.00
     per_agent:
@@ -286,12 +302,20 @@ snapshot to avoid torn reads; if any scope would be exceeded the dispatch is
 rejected **before** the LLM is called
 ([internal/cost/cost.go:260–336](../../internal/cost/cost.go#L260-L336)).
 
-A rejection surfaces as an HTTP 429 with a structured body identifying
-which scope failed:
+A rejection today causes the workflow step to fail with
+`ErrBudgetExceeded`. The failure is visible in the step status
+([internal/scheduler/stage_runner.go:152–158](../../internal/scheduler/stage_runner.go#L152-L158))
+and on the OTEL span (`span.RecordError` + `codes.Error`). The
+`BudgetError` struct carries the offending scope plus spent / limit /
+estimated-cost numbers — for example:
 
-```json
-{"scope": "global", "spent": 87.50, "limit": 100.00, "estimated": 25.00}
+```text
+global budget exceeded: spent=87.500000, limit=100.000000, estimated=25.000000
 ```
+
+A structured HTTP 429 response to REST clients is planned but not yet
+wired; the mapping is deferred to a follow-up PR noted in
+[internal/scheduler/budget.go:21](../../internal/scheduler/budget.go#L21).
 
 ### Reading cost — `GET /api/v1/cost/summary`
 
