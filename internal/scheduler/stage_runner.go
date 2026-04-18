@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
@@ -75,6 +78,16 @@ func (s *WorkflowScheduler) executeStep(
 	vars map[string]string,
 	mu *sync.Mutex,
 ) (string, error) {
+	ctx, span := schedulerTracer.Start(ctx, "workflow.step",
+		trace.WithAttributes(
+			attribute.String("persatrix.run_id", runID),
+			attribute.String("persatrix.workflow_id", workflowID),
+			attribute.String("persatrix.step_id", step.ID),
+			attribute.String("persatrix.agent_id", step.AgentID),
+		),
+	)
+	defer span.End()
+
 	// Track start time locally so subsequent UpdateStepState calls (which do
 	// full replacement) preserve the value. See state.InMemoryStore.UpdateStepState.
 	startedAt := time.Now()
@@ -103,6 +116,8 @@ func (s *WorkflowScheduler) executeStep(
 
 	resolved, err := planner.ResolveInputs(step, outputsCopy, vars, s.logger)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
@@ -136,6 +151,8 @@ func (s *WorkflowScheduler) executeStep(
 		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, registryModel, int64(limits.MaxTokens))
 		if budgetResult.Decision == cost.BudgetReject {
 			err := fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetResult.Error)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 			return "", err
 		}
@@ -150,6 +167,8 @@ func (s *WorkflowScheduler) executeStep(
 		Cacheable:  step.Cacheable,
 	})
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 		return "", err
 	}
@@ -168,6 +187,13 @@ func (s *WorkflowScheduler) executeStep(
 		zap.Int64("wallTimeMs", metadata.WallTimeMs),
 		zap.Float64("estimatedCostUSD", metadata.EstimatedCostUSD),
 	)
+	span.SetAttributes(
+		attribute.String("persatrix.status", state.RunCompleted.String()),
+		attribute.Int("persatrix.tokens_used", metadata.TokensUsed),
+		attribute.Int("persatrix.retry_count", metadata.RetryCount),
+		attribute.Int64("persatrix.wall_time_ms", metadata.WallTimeMs),
+	)
+	span.SetStatus(codes.Ok, "completed")
 
 	// Mark step as completed.
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{

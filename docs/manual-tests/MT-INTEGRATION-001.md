@@ -157,7 +157,7 @@ echo "Final status: $STATUS"
 http://127.0.0.1:16686
 ```
 
-Select service `persatrix-orchestrator` (or the configured service name) and search for recent
+Select service `persatrix-server` (or the configured service name) and search for recent
 traces.
 
 **Expected Result**: At least one trace present corresponding to the workflow run in Step 4.

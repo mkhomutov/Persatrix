@@ -10,9 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
+	grpcodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
@@ -21,6 +25,8 @@ import (
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
+
+var executorTracer = otel.Tracer("persatrix/executor")
 
 // DeadlineMode controls how per-dispatch RPC timeouts are computed.
 type DeadlineMode string
@@ -197,6 +203,14 @@ func NewGRPCExecutor(reg registry.Registry, logger *zap.Logger, opts ...Option) 
 // MinRetryBudgetFraction of the original time or token budget remains, the retry
 // is skipped. In static mode, each attempt gets the per-executor timeout.
 func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error) {
+	ctx, span := executorTracer.Start(ctx, "agent.dispatch",
+		trace.WithAttributes(
+			attribute.String("persatrix.workflow_id", req.WorkflowID),
+			attribute.String("persatrix.agent_id", req.AgentID),
+		),
+	)
+	defer span.End()
+
 	// Check cache for cacheable steps before any network I/O.
 	if req.Cacheable && e.cache != nil {
 		cacheKey := cost.CacheKey(req.AgentID, req.Payload, req.Context)
@@ -217,14 +231,21 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	agent, err := e.registry.Get(ctx, req.AgentID)
 	if err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, req.AgentID)
 		}
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
 		return nil, fmt.Errorf("registry lookup: %w", err)
 	}
 
 	// Check agent health before dialing.
 	if agent.Status != registry.StatusHealthy {
-		return nil, fmt.Errorf("%w: agent %s status is %s", ErrAgentNotReady, req.AgentID, agent.Status)
+		err := fmt.Errorf("%w: agent %s status is %s", ErrAgentNotReady, req.AgentID, agent.Status)
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return nil, err
 	}
 
 	// Generate task ID if not provided.
@@ -232,6 +253,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	if taskID == "" {
 		taskID = uuid.New().String()
 	}
+	span.SetAttributes(attribute.String("persatrix.task_id", taskID))
 
 	// Build gRPC request.
 	// F-02: Clamp int → int32 casts to prevent silent wraparound to negative
@@ -361,6 +383,13 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 				})
 			}
 
+			span.SetAttributes(
+				attribute.Int("persatrix.retry_count", attempt),
+				attribute.Int64("persatrix.wall_time_ms", wallTimeMs),
+				attribute.Bool("persatrix.cache_hit", result.CacheHit),
+			)
+			span.SetStatus(otelcodes.Ok, "dispatched")
+
 			return result, nil
 		}
 
@@ -373,6 +402,8 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 
 		// Don't retry on non-transient errors or if retries exhausted.
 		if !isTransient(err) {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return nil, fmt.Errorf("permanent failure dispatching to agent %s: %w", req.AgentID, err)
 		}
 
@@ -402,11 +433,17 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			span.RecordError(ctx.Err())
+			span.SetStatus(otelcodes.Error, ctx.Err().Error())
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
 	}
 
+	if lastErr != nil {
+		span.RecordError(lastErr)
+		span.SetStatus(otelcodes.Error, lastErr.Error())
+	}
 	return nil, fmt.Errorf("retries exhausted (%d attempts) for agent %s: %w", e.maxRetries+1, req.AgentID, lastErr)
 }
 
@@ -508,7 +545,7 @@ func isTransient(err error) bool {
 	}
 
 	switch st.Code() {
-	case codes.Unavailable, codes.ResourceExhausted, codes.Aborted:
+	case grpcodes.Unavailable, grpcodes.ResourceExhausted, grpcodes.Aborted:
 		return true
 	default:
 		return false

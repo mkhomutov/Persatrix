@@ -14,6 +14,10 @@
 **Purpose**: Verify that a valid YAML workflow can be submitted via the REST API and polled until it
 reaches a terminal status (`completed` or `failed`).
 
+This test supports two execution modes:
+- API terminal-state mode: validates REST + state transitions only. A final `failed` status is acceptable.
+- End-to-end success mode: validates full workflow execution and requires all workflow agents to be registered.
+
 **Scope**: `POST /api/v1/workflows/run` submission, `GET /api/v1/workflows/{id}/status` polling,
 response envelope shape, and workflow state transitions.
 
@@ -52,13 +56,16 @@ response envelope shape, and workflow state transitions.
 - ☐ Orchestrator built: `make build`
 - ☐ Orchestrator running: `make run` (binds to `127.0.0.1:8080`)
 - ☐ Config valid: `make validate` exits 0
-- ☐ At least one Python agent registered (see Step 1)
+
+**Agent Requirements (choose one mode)**:
+- ☐ API terminal-state mode: no agents required (a terminal `failed` run is valid for this test)
+- ☐ End-to-end success mode: all workflow agents are registered: `planner`, `code-writer`, `code-reviewer`
 
 ### Test Data
 
 **Fixtures Used**:
 - `workflows/feature-builder.yaml` — pre-existing workflow definition loaded by the orchestrator
-  from `config/` at startup
+  from `workflows/` at startup (`--workflows-dir`)
 - Input payload: `{"workflow_id": "feature-builder", "inputs": {"user_request": "Add hello-world endpoint"}}`
 
 ---
@@ -75,6 +82,14 @@ make run
 
 In a second terminal, confirm it is healthy:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s http://127.0.0.1:8080/healthz
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
 curl -s http://127.0.0.1:8080/healthz
 ```
@@ -85,11 +100,33 @@ curl -s http://127.0.0.1:8080/healthz
 - [ ] `curl` exits 0
 - [ ] Response body confirms server is healthy
 
+Optional agent check:
+
+```powershell
+curl.exe -s http://127.0.0.1:8080/api/v1/agents | python -m json.tool
+```
+
+For end-to-end success mode, ensure this list includes all of:
+- `planner`
+- `code-writer`
+- `code-reviewer`
+
 ---
 
 ### Step 2: Submit the Workflow
 
 **Action**: POST the workflow run request:
+
+**Windows PowerShell**:
+
+```bash
+curl.exe -s -w "`nHTTP %{http_code}`n" `
+  -X POST "http://127.0.0.1:8080/api/v1/workflows/run" `
+  -H "Content-Type: application/json" `
+  -d '{"workflow_id":"feature-builder","inputs":{"user_request":"Add hello-world endpoint"}}'
+```
+
+**macOS/Linux (bash/zsh)**:
 
 ```bash
 curl -s -w "\nHTTP %{http_code}\n" \
@@ -120,6 +157,49 @@ Note the `run_id` value for the next steps.
 **Action**: Replace `<RUN_ID>` with the value from Step 2, then poll at ~2-second intervals.
 The loop aborts with a timeout message after 180 s so it cannot run indefinitely if the
 orchestrator stalls.
+
+**Quick status check (single request)**:
+
+**Windows PowerShell**:
+
+```powershell
+$RUN_ID = "<RUN_ID>"
+curl.exe -s "http://127.0.0.1:8080/api/v1/workflows/$RUN_ID/status" | ConvertFrom-Json | ConvertTo-Json -Depth 10
+```
+
+**macOS/Linux (bash/zsh)**:
+
+```bash
+RUN_ID=<RUN_ID>
+curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m json.tool
+```
+
+**Continuous polling until terminal**:
+
+**Windows PowerShell**:
+
+```powershell
+$RUN_ID = "<RUN_ID>"
+$TIMEOUT = 180
+$ELAPSED = 0
+$STATUS = ""
+while ($ELAPSED -lt $TIMEOUT) {
+  $RESP = curl.exe -s "http://127.0.0.1:8080/api/v1/workflows/$RUN_ID/status"
+  $STATUS = ($RESP | ConvertFrom-Json).status
+  Write-Host "$(Get-Date -Format HH:mm:ss) status=$STATUS"
+  if ($STATUS -eq "completed" -or $STATUS -eq "failed") {
+    $RESP
+    break
+  }
+  Start-Sleep -Seconds 2
+  $ELAPSED += 2
+}
+if ($STATUS -ne "completed" -and $STATUS -ne "failed") {
+  Write-Error "TIMEOUT: run did not reach terminal state in ${TIMEOUT}s"
+}
+```
+
+**macOS/Linux (bash/zsh)**:
 
 ```bash
 RUN_ID=<RUN_ID>
@@ -153,6 +233,14 @@ terminal transition itself is under test here.
 
 **Action**: Fetch the final status once more and pretty-print it:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s "http://127.0.0.1:8080/api/v1/workflows/$RUN_ID/status" | python -m json.tool
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
 curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m json.tool
 ```
@@ -179,6 +267,14 @@ curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m jso
 ### Step 5: Verify the Run Appears in the List Endpoint
 
 **Action**:
+
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s http://127.0.0.1:8080/api/v1/workflows | python -m json.tool
+```
+
+**macOS/Linux (bash/zsh)**:
 
 ```bash
 curl -s http://127.0.0.1:8080/api/v1/workflows | python3 -m json.tool
