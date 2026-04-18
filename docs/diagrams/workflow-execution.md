@@ -72,9 +72,14 @@ The planner resolves these references at stage-entry time, after all
 
 ## Retry semantics
 
-Retries happen inside the **Executor** (not the Scheduler). An individual step
-may retry with backoff on transient gRPC or LLM errors before surfacing failure
-to the scheduler. Retry counts are folded into the step's cost metadata.
+Retry **policy** lives inside the `Executor` — it owns the backoff loop for
+transient gRPC and LLM errors and only surfaces failure to the `Scheduler`
+once the attempts are exhausted ([internal/executor/executor.go:369](../../internal/executor/executor.go#L369)
+sets `result.RetryCount = attempt`). The `Scheduler` still consumes that count
+when it folds step results into cost metadata and span attributes
+([internal/scheduler/stage_runner.go:192](../../internal/scheduler/stage_runner.go#L192),
+[internal/scheduler/budget.go:236](../../internal/scheduler/budget.go#L236)) —
+so the retry is invisible to scheduling, but the *outcome* is not.
 
 ## What v0.2 added on this path
 

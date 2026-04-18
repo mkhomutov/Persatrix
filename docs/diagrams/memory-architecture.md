@@ -63,8 +63,15 @@ On every LLM call, `memory_context.py` composes the system prompt by layering
 4. Selected notes (if referenced by the event/goal).
 5. Working memory (most recent turns, priority-weighted).
 
-If the assembled context exceeds the model's window, `working.py` runs
-automatic summarization on the lowest-priority sections.
+The list above is the **textual layering** (the order sections appear in the
+assembled prompt), not the eviction ranking. Each section is tagged with a
+numeric `priority` (see [persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py):
+relationship=8, episodic=7, notes=6; persona identity and working memory sit
+higher still). When the assembled context exceeds the model's window,
+`working.py` summarizes sections in **ascending priority order** (lowest first),
+so the list position above does not predict what gets dropped — the numeric
+priority does. See the [Working memory section of the persona guide](../guides/persona-agents.md#working-memory)
+for the walk-through.
 
 ## Schema & migrations
 
