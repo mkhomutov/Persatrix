@@ -85,7 +85,7 @@ Executed by mkhomutov on Windows 11. All testable tests run from clean state.
 | MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: `get_relationship()` replaced with `get_trust()` / `get_relationship_summary()`. |
 | MT-MEMORY-003 | **Partial** | Step 1 (threshold detection) pass. Steps 2–3 require API key. **Doc fix**: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`. **Code fix**: wrong model name `claude-haiku-4` → `claude-haiku-4-5`; `LLMClient()` requires `LLMClient(AnthropicProvider())`. |
 | MT-PERSONA-001 | **Partial** | Startup log verified with PYTHONPATH fix. Steps 2–5 require API key. **Code issue**: `make run-agent` fails without `PYTHONPATH=agents/generated`; port 50051 may conflict. |
-| MT-PERSONA-002 | **Not run** | Requires live persona + API key. |
+| MT-PERSONA-002 | **Fail** | Step 1 health-check pass (`SERVING`) on `127.0.0.1:50345`; Step 2 fails with gRPC `UNIMPLEMENTED` (`ChannelService/SendMessage` method not registered in agent server). |
 | MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
 
 ---
