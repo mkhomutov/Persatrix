@@ -16,10 +16,13 @@ import pytest
 import yaml
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.generated import task_pb2, task_pb2_grpc
+from agents.dispatch import EventDispatcher
+from agents.generated import agent_message_pb2, task_pb2, task_pb2_grpc
+from agents.persona_types import EventType
 from agents.server import (
     AgentServer,
     AgentServiceServicer,
+    ChannelServiceServicer,
     load_agent,
 )
 from agents.server_persona import _resolve_agent_type
@@ -786,3 +789,143 @@ class TestDuplicateAgentId:
             ])
             with pytest.raises(SystemExit, match="Duplicate agent ID"):
                 load_agent("code-writer", config_path, tmp)
+
+
+# ─── ChannelServiceServicer Tests (MT-PERSONA-002 fix) ───────
+
+
+def _agent_message(**kwargs) -> agent_message_pb2.AgentMessage:
+    defaults = {
+        "message_id": "msg-001",
+        "channel_id": "general",
+        "sender_id": "tester",
+        "content": "Sarah, what is your current focus?",
+    }
+    defaults.update(kwargs)
+    return agent_message_pb2.AgentMessage(**defaults)
+
+
+def _channel_servicer(
+    agents: dict | None = None,
+) -> tuple[ChannelServiceServicer, AsyncMock]:
+    """Return a servicer with a mocked EventDispatcher.dispatch."""
+    agents = agents or {}
+    dispatcher = MagicMock(spec=EventDispatcher)
+    dispatcher.dispatch = AsyncMock(return_value=[])
+    return ChannelServiceServicer(agents, dispatcher), dispatcher.dispatch
+
+
+class TestChannelServiceServicerSendMessage:
+    """Tests for ChannelServiceServicer.SendMessage (MT-PERSONA-002)."""
+
+    async def test_explicit_mentions_dispatches_only_to_those_agents(self):
+        """SendMessage with mentions routes exclusively to the listed agent IDs."""
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        resp = await servicer.SendMessage(
+            _agent_message(mentions=["sarah-chen"]), context
+        )
+        await asyncio.sleep(0)  # let create_task execute
+
+        assert resp.delivered is True
+        assert resp.message_id == "msg-001"
+        dispatch.assert_called_once()
+        target_id, event = dispatch.call_args.args
+        assert target_id == "sarah-chen"
+
+    async def test_no_mentions_broadcasts_to_all_agents(self):
+        """SendMessage without mentions delivers to every agent on the server."""
+        agents = {
+            "agent-a": _StubAgent(agent_id="agent-a", config={"model": "test"}),
+            "agent-b": _StubAgent(agent_id="agent-b", config={"model": "test"}),
+        }
+        servicer, dispatch = _channel_servicer(agents)
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        resp = await servicer.SendMessage(_agent_message(), context)
+        await asyncio.sleep(0)
+
+        assert resp.delivered is True
+        assert dispatch.call_count == 2
+        dispatched_targets = {call.args[0] for call in dispatch.call_args_list}
+        assert dispatched_targets == {"agent-a", "agent-b"}
+
+    async def test_no_agents_returns_not_delivered(self):
+        """SendMessage with an empty agent registry returns delivered=False."""
+        servicer, dispatch = _channel_servicer({})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        resp = await servicer.SendMessage(_agent_message(), context)
+
+        assert resp.delivered is False
+        dispatch.assert_not_called()
+
+    async def test_event_type_is_message_received(self):
+        """Dispatched event must carry EventType.MESSAGE_RECEIVED."""
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        await servicer.SendMessage(
+            _agent_message(mentions=["sarah-chen"]), context
+        )
+        await asyncio.sleep(0)
+
+        _, event = dispatch.call_args.args
+        assert event.event_type == EventType.MESSAGE_RECEIVED
+
+    async def test_event_payload_matches_message_fields(self):
+        """Event payload carries content and channel_id from the AgentMessage."""
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        await servicer.SendMessage(
+            _agent_message(
+                content="what is your focus?",
+                channel_id="engineering",
+                sender_id="tester",
+                message_id="msg-xyz",
+                mentions=["sarah-chen"],
+            ),
+            context,
+        )
+        await asyncio.sleep(0)
+
+        _, event = dispatch.call_args.args
+        assert event.payload["content"] == "what is your focus?"
+        assert event.payload["channel_id"] == "engineering"
+        assert event.sender_id == "tester"
+        assert event.channel_id == "engineering"
+        assert event.message_id == "msg-xyz"
+
+    async def test_response_message_id_echoes_request(self):
+        """SendMessageResponse.message_id must equal the request message_id."""
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer, _ = _channel_servicer({"sarah-chen": stub})
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        resp = await servicer.SendMessage(
+            _agent_message(message_id="custom-id-42", mentions=["sarah-chen"]),
+            context,
+        )
+
+        assert resp.message_id == "custom-id-42"
+
+
+class TestChannelServiceServicerSubscribe:
+    """Tests for ChannelServiceServicer.Subscribe (v0.3 stub)."""
+
+    async def test_subscribe_returns_unimplemented(self):
+        """Subscribe must set UNIMPLEMENTED until v0.3 channel streaming is built."""
+        servicer, _ = _channel_servicer()
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+        request = agent_message_pb2.SubscribeRequest(
+            channel_id="general", agent_id="sarah-chen"
+        )
+
+        await servicer.Subscribe(request, context)
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.UNIMPLEMENTED)
