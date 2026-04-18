@@ -4,59 +4,122 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### ⚠️ Breaking Changes
+- No notable changes yet.
 
-- *(agents)* `max_llm_calls` default for task agents lowered from **10 → 5** (RFC 0006 §B).
-  Agents performing complex multi-tool operations that relied on the 10-call default must set
-  an explicit `max_llm_calls` override in their step config or agent config. A warning is logged
-  when an agent exhausts its LLM call budget (`Max LLM call iterations exceeded`).
+## [0.2.0] - 2026-04-18
+
+### Highlights
+
+- Persona-agent runtime is now part of the core surface for v0.2, including event-driven behavior,
+  autonomous ticks, and integrated memory tools.
+- Memory capabilities now include episodic, relationship, and working tiers with persistence,
+  context-window management, and summarization paths.
+- Workflow execution now includes execution limits, cost tracking, budget enforcement,
+  response caching, and a cost summary API.
+
+### Upgrade Notes
+
+- **Behavior change:** task-agent default `max_llm_calls` is reduced from **10** to **5**.
+  If your workflows relied on the previous default for long tool/LLM loops, set an explicit
+  `max_llm_calls` override in workflow step config or agent config.
+
+### Curated v0.2 Additions (Migrated from Unreleased)
+
+- *(orchestrator)* `TokenCounter` and `BudgetEnforcer` add pre-dispatch budget gating with
+  per-workflow, per-agent, and global daily accounting.
+- *(orchestrator)* LRU response cache for `cacheable: true` steps avoids redundant gRPC dispatch
+  on cache hits.
+- *(server)* `GET /api/v1/cost/summary` reports global daily totals and per-agent spend,
+  and returns `503` when cost tracking is not configured.
+- *(orchestrator)* Step-level execution metadata now includes `tokens_used`, `llm_call_count`,
+  `retry_count`, `cache_hit`, `wall_time_ms`, and `estimated_cost_usd` in workflow status output.
+- *(orchestrator)* Derived deadline mode computes RPC timeout from step config and shares
+  retry budget across attempts.
+- *(agents)* Defaults are centralized in `agents/defaults.py` with
+  `DEFAULT_MAX_LLM_CALLS=5`, `DEFAULT_MAX_TOKENS=8192`, and `DEFAULT_TIMEOUT_SECONDS=60`.
 
 ### 🚀 Features
 
-- *(orchestrator)* `TokenCounter` and `BudgetEnforcer` implement per-workflow, per-agent, and
-  global daily budget tracking with pre-dispatch cost gating. Atomic multi-scope snapshot
-  prevents torn reads in budget checks. Structured `BudgetError` type enables programmatic
-  handling of budget rejections (RFC 0006 PR 3a, PR 5b)
-- *(orchestrator)* In-memory LRU response cache for cacheable workflow steps: SHA-256 keyed by
-  agent ID + payload + context, with configurable max entries and TTL. Steps opt in via
-  `cacheable: true` in workflow YAML. Cache hit skips gRPC dispatch entirely (RFC 0006 PR 4b)
-- *(server)* `GET /api/v1/cost/summary` endpoint: returns global daily cost totals, per-agent
-  breakdown sorted by spend, and report timestamp. Returns 503 when cost tracking is not
-  configured (RFC 0006 PR 4b)
-- *(orchestrator)* Per-step execution metadata: `StepExecutionMetadata` captures `tokens_used`,
-  `llm_call_count`, `retry_count`, `cache_hit`, `wall_time_ms`, and `estimated_cost_usd` for
-  every completed step. Exposed in `GET /api/v1/workflows/{id}/status` response and logged at
-  INFO level on step completion (RFC 0006 PR 4a)
-- *(server)* Workflow status API now populates per-step data (status, output, error, timestamps,
-  metadata) — previously returned an empty steps map (RFC 0006 PR 4a)
-- *(cost)* `CostReporter` aggregates per-workflow and global cost summaries from `TokenCounter`
-  data — provides `WorkflowCostSummary` (per-step breakdown, estimated USD) and
-  `GlobalCostSummary` (daily totals, top agents by spend) (RFC 0006 PR 3b)
-- *(scheduler)* Pre-dispatch budget gating: `BudgetEnforcer.CheckBudget()` called before
-  `ExecuteTask()` — steps fail immediately with "budget exceeded" when over budget
-  (RFC 0006 PR 3b)
-- *(scheduler)* Post-dispatch token recording: `TokenCounter.RecordUsage()` called after
-  successful dispatch, parsing `input_tokens`/`output_tokens` from response metadata
-  (RFC 0006 PR 3b)
-- *(orchestrator)* Derived deadline mode: RPC timeouts computed from step config
-  (`step.TimeoutSeconds + transport_margin`) instead of a static per-executor timeout.
-  Retries share the step deadline — each attempt gets remaining time, not a fresh window.
-  Minimum budget check (25% remaining) prevents wasteful retries. Configurable via
-  `execution.deadline_mode: "derived"|"static"` (RFC 0006 PR 2)
-- *(agents)* Centralize execution limit defaults in `agents/defaults.py`
-  (`DEFAULT_MAX_LLM_CALLS=5`, `DEFAULT_MAX_TOKENS=8192`, `DEFAULT_TIMEOUT_SECONDS=60`)
-  replacing inline magic numbers in `base.py` (RFC 0006 PR 1c, #83)
-- *(agents)* Raise `max_tokens` task agent default from 4096 → **8192** — covers typical
-  code review and generation without truncation (RFC 0006 §B, #83)
-- *(schema)* Add `description` attributes to step-level execution limit properties
-  (`timeout_seconds`, `max_llm_calls`, `max_tokens`, `context_budget`) in
-  `schemas/workflow.schema.json` for VS Code YAML extension hover hints (RFC 0006 PR 5c)
-- *(agents)* `_run_llm_loop()` rejects negative `max_llm_calls` / `max_tokens` values
-  from `TaskInputConfig` with `TaskOutput(FAILED, error_type="permanent")` — aligns with
-  all other error conditions in the loop that return structured `TaskOutput` rather than
-  raising exceptions (RFC 0006 PRs 1c+5c)
+- *(agents)* Data-driven TaskAgent + agent type system (#47)
+- *(cli)* Wire v0.1 REST endpoints (RFC 0005, PR 1b) (#48)
+- *(memory)* Working memory + token estimation (RFC 0005, PR 2) (#49)
+- *(memory)* Schema migration + episodic memory core (RFC 0005, PR 3a) (#50)
+- *(memory)* Agent-initiated memory tools (RFC 0005, PR 3b) (#51)
+- *(memory)* Episode auto-summarization (RFC 0005, PR 3c) (#52)
+- *(memory)* Relationship memory (RFC 0005, PR 4) (#53)
+- *(agents)* PersonaAgent runtime core (#54)
+- *(agents)* Event dispatch + tick loop integration (RFC 0005 PR 5b) (#55)
+- *(agents)* Config validation + schema wiring (RFC 0005, PR 6a) (#56)
+- *(cli)* Wire validate + test --persona commands (RFC 0005, PR 6b) (#57)
+- *(persona,validate)* Persona + validation review fixes (PR 7b) (#60)
+- Add defaults package, step limit fields, and schema updates (RFC 0006 PR 1a) (#79)
+- Wire execution limits through executor and scheduler (RFC 0006 PR 1b) (#81)
+- Implement Python defaults and limit validation (RFC 0006 PR 1c) (#83)
+- *(executor)* Derived deadline mode with shared retry budget (RFC 0006 PR 2) (#84)
+- *(cost)* Implement TokenCounter and BudgetEnforcer (RFC 0006 PR 3a) (#85)
+- *(cost)* CostReporter + scheduler budget integration (RFC 0006 PR 3b) (#86)
+- *(state)* StepExecutionMetadata + observability (RFC 0006 PR 4a) (#87)
+- *(cost)* RFC 0006 PR 4b — Response Cache + Cost Summary Endpoint (#88)
 
----
+### 🐛 Bug Fixes
+
+- *(memory)* Memory tier review fixes (RFC 0005, PR 7a) (#59)
+- *(cli)* Rust CLI review fixes (RFC 0005, PR 7c) (#62)
+- Resolve Windows setup, Docker service discovery, and tool schema bugs (#71)
+- *(executor,scheduler,state)* RFC 0006 PR 5a — execution follow-up fixes (#90)
+- *(cost)* Atomic budget snapshot, BudgetError struct, config validation (RFC 0006 PR 5b) (#91)
+- *(cost)* Remove dead rawPricing field, fix CacheKey non-deterministic hashing
+- *(planner,agents)* RFC 0006 PR 5c — Planner/Schema + Python Fixes (#92)
+- *(agents)* Surface invalid_fields in negative-limit error metadata (RFC 0006 PR 5c N-01, N-02) (#93)
+
+### 🔧 Refactoring
+
+- *(persona)* Split persona.py into focused modules (RFC 0005, PR 8a) (#64)
+- *(persona)* Extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) (#65)
+- *(memory)* Split episodic.py into focused modules (RFC 0005, PR 8b) (#66)
+- *(cli)* Split main.rs into modules (RFC 0005, PR 8c) (#67)
+- Rename project from Orchestr8 to Persatrix (#70)
+- *(agents)* Split persona_runtime.py into package (#95)
+- *(scheduler)* Split scheduler.go into stage_runner.go and budget.go (#96)
+- *(agents)* Split episodic.py and server.py (v0.2 release prep A-3) (#97)
+
+### 📚 Documentation
+
+- *(rfc)* RFC 0005 — Persona Agent & Memory System (v0.2 planning) (#45)
+- *(rfc0005)* Add PR implementation plan for Persona Agent & Memory System (#46)
+- *(rfc0005)* Add PR 3a review findings to PR plan
+- *(roadmap)* Update episodic memory component status for PR 3c
+- *(roadmap)* Add persona.py component status, fix PR #54 link
+- Update ROADMAP last-updated date to 2026-04-13
+- Fix PR #56 link in ROADMAP merged PR history
+- *(rfc0005)* Split PR 7 into 4 sub-PRs (7a-7d) (#58)
+- Add development workflow lifecycle guide (#61)
+- Add documentation & diagrams phase to workflow and PR plan (RFC 0005, PR 9) (#68)
+- Close RFC 0005 — Persona Agent & Memory System (PR 7d, 20/20) (#69)
+- *(rfc)* Propose RFC 0006 (Efficiency & Execution Limits) and RFC 0007 (Conditional & Looped Control Flow) (#72)
+- *(rfc)* Add RFC 0008 for agent memory and context optimization (#73)
+- *(rfc)* Add RFC 0009 — Agent Identity, Security & Sandboxing (#74) (#74)
+- *(rfc0006)* Resolve open questions, accept RFC (#75)
+- *(rfc0008)* Resolve open questions and accept RFC (#76)
+- *(rfc)* RFC 0013 — Legal, Ethical & Regulatory Compliance Framework (#77)
+- *(rfc0006)* Add PR implementation plan for Efficiency & Execution Limits (#78)
+- *(rfc)* RFC 0014 — Agent Skill Registry & Lifecycle (#80)
+- *(roadmap)* Restructure versioning strategy for release velocity (#82)
+- *(rfc0006)* Add detailed follow-up PR descriptions (5a-5c) and update status (#89)
+- Add v0.2.0 release preparation plan (#94)
+- *(tests)* Author manual tests for v0.1 surface (v0.2 release prep C-8) (#98)
+- *(tests)* Author manual tests for v0.2 surface (PR 9) (#99)
+- README overhaul for v0.2.0 (v0.2 release prep B-4) (#102)
+- *(guides)* Persona & memory user guide (v0.2 release prep B-5) (#103)
+- *(diagrams)* Phase-neutral architecture diagrams (v0.2 release prep B-7) (#104)
+
+### 📦 Miscellaneous
+
+- Ongoing manual test campaign and fixes (WIP) (#101)
+
+### license
+
+- Move repository to BUSL 1.1 (#63)
 
 ## [0.1.0] - 2026-04-11
 
