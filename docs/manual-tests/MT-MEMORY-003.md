@@ -90,12 +90,13 @@ async def main():
     ctx = mem.build_context()
     print(f"Context built (may be truncated); total sections: {len(mem._sections)}")
 
-    # Trigger compression (requires LLM)
+    # Trigger compression (requires LLM).
+    # compress_if_needed is async and awaited directly here, so it runs to
+    # completion before the next line — no sleep needed.
+    # (The background-task path goes through try_start_compression +
+    # await_pending_compression, not this function directly.)
     client = LLMClient()  # reads ANTHROPIC_API_KEY from environment
     await mem.compress_if_needed(client)
-    # Wait for background compression task to finish
-    import asyncio as _a
-    await _a.sleep(10)
 
     total_after = sum(len(s.content) // 4 for s in mem._sections.values())
     print(f"Total estimated tokens after compression: {total_after}")
@@ -137,7 +138,7 @@ python3 <the script above> 2>&1 | grep -E "Compression|Compressed|section"
 
 **Action**: After compression, confirm sections still exist and have non-empty content:
 
-Add to the script from Step 1 (after `sleep(10)`):
+Add to the script from Step 1 (after `await mem.compress_if_needed(client)`):
 
 ```python
     for name, section in mem._sections.items():
@@ -194,5 +195,7 @@ still triggers correctly (conservative token estimates may cause earlier-than-ne
 
 - `ANTHROPIC_API_KEY` is required. Without it, `compress_if_needed()` will raise an authentication
   error on the first LLM call; the section content will be preserved unchanged.
-- The `sleep(10)` in the script waits for the background compression task. For slower network
-  connections increase this to 30 s.
+- The script calls `compress_if_needed()` directly and awaits it, so compression is complete
+  before the token-count assertions. No sleep is needed — and the original `sleep(10)` has been
+  removed. If you switch to the background-task API (`try_start_compression`), use
+  `await mem.await_pending_compression()` instead of sleeping.

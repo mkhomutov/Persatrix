@@ -67,8 +67,10 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
 
 **Expected Result**: Either a cost-summary JSON object (tracking enabled) or a 503 with:
 ```json
-{"code": "SERVICE_UNAVAILABLE", "message": "cost tracking is not configured"}
+{"error": "cost tracking is not configured", "code": "SERVICE_UNAVAILABLE"}
 ```
+<!-- Field names from internal/server/types.go errorResponse struct: json:"error" and json:"code".
+     "message" is NOT a field on that struct — a previous version of this doc had the wrong key. -->
 
 **Verification**:
 - [ ] HTTP 200 → cost tracking enabled; proceed to Step 2.
@@ -157,7 +159,7 @@ print(json.dumps(d, indent=2))
 **Scenario**: Orchestrator started without cost-tracking configuration.
 
 **Expected Behavior**: `GET /api/v1/cost/summary` returns HTTP 503 with
-`{"code": "SERVICE_UNAVAILABLE", "message": "cost tracking is not configured"}`.
+`{"error": "cost tracking is not configured", "code": "SERVICE_UNAVAILABLE"}`.
 No panic or 500 error.
 
 ---

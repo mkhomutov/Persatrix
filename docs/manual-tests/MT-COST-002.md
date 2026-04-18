@@ -133,11 +133,13 @@ curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m jso
 ```
 
 **Expected Result**: The `error` field is present and non-empty. It should reference the budget
-limit that was exceeded (LLM call count or token limit), for example:
-- `"max_llm_calls limit (1) exceeded"`
-- `"budget exhausted: token limit reached"`
+limit that was exceeded. The current sentinel from `internal/scheduler/budget.go` is:
+- `"budget exceeded"`
 
-(Exact wording depends on implementation; any budget-related phrase is acceptable.)
+(The check matches any budget-related phrase, so a richer string produced by a future
+refactor — e.g. `"budget exceeded: max_llm_calls (1) reached"` — also passes.)
+<!-- Example strings in an earlier draft ("max_llm_calls limit (1) exceeded" / "budget exhausted:
+     token limit reached") did not match ErrBudgetExceeded and were replaced with the real one. -->
 
 **Verification**:
 - [ ] `"error"` field is present in the JSON
