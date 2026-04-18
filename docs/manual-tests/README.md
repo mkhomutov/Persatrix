@@ -105,7 +105,7 @@ Executed by mkhomutov on Windows 11 after code fix (`PYTHONPATH` in Makefile + `
 | MT-WORKFLOW-002 | **Pass** | All 5 error cases pass. |
 | MT-CLI-001 | **Pass** | All 5 steps pass. `make run-agent` PYTHONPATH fix verified. |
 | MT-COST-001 | **Pass** | Full execution completed on port 8081 with live agents and API key. Workflow reached terminal `failed` (acceptable), and cost summary showed non-zero usage (`daily_output_tokens: 746`) with stable response structure across repeated calls. |
-| MT-COST-002 | **Fail (Step 4)** | Full live run with planner agent and API key. Steps 1–3 pass (HTTP 201, `failed` in ~3 s, error references `max_tokens limit`). Step 4 FAIL: cost summary unchanged after run — tokens consumed on the aborted LLM call not recorded (`recordStepUsage` skipped on permanent gRPC failure). Step 5 N/A (fixture committed). |
+| MT-COST-002 | **Pass** | Full live retest after fix `1232236` (`recordStepUsage` on error path). `run_id=e624e00b`. Steps 1–3 pass (HTTP 201, `failed` in ~7 s, error = `"max_tokens limit reached"`). Step 4 PASS: `daily_output_tokens=246` from zero — tokens recorded despite abort. Step 5 N/A (fixture committed). |
 | MT-PERSONA-001 | **Partial** | Steps 1–2 pass (`make run-agent` PYTHONPATH fixed, port 50056 used). Steps 3–5 require API key. **Doc fix**: Step 1 command updated; notes updated to reflect resolved code issue. |
 | MT-PERSONA-002 | **Not run** | Requires live persona + API key. |
 | MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
