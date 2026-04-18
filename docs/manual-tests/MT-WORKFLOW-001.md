@@ -14,6 +14,10 @@
 **Purpose**: Verify that a valid YAML workflow can be submitted via the REST API and polled until it
 reaches a terminal status (`completed` or `failed`).
 
+This test supports two execution modes:
+- API terminal-state mode: validates REST + state transitions only. A final `failed` status is acceptable.
+- End-to-end success mode: validates full workflow execution and requires all workflow agents to be registered.
+
 **Scope**: `POST /api/v1/workflows/run` submission, `GET /api/v1/workflows/{id}/status` polling,
 response envelope shape, and workflow state transitions.
 
@@ -52,13 +56,16 @@ response envelope shape, and workflow state transitions.
 - ☐ Orchestrator built: `make build`
 - ☐ Orchestrator running: `make run` (binds to `127.0.0.1:8080`)
 - ☐ Config valid: `make validate` exits 0
-- ☐ At least one Python agent registered (see Step 1)
+
+**Agent Requirements (choose one mode)**:
+- ☐ API terminal-state mode: no agents required (a terminal `failed` run is valid for this test)
+- ☐ End-to-end success mode: all workflow agents are registered: `planner`, `code-writer`, `code-reviewer`
 
 ### Test Data
 
 **Fixtures Used**:
 - `workflows/feature-builder.yaml` — pre-existing workflow definition loaded by the orchestrator
-  from `config/` at startup
+  from `workflows/` at startup (`--workflows-dir`)
 - Input payload: `{"workflow_id": "feature-builder", "inputs": {"user_request": "Add hello-world endpoint"}}`
 
 ---
@@ -92,6 +99,17 @@ curl -s http://127.0.0.1:8080/healthz
 **Verification**:
 - [ ] `curl` exits 0
 - [ ] Response body confirms server is healthy
+
+Optional agent check:
+
+```powershell
+curl.exe -s http://127.0.0.1:8080/api/v1/agents | python -m json.tool
+```
+
+For end-to-end success mode, ensure this list includes all of:
+- `planner`
+- `code-writer`
+- `code-reviewer`
 
 ---
 

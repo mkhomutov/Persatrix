@@ -64,14 +64,25 @@ No external fixtures required. All payloads are inline in the test steps.
 
 **Action**:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s -D - -o - -w "`nHTTP %{http_code}`n" `
+  -X POST "http://127.0.0.1:8080/api/v1/workflows/run" `
+  -H "Content-Type: application/json" `
+  -d '{"workflow_id":"does-not-exist","inputs":{}}'
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" \
+curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8080/api/v1/workflows/run \
   -H "Content-Type: application/json" \
   -d '{"workflow_id":"does-not-exist","inputs":{}}'
 ```
 
-**Expected Result**: HTTP 4xx (expected `404` or `400`) with a JSON body matching the
+**Expected Result**: HTTP `404` with a JSON body matching the
 `errorResponse` envelope:
 
 ```json
@@ -79,11 +90,14 @@ curl -s -w "\nHTTP %{http_code}\n" \
 ```
 
 **Verification**:
-- [ ] HTTP status is 4xx (not 2xx, not 5xx)
+- [ ] HTTP status is `404`
 - [ ] Response `Content-Type` is `application/json`
 - [ ] Body is valid JSON
 - [ ] Body contains an `"error"` key with a non-empty string value
 - [ ] No stack trace or Go panic text in the body
+
+Note: For this payload, `workflow_id` format is valid and the workflow file is missing,
+so the expected code path is `NOT_FOUND` (`404`).
 
 ---
 
@@ -91,8 +105,19 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 **Action**:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s -D - -o - -w "`nHTTP %{http_code}`n" `
+  -X POST "http://127.0.0.1:8080/api/v1/workflows/run" `
+  -H "Content-Type: application/json" `
+  -d '{"workflow_id": NOTJSON'
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" \
+curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8080/api/v1/workflows/run \
   -H "Content-Type: application/json" \
   -d '{"workflow_id": NOTJSON'
@@ -112,19 +137,30 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 **Action**:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s -D - -o - -w "`nHTTP %{http_code}`n" `
+  -X POST "http://127.0.0.1:8080/api/v1/workflows/run" `
+  -H "Content-Type: application/json" `
+  -d ''
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" \
+curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8080/api/v1/workflows/run \
   -H "Content-Type: application/json" \
   -d ''
 ```
 
-**Expected Result**: HTTP 400 with a JSON error body indicating a missing or empty `workflow_id`.
+**Expected Result**: HTTP 400 with a JSON error body indicating malformed JSON.
 
 **Verification**:
 - [ ] HTTP status is `400`
 - [ ] Response body is valid JSON with an `"error"` key
-- [ ] Error message references a missing or invalid field (not a generic 500)
+- [ ] Error message indicates malformed JSON (for example: `invalid or malformed JSON body`)
 
 ---
 
@@ -132,8 +168,19 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 **Action**:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s -D - -o - -w "`nHTTP %{http_code}`n" `
+  -X POST "http://127.0.0.1:8080/api/v1/workflows/run" `
+  -H "Content-Type: application/json" `
+  -d '{"inputs":{"user_request":"test"}}'
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" \
+curl -s -D - -o - -w "\nHTTP %{http_code}\n" \
   -X POST http://127.0.0.1:8080/api/v1/workflows/run \
   -H "Content-Type: application/json" \
   -d '{"inputs":{"user_request":"test"}}'
@@ -152,8 +199,16 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 **Action**:
 
+**Windows PowerShell**:
+
+```powershell
+curl.exe -s -w "`nHTTP %{http_code}`n" "http://127.0.0.1:8080/healthz"
+```
+
+**macOS/Linux (bash/zsh)**:
+
 ```bash
-curl -s http://127.0.0.1:8080/healthz
+curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8080/healthz
 ```
 
 **Expected Result**: HTTP 200 — the server did not crash during the error-case steps above.
@@ -168,7 +223,7 @@ curl -s http://127.0.0.1:8080/healthz
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Unknown workflow ID → 4xx JSON error | ☐ |
+| 1 | Unknown workflow ID → 404 JSON error | ☐ |
 | 2 | Malformed JSON → 400 JSON error | ☐ |
 | 3 | Empty body → 400 JSON error | ☐ |
 | 4 | Missing `workflow_id` → 400 JSON error | ☐ |
@@ -178,10 +233,13 @@ curl -s http://127.0.0.1:8080/healthz
 
 ## Edge Cases & Error Scenarios
 
-### Edge Case 1: Workflow File Present but Fails Schema Validation
+### Edge Case 1: Workflow File Present but Fails Schema Validation (Optional Setup)
 
 **Scenario**: A workflow YAML exists on disk but has an invalid schema (e.g., circular
 dependency between steps).
+
+This edge case requires additional setup (creating or modifying a workflow fixture) and is
+outside the core "inline payload only" path above.
 
 **Expected Behavior**: The orchestrator should detect the cycle at planning time and return a
 4xx response with a descriptive error rather than hanging or panicking.
