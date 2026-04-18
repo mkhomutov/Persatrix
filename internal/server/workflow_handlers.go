@@ -7,11 +7,17 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
+
+var workflowHandlerTracer = otel.Tracer("persatrix/server/workflow")
 
 // resourceIDRegex is imported from the planner package to ensure a single source
 // of truth for the resource ID validation pattern across security boundaries.
@@ -26,23 +32,35 @@ var (
 
 // handleSubmitWorkflowRun handles POST /api/v1/workflows/run.
 func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	ctx, span := workflowHandlerTracer.Start(r.Context(), "http.workflow.submit",
+		trace.WithAttributes(attribute.String("http.route", "/api/v1/workflows/run")),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	if !requireJSON(w, r) {
+		span.SetStatus(codes.Error, "content type validation failed")
 		return
 	}
 	var req submitWorkflowRunRequest
 	if !decodeJSON(w, r, &req) {
+		span.SetStatus(codes.Error, "invalid JSON payload")
 		return
 	}
 
 	// TODO(v0.3): validate input key names against variable name charset [a-z_][a-z0-9_]*
 	if req.WorkflowID == "" {
+		span.SetStatus(codes.Error, "workflow_id missing")
 		writeError(w, "BAD_REQUEST", "workflow_id is required", http.StatusBadRequest)
 		return
 	}
 	if !resourceIDRegex.MatchString(req.WorkflowID) {
+		span.SetAttributes(attribute.String("persatrix.workflow_id", req.WorkflowID))
+		span.SetStatus(codes.Error, "workflow_id validation failed")
 		writeError(w, "BAD_REQUEST", "workflow_id must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$", http.StatusBadRequest)
 		return
 	}
+	span.SetAttributes(attribute.String("persatrix.workflow_id", req.WorkflowID))
 
 	resolvedPath, err := s.resolveWorkflowPath(req.WorkflowID)
 	if err != nil {
@@ -51,9 +69,13 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 		// Kept as a safety net in case resolveWorkflowPath is called from a new code path
 		// that doesn't pre-validate the ID.
 		if errors.Is(err, ErrInvalidWorkflowID) {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			writeError(w, "BAD_REQUEST", "invalid workflow_id format", http.StatusBadRequest)
 			return
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		writeError(w, "NOT_FOUND", "workflow not found", http.StatusNotFound)
 		return
 	}
@@ -64,6 +86,8 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 		// message to prevent leaking filesystem paths or YAML parser internals.
 		s.logger.Warn("workflow parse failed",
 			zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		writeError(w, "UNPROCESSABLE", "workflow file could not be parsed", http.StatusUnprocessableEntity)
 		return
 	}
@@ -73,6 +97,8 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 		// message to prevent leaking internal step IDs and dependency structure.
 		s.logger.Warn("workflow DAG validation failed",
 			zap.String("workflow_id", req.WorkflowID), zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		writeError(w, "UNPROCESSABLE", "workflow contains invalid dependencies", http.StatusUnprocessableEntity)
 		return
 	}
@@ -88,10 +114,14 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.store.CreateRun(r.Context(), run); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.logger.Error("failed to create workflow run", zap.Error(err))
 		writeError(w, "INTERNAL", "failed to create workflow run", http.StatusInternalServerError)
 		return
 	}
+	span.SetAttributes(attribute.String("persatrix.run_id", run.ID))
+	span.SetStatus(codes.Ok, "submitted")
 
 	writeJSON(w, submitWorkflowRunResponse{
 		RunID:      run.ID,

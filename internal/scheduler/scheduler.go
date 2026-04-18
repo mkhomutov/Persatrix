@@ -8,6 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
@@ -16,6 +20,8 @@ import (
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
+
+var schedulerTracer = otel.Tracer("persatrix/scheduler")
 
 // Scheduler drives workflow execution by polling for pending runs and
 // dispatching tasks to agents via the Executor.
@@ -174,9 +180,18 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		return
 	}
 
+	ctx, span := schedulerTracer.Start(ctx, "workflow.run",
+		trace.WithAttributes(
+			attribute.String("persatrix.run_id", runID),
+			attribute.String("persatrix.workflow_id", run.WorkflowID),
+		),
+	)
+	defer span.End()
+
 	// Guard against TOCTOU: the run may have been cancelled via REST API between
 	// the time pollAndExecute filtered for RunPending and now.
 	if run.Status != state.RunPending {
+		span.SetAttributes(attribute.String("persatrix.status", run.Status.String()))
 		s.logger.Info("run no longer pending, skipping",
 			zap.String("runID", runID),
 			zap.String("status", run.Status.String()),
@@ -192,6 +207,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	// Resolve workflow file path.
 	yamlPath, err := resolveWorkflowPath(s.workflowsDir, run.WorkflowID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.failRun(ctx, runID, fmt.Sprintf("resolve workflow path: %v", err))
 		return
 	}
@@ -199,12 +216,16 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	// Parse workflow YAML.
 	wf, err := s.planner.Parse(ctx, yamlPath)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.failRun(ctx, runID, fmt.Sprintf("parse workflow: %v", err))
 		return
 	}
 
 	// Validate DAG.
 	if err := s.planner.ValidateDAG(ctx, wf); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.failRun(ctx, runID, fmt.Sprintf("validate DAG: %v", err))
 		return
 	}
@@ -212,6 +233,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	// Create execution plan.
 	plan, err := s.planner.Plan(ctx, wf)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		s.failRun(ctx, runID, fmt.Sprintf("plan workflow: %v", err))
 		return
 	}
@@ -249,6 +272,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		// Check context between stages.
 		select {
 		case <-ctx.Done():
+			span.RecordError(ctx.Err())
+			span.SetStatus(codes.Error, ctx.Err().Error())
 			s.failRun(ctx, runID, "context cancelled")
 			return
 		default:
@@ -261,6 +286,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		)
 
 		if err := s.executeStage(ctx, runID, run.WorkflowID, stage, outputs, vars, &mu); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			s.failRun(ctx, runID, fmt.Sprintf("stage %d: %v", stageIdx, err))
 			return
 		}
@@ -281,6 +308,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	}
 
 	s.logger.Info("run completed", zap.String("runID", runID))
+	span.SetAttributes(attribute.String("persatrix.status", state.RunCompleted.String()))
+	span.SetStatus(codes.Ok, "completed")
 }
 
 // failRun marks a workflow run as failed with the given error message and sets FinishedAt.

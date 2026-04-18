@@ -22,6 +22,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/scheduler"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
+	"github.com/mkhomutov/persatrix/internal/telemetry"
 )
 
 const (
@@ -96,6 +97,20 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
+	telemetryCfg := telemetry.NewConfigFromEnv(*env)
+	telemetryShutdown, err := telemetry.Init(context.Background(), telemetryCfg, logger)
+	if err != nil {
+		logger.Warn("failed to initialize telemetry, continuing without tracing", zap.Error(err))
+	} else {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := telemetryShutdown(shutdownCtx); err != nil {
+				logger.Warn("telemetry shutdown failed", zap.Error(err))
+			}
+		}()
+	}
+
 	// N-47: Resolve workflowsDir to a fully canonical path once, so both
 	// the server and scheduler see the same path regardless of CWD or symlinks.
 	// Without EvalSymlinks, server.New() internally canonicalizes further via
@@ -123,8 +138,6 @@ func main() {
 
 	// TODO: Initialize components in order:
 	// 1. Load and validate configuration
-	// 2. Initialize telemetry (OTEL tracer + metrics)
-
 	// 3. Initialize state store
 	store := state.NewInMemoryStore(logger)
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
