@@ -299,11 +299,11 @@ curl -s http://127.0.0.1:8080/api/v1/workflows | python3 -m json.tool
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Orchestrator healthy, `/healthz` returns 200 | ☐ |
-| 2 | Submission returns 201 with valid `run_id` | ☐ |
-| 3 | Run reaches `completed` or `failed` terminal status | ☐ |
-| 4 | Status response contains all required fields with correct types | ☐ |
-| 5 | Run appears in list endpoint | ☐ |
+| 1 | Orchestrator healthy, `/healthz` returns 200 | ☑ |
+| 2 | Submission returns 201 with valid `run_id` | ☑ |
+| 3 | Run reaches `completed` or `failed` terminal status | ☑ |
+| 4 | Status response contains all required fields with correct types | ☑ |
+| 5 | Run appears in list endpoint | ☑ |
 
 ---
 

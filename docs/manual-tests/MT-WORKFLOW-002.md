@@ -223,11 +223,11 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8080/healthz
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Unknown workflow ID → 404 JSON error | ☐ |
-| 2 | Malformed JSON → 400 JSON error | ☐ |
-| 3 | Empty body → 400 JSON error | ☐ |
-| 4 | Missing `workflow_id` → 400 JSON error | ☐ |
-| 5 | Server still healthy after all error cases | ☐ |
+| 1 | Unknown workflow ID → 404 JSON error | ☑ |
+| 2 | Malformed JSON → 400 JSON error | ☑ |
+| 3 | Empty body → 400 JSON error | ☑ |
+| 4 | Missing `workflow_id` → 400 JSON error | ☑ |
+| 5 | Server still healthy after all error cases | ☑ |
 
 ---
 
@@ -250,7 +250,7 @@ outside the core "inline payload only" path above.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All negative-path checks passed: unknown workflow returned 404 JSON error, malformed/empty/missing-field payloads returned 400 JSON errors, and `/healthz` remained 200 afterward. |
 
 ---
 
