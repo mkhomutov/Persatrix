@@ -10,35 +10,25 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import signal
 import sys
 import time
-from pathlib import Path
-from typing import Any
 
 import aiohttp
 import grpc
 import grpc.aio
-import yaml
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
-from .llm_client import LLMClient, create_provider
-from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
-from .task_agent import TaskAgent
+from .server_persona import (
+    initialize_persona_agents,
+    load_agent,
+)
 from .tick import TickScheduler
-from .tools import builtin
-from .tools.permissions import PermissionGate
-from .tools.sandbox import PathValidator
 
 logger = logging.getLogger("Persatrix.agent.server")
-
-# Agent IDs must match the cross-component contract shared with the Go
-# orchestrator registry.  Validated at load time to prevent routing mismatches.
-_AGENT_ID_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
 
 # ─── AgentServiceServicer ───────────────────────────────────
@@ -160,130 +150,6 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         context.set_details("Streaming execution not implemented in v0.1")
 
 
-# ─── Agent Loading ───────────────────────────────────────────
-
-
-def _resolve_agent_type(agent_config: dict[str, Any]) -> str:
-    """Resolve agent type string from the ``type`` field in agent config.
-
-    Supported types:
-    - ``task`` (default) — data-driven TaskAgent with YAML instructions
-    - ``persona`` — LLM-powered PersonaAgent with memory and autonomy
-
-    Agents without a ``type`` field default to ``task`` for backward
-    compatibility with v0.1 configs.
-    """
-    agent_type = agent_config.get("type", "task")
-
-    match agent_type:
-        case "task":
-            return "task"
-        case "persona":
-            return "persona"
-        case _:
-            raise SystemExit(
-                f"Unknown agent type {agent_type!r} for agent "
-                f"{agent_config['id']!r}. Supported types: task, persona"
-            )
-
-
-def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
-    """Load an agent by ID from YAML config.
-
-    Returns a fully-initialized BaseAgent with LLM client, tools, and
-    permission configuration wired.
-    """
-    # MF-02: validate agent ID format against the cross-component contract
-    # (^[a-z0-9][a-z0-9-]*[a-z0-9]$) shared with Go orchestrator registry.
-    if not _AGENT_ID_PATTERN.match(agent_id):
-        raise SystemExit(
-            f"Invalid agent ID {agent_id!r}: "
-            f"must match {_AGENT_ID_PATTERN.pattern}"
-        )
-
-    # PR-review m5: surface clear errors at startup
-    try:
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise SystemExit(f"Agent config not found: {config_path}")
-    except yaml.YAMLError as exc:
-        raise SystemExit(f"Invalid YAML in {config_path}: {exc}")
-
-    # S-02: validate that 'agents' value is a list before iteration.
-    # A malformed config like ``agents: "string"`` would otherwise fail
-    # with an unclear TypeError during enumeration.
-    agents_list = config.get("agents", [])
-    if not isinstance(agents_list, list):
-        raise SystemExit(
-            f"'agents' key in {config_path} must be a list, "
-            f"got {type(agents_list).__name__}"
-        )
-
-    # F-03: validate 'id' field presence before dict comprehension to
-    # surface a clear SystemExit instead of a raw KeyError.
-    for i, a in enumerate(agents_list):
-        if "id" not in a:
-            raise SystemExit(
-                f"Agent config entry {i} missing required 'id' field"
-            )
-    # S-17: detect duplicate agent IDs — dict comprehension silently takes
-    # the last entry, which may mask config errors.
-    seen_ids: set[str] = set()
-    for a in agents_list:
-        aid = a["id"]
-        if aid in seen_ids:
-            raise SystemExit(
-                f"Duplicate agent ID {aid!r} in {config_path}"
-            )
-        seen_ids.add(aid)
-    agent_configs = {a["id"]: a for a in agents_list}
-    if agent_id not in agent_configs:
-        raise SystemExit(f"Agent {agent_id!r} not found in {config_path}")
-
-    agent_config = agent_configs[agent_id]
-    agent_type = _resolve_agent_type(agent_config)
-
-    # SF-08: validate required 'model' field at startup so operators see a
-    # clear message instead of a raw KeyError from create_provider().
-    if "model" not in agent_config:
-        raise SystemExit(
-            f"Agent {agent_id!r} missing required 'model' field in config"
-        )
-
-    # Create LLM client
-    provider = create_provider(agent_config)
-    llm_client = LLMClient(provider)
-
-    # Create agent based on type
-    agent: BaseAgent
-    if agent_type == "persona":
-        agent = create_persona_agent(
-            agent_id=agent_id,
-            config=agent_config,
-            llm_client=llm_client,
-        )
-    else:
-        agent = TaskAgent(
-            agent_id=agent_id,
-            config=agent_config,
-            llm_client=llm_client,
-        )
-
-    # Wire built-in tool dependencies
-    permissions = agent_config.get("permissions", {})
-    builtin.permission_gate = PermissionGate(permissions)
-    fs = permissions.get("filesystem", {})
-    builtin.path_validator = PathValidator(
-        allow_read=fs.get("read", []),
-        allow_write=fs.get("write", []),
-        deny=fs.get("deny", []),
-    )
-    builtin.workspace_root = Path(workspace).resolve()
-
-    return agent
-
-
 # ─── AgentServer ─────────────────────────────────────────────
 
 
@@ -371,49 +237,9 @@ class AgentServer:
         # Initialize memory, register with dispatcher, and start tick
         # schedulers for persona agents in a single pass.
         # (F-5b-9: consolidated three separate agent-iteration loops.)
-        for agent_id, agent in self.agents.items():
-            if not isinstance(agent, _LLMPersonaAgent):
-                continue
-
-            # Memory initialization — must succeed before dispatch/tick.
-            try:
-                await agent.initialize_memory()
-                logger.info("Initialized memory for persona agent %s", agent_id)
-            except Exception:
-                logger.exception(
-                    "Failed to initialize memory for agent %s — "
-                    "agent will NOT receive dispatched events or tick scheduling",
-                    agent_id,
-                )
-                # (F-60-8: removed dead failed_memory_init set — continue
-                # already skips the agent, no downstream loops need it.)
-                continue
-
-            # Register with event dispatcher.
-            self._dispatcher.register_agent(agent_id, agent)
-
-            # Start tick scheduler for autonomous agents.
-            autonomy = agent.config.get("autonomy", {})
-            level = autonomy.get("level", "reactive")
-            if level in ("semi-autonomous", "autonomous"):
-                interval = autonomy.get("tick_interval_seconds", 60)
-                max_actions = autonomy.get("max_actions_per_tick", 3)
-                idle_after = autonomy.get("idle_after_ticks", 10)
-                scheduler = TickScheduler(
-                    agent,
-                    interval=float(interval),
-                    max_actions_per_tick=max_actions,
-                    idle_after_ticks=idle_after,
-                    executor=self._dispatcher.executor,
-                )
-                self._tick_schedulers[agent_id] = scheduler
-                self._dispatcher.register_tick_scheduler(agent_id, scheduler)
-                scheduler.start()
-                logger.info(
-                    "Started tick scheduler for %s (interval=%ds)",
-                    agent_id,
-                    interval,
-                )
+        await initialize_persona_agents(
+            self.agents, self._dispatcher, self._tick_schedulers,
+        )
 
         # Deep-review D4: shared aiohttp session for self-registration and
         # http_request tool (via builtin.http_session).

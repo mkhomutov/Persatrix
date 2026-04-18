@@ -22,7 +22,8 @@ from agents.persona_types import (
     EventType,
 )
 from agents.tick import TickScheduler
-from agents.server import AgentServer, _resolve_agent_type
+from agents.server import AgentServer
+from agents.server_persona import _resolve_agent_type
 from agents.tools.registry import clear_registry
 
 
