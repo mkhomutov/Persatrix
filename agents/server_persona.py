@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("Persatrix.agent.server_persona")
 
+# _resolve_agent_type is intentionally excluded: it is a private helper
+# used only within load_agent; tests that import it directly are accessing
+# an implementation detail, not part of this module's public contract.
+__all__ = ["load_agent", "initialize_persona_agents"]
+
 # Agent IDs must match the cross-component contract shared with the Go
 # orchestrator registry.  Validated at load time to prevent routing mismatches.
 _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")

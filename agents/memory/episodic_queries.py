@@ -24,6 +24,21 @@ from .migrations import _SCORE_EXPR, _SCORE_EXPR_BARE
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "Episode",
+    "EPISODE_SELECT",
+    "MAX_RECALL_LIMIT",
+    "row_to_episode",
+    "recall_fts5",
+    "recall_like",
+    "recall_recency",
+    "get_interaction_count",
+    "increment_interaction_count",
+    "reset_interaction_count",
+    "persist_agent_state",
+    "load_agent_state",
+]
+
 
 # ─── Data model ─────────────────────────────────────────────
 
