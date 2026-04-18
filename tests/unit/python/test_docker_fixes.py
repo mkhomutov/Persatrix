@@ -147,6 +147,16 @@ class TestToolSchemaFormat:
         assert props["c"]["type"] == "number"
         assert props["d"]["type"] == "boolean"
 
+    def test_properties_contain_types_for_string_annotations(self):
+        @tool(name="typed_stringified")
+        async def typed_stringified(a: "str", b: "int") -> ToolResult:
+            return ToolResult(success=True)
+
+        defn = get_tool("typed_stringified")
+        props = defn.parameters["properties"]
+        assert props["a"]["type"] == "string"
+        assert props["b"]["type"] == "integer"
+
     def test_required_list_for_mandatory_params(self):
         @tool(name="mixed")
         async def mixed(required: str, optional: str = "default") -> ToolResult:

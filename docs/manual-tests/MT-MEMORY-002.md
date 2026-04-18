@@ -50,6 +50,11 @@ enforces the ±0.2 per-call delta cap, persists scores across close/re-open, and
 
 - ☐ No orchestrator required — library-level test.
 - ☐ `data/` directory writable: `mkdir -p data`
+- ☐ No leftover test database from a previous run (remove DB and SQLite WAL files):
+
+```bash
+rm -f data/mt-memory-002.db data/mt-memory-002.db-shm data/mt-memory-002.db-wal
+```
 
 ---
 
@@ -70,8 +75,8 @@ async def main():
     mem = RelationshipMemory("sarah-chen", db_path=DB)
     await mem.initialize()
 
-    rel = await mem.get_relationship("unknown-agent")
-    trust = rel.trust_score if rel else 0.5  # default when no record exists
+    # get_trust() returns the float score directly (0.5 default for unknown pairs)
+    trust = await mem.get_trust("unknown-agent")
     print(f"Default trust for unknown pair: {trust}")
     assert abs(trust - 0.5) < 0.001, f"Expected 0.5, got {trust}"
 
@@ -82,11 +87,16 @@ asyncio.run(main())
 EOF
 ```
 
+> **Fix (2026-04-18)**: `RelationshipMemory` has no `get_relationship()` method.
+> Use `get_trust(other_agent_id)` to read a trust score, or
+> `get_relationship_summary(other_agent_id)` to get the full `RelationshipSummary` object.
+> Steps 3 and 4 below are updated accordingly.
+
 **Expected Result**: `"Default trust for unknown pair: 0.5"` then `"PASS"`.
 
 **Verification**:
-- [ ] Output contains `"Default trust for unknown pair: 0.5"`
-- [ ] Script exits 0
+- [x] Output contains `"Default trust for unknown pair: 0.5"`
+- [x] Script exits 0
 
 ---
 
@@ -128,9 +138,9 @@ the score by exactly 0.15). The oversized `delta=0.5` update is capped to 0.2. S
 exceeds 1.0.
 
 **Verification**:
-- [ ] Scores print as increasing values after each `+0.15` update
-- [ ] The capped update moves score by ≤ 0.2 (not 0.5)
-- [ ] Script exits 0 with `"PASS"`
+- [x] Scores print as increasing values after each `+0.15` update
+- [x] The capped update moves score by ≤ 0.2 (not 0.5)
+- [x] Script exits 0 with `"PASS"`
 
 ---
 
@@ -149,7 +159,7 @@ async def main():
     mem = RelationshipMemory("sarah-chen", db_path=DB)
     await mem.initialize()
 
-    rel = await mem.get_relationship("mike-torres")
+    rel = await mem.get_relationship_summary("mike-torres")
     assert rel is not None, "Relationship record missing after restart"
     print(f"Trust after restart: {rel.trust_score:.3f}")
     assert rel.trust_score > 0.5, "Trust should be above default after positive updates"
@@ -164,8 +174,8 @@ EOF
 **Expected Result**: Trust score matches the last value from Step 2.
 
 **Verification**:
-- [ ] `"Trust after restart"` value matches the last printed score in Step 2
-- [ ] Script exits 0 with `"PASS"`
+- [x] `"Trust after restart"` value matches the last printed score in Step 2
+- [x] Script exits 0 with `"PASS"`
 
 ---
 
@@ -184,13 +194,13 @@ async def main():
     mem = RelationshipMemory("sarah-chen", db_path=DB)
     await mem.initialize()
 
-    rel_before = await mem.get_relationship("mike-torres")
+    rel_before = await mem.get_relationship_summary("mike-torres")
     trust_before = rel_before.trust_score
 
     count = await mem.apply_decay(decay_rate=0.01)
     print(f"Decay applied to {count} relationship(s)")
 
-    rel_after = await mem.get_relationship("mike-torres")
+    rel_after = await mem.get_relationship_summary("mike-torres")
     trust_after = rel_after.trust_score
 
     print(f"Trust before decay: {trust_before:.4f}, after: {trust_after:.4f}")
@@ -207,16 +217,16 @@ EOF
 **Expected Result**: Trust score moves toward 0.5 after `apply_decay()`.
 
 **Verification**:
-- [ ] `count` ≥ 1
-- [ ] `trust_after` is numerically closer to 0.5 than `trust_before`
-- [ ] Script exits 0 with `"PASS"`
+- [x] `count` ≥ 1
+- [x] `trust_after` is numerically closer to 0.5 than `trust_before`
+- [x] Script exits 0 with `"PASS"`
 
 ---
 
 ### Step 5: Clean Up
 
 ```bash
-rm data/mt-memory-002.db
+rm -f data/mt-memory-002.db data/mt-memory-002.db-shm data/mt-memory-002.db-wal
 ```
 
 ---
@@ -225,11 +235,11 @@ rm data/mt-memory-002.db
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Default trust for unknown pair is 0.5 | ☐ |
-| 2 | Delta cap enforced; score ≤ 1.0 | ☐ |
-| 3 | Score persists across close/re-open | ☐ |
-| 4 | Decay moves score toward 0.5 | ☐ |
-| 5 | Test DB cleaned up | ☐ |
+| 1 | Default trust for unknown pair is 0.5 | ☑ |
+| 2 | Delta cap enforced; score ≤ 1.0 | ☑ |
+| 3 | Score persists across close/re-open | ☑ |
+| 4 | Decay moves score toward 0.5 | ☑ |
+| 5 | Test DB cleaned up | ☑ |
 
 ---
 
@@ -248,4 +258,5 @@ rm data/mt-memory-002.db
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 5 steps pass. Doc fix: replaced `get_relationship()` (does not exist) with `get_trust()` (Step 1) and `get_relationship_summary()` (Steps 3/4). Delta cap, persistence, and decay all verified. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | All 5 steps pass. Doc fixes: added pre-run cleanup step (remove stale DB + `.db-shm`/`.db-wal` WAL files); updated Step 5 cleanup to include WAL files. |

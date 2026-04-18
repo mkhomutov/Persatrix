@@ -172,12 +172,16 @@ for `"gRPC server listening on"` to find the actual port and retry.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Not run | Requires `ANTHROPIC_API_KEY` and a live persona agent. MT-PERSONA-001 code issue (PYTHONPATH + port conflict) must be resolved first. |
+| 2026-04-18 | mkhomutov | Windows 11 | Not run | Retest — PYTHONPATH Makefile issue now resolved. Still requires `ANTHROPIC_API_KEY` and a persona agent running Steps 1–4 of MT-PERSONA-001. |
+| 2026-04-18 | GitHub Copilot | Windows 11 | Fail | Executed with Python gRPC stub fallback (`grpcurl` not installed). Step 1 PASS: `HealthCheck` returned `status=1` (SERVING) on `127.0.0.1:50345`. Step 2 FAIL: `ChannelService/SendMessage` returns gRPC `StatusCode.UNIMPLEMENTED` (`Method not found!`). Steps 3-4 blocked because no inbound event is accepted by the server. Observed implementation gap: `agents/server.py` registers only `AgentService` and does not register `ChannelService`. |
+| 2026-04-18 | GitHub Copilot | Windows 11 | Pass | Retest on `127.0.0.1:50354` after `ChannelService` implementation landed. Used generated Python gRPC stubs because `grpcurl` is not installed. Step 1 PASS: `HealthCheck` returned `status=1` (`SERVING`). Step 2 PASS: `SendMessage(message_id=test-msg-001)` returned `delivered=true`. Step 3 PASS: log shows the inbound content routed into the persona prompt (`Message from tester: Sarah, what is your current focus?`) and completed as `Event: message_received -> Actions: ['complete_task']`; no traceback and no `event processing timed out`. Step 4 PASS (acceptable variant): no idle-skip lines appeared after the message because the agent was active rather than idle. Non-blocking warnings observed: episodic/notes FTS5 query fallback triggered by punctuation in the inbound message. |
 
 ---
 
 ## Notes
 
+- **Known Gap (2026-04-18)**: `ChannelService` is declared in `proto/agent_message.proto`, but the current persona server path does not register it; `SendMessage` currently returns gRPC `UNIMPLEMENTED` (`Method not found!`).
 - The persona agent's gRPC port is configurable. If the default differs from 50054, update the
   `grpcurl` commands with the correct port.
 - All `grpcurl` commands use `-import-path proto/ -proto <file>` to resolve method descriptors

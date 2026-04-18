@@ -1,0 +1,12 @@
+schema_version: "0.1"
+
+workflow:
+  id: budget-test
+  name: Budget Abort Test
+  steps:
+    - id: constrained-step
+      agent: planner
+      input: "Write a detailed 10-page report on the history of computing."
+      max_llm_calls: 1     # forces abort after the very first LLM call
+      max_tokens: 50       # extremely low output cap
+      timeout_seconds: 60

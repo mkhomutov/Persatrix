@@ -42,6 +42,7 @@ agents:
     role: "Writes clean, tested code from specifications"
     model: "claude-sonnet-4-20250514"
     temperature: 0.3
+    max_llm_calls: 15
     instructions: |
       You are a code generation agent. Your job is to write clean, well-tested code
       based on the specifications you receive.

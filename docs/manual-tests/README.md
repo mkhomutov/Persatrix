@@ -45,7 +45,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-MEMORY-001](MT-MEMORY-001.md) | Episodic memory: write and recall across agent restart | Active |
 | [MT-MEMORY-002](MT-MEMORY-002.md) | Relationship memory: trust score updates after N exchanges | Active |
-| [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Active |
+| [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Complete |
 
 ## Cost
 
@@ -65,6 +65,50 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 ## Execution Report
 
 Results for a release execution run are recorded in `v0.2-execution-report.md` (created in PR 11).
+
+---
+
+## 2026-04-18 Full Pass Summary
+
+Executed by mkhomutov on Windows 11. All testable tests run from clean state.
+
+| ID | Result | Notes |
+|----|--------|-------|
+| MT-CONFIG-001 | **Pass** | All 5 mutation steps pass. |
+| MT-CLI-001 | **Pass** | All 5 steps + 3 edge cases pass. |
+| MT-WORKFLOW-001 | **Pass** | API terminal-state mode; terminal `failed` in <1 s. |
+| MT-WORKFLOW-002 | **Pass** | All 4 error cases and health check pass. |
+| MT-AGENT-001 | **Pass** | All 7 integration tests pass with `PYTHONPATH=agents/generated`. **Code issue**: `make test-integration` / `make run-agent` fail without PYTHONPATH (grpc stub bare import). |
+| MT-COST-001 | **Partial** | Step 1 (endpoint shape) pass; Steps 2–4 require live agents + API key. |
+| MT-COST-002 | **Partial** | Fixture YAML corrected (wrong format); Step 1 HTTP code corrected (200→201). Steps 1–5 require live agents + API key. |
+| MT-MEMORY-001 | **Pass** | All 4 steps pass. **Doc fix**: Step 2 needs `logging.basicConfig()`. |
+| MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: `get_relationship()` replaced with `get_trust()` / `get_relationship_summary()`. |
+| MT-MEMORY-003 | **Partial** | Step 1 (threshold detection) pass. Steps 2–3 require API key. **Doc fix**: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`. **Code fix**: wrong model name `claude-haiku-4` → `claude-haiku-4-5`; `LLMClient()` requires `LLMClient(AnthropicProvider())`. |
+| MT-PERSONA-001 | **Partial** | Startup log verified with PYTHONPATH fix. Steps 2–5 require API key. **Code issue**: `make run-agent` fails without `PYTHONPATH=agents/generated`; port 50051 may conflict. |
+| MT-PERSONA-002 | **Fail** | Step 1 health-check pass (`SERVING`) on `127.0.0.1:50345`; Step 2 fails with gRPC `UNIMPLEMENTED` (`ChannelService/SendMessage` method not registered in agent server). |
+| MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
+
+---
+
+## 2026-04-18 Retest Pass Summary
+
+Executed by mkhomutov on Windows 11 after code fix (`PYTHONPATH` in Makefile + `conftest.py`).
+
+| ID | Result | Notes |
+|----|--------|-------|
+| MT-CONFIG-001 | **Pass** | All 5 mutation steps + teardown pass. No new issues. |
+| MT-AGENT-001 | **Pass** | All 7 tests pass via `make test-integration` (no manual PYTHONPATH needed). PYTHONPATH code issue resolved. |
+| MT-MEMORY-001 | **Pass** | All 4 steps pass. Scripts verified correct. |
+| MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: added pre-run cleanup step (remove stale DB + WAL files). |
+| MT-MEMORY-003 | **Pass** | All 3 steps pass. 1 212 → 961 tokens, compression logs present, all sections non-empty. **Code fix**: `compression_model` default `claude-haiku-4` → `claude-haiku-4-5`; `LLMClient(AnthropicProvider())` required. |
+| MT-WORKFLOW-001 | **Pass** | HTTP 201, terminal `failed` (<1 s), all required fields present. |
+| MT-WORKFLOW-002 | **Pass** | All 5 error cases pass. |
+| MT-CLI-001 | **Pass** | All 5 steps pass. `make run-agent` PYTHONPATH fix verified. |
+| MT-COST-001 | **Pass** | Full execution completed on port 8081 with live agents and API key. Workflow reached terminal `failed` (acceptable), and cost summary showed non-zero usage (`daily_output_tokens: 746`) with stable response structure across repeated calls. |
+| MT-COST-002 | **Pass** | Full live retest after fix `1232236` (`recordStepUsage` on error path). `run_id=e624e00b`. Steps 1–3 pass (HTTP 201, `failed` in ~7 s, error = `"max_tokens limit reached"`). Step 4 PASS: `daily_output_tokens=246` from zero — tokens recorded despite abort. Step 5 N/A (fixture committed). |
+| MT-PERSONA-001 | **Pass** | Full live pass. Steps 1–4 all pass (scheduler log, 13+ LLM ticks, no errors). Step 5 interactive Ctrl+C verified graceful shutdown logs (`Shutting down...`, `Tick scheduler stopped`, `Agent server stopped`); Windows PowerShell reports exit code `1` for this SIGINT path. **Note**: non-fatal episodic/notes FTS5 query fallback warnings were observed during persona activity. |
+| MT-PERSONA-002 | **Pass** | Full live pass on `127.0.0.1:50354` using generated Python gRPC stubs (`grpcurl` not installed). HealthCheck returned `SERVING`; `SendMessage` returned `delivered=true`; logs show inbound prompt routing and `Event: message_received -> Actions: ['complete_task']`. No traceback or timeout. No idle-skip lines appeared after the message because the persona remained active. Non-blocking FTS5 fallback warnings still occur on punctuation-heavy queries. |
+| MT-INTEGRATION-001 | **Pass** | Full live run completed after fix (`Dockerfile.orchestrator` Go 1.25). All compose services healthy; `/healthz` pass; agents listed healthy (`planner`, `code-writer`, `code-reviewer`); workflow terminal `failed` in ~41 s with `finished_at` present (acceptable for this smoke test, investigate `Max LLM call iterations exceeded` separately); Jaeger traces present (`workflow.run` + child spans); teardown pass with no residual `persatrix_*` volumes. |
 
 ---
 

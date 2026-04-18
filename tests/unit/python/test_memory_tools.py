@@ -11,7 +11,7 @@ import tempfile
 import pytest
 
 from agents.memory.episodic import EpisodicMemory
-from agents.memory.notes import Note, _MAX_NOTE_CONTENT_BYTES
+from agents.memory.notes import Note, _FTS5_SPECIAL, _MAX_NOTE_CONTENT_BYTES
 from agents.tools.builtin import check_auto_reflect, create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry, get_tool
@@ -569,3 +569,70 @@ class TestPruningFTS5Cleanup:
         # Surviving notes should still be findable
         found_beta = await memory.recall_notes("unique-beta-xyzzy")
         assert len(found_beta) == 1
+
+
+# ─── FTS5 query sanitization (MT-PERSONA-001 fix) ───────────
+
+
+class TestFTS5QuerySanitization:
+    """FTS5 special-character stripping in NoteStore._recall_notes_fts5.
+
+    Colons trigger FTS5 column-filter syntax (``col:term``); when the word
+    before the colon is not a declared FTS5 column the engine raises
+    ``sqlite3.OperationalError: no such column: <word>``.  The fix strips
+    FTS5 operator characters before passing user/LLM queries to MATCH.
+    """
+
+    # ── Regex unit tests (no DB required) ──────────────────────
+
+    def test_colon_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "tick:scheduler").strip() == "tick scheduler"
+
+    def test_colon_with_space_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "tick: scheduler").strip() == "tick  scheduler".strip()
+
+    def test_double_quote_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", '"phrase query"').strip() == "phrase query"
+
+    def test_wildcard_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "term*").strip() == "term"
+
+    def test_caret_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "^anchor").strip() == "anchor"
+
+    def test_parens_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "(grouped terms)").strip() == "grouped terms"
+
+    def test_only_special_chars_becomes_empty(self):
+        assert _FTS5_SPECIAL.sub(" ", '":*^()').strip() == ""
+
+    def test_plain_term_unchanged(self):
+        assert _FTS5_SPECIAL.sub(" ", "asyncio").strip() == "asyncio"
+
+    # ── Integration tests via EpisodicMemory ───────────────────
+
+    async def test_colon_query_does_not_raise(self, memory):
+        """Colon in query must not bubble up a sqlite3.OperationalError."""
+        await memory.store_note("tick scheduler", "tick scheduler started for sarah-chen")
+        notes = await memory.recall_notes("tick: scheduler")
+        assert isinstance(notes, list)
+
+    async def test_colon_query_finds_matching_notes(self, memory):
+        """After sanitizing 'tick:' → 'tick', FTS5 or LIKE still returns results."""
+        await memory.store_note("tick", "tick scheduler started")
+        await memory.store_note("other", "unrelated database configuration")
+        notes = await memory.recall_notes("tick:")
+        assert any(n.topic == "tick" for n in notes)
+
+    async def test_wildcard_query_finds_matching_notes(self, memory):
+        """Wildcard stripped: 'architecture*' → 'architecture' still finds results."""
+        await memory.store_note("architecture", "microservices and async patterns")
+        await memory.store_note("recipes", "pasta and sauce preparation")
+        notes = await memory.recall_notes("architecture*")
+        assert any(n.topic == "architecture" for n in notes)
+
+    async def test_only_special_chars_does_not_raise(self, memory):
+        """A query of only special characters (sanitizes to empty) does not raise."""
+        await memory.store_note("any", "some content here")
+        notes = await memory.recall_notes('":*^()')
+        assert isinstance(notes, list)

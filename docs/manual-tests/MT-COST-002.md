@@ -61,17 +61,23 @@ Create a budget-constrained workflow fixture at `workflows/budget-test.yaml`:
 
 ```yaml
 schema_version: "0.1"
-id: budget-test
-name: Budget Abort Test
-steps:
-  - id: constrained-step
-    agent: planner
-    task: "Write a detailed 10-page report on the history of computing."
-    config:
+
+workflow:
+  id: budget-test
+  name: Budget Abort Test
+  steps:
+    - id: constrained-step
+      agent: planner
+      input: "Write a detailed 10-page report on the history of computing."
       max_llm_calls: 1     # forces abort after the very first LLM call
       max_tokens: 50       # extremely low output cap
       timeout_seconds: 60
 ```
+
+> **Fix (2026-04-18)**: The original fixture used `id:`, `name:`, and `steps:` at the top level,
+> with `task:` instead of `input:` and a nested `config:` wrapper. The actual schema requires a
+> `workflow:` envelope and flat step-level fields (`input:`, `max_llm_calls`, `max_tokens`).
+> `make validate` will fail on the old format.
 
 Run `make validate` to confirm the fixture is valid before proceeding.
 
@@ -90,10 +96,14 @@ curl -s -w "\nHTTP %{http_code}\n" \
   -d '{"workflow_id":"budget-test","inputs":{}}'
 ```
 
-**Expected Result**: HTTP 200 with a `run_id`.
+**Expected Result**: HTTP 201 (`Created`) with a `run_id`.
+
+> **Fix (2026-04-18)**: The workflow submission endpoint returns HTTP **201**, not 200.
+> The `POST /api/v1/workflows/run` endpoint always responds 201 on success (confirmed in
+> MT-WORKFLOW-001 and live testing).
 
 **Verification**:
-- [ ] HTTP status 200
+- [ ] HTTP status 201
 - [ ] `run_id` present in response body
 
 Note the `run_id` for the following steps.
@@ -207,7 +217,10 @@ should not crash permanently — it should recover for subsequent tasks.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Precondition fixture fixed (wrong YAML format); Step 1 HTTP code corrected (200→201). Steps 1–5 skipped — require live agents and `ANTHROPIC_API_KEY`. Fixture validated OK with corrected format. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — fixture created at `workflows/budget-test.yaml`, `make validate` passes (4 files). Step 1: HTTP 201 `run_id=1551cf89` on port 8081. Step 2: terminal `failed` (no `planner` registered — expected). Steps 3–5 require live agents + `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | Fail (Step 4) | Full live run with planner agent on Windows 11. `run_id=5c96ebcb`. Step 1: HTTP 201 ✓. Step 2: `"failed"` in ~3 s ✓. Step 3: error = `"LLM response truncated: max_tokens limit reached"` — references limit concept ✓ (enforcement via agent-side LLM truncation, not scheduler `ErrBudgetExceeded`; `max_llm_calls:1` path not triggered since step failed on first call). Step 4: FAIL — `/api/v1/cost/summary` token counts unchanged after run (746 output tokens from prior session; new run's tokens not recorded). Root cause: `recordStepUsage` requires a non-nil `ExecuteResult`; permanent gRPC failures return no result so tokens consumed pre-failure are silently dropped. Step 5: N/A — fixture committed to repo. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Full live retest after fix `1232236` (`recordStepUsage` called on error path when `result != nil`). Orchestrator rebuilt and restarted on port 8081 with `--config config/`. Planner agent self-registered. `run_id=e624e00b`. Step 1: HTTP 201 ✓. Step 2: `"failed"` in ~7 s ✓. Step 3: error = `"LLM response truncated: max_tokens limit reached"` ✓. Step 4: PASS — cost summary shows `daily_output_tokens=246` (started from 0; 246 tokens from the aborted run recorded) ✓. Step 5: N/A — fixture committed to repo. All 4 steps pass. |
 
 ---
 
@@ -218,3 +231,13 @@ should not crash permanently — it should recover for subsequent tasks.
   path is not wired correctly.
 - The `max_llm_calls` default change from 10 → 5 (breaking change noted in `CHANGELOG.md`) does
   not affect this test since `config.max_llm_calls: 1` is set explicitly.
+- **Gap resolved (Step 4)**: Fixed in commit `1232236`. When a step fails with a permanent gRPC
+  error (e.g. LLM truncation), the executor now propagates a partial `ExecuteResult` carrying
+  the agent's metadata (including `tokens_used`) alongside the error. `stage_runner.go` calls
+  `recordStepUsage` when `result != nil`, ensuring tokens consumed before failure are recorded.
+- **Enforcement path note**: With `max_tokens: 50`, the `max_tokens` constraint is enforced by
+  the LLM provider cutting off the response; the agent detects truncation and raises an error.
+  The scheduler's `ErrBudgetExceeded` sentinel (from `budget.go`) covers the `max_llm_calls`
+  counter path, which is not exercised here because the step fails before a second LLM call is
+  attempted. A dedicated test with `max_llm_calls: 2` and a multi-turn agent would better target
+  `ErrBudgetExceeded`.

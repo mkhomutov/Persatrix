@@ -62,7 +62,7 @@ run: build ## Run the orchestrator
 	$(GO_BIN)/persatrix-server$(EXE) --config config/
 
 run-agent: ## Run a Python agent process (AGENT=coder)
-	$(PYTHON) -m persatrix_agents.server --agent $(AGENT)
+	PYTHONPATH="agents/generated" $(PYTHON) -m persatrix_agents.server --agent $(AGENT)
 
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests
@@ -74,7 +74,7 @@ test-python: ## Run Python agent tests
 	$(PYTHON) -m pytest tests/unit/python/ -v --tb=short
 
 test-integration: ## Run integration tests
-	$(PYTHON) -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
+	PYTHONPATH="agents/generated" $(PYTHON) -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
 
 test-persona: ## Run persona consistency tests (AGENT=sarah-chen)
 	cd agents && $(PYTHON) -m pytest tests/ -v -k "persona" --agent $(AGENT)

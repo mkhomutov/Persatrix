@@ -1493,14 +1493,56 @@ func TestExecuteTask_MetadataFailure_NoMetadata(t *testing.T) {
 
 	registerHealthyAgent(t, env.reg, "fail-agent")
 
-	_, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
 		TaskID:  "task-fail",
 		AgentID: "fail-agent",
 	})
 
-	// Failure should not return metadata — only successful dispatches get metadata.
+	// FAILED with no metadata: error is set, result is non-nil but has no token data.
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTaskFailed))
+	require.NotNil(t, result, "result should be non-nil so callers can attempt cost recording")
+	assert.Empty(t, result.Metadata)
+}
+
+// TestExecuteTask_FailedStatus_PreservesMetadata verifies that when an agent
+// responds with TaskStatus_FAILED and includes response metadata (e.g. token
+// counts from the LLM call that triggered the failure), ExecuteTask returns
+// a non-nil result carrying that metadata alongside the error. This enables
+// the scheduler to record partial token usage for cost tracking even when a
+// step fails (MT-COST-002 fix).
+func TestExecuteTask_FailedStatus_PreservesMetadata(t *testing.T) {
+	env := setupTestEnv(t, func(_ context.Context, req *taskpb.TaskRequest) (*taskpb.TaskResponse, error) {
+		return &taskpb.TaskResponse{
+			TaskId:       req.TaskId,
+			Status:       taskpb.TaskStatus_FAILED,
+			ErrorMessage: "LLM response truncated: max_tokens limit reached",
+			Metadata: map[string]string{
+				"input_tokens":  "120",
+				"output_tokens": "50",
+				"model":         "claude-sonnet",
+			},
+		}, nil
+	})
+
+	registerHealthyAgent(t, env.reg, "truncating-agent")
+
+	result, err := env.executor.ExecuteTask(context.Background(), ExecuteRequest{
+		TaskID:  "task-truncated",
+		AgentID: "truncating-agent",
+		Payload: "write a very long report",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTaskFailed))
+	assert.Contains(t, err.Error(), "max_tokens limit reached")
+
+	// Metadata must be preserved so the scheduler can record token usage.
+	require.NotNil(t, result, "non-nil result required for partial cost recording")
+	assert.Equal(t, "120", result.Metadata["input_tokens"])
+	assert.Equal(t, "50", result.Metadata["output_tokens"])
+	assert.Equal(t, "claude-sonnet", result.Metadata["model"])
+	assert.Empty(t, result.Output, "output should be empty on failure")
 }
 
 // TestExecuteTask_Int32OverflowGuard verifies that limit values exceeding
