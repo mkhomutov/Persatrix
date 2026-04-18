@@ -438,7 +438,12 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			timer.Stop()
 			span.RecordError(ctx.Err())
 			span.SetStatus(otelcodes.Error, ctx.Err().Error())
-			return nil, ctx.Err()
+			// Propagate partial result so callers can record token usage from
+			// the last dispatch attempt's metadata. Symmetric with the
+			// permanent-failure and retry-exhaustion paths above — the
+			// scheduler's stage_runner already treats any non-nil result on
+			// error as cost-recordable data. (PR #101 review: nice-to-have #9)
+			return lastResult, ctx.Err()
 		case <-timer.C:
 		}
 	}

@@ -165,6 +165,13 @@ class ChannelServiceServicer(agent_message_pb2_grpc.ChannelServiceServicer):
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher) -> None:
         self._agents = agents
         self._dispatcher = dispatcher
+        # PR #101 review: Python 3.11+ asyncio docs warn that the event loop
+        # only holds weak references to tasks, so a fire-and-forget
+        # ``asyncio.create_task(...)`` can be garbage-collected mid-flight if
+        # the caller does not retain a strong reference. SendMessage returns
+        # immediately after queueing, which is exactly that hazard. Keep a
+        # strong-ref set and drop tasks via a done-callback once they finish.
+        self._pending_dispatches: set[asyncio.Task] = set()
 
     async def SendMessage(
         self,
@@ -185,11 +192,35 @@ class ChannelServiceServicer(agent_message_pb2_grpc.ChannelServiceServicer):
             message_id=request.message_id or None,
         )
         for target_id in targets:
-            asyncio.create_task(self._dispatcher.dispatch(target_id, event))
+            task = asyncio.create_task(
+                self._dispatch_and_log(target_id, event),
+                name=f"channel-dispatch-{target_id}-{request.message_id or 'anon'}",
+            )
+            self._pending_dispatches.add(task)
+            task.add_done_callback(self._pending_dispatches.discard)
         return agent_message_pb2.SendMessageResponse(
             message_id=request.message_id,
             delivered=True,
         )
+
+    async def _dispatch_and_log(self, target_id: str, event: AgentEvent) -> None:
+        """Wrapper around ``EventDispatcher.dispatch`` that logs failures.
+
+        PR #101 review: fire-and-forget ``create_task`` surfaces exceptions only
+        as ``Task exception was never retrieved`` warnings at GC time, which is
+        easy to miss in production logs. Wrapping in a try/except at the task
+        boundary ensures dispatch failures are recorded with enough context to
+        correlate them back to the inbound message.
+        """
+        try:
+            await self._dispatcher.dispatch(target_id, event)
+        except Exception:
+            logger.exception(
+                "Channel dispatch to agent %s failed (message_id=%s, sender=%s)",
+                target_id,
+                event.message_id,
+                event.sender_id,
+            )
 
     async def Subscribe(
         self,

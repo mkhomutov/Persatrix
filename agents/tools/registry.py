@@ -72,9 +72,18 @@ def tool(
         sig = inspect.signature(func)
         # Resolve postponed annotations (PEP 563 / ``from __future__ import annotations``)
         # so built-in scalar types map correctly to JSON Schema.
+        # Log resolution failures at DEBUG — get_type_hints() can raise on forward
+        # references to runtime-only symbols or malformed annotations; the fallback
+        # to raw param.annotation is safe but silent, so surface the cause for
+        # operators investigating "type annotation defaulted to string" warnings.
         try:
             resolved_hints = get_type_hints(func)
-        except Exception:
+        except Exception as exc:
+            logger.debug(
+                "get_type_hints failed for %s, falling back to raw annotations: %s",
+                getattr(func, "__qualname__", repr(func)),
+                exc,
+            )
             resolved_hints = {}
 
         # Auto-generate parameter schema from type hints.

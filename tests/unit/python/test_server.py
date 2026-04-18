@@ -914,6 +914,82 @@ class TestChannelServiceServicerSendMessage:
 
         assert resp.message_id == "custom-id-42"
 
+    async def test_dispatcher_failure_is_logged_not_propagated(self, caplog):
+        """Dispatcher exceptions must be logged and not bubble up to the client.
+
+        PR #101 review: before the ``_dispatch_and_log`` wrapper, an exception
+        raised inside ``EventDispatcher.dispatch`` surfaced only as a
+        ``Task exception was never retrieved`` warning at GC time, silently
+        under-reporting real routing failures. This test locks in the fix.
+        """
+        import logging
+
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer = ChannelServiceServicer(
+            {"sarah-chen": stub},
+            MagicMock(spec=EventDispatcher),
+        )
+        servicer._dispatcher.dispatch = AsyncMock(
+            side_effect=RuntimeError("upstream channel unavailable"),
+        )
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        caplog.set_level(logging.ERROR, logger="agents.server")
+        resp = await servicer.SendMessage(
+            _agent_message(mentions=["sarah-chen"]), context
+        )
+        # Await all pending dispatch tasks so the exception surfaces before
+        # the test exits — asyncio.gather with return_exceptions swallows
+        # the RuntimeError that the wrapper already logged.
+        await asyncio.gather(
+            *servicer._pending_dispatches, return_exceptions=True,
+        )
+
+        assert resp.delivered is True
+        assert any(
+            "Channel dispatch to agent sarah-chen failed" in record.message
+            and record.levelno == logging.ERROR
+            for record in caplog.records
+        ), "dispatcher exception should be logged at ERROR with agent id"
+
+    async def test_pending_dispatches_retain_task_references(self):
+        """Fire-and-forget tasks must be tracked until completion.
+
+        Python 3.11+ asyncio docs warn that ``create_task`` returns a weakly
+        referenced task — without a strong ref, GC may cancel it mid-flight.
+        This test verifies the servicer holds a ref until done.
+        """
+        dispatch_started = asyncio.Event()
+        dispatch_may_finish = asyncio.Event()
+
+        async def slow_dispatch(_target_id, _event):
+            dispatch_started.set()
+            await dispatch_may_finish.wait()
+            return []
+
+        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        servicer = ChannelServiceServicer(
+            {"sarah-chen": stub},
+            MagicMock(spec=EventDispatcher),
+        )
+        servicer._dispatcher.dispatch = slow_dispatch
+        context = MagicMock(spec=grpc.aio.ServicerContext)
+
+        await servicer.SendMessage(
+            _agent_message(mentions=["sarah-chen"]), context
+        )
+        await dispatch_started.wait()
+
+        # Strong ref must be retained while dispatch is in flight.
+        assert len(servicer._pending_dispatches) == 1
+
+        dispatch_may_finish.set()
+        await asyncio.gather(
+            *servicer._pending_dispatches, return_exceptions=True,
+        )
+        # Done-callback should have evicted the task by now.
+        assert len(servicer._pending_dispatches) == 0
+
 
 class TestChannelServiceServicerSubscribe:
     """Tests for ChannelServiceServicer.Subscribe (v0.3 stub)."""
