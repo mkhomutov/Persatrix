@@ -59,7 +59,7 @@ class WorkingMemory:
     def __init__(
         self,
         max_tokens: int = 100_000,
-        compression_model: str = "claude-haiku-4",
+        compression_model: str = "claude-haiku-4-5",
     ) -> None:
         self._max_tokens = max_tokens
         self._compression_model = compression_model

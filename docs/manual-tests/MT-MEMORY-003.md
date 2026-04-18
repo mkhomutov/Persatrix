@@ -5,7 +5,7 @@
 **Version**: 1.0
 **Created**: 2026-04-18
 **Last Updated**: 2026-04-18
-**Status**: Active
+**Status**: Complete
 
 ---
 
@@ -67,7 +67,7 @@ import asyncio, logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 from persatrix_agents.memory.working import WorkingMemory, ContextSection
-from persatrix_agents.llm_client import LLMClient
+from persatrix_agents.llm_client import LLMClient, AnthropicProvider
 
 # Use a small threshold to trigger compression without adding 100 k tokens.
 MAX_TOKENS = 1_000
@@ -97,7 +97,7 @@ async def main():
     # completion before the next line — no sleep needed.
     # (The background-task path goes through try_start_compression +
     # await_pending_compression, not this function directly.)
-    client = LLMClient()  # reads ANTHROPIC_API_KEY from environment
+    client = LLMClient(AnthropicProvider())  # reads ANTHROPIC_API_KEY from environment
     await mem.compress_if_needed(client)
 
     total_after = mem.total_tokens()
@@ -114,12 +114,18 @@ EOF
 >    `mem.total_tokens()` instead of manually summing.
 > 3. `ContextSection` must be imported from `persatrix_agents.memory.working`.
 
+> **Fix (2026-04-18)**: Two additional bugs discovered during full run:
+> 4. `LLMClient()` requires a provider argument — use `LLMClient(AnthropicProvider())` (also import
+>    `AnthropicProvider` from `persatrix_agents.llm_client`).
+> 5. Default `compression_model` was `"claude-haiku-4"` (non-existent model) — corrected to
+>    `"claude-haiku-4-5"` in `agents/memory/working.py`.
+
 **Expected Result**: Compression fires; total tokens after is lower than before.
 
 **Verification**:
-- [ ] `"Total estimated tokens before compression"` value exceeds `MAX_TOKENS` (1 000)
-- [ ] At least one `"Compression pass: X → Y total tokens"` log line printed (INFO level)
-- [ ] `"Total estimated tokens after compression"` is lower than before
+- [x] `"Total estimated tokens before compression"` value exceeds `MAX_TOKENS` (1 000)
+- [x] At least one `"Compression pass: X → Y total tokens"` log line printed (INFO level)
+- [x] `"Total estimated tokens after compression"` is lower than before
 
 ---
 
@@ -137,9 +143,9 @@ python3 <the script above> 2>&1 | grep -E "Compression|Compressed|section"
 - `"Compression pass: N → M total tokens"` (INFO)
 
 **Verification**:
-- [ ] At least one compression log line present
-- [ ] No `"Failed to compress section"` warning (unless LLM returned empty text — acceptable)
-- [ ] No unhandled Python exception
+- [x] At least one compression log line present
+- [x] No `"Failed to compress section"` warning (unless LLM returned empty text — acceptable)
+- [x] No unhandled Python exception
 
 ---
 
@@ -162,8 +168,8 @@ Add to the script from Step 1 (after `await mem.compress_if_needed(client)`):
 **Expected Result**: All sections retain non-empty content.
 
 **Verification**:
-- [ ] Each section reports a positive char count
-- [ ] Script prints `"PASS"`
+- [x] Each section reports a positive char count
+- [x] Script prints `"PASS"`
 
 > **Note**: Steps 2 and 3 require `ANTHROPIC_API_KEY` and cannot be fully verified without it.
 > Step 1 (threshold detection) was verified without an API key (total 1 212 tokens > 1 000 limit).
@@ -174,9 +180,9 @@ Add to the script from Step 1 (after `await mem.compress_if_needed(client)`):
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Compression triggered; token count reduced | ☑ (threshold detection only; LLM call skipped — no API key) |
-| 2 | Compression log lines present; no failure warnings | ☐ (requires `ANTHROPIC_API_KEY`) |
-| 3 | All sections retain non-empty content | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 1 | Compression triggered; token count reduced | ✅ PASS (1 212 → 961 tokens) |
+| 2 | Compression log lines present; no failure warnings | ✅ PASS |
+| 3 | All sections retain non-empty content | ✅ PASS |
 
 ---
 
@@ -204,6 +210,7 @@ still triggers correctly (conservative token estimates may cause earlier-than-ne
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 (threshold detection): 1 212 tokens > 1 000 limit, PASS. Steps 2–3 require `ANTHROPIC_API_KEY` (not set). Doc fixes: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`, `_sections.items()` → iterate list directly. |
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Step 1 confirms 1 212 tokens > 1 000 limit. API fixed scripts verified correct. Steps 2–3 still require `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | **PASS** | Full run with `ANTHROPIC_API_KEY` set. Steps 1–3 all pass: 1 212 → 961 tokens, compression log lines present, all sections non-empty. Two bugs found and fixed: `LLMClient()` requires `LLMClient(AnthropicProvider())`; default `compression_model` was `claude-haiku-4` (non-existent) → corrected to `claude-haiku-4-5` in `agents/memory/working.py`. |
 
 ---
 

@@ -45,7 +45,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-MEMORY-001](MT-MEMORY-001.md) | Episodic memory: write and recall across agent restart | Active |
 | [MT-MEMORY-002](MT-MEMORY-002.md) | Relationship memory: trust score updates after N exchanges | Active |
-| [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Active |
+| [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Complete |
 
 ## Cost
 
@@ -83,7 +83,7 @@ Executed by mkhomutov on Windows 11. All testable tests run from clean state.
 | MT-COST-002 | **Partial** | Fixture YAML corrected (wrong format); Step 1 HTTP code corrected (200→201). Steps 1–5 require live agents + API key. |
 | MT-MEMORY-001 | **Pass** | All 4 steps pass. **Doc fix**: Step 2 needs `logging.basicConfig()`. |
 | MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: `get_relationship()` replaced with `get_trust()` / `get_relationship_summary()`. |
-| MT-MEMORY-003 | **Partial** | Step 1 (threshold detection) pass. Steps 2–3 require API key. **Doc fix**: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`. |
+| MT-MEMORY-003 | **Partial** | Step 1 (threshold detection) pass. Steps 2–3 require API key. **Doc fix**: `set_section` → `add_section(ContextSection(...))`, `_sections.values()` → `total_tokens()`. **Code fix**: wrong model name `claude-haiku-4` → `claude-haiku-4-5`; `LLMClient()` requires `LLMClient(AnthropicProvider())`. |
 | MT-PERSONA-001 | **Partial** | Startup log verified with PYTHONPATH fix. Steps 2–5 require API key. **Code issue**: `make run-agent` fails without `PYTHONPATH=agents/generated`; port 50051 may conflict. |
 | MT-PERSONA-002 | **Not run** | Requires live persona + API key. |
 | MT-INTEGRATION-001 | **Not run** | Requires `ANTHROPIC_API_KEY` (Docker available). |
@@ -100,7 +100,7 @@ Executed by mkhomutov on Windows 11 after code fix (`PYTHONPATH` in Makefile + `
 | MT-AGENT-001 | **Pass** | All 7 tests pass via `make test-integration` (no manual PYTHONPATH needed). PYTHONPATH code issue resolved. |
 | MT-MEMORY-001 | **Pass** | All 4 steps pass. Scripts verified correct. |
 | MT-MEMORY-002 | **Pass** | All 5 steps pass. **Doc fix**: added pre-run cleanup step (remove stale DB + WAL files). |
-| MT-MEMORY-003 | **Partial** | Step 1 (1 212 tokens > 1 000 threshold) pass. Steps 2–3 require API key. |
+| MT-MEMORY-003 | **Pass** | All 3 steps pass. 1 212 → 961 tokens, compression logs present, all sections non-empty. **Code fix**: `compression_model` default `claude-haiku-4` → `claude-haiku-4-5`; `LLMClient(AnthropicProvider())` required. |
 | MT-WORKFLOW-001 | **Pass** | HTTP 201, terminal `failed` (<1 s), all required fields present. |
 | MT-WORKFLOW-002 | **Pass** | All 5 error cases pass. |
 | MT-CLI-001 | **Pass** | All 5 steps pass. `make run-agent` PYTHONPATH fix verified. |
