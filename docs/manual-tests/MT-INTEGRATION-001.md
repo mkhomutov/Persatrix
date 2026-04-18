@@ -223,6 +223,8 @@ not having been run or a stale Docker layer — rebuild with `--no-cache`.
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Not run | Requires `ANTHROPIC_API_KEY` (not set in this environment). Docker is available. |
 | 2026-04-18 | mkhomutov | Windows 11 | Not run | Retest — still requires `ANTHROPIC_API_KEY`. Docker available. No blocking infrastructure issues. |
+| 2026-04-18 | mkhomutov | Windows 11 | Fail | Step 1 failed during `docker compose up --build -d`: orchestrator image uses `golang:1.24-alpine` but `go.mod` requires Go `1.25.0` (`go mod download` exits with `go.mod requires go >= 1.25.0`). Steps 2–5 blocked. Step 6 cleanup completed; no running services and no `persatrix_*` volumes remained. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Full live run completed after fix `Dockerfile.orchestrator` (`golang:1.25-alpine`). Step 1 pass (all 5 services healthy). Step 2 pass (`/healthz` = `{"status":"ok"}`). Step 3 pass (agents API lists `planner`, `code-writer`, `code-reviewer` healthy). Step 4 pass by policy: workflow reached terminal `failed` in ~41 s with non-null `finished_at` (`Max LLM call iterations exceeded` on `code-writer`, requires follow-up). Step 5 pass: Jaeger `persatrix-server` traces present with parent `workflow.run` and child spans (`workflow.step`, `agent.dispatch`). Step 6 pass: `docker compose down -v` removed containers, network, and `persatrix_workspace`; no residual `persatrix_*` volumes. Note: a stale local `persatrix-server` on host port 8080 initially caused API checks to hit the wrong process; stopping it restored expected compose endpoint behavior. |
 
 ---
 
@@ -233,3 +235,7 @@ not having been run or a stale Docker layer — rebuild with `--no-cache`.
 - Jaeger traces require OTLP export to be enabled in the orchestrator config. If traces are absent,
   check that `OTEL_EXPORTER_OTLP_ENDPOINT` is set correctly in the orchestrator container
   environment.
+- **Required follow-up (from 2026-04-18 pass run):** investigate the `code-writer` failure
+  `Max LLM call iterations exceeded` observed in Step 4 (`run_id=6d98e5cc-e328-40fa-97eb-9a0abb28eeb8`).
+  Capture and review `docker compose logs orchestrator agent-coder`, identify whether the loop cap is
+  triggered by prompt/tool behavior or retry policy, then retest MT-INTEGRATION-001 Step 4 after the fix.
