@@ -16,27 +16,14 @@ All notable changes to this project will be documented in this file.
   context-window management, and summarization paths.
 - Workflow execution now includes execution limits, cost tracking, budget enforcement,
   response caching, and a cost summary API.
+- Default `max_tokens` for task agents raised from **4096** to **8192**, improving out-of-box
+  capacity for code review and generation workloads.
 
 ### Upgrade Notes
 
 - **Behavior change:** task-agent default `max_llm_calls` is reduced from **10** to **5**.
   If your workflows relied on the previous default for long tool/LLM loops, set an explicit
   `max_llm_calls` override in workflow step config or agent config.
-
-### Curated v0.2 Additions (Migrated from Unreleased)
-
-- *(orchestrator)* `TokenCounter` and `BudgetEnforcer` add pre-dispatch budget gating with
-  per-workflow, per-agent, and global daily accounting.
-- *(orchestrator)* LRU response cache for `cacheable: true` steps avoids redundant gRPC dispatch
-  on cache hits.
-- *(server)* `GET /api/v1/cost/summary` reports global daily totals and per-agent spend,
-  and returns `503` when cost tracking is not configured.
-- *(orchestrator)* Step-level execution metadata now includes `tokens_used`, `llm_call_count`,
-  `retry_count`, `cache_hit`, `wall_time_ms`, and `estimated_cost_usd` in workflow status output.
-- *(orchestrator)* Derived deadline mode computes RPC timeout from step config and shares
-  retry budget across attempts.
-- *(agents)* Defaults are centralized in `agents/defaults.py` with
-  `DEFAULT_MAX_LLM_CALLS=5`, `DEFAULT_MAX_TOKENS=8192`, and `DEFAULT_TIMEOUT_SECONDS=60`.
 
 ### 🚀 Features
 
@@ -116,9 +103,6 @@ All notable changes to this project will be documented in this file.
 ### 📦 Miscellaneous
 
 - Ongoing manual test campaign and fixes (WIP) (#101)
-
-### license
-
 - Move repository to BUSL 1.1 (#63)
 
 ## [0.1.0] - 2026-04-11
@@ -194,6 +178,5 @@ All notable changes to this project will be documented in this file.
 ### 📦 Miscellaneous
 
 - Update FILEMAP.md
-- *(license)* Adopt Business Source License 1.1 (#63)
 
 
