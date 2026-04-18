@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agents.memory.episodic import (
-    _MAX_RECALL_LIMIT,
     Episode,
     EpisodicMemory,
 )
+from agents.memory.episodic_queries import MAX_RECALL_LIMIT
 from agents.memory.migrations import _apply_migrations
 from agents.llm_client import LLMResponse, StopReason, Usage
 
@@ -679,11 +679,11 @@ class TestLimitValidation:
             await memory.recall("anything", limit=0)
 
     async def test_limit_above_max_is_capped(self, memory: EpisodicMemory):
-        """Limit exceeding _MAX_RECALL_LIMIT is silently capped."""
+        """Limit exceeding MAX_RECALL_LIMIT is silently capped."""
         # Store a few episodes so we can verify the query still works
         for i in range(3):
             await memory.store_episode(summary=f"Limit cap episode {i}", context={})
-        results = await memory.recall("", limit=_MAX_RECALL_LIMIT + 50)
+        results = await memory.recall("", limit=MAX_RECALL_LIMIT + 50)
         # Should return all 3 (below the cap), proving the query ran without error
         assert len(results) == 3
 

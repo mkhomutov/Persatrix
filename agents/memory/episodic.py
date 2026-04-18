@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 
 from .episodic_queries import (
-    _EPISODE_SELECT,
-    _MAX_RECALL_LIMIT,
+    EPISODE_SELECT,
+    MAX_RECALL_LIMIT,
     Episode,
     get_interaction_count,
     increment_interaction_count,
@@ -180,12 +180,12 @@ class EpisodicMemory:
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
-        if limit > _MAX_RECALL_LIMIT:
+        if limit > MAX_RECALL_LIMIT:
             logger.warning(
                 "limit=%d exceeds maximum (%d), capping",
-                limit, _MAX_RECALL_LIMIT,
+                limit, MAX_RECALL_LIMIT,
             )
-            limit = _MAX_RECALL_LIMIT
+            limit = MAX_RECALL_LIMIT
         db = self._ensure_db()
 
         if query and self._fts5:
@@ -219,7 +219,7 @@ class EpisodicMemory:
         """Retrieve a single episode by ID (agent-scoped)."""
         db = self._ensure_db()
         async with db.execute(
-            f"SELECT {_EPISODE_SELECT} FROM episodes WHERE id = ? AND agent_id = ?",
+            f"SELECT {EPISODE_SELECT} FROM episodes WHERE id = ? AND agent_id = ?",
             (episode_id, self._agent_id),
         ) as cursor:
             row = await cursor.fetchone()
@@ -285,7 +285,7 @@ class EpisodicMemory:
         # memory usage for agents with large unsummarized backlogs.  Callers
         # should loop until this method returns 0.
         async with db.execute(
-            f"SELECT {_EPISODE_SELECT} FROM episodes "
+            f"SELECT {EPISODE_SELECT} FROM episodes "
             "WHERE agent_id = ? AND compression_level < 1 AND created_at < ? "
             "ORDER BY created_at ASC LIMIT ?",
             (self._agent_id, cutoff, batch_size),

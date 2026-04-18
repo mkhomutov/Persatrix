@@ -1,9 +1,12 @@
 """
-SQL query helpers and data model for EpisodicMemory.
+SQL query helpers and Episode data model for EpisodicMemory.
 
-Extracted from episodic.py to keep that module ≤ 500 lines.
+Contains the Episode dataclass, column constants, row conversion, recall
+query implementations (FTS5 and LIKE fallback), and agent-state helpers
+(interaction counter, persona-state persistence).
+
 All functions accept an open ``aiosqlite.Connection`` and an ``agent_id``
-string; they carry no object state and are safe to call from any context.
+string; they carry no object state and are safe to call from any async context.
 """
 
 from __future__ import annotations
@@ -50,12 +53,12 @@ _EPISODE_COLS = (
     "importance", "access_count", "last_accessed_at",
     "tags_json", "created_at", "compressed_at", "compression_level",
 )
-_EPISODE_SELECT = ", ".join(_EPISODE_COLS)
+EPISODE_SELECT = ", ".join(_EPISODE_COLS)
 _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
 
 # Maximum number of episodes returned by recall() to prevent unbounded
 # result sets and resource exhaustion.
-_MAX_RECALL_LIMIT = 100
+MAX_RECALL_LIMIT = 100
 
 
 # ─── Row conversion ─────────────────────────────────────────
@@ -111,7 +114,7 @@ async def recall_fts5(
             """,
             (query, agent_id, min_importance, time.time(), limit),
         ) as cursor:
-            return list(await cursor.fetchall())
+            return await cursor.fetchall()
     except sqlite3.OperationalError as exc:
         logger.warning(
             "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
@@ -135,7 +138,7 @@ async def recall_like(
     pattern = f"%{escaped}%"
     async with db.execute(
         f"""
-        SELECT {_EPISODE_SELECT}
+        SELECT {EPISODE_SELECT}
         FROM episodes
         WHERE agent_id = ?
           AND importance >= ?
@@ -147,7 +150,7 @@ async def recall_like(
         """,
         (agent_id, min_importance, pattern, pattern, time.time(), limit),
     ) as cursor:
-        return list(await cursor.fetchall())
+        return await cursor.fetchall()
 
 
 async def recall_recency(
@@ -159,7 +162,7 @@ async def recall_recency(
     """No query text — rank by importance x access x recency only."""
     async with db.execute(
         f"""
-        SELECT {_EPISODE_SELECT}
+        SELECT {EPISODE_SELECT}
         FROM episodes
         WHERE agent_id = ?
           AND importance >= ?
@@ -170,7 +173,7 @@ async def recall_recency(
         """,
         (agent_id, min_importance, time.time(), limit),
     ) as cursor:
-        return list(await cursor.fetchall())
+        return await cursor.fetchall()
 
 
 # ─── Interaction counter helpers ─────────────────────────────
@@ -271,5 +274,5 @@ async def load_agent_state(
     ) as cursor:
         row = await cursor.fetchone()
     if row and row[0]:
-        return str(row[0])
+        return row[0]
     return None
