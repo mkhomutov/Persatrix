@@ -1,0 +1,76 @@
+# Manual Test Index
+
+This directory contains manual test documents for Persatrix. Each document provides step-by-step
+procedures, expected results, and a results table for recording execution outcomes.
+
+Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>`.
+
+---
+
+## Workflow
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-WORKFLOW-001](MT-WORKFLOW-001.md) | Submit YAML workflow via REST, poll to completion | Active |
+| [MT-WORKFLOW-002](MT-WORKFLOW-002.md) | Submit invalid workflow, verify clean error response | Active |
+
+## Agent
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-AGENT-001](MT-AGENT-001.md) | Task agent executes a builtin tool (no LLM required) | Active |
+
+## CLI
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CLI-001](MT-CLI-001.md) | `orch run` end-to-end against a running orchestrator | Active |
+
+## Config
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CONFIG-001](MT-CONFIG-001.md) | `make validate` catches malformed `config/agents.yaml` | Active |
+
+## Persona
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-PERSONA-001](MT-PERSONA-001.md) | Start semi-autonomous persona; verify tick loop and logged actions | Active |
+| [MT-PERSONA-002](MT-PERSONA-002.md) | Persona handles an inbound channel message and produces a logged response | Active |
+
+## Memory
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-MEMORY-001](MT-MEMORY-001.md) | Episodic memory: write and recall across agent restart | Active |
+| [MT-MEMORY-002](MT-MEMORY-002.md) | Relationship memory: trust score updates after N exchanges | Active |
+| [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Active |
+
+## Cost
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-COST-001](MT-COST-001.md) | `GET /api/v1/cost/summary` reports token usage for a completed run | Active |
+| [MT-COST-002](MT-COST-002.md) | Workflow exceeding budget is aborted with the expected reason | Active |
+
+## Integration
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-INTEGRATION-001](MT-INTEGRATION-001.md) | Docker Compose full-stack smoke test end-to-end | Active |
+
+---
+
+## Execution Report
+
+Results for a release execution run are recorded in `v0.2-execution-report.md` (created in PR 11).
+
+---
+
+## Conventions
+
+- **Test IDs** are unique across all areas and never reused after deprecation.
+- **Status** values: `Active` | `Draft` | `Deprecated`
+- A test file template is at [docs/templates/MANUAL_TEST_TEMPLATE.md](../templates/MANUAL_TEST_TEMPLATE.md).
+- Tests that require `ANTHROPIC_API_KEY` are noted in their **Preconditions** section.

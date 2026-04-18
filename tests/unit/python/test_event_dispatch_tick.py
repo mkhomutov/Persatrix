@@ -1169,6 +1169,7 @@ class TestInitializePersonaAgents:
         await initialize_persona_agents(agents, dispatcher, schedulers)
 
         assert "worker" not in schedulers
+        # EventDispatcher has no public "has_agent" API; _agents is the only way to verify registration.
         assert "worker" not in dispatcher._agents
 
     async def test_persona_agent_registered_with_dispatcher(self):
@@ -1183,8 +1184,10 @@ class TestInitializePersonaAgents:
 
         await initialize_persona_agents({"sarah-chen": agent}, dispatcher, schedulers)
 
-        assert "sarah-chen" in dispatcher._agents
-        await agent.close_memory()
+        try:
+            assert "sarah-chen" in dispatcher._agents
+        finally:
+            await agent.close_memory()
 
     async def test_memory_failure_skips_agent_but_others_continue(self):
         """A memory init failure on one agent does not prevent others from initializing.
