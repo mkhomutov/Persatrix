@@ -1500,6 +1500,90 @@ func TestTokenRecording_TokensUsedFallback(t *testing.T) {
 	assert.Equal(t, int64(500), output)
 }
 
+// TestTokenRecording_StepFailed_WithPartialMetadata verifies that when a step
+// fails and the executor returns a non-nil result containing response metadata
+// (e.g. token counts from an LLM call that completed before the step error),
+// recordStepUsage is called and those tokens are recorded in the cost summary.
+// This is the MT-COST-002 fix: previously tokens from failed steps were silently
+// dropped because recordStepUsage was only called on the success path.
+func TestTokenRecording_StepFailed_WithPartialMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	// Executor returns partial metadata alongside the error, simulating an agent
+	// that completed its LLM call but failed before returning output (e.g. truncation).
+	exec := &mockExecutor{handler: func(_ context.Context, _ executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return &executor.ExecuteResult{
+			Metadata: map[string]string{
+				"input_tokens":  "200",
+				"output_tokens": "80",
+				"model":         "claude-sonnet",
+			},
+		}, fmt.Errorf("LLM response truncated: max_tokens limit reached")
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "partial-meta-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "partial-meta-run", state.RunFailed, 5*time.Second)
+	assert.Equal(t, state.RunFailed, run.Status)
+
+	// Tokens from the partial result must be recorded despite the step failure.
+	input, output, _ := tc.GlobalUsage()
+	assert.Equal(t, int64(200), input, "input tokens from failed step should be recorded")
+	assert.Equal(t, int64(80), output, "output tokens from failed step should be recorded")
+}
+
+// TestTokenRecording_StepFailed_NilResult verifies that when a step fails and
+// the executor returns nil alongside the error (e.g. transport-level gRPC
+// failure before the agent is reached), no recording attempt is made and no
+// panic occurs. This is the pre-existing behaviour preserved by the nil guard.
+func TestTokenRecording_StepFailed_NilResult(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "test-wf", singleStepYAML)
+
+	cfg := testCostConfig()
+	tc := cost.NewTokenCounter(cfg, zap.NewNop())
+	be := cost.NewBudgetEnforcer(tc, cfg, zap.NewNop())
+	cr := cost.NewCostReporter(tc, cfg, zap.NewNop())
+
+	store := state.NewInMemoryStore(zap.NewNop())
+	exec := &mockExecutor{handler: func(_ context.Context, _ executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		return nil, fmt.Errorf("agent not found in registry")
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir,
+		WithPollInterval(50*time.Millisecond),
+		WithCostComponents(tc, be, cr),
+	)
+	createPendingRun(t, store, "nil-result-run", "test-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	run := waitForRunStatus(t, store, "nil-result-run", state.RunFailed, 5*time.Second)
+	assert.Equal(t, state.RunFailed, run.Status)
+
+	// No tokens should be recorded when result is nil.
+	input, output, _ := tc.GlobalUsage()
+	assert.Equal(t, int64(0), input, "no input tokens should be recorded for nil result")
+	assert.Equal(t, int64(0), output, "no output tokens should be recorded for nil result")
+}
+
 func TestCostReporter_StepCostRecorded(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflow(t, dir, "test-wf", singleStepYAML)
