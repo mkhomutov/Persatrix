@@ -221,6 +221,7 @@ completion.
 
 - [Roadmap & Progress](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
+- [Persona agents & memory guide](docs/guides/persona-agents.md) — declaring personas, memory tiers, cost budgets
 - [Architecture diagrams](docs/diagrams/)
 - [Manual test suite](docs/manual-tests/README.md)
 - [RFCs](docs/rfcs/README.md) — engineering design docs
