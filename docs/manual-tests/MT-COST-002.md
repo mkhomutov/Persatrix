@@ -219,6 +219,7 @@ should not crash permanently — it should recover for subsequent tasks.
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Precondition fixture fixed (wrong YAML format); Step 1 HTTP code corrected (200→201). Steps 1–5 skipped — require live agents and `ANTHROPIC_API_KEY`. Fixture validated OK with corrected format. |
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — fixture created at `workflows/budget-test.yaml`, `make validate` passes (4 files). Step 1: HTTP 201 `run_id=1551cf89` on port 8081. Step 2: terminal `failed` (no `planner` registered — expected). Steps 3–5 require live agents + `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | Fail (Step 4) | Full live run with planner agent on Windows 11. `run_id=5c96ebcb`. Step 1: HTTP 201 ✓. Step 2: `"failed"` in ~3 s ✓. Step 3: error = `"LLM response truncated: max_tokens limit reached"` — references limit concept ✓ (enforcement via agent-side LLM truncation, not scheduler `ErrBudgetExceeded`; `max_llm_calls:1` path not triggered since step failed on first call). Step 4: FAIL — `/api/v1/cost/summary` token counts unchanged after run (746 output tokens from prior session; new run's tokens not recorded). Root cause: `recordStepUsage` requires a non-nil `ExecuteResult`; permanent gRPC failures return no result so tokens consumed pre-failure are silently dropped. Step 5: N/A — fixture committed to repo. |
 
 ---
 
@@ -229,3 +230,13 @@ should not crash permanently — it should recover for subsequent tasks.
   path is not wired correctly.
 - The `max_llm_calls` default change from 10 → 5 (breaking change noted in `CHANGELOG.md`) does
   not affect this test since `config.max_llm_calls: 1` is set explicitly.
+- **Known gap (Step 4)**: When a step fails with a permanent gRPC error (e.g. LLM truncation),
+  `recordStepUsage` is never called because there is no `ExecuteResult`. Tokens consumed by the
+  LLM call before failure are not recorded in the cost summary. This affects any run where the
+  agent raises an exception rather than returning a structured result with metadata.
+- **Enforcement path note**: With `max_tokens: 50`, the `max_tokens` constraint is enforced by
+  the LLM provider cutting off the response; the agent detects truncation and raises an error.
+  The scheduler's `ErrBudgetExceeded` sentinel (from `budget.go`) covers the `max_llm_calls`
+  counter path, which is not exercised here because the step fails before a second LLM call is
+  attempted. A dedicated test with `max_llm_calls: 2` and a multi-turn agent would better target
+  `ErrBudgetExceeded`.
