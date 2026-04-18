@@ -104,7 +104,7 @@ Executed by mkhomutov on Windows 11 after code fix (`PYTHONPATH` in Makefile + `
 | MT-WORKFLOW-001 | **Pass** | HTTP 201, terminal `failed` (<1 s), all required fields present. |
 | MT-WORKFLOW-002 | **Pass** | All 5 error cases pass. |
 | MT-CLI-001 | **Pass** | All 5 steps pass. `make run-agent` PYTHONPATH fix verified. |
-| MT-COST-001 | **Partial** | Step 1: port 8080 (stale instance) → 503; port 8081 (fresh instance) → 200 with correct shape. **Doc fix**: summary table Step 1 corrected to `☑`. Steps 2–4 require API key. |
+| MT-COST-001 | **Pass** | Full execution completed on port 8081 with live agents and API key. Workflow reached terminal `failed` (acceptable), and cost summary showed non-zero usage (`daily_output_tokens: 746`) with stable response structure across repeated calls. |
 | MT-COST-002 | **Partial** | Fixture created and validated. Steps 1–2 pass (HTTP 201, terminal failed). Steps 3–5 require API key. |
 | MT-PERSONA-001 | **Partial** | Steps 1–2 pass (`make run-agent` PYTHONPATH fixed, port 50056 used). Steps 3–5 require API key. **Doc fix**: Step 1 command updated; notes updated to reflect resolved code issue. |
 | MT-PERSONA-002 | **Not run** | Requires live persona + API key. |

@@ -152,9 +152,9 @@ print(json.dumps(d, indent=2))
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
 | 1 | Cost tracking enabled; 200 OK | ☑ |
-| 2 | Workflow run completes; `run_id` obtained | ☐ (requires `ANTHROPIC_API_KEY`) |
-| 3 | Cost summary returns non-empty JSON with token/cost fields | ☐ (requires `ANTHROPIC_API_KEY`) |
-| 4 | Token usage is non-zero after a completed run | ☐ (requires `ANTHROPIC_API_KEY`) |
+| 2 | Workflow run reaches terminal state; `run_id` obtained | ☑ |
+| 3 | Cost summary returns non-empty JSON with token/cost fields | ☑ |
+| 4 | Token usage is non-zero after a completed run | ☑ |
 
 ---
 
@@ -176,3 +176,4 @@ No panic or 500 error.
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1: HTTP 200 with cost summary structure confirmed (all fields present, counts zero). Steps 2–4 skipped — require live agents and `ANTHROPIC_API_KEY`. |
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Step 1: port 8080 (stale instance) returns HTTP 503; port 8081 (fresh `make run` instance) returns HTTP 200 `{"daily_input_tokens":0,"daily_output_tokens":0,"daily_estimated_usd":0,"top_agents":[],"reported_at":"..."}`. Summary table fixed: Step 1 marked `☑`. Steps 2–4 still require `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Full run on fresh orchestrator (`127.0.0.1:8081`) with registered agents (`planner`, `code-writer`, `code-reviewer`). Step 2 returned `run_id=468a0075-f50d-4a90-a2cf-decd2bb5e26c`; terminal status was `failed` (acceptable per test). Step 3 returned HTTP 200 with non-zero usage (`daily_output_tokens: 746`, `top_agents[0].agent_id: planner`). Step 4 repeated calls confirmed stable response structure and non-zero token totals. |
