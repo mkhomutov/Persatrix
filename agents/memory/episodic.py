@@ -447,7 +447,12 @@ class EpisodicMemory:
         return await get_interaction_count(self._ensure_db(), self._agent_id)
 
     async def increment_interaction_count(self) -> int:
-        """Increment and return the new interaction count."""
+        """Increment and return the new interaction count (upsert).
+
+        Uses RETURNING to get the post-upsert count in a single round-trip,
+        eliminating a read-after-write race.  Requires SQLite >= 3.35
+        (Python 3.11+ ships >= 3.39).
+        """
         return await increment_interaction_count(self._ensure_db(), self._agent_id)
 
     async def reset_interaction_count(self) -> None:
@@ -459,7 +464,11 @@ class EpisodicMemory:
     async def persist_agent_state(
         self, agent_id: str, state_json: str,
     ) -> None:
-        """Persist opaque agent state JSON to the agent_state table."""
+        """Persist opaque agent state JSON to the agent_state table (upsert).
+
+        Preserves interaction_count: only persona_state_json and updated_at
+        are overwritten by the upsert, so call-count tracking is not reset.
+        """
         await persist_agent_state(self._ensure_db(), agent_id, state_json)
 
     async def load_agent_state(self, agent_id: str) -> str | None:

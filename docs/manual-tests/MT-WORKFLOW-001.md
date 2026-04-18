@@ -1,0 +1,232 @@
+# Manual Test MT-WORKFLOW-001: Submit YAML Workflow via REST, Poll to Completion
+
+**Test ID**: `MT-WORKFLOW-001`
+**Feature Area**: Workflow
+**Version**: 1.0
+**Created**: 2026-04-18
+**Last Updated**: 2026-04-18
+**Status**: Active
+
+---
+
+## Overview
+
+**Purpose**: Verify that a valid YAML workflow can be submitted via the REST API and polled until it
+reaches a terminal status (`completed` or `failed`).
+
+**Scope**: `POST /api/v1/workflows/run` submission, `GET /api/v1/workflows/{id}/status` polling,
+response envelope shape, and workflow state transitions.
+
+**Out of Scope**: Agent LLM correctness; step output content; budget enforcement.
+
+---
+
+## Related Documentation
+
+**Feature Documentation**:
+- [docs/ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md)
+- [internal/server/server.go](../../internal/server/server.go) — route registrations
+
+**Related Automated Tests**:
+- Integration tests: `tests/integration/test_workflow.py`
+
+---
+
+## Preconditions
+
+### System Requirements
+
+**Operating Systems**:
+- ☐ Windows 10/11 (x64)
+- ☐ macOS 12.0+ (Intel/Apple Silicon)
+- ☐ Linux (Ubuntu 22.04+)
+
+**Dependencies Installed**:
+- Go 1.24+: `go version`
+- Python 3.11+: `python3 --version`
+- `curl` available in PATH: `curl --version`
+
+### Application State
+
+**Orchestrator Setup**:
+- ☐ Orchestrator built: `make build`
+- ☐ Orchestrator running: `make run` (binds to `127.0.0.1:8080`)
+- ☐ Config valid: `make validate` exits 0
+- ☐ At least one Python agent registered (see Step 1)
+
+### Test Data
+
+**Fixtures Used**:
+- `workflows/feature-builder.yaml` — pre-existing workflow definition loaded by the orchestrator
+  from `config/` at startup
+- Input payload: `{"workflow_id": "feature-builder", "inputs": {"user_request": "Add hello-world endpoint"}}`
+
+---
+
+## Test Procedure
+
+### Step 1: Start the Orchestrator and Verify Health
+
+**Action**: In one terminal, start the orchestrator:
+
+```bash
+make run
+```
+
+In a second terminal, confirm it is healthy:
+
+```bash
+curl -s http://127.0.0.1:8080/healthz
+```
+
+**Expected Result**: HTTP 200 with body `{"status":"ok"}` (or equivalent).
+
+**Verification**:
+- [ ] `curl` exits 0
+- [ ] Response body confirms server is healthy
+
+---
+
+### Step 2: Submit the Workflow
+
+**Action**: POST the workflow run request:
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" \
+  -X POST http://127.0.0.1:8080/api/v1/workflows/run \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_id":"feature-builder","inputs":{"user_request":"Add hello-world endpoint"}}'
+```
+
+**Expected Result**: HTTP 200 with a JSON body containing a non-empty `run_id` and `status` of
+`"running"` or `"pending"`:
+
+```json
+{"run_id":"<uuid>","workflow_id":"feature-builder","status":"running"}
+```
+
+**Verification**:
+- [ ] HTTP status code is `200`
+- [ ] Response JSON contains `run_id` (non-empty string)
+- [ ] Response JSON contains `workflow_id: "feature-builder"`
+- [ ] `status` field is `"running"` or `"pending"` (not already `"completed"`)
+
+Note the `run_id` value for the next steps.
+
+---
+
+### Step 3: Poll Status Until Terminal
+
+**Action**: Replace `<RUN_ID>` with the value from Step 2, then poll at ~2-second intervals.
+The loop aborts with a timeout message after 180 s so it cannot run indefinitely if the
+orchestrator stalls.
+
+```bash
+RUN_ID=<RUN_ID>
+TIMEOUT=180; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  RESP=$(curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status)
+  STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+  echo "$(date +%T) status=$STATUS"
+  case "$STATUS" in completed|failed) echo "$RESP"; break;; esac
+  sleep 2; ELAPSED=$((ELAPSED+2))
+done
+if [ "$STATUS" != "completed" ] && [ "$STATUS" != "failed" ]; then
+  echo "TIMEOUT: run did not reach terminal state in ${TIMEOUT}s" >&2
+fi
+```
+
+**Expected Result**: The loop terminates with `status` equal to `"completed"` or `"failed"` within
+180 s. A `"failed"` status is acceptable for this test if agents are unavailable; only the
+terminal transition itself is under test here.
+
+**Verification**:
+- [ ] Loop terminates (does not run indefinitely)
+- [ ] Final `status` is `"completed"` or `"failed"` — never stuck at `"running"` or `"pending"`
+- [ ] `started_at` field is a non-null ISO-8601 timestamp
+- [ ] `finished_at` field is a non-null ISO-8601 timestamp
+- [ ] `steps` field is present (may be empty map `{}` if run failed early)
+
+---
+
+### Step 4: Inspect the Status Response Shape
+
+**Action**: Fetch the final status once more and pretty-print it:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m json.tool
+```
+
+**Expected Result**: All required fields present with correct types:
+
+| Field | Type | Required |
+|-------|------|----------|
+| `run_id` | string | yes |
+| `workflow_id` | string | yes |
+| `status` | string | yes |
+| `started_at` | string (ISO-8601) or null | yes |
+| `finished_at` | string (ISO-8601) or null | yes |
+| `steps` | object | yes |
+| `error` | string | only if `status == "failed"` |
+
+**Verification**:
+- [ ] All required fields present
+- [ ] No extra `500`-level or unhandled-exception text in the body
+- [ ] If `status == "failed"`, the `error` field is a non-empty human-readable string
+
+---
+
+### Step 5: Verify the Run Appears in the List Endpoint
+
+**Action**:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/workflows | python3 -m json.tool
+```
+
+**Expected Result**: The response is a JSON array. The array includes the run submitted in Step 2.
+
+**Verification**:
+- [ ] Response is a JSON array (not an error object)
+- [ ] Array contains an element whose `run_id` matches the value from Step 2
+
+---
+
+## Expected Results Summary
+
+| Step | Expected Outcome | Pass/Fail |
+|------|-----------------|-----------|
+| 1 | Orchestrator healthy, `/healthz` returns 200 | ☐ |
+| 2 | Submission returns 200 with valid `run_id` | ☐ |
+| 3 | Run reaches `completed` or `failed` terminal status | ☐ |
+| 4 | Status response contains all required fields with correct types | ☐ |
+| 5 | Run appears in list endpoint | ☐ |
+
+---
+
+## Edge Cases & Error Scenarios
+
+### Edge Case 1: No Agents Connected
+
+**Scenario**: Orchestrator is running but no Python agents have registered.
+
+**Expected Behavior**: The workflow run transitions to `"failed"` with an `error` field explaining
+that the agent could not be reached (gRPC connection refused or registry lookup failure). The REST
+API still returns a well-formed JSON response — no 500 or panic.
+
+---
+
+## Test Results
+
+| Date | Tester | OS | Result | Notes |
+|------|--------|----|--------|-------|
+| | | | | |
+
+---
+
+## Notes
+
+- This test validates the REST plumbing and state-machine transitions, not agent LLM quality.
+  A `"failed"` terminal status is acceptable when no real agent is connected — what matters is
+  that the state machine advances to a terminal state cleanly.
+- If running without live agents, expect `error` to mention the agent address or registry lookup.
