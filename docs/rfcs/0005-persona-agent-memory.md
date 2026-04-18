@@ -233,7 +233,7 @@ agents:
     model: "claude-sonnet-4-20250514"
     tools: [file_read, file_write, shell_exec]
 
-  - id: "sarah-chen"
+  - id: "ember-owl"
     type: "persona"                 # persona agent — event-driven with autonomy
     persona:
       title: "VP of Engineering"
@@ -1038,7 +1038,7 @@ Note-taking ability is controlled per-agent in the `memory` config section. This
 
 ```yaml
 # config/agents.yaml — persona agent with note-taking enabled
-- id: "sarah-chen"
+- id: "ember-owl"
   type: "persona"
   memory:
     db_path: "data/memory.db"

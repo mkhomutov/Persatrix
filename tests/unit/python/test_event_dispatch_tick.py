@@ -60,9 +60,9 @@ def _make_client(
 
 
 _PERSONA_CONFIG: dict = {
-    "id": "sarah-chen",
+    "id": "ember-owl",
     "type": "persona",
-    "name": "Sarah Chen",
+    "name": "Ember Owl",
     "role": "Engineering leadership",
     "model": "test-model",
     "temperature": 0.7,
@@ -89,9 +89,9 @@ _PERSONA_CONFIG: dict = {
 }
 
 _PERSONA_CONFIG_2: dict = {
-    "id": "mike-torres",
+    "id": "iron-fox",
     "type": "persona",
-    "name": "Mike Torres",
+    "name": "Iron Fox",
     "role": "Senior developer",
     "model": "test-model",
     "temperature": 0.7,
@@ -133,7 +133,7 @@ class TestActionExecutor:
 
     async def test_complete_task(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.COMPLETE_TASK, {"result": "done"}),
         ])
         assert len(results) == 1
@@ -143,56 +143,56 @@ class TestActionExecutor:
 
     async def test_do_nothing(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DO_NOTHING, {}),
         ])
         assert results[0]["status"] == "ok"
 
     async def test_use_tool_skipped(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.USE_TOOL, {"tool": "file_read"}),
         ])
         assert results[0]["status"] == "skipped"
 
     async def test_delegate_not_implemented(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
-            AgentAction(ActionType.DELEGATE, {"agent_id": "mike-torres", "task": "test"}),
+        results = await executor.execute("ember-owl", [
+            AgentAction(ActionType.DELEGATE, {"agent_id": "iron-fox", "task": "test"}),
         ])
         assert results[0]["status"] == "not_implemented"
 
     async def test_spawn_sub_agent_not_implemented(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SPAWN_SUB_AGENT, {"role": "helper", "task": "test"}),
         ])
         assert results[0]["status"] == "not_implemented"
 
     async def test_request_approval_not_implemented(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.REQUEST_APPROVAL, {}),
         ])
         assert results[0]["status"] == "not_implemented"
 
     async def test_grant_approval_not_implemented(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.GRANT_APPROVAL, {}),
         ])
         assert results[0]["status"] == "not_implemented"
 
     async def test_deny_approval_not_implemented(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DENY_APPROVAL, {}),
         ])
         assert results[0]["status"] == "not_implemented"
 
     async def test_multiple_actions(self):
         executor = ActionExecutor()
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DO_NOTHING, {}),
             AgentAction(ActionType.COMPLETE_TASK, {"result": "ok"}),
         ])
@@ -202,11 +202,11 @@ class TestActionExecutor:
 
     async def test_send_message_no_dispatcher(self):
         executor = ActionExecutor(dispatcher=None)
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello!",
-                "mentions": ["mike-torres"],
+                "mentions": ["iron-fox"],
             }),
         ])
         assert results[0]["status"] == "no_dispatcher"
@@ -214,14 +214,14 @@ class TestActionExecutor:
     async def test_send_message_with_dispatcher(self):
         """SEND_MESSAGE dispatches to mentioned agents via EventDispatcher."""
         agent = await _make_agent(config={**_PERSONA_CONFIG_2})
-        dispatcher = EventDispatcher(agents={"mike-torres": agent})
+        dispatcher = EventDispatcher(agents={"iron-fox": agent})
         executor = ActionExecutor(dispatcher=dispatcher)
 
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey Mike!",
-                "mentions": ["mike-torres"],
+                "mentions": ["iron-fox"],
             }),
         ])
         assert results[0]["status"] == "dispatched"
@@ -235,7 +235,7 @@ class TestActionExecutor:
         """
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello team!",
@@ -258,7 +258,7 @@ class TestActionExecutor:
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
         with caplog.at_level(logging.WARNING):
-            results = await executor.execute("sarah-chen", [
+            results = await executor.execute("ember-owl", [
                 AgentAction(ActionType.SEND_MESSAGE, {
                     "channel_id": "general",
                     "content": "Hello team!",
@@ -283,7 +283,7 @@ class TestActionExecutor:
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
         with caplog.at_level(logging.DEBUG):
-            results = await executor.execute("sarah-chen", [
+            results = await executor.execute("ember-owl", [
                 AgentAction(ActionType.SEND_MESSAGE, {
                     "content": "Hello!",
                     "mentions": [],
@@ -301,7 +301,7 @@ class TestActionExecutor:
         (Review finding: _handle_send_message exception propagation.)
         """
         agent_ok = await _make_agent(config={**_PERSONA_CONFIG_2})
-        dispatcher = EventDispatcher(agents={"mike-torres": agent_ok})
+        dispatcher = EventDispatcher(agents={"iron-fox": agent_ok})
 
         # "ghost-agent" is not registered — dispatch will log a warning
         # but not raise.  To test actual exception handling, make the
@@ -320,16 +320,16 @@ class TestActionExecutor:
         dispatcher.dispatch = _failing_dispatch  # type: ignore[assignment]
         executor = ActionExecutor(dispatcher=dispatcher)
 
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey everyone!",
-                "mentions": ["bad-agent", "mike-torres"],
+                "mentions": ["bad-agent", "iron-fox"],
             }),
         ])
         # Both mentions were attempted despite "bad-agent" raising
         assert call_count == 2
-        # Only "mike-torres" succeeded
+        # Only "iron-fox" succeeded
         assert results[0]["dispatched_to"] == 1
         assert results[0]["status"] == "dispatched"
         await agent_ok.close_memory()
@@ -343,14 +343,14 @@ class TestActionExecutor:
         (PR #55 review: unbounded mentions list → resource exhaustion.)
         """
         agent = await _make_agent(config={**_PERSONA_CONFIG_2})
-        dispatcher = EventDispatcher(agents={"mike-torres": agent})
+        dispatcher = EventDispatcher(agents={"iron-fox": agent})
         executor = ActionExecutor(dispatcher=dispatcher)
 
         # 15 mentions — only first 10 should be dispatched
         many_mentions = [f"agent-{i}" for i in range(15)]
-        many_mentions[0] = "mike-torres"  # one valid target
+        many_mentions[0] = "iron-fox"  # one valid target
 
-        results = await executor.execute("sarah-chen", [
+        results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello!",
@@ -372,7 +372,7 @@ class TestActionExecutor:
         """
         agent = await _make_agent(config={**_PERSONA_CONFIG_2})
         dispatcher = EventDispatcher(
-            agents={"mike-torres": agent},
+            agents={"iron-fox": agent},
             max_cascade_depth=5,
         )
         executor = ActionExecutor(dispatcher=dispatcher)
@@ -387,11 +387,11 @@ class TestActionExecutor:
 
         dispatcher.dispatch = _tracking_dispatch  # type: ignore[assignment]
 
-        await executor.execute("sarah-chen", [
+        await executor.execute("ember-owl", [
             AgentAction(ActionType.SEND_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey!",
-                "mentions": ["mike-torres"],
+                "mentions": ["iron-fox"],
             }),
         ], cascade_depth=3)
 
@@ -410,18 +410,18 @@ class TestActionExecutor:
         (F-64-DR2-08: missing channel_id path untested.)
         """
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
         executor = ActionExecutor(dispatcher=dispatcher)
 
         action = AgentAction(
             action_type=ActionType.SEND_MESSAGE,
             payload={
                 "content": "No channel",
-                "mentions": ["sarah-chen"],
+                "mentions": ["ember-owl"],
                 # channel_id intentionally omitted
             },
         )
-        results = await executor.execute("mike-torres", [action])
+        results = await executor.execute("iron-fox", [action])
         assert len(results) == 1
         assert results[0]["status"] == "dispatched"
         assert results[0]["dispatched_to"] == 1
@@ -443,14 +443,14 @@ class TestEventDispatcher:
 
     async def test_dispatch_to_registered_agent(self):
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Hi Sarah"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert len(actions) >= 1
         await agent.close_memory()
 
@@ -467,7 +467,7 @@ class TestEventDispatcher:
         """Events beyond max_cascade_depth are dropped."""
         agent = await _make_agent()
         dispatcher = EventDispatcher(
-            agents={"sarah-chen": agent},
+            agents={"ember-owl": agent},
             max_cascade_depth=3,
         )
 
@@ -476,21 +476,21 @@ class TestEventDispatcher:
             payload={"content": "test"},
             metadata={"cascade_depth": 3},  # Already at limit
         )
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert actions == []
         await agent.close_memory()
 
     async def test_cascade_depth_incremented(self):
         """Dispatch creates a copy with incremented depth; original is unchanged."""
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "test"},
         )
         assert event.metadata.get("cascade_depth", 0) == 0
-        await dispatcher.dispatch("sarah-chen", event)
+        await dispatcher.dispatch("ember-owl", event)
         # Original event metadata must NOT be mutated (review finding:
         # in-place metadata mutation could produce incorrect cascade depth
         # if the same event were dispatched to multiple targets).
@@ -501,7 +501,7 @@ class TestEventDispatcher:
         """Events below max_cascade_depth are delivered normally."""
         agent = await _make_agent()
         dispatcher = EventDispatcher(
-            agents={"sarah-chen": agent},
+            agents={"ember-owl": agent},
             max_cascade_depth=5,
         )
 
@@ -510,30 +510,30 @@ class TestEventDispatcher:
             payload={"content": "test"},
             metadata={"cascade_depth": 2},
         )
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert len(actions) >= 1
         await agent.close_memory()
 
     async def test_register_agent(self):
         dispatcher = EventDispatcher()
         agent = await _make_agent()
-        dispatcher.register_agent("sarah-chen", agent)
+        dispatcher.register_agent("ember-owl", agent)
 
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "test"},
         )
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert len(actions) >= 1
         await agent.close_memory()
 
     async def test_wake_tick_scheduler_on_dispatch(self):
         """Dispatcher wakes the tick scheduler when an event arrives."""
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         scheduler = TickScheduler(agent, interval=999.0)
-        dispatcher.register_tick_scheduler("sarah-chen", scheduler)
+        dispatcher.register_tick_scheduler("ember-owl", scheduler)
 
         # Manually set idle state
         scheduler._idle_count = 15
@@ -542,7 +542,7 @@ class TestEventDispatcher:
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "urgent"},
         )
-        await dispatcher.dispatch("sarah-chen", event)
+        await dispatcher.dispatch("ember-owl", event)
 
         # Scheduler should be woken (idle count reset)
         assert scheduler.idle_count == 0
@@ -558,17 +558,17 @@ class TestEventDispatcher:
         """
         agent = await _make_agent()
         dispatcher = EventDispatcher(
-            agents={"sarah-chen": agent},
+            agents={"ember-owl": agent},
             max_cascade_depth=3,
         )
 
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Talking to myself"},
-            sender_id="sarah-chen",
+            sender_id="ember-owl",
         )
         # Should complete without deadlock or error
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert isinstance(actions, list)
         await agent.close_memory()
 
@@ -578,14 +578,14 @@ class TestEventDispatcher:
         (Review finding: shared payload reference between caller and target.)
         """
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         original_payload = {"content": "test", "mutable_key": "original"}
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload=original_payload,
         )
-        await dispatcher.dispatch("sarah-chen", event)
+        await dispatcher.dispatch("ember-owl", event)
 
         # Original payload must be unchanged (dispatch copies it)
         assert original_payload["mutable_key"] == "original"
@@ -600,7 +600,7 @@ class TestEventDispatcher:
         (PR #55 review: test copy.deepcopy on nested payload structures.)
         """
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         nested_list = [1, 2, 3]
         nested_dict = {"inner_key": "inner_value"}
@@ -613,7 +613,7 @@ class TestEventDispatcher:
             event_type=EventType.MESSAGE_RECEIVED,
             payload=original_payload,
         )
-        await dispatcher.dispatch("sarah-chen", event)
+        await dispatcher.dispatch("ember-owl", event)
 
         # Nested structures in the original payload must be untouched
         assert original_payload["nested_list"] is nested_list
@@ -633,7 +633,7 @@ class TestEventDispatcher:
         (F-64-R-SF3: metadata deep-copy isolation test.)
         """
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         inner_meta = {"trace_ids": ["t1", "t2"]}
         original_metadata = {"cascade_depth": 0, "tracing": inner_meta}
@@ -642,7 +642,7 @@ class TestEventDispatcher:
             payload={"content": "test"},
             metadata=original_metadata,
         )
-        await dispatcher.dispatch("sarah-chen", event)
+        await dispatcher.dispatch("ember-owl", event)
 
         # Original metadata must be untouched — cascade_depth stays 0
         assert original_metadata["cascade_depth"] == 0
@@ -996,7 +996,7 @@ class TestAgentServerPersonaLifecycle:
         await agent.close_memory()
 
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         # Mock gRPC server and network calls
         with patch.object(server, '_self_register', new_callable=AsyncMock):
@@ -1014,7 +1014,7 @@ class TestAgentServerPersonaLifecycle:
         """Persona agents have memory closed during server.stop()."""
         agent = await _make_agent()
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         agent.close_memory = AsyncMock()  # type: ignore[method-assign]
         await server.stop()
@@ -1032,13 +1032,13 @@ class TestAgentServerPersonaLifecycle:
             },
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
 
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
             mock_grpc = AsyncMock()
@@ -1046,8 +1046,8 @@ class TestAgentServerPersonaLifecycle:
             server._server = mock_grpc
             await server.start()
 
-        assert "sarah-chen" in server._tick_schedulers
-        assert server._tick_schedulers["sarah-chen"].is_running
+        assert "ember-owl" in server._tick_schedulers
+        assert server._tick_schedulers["ember-owl"].is_running
         await server.stop()
 
     async def test_tick_scheduler_not_started_for_reactive_agent(self):
@@ -1057,13 +1057,13 @@ class TestAgentServerPersonaLifecycle:
             "autonomy": {"level": "reactive"},
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
 
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
             mock_grpc = AsyncMock()
@@ -1071,7 +1071,7 @@ class TestAgentServerPersonaLifecycle:
             server._server = mock_grpc
             await server.start()
 
-        assert "sarah-chen" not in server._tick_schedulers
+        assert "ember-owl" not in server._tick_schedulers
         await server.stop()
 
     async def test_tick_scheduler_stopped_on_server_stop(self):
@@ -1084,13 +1084,13 @@ class TestAgentServerPersonaLifecycle:
             },
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
 
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         with patch.object(server, '_self_register', new_callable=AsyncMock):
             mock_grpc = AsyncMock()
@@ -1098,7 +1098,7 @@ class TestAgentServerPersonaLifecycle:
             server._server = mock_grpc
             await server.start()
 
-        assert server._tick_schedulers["sarah-chen"].is_running
+        assert server._tick_schedulers["ember-owl"].is_running
         await server.stop()
         assert len(server._tick_schedulers) == 0
 
@@ -1118,13 +1118,13 @@ class TestAgentServerPersonaLifecycle:
             },
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
 
         server = AgentServer(port=0)
-        server.agents["sarah-chen"] = agent
+        server.agents["ember-owl"] = agent
 
         # Force initialize_memory() to fail
         agent.initialize_memory = AsyncMock(  # type: ignore[method-assign]
@@ -1138,9 +1138,9 @@ class TestAgentServerPersonaLifecycle:
             await server.start()
 
         # Agent should NOT be registered with dispatcher
-        assert "sarah-chen" not in server._dispatcher._agents
+        assert "ember-owl" not in server._dispatcher._agents
         # Agent should NOT have a tick scheduler
-        assert "sarah-chen" not in server._tick_schedulers
+        assert "ember-owl" not in server._tick_schedulers
 
         await server.stop()
 
@@ -1182,10 +1182,10 @@ class TestInitializePersonaAgents:
         dispatcher = EventDispatcher()
         schedulers: dict = {}
 
-        await initialize_persona_agents({"sarah-chen": agent}, dispatcher, schedulers)
+        await initialize_persona_agents({"ember-owl": agent}, dispatcher, schedulers)
 
         try:
-            assert "sarah-chen" in dispatcher._agents
+            assert "ember-owl" in dispatcher._agents
         finally:
             await agent.close_memory()
 
@@ -1199,7 +1199,7 @@ class TestInitializePersonaAgents:
         from agents.server_persona import initialize_persona_agents
 
         failing_agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config={**_PERSONA_CONFIG},
             llm_client=_make_client(),
         )
@@ -1210,15 +1210,15 @@ class TestInitializePersonaAgents:
         ok_agent = await _make_agent(config={**_PERSONA_CONFIG_2})
         await ok_agent.close_memory()
 
-        agents = {"sarah-chen": failing_agent, "mike-torres": ok_agent}
+        agents = {"ember-owl": failing_agent, "iron-fox": ok_agent}
         dispatcher = EventDispatcher()
         schedulers: dict = {}
 
         await initialize_persona_agents(agents, dispatcher, schedulers)
 
-        assert "sarah-chen" not in dispatcher._agents
-        assert "sarah-chen" not in schedulers
-        assert "mike-torres" in dispatcher._agents
+        assert "ember-owl" not in dispatcher._agents
+        assert "ember-owl" not in schedulers
+        assert "iron-fox" in dispatcher._agents
         await ok_agent.close_memory()
 
     async def test_tick_schedulers_dict_mutated_in_place(self):
@@ -1239,18 +1239,18 @@ class TestInitializePersonaAgents:
             },
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
         )
 
         dispatcher = EventDispatcher()
         schedulers: dict = {}
 
-        await initialize_persona_agents({"sarah-chen": agent}, dispatcher, schedulers)
+        await initialize_persona_agents({"ember-owl": agent}, dispatcher, schedulers)
 
-        assert "sarah-chen" in schedulers
-        assert schedulers["sarah-chen"].is_running
+        assert "ember-owl" in schedulers
+        assert schedulers["ember-owl"].is_running
 
-        await schedulers["sarah-chen"].stop()
+        await schedulers["ember-owl"].stop()
         await agent.close_memory()
 
 
@@ -1286,13 +1286,13 @@ class TestEventActionMemoryCycle:
 
     async def test_full_cycle(self):
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         event = AgentEvent(
             event_type=EventType.TASK_ASSIGNED,
             payload={"task": "Review code"},
         )
-        actions = await dispatcher.dispatch("sarah-chen", event)
+        actions = await dispatcher.dispatch("ember-owl", event)
         assert len(actions) >= 1
 
         # Verify episode was stored
@@ -1303,7 +1303,7 @@ class TestEventActionMemoryCycle:
     async def test_concurrent_dispatch_serialized(self):
         """Concurrent dispatches to the same agent are serialized by the lock."""
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         events = [
             AgentEvent(
@@ -1316,7 +1316,7 @@ class TestEventActionMemoryCycle:
 
         # Dispatch all concurrently
         results = await asyncio.gather(
-            *[dispatcher.dispatch("sarah-chen", e) for e in events]
+            *[dispatcher.dispatch("ember-owl", e) for e in events]
         )
         # All should complete without error
         assert len(results) == 3
@@ -1338,7 +1338,7 @@ class TestPerDispatchTimeout:
         raises) to verify the except clause in _handle_send_message.
         """
         agent = await _make_agent()
-        dispatcher = EventDispatcher(agents={"sarah-chen": agent})
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
         executor = ActionExecutor(dispatcher=dispatcher)
 
         # Make dispatch raise TimeoutError as if wait_for expired.
@@ -1351,10 +1351,10 @@ class TestPerDispatchTimeout:
             action_type=ActionType.SEND_MESSAGE,
             payload={
                 "content": "Hello",
-                "mentions": ["sarah-chen"],
+                "mentions": ["ember-owl"],
             },
         )
-        results = await executor.execute("sarah-chen", [action], cascade_depth=0)
+        results = await executor.execute("ember-owl", [action], cascade_depth=0)
         assert len(results) == 1
         # Dispatch timed out, so dispatched_to == 0 (timeout is caught, not counted).
         assert results[0]["dispatched_to"] == 0

@@ -99,7 +99,7 @@ curl -X POST http://localhost:8080/api/v1/workflows/run \
 ### Run a Persona Agent (v0.2)
 
 Personas are declared in [config/agents.yaml](config/agents.yaml). A worked example
-is shipped with the repo — `sarah-chen`, a semi-autonomous "VP of Engineering"
+is shipped with the repo — `ember-owl`, a semi-autonomous "VP of Engineering"
 persona with structured behaviour, quirks, and memory configuration.
 
 ```bash
@@ -107,13 +107,13 @@ persona with structured behaviour, quirks, and memory configuration.
 make run
 
 # 2. Launch the persona as a gRPC service (separate terminal)
-make run-agent AGENT=sarah-chen
+make run-agent AGENT=ember-owl
 
 # 3. Ping it through the orchestrator
-orch agent test --persona sarah-chen
+orch agent test --persona ember-owl
 
 # 4. Inspect its registration and status
-orch agent info sarah-chen
+orch agent info ember-owl
 ```
 
 Live tick-loop output — decisions, memory writes, tool calls — streams in the
@@ -221,6 +221,7 @@ completion.
 
 - [Roadmap & Progress](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
+- [Persona agents & memory guide](docs/guides/persona-agents.md) — declaring personas, memory tiers, cost budgets
 - [Architecture diagrams](docs/diagrams/)
 - [Manual test suite](docs/manual-tests/README.md)
 - [RFCs](docs/rfcs/README.md) — engineering design docs

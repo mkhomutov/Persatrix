@@ -101,6 +101,8 @@ CI runs on every PR: Go build+test, Python lint+test, Rust build+clippy, config 
 ### Cross-cutting
 
 - **Agent IDs:** lowercase alphanumeric + hyphens, pattern `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
+- **Persona naming policy:** avoid human-like names in persona IDs/display names. Use nickname-style names (for example `ember-owl`).
+- **Nickname generator:** use `make generate-persona-nickname COUNT=5` (or `python scripts/persona_nickname_generator.py`) when creating persona examples or test fixtures.
 - **Config files** validate against JSON schemas in `schemas/`. Always run `make validate` after editing YAML configs.
 - **Permissions are deny-by-default.** Agent permissions in `config/agents.yaml` explicitly whitelist filesystem paths, network domains, and shell commands.
 - **Workflow templating** uses `{{ variable }}` syntax (Jinja2-like) for step inputs and conditions.

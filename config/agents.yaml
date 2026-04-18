@@ -130,9 +130,9 @@ agents:
   # ─── Persona Agent (v0.2+, commented out for v0.1) ────
   # Updated to match RFC 0005 format: `type: persona`, structured `behavior`
   # dimensions (replaces free-text `personality.traits`), and memory config.
-  - id: "sarah-chen"
+  - id: "ember-owl"
     type: "persona"
-    name: "Sarah Chen"
+    name: "Ember Owl"
     role: "Engineering leadership and technical oversight"
     model: "claude-sonnet-4-20250514"
     temperature: 0.7
@@ -186,6 +186,6 @@ agents:
         auto_reflect_after: 5
         inject_recent_notes: 3
     relationships:
-      - agent_id: "mike-torres"
+      - agent_id: "iron-fox"
         type: "reports_to_me"
         trust_level: 0.9

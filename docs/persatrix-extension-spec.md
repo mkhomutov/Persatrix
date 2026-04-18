@@ -39,8 +39,8 @@ full **persona layer** that makes each agent a believable individual.
 
 ```yaml
 agent:
-  id: "sarah-chen"
-  name: "Sarah Chen"
+  id: "ember-owl"
+  name: "Ember Owl"
 
   # ─── Persona (NEW) ──────────────────────────────────
   persona:
@@ -72,15 +72,15 @@ agent:
 
   # ─── Relationships (NEW) ─────────────────────────────
   relationships:
-    - agent_id: "mike-torres"
+    - agent_id: "iron-fox"
       type: "reports_to_me"
       trust_level: 0.9
       notes: "Senior engineer, reliable but tends to over-engineer"
-    - agent_id: "lisa-park"
+    - agent_id: "pixel-heron"
       type: "peer"
       trust_level: 0.7
       notes: "VP of Product — we align on goals but disagree on timelines"
-    - agent_id: "james-wu"
+    - agent_id: "cobalt-lark"
       type: "reports_to_me"
       trust_level: 0.6
       notes: "Junior dev, needs clear guidance but shows potential"
@@ -126,7 +126,7 @@ persona_templates:
 
 # agents/mike.yaml
 agent:
-  id: "mike-torres"
+  id: "iron-fox"
   persona:
     extends: "senior_engineer"       # inherit base template
     title: "Senior Backend Engineer"
@@ -143,14 +143,14 @@ can evolve:
 ```yaml
 # Managed at runtime, not in static config
 agent_state:
-  agent_id: "sarah-chen"
+  agent_id: "ember-owl"
   mood: "frustrated"                    # inferred from recent interactions
   stress_level: 0.7                     # affects communication tone
   recent_context:
     - "sprint review went poorly"
     - "two team members are out sick"
   relationship_updates:
-    - agent_id: "mike-torres"
+    - agent_id: "iron-fox"
       trust_delta: -0.1
       reason: "missed deadline without communicating"
   goal_progress:
@@ -343,7 +343,7 @@ either — even if explicitly requested. The orchestrator enforces this.
 ```yaml
 # Example: permission scoping in practice
 #
-# Sarah's permissions:
+# Ember's permissions:
 #   filesystem: read [/workspace/**], write [/workspace/src/**]
 #   shell: [python, pytest, ruff, git]
 #   network: [api.anthropic.com]
@@ -465,7 +465,7 @@ Depth 0: Sarah (VP Engineering)          ← persona agent
 ```
 
 **Budget flows downward**: if Sarah has 100k tokens for a task, and she spawns
-a code_reviewer with max_tokens=50k, that 50k comes out of Sarah's 100k. The
+a code_reviewer with max_tokens=50k, that 50k comes out of Ember's 100k. The
 reviewer's sub-agents share from that 50k. This prevents unbounded cost growth.
 
 #### E3.2.7 Lifecycle
@@ -530,18 +530,18 @@ organization:
 
   # ─── Hierarchy topology ──────────────────
   structure:
-    - agent_id: "sarah-chen"
+    - agent_id: "ember-owl"
       role: "VP of Engineering"
       reports_to: null                # top of this org
       manages:
-        - agent_id: "mike-torres"
+        - agent_id: "iron-fox"
           role: "Senior Backend Engineer"
-        - agent_id: "james-wu"
+        - agent_id: "cobalt-lark"
           role: "Junior Developer"
-        - agent_id: "anna-kim"
+        - agent_id: "nova-sparrow"
           role: "QA Lead"
           manages:
-            - agent_id: "raj-patel"
+            - agent_id: "grid-hawk"
               role: "QA Engineer"
 ```
 
@@ -654,14 +654,14 @@ channels:
   - id: "eng-general"
     type: "group"
     name: "#engineering-general"
-    members: ["sarah-chen", "mike-torres", "james-wu", "anna-kim"]
+    members: ["ember-owl", "iron-fox", "cobalt-lark", "nova-sparrow"]
     history_visible: true               # agents can read past messages
     max_history_messages: 100           # context window management
 
   # Direct message — 1:1 private conversation
   - id: "sarah-mike-dm"
     type: "direct"
-    participants: ["sarah-chen", "mike-torres"]
+    participants: ["ember-owl", "iron-fox"]
 
   # Broadcast — one-to-many, no replies
   - id: "company-announcements"
@@ -675,8 +675,8 @@ channels:
   # Meeting — synchronous, turn-based group conversation
   - id: "sprint-planning"
     type: "meeting"
-    participants: ["sarah-chen", "mike-torres", "james-wu", "anna-kim"]
-    facilitator: "sarah-chen"
+    participants: ["ember-owl", "iron-fox", "cobalt-lark", "nova-sparrow"]
+    facilitator: "ember-owl"
     agenda:
       - "Review last sprint outcomes"
       - "Prioritize backlog for next sprint"
@@ -754,7 +754,7 @@ bridges:
       inbound:
         - match: { from: "*@client.com" }
           deliver_to: "channel:client-comms"
-          notify: ["sarah-chen", "lisa-park"]
+          notify: ["ember-owl", "pixel-heron"]
         - match: { subject_contains: "URGENT" }
           deliver_to: "channel:eng-general"
           priority: "high"
@@ -762,7 +762,7 @@ bridges:
           deliver_to: "agent:support-l1"
       # Map internal agent messages to outbound emails
       outbound:
-        allowed_agents: ["sarah-chen", "lisa-park"]
+        allowed_agents: ["ember-owl", "pixel-heron"]
         require_approval: true
         approval_agent: "ceo"
         from_address: "team@ourcompany.com"
@@ -780,9 +780,9 @@ bridges:
         "slack:#product": "internal:product-general"
       inbound:
         - match: { channel: "#engineering", mentions_bot: true }
-          deliver_to: "agent:sarah-chen"
+          deliver_to: "agent:ember-owl"
       outbound:
-        allowed_agents: ["sarah-chen", "mike-torres"]
+        allowed_agents: ["ember-owl", "iron-fox"]
         require_approval: false
         display_name_format: "{{ agent.name }} (AI)"
 
@@ -1039,7 +1039,7 @@ node:
     
   # ─── Agents deployed here ────────────────────────
   agents:
-    - id: "yuki-tanaka"
+    - id: "orbit-kite"
     - id: "kai-researcher"
 ```
 
@@ -1051,8 +1051,8 @@ Every agent in the mesh has a **globally unique address**:
 <agent_id>@<node_id>
 
 Examples:
-  sarah-chen@node-aws-01
-  yuki-tanaka@node-tokyo-01
+  ember-owl@node-aws-01
+  orbit-kite@node-tokyo-01
   james-compliance@node-london-01
 ```
 
@@ -1063,8 +1063,8 @@ agent ID — the orchestrator resolves the location transparently.
 ```
 Sarah sends DM to Yuki
   │
-  ├─ Sarah's node (AWS) sends to orchestrator: "deliver to yuki-tanaka"
-  ├─ Orchestrator looks up registry: yuki-tanaka → node-tokyo-01
+  ├─ Ember's node (AWS) sends to orchestrator: "deliver to orbit-kite"
+  ├─ Orchestrator looks up registry: orbit-kite → node-tokyo-01
   ├─ Orchestrator routes message to Node Tokyo
   └─ Node Tokyo delivers to Yuki's agent process
 ```
@@ -1076,7 +1076,7 @@ with it.
 
 ```yaml
 # Migration command
-orch agent migrate yuki-tanaka --from node-tokyo-01 --to node-aws-02
+orch agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
 ```
 
 ### E6.4 Communication Over the Mesh
@@ -1093,7 +1093,7 @@ mesh:
     
     # Prefer co-located agents for high-frequency interactions
     affinity_rules:
-      - agents: ["sarah-chen", "mike-torres"]
+      - agents: ["ember-owl", "iron-fox"]
         prefer_same_node: true
         reason: "frequent code review exchanges"
       
@@ -1313,7 +1313,7 @@ deployment:
         trust: "restricted"
         shared_channels: ["cross-org-project"]
         allowed_interactions:
-          - { local_agent: "sarah-chen", remote_agent: "partner:alex-dev" }
+          - { local_agent: "ember-owl", remote_agent: "partner:orbit-dev" }
     # Agents from different orgs can collaborate in shared channels
     # but cannot see each other's internal channels or org structure.
 ```
@@ -1328,14 +1328,14 @@ orch node status node-tokyo-01
 orch node drain node-tokyo-01          # gracefully migrate agents off this node
 
 # Agent placement
-orch agent deploy sarah-chen --to node-aws-01
-orch agent migrate yuki-tanaka --from node-tokyo-01 --to node-aws-02
-orch agent locate sarah-chen           # → sarah-chen@node-aws-01
+orch agent deploy ember-owl --to node-aws-01
+orch agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
+orch agent locate ember-owl           # → ember-owl@node-aws-01
 
 # Mesh diagnostics
 orch mesh status                       # show all nodes, latencies, health
 orch mesh ping node-tokyo-01           # measure RTT to a node
-orch mesh trace sarah-chen yuki-tanaka # show routing path between two agents
+orch mesh trace ember-owl orbit-kite # show routing path between two agents
 ```
 
 ### E6.8 Sub-Agents in a Distributed Context
@@ -1493,8 +1493,8 @@ Every execution produces a trace with a well-defined span tree:
 ```
 Trace: workflow execution "feature-builder-run-42"
 │
-├─ Span: invoke_agent "sarah-chen" (kind: CLIENT)
-│  │  gen_ai.agent.name: "sarah-chen"
+├─ Span: invoke_agent "ember-owl" (kind: CLIENT)
+│  │  gen_ai.agent.name: "ember-owl"
 │  │  gen_ai.operation.name: "invoke_agent"
 │  │  Persatrix.agent.persona.title: "VP of Engineering"
 │  │  Persatrix.agent.autonomy_level: "semi-autonomous"
@@ -1522,7 +1522,7 @@ Trace: workflow execution "feature-builder-run-42"
 │  └─ Span: invoke_agent "sub:code_reviewer" (kind: INTERNAL)
 │     │  gen_ai.agent.name: "code_reviewer"
 │     │  Persatrix.sub_agent: true
-│     │  Persatrix.sub_agent.parent: "sarah-chen"
+│     │  Persatrix.sub_agent.parent: "ember-owl"
 │     │  Persatrix.sub_agent.depth: 1
 │     │
 │     ├─ Span: gen_ai.chat "claude-sonnet-4" (kind: CLIENT)
@@ -1534,9 +1534,9 @@ Trace: workflow execution "feature-builder-run-42"
 ├─ Span: channel.message "eng-general" (kind: INTERNAL)
 │     Persatrix.channel.id: "eng-general"
 │     Persatrix.message.type: "DECISION"
-│     Persatrix.message.sender: "sarah-chen"
+│     Persatrix.message.sender: "ember-owl"
 │
-└─ Span: invoke_agent "mike-torres" (kind: CLIENT)
+└─ Span: invoke_agent "iron-fox" (kind: CLIENT)
       ...
 ```
 
@@ -1758,11 +1758,11 @@ a2a:
 
     # Each exposed agent gets an Agent Card
     exposed_agents:
-      - agent_id: "sarah-chen"
+      - agent_id: "ember-owl"
         agent_card:
-          name: "Sarah Chen - VP Engineering"
+          name: "Ember Owl - VP Engineering"
           description: "Engineering leadership agent. Can review architectures, prioritize work, and coordinate development."
-          url: "https://agents.example.com/a2a/sarah-chen"
+          url: "https://agents.example.com/a2a/ember-owl"
           version: "1.0.0"
           capabilities:
             streaming: true
@@ -1965,7 +1965,7 @@ cost:
     per_agent:
       default_max_usd: 5.00
       overrides:
-        "sarah-chen": 20.00                 # supervisors get bigger budgets
+        "ember-owl": 20.00                 # supervisors get bigger budgets
         "support-l1": 2.00
 
   # ─── Cost attribution ─────────────────────────
@@ -2271,10 +2271,10 @@ prompt_compression:
   static:
     # Precompute compressed versions of static prompt components
     compress_persona: true
-    # "Sarah Chen has 15 years of experience in software engineering.
+    # "Ember Owl has 15 years of experience in software engineering.
     #  She was formerly a tech lead at a Series B startup..."
     # becomes:
-    # "Sarah Chen: 15yr SW eng, ex-tech-lead Series B startup..."
+    # "Ember Owl: 15yr SW eng, ex-tech-lead Series B startup..."
     compression_model: "claude-haiku-4-5-20251001"
     target_ratio: 0.5                       # reduce to ~50% of original tokens
 
@@ -2292,7 +2292,7 @@ prompt_compression:
     # Remove redundant whitespace, markdown formatting from tool outputs
     strip_formatting: true
     # Replace repeated entity names with short aliases in context
-    # "Sarah Chen, VP of Engineering" → "SC" after first mention
+    # "Ember Owl, VP of Engineering" → "EO" after first mention
     entity_aliasing: false                  # opt-in, can confuse some models
     # Remove system prompt components that aren't relevant to current task
     conditional_prompt_sections: true
@@ -2334,7 +2334,7 @@ communication_optimization:
   notification_filter:
     rules:
       - channel: "eng-general"
-        agent: "sarah-chen"
+        agent: "ember-owl"
         notify_on:
           - mentions_me: true
           - message_type: ["DECISION", "ESCALATION", "QUESTION"]
@@ -2693,7 +2693,7 @@ observation:
     # ─── Data protection ────────────────────────
     anonymize_export: false                # set true for external research sharing
     anonymization_rules:
-      replace_names: true                  # "Sarah Chen" → "Agent-A"
+      replace_names: true                  # "Ember Owl" → "Agent-A"
       hash_ids: true                       # deterministic pseudonymization
       strip_pii: true                      # remove emails, phone numbers, etc.
 

@@ -50,7 +50,7 @@ is reset (woken) on receipt of the message.
 ### Application State
 
 - ☐ Orchestrator running: `make run`
-- ☐ `sarah-chen` persona agent running (see MT-PERSONA-001 Step 1)
+- ☐ `ember-owl` persona agent running (see MT-PERSONA-001 Step 1)
 - ☐ Agent gRPC port known — default `50054` for persona agents; confirm in startup logs or
   `config/agents.yaml`
 
@@ -115,14 +115,14 @@ grpcurl -plaintext \
 `tee` file, or the terminal where the agent is running):
 
 ```bash
-grep -E "event|message|sarah-chen" logs/persona-001.log | tail -20
+grep -E "event|message|ember-owl" logs/persona-001.log | tail -20
 ```
 
 **Expected Result**: Log entries show the agent received and began processing the event. Exact
 message text depends on implementation, but should include the agent ID and event content.
 
 **Verification**:
-- [ ] A log entry referencing `"sarah-chen"` and the event appears within 30 s
+- [ ] A log entry referencing `"ember-owl"` and the event appears within 30 s
 - [ ] No `"event processing timed out"` error logged
 - [ ] No Python exception traceback
 

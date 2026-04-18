@@ -70,9 +70,9 @@ def _make_client(
 
 
 _PERSONA_CONFIG: dict = {
-    "id": "sarah-chen",
+    "id": "ember-owl",
     "type": "persona",
-    "name": "Sarah Chen",
+    "name": "Ember Owl",
     "role": "Engineering leadership",
     "model": "test-model",
     "temperature": 0.7,
@@ -585,7 +585,7 @@ class TestLLMPersonaAgent:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "How's the sprint going?"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         actions = await agent.on_event(event)
         assert len(actions) >= 1
@@ -611,7 +611,7 @@ class TestLLMPersonaAgent:
     async def test_system_prompt_contains_persona(self):
         agent = await self._make_agent()
         prompt = agent._build_system_prompt()
-        assert "Sarah Chen" in prompt
+        assert "Ember Owl" in prompt
         assert "VP of Engineering" in prompt
         assert "Engineering leadership" in prompt
         assert "15 years in software engineering" in prompt
@@ -739,7 +739,7 @@ class TestLLMPersonaAgent:
         client = _make_client()
 
         agent1 = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=client,
+            agent_id="ember-owl", config=cfg, llm_client=client,
         )
         await agent1.initialize_memory()
         agent1._state.mood = Mood.SATISFIED
@@ -821,7 +821,7 @@ class TestLLMPersonaAgent:
     async def test_no_llm_client(self):
         cfg = {**_PERSONA_CONFIG}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
         )
         await agent.initialize_memory()
         agent._llm_client = None
@@ -892,7 +892,7 @@ class TestLLMPersonaAgent:
 class TestCreatePersonaAgent:
     async def test_returns_llm_persona_agent(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -900,7 +900,7 @@ class TestCreatePersonaAgent:
 
     async def test_memory_tiers_wired(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -910,7 +910,7 @@ class TestCreatePersonaAgent:
 
     async def test_memory_tools_created(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -920,7 +920,7 @@ class TestCreatePersonaAgent:
 
     async def test_initialize_and_close_memory(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -953,7 +953,7 @@ class TestCreatePersonaAgent:
             "max_tokens": 4096,  # LLM completion limit — must NOT affect working memory
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
@@ -971,7 +971,7 @@ class TestCreatePersonaAgent:
             },
         }
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config,
             llm_client=_make_client(),
         )
@@ -1009,7 +1009,7 @@ class TestFormatEventAdditional:
 
     async def _make_agent(self) -> _LLMPersonaAgent:
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1072,7 +1072,7 @@ class TestMaxLLMCallsExhaustion:
 
         config = {**_PERSONA_CONFIG, "max_llm_calls": max_calls}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -1110,7 +1110,7 @@ class TestPersonaDefaultFallbackLimits:
         client = _make_client()
         config = {k: v for k, v in _PERSONA_CONFIG.items() if k != "max_llm_calls"}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -1131,7 +1131,7 @@ class TestPersonaDefaultFallbackLimits:
         client = _make_client()
         config = {k: v for k, v in _PERSONA_CONFIG.items() if k != "max_tokens"}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -1159,7 +1159,7 @@ class TestConvenienceMethods:
 
     async def _make_agent(self) -> _LLMPersonaAgent:
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1372,7 +1372,7 @@ class TestSpawnSubAgentWithoutClient:
 
     async def test_raises_runtime_error(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1407,7 +1407,7 @@ class TestBuildToolDefinitionsWithRegistry:
 
         cfg = {**_PERSONA_CONFIG, "tools": ["code_search"]}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
         )
         await agent.initialize_memory()
         return agent
@@ -1433,7 +1433,7 @@ class TestBuildToolDefinitionsWithRegistry:
 
         cfg = {**_PERSONA_CONFIG, "tools": ["store_note"]}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -1458,7 +1458,7 @@ class TestBuildToolDefinitionsWithRegistry:
         # Agent config does NOT include "secret_admin_tool" in tools list
         cfg = {**_PERSONA_CONFIG, "tools": ["code_search"]}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -1481,7 +1481,7 @@ class TestBuildToolDefinitionsWithRegistry:
 
         cfg = {**_PERSONA_CONFIG, "tools": ["allowed_tool"]}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=cfg, llm_client=_make_client(),
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -1512,7 +1512,7 @@ class TestBuildToolDefinitionsWithRegistry:
             func=None,
         )
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
         # Inject the stub directly into the agent's memory-tools list so it
@@ -1548,7 +1548,7 @@ class TestHandleWithoutCompleteTask:
         )
         client = _make_client([response])
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=client,
         )
@@ -1574,7 +1574,7 @@ class TestCloseMemoryPartialFailure:
     async def test_later_tiers_closed_when_earlier_tier_raises(self):
         """If episodic close() raises, relationship memory is still closed."""
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1601,7 +1601,7 @@ class TestCloseMemoryPartialFailure:
     async def test_all_tiers_attempted_when_working_memory_fails(self):
         """If working memory close() raises, episodic and relationship are still closed."""
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1636,7 +1636,7 @@ class TestLoadPersonaStateCorrupted:
 
     async def test_corrupted_json_returns_defaults(self):
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=_make_client(),
         )
@@ -1674,7 +1674,7 @@ class TestMaxTokensStopReason:
         )
         client = _make_client(responses=[truncated_response])
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=client,
         )
@@ -1702,7 +1702,7 @@ class TestMaxTokensStopReason:
         )
         client = _make_client(responses=[tool_response, truncated_response])
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=_PERSONA_CONFIG,
             llm_client=client,
         )
@@ -1733,7 +1733,7 @@ class TestMissingModelConfig:
         del config_without_model["model"]
 
         agent = create_persona_agent(
-            agent_id="sarah-chen",
+            agent_id="ember-owl",
             config=config_without_model,
             llm_client=_make_client(),
         )
@@ -1923,7 +1923,7 @@ class TestEventTimeout:
 
         config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -1941,7 +1941,7 @@ class TestEventTimeout:
         """Events that complete within the timeout work normally."""
         config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -1980,7 +1980,7 @@ class TestTickTimeout:
 
         config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -1993,7 +1993,7 @@ class TestTickTimeout:
         """Ticks that complete within the timeout work normally."""
         config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2021,7 +2021,7 @@ class TestTickTimeout:
 
         config = {**_PERSONA_CONFIG, "event_timeout": 0.1}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=client,
+            agent_id="ember-owl", config=config, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -2040,7 +2040,7 @@ class TestTickTimeout:
         """
         config = {**_PERSONA_CONFIG, "event_timeout": 10.0}
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2108,7 +2108,7 @@ class TestInjectMemoryContext:
     async def test_injects_episodic_and_notes(self):
         """_inject_memory_context adds episodic and note sections."""
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2145,13 +2145,13 @@ class TestInjectMemoryContext:
     async def test_injects_relationship_for_sender(self):
         """_inject_memory_context adds relationship section when sender known."""
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
         # Record an interaction to create a relationship.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="mike-torres",
+            other_agent_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2160,20 +2160,20 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Hello"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         await agent._inject_memory_context(event)
 
         rel_section = agent._working_memory.get_section("relationship_context")
         assert rel_section is not None
-        assert "mike-torres" in rel_section.content
+        assert "iron-fox" in rel_section.content
         assert rel_section.priority == 8
         await agent.close_memory()
 
     async def test_no_sender_skips_relationship(self):
         """_inject_memory_context skips relationship when no sender_id."""
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2190,7 +2190,7 @@ class TestInjectMemoryContext:
     async def test_memory_error_graceful(self):
         """_inject_memory_context logs and continues if recall() raises."""
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2201,7 +2201,7 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "test"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         # Should not raise.
         await agent._inject_memory_context(event)
@@ -2220,7 +2220,7 @@ class TestInjectMemoryContext:
         (PR #60 review: coverage gap — all-tiers-failing case.)
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2234,7 +2234,7 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "test"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         # Should not raise — all tiers fail gracefully.
         await agent._inject_memory_context(event)
@@ -2255,7 +2255,7 @@ class TestInjectMemoryContext:
         (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2297,13 +2297,13 @@ class TestInjectMemoryContext:
         (PR #60 review: test zero-interaction relationship branch.)
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
         # Bootstrap a relationship with trust but zero interactions.
         await agent._relationship_memory.update_trust(
-            other_agent_id="mike-torres",
+            other_agent_id="iron-fox",
             delta=0.1,
             reason="config bootstrap",
         )
@@ -2311,7 +2311,7 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Hello"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         await agent._inject_memory_context(event)
 
@@ -2328,7 +2328,7 @@ class TestInjectMemoryContext:
         episodic and relationship context.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2359,7 +2359,7 @@ class TestInjectMemoryContext:
         and passes it as query= to avoid a redundant call.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2385,13 +2385,13 @@ class TestInjectMemoryContext:
         measured.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
         # Record interaction without sentiment to keep trust at ~0.5.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="mike-torres",
+            other_agent_id="iron-fox",
             interaction_type="collaboration",
             outcome="neutral",
             sentiment=0.0,
@@ -2400,7 +2400,7 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Hello"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         await agent._inject_memory_context(event)
 
@@ -2415,13 +2415,13 @@ class TestInjectMemoryContext:
     async def test_relationship_notes_truncated(self):
         """F-60-5: relationship notes exceeding 300 chars are truncated."""
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
         # Record interaction to create a relationship with long notes.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="mike-torres",
+            other_agent_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2439,7 +2439,7 @@ class TestInjectMemoryContext:
         long_notes = "n" * 600
         async with agent._relationship_memory._db.execute(
             "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",
-            (long_notes, "sarah-chen", "mike-torres"),
+            (long_notes, "ember-owl", "iron-fox"),
         ):
             pass
         await agent._relationship_memory._db.commit()
@@ -2447,7 +2447,7 @@ class TestInjectMemoryContext:
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={"content": "Hello"},
-            sender_id="mike-torres",
+            sender_id="iron-fox",
         )
         await agent._inject_memory_context(event)
 
@@ -2463,7 +2463,7 @@ class TestInjectMemoryContext:
         truncation with trailing '...' so the LLM knows text was truncated.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2494,7 +2494,7 @@ class TestInjectMemoryContext:
         truncation with trailing '...' so the LLM knows text was truncated.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2529,7 +2529,7 @@ class TestInjectMemoryContext:
         """
         client = _make_client()
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=client,
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=client,
         )
         await agent.initialize_memory()
 
@@ -2569,7 +2569,7 @@ class TestInjectMemoryContext:
         when there is no space, and '...' is appended regardless.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2605,7 +2605,7 @@ class TestInjectMemoryContext:
         response for the subsequent TICK event.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2647,7 +2647,7 @@ class TestInjectMemoryContext:
         remove_section() guard (finding F-60-R1).
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 
@@ -2690,7 +2690,7 @@ class TestInjectMemoryContext:
         even if the topics are unrelated.
         """
         agent = create_persona_agent(
-            agent_id="sarah-chen", config=_PERSONA_CONFIG, llm_client=_make_client(),
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
         await agent.initialize_memory()
 

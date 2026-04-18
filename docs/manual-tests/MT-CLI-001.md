@@ -216,7 +216,7 @@ Usage: orch.exe run <WORKFLOW>
 |------|--------|----|--------|-------|
 | 2026-04-18 | Copilot | Windows 11 | Pass | All 5 steps passed. `--help` exit 0 with full subcommand list. `validate config/` → "Validation passed (3 file(s) checked)". `run feature-builder` → HTTP 201, `run_id=a1badf22`, status `pending`. `status <id>` → structured output showing `failed` (no agents registered, expected). `agent list` → "No agents registered.", exit 0. |
 | 2026-04-18 | Copilot | Windows 11 | Pass | Re-verified Steps 1-5 and Edge Cases 1-3 against live orchestrator. `run feature-builder` output now prints ASCII-safe `OK Workflow ...` marker (fixed Windows mojibake issue from Unicode checkmark). Latest run: `run_id=7d846bcc-bc3d-4590-9ef6-e7e84c0acd4b`, `Status: pending`; `status` then shows terminal `failed` due no `planner` agent registered (expected in this setup). |
-| 2026-04-18 | mkhomutov | Windows 11 | Pass | Retest — all 5 steps pass. `run_id=4d418cb4`, `Status: pending`, terminal `failed` (no `planner` registered). `agent list` shows `sarah-chen` healthy on port 50055 (lingering from prior session). |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | Retest — all 5 steps pass. `run_id=4d418cb4`, `Status: pending`, terminal `failed` (no `planner` registered). `agent list` shows `ember-owl` healthy on port 50055 (lingering from prior session). |
 
 ---
 
