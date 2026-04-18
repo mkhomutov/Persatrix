@@ -1,0 +1,218 @@
+# Manual Test MT-COST-002: Workflow Exceeding Budget Is Aborted with the Expected Reason
+
+**Test ID**: `MT-COST-002`
+**Feature Area**: Cost
+**Version**: 1.0
+**Created**: 2026-04-18
+**Last Updated**: 2026-04-18
+**Status**: Active
+
+---
+
+## Overview
+
+**Purpose**: Verify that when a workflow step exceeds its configured `max_llm_calls` or
+`max_tokens` budget, the scheduler aborts the run and surfaces a meaningful error reason via the
+status endpoint — exercising the RFC 0006 budget-enforcement path.
+
+**Scope**: `TaskConfig.max_llm_calls`, `TaskConfig.max_tokens`, scheduler budget enforcement,
+`status` → `"failed"` transition, `error` field content.
+
+**Out of Scope**: Token pricing accuracy; cost-summary aggregation (see MT-COST-001).
+
+---
+
+## Related Documentation
+
+**Feature Documentation**:
+- [docs/rfcs/0006-efficiency-execution-limits.md](../rfcs/0006-efficiency-execution-limits.md)
+- [internal/scheduler/scheduler.go](../../internal/scheduler/scheduler.go)
+- [internal/scheduler/budget.go](../../internal/scheduler/budget.go)
+
+**Related Automated Tests**:
+- Integration tests: `tests/integration/test_workflow.py`
+
+---
+
+## Preconditions
+
+### System Requirements
+
+**Operating Systems**:
+- ☐ Windows 10/11 (x64)
+- ☐ macOS 12.0+ (Intel/Apple Silicon)
+- ☐ Linux (Ubuntu 22.04+)
+
+**Dependencies Installed**:
+- Go 1.24+: `go version`
+- Python 3.11+: `python3 --version`
+- `curl` available in PATH
+- `ANTHROPIC_API_KEY` set
+
+### Application State
+
+- ☐ Orchestrator running: `make run`
+- ☐ At least one Python task agent registered and connected
+- ☐ Config valid: `make validate` exits 0
+
+### Test Data
+
+Create a budget-constrained workflow fixture at `workflows/budget-test.yaml`:
+
+```yaml
+schema_version: "0.1"
+id: budget-test
+name: Budget Abort Test
+steps:
+  - id: constrained-step
+    agent: planner
+    task: "Write a detailed 10-page report on the history of computing."
+    config:
+      max_llm_calls: 1     # forces abort after the very first LLM call
+      max_tokens: 50       # extremely low output cap
+      timeout_seconds: 60
+```
+
+Run `make validate` to confirm the fixture is valid before proceeding.
+
+---
+
+## Test Procedure
+
+### Step 1: Submit the Budget-Constrained Workflow
+
+**Action**:
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" \
+  -X POST http://127.0.0.1:8080/api/v1/workflows/run \
+  -H "Content-Type: application/json" \
+  -d '{"workflow_id":"budget-test","inputs":{}}'
+```
+
+**Expected Result**: HTTP 200 with a `run_id`.
+
+**Verification**:
+- [ ] HTTP status 200
+- [ ] `run_id` present in response body
+
+Note the `run_id` for the following steps.
+
+---
+
+### Step 2: Poll Until the Run Reaches `"failed"`
+
+**Action**:
+
+```bash
+RUN_ID=<run_id from Step 1>
+TIMEOUT=120; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  RESP=$(curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status)
+  STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+  echo "$(date +%T) status=$STATUS"
+  case "$STATUS" in completed|failed) echo "$RESP"; break;; esac
+  sleep 3; ELAPSED=$((ELAPSED+3))
+done
+```
+
+**Expected Result**: Run transitions to `"failed"` within 120 s.
+
+**Verification**:
+- [ ] `status` field equals `"failed"` (not `"completed"`)
+- [ ] Run does **not** remain stuck at `"running"` past the timeout
+
+---
+
+### Step 3: Verify the Error Field Contains a Budget Reason
+
+**Action**: Inspect the final status response from Step 2:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status | python3 -m json.tool
+```
+
+**Expected Result**: The `error` field is present and non-empty. It should reference the budget
+limit that was exceeded (LLM call count or token limit), for example:
+- `"max_llm_calls limit (1) exceeded"`
+- `"budget exhausted: token limit reached"`
+
+(Exact wording depends on implementation; any budget-related phrase is acceptable.)
+
+**Verification**:
+- [ ] `"error"` field is present in the JSON
+- [ ] `"error"` value is a non-empty string
+- [ ] `"error"` string references a budget/limit concept (not a generic internal error)
+- [ ] No 500-level HTTP status returned; response is a well-formed JSON envelope
+
+---
+
+### Step 4: Verify Cost Summary Still Updated
+
+**Action**: Check that the aborted run's token usage appears in the cost summary:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
+```
+
+**Expected Result**: Cost data updated to reflect tokens consumed before the abort.
+
+**Verification**:
+- [ ] Response is HTTP 200 and valid JSON
+- [ ] Token counts are non-zero (tokens consumed on the single allowed LLM call are recorded)
+
+---
+
+### Step 5: Clean Up Test Fixture
+
+**Action**: Remove the test workflow fixture created in preconditions:
+
+```bash
+rm workflows/budget-test.yaml
+```
+
+**Verification**:
+- [ ] File removed
+
+---
+
+## Expected Results Summary
+
+| Step | Expected Outcome | Pass/Fail |
+|------|-----------------|-----------|
+| 1 | Workflow submitted; `run_id` returned | ☐ |
+| 2 | Run reaches `"failed"`; does not hang | ☐ |
+| 3 | `error` field references budget exhaustion | ☐ |
+| 4 | Cost summary updated despite abort | ☐ |
+| 5 | Test fixture cleaned up | ☐ |
+
+---
+
+## Edge Cases & Error Scenarios
+
+### Edge Case 1: `max_tokens: 50` Causes Agent Crash
+
+**Scenario**: The extremely low token cap causes the agent process to panic rather than return a
+graceful error.
+
+**Expected Behavior**: The orchestrator's executor catches the gRPC error and marks the step as
+`FAILED`. The workflow transitions to `"failed"` with an error message. The agent process itself
+should not crash permanently — it should recover for subsequent tasks.
+
+---
+
+## Test Results
+
+| Date | Tester | OS | Result | Notes |
+|------|--------|----|--------|-------|
+| | | | | |
+
+---
+
+## Notes
+
+- This test exercises the most recently shipped RFC 0006 budget-enforcement code. A `"failed"`
+  status that does **not** reference the budget in the `error` field may indicate the enforcement
+  path is not wired correctly.
+- The `max_llm_calls` default change from 10 → 5 (breaking change noted in `CHANGELOG.md`) does
+  not affect this test since `config.max_llm_calls: 1` is set explicitly.
