@@ -23,9 +23,6 @@ from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .persona_runtime import _LLMPersonaAgent
 from .server_persona import (
-    _resolve_agent_type as _resolve_agent_type,  # re-exported for tests
-)
-from .server_persona import (
     initialize_persona_agents,
     load_agent,
 )

@@ -20,9 +20,9 @@ from agents.generated import task_pb2, task_pb2_grpc
 from agents.server import (
     AgentServer,
     AgentServiceServicer,
-    _resolve_agent_type,
     load_agent,
 )
+from agents.server_persona import _resolve_agent_type
 from agents.task_agent import TaskAgent
 from agents.tools import builtin
 

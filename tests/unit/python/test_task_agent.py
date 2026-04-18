@@ -281,23 +281,23 @@ class TestAgentLoaderDispatch:
     """Test that _resolve_agent_type dispatches on the 'type' field."""
 
     def test_type_task_returns_task_string(self):
-        from agents.server import _resolve_agent_type
+        from agents.server_persona import _resolve_agent_type
 
         assert _resolve_agent_type({"id": "test", "type": "task"}) == "task"
 
     def test_type_default_returns_task_string(self):
         """Agents without a type field default to 'task'."""
-        from agents.server import _resolve_agent_type
+        from agents.server_persona import _resolve_agent_type
 
         assert _resolve_agent_type({"id": "test"}) == "task"
 
     def test_type_persona_returns_persona_string(self):
-        from agents.server import _resolve_agent_type
+        from agents.server_persona import _resolve_agent_type
 
         assert _resolve_agent_type({"id": "test", "type": "persona"}) == "persona"
 
     def test_unknown_type_raises_system_exit(self):
-        from agents.server import _resolve_agent_type
+        from agents.server_persona import _resolve_agent_type
 
         with pytest.raises(SystemExit, match="Unknown agent type"):
             _resolve_agent_type({"id": "test", "type": "invalid"})

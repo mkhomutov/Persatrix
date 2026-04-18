@@ -22,13 +22,13 @@ from .llm_client import LLMClient, create_provider
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
 from .task_agent import TaskAgent
+from .tick import TickScheduler
 from .tools import builtin
 from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator
 
 if TYPE_CHECKING:
     from .dispatch import EventDispatcher
-    from .tick import TickScheduler
 
 logger = logging.getLogger("Persatrix.agent.server")
 
@@ -206,12 +206,10 @@ async def initialize_persona_agents(
         autonomy = agent.config.get("autonomy", {})
         level = autonomy.get("level", "reactive")
         if level in ("semi-autonomous", "autonomous"):
-            from .tick import TickScheduler as _TickScheduler
-
             interval = autonomy.get("tick_interval_seconds", 60)
             max_actions = autonomy.get("max_actions_per_tick", 3)
             idle_after = autonomy.get("idle_after_ticks", 10)
-            scheduler = _TickScheduler(
+            scheduler = TickScheduler(
                 agent,
                 interval=float(interval),
                 max_actions_per_tick=max_actions,
