@@ -1145,6 +1145,112 @@ class TestAgentServerPersonaLifecycle:
         await server.stop()
 
 
+# ─── Direct tests for initialize_persona_agents ─────────────
+#
+# TestAgentServerPersonaLifecycle above tests the same logic indirectly via
+# AgentServer.start(), which requires gRPC server mocking.  These tests call
+# initialize_persona_agents() directly to cover scenarios that are awkward to
+# exercise through the server: mixed agent dicts, partial init failures, and
+# the in-place mutation contract on tick_schedulers.
+
+
+class TestInitializePersonaAgents:
+
+    async def test_task_agent_is_skipped(self):
+        """Non-_LLMPersonaAgent entries in the dict are silently ignored."""
+        from agents.server_persona import initialize_persona_agents
+        from agents.task_agent import TaskAgent
+
+        task_agent = MagicMock(spec=TaskAgent)
+        agents = {"worker": task_agent}
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        await initialize_persona_agents(agents, dispatcher, schedulers)
+
+        assert "worker" not in schedulers
+        assert "worker" not in dispatcher._agents
+
+    async def test_persona_agent_registered_with_dispatcher(self):
+        """A persona agent with successful memory init is registered with the dispatcher."""
+        from agents.server_persona import initialize_persona_agents
+
+        agent = await _make_agent()
+        await agent.close_memory()  # let initialize_persona_agents open it
+
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        await initialize_persona_agents({"sarah-chen": agent}, dispatcher, schedulers)
+
+        assert "sarah-chen" in dispatcher._agents
+        await agent.close_memory()
+
+    async def test_memory_failure_skips_agent_but_others_continue(self):
+        """A memory init failure on one agent does not prevent others from initializing.
+
+        The indirect AgentServer tests only exercise single-agent failure.
+        This test verifies the multi-agent case: the failing agent is skipped
+        and the next agent in the dict is still initialized correctly.
+        """
+        from agents.server_persona import initialize_persona_agents
+
+        failing_agent = create_persona_agent(
+            agent_id="sarah-chen",
+            config={**_PERSONA_CONFIG},
+            llm_client=_make_client(),
+        )
+        failing_agent.initialize_memory = AsyncMock(
+            side_effect=RuntimeError("DB error"),
+        )
+
+        ok_agent = await _make_agent(config={**_PERSONA_CONFIG_2})
+        await ok_agent.close_memory()
+
+        agents = {"sarah-chen": failing_agent, "mike-torres": ok_agent}
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        await initialize_persona_agents(agents, dispatcher, schedulers)
+
+        assert "sarah-chen" not in dispatcher._agents
+        assert "sarah-chen" not in schedulers
+        assert "mike-torres" in dispatcher._agents
+        await ok_agent.close_memory()
+
+    async def test_tick_schedulers_dict_mutated_in_place(self):
+        """The tick_schedulers dict passed in is mutated: autonomous agents are inserted.
+
+        Validates the in-place mutation contract documented in the function's
+        docstring — callers rely on the dict being populated, not on a return value.
+        """
+        from agents.server_persona import initialize_persona_agents
+
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 999,
+                "max_actions_per_tick": 3,
+                "idle_after_ticks": 10,
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="sarah-chen", config=config, llm_client=_make_client(),
+        )
+
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        await initialize_persona_agents({"sarah-chen": agent}, dispatcher, schedulers)
+
+        assert "sarah-chen" in schedulers
+        assert schedulers["sarah-chen"].is_running
+
+        await schedulers["sarah-chen"].stop()
+        await agent.close_memory()
+
+
 # ─── Cross-Agent Memory Isolation ───────────────────────────
 
 

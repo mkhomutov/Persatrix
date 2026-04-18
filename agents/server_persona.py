@@ -179,6 +179,9 @@ async def initialize_persona_agents(
 
     Memory failure for a given agent is logged and that agent is skipped
     (it will NOT receive dispatched events or tick scheduling).
+
+    ``tick_schedulers`` is mutated in-place: started TickScheduler instances
+    are inserted under their agent ID.  Non-persona agents are left untouched.
     """
     for agent_id, agent in agents.items():
         if not isinstance(agent, _LLMPersonaAgent):
