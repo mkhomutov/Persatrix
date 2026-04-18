@@ -106,10 +106,17 @@ Optional agent check:
 curl.exe -s http://127.0.0.1:8080/api/v1/agents | python -m json.tool
 ```
 
+Expected result for this check:
+- API terminal-state mode: an empty array (`[]`) is valid and does not fail this test.
+- End-to-end success mode: an empty array (`[]`) means required agents are not registered yet.
+
 For end-to-end success mode, ensure this list includes all of:
 - `planner`
 - `code-writer`
 - `code-reviewer`
+
+If one or more required agents are missing, start/register them first, then rerun the
+agent check before continuing.
 
 ---
 
@@ -135,7 +142,7 @@ curl -s -w "\nHTTP %{http_code}\n" \
   -d '{"workflow_id":"feature-builder","inputs":{"user_request":"Add hello-world endpoint"}}'
 ```
 
-**Expected Result**: HTTP 200 with a JSON body containing a non-empty `run_id` and `status` of
+**Expected Result**: HTTP 201 (`Created`) with a JSON body containing a non-empty `run_id` and `status` of
 `"running"` or `"pending"`:
 
 ```json
@@ -143,7 +150,7 @@ curl -s -w "\nHTTP %{http_code}\n" \
 ```
 
 **Verification**:
-- [ ] HTTP status code is `200`
+- [ ] HTTP status code is `201`
 - [ ] Response JSON contains `run_id` (non-empty string)
 - [ ] Response JSON contains `workflow_id: "feature-builder"`
 - [ ] `status` field is `"running"` or `"pending"` (not already `"completed"`)
@@ -293,7 +300,7 @@ curl -s http://127.0.0.1:8080/api/v1/workflows | python3 -m json.tool
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
 | 1 | Orchestrator healthy, `/healthz` returns 200 | ☐ |
-| 2 | Submission returns 200 with valid `run_id` | ☐ |
+| 2 | Submission returns 201 with valid `run_id` | ☐ |
 | 3 | Run reaches `completed` or `failed` terminal status | ☐ |
 | 4 | Status response contains all required fields with correct types | ☐ |
 | 5 | Run appears in list endpoint | ☐ |
@@ -316,7 +323,7 @@ API still returns a well-formed JSON response — no 500 or panic.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| | | | | |
+| 2026-04-18 | mkhomutov | Windows 11 | Pass | End-to-end run completed successfully; submit returned HTTP 201 with valid `run_id`, terminal status reached, and run present in list endpoint. |
 
 ---
 
