@@ -414,7 +414,7 @@ type AuditEntry struct {
     // ... existing fields from RFC 0009 ...
     SubjectID      string   // Data subject this action relates to (may be empty)
     Classification string   // Data classification level
-    Summary        string   // Plain-language: "Agent sarah-chen read file /workspace/report.md"
+    Summary        string   // Plain-language: "Agent ember-owl read file /workspace/report.md"
     ConsentRef     string   // Reference to consent record that authorized this action
 }
 ```

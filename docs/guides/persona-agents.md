@@ -32,15 +32,35 @@ agent must declare the `persona` block, a `task` agent must declare
 setting `type` is rejected
 ([schemas/agent.schema.json:73–109](../../schemas/agent.schema.json#L73-L109)).
 
+### Naming policy for personas
+
+Use nickname-style persona names and IDs, not human-like names, to avoid
+accidentally matching real people.
+
+- Good: `ember-owl`, `orbit-kite`, `nova-sparrow`
+- Avoid: first-name + last-name IDs
+
+Generate candidates with:
+
+```bash
+make generate-persona-nickname COUNT=5
+```
+
+For reproducible output (useful in docs/tests), pass a seed:
+
+```bash
+make generate-persona-nickname COUNT=3 SEED=42
+```
+
 ### A worked example
 
-The repository ships with `sarah-chen`, a "VP of Engineering" persona
+The repository ships with `ember-owl`, a "VP of Engineering" persona
 ([config/agents.yaml:133–192](../../config/agents.yaml#L133-L192)):
 
 ```yaml
-- id: "sarah-chen"
+- id: "ember-owl"
   type: "persona"
-  name: "Sarah Chen"
+  name: "Ember Owl"
   role: "Engineering leadership and technical oversight"
   model: "claude-sonnet-4-20250514"
   temperature: 0.7
@@ -86,7 +106,7 @@ The repository ships with `sarah-chen`, a "VP of Engineering" persona
       inject_recent_notes: 3
 
   relationships:
-    - agent_id: "mike-torres"
+    - agent_id: "iron-fox"
       type: "reports_to_me"
       trust_level: 0.9
 ```
@@ -94,7 +114,7 @@ The repository ships with `sarah-chen`, a "VP of Engineering" persona
 Launch it once the orchestrator is running:
 
 ```bash
-make run-agent AGENT=sarah-chen
+make run-agent AGENT=ember-owl
 ```
 
 ### What each block controls
@@ -216,23 +236,23 @@ separate `messages` list and are likewise outside working memory.
 
 ### A minimal walkthrough
 
-A single tick of `sarah-chen` after receiving a pull-request event from
-`mike-torres`:
+A single tick of `ember-owl` after receiving a pull-request event from
+`iron-fox`:
 
 1. **Tick fires** at `tick_interval_seconds: 60`.
 2. **Episodic recall** — `_inject_memory_context` queries
-   `episodic_memory.recall("code review mike-torres", limit=10)`.
+   `episodic_memory.recall("code review iron-fox", limit=10)`.
    BM25 returns the top matches; their `access_count` is incremented so
    frequently-used memories outrank stale ones on later queries.
-3. **Relationship context** — `relationship_memory.get_relationship_summary("mike-torres")`
+3. **Relationship context** — `relationship_memory.get_relationship_summary("iron-fox")`
    returns `trust_score=0.9` plus recent interactions. Because 0.9 is well
    away from neutral, the section is injected at priority 8.
 4. **LLM call** — the action loop
    ([agents/persona_runtime/action_loop.py](../../agents/persona_runtime/action_loop.py))
    runs up to `max_llm_calls` turns (see §3), subject to the budget check.
 5. **Record outcome** — after the decision the agent calls
-   `record_interaction("mike-torres", "code_review", outcome="approved", sentiment=0.8)`
-   and `update_trust("mike-torres", delta=+0.1, reason="delivered on time")`.
+   `record_interaction("iron-fox", "code_review", outcome="approved", sentiment=0.8)`
+   and `update_trust("iron-fox", delta=+0.1, reason="delivered on time")`.
    Trust stays at `1.0` (clamped).
 6. **Compression (if needed)** — if working memory is now over budget,
    `compress_if_needed` summarises the oldest conversation section before

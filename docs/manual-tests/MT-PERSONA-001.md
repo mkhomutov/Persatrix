@@ -59,7 +59,7 @@ Create the log directory before starting the agent (works on all platforms):
 mkdir -p logs
 ```
 
-Temporarily reduce the tick interval in `config/agents.yaml` for the `sarah-chen` persona to speed
+Temporarily reduce the tick interval in `config/agents.yaml` for the `ember-owl` persona to speed
 up the test:
 
 ```yaml
@@ -73,10 +73,10 @@ autonomy:
 
 ### Step 1: Start the Persona Agent
 
-**Action**: In a dedicated terminal, start the `sarah-chen` persona agent and capture its output:
+**Action**: In a dedicated terminal, start the `ember-owl` persona agent and capture its output:
 
 ```bash
-make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
+make run-agent AGENT=ember-owl 2>&1 | tee logs/persona-001.log
 ```
 
 > **Fix (2026-04-18, resolved)**: `make run-agent` previously failed with
@@ -86,17 +86,17 @@ make run-agent AGENT=sarah-chen 2>&1 | tee logs/persona-001.log
 > If port 50051 (the default agent gRPC port) is already in use by another process,
 > the agent prints `Failed to bind gRPC server to 127.0.0.1:50051`. Use the direct invocation
 > with an explicit port instead:
-> `python3 -m persatrix_agents.server --agent sarah-chen --port 50055`
+> `python3 -m persatrix_agents.server --agent ember-owl --port 50055`
 
 **Expected Result**: Agent starts without errors; gRPC server binds successfully.
 
 **Verification**:
 - [x] No Python traceback in the first 5 seconds of output
-- [x] Log line contains `"Tick scheduler started for sarah-chen"`
+- [x] Log line contains `"Tick scheduler started for ember-owl"`
 
 > **Run 2026-04-18 (full pass)**: Agent started cleanly on port 50057. Log output within 2 s:
-> `Agent server listening on 127.0.0.1:50057`, `Serving 1 agent(s): ['sarah-chen']`,
-> `FTS5 enabled for episodic memory`, `Started tick scheduler for sarah-chen (interval=5s)`.
+> `Agent server listening on 127.0.0.1:50057`, `Serving 1 agent(s): ['ember-owl']`,
+> `FTS5 enabled for episodic memory`, `Started tick scheduler for ember-owl (interval=5s)`.
 > No Python traceback. One `WARNING` for Notes FTS5 fallback (non-fatal; see Step 2 notes).
 
 ---
@@ -111,7 +111,7 @@ grep "Tick scheduler started" logs/persona-001.log
 
 **Expected Result**: Exactly one line matching:
 ```
-Tick scheduler started for sarah-chen (interval=5s, idle_after=10)
+Tick scheduler started for ember-owl (interval=5s, idle_after=10)
 ```
 
 **Verification**:
@@ -120,7 +120,7 @@ Tick scheduler started for sarah-chen (interval=5s, idle_after=10)
 - [x] `idle_after` matches `autonomy.idle_after_ticks` from config (default 10)
 
 > **Run 2026-04-18 (full pass)**: Exact line observed:
-> `Tick scheduler started for sarah-chen (interval=5s, idle_after=10)`.
+> `Tick scheduler started for ember-owl (interval=5s, idle_after=10)`.
 > Interval matches test value (5 s); idle_after=10 matches config default.
 > Also observed — non-fatal warning: `Notes FTS5 query failed ... no such column: tick, falling back to LIKE`.
 > This is a bug in `notes.py` (FTS5 virtual table missing the `tick` column), but the agent continues normally.
@@ -139,7 +139,7 @@ grep -c "tick" logs/persona-001.log
 **Expected Result**: Count is ≥ 1; the LLM tick loop has fired at least once.
 
 **Verification**:
-- [x] No `"Tick error for sarah-chen"` error lines
+- [x] No `"Tick error for ember-owl"` error lines
 - [x] No Python exception traceback
 
 > **Run 2026-04-18 (full pass)**: 13+ HTTP 200 responses to `api.anthropic.com/v1/messages`
@@ -159,7 +159,7 @@ grep "idle" logs/persona-001.log | tail -5
 
 **Expected Result**: After 10 consecutive `DO_NOTHING` ticks the scheduler logs:
 ```
-Agent sarah-chen idle (10 ticks), skipping LLM tick
+Agent ember-owl idle (10 ticks), skipping LLM tick
 ```
 
 **Verification**:
@@ -178,7 +178,7 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 **Expected Result**: Scheduler stops cleanly and logs shutdown.
 
 **Verification**:
-- [x] Log line contains `"Tick scheduler stopped for sarah-chen"`
+- [x] Log line contains `"Tick scheduler stopped for ember-owl"`
 - [x] Process exits after SIGINT with no unhandled exception (Windows may report exit code 1)
 
 > **Run 2026-04-18 (pass with Windows note)**: Process exits when signalled.
@@ -189,9 +189,9 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 >
 > **Interactive confirmation (2026-04-18, terminal-assisted)**: Direct foreground run on port `50344`
 > followed by interactive Ctrl+C produced:
-> `Shutting down agent server...`, `Tick scheduler stopped for sarah-chen`,
-> `Stopped tick scheduler for sarah-chen`, `De-registered agent sarah-chen from orchestrator`,
-> `Closed memory for persona agent sarah-chen`, `Agent server stopped.`.
+> `Shutting down agent server...`, `Tick scheduler stopped for ember-owl`,
+> `Stopped tick scheduler for ember-owl`, `De-registered agent ember-owl from orchestrator`,
+> `Closed memory for persona agent ember-owl`, `Agent server stopped.`.
 > Terminal exit code observed: `1` on Windows PowerShell.
 
 ---
@@ -215,7 +215,7 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 **Scenario**: Environment variable absent when agent starts.
 
 **Expected Behavior**: LLM client raises a configuration error on the first tick; log shows
-`"Tick error for sarah-chen"` with an authentication exception. Agent does not crash the process
+`"Tick error for ember-owl"` with an authentication exception. Agent does not crash the process
 — subsequent ticks are attempted (and will also fail until the key is provided).
 
 ---
@@ -225,9 +225,9 @@ Agent sarah-chen idle (10 ticks), skipping LLM tick
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-04-18 | mkhomutov | Windows 11 | Partial | Step 1 startup verified with `PYTHONPATH=agents/generated --port 50055`. Agent starts; gRPC binds; tick scheduler and FTS5 log lines confirmed. Steps 2–5 (tick fires, idle, graceful shutdown) not exercised — require `ANTHROPIC_API_KEY`. Code issue: `make run-agent` fails without PYTHONPATH; port 50051 occupied in test environment. |
-| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Steps 1–2 pass. `make run-agent` PYTHONPATH issue resolved (Makefile fix). Port 50051 still in use; used `--port 50056`. Agent starts cleanly: gRPC on 50056, FTS5 enabled, `"Tick scheduler started for sarah-chen (interval=60s, idle_after=10)"`. Steps 3–5 require `ANTHROPIC_API_KEY`. |
+| 2026-04-18 | mkhomutov | Windows 11 | Partial | Retest — Steps 1–2 pass. `make run-agent` PYTHONPATH issue resolved (Makefile fix). Port 50051 still in use; used `--port 50056`. Agent starts cleanly: gRPC on 50056, FTS5 enabled, `"Tick scheduler started for ember-owl (interval=60s, idle_after=10)"`. Steps 3–5 require `ANTHROPIC_API_KEY`. |
 | 2026-04-18 | mkhomutov | Windows 11 | Pass | Full live pass with `ANTHROPIC_API_KEY`. Steps 1–2: agent starts cleanly, scheduler log present `(interval=5s, idle_after=10)`. Step 3: 13+ LLM ticks fired (HTTP 200), no errors. Step 4: LLM stayed active throughout (no idle; acceptable per spec). Step 5: process exits on signal; graceful `"Tick scheduler stopped"` log requires interactive Ctrl+C on Windows (code-reviewed correct). **Bug noted**: `Notes FTS5 query failed ... no such column: tick` (non-fatal LIKE fallback). |
-| 2026-04-18 | GitHub Copilot | Windows 11 | Pass | Executed in-session with `ANTHROPIC_API_KEY`. Ran on ports `50345` (`tee`-captured run) and `50346` (direct foreground). Step 1 PASS: startup clean, `Tick scheduler started ... (interval=5s, idle_after=10)` observed. Step 3 PASS: repeated LLM ticks with `HTTP/1.1 200 OK` (7 in captured log, 20+ in direct run), no tick errors/tracebacks. Step 4 PASS (acceptable variant): no idle-skip because LLM remained active. Step 5 PASS: interactive Ctrl+C produced `Tick scheduler stopped for sarah-chen` and full shutdown sequence; Windows exit code `1` observed. |
+| 2026-04-18 | GitHub Copilot | Windows 11 | Pass | Executed in-session with `ANTHROPIC_API_KEY`. Ran on ports `50345` (`tee`-captured run) and `50346` (direct foreground). Step 1 PASS: startup clean, `Tick scheduler started ... (interval=5s, idle_after=10)` observed. Step 3 PASS: repeated LLM ticks with `HTTP/1.1 200 OK` (7 in captured log, 20+ in direct run), no tick errors/tracebacks. Step 4 PASS (acceptable variant): no idle-skip because LLM remained active. Step 5 PASS: interactive Ctrl+C produced `Tick scheduler stopped for ember-owl` and full shutdown sequence; Windows exit code `1` observed. |
 
 ---
 

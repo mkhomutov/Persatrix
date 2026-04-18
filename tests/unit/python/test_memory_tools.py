@@ -613,7 +613,7 @@ class TestFTS5QuerySanitization:
 
     async def test_colon_query_does_not_raise(self, memory):
         """Colon in query must not bubble up a sqlite3.OperationalError."""
-        await memory.store_note("tick scheduler", "tick scheduler started for sarah-chen")
+        await memory.store_note("tick scheduler", "tick scheduler started for ember-owl")
         notes = await memory.recall_notes("tick: scheduler")
         assert isinstance(notes, list)
 

@@ -84,9 +84,9 @@ _VALID_PERSONA_AGENT = {
     "schema_version": "0.2",
     "agents": [
         {
-            "id": "sarah-chen",
+            "id": "ember-owl",
             "type": "persona",
-            "name": "Sarah Chen",
+            "name": "Ember Owl",
             "role": "VP of Engineering",
             "model": "claude-sonnet-4-20250514",
             "persona": {
@@ -175,9 +175,9 @@ class TestValidTaskAgent:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
-                    "name": "Sarah Chen",
+                    "name": "Ember Owl",
                     "role": "VP",
                     "model": "claude-sonnet-4-20250514",
                     # Missing 'persona'
@@ -225,7 +225,7 @@ class TestBehaviorDimensions:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -253,7 +253,7 @@ class TestBehaviorDimensions:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -278,7 +278,7 @@ class TestBehaviorDimensions:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -307,7 +307,7 @@ class TestAutonomyValidation:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -335,7 +335,7 @@ class TestAutonomyValidation:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -368,7 +368,7 @@ class TestMemoryValidation:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -398,7 +398,7 @@ class TestMemoryValidation:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -454,7 +454,7 @@ class TestSafetyNetConditional:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     # Missing 'type' — safety net requires it
                     "name": "Sarah",
                     "role": "Lead",
@@ -489,7 +489,7 @@ class TestPersonaAdditionalProperties:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -516,7 +516,7 @@ class TestPersonaAdditionalProperties:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -669,9 +669,9 @@ class TestMultiAgentConfig:
                     "instructions": "You are a code writer.",
                 },
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
-                    "name": "Sarah Chen",
+                    "name": "Ember Owl",
                     "role": "VP of Engineering",
                     "model": "claude-sonnet-4-20250514",
                     "persona": {
@@ -704,9 +704,9 @@ class TestMultiAgentConfig:
                     "instructions": "You are a code writer.",
                 },
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
-                    "name": "Sarah Chen",
+                    "name": "Ember Owl",
                     "role": "VP",
                     "model": "claude-sonnet-4-20250514",
                     # Missing 'persona'
@@ -730,7 +730,7 @@ class TestRangeConstraints:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -742,7 +742,7 @@ class TestRangeConstraints:
                     },
                     "relationships": [
                         {
-                            "agent_id": "mike-torres",
+                            "agent_id": "iron-fox",
                             "type": "peer",
                             "trust_level": 1.5,  # max is 1.0
                         }
@@ -786,7 +786,7 @@ class TestRangeConstraints:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",
@@ -816,7 +816,7 @@ class TestRangeConstraints:
             "schema_version": "0.2",
             "agents": [
                 {
-                    "id": "sarah-chen",
+                    "id": "ember-owl",
                     "type": "persona",
                     "name": "Sarah",
                     "role": "Lead",

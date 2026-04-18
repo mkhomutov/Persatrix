@@ -72,7 +72,7 @@ from persatrix_agents.memory.relationship import RelationshipMemory
 DB = "data/mt-memory-002.db"
 
 async def main():
-    mem = RelationshipMemory("sarah-chen", db_path=DB)
+    mem = RelationshipMemory("ember-owl", db_path=DB)
     await mem.initialize()
 
     # get_trust() returns the float score directly (0.5 default for unknown pairs)
@@ -113,16 +113,16 @@ from persatrix_agents.memory.relationship import RelationshipMemory
 DB = "data/mt-memory-002.db"
 
 async def main():
-    mem = RelationshipMemory("sarah-chen", db_path=DB)
+    mem = RelationshipMemory("ember-owl", db_path=DB)
     await mem.initialize()
 
     score = 0.5  # starting default
     for i in range(3):
-        score = await mem.update_trust("mike-torres", delta=0.15, reason=f"positive interaction {i+1}")
+        score = await mem.update_trust("iron-fox", delta=0.15, reason=f"positive interaction {i+1}")
         print(f"After update {i+1} (+0.15): {score:.3f}")
 
     # Oversized delta — must be clamped to 0.2
-    score = await mem.update_trust("mike-torres", delta=0.5, reason="large positive event")
+    score = await mem.update_trust("iron-fox", delta=0.5, reason="large positive event")
     print(f"After capped update (+0.5 clamped to 0.2): {score:.3f}")
     assert score <= 1.0, "Trust must not exceed 1.0"
 
@@ -156,10 +156,10 @@ from persatrix_agents.memory.relationship import RelationshipMemory
 DB = "data/mt-memory-002.db"
 
 async def main():
-    mem = RelationshipMemory("sarah-chen", db_path=DB)
+    mem = RelationshipMemory("ember-owl", db_path=DB)
     await mem.initialize()
 
-    rel = await mem.get_relationship_summary("mike-torres")
+    rel = await mem.get_relationship_summary("iron-fox")
     assert rel is not None, "Relationship record missing after restart"
     print(f"Trust after restart: {rel.trust_score:.3f}")
     assert rel.trust_score > 0.5, "Trust should be above default after positive updates"
@@ -191,16 +191,16 @@ from persatrix_agents.memory.relationship import RelationshipMemory
 DB = "data/mt-memory-002.db"
 
 async def main():
-    mem = RelationshipMemory("sarah-chen", db_path=DB)
+    mem = RelationshipMemory("ember-owl", db_path=DB)
     await mem.initialize()
 
-    rel_before = await mem.get_relationship_summary("mike-torres")
+    rel_before = await mem.get_relationship_summary("iron-fox")
     trust_before = rel_before.trust_score
 
     count = await mem.apply_decay(decay_rate=0.01)
     print(f"Decay applied to {count} relationship(s)")
 
-    rel_after = await mem.get_relationship_summary("mike-torres")
+    rel_after = await mem.get_relationship_summary("iron-fox")
     trust_after = rel_after.trust_score
 
     print(f"Trust before decay: {trust_before:.4f}, after: {trust_after:.4f}")
@@ -250,7 +250,7 @@ rm -f data/mt-memory-002.db data/mt-memory-002.db-shm data/mt-memory-002.db-wal
 **Scenario**: `reason` parameter longer than 1024 chars passed to `update_trust()`.
 
 **Expected Behavior**: Reason is silently truncated to 1024 chars; a warning is logged:
-`"reason truncated from N to 1024 chars for sarah-chen→mike-torres"`. The update still succeeds.
+`"reason truncated from N to 1024 chars for ember-owl→iron-fox"`. The update still succeeds.
 
 ---
 

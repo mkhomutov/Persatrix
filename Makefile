@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -64,6 +64,9 @@ run: build ## Run the orchestrator
 run-agent: ## Run a Python agent process (AGENT=coder)
 	PYTHONPATH="agents/generated" $(PYTHON) -m persatrix_agents.server --agent $(AGENT)
 
+generate-persona-nickname: ## Generate nickname-style persona id/name pairs (COUNT=1 SEED=)
+	$(PYTHON) scripts/persona_nickname_generator.py --count $(or $(COUNT),1) $(if $(SEED),--seed $(SEED),)
+
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests
 
@@ -76,7 +79,7 @@ test-python: ## Run Python agent tests
 test-integration: ## Run integration tests
 	PYTHONPATH="agents/generated" $(PYTHON) -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
 
-test-persona: ## Run persona consistency tests (AGENT=sarah-chen)
+test-persona: ## Run persona consistency tests (AGENT=ember-owl)
 	cd agents && $(PYTHON) -m pytest tests/ -v -k "persona" --agent $(AGENT)
 
 # ─── Lint ───────────────────────────────────────────────

@@ -820,12 +820,12 @@ class TestChannelServiceServicerSendMessage:
 
     async def test_explicit_mentions_dispatches_only_to_those_agents(self):
         """SendMessage with mentions routes exclusively to the listed agent IDs."""
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
-        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"ember-owl": stub})
         context = MagicMock(spec=grpc.aio.ServicerContext)
 
         resp = await servicer.SendMessage(
-            _agent_message(mentions=["sarah-chen"]), context
+            _agent_message(mentions=["ember-owl"]), context
         )
         await asyncio.sleep(0)  # let create_task execute
 
@@ -833,7 +833,7 @@ class TestChannelServiceServicerSendMessage:
         assert resp.message_id == "msg-001"
         dispatch.assert_called_once()
         target_id, event = dispatch.call_args.args
-        assert target_id == "sarah-chen"
+        assert target_id == "ember-owl"
 
     async def test_no_mentions_broadcasts_to_all_agents(self):
         """SendMessage without mentions delivers to every agent on the server."""
@@ -864,12 +864,12 @@ class TestChannelServiceServicerSendMessage:
 
     async def test_event_type_is_message_received(self):
         """Dispatched event must carry EventType.MESSAGE_RECEIVED."""
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
-        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"ember-owl": stub})
         context = MagicMock(spec=grpc.aio.ServicerContext)
 
         await servicer.SendMessage(
-            _agent_message(mentions=["sarah-chen"]), context
+            _agent_message(mentions=["ember-owl"]), context
         )
         await asyncio.sleep(0)
 
@@ -878,8 +878,8 @@ class TestChannelServiceServicerSendMessage:
 
     async def test_event_payload_matches_message_fields(self):
         """Event payload carries content and channel_id from the AgentMessage."""
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
-        servicer, dispatch = _channel_servicer({"sarah-chen": stub})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        servicer, dispatch = _channel_servicer({"ember-owl": stub})
         context = MagicMock(spec=grpc.aio.ServicerContext)
 
         await servicer.SendMessage(
@@ -888,7 +888,7 @@ class TestChannelServiceServicerSendMessage:
                 channel_id="engineering",
                 sender_id="tester",
                 message_id="msg-xyz",
-                mentions=["sarah-chen"],
+                mentions=["ember-owl"],
             ),
             context,
         )
@@ -903,12 +903,12 @@ class TestChannelServiceServicerSendMessage:
 
     async def test_response_message_id_echoes_request(self):
         """SendMessageResponse.message_id must equal the request message_id."""
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
-        servicer, _ = _channel_servicer({"sarah-chen": stub})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        servicer, _ = _channel_servicer({"ember-owl": stub})
         context = MagicMock(spec=grpc.aio.ServicerContext)
 
         resp = await servicer.SendMessage(
-            _agent_message(message_id="custom-id-42", mentions=["sarah-chen"]),
+            _agent_message(message_id="custom-id-42", mentions=["ember-owl"]),
             context,
         )
 
@@ -924,9 +924,9 @@ class TestChannelServiceServicerSendMessage:
         """
         import logging
 
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
         servicer = ChannelServiceServicer(
-            {"sarah-chen": stub},
+            {"ember-owl": stub},
             MagicMock(spec=EventDispatcher),
         )
         servicer._dispatcher.dispatch = AsyncMock(
@@ -936,7 +936,7 @@ class TestChannelServiceServicerSendMessage:
 
         caplog.set_level(logging.ERROR, logger="agents.server")
         resp = await servicer.SendMessage(
-            _agent_message(mentions=["sarah-chen"]), context
+            _agent_message(mentions=["ember-owl"]), context
         )
         # Await all pending dispatch tasks so the exception surfaces before
         # the test exits — asyncio.gather with return_exceptions swallows
@@ -947,7 +947,7 @@ class TestChannelServiceServicerSendMessage:
 
         assert resp.delivered is True
         assert any(
-            "Channel dispatch to agent sarah-chen failed" in record.message
+            "Channel dispatch to agent ember-owl failed" in record.message
             and record.levelno == logging.ERROR
             for record in caplog.records
         ), "dispatcher exception should be logged at ERROR with agent id"
@@ -967,16 +967,16 @@ class TestChannelServiceServicerSendMessage:
             await dispatch_may_finish.wait()
             return []
 
-        stub = _StubAgent(agent_id="sarah-chen", config={"model": "test"})
+        stub = _StubAgent(agent_id="ember-owl", config={"model": "test"})
         servicer = ChannelServiceServicer(
-            {"sarah-chen": stub},
+            {"ember-owl": stub},
             MagicMock(spec=EventDispatcher),
         )
         servicer._dispatcher.dispatch = slow_dispatch
         context = MagicMock(spec=grpc.aio.ServicerContext)
 
         await servicer.SendMessage(
-            _agent_message(mentions=["sarah-chen"]), context
+            _agent_message(mentions=["ember-owl"]), context
         )
         await dispatch_started.wait()
 
@@ -999,7 +999,7 @@ class TestChannelServiceServicerSubscribe:
         servicer, _ = _channel_servicer()
         context = MagicMock(spec=grpc.aio.ServicerContext)
         request = agent_message_pb2.SubscribeRequest(
-            channel_id="general", agent_id="sarah-chen"
+            channel_id="general", agent_id="ember-owl"
         )
 
         await servicer.Subscribe(request, context)

@@ -5,6 +5,6 @@ schema_version: "0.2"
 #   - id: "eng-general"
 #     type: "group"
 #     name: "#engineering-general"
-#     members: ["sarah-chen", "mike-torres", "james-wu"]
+#     members: ["ember-owl", "iron-fox", "cobalt-lark"]
 #     history_visible: true
 #     max_history_messages: 100

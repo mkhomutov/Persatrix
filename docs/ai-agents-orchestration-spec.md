@@ -150,8 +150,8 @@ agent:
 ```yaml
 # ─── Persona Agent (v0.2+ — extends base) ─────────────────
 agent:
-  id: "sarah-chen"
-  name: "Sarah Chen"
+  id: "ember-owl"
+  name: "Ember Owl"
   role: "Engineering leadership and technical oversight"
   model: "claude-sonnet-4-20250514"
   temperature: 0.7                     # higher for personality variance
@@ -190,7 +190,7 @@ agent:
 
   # ─── Relationships (optional) ───────────────────────────
   relationships:
-    - agent_id: "mike-torres"
+    - agent_id: "iron-fox"
       type: "reports_to_me"
       trust_level: 0.9
 ```
@@ -1272,7 +1272,7 @@ testing:
 orch test                                    # run all tests
 orch test --agent code-writer               # test a single agent
 orch test --workflow feature-builder        # test a workflow end-to-end
-orch test --persona sarah-chen              # test persona consistency
+orch test --persona ember-owl              # test persona consistency
 orch test --record                           # record LLM responses for replay
 ```
 
@@ -1314,8 +1314,8 @@ When a message is sent to a human agent, the framework:
 Change agent configuration without restarting the process:
 
 ```bash
-orch agent reload sarah-chen                # reload persona, tools, permissions
-orch agent reload sarah-chen --config new-sarah.yaml  # load from specific file
+orch agent reload ember-owl                # reload persona, tools, permissions
+orch agent reload ember-owl --config new-ember.yaml  # load from specific file
 ```
 
 Hot-reloadable fields: system prompt, persona, tools, permissions, temperature,

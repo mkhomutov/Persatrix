@@ -99,6 +99,8 @@ Many `internal/` packages are **intentional TODO stubs** for their target phase.
 
 ### Cross-cutting
 - Agent IDs: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
+- Persona names/IDs should be nickname-style, not human-like names (avoid first-name + last-name examples)
+- Use `make generate-persona-nickname COUNT=5` (or `python scripts/persona_nickname_generator.py`) to generate persona examples/test fixtures
 - Permissions are deny-by-default. Whitelist in `config/agents.yaml`
 - Always run `make validate` after editing YAML configs
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `refactor:`, etc.)
