@@ -117,22 +117,28 @@ Note the `run_id` value for the next steps.
 
 ### Step 3: Poll Status Until Terminal
 
-**Action**: Replace `<RUN_ID>` with the value from Step 2, then poll at ~2-second intervals:
+**Action**: Replace `<RUN_ID>` with the value from Step 2, then poll at ~2-second intervals.
+The loop aborts with a timeout message after 180 s so it cannot run indefinitely if the
+orchestrator stalls.
 
 ```bash
 RUN_ID=<RUN_ID>
-while true; do
+TIMEOUT=180; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
   RESP=$(curl -s http://127.0.0.1:8080/api/v1/workflows/${RUN_ID}/status)
   STATUS=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
   echo "$(date +%T) status=$STATUS"
   case "$STATUS" in completed|failed) echo "$RESP"; break;; esac
-  sleep 2
+  sleep 2; ELAPSED=$((ELAPSED+2))
 done
+if [ "$STATUS" != "completed" ] && [ "$STATUS" != "failed" ]; then
+  echo "TIMEOUT: run did not reach terminal state in ${TIMEOUT}s" >&2
+fi
 ```
 
 **Expected Result**: The loop terminates with `status` equal to `"completed"` or `"failed"` within
-the configured step timeouts (default 120 s each). A `"failed"` status is acceptable for this test
-if agents are unavailable; only the terminal transition itself is under test here.
+180 s. A `"failed"` status is acceptable for this test if agents are unavailable; only the
+terminal transition itself is under test here.
 
 **Verification**:
 - [ ] Loop terminates (does not run indefinitely)

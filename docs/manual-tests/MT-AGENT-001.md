@@ -107,8 +107,8 @@ tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_to
 
 ### Step 3: Inspect What the Test Verifies
 
-The test `test_task_with_tool_use` (in
-`tests/integration/test_agent_server.py`, lines ~260–310) does the following:
+The test `test_task_with_tool_use` (search for `def test_task_with_tool_use` in
+`tests/integration/test_agent_server.py`) does the following:
 
 1. Registers a mock `file_write` tool.
 2. Creates a mock LLM that returns a `TOOL_USE` stop reason with a `file_write` call
@@ -118,18 +118,18 @@ The test `test_task_with_tool_use` (in
    - `status == COMPLETED`
    - `metadata["tool_calls"] == "1"`
 
-**Action**: Read the test file to confirm the assertions are as described above:
+**Action**: Confirm the assertions match the description by reading the source:
 
 ```bash
-python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_tool_use \
-  -v --tb=long --capture=no -c agents/pyproject.toml
+grep -n "COMPLETED\|tool_calls" tests/integration/test_agent_server.py
 ```
 
-**Expected Result**: Test passes and the captured output includes no unexpected failures.
+**Expected Result**: Output includes two assertion lines — one checking
+`resp.status == task_pb2.COMPLETED` and one checking `resp.metadata["tool_calls"] == "1"`.
 
 **Verification**:
-- [ ] `status == COMPLETED` assertion passes
-- [ ] `metadata["tool_calls"] == "1"` assertion passes
+- [ ] `assert resp.status == task_pb2.COMPLETED` is present in the test source
+- [ ] `assert resp.metadata["tool_calls"] == "1"` is present in the test source
 
 ---
 
@@ -146,8 +146,7 @@ python3 -m pytest tests/integration/test_agent_server.py::TestEndToEndExecution 
 
 **Verification**:
 - [ ] Exit code 0
-- [ ] All tests listed as `PASSED`
-- [ ] Test count matches the number of methods in `TestEndToEndExecution` (currently 6)
+- [ ] All methods in `TestEndToEndExecution` are listed as `PASSED`
 
 ---
 

@@ -24,8 +24,7 @@ body, and missing required fields.
 ## Related Documentation
 
 **Feature Documentation**:
-- [internal/server/types.go](../../internal/server/types.go) — `errorResponse` struct (`{"error":
-  "...","code":"..."}`)
+- [docs/ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — REST API error envelope
 - [internal/server/server.go](../../internal/server/server.go) — handler implementations
 
 **Related Automated Tests**:

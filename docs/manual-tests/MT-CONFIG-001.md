@@ -86,7 +86,7 @@ the file.
 cp config/agents.yaml config/agents.yaml.bak
 
 # Open in editor and delete the 'name:' line from the first agent
-$EDITOR config/agents.yaml
+# Windows: notepad config\agents.yaml  |  macOS/Linux: nano config/agents.yaml
 ```
 
 Then run:
@@ -116,7 +116,7 @@ echo "Exit code: $?"
 ```bash
 cp config/agents.yaml.bak config/agents.yaml
 # Edit: change first agent id to "My Agent!"
-$EDITOR config/agents.yaml
+# Windows: notepad config\agents.yaml  |  macOS/Linux: nano config/agents.yaml
 
 make validate
 echo "Exit code: $?"
@@ -139,7 +139,7 @@ the allowed enum `["task", "persona"]`).
 ```bash
 cp config/agents.yaml.bak config/agents.yaml
 # Edit: change first agent type to "unknown"
-$EDITOR config/agents.yaml
+# Windows: notepad config\agents.yaml  |  macOS/Linux: nano config/agents.yaml
 
 make validate
 echo "Exit code: $?"
@@ -162,7 +162,7 @@ missing colon).
 ```bash
 cp config/agents.yaml.bak config/agents.yaml
 # Edit: add a line like "  bad: indent: here" in the middle of an agent block
-$EDITOR config/agents.yaml
+# Windows: notepad config\agents.yaml  |  macOS/Linux: nano config/agents.yaml
 
 make validate
 echo "Exit code: $?"
