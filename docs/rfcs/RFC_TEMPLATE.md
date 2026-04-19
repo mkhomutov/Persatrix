@@ -2,7 +2,7 @@
 
 **Type**: feature | architecture | protocol | process  
 **Status**: 📋 Proposed  
-**Author**: [Name or team]  
+**Author**: Maksim Khomutov  
 **Date**: YYYY-MM-DD  
 **Target**: [Development phase or timeline, e.g. v0.2]  
 **Depends on**: RFC NNNN (remove if none)  

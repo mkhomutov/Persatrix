@@ -1,14 +1,6 @@
-| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic.py + server.py | v0.2 release prep (A-3) | 2026-04-18 |
-| [#98](https://github.com/mkhomutov/Persatrix/pull/98) | docs(manual-tests): author v0.1 surface tests (MT-WORKFLOW, MT-CLI, MT-CONFIG, MT-AGENT) | v0.2 release prep (C-1) | 2026-04-18 |
-| [#99](https://github.com/mkhomutov/Persatrix/pull/99) | docs(manual-tests): author v0.2 surface tests (MT-PERSONA, MT-MEMORY, MT-COST, MT-INTEGRATION) | v0.2 release prep (C-2) | 2026-04-18 |
-| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul — badges, quickstart, v0.2 features | v0.2 release prep (B-1) | 2026-04-18 |
-| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona agents and memory user guide | v0.2 release prep (B-2) | 2026-04-18 |
-| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
-| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
-| [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-18 (v0.2.0 release prep: PR 2 merged, PR 3 open)  
+> **Last updated**: 2026-04-19 (docs: add RFC 0015, restore merged PR rows, update ROADMAP hygiene)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
 > **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
 
@@ -51,6 +43,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
+| [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
 
 ---
 
@@ -362,6 +355,7 @@ v0.4.0 complete
 
 - **External bridges** — Slack, Discord, Telegram, email connectors (RFC 0011, external part)
 - **Full compliance and privacy layer** — data classification, consent tracking, PII detection, right to erasure, ethical guardrails (RFC 0013)
+- **Process automation & pattern extraction** — deterministic skill promotion pipeline from repeated LLM reasoning patterns (RFC 0015)
 - **RFC 0012 remainder** — meeting and negotiation protocol completion, advanced organizational features
 
 ### RFC Scope
@@ -371,6 +365,7 @@ v0.4.0 complete
 | 0011 | Channels + Bridges | External bridges | Not yet written |
 | 0012 | Protocols + Organizations | Remainder (meeting/negotiation protocols) | Not yet written |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | Full RFC | 📋 Proposed |
+| [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | Full RFC | 📋 Proposed |
 
 > **Why RFC 0013 lands here and not earlier**: Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel with v0.4.0 work. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's `AuditLogger` and HITL gates. RFC 0013 must be substantially complete before external bridges ship — bridge inputs are the primary vector for external user data entering the system.
 
@@ -380,6 +375,7 @@ v0.4.0 complete
 |-----------|-----------|---------------|------------|
 | External Bridges | `internal/bridges/` | — | 0011 |
 | Compliance & Privacy | `internal/security/` | `agents/compliance.py` | 0013 |
+| Automation Pipeline | `internal/automation/` | `agents/automation/` | 0015 |
 | Organizations (remainder) | `internal/protocols/` | — | 0012 |
 
 ---
@@ -489,6 +485,15 @@ v0.4.0 complete
 | [#94](https://github.com/mkhomutov/Persatrix/pull/94) | docs: add v0.2.0 release preparation plan | v0.2 release prep | 2026-04-17 |
 | [#95](https://github.com/mkhomutov/Persatrix/pull/95) | refactor(agents): split persona_runtime.py into package | v0.2 release prep (A-1) | 2026-04-17 |
 | [#96](https://github.com/mkhomutov/Persatrix/pull/96) | refactor(scheduler): split scheduler.go into stage_runner.go and budget.go | v0.2 release prep (A-2) | 2026-04-18 |
+| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic.py + server.py | v0.2 release prep (A-3) | 2026-04-18 |
+| [#98](https://github.com/mkhomutov/Persatrix/pull/98) | docs(manual-tests): author v0.1 surface tests (MT-WORKFLOW, MT-CLI, MT-CONFIG, MT-AGENT) | v0.2 release prep (C-1) | 2026-04-18 |
+| [#99](https://github.com/mkhomutov/Persatrix/pull/99) | docs(manual-tests): author v0.2 surface tests (MT-PERSONA, MT-MEMORY, MT-COST, MT-INTEGRATION) | v0.2 release prep (C-2) | 2026-04-18 |
+| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul — badges, quickstart, v0.2 features | v0.2 release prep (B-1) | 2026-04-18 |
+| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona agents and memory user guide | v0.2 release prep (B-2) | 2026-04-18 |
+| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
+| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
+| [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
+| [#115](https://github.com/mkhomutov/Persatrix/pull/115) | docs(rfcs): correct author attribution across all RFCs and add RFC 0015 | 0015 (RFC) + attribution | 2026-04-19 |
 
 ---
 
