@@ -77,4 +77,4 @@ Before approving documentation changes:
 - [ ] Status markers are current
 - [ ] Links are valid
 - [ ] Terminology is consistent
-- [ ] File size limits respected (code: ≤500 lines, docs: ≤3000 words)
+- [ ] File size limits respected (code: ≤500 lines, docs: ≤3000 words) — enforced automatically by the `file-size-check` CI job (`python scripts/checks/file_size.py --strict`)
