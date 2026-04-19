@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-18 (v0.2.0 release prep: PR 2 merged, PR 3 open)  
+> **Last updated**: 2026-04-19 (v0.2.0 release prep: docs tracks A-C complete, PR 10 in progress)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
+> **Current milestone**: v0.2.0 release preparation — Track D checklist authoring in progress
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -481,6 +481,11 @@ v0.4.0 complete
 | [#94](https://github.com/mkhomutov/Persatrix/pull/94) | docs: add v0.2.0 release preparation plan | v0.2 release prep | 2026-04-17 |
 | [#95](https://github.com/mkhomutov/Persatrix/pull/95) | refactor(agents): split persona_runtime.py into package | v0.2 release prep (A-1) | 2026-04-17 |
 | [#96](https://github.com/mkhomutov/Persatrix/pull/96) | refactor(scheduler): split scheduler.go into stage_runner.go and budget.go | v0.2 release prep (A-2) | 2026-04-18 |
+| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic memory queries and persona gRPC handlers | v0.2 release prep (A-3) | 2026-04-18 |
+| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul for v0.2.0 release prep | v0.2 release prep (B-4) | 2026-04-18 |
+| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona & memory user guide | v0.2 release prep (B-5) | 2026-04-18 |
+| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): phase-neutral architecture diagrams | v0.2 release prep (B-7) | 2026-04-19 |
+| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate and curate v0.2.0 release section | v0.2 release prep (B-6) | 2026-04-19 |
 
 ---
 
