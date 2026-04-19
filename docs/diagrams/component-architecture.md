@@ -102,7 +102,7 @@ graph TB
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
-per [CLAUDE.md](../../CLAUDE.md).
+per [CLAUDE.md](../../.github/CLAUDE.md).
 
 ## Package import rules
 
