@@ -49,7 +49,7 @@ jobs:
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
-          version: "27.2"  # pin to exact version to match committed stubs
+          version: "34.1"  # pin to exact version to match committed stubs
 
       - name: Install Go protoc plugins
         run: |
