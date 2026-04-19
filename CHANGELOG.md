@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.0] - 2026-04-18
 
+> **Note:** Persatrix was previously developed internally under a different name.
+> The project was renamed in April 2026 prior to this first public release.
+
 ### Highlights
 
 - Persona-agent runtime is now part of the core surface for v0.2, including event-driven behavior,
@@ -65,7 +68,7 @@ All notable changes to this project will be documented in this file.
 - *(persona)* Extract _LLMPersonaAgent to persona_runtime.py (RFC 0005, PR 8d) (#65)
 - *(memory)* Split episodic.py into focused modules (RFC 0005, PR 8b) (#66)
 - *(cli)* Split main.rs into modules (RFC 0005, PR 8c) (#67)
-- Rename project from Orchestr8 to Persatrix (#70)
+- Rename project to Persatrix (#70)
 - *(agents)* Split persona_runtime.py into package (#95)
 - *(scheduler)* Split scheduler.go into stage_runner.go and budget.go (#96)
 - *(agents)* Split episodic.py and server.py (v0.2 release prep A-3) (#97)
