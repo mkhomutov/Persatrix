@@ -11,9 +11,9 @@
 | `internal/` | 52 |
 | `agents/` | 42 |
 | `tests/` | 31 |
-| `(root)` | 21 |
+| `(root)` | 20 |
 | `scripts/` | 16 |
-| `.github/` | 14 |
+| `.github/` | 15 |
 | `cli/` | 9 |
 | `config/` | 9 |
 | `schemas/` | 3 |
@@ -51,6 +51,7 @@
 ├── .dockerignore
 ├── .env.example
 ├── .github/
+│   ├── CLAUDE.md
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
@@ -71,7 +72,6 @@
 │       └── scheduled-audit.yml
 ├── .gitignore
 ├── CHANGELOG.md
-├── CLAUDE.md
 ├── CONTRIBUTING.md
 ├── Dockerfile.agent
 ├── Dockerfile.orchestrator

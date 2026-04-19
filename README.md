@@ -23,7 +23,24 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 
 ---
 
-## What's in v0.2
+## Why Persatrix
+
+Existing agent frameworks treat agents as task executors in a workflow. This works
+well for structured problems — research a question, write a report, review code. It
+does not capture how real collaboration works.
+
+Real collaboration is not an assembly line. It is a society of individuals who know
+each other, trust each other differently, and act on their own initiative. A research
+team that works together for a year has shared history. A company has organizational
+structure. A classroom has social dynamics.
+
+Persatrix is the runtime for building software systems that work like this. Agents as
+persistent individuals with memory, personality, and evolving relationships — not
+tasks in a workflow.
+
+---
+
+## What's in v0.2.0
 
 | Capability | Where it lives | Spec |
 |------------|----------------|------|
@@ -33,10 +50,6 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 | **Execution limits** — `max_llm_calls`, derived per-call deadlines, shared retry budget | [internal/executor/](internal/executor/), [internal/scheduler/](internal/scheduler/) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Response cache** — in-memory cache keyed on prompt + config | [internal/cost/cache.go](internal/cost/cache.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **OTEL tracing** — spans flowing through orchestrator → agents, visible in Jaeger | [internal/](internal/) | — |
-
-> The MCP bridge ([agents/tools/mcp_bridge.py](agents/tools/mcp_bridge.py)) is
-> scaffolded but not yet functional — tracked as a follow-up to v0.2. Agents that
-> reference MCP tools emit a startup warning and run without them.
 
 > **Upgrade note from v0.1 baseline:** `max_llm_calls` default changed from `10` to
 > `5`. See [CHANGELOG.md](CHANGELOG.md).
@@ -96,7 +109,7 @@ curl -X POST http://localhost:8080/api/v1/workflows/run \
   -d '{"workflow": "feature-builder", "input": "Build a REST API for user management"}'
 ```
 
-### Run a Persona Agent (v0.2)
+### Run a Persona Agent (v0.2.0)
 
 Personas are declared in [config/agents.yaml](config/agents.yaml). A worked example
 is shipped with the repo — `ember-owl`, a semi-autonomous "VP of Engineering"
@@ -122,7 +135,7 @@ The persona's tick loop fires every `autonomy.tick_interval_seconds`, reads
 episodic and relationship memory, decides on up to `autonomy.max_actions_per_tick`
 actions, and writes results back. State survives process restarts.
 
-### Inspect Cost & Budget (v0.2)
+### Inspect Cost & Budget (v0.2.0)
 
 ```bash
 # Token usage and cost for the most recent runs
@@ -188,13 +201,13 @@ Persatrix/
 │   ├── registry/           Agent lookup
 │   ├── state/              Workflow run tracking
 │   ├── server/             REST API + SSE
-│   └── cost/               Token counting, budgets, response cache (v0.2)
+│   └── cost/               Token counting, budgets, response cache (v0.2.0)
 ├── proto/                  Protobuf definitions
 ├── agents/                 Python agent runtime (persatrix_agents package)
 │   ├── base.py             BaseAgent ABC
 │   ├── persona.py          Persona agent entrypoint
 │   ├── persona_runtime/    Memory context, action loop, state persistence
-│   ├── memory/             Episodic, relationship, working memory (v0.2)
+│   ├── memory/             Episodic, relationship, working memory (v0.2.0)
 │   ├── tools/              @tool registry, built-ins, sandbox
 │   └── server.py           gRPC servicer
 ├── cli/                    Rust CLI
@@ -211,7 +224,7 @@ Persatrix/
 | Version | What a user can do | Status |
 |---------|-------------------|--------|
 | **v0.1** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
-| **v0.2** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | 🚧 In Progress — first public release |
+| **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release — v0.2.1 in progress |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -235,6 +248,14 @@ completion.
 - [MVP specification](docs/ai-agents-orchestration-spec.md)
 - [Extension specification](docs/persatrix-extension-spec.md)
 - [Spec audit](docs/persatrix-spec-audit.md)
+
+---
+
+## Known Limitations in v0.2.0
+
+- The MCP bridge ([agents/tools/mcp_bridge.py](agents/tools/mcp_bridge.py)) is
+  scaffolded but not yet functional — tracked as a follow-up to v0.2. Agents that
+  reference MCP tools emit a startup warning and run without them.
 
 ---
 

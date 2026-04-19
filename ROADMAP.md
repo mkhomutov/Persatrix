@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-19 (RFC 0016 proposed — human participant & chat interface, targeting v0.2.1)  
-> **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
+> **Last updated**: 2026-04-19 (v0.2.0 released — first public release; RFC 0016 proposed for v0.2.1)  
+> **Current phase**: v0.2.1 (Human Participant & Chat Interface) — 🚧 In Progress  
+> **Current milestone**: v0.2.1 — RFC 0016 in design
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -15,8 +15,8 @@ A version is ready when a developer can do something meaningful they could not d
 | Version | What a user can do | Status |
 |---------|-------------------|--------|
 | **v0.1.0** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
-| **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | 🚧 In Progress — first public release |
-| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | 📋 Planned |
+| **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
+| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | 🚧 In Progress |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
