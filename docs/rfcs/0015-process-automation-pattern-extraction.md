@@ -163,6 +163,7 @@ where confidence_factor =
 
 Natural log (`ln`) is used so that scores at practical invocation counts (10–1000) are bounded in the range 2.3–6.9, making threshold configuration tractable. Log base 10 or 2 would produce values in different ranges and change the relative weight of the token-cost factor.
 
+
 High-variance patterns are *not* candidates. The guidance in the source material is explicit: tasks where agents produce low-variance output are the safest to automate. High variance is a signal that judgment is involved — automation would be wrong.
 
 **Thresholds (defaults, configurable in `config/automation.yaml`):**

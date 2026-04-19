@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-19 (docs: add RFC 0015, restore merged PR rows, update ROADMAP hygiene)  
+> **Last updated**: 2026-04-19 (RFC 0015 proposed — process automation & pattern extraction, targeting v0.5.0)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
 > **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
 
@@ -157,6 +157,7 @@ v0.1.0 complete — end-to-end execution working
 - Skill registry and lifecycle governance (RFC 0014) → v0.4.0
 - External bridges — Slack, Discord, Telegram, email (RFC 0011) → v0.5.0
 - Compliance and privacy layer (RFC 0013) → v0.5.0
+- Process automation and pattern extraction (RFC 0015) → v0.5.0
 - Distributed mesh (v0.6.0)
 - Web dashboard
 
@@ -357,6 +358,7 @@ v0.4.0 complete
 - **Full compliance and privacy layer** — data classification, consent tracking, PII detection, right to erasure, ethical guardrails (RFC 0013)
 - **Process automation & pattern extraction** — deterministic skill promotion pipeline from repeated LLM reasoning patterns (RFC 0015)
 - **RFC 0012 remainder** — meeting and negotiation protocol completion, advanced organizational features
+- **Process automation & pattern extraction** — detect repeated reasoning patterns from telemetry, promote them to tested, sandboxed deterministic skills via human review (RFC 0015)
 
 ### RFC Scope
 
@@ -369,6 +371,30 @@ v0.4.0 complete
 
 > **Why RFC 0013 lands here and not earlier**: Phases 1–2 of RFC 0013 (risk taxonomy, data classification, PII detection) have no RFC 0009 dependency and can develop in parallel with v0.4.0 work. Phases 3–5 (erasure, consent enforcement, audit extensions) depend on RFC 0009's `AuditLogger` and HITL gates. RFC 0013 must be substantially complete before external bridges ship — bridge inputs are the primary vector for external user data entering the system.
 
+> **Why RFC 0015 lands here and not earlier**: RFC 0015 is the learned-skill extraction pipeline deferred by RFC 0014 Open Question 4. It depends on the RFC 0014 Skill Registry (v0.4.0), RFC 0009 sandbox Phases 3–4 (v0.4.0), and RFC 0013 Phase 1 PII detection (v0.5.0) — PII redaction is a hard blocker because candidate records persist representative inputs. v0.5.0 is also when external bridges produce the high-repetition traffic patterns that make automation economically worthwhile.
+
+### Dependency Chain (v0.5.0)
+
+```
+v0.4.0 complete (RFC 0014 Skill Registry + RFC 0009 sandbox + RFC 0010 sub-agents)
+    ↓
+RFC 0013 Phases 1–2 (risk taxonomy, PII detection)   [parallel with v0.4.0]
+    ↓
+RFC 0013 Phases 3–5 (erasure, consent, audit)        [depends on RFC 0009 P3–4]
+    │
+RFC 0015 Phase 1 (detection + candidate store)       [depends on RFC 0013 P1, RFC 0014 P4]
+    ↓
+RFC 0015 Phase 2 (drafter + registration gate)       [depends on RFC 0014 P1]
+    ↓
+RFC 0015 Phase 3 (deterministic dispatch + sandbox)  [depends on RFC 0009 P3–4, RFC 0014 P2–3]
+    │
+RFC 0011 external bridges + RFC 0012 remainder       [parallel with RFC 0015 P2–3]
+    ↓
+RFC 0015 Phase 4 (lifecycle governance + audit)      [depends on RFC 0009 all phases]
+    ↓
+v0.5.0 complete
+```
+
 ### Planned Components (v0.5.0)
 
 | Component | Go Package | Python Module | Target RFC |
@@ -377,6 +403,8 @@ v0.4.0 complete
 | Compliance & Privacy | `internal/security/` | `agents/compliance.py` | 0013 |
 | Automation Pipeline | `internal/automation/` | `agents/automation/` | 0015 |
 | Organizations (remainder) | `internal/protocols/` | — | 0012 |
+| Pattern Detection & Candidates | `internal/automation/` | — | 0015 |
+| Deterministic Skill Dispatch | — | `agents/automation/`, `agents/skills/executor.py` | 0015 |
 
 ---
 
