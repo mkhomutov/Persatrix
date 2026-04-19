@@ -121,3 +121,16 @@ jobs:
 
       - name: Validate YAML configs
         run: python agents/validate.py config/
+
+  file-size-check:
+    name: File size check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check file sizes
+        run: python scripts/checks/file_size.py --strict

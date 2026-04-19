@@ -43,9 +43,37 @@ _EXTRA_EXCLUDES = [
     "cli/target/**",
     "agents/generated/**",
     "internal/generated/**",
+    # Tests are excluded to match the v0.2 release-prep plan baseline
+    # ("non-generated, non-test source files only"). Test files are expected
+    # to grow with coverage and are reviewed through their own code-review lens.
+    "tests/**",
+    "**/*_test.go",
+    # Local venvs (not present in CI but common during local runs).
+    ".venv/**",
+    "venv/**",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
+
+# Files that already exceeded the size limit when the CI guard was introduced
+# (v0.2 release prep, PR 13). New files must stay under the limit. These
+# entries are tracked for targeted follow-up splits/trims and should shrink
+# rather than grow; remove each once it falls back under its threshold.
+GRANDFATHERED_FILES: frozenset[str] = frozenset({
+    # Code — candidates for a follow-up split (tracked in watch-list).
+    "agents/server.py",
+    "internal/executor/executor.go",
+    # Long-form reference docs. The 3000/8000-word limit targets typical
+    # prose; these are enumerated planning and specification documents whose
+    # length is inherent to their purpose.
+    "ROADMAP.md",
+    "docs/ai-agents-orchestration-spec.md",
+    "docs/persatrix-extension-spec.md",
+    "docs/v0.2-release-prep-plan.md",
+    "docs/rfcs/0005-persona-agent-memory.md",
+    "docs/rfcs/0005-pr-plan.md",
+    "docs/rfcs/0006-pr-plan.md",
+})
 
 
 class FileSizeWarning(NamedTuple):
@@ -89,7 +117,7 @@ def _scan_files(
         line_count = len(text.splitlines())
         rel = fpath.relative_to(repo_root).as_posix()
         code_results.append((rel, line_count))
-        if line_count > max_code_lines:
+        if line_count > max_code_lines and rel not in GRANDFATHERED_FILES:
             warnings.append(FileSizeWarning(
                 file=rel, kind="code", measured=line_count,
                 limit=max_code_lines, unit="lines",
@@ -104,7 +132,7 @@ def _scan_files(
         rel = fpath.relative_to(repo_root).as_posix()
         doc_results.append((rel, word_count))
         effective_limit = max_rfc_words if rel.startswith(_RFC_PREFIX) else max_doc_words
-        if word_count > effective_limit:
+        if word_count > effective_limit and rel not in GRANDFATHERED_FILES:
             warnings.append(FileSizeWarning(
                 file=rel, kind="doc", measured=word_count,
                 limit=effective_limit, unit="words",
