@@ -245,3 +245,6 @@ Production use is not granted under the default terms in this repository.
 Each version transitions to Apache License, Version 2.0 four years after its
 first public release.
 See [LICENSE](LICENSE) for the full terms.
+
+Third-party dependencies and their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

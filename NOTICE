@@ -6,3 +6,7 @@ See the LICENSE file for the full license text.
 
 Each version of the Licensed Work transitions to the Apache License,
 Version 2.0 four years after its first publicly available distribution.
+
+This product also bundles third-party components. Their licenses, copyright
+notices, and source locations are enumerated in THIRD_PARTY_NOTICES.md at
+the root of this repository.
