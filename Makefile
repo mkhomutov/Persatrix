@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -117,6 +117,17 @@ check-licenses-rust: ## Check Rust crate licenses via cargo-deny
 	@command -v cargo-deny >/dev/null 2>&1 || $(CARGO) install cargo-deny --locked --version 0.19.0
 	cd cli && $(CARGO) deny check licenses
 	@echo "✓ Rust licenses OK"
+
+# ─── Third-party notices ────────────────────────────────
+notices: ## Regenerate THIRD_PARTY_NOTICES.md from Go, Python, and Rust dependency graphs
+	@echo "→ Regenerating THIRD_PARTY_NOTICES.md..."
+	@command -v go-licenses >/dev/null 2>&1 || go install github.com/google/go-licenses@latest
+	@command -v cargo-license >/dev/null 2>&1 || $(CARGO) install cargo-license
+	@$(PYTHON) scripts/generate_third_party_notices.py
+	@echo "✓ THIRD_PARTY_NOTICES.md updated"
+
+notices-check: ## Fail if THIRD_PARTY_NOTICES.md is stale relative to current deps
+	@$(PYTHON) scripts/generate_third_party_notices.py --check
 
 # ─── Validate ───────────────────────────────────────────
 validate: ## Validate all YAML configs against JSON schemas
