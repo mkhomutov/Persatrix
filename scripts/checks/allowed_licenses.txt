@@ -1,0 +1,47 @@
+# Canonical allow-list of third-party licenses for Persatrix dependencies.
+#
+# This file is the single source of truth for Go and Python license checks.
+# The Rust check in deny.toml mirrors this list — keep the two in sync.
+#
+# Policy: allow-list approach. Anything not listed here fails CI. GPL, AGPL,
+# SSPL, LGPL, and other strong/network copyleft licenses are implicitly denied
+# because they impose obligations incompatible with distributing Persatrix
+# under BUSL-1.1.
+#
+# Format: one SPDX identifier per line. Comments (#) and blank lines ignored.
+# SPDX list: https://spdx.org/licenses/
+
+MIT
+Apache-2.0
+Apache-2.0 WITH LLVM-exception
+BSD-2-Clause
+BSD-3-Clause
+ISC
+MPL-2.0
+BSL-1.0
+0BSD
+Zlib
+CC0-1.0
+Unicode-DFS-2016
+Unicode-3.0
+Unlicense
+# Python historical license (Python 1.6.1 era). OSI-approved, permissive,
+# compatible with BUSL-1.1 distribution. Transitively pulled in by `regex`
+# which is dual-licensed Apache-2.0 AND CNRI-Python.
+CNRI-Python
+
+# Python package metadata sometimes reports these non-SPDX forms. They map
+# to SPDX identifiers above but need to be accepted literally because
+# pip-licenses surfaces whatever the package declares.
+Python Software Foundation License
+PSF-2.0
+BSD License
+BSD-3-Clause License
+3-Clause BSD License
+MIT License
+Apache Software License
+Apache License 2.0
+Mozilla Public License 2.0 (MPL 2.0)
+ISC License (ISCL)
+The Unlicense (Unlicense)
+Public Domain
