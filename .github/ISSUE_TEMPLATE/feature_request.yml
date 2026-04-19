@@ -1,0 +1,42 @@
+name: Feature Request
+description: Suggest an enhancement or a new capability
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please skim the [ROADMAP](../../ROADMAP.md) and existing
+        [RFCs](../../docs/rfcs/). Substantial changes typically go through the
+        [RFC process](../../docs/rfcs/README.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do? What is the user-visible pain point?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: Outline what you'd like to see. Rough sketches are fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you look at, try, or rule out?
+  - type: dropdown
+    id: component
+    attributes:
+      label: Primary component
+      options:
+        - Orchestrator (Go)
+        - Agents (Python)
+        - CLI (Rust)
+        - Protobuf / gRPC contract
+        - Docs / examples
+        - New surface area
+    validations:
+      required: true

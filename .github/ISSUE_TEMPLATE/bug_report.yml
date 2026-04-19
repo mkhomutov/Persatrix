@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a defect in Persatrix
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in as much as you can —
+        the more concrete the reproduction, the faster it gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: Persatrix version
+      description: "Output of `orch --version`, the released tag, or the commit you built from."
+      placeholder: "v0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Orchestrator (Go)
+        - Agents (Python)
+        - CLI (Rust)
+        - Protobuf / gRPC contract
+        - Docs / examples
+        - Build / tooling
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug. Paste logs, stack traces, or workflow output in fenced code blocks.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `make run`
+        2. POST /api/v1/workflows/run with {...}
+        3. Observe error in orchestrator log
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go/Python/Rust versions, running locally vs Docker Compose.
+      placeholder: "macOS 14 / Go 1.24 / Python 3.11 / Rust 1.80 / Docker Compose"
+    validations:
+      required: true
