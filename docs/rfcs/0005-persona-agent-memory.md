@@ -2,7 +2,7 @@
 
 **Type**: feature  
 **Status**: ✅ Implemented  
-**Author**: Engineering Team  
+**Author**: Maksim Khomutov  
 **Date**: 2026-04-11  
 **Target**: v0.2  
 **Depends on**: RFC 0001, RFC 0003, RFC 0004

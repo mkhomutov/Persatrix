@@ -2,7 +2,7 @@
 
 **Type**: architecture  
 **Status**: 📋 Proposed  
-**Author**: Engineering Team  
+**Author**: Maksim Khomutov  
 **Date**: 2026-04-16  
 **Target**: v0.4.0  
 **Depends on**: RFC 0008, RFC 0009

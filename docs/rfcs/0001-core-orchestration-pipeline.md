@@ -2,7 +2,7 @@
 
 **Type**: architecture  
 **Status**: ✅ Implemented  
-**Author**: Persatrix team  
+**Author**: Maksim Khomutov  
 **Date**: 2026-04-08  
 **Target**: v0.1 (MVP)  
 **Depends on**: None  
