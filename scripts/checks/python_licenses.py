@@ -70,7 +70,6 @@ def run_pip_licenses() -> list[dict[str, str]]:
                 "piplicenses",
                 "--format=json",
                 "--from=mixed",
-                "--with-system",
             ],
             check=True,
             capture_output=True,
