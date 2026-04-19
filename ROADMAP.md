@@ -1,3 +1,11 @@
+| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic.py + server.py | v0.2 release prep (A-3) | 2026-04-18 |
+| [#98](https://github.com/mkhomutov/Persatrix/pull/98) | docs(manual-tests): author v0.1 surface tests (MT-WORKFLOW, MT-CLI, MT-CONFIG, MT-AGENT) | v0.2 release prep (C-1) | 2026-04-18 |
+| [#99](https://github.com/mkhomutov/Persatrix/pull/99) | docs(manual-tests): author v0.2 surface tests (MT-PERSONA, MT-MEMORY, MT-COST, MT-INTEGRATION) | v0.2 release prep (C-2) | 2026-04-18 |
+| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul — badges, quickstart, v0.2 features | v0.2 release prep (B-1) | 2026-04-18 |
+| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona agents and memory user guide | v0.2 release prep (B-2) | 2026-04-18 |
+| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
+| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
+| [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
 # Persatrix Roadmap
 
 > **Last updated**: 2026-04-18 (v0.2.0 release prep: PR 2 merged, PR 3 open)  
