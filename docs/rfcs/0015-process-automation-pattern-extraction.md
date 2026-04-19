@@ -2,7 +2,7 @@
 
 **Type**: feature
 **Status**: 📋 Proposed
-**Author**: Engineering Team
+**Author**: Maksim Khomutov
 **Date**: 2026-04-19
 **Target**: v0.5.0
 **Depends on**: RFC 0006, RFC 0008, RFC 0009, RFC 0014
