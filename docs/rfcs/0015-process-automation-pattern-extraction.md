@@ -153,13 +153,16 @@ Detection runs as a background task in the orchestrator. It is not in the hot pa
 **Candidate scoring:**
 
 ```
-score = log(invocation_count) * (1 + avg_tokens / 1000) * confidence_factor
+score = ln(invocation_count) * (1 + avg_tokens / 1000) * confidence_factor
 
 where confidence_factor =
     1.0  if output_variance <= low_variance_threshold
     0.5  if output_variance in (low, high)
     0.0  if output_variance >= high_variance_threshold   # rejected
 ```
+
+Natural log (`ln`) is used so that scores at practical invocation counts (10–1000) are bounded in the range 2.3–6.9, making threshold configuration tractable. Log base 10 or 2 would produce values in different ranges and change the relative weight of the token-cost factor.
+
 
 High-variance patterns are *not* candidates. The guidance in the source material is explicit: tasks where agents produce low-variance output are the safest to automate. High variance is a signal that judgment is involved — automation would be wrong.
 
@@ -549,6 +552,10 @@ Dependencies: Phase 3, RFC 0009 all phases, RFC 0014 Phase 3.
 5. **Drafter agent trust level**: the drafter agent produces YAML that humans review. Should it run in the same sandbox profile as a `persona` agent or a tightened profile given it only reads telemetry? **Proposed default**: tightened profile with no network, no filesystem write outside `drafts/`, no LLM tool-calling (only text generation). The drafter is effectively a templating agent, not an interactive one.
 
 6. **High-stakes auto-detection accuracy**: the drafter auto-sets `high_stakes: true` when observed tool calls match RFC 0009's high-risk classification. What false-negative rate is acceptable before we require human setting? **Proposed default**: ship with auto-detection in Phase 2; review telemetry after 30 days of triage. If any high-risk automation reaches production without `high_stakes`, fail-closed by requiring human sign-off for the field.
+
+7. **Candidate store durability and backend**: `AutomationCandidate` records must survive orchestrator restarts to avoid re-discovering patterns from scratch. Should the store use the existing workflow state store (RFC 0005 — already available), a dedicated time-series backend, or the metrics store from RFC 0006? **Proposed default**: wrap the existing state store interface in Phase 1 (`InMemoryAutomationCandidateStore` for tests, a file-backed or DB-backed implementation for production); promote to a dedicated store only if Phase 3's multi-node scenarios require it. The `AutomationCandidateStore` interface defined in §C already isolates this decision — the backend can be swapped without touching detection or promotion logic.
+
+8. **Static mutation inspection method**: §E requires registration-time rejection of `reversible: false` handlers that call mutating tools, but the inspection mechanism is unspecified. Options: (a) AST-based import scanning (checks `from persatrix_agents.tools import <mutating-tool>`), (b) a whitelist of known-mutating callable names resolved via `ast.walk`, or (c) a runtime dry-run in a sandboxed no-op mode that intercepts tool calls. **Proposed default**: AST-based import scanning in Phase 3 (simplest, no runtime dependency); the whitelist of mutating tools is maintained alongside the tool registry and updated when new tools are added. Option (c) is deferred to a future RFC if false-negative rates from static analysis prove unacceptable.
 
 ## Decision / Next Steps
 

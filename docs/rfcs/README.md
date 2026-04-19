@@ -156,7 +156,7 @@ Examples:
 |-------|:--------:|--------|---------|
 | **Type** | ✅ | One of: `feature`, `architecture`, `protocol`, `process` | `feature` |
 | **Status** | ✅ | `[emoji] [Label]` from the lifecycle table | `📋 Proposed` |
-| **Author** | ✅ | Name, team name, or GitHub handle | `Engineering Team` |
+| **Author** | ✅ | Name or GitHub handle | `Maksim Khomutov` |
 | **Date** | ✅ | `YYYY-MM-DD` (creation date) | `2026-04-08` |
 | **Target** | ✅ | Development phase or timeline | `v0.2` |
 | **Depends on** | ⬚ | Comma-separated `RFC NNNN` references | `RFC 0001` |

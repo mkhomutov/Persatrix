@@ -1,11 +1,3 @@
-| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic.py + server.py | v0.2 release prep (A-3) | 2026-04-18 |
-| [#98](https://github.com/mkhomutov/Persatrix/pull/98) | docs(manual-tests): author v0.1 surface tests (MT-WORKFLOW, MT-CLI, MT-CONFIG, MT-AGENT) | v0.2 release prep (C-1) | 2026-04-18 |
-| [#99](https://github.com/mkhomutov/Persatrix/pull/99) | docs(manual-tests): author v0.2 surface tests (MT-PERSONA, MT-MEMORY, MT-COST, MT-INTEGRATION) | v0.2 release prep (C-2) | 2026-04-18 |
-| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul — badges, quickstart, v0.2 features | v0.2 release prep (B-1) | 2026-04-18 |
-| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona agents and memory user guide | v0.2 release prep (B-2) | 2026-04-18 |
-| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
-| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
-| [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
 # Persatrix Roadmap
 
 > **Last updated**: 2026-04-19 (RFC 0015 proposed — process automation & pattern extraction, targeting v0.5.0)  
@@ -364,6 +356,7 @@ v0.4.0 complete
 
 - **External bridges** — Slack, Discord, Telegram, email connectors (RFC 0011, external part)
 - **Full compliance and privacy layer** — data classification, consent tracking, PII detection, right to erasure, ethical guardrails (RFC 0013)
+- **Process automation & pattern extraction** — deterministic skill promotion pipeline from repeated LLM reasoning patterns (RFC 0015)
 - **RFC 0012 remainder** — meeting and negotiation protocol completion, advanced organizational features
 - **Process automation & pattern extraction** — detect repeated reasoning patterns from telemetry, promote them to tested, sandboxed deterministic skills via human review (RFC 0015)
 
@@ -408,6 +401,7 @@ v0.5.0 complete
 |-----------|-----------|---------------|------------|
 | External Bridges | `internal/bridges/` | — | 0011 |
 | Compliance & Privacy | `internal/security/` | `agents/compliance.py` | 0013 |
+| Automation Pipeline | `internal/automation/` | `agents/automation/` | 0015 |
 | Organizations (remainder) | `internal/protocols/` | — | 0012 |
 | Pattern Detection & Candidates | `internal/automation/` | — | 0015 |
 | Deterministic Skill Dispatch | — | `agents/automation/`, `agents/skills/executor.py` | 0015 |
@@ -519,6 +513,15 @@ v0.5.0 complete
 | [#94](https://github.com/mkhomutov/Persatrix/pull/94) | docs: add v0.2.0 release preparation plan | v0.2 release prep | 2026-04-17 |
 | [#95](https://github.com/mkhomutov/Persatrix/pull/95) | refactor(agents): split persona_runtime.py into package | v0.2 release prep (A-1) | 2026-04-17 |
 | [#96](https://github.com/mkhomutov/Persatrix/pull/96) | refactor(scheduler): split scheduler.go into stage_runner.go and budget.go | v0.2 release prep (A-2) | 2026-04-18 |
+| [#97](https://github.com/mkhomutov/Persatrix/pull/97) | refactor(agents): split episodic.py + server.py | v0.2 release prep (A-3) | 2026-04-18 |
+| [#98](https://github.com/mkhomutov/Persatrix/pull/98) | docs(manual-tests): author v0.1 surface tests (MT-WORKFLOW, MT-CLI, MT-CONFIG, MT-AGENT) | v0.2 release prep (C-1) | 2026-04-18 |
+| [#99](https://github.com/mkhomutov/Persatrix/pull/99) | docs(manual-tests): author v0.2 surface tests (MT-PERSONA, MT-MEMORY, MT-COST, MT-INTEGRATION) | v0.2 release prep (C-2) | 2026-04-18 |
+| [#102](https://github.com/mkhomutov/Persatrix/pull/102) | docs: README overhaul — badges, quickstart, v0.2 features | v0.2 release prep (B-1) | 2026-04-18 |
+| [#103](https://github.com/mkhomutov/Persatrix/pull/103) | docs(guides): persona agents and memory user guide | v0.2 release prep (B-2) | 2026-04-18 |
+| [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
+| [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
+| [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
+| [#115](https://github.com/mkhomutov/Persatrix/pull/115) | docs(rfcs): correct author attribution across all RFCs and add RFC 0015 | 0015 (RFC) + attribution | 2026-04-19 |
 
 ---
 
