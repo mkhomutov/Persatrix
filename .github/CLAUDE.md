@@ -109,7 +109,7 @@ Many `internal/` packages are **intentional TODO stubs** for their target phase.
 
 ## Status Hygiene
 
-When completing work, update ROADMAP.md (merged PR table, component status, RFC status). Follow [Status Hygiene rules](docs/development-workflow.md#status-hygiene) — verify consistency across RFC files, PR plans, and ROADMAP before and after every task.
+When completing work, update ROADMAP.md (merged PR table, component status, RFC status). Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene) — verify consistency across RFC files, PR plans, and ROADMAP before and after every task.
 
 ## Documentation Pointers
 
