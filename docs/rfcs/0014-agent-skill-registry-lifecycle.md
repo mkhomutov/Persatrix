@@ -392,7 +392,7 @@ Three acquisition classes with explicit promotion gates:
 - Patterns extracted from successful past runs and codified as reusable skills.
 - Require explicit human review (`reviewed_by` field) before registry promotion. A learned skill without `reviewed_by` is rejected by the registry at load time.
 - Lifecycle: Candidate → Reviewed → Registered. Any change to the source data resets `reviewed_by` to `None`, blocking redeployment until re-reviewed.
-- Phase 1 reserves the `source: "learned"` path in the data model without implementing the extraction pipeline. The mechanism is ready for a future implementation phase.
+- Phase 1 reserves the `source: "learned"` path in the data model without implementing the extraction pipeline. The mechanism is specified in [RFC 0015](0015-process-automation-pattern-extraction.md) and targets v0.5.0.
 
 **3. Delegated skills** (session trust):
 - Temporarily granted by the orchestrator for a specific task, scoped to the task's correlation ID.
@@ -693,7 +693,7 @@ Dependencies: Phase 2, RFC 0006 (telemetry pipeline), RFC 0008 Phase 2 (MemoryFa
 
 3. **Rollback version audit requirement**: Should all version rollbacks require an explicit security review approval before deployment, not just an audit event? **Proposed default**: audit-and-alert (Phase 3 approach) is sufficient for v0.2's single-operator model. A mandatory approval gate is appropriate for v0.3+ multi-operator deployments and belongs in a future compliance RFC.
 
-4. **Learned skill extraction pipeline**: Phase 1 reserves `source: "learned"` in the data model but defers the extraction mechanism. When should this be designed — as a follow-on RFC, or expanded into a later phase of this RFC? **Proposed default**: follow-on RFC, scoped to v0.3 when multi-run pattern mining across distributed nodes becomes feasible. Keeping it separate avoids expanding RFC 0014's scope before Phase 1 is validated.
+4. **Learned skill extraction pipeline**: ✅ **Resolved** — [RFC 0015 (Process Automation & Pattern Extraction)](0015-process-automation-pattern-extraction.md) is the follow-on RFC this question anticipated. It defines the full detection, triage, promotion, and governance pipeline and targets v0.5.0.
 
 5. **Meta-skill defaults for `BaseAgent` vs `PersonaAgent`**: Section K proposes `BaseAgent` defaults to `ESCALATE` for `on_skill_uncertainty`, with `PersonaAgent` overriding to `ASK_CLARIFICATION`. Is `ESCALATE` always the right default for task agents, or should some task agents (e.g., `planner`) also ask for clarification? **Proposed default**: `ESCALATE` for `BaseAgent` (safe for automated pipelines where no user is present). Agents that benefit from clarification (including task-agent roles that run in interactive workflows) override the hook explicitly. The override is lightweight — one method, one return value.
 
