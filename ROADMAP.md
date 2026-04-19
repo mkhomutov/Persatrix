@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-19 (v0.2.0 release prep: docs tracks A-C complete, PR 10 in progress)  
+> **Last updated**: 2026-04-19 (v0.2.0 release prep: docs tracks A-C complete, PR 10 open)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
-> **Current milestone**: v0.2.0 release preparation — Track D checklist authoring in progress
+> **Current milestone**: v0.2.0 release preparation — Track D checklist PR open
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
