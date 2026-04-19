@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-19 (RFC 0015 proposed — process automation & pattern extraction, targeting v0.5.0)  
+> **Last updated**: 2026-04-19 (RFC 0016 proposed — human participant & chat interface, targeting v0.2.1)  
 > **Current phase**: v0.2.0 (Persona Core) — 🚧 In Progress  
 > **Current milestone**: v0.2.0 release preparation — Track A file-size hygiene in progress
 
@@ -16,6 +16,7 @@ A version is ready when a developer can do something meaningful they could not d
 |---------|-------------------|--------|
 | **v0.1.0** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | 🚧 In Progress — first public release |
+| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | 📋 Planned |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -44,6 +45,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | 📋 Proposed |
 
 ---
 
@@ -235,6 +237,61 @@ v0.2.0 complete
 6. Working memory manages the context window — high-priority items are retained, excess is summarized
 7. CLI commands: `persatrix agent test-persona`, `persatrix agent info`, `persatrix agent list`
 8. Relationships evolve over time: trust decays when agents don't interact, grows with positive interactions
+
+---
+
+## v0.2.1 — Talk to Your Agents
+
+**What a user can do**: Open a terminal, type `persatrix chat <agent_id>`, and have a conversation with a persona agent. The agent remembers you and builds a relationship with you over time.
+
+### What ships in v0.2.1
+
+- **`Participant` abstraction** — `Participant` Protocol generalising agents, users, and future system actors (RFC 0016)
+- **`UserParticipant`** — persistent user identity stored in the agent SQLite database (RFC 0016)
+- **Memory generalization** — `RelationshipMemory` extended to track trust and interactions with human users; `EpisodicMemory` records user-agent exchanges (RFC 0016)
+- **`persatrix chat` CLI command** — interactive REPL for conversations with persona agents (RFC 0016)
+- **Chat REST endpoint** — `POST /api/v1/agents/{id}/chat` for synchronous message-response round-trips (RFC 0016)
+- **`SendChatMessage` gRPC RPC** — new `AgentService` method for orchestrator→agent chat routing (RFC 0016)
+
+### What does not ship in v0.2.1
+
+- Multi-user support — single `UserParticipant` per session; multi-user support is RFC 0011 (v0.3.0)
+- Authentication — sessions are local and caller-supplied; auth is RFC 0009 (v0.3.0)
+- Agent-initiated messages to users — notification infrastructure deferred
+- Streaming chat responses — synchronous request-response only for v0.2.1
+- Channel routing for user messages — channels are RFC 0011 (v0.3.0)
+
+### RFC Scope
+
+| RFC | Title | Status | PRs | Merged |
+|-----|-------|--------|-----|--------|
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 📋 Proposed | TBD | 0/TBD |
+
+### Dependency Chain (v0.2.1)
+
+```
+v0.2.0 complete (RFC 0005 ✅, RFC 0006 ✅)
+    ↓
+RFC 0016 Phase 1 (Participant abstraction + memory generalization)
+    ↓
+RFC 0016 Phase 2 (proto + gRPC + REST wiring)
+    ↓
+RFC 0016 Phase 3 (persatrix chat CLI command)
+    ↓
+v0.2.1 complete
+```
+
+> **Why this is a minor release and not part of v0.3.0**: The human participation primitive is architecturally independent of channels (RFC 0011). It reuses the RFC 0005 memory and dispatch system without modification. Shipping it as v0.2.1 gives v0.2.0 users something immediately useful and generates real-world feedback on persona behavior before the larger v0.3.0 channel work begins.
+
+### Planned Components (v0.2.1)
+
+| Component | Go Package | Python Module | Target RFC |
+|-----------|-----------|---------------|------------|
+| `Participant` Protocol + `UserParticipant` | — | `agents/participant.py` | 0016 |
+| Memory generalization | — | `agents/memory/relationship.py`, `agents/memory/migrations.py` | 0016 |
+| Chat REST endpoint | `internal/server/` | — | 0016 |
+| Chat gRPC dispatch | `internal/executor/` | `agents/server.py` | 0016 |
+| `persatrix chat` CLI | — | — | 0016 (`cli/src/commands/chat.rs`) |
 
 ---
 
