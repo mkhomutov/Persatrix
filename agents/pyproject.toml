@@ -33,6 +33,7 @@ dev = [
     "types-PyYAML",
     "types-protobuf",
     "tiktoken>=0.7.0,<1",
+    "pip-licenses>=5.0.0,<6",
 ]
 accurate-tokens = [
     "tiktoken>=0.7.0,<1",

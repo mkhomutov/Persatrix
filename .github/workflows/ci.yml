@@ -134,3 +134,50 @@ jobs:
 
       - name: Check file sizes
         run: python scripts/checks/file_size.py --strict
+
+  licenses:
+    name: Third-party license check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Cache cargo-deny
+        id: cache-cargo-deny
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: ${{ runner.os }}-cargo-deny-0.19.0
+
+      - name: Install cargo-deny
+        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        run: cargo install cargo-deny --locked --version 0.19.0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          cd agents && pip install -e ".[dev]"
+
+      - name: Check Go licenses
+        run: make check-licenses-go
+
+      - name: Check Python licenses
+        run: make check-licenses-python
+
+      - name: Check Rust licenses
+        run: make check-licenses-rust

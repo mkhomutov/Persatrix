@@ -44,7 +44,12 @@ allow = [
     "CC0-1.0",
     "Unlicense",
 ]
-exceptions = []
+exceptions = [
+    # Persatrix itself ships under BUSL-1.1. The allow-list above governs
+    # third-party dependencies; our own crate needs an explicit exception so
+    # cargo-deny doesn't reject the workspace root.
+    { allow = ["BUSL-1.1"], crate = "orch" },
+]
 confidence-threshold = 0.8
 
 [bans]

@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -93,6 +93,30 @@ lint-python:
 
 lint-rust:
 	cd cli && $(CARGO) clippy -- -D warnings
+
+# ─── License checks ─────────────────────────────────────
+# Canonical allow-list: scripts/checks/allowed_licenses.txt
+# Rust mirror: deny.toml [licenses].allow — keep in sync.
+check-licenses: check-licenses-go check-licenses-python check-licenses-rust ## Run third-party license checks for Go, Python, and Rust
+
+check-licenses-go: ## Check Go module licenses against the allow-list
+	@echo "→ Checking Go dependency licenses..."
+	@command -v go-licenses >/dev/null 2>&1 || go install github.com/google/go-licenses@latest
+	@ALLOWED=$$(grep -v '^\s*#' scripts/checks/allowed_licenses.txt | grep -v '^\s*$$' | paste -sd, -); \
+		go-licenses check ./cmd/... ./internal/... \
+			--allowed_licenses="$$ALLOWED" \
+			--ignore=$(GO_MODULE)
+	@echo "✓ Go licenses OK"
+
+check-licenses-python: ## Check Python dependency licenses against the allow-list
+	@echo "→ Checking Python dependency licenses..."
+	@$(PYTHON) scripts/checks/python_licenses.py --exception Persatrix-agents
+
+check-licenses-rust: ## Check Rust crate licenses via cargo-deny
+	@echo "→ Checking Rust dependency licenses..."
+	@command -v cargo-deny >/dev/null 2>&1 || $(CARGO) install cargo-deny --locked --version 0.19.0
+	cd cli && $(CARGO) deny check licenses
+	@echo "✓ Rust licenses OK"
 
 # ─── Validate ───────────────────────────────────────────
 validate: ## Validate all YAML configs against JSON schemas
