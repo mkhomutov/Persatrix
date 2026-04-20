@@ -538,6 +538,36 @@ For multi-user scenarios (v0.3.0), the real defense is RFC 0009's auth boundary 
 
 Additionally, if `on_event()` raises an exception (LLM timeout, tool failure), the `SendChatMessage` servicer catches it and returns a gRPC error with `INTERNAL` status code. The REST layer maps this to HTTP 503. This error path is an explicit Phase 2 deliverable.
 
+**7. How does synchronous chat interact with the per-agent tick loop lock?**
+`_LLMPersonaAgent.on_event()` acquires `self._lock` for the entire LLM call duration (up to 300s default via `_DEFAULT_EVENT_TIMEOUT`). If a `SendChatMessage` request arrives while `on_tick()` holds the lock, the user blocks silently until the tick finishes. The `timeout_seconds` field in `ChatRequest` defaults to 60s, but the agent-side `event_timeout` default is 300s — which one governs the user's wait? Should the CLI show a "waiting for agent..." indicator? Should chat requests preempt or deprioritize ticks? *Unresolved.*
+
+**8. Reply extraction path: bypass `EventDispatcher` or intercept before `ActionExecutor`?**
+The RFC says the `SendChatMessage` servicer calls `EventDispatcher.dispatch()`, which calls `agent.on_event()`, which returns `list[AgentAction]`. But `EventDispatcher.dispatch()` currently feeds actions into `ActionExecutor`, which executes them — including `SEND_MESSAGE` cascading to other agents. If the servicer uses `dispatch()`, the reply may be executed (sent to another agent) before the servicer can extract it. If the servicer calls `on_event()` directly, it bypasses dispatch infrastructure (logging, cascade depth tracking). The RFC must specify whether `SendChatMessage` (a) calls `on_event()` directly, (b) adds a "synchronous" mode to `EventDispatcher.dispatch()` that returns actions without executing them, or (c) takes another approach. *Unresolved.*
+
+**9. Multi-action responses: which `SEND_MESSAGE` is the reply?**
+`on_event()` returns a list of actions. A persona agent might produce `[SEND_MESSAGE(target="other-agent", ...), SEND_MESSAGE(target=user_id, ...), UPDATE_STATE(...)]`. OQ 6's priority order takes the *first* `SEND_MESSAGE`, which could be addressed to another agent, not the user. Should the servicer filter `SEND_MESSAGE` actions by `target_id == user_id`? If no action targets the user, should it fall through to `COMPLETE_TASK`? The RFC is silent on multi-action and multi-target responses. *Unresolved.*
+
+**10. Per-agent vs. shared SQLite database — where does the `users` table live?**
+`RelationshipMemory` and `EpisodicMemory` are constructed per-agent with a `db_path` (default `data/memory.db`). If all agents share one DB file, a single `users` table works. If agents use separate DB files (e.g., `data/{agent_id}/memory.db`), the `users` table is duplicated per agent, and a user chatting with two agents creates two independent `UserParticipant` records with potentially divergent `last_seen_at` timestamps. The current code defaults to `data/memory.db` for all agents — is that guaranteed by contract, or is it a coincidence that could change? The RFC should state the assumption explicitly. *Unresolved.*
+
+**11. Why not reuse `ChannelServiceServicer.SendMessage` for chat routing?**
+`ChannelServiceServicer.SendMessage` in `agents/server.py` already builds an `AgentEvent(event_type=MESSAGE_RECEIVED, ...)` and dispatches it to target agents. The only difference is it's fire-and-forget (returns `delivered=True` immediately). The RFC introduces an entirely new synchronous RPC instead of adding a synchronous response mode to the existing path. Should the RFC justify this duplication, or should `SendChatMessage` delegate to the existing `SendMessage` path with a synchronous wrapper that awaits the reply? *Unresolved.*
+
+**12. Do SQLite indexes survive `ALTER TABLE RENAME COLUMN`?**
+Migration 3 creates `idx_interactions_lookup ON interactions(agent_id, other_agent_id, created_at DESC)`. After Migration 4's `ALTER TABLE RENAME COLUMN agent_id TO participant_id`, SQLite (≥ 3.25.0) does update index definitions to reference the new column name. The RFC should explicitly confirm this behavior and note that `get_relationship_summary()` queries will continue to hit the covering index post-rename without requiring index recreation. *Unresolved — confirm and document.*
+
+**13. Should `ChatResponse` include `agent_display_name`?**
+`ChatResponse` returns `agent_id` but not `display_name`. The CLI prints `<agent_id>: <reply>`. If the agent's display name differs from its ID (e.g., ID `nexus-7` but display name `Nexus Seven`), the CLI cannot show it. Is `agent_id` sufficient for v0.2.1, or should `ChatResponse` include `display_name` to future-proof the proto contract? Adding a field later is backward-compatible in proto3, but changing the CLI's display format is a UX break. *Unresolved.*
+
+**14. How does the orchestrator obtain the persona agent's gRPC address?**
+The RFC says "The orchestrator looks up the agent gRPC address via `Registry`." The current `Registry` stores agent metadata from `POST /api/v1/agents/register`, but the persona agent boot sequence (`server_persona.py`) starts a gRPC server locally without necessarily registering its address with the orchestrator. How does a persona agent's gRPC endpoint become discoverable by the orchestrator's `Registry`? Is this already solved by the existing agent registration flow, or does the RFC need to specify registration changes? *Unresolved.*
+
+**15. What is `session_id` used for on the agent side?**
+The RFC says session ID is generated agent-side and "session continuity lives in the agent's episodic and relationship memory." But episodic memory records episodes keyed by `agent_id` + `sender_id`, not by `session_id`. The `session_id` is returned to the client and passed back on subsequent requests, but nothing in the agent stores it, queries by it, or uses it to scope memory recall. Is `session_id` purely a client-side opaque token for future use (e.g., conversation threading in v0.3.0), or is it supposed to scope memory queries? If the former, that should be stated explicitly so implementors don't build dead infrastructure. *Unresolved.*
+
+**16. Backward compatibility: how do existing agents satisfy the `Participant` Protocol?**
+The RFC says `PersonaAgent` and `TaskAgent` satisfy `Participant` "once they expose these three attributes" (`participant_id`, `participant_type`, `display_name`). This means modifying `__init__` signatures for both classes. What are the default values? Is `participant_id = agent_id` always correct? Does `create_persona_agent()` need changes to pass these fields? Does `TaskAgent` (which is not a persona agent and has no persona config) get `display_name` from the YAML config, from `agent_id`, or from a new parameter? The RFC should specify the exact `__init__` signature changes and confirm no existing caller breaks. *Unresolved.*
+
 ---
 
 ## Decision / Next Steps
