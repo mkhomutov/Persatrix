@@ -140,7 +140,14 @@ class UserStore:
         ) as cursor:
             row = await cursor.fetchone()
 
-        assert row is not None  # INSERT OR IGNORE guarantees the row exists
+        # INSERT OR IGNORE guarantees the row exists; use an explicit
+        # check instead of ``assert`` so the invariant is enforced even
+        # when Python runs with -O (assert statements are stripped).
+        # (PR 6 review finding: assert → RuntimeError.)
+        if row is None:
+            raise RuntimeError(
+                f"INSERT OR IGNORE + SELECT returned no row for {participant_id!r}"
+            )
         return UserParticipant(
             participant_id=row[0],
             display_name=row[1],

@@ -99,6 +99,10 @@ pub(crate) async fn cmd_chat(
         // Clear width computed dynamically from spinner text length (spinner
         // prefix "⠋ " is 2 display chars) to handle long agent IDs without
         // a hardcoded magic number. (PR 6 review fix: PR 5 finding #3.)
+        // NOTE: `str::len()` returns byte count, which equals display width
+        // because agent IDs are pure ASCII per the project convention
+        // (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`). If the ID pattern is ever
+        // relaxed to allow non-ASCII, switch to a unicode-width crate.
         let clear_width = spinner_text.len() + 2;
         let spinner_handle = {
             let active = Arc::clone(&spinner_active);

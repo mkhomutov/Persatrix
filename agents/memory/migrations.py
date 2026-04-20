@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 
 import aiosqlite
 
@@ -375,7 +376,7 @@ async def _apply_migration_4(db: aiosqlite.Connection) -> None:
 # fragile (typo in handler name silently fell through) and not IDE-friendly
 # (Find Usages / refactoring didn't discover the dynamic lookup).
 # (PR 6 review fix: PR 2 finding #1.)
-_MIGRATION_HANDLERS: dict[int, object] = {
+_MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     4: _apply_migration_4,
 }
 
