@@ -534,7 +534,7 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 
 #### Key implementation details
 
-This is a documentation-only PR. No code changes — only status markers and tracking tables are updated.
+This PR closes the RFC with status marker updates and also resolves pre-existing mypy type errors across the `agents/` package, enabling strict mypy enforcement in CI (removes `continue-on-error: true`). The mypy fixes are type-annotation-only changes with no runtime behavior impact (except a defensive null guard in `relationship.py`). The `types-grpcio` stub package is added as a dev dependency.
 
 - RFC 0016 header status changes from `🚧 Implementing` to `✅ Implemented`.
 - `ROADMAP.md` RFC Tracker row for 0016 updates status to `✅ Implemented` and merged count to `7/7`.
@@ -554,6 +554,6 @@ No new tests. `make test`, `make lint`, and `make validate` are run to confirm n
 - [x] ROADMAP.md RFC Tracker updated
 - [x] ROADMAP.md Component Status tables updated
 - [x] ROADMAP.md Merged PR History includes all 7 PRs
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes

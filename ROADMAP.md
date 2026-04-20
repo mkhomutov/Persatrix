@@ -585,6 +585,7 @@ v0.5.0 complete
 | [#123](https://github.com/mkhomutov/Persatrix/pull/123) | feat(server): add REST chat endpoint and gRPC chat executor | 0016 (4/7) | 2026-04-20 |
 | [#125](https://github.com/mkhomutov/Persatrix/pull/125) | feat(cli): add `persatrix chat` command and rename binary | 0016 (5/7) | 2026-04-20 |
 | [#127](https://github.com/mkhomutov/Persatrix/pull/127) | fix(agents,cli): address PR 1–5 review follow-ups | 0016 (6/7) | 2026-04-20 |
+| [#128](https://github.com/mkhomutov/Persatrix/pull/128) | docs(rfc): close RFC 0016 — Human Participant & Chat Interface (PR 7/7) | 0016 (7/7) | 2026-04-20 |
 
 ---
 
