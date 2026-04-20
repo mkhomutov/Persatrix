@@ -198,6 +198,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 
         user_id = request.user_id
 
+        # Validate user_id length — defence-in-depth against oversized
+        # payloads propagating into events and memory (review fix).
+        if len(user_id) > 256:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("user_id exceeds 256 characters")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
+
         event = AgentEvent(
             event_type=EventType.MESSAGE_RECEIVED,
             payload={
@@ -241,9 +252,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         reply, reply_status = _extract_chat_reply(actions, user_id)
 
         # Execute remaining actions (side-effects) after reply is secured.
-        await self._dispatcher.executor.execute(
-            agent_id, actions, cascade_depth=1,
-        )
+        # Wrapped in try/except so the already-extracted reply is never lost
+        # if a downstream action raises (review fix: two-phase guarantee).
+        try:
+            await self._dispatcher.executor.execute(
+                agent_id, actions, cascade_depth=1,
+            )
+        except Exception:
+            logger.warning(
+                "Post-reply action execution failed for agent %s",
+                agent_id, exc_info=True,
+            )
 
         # Record human→agent interaction in relationship memory (OQ 11).
         if hasattr(agent, "memory") and hasattr(agent.memory, "relationship"):
@@ -311,8 +330,11 @@ def _extract_chat_reply(
         result = complete.payload.get("result", "")
         return result, "ok"
 
-    # Priority 4: empty
-    logger.warning("SendChatMessage: no reply action found in agent response")
+    # Priority 4: empty — only warn when the agent returned actions but
+    # none were reply-extractable; an empty action list is expected for
+    # agents that legitimately produce no reply (review fix: log noise).
+    if actions:
+        logger.warning("SendChatMessage: no reply action found in agent response")
     return "", "empty"
 
 

@@ -347,3 +347,65 @@ class TestSendChatMessage:
 
         # 0 → default 30 → clamped to max(1, min(30, 300)) = 30
         assert captured_timeouts[0] == 30
+
+    async def test_executor_failure_still_returns_reply(self):
+        """Reply is returned even when executor.execute() raises (two-phase guarantee)."""
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": "safe reply", "mentions": ["local"]}),
+        ]
+        servicer = _make_servicer(actions)
+        # Make executor raise after reply extraction
+        servicer._dispatcher.executor.execute = AsyncMock(
+            side_effect=RuntimeError("side-effect boom"),
+        )
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(user_id="local"), context,
+        )
+
+        assert resp.reply == "safe reply"
+        assert resp.reply_status == "ok"
+
+    async def test_relationship_memory_recorded(self):
+        """record_interaction() is called when agent has relationship memory."""
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]}),
+        ]
+        agent = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        # Attach a mock memory.relationship attribute
+        memory = MagicMock()
+        memory.relationship = MagicMock()
+        memory.relationship.record_interaction = AsyncMock()
+        agent.memory = memory  # type: ignore[attr-defined]
+
+        dispatcher = MagicMock(spec=EventDispatcher)
+        dispatcher.dispatch = AsyncMock(return_value=actions)
+        dispatcher.executor = MagicMock()
+        dispatcher.executor.execute = AsyncMock(return_value=[])
+
+        servicer = AgentServiceServicer({"ember-owl": agent}, dispatcher)
+        context = _mock_context()
+
+        await servicer.SendChatMessage(
+            _chat_request(user_id="local", participant_type="user"), context,
+        )
+
+        memory.relationship.record_interaction.assert_called_once_with(
+            other_id="local",
+            interaction_type="chat",
+            outcome="hi",
+            other_participant_type="user",
+        )
+
+    async def test_user_id_too_long_rejected(self):
+        """user_id exceeding 256 chars returns INVALID_ARGUMENT."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(user_id="x" * 257), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
