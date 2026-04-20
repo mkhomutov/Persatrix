@@ -2151,7 +2151,7 @@ class TestInjectMemoryContext:
 
         # Record an interaction to create a relationship.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2303,7 +2303,7 @@ class TestInjectMemoryContext:
 
         # Bootstrap a relationship with trust but zero interactions.
         await agent._relationship_memory.update_trust(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             delta=0.1,
             reason="config bootstrap",
         )
@@ -2391,7 +2391,7 @@ class TestInjectMemoryContext:
 
         # Record interaction without sentiment to keep trust at ~0.5.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="neutral",
             sentiment=0.0,
@@ -2421,7 +2421,7 @@ class TestInjectMemoryContext:
 
         # Record interaction to create a relationship with long notes.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2437,8 +2437,14 @@ class TestInjectMemoryContext:
         # than an assertion error — treat that as a reminder to update
         # the fixture.  (PR review: coupling note for future maintainers.)
         long_notes = "n" * 600
+        # Include all composite PK columns in WHERE to be resilient
+        # against fixtures with both agent and user relationships
+        # sharing the same participant IDs.
+        # (PR #120 review F-8: incomplete WHERE clause.)
         async with agent._relationship_memory._db.execute(
-            "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",
+            "UPDATE relationships SET notes = ? "
+            "WHERE participant_id = ? AND participant_type = 'agent' "
+            "AND other_participant_id = ? AND other_participant_type = 'agent'",
             (long_notes, "ember-owl", "iron-fox"),
         ):
             pass
@@ -2611,7 +2617,7 @@ class TestInjectMemoryContext:
 
         # Record an interaction so there is a relationship to inject.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="alice",
+            other_id="alice",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.9,
@@ -2721,5 +2727,80 @@ class TestInjectMemoryContext:
         assert agent._working_memory.get_section("recent_notes") is None, (
             "Stale recent_notes from event 1 persisted into unrelated event 2"
         )
+        await agent.close_memory()
+
+    async def test_user_relationship_injected_via_metadata(self):
+        """PR #120 review F-1/F-9: user→agent event flow injects user
+        relationship correctly.
+
+        Validates the full path:
+        1. Agent records an interaction with other_participant_type="user"
+        2. A user sends MESSAGE_RECEIVED with sender_participant_type="user"
+        3. _inject_memory_context() queries the user relationship
+        4. The relationship section labels the sender as "(Human user)"
+
+        This is the integration path where F-1 (missing other_participant_type
+        propagation) would manifest as a silently missing relationship.
+        """
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Record a user interaction — note other_participant_type="user".
+        await agent._relationship_memory.record_interaction(
+            other_id="user-alice",
+            interaction_type="conversation",
+            outcome="positive",
+            sentiment=0.7,
+            other_participant_type="user",
+        )
+
+        # Simulate a user message with sender_participant_type in metadata.
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello from user"},
+            sender_id="user-alice",
+            metadata={"sender_participant_type": "user"},
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None, (
+            "User relationship should have been injected into working memory"
+        )
+        assert "user-alice" in rel_section.content
+        assert "(Human user)" in rel_section.content
+        await agent.close_memory()
+
+    async def test_agent_relationship_still_works_without_metadata(self):
+        """PR #120 review F-1 regression guard: agent-to-agent relationships
+        still work when no sender_participant_type metadata is present
+        (backward compatibility with pre-generalization callers).
+        """
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._relationship_memory.record_interaction(
+            other_id="iron-fox",
+            interaction_type="collaboration",
+            outcome="success",
+            sentiment=0.8,
+        )
+
+        # No metadata at all — should default to "agent" lookup.
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "Hello"},
+            sender_id="iron-fox",
+        )
+        await agent._inject_memory_context(event)
+
+        rel_section = agent._working_memory.get_section("relationship_context")
+        assert rel_section is not None
+        assert "iron-fox" in rel_section.content
+        assert "(Human user)" not in rel_section.content
         await agent.close_memory()
 

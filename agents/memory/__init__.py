@@ -4,7 +4,8 @@ from typing import Protocol, runtime_checkable
 
 from .episodic import Episode, EpisodicMemory
 from .notes import Note, NoteStore
-from .relationship import Interaction, RelationshipMemory, RelationshipSummary
+from .relationship import RelationshipMemory
+from .relationship_types import Interaction, RelationshipSummary
 from .working import ContextSection, WorkingMemory, estimate_tokens
 
 

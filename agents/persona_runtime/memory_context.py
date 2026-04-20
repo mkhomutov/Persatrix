@@ -190,9 +190,21 @@ class _MemoryContextMixin:
         # 2. Relationship summary for the sender (if present).
         sender_id = event.sender_id
         if sender_id:
+            # Extract sender's participant type from event metadata so
+            # user relationships are queried correctly.  Without this,
+            # get_relationship_summary() defaults to "agent" and silently
+            # misses user-type relationships — making the "(Human user)"
+            # labeling below dead code.
+            # (PR #120 review F-1: other_participant_type not propagated.)
+            sender_type = (
+                event.metadata.get("sender_participant_type", "agent")
+                if event.metadata
+                else "agent"
+            )
             try:
                 rel = await self._relationship_memory.get_relationship_summary(
                     sender_id,
+                    other_participant_type=sender_type,
                 )
             except Exception:
                 logger.warning(
@@ -202,8 +214,14 @@ class _MemoryContextMixin:
                 rel = None
 
             if rel and rel.interaction_count > 0:
+                # Label user participants distinctly so the LLM knows
+                # whether the sender is a human or another agent.
+                if rel.other_participant_type == "user":
+                    label = f"{rel.other_participant_id} (Human user)"
+                else:
+                    label = rel.other_participant_id
                 lines = [
-                    f"Relationship with {rel.other_agent_id}:",
+                    f"Relationship with {label}:",
                 ]
                 # Only inject trust when it has deviated from the default.
                 # A score of exactly _DEFAULT_TRUST_SCORE provides no useful

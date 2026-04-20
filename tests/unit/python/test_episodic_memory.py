@@ -111,13 +111,15 @@ class TestMigrations:
         db = memory._ensure_db()
         async with db.execute("SELECT version, description FROM schema_version ORDER BY version") as cursor:
             rows = await cursor.fetchall()
-        assert len(rows) == 3
+        assert len(rows) == 4
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
         assert "Notes" in rows[1][1]
         assert rows[2][0] == 3
         assert "Relationships" in rows[2][1]
+        assert rows[3][0] == 4
+        assert "participant" in rows[3][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -125,7 +127,7 @@ class TestMigrations:
         await _apply_migrations(db)
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
-        assert row[0] == 3
+        assert row[0] == 4
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
@@ -1236,32 +1238,32 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v4_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v4 entry, verify v1–v4 applied."""
+    async def test_hypothetical_v5_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v5 entry, verify v1–v5 applied."""
         from agents.memory.migrations import MIGRATIONS
 
-        v4 = (
-            4,
+        v5 = (
+            5,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v4 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v5 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v4)
+            MIGRATIONS.append(v5)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All four versions should be recorded
+            # All five versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4]
+            assert versions == [1, 2, 3, 4, 5]
 
-            # v4 table should exist
+            # v5 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v4'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v5'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 

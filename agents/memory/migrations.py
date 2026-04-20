@@ -137,7 +137,237 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             ON interactions(agent_id, other_agent_id, created_at DESC);
         """,
     ),
+    # Migration 4 uses the callable path (_apply_migration_4) because it
+    # rebuilds tables with a new composite PK — this is NOT idempotent
+    # and requires a manually managed transaction.  The SQL field is empty;
+    # _apply_migrations() detects the callable and invokes it directly.
+    (
+        4,
+        "Generalize relationships/interactions to participant pairs; add users table",
+        "",  # handled by _apply_migration_4()
+    ),
 ]
+
+
+async def _apply_migration_4(db: aiosqlite.Connection) -> None:
+    """Rebuild relationships/interactions with participant_type columns.
+
+    Uses the `12-step ALTER TABLE`_ pattern in a single transaction.
+    Also creates the ``users`` table so the schema is consistent even
+    when ``UserStore`` is not used.
+
+    Existing data is backfilled with ``participant_type = 'agent'`` and
+    ``other_participant_type = 'agent'``.
+
+    .. _12-step ALTER TABLE:
+       https://www.sqlite.org/lang_altertable.html#otheralter
+    """
+    # -- 1. Users table (idempotent) --
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            participant_id   TEXT PRIMARY KEY,
+            display_name     TEXT NOT NULL,
+            participant_type TEXT NOT NULL DEFAULT 'user',
+            created_at       REAL NOT NULL,
+            last_seen_at     REAL NOT NULL
+        )
+        """
+    )
+
+    # -- 2. Rebuild relationships: 12-step ALTER TABLE --
+    # Crash recovery: if a previous run crashed between DROP TABLE
+    # relationships and ALTER TABLE RENAME, the staging table exists
+    # but the final name does not.  Complete the interrupted rename to
+    # avoid data loss.  (PR #120 review F-3: migration crash-recovery gap.)
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='relationships_new'"
+    )
+    if await cursor.fetchone():
+        cursor2 = await db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='relationships'"
+        )
+        if not await cursor2.fetchone():
+            await db.execute(
+                "ALTER TABLE relationships_new RENAME TO relationships"
+            )
+        else:
+            # Both tables exist — drop the staging table (incomplete copy).
+            await db.execute("DROP TABLE relationships_new")
+
+    # Check if migration already partially ran (crash recovery).
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='relationships'"
+    )
+    old_exists = await cursor.fetchone()
+
+    if old_exists:
+        # Check if already migrated (has participant_id column).
+        cursor = await db.execute("PRAGMA table_info(relationships)")
+        columns = {row[1] for row in await cursor.fetchall()}
+
+        if "participant_id" not in columns:
+            # Step 1: Create new table
+            await db.execute(
+                """
+                CREATE TABLE relationships_new (
+                    participant_id TEXT NOT NULL,
+                    participant_type TEXT NOT NULL DEFAULT 'agent',
+                    other_participant_id TEXT NOT NULL,
+                    other_participant_type TEXT NOT NULL DEFAULT 'agent',
+                    trust_score REAL DEFAULT 0.5,
+                    interaction_count INTEGER DEFAULT 0,
+                    last_interaction_at REAL,
+                    notes TEXT,
+                    PRIMARY KEY (participant_id, participant_type,
+                                 other_participant_id, other_participant_type)
+                )
+                """
+            )
+            # Step 2: Copy data with backfill
+            await db.execute(
+                """
+                INSERT INTO relationships_new
+                    (participant_id, participant_type,
+                     other_participant_id, other_participant_type,
+                     trust_score, interaction_count, last_interaction_at, notes)
+                SELECT agent_id, 'agent',
+                       other_agent_id, 'agent',
+                       trust_score, interaction_count, last_interaction_at, notes
+                FROM relationships
+                """
+            )
+            # Step 3: Drop old table
+            await db.execute("DROP TABLE relationships")
+            # Step 4: Rename new table
+            await db.execute(
+                "ALTER TABLE relationships_new RENAME TO relationships"
+            )
+    else:
+        # Fresh DB or relationships was already dropped — create directly.
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS relationships (
+                participant_id TEXT NOT NULL,
+                participant_type TEXT NOT NULL DEFAULT 'agent',
+                other_participant_id TEXT NOT NULL,
+                other_participant_type TEXT NOT NULL DEFAULT 'agent',
+                trust_score REAL DEFAULT 0.5,
+                interaction_count INTEGER DEFAULT 0,
+                last_interaction_at REAL,
+                notes TEXT,
+                PRIMARY KEY (participant_id, participant_type,
+                             other_participant_id, other_participant_type)
+            )
+            """
+        )
+
+    # Recreate indexes with new column names.
+    await db.execute("DROP INDEX IF EXISTS idx_relationships_agent")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationships_participant "
+        "ON relationships(participant_id, participant_type)"
+    )
+
+    # -- 3. Rebuild interactions: 12-step ALTER TABLE --
+    # Crash recovery for interactions_new (same pattern as relationships).
+    # (PR #120 review F-3.)
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='interactions_new'"
+    )
+    if await cursor.fetchone():
+        cursor2 = await db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='interactions'"
+        )
+        if not await cursor2.fetchone():
+            await db.execute(
+                "ALTER TABLE interactions_new RENAME TO interactions"
+            )
+        else:
+            await db.execute("DROP TABLE interactions_new")
+
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='interactions'"
+    )
+    old_exists = await cursor.fetchone()
+
+    if old_exists:
+        cursor = await db.execute("PRAGMA table_info(interactions)")
+        columns = {row[1] for row in await cursor.fetchall()}
+
+        if "participant_id" not in columns:
+            await db.execute(
+                """
+                CREATE TABLE interactions_new (
+                    id TEXT PRIMARY KEY,
+                    participant_id TEXT NOT NULL,
+                    participant_type TEXT NOT NULL DEFAULT 'agent',
+                    other_participant_id TEXT NOT NULL,
+                    other_participant_type TEXT NOT NULL DEFAULT 'agent',
+                    interaction_type TEXT NOT NULL,
+                    outcome TEXT,
+                    sentiment REAL DEFAULT 0.0,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
+            await db.execute(
+                """
+                INSERT INTO interactions_new
+                    (id, participant_id, participant_type,
+                     other_participant_id, other_participant_type,
+                     interaction_type, outcome, sentiment, created_at)
+                SELECT id, agent_id, 'agent',
+                       other_agent_id, 'agent',
+                       interaction_type, outcome, sentiment, created_at
+                FROM interactions
+                """
+            )
+            await db.execute("DROP TABLE interactions")
+            await db.execute(
+                "ALTER TABLE interactions_new RENAME TO interactions"
+            )
+    else:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS interactions (
+                id TEXT PRIMARY KEY,
+                participant_id TEXT NOT NULL,
+                participant_type TEXT NOT NULL DEFAULT 'agent',
+                other_participant_id TEXT NOT NULL,
+                other_participant_type TEXT NOT NULL DEFAULT 'agent',
+                interaction_type TEXT NOT NULL,
+                outcome TEXT,
+                sentiment REAL DEFAULT 0.0,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+
+    # Recreate composite covering index with new column names.
+    await db.execute("DROP INDEX IF EXISTS idx_interactions_lookup")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interactions_participant_lookup "
+        "ON interactions(participant_id, participant_type, "
+        "other_participant_id, other_participant_type, created_at DESC)"
+    )
+
+    # NOTE: this commit makes the DDL changes durable, but the version
+    # record in schema_version is written by _apply_migrations() AFTER
+    # this function returns.  If the process crashes between this commit
+    # and the version INSERT, the migration re-runs on restart.  The
+    # crash-recovery guards above (PRAGMA table_info + relationships_new
+    # check) make the re-run safe by detecting the already-migrated schema.
+    # Removing this commit would not help because SQLite DDL (CREATE TABLE,
+    # DROP TABLE) causes implicit commits in many modes.
+    # (PR #120 review F-7: migration version recording atomicity.)
+    await db.commit()
 
 # FTS5 DDL — applied only when FTS5 is available.
 _FTS5_DDL = """
@@ -210,7 +440,23 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
             # IF NOT EXISTS guards.  Future non-idempotent migrations (ALTER
             # TABLE, data transforms) MUST use individual db.execute() calls
             # inside a manually managed transaction instead.
-            await db.executescript(sql)
+
+            # Check for a callable migration handler (e.g. _apply_migration_4).
+            handler = globals().get(f"_apply_migration_{version}")
+            if handler is not None:
+                await handler(db)
+            elif sql:
+                await db.executescript(sql)
+            else:
+                # No callable handler found and SQL is empty — this is a
+                # programming error (e.g. a typo in the handler name).
+                # Without this guard, the migration would silently be
+                # recorded as applied without actually running.
+                # (PR #120 review F-4: globals().get() dispatch fragility.)
+                raise RuntimeError(
+                    f"Migration v{version} has no SQL and no callable "
+                    f"handler '_apply_migration_{version}()'"
+                )
             await db.execute(
                 "INSERT INTO schema_version VALUES (?, ?, ?)",
                 (version, time.time(), desc),
