@@ -82,7 +82,6 @@ jobs:
 
       - name: Type check with mypy
         run: cd agents && mypy .
-        continue-on-error: true  # scaffold has many stubs; enforce once implemented
 
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
