@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-20 (RFC 0016 PR 5/7 merged — CLI chat command + binary rename)  
+> **Last updated**: 2026-04-20 (RFC 0016 PR 6/7 merged — PR 1–5 review follow-ups)  
 > **Current phase**: v0.2.1 (Human Participant & Chat Interface) — 🚧 In Progress  
-> **Current milestone**: v0.2.1 — RFC 0016 PR 5/7 merged; next: PR 6 (review follow-ups)
+> **Current milestone**: v0.2.1 — RFC 0016 PR 6/7 merged; next: PR 7 (RFC close)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -265,7 +265,7 @@ v0.2.0 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 🚧 Implementing | 7 | 5/7 |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 🚧 Implementing | 7 | 6/7 |
 
 ### Dependency Chain (v0.2.1)
 
@@ -584,6 +584,7 @@ v0.5.0 complete
 | [#121](https://github.com/mkhomutov/Persatrix/pull/121) | feat(agents): SendChatMessage gRPC servicer + EventDispatcher flag | 0016 (3/7) | 2026-04-20 |
 | [#123](https://github.com/mkhomutov/Persatrix/pull/123) | feat(server): add REST chat endpoint and gRPC chat executor | 0016 (4/7) | 2026-04-20 |
 | [#125](https://github.com/mkhomutov/Persatrix/pull/125) | feat(cli): add `persatrix chat` command and rename binary | 0016 (5/7) | 2026-04-20 |
+| [#127](https://github.com/mkhomutov/Persatrix/pull/127) | fix(agents,cli): address PR 1–5 review follow-ups | 0016 (6/7) | 2026-04-20 |
 
 ---
 
