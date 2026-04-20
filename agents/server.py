@@ -8,228 +8,30 @@ ExecuteTaskStream) from the generated protobuf stubs.
 
 import argparse
 import asyncio
-import json
 import logging
 import signal
 import sys
-import time
 
 import aiohttp
 import grpc
 import grpc.aio
 
-from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
+from .base import BaseAgent
 from .dispatch import EventDispatcher
-from .generated import agent_message_pb2, agent_message_pb2_grpc, task_pb2, task_pb2_grpc
+from .generated import agent_message_pb2_grpc, task_pb2_grpc
 from .persona_runtime import _LLMPersonaAgent
-from .persona_types import AgentEvent, EventType
 from .server_persona import (
     initialize_persona_agents,
     load_agent,
 )
+from .server_servicers import (  # noqa: F401
+    AgentServiceServicer,
+    ChannelServiceServicer,
+    _extract_chat_reply,
+)
 from .tick import TickScheduler
 
 logger = logging.getLogger("Persatrix.agent.server")
-
-
-# ─── AgentServiceServicer ───────────────────────────────────
-
-
-class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
-    """gRPC servicer implementing ExecuteTask, HealthCheck, and ExecuteTaskStream."""
-
-    def __init__(self, agents: dict[str, BaseAgent]):
-        self._agents = agents
-
-    async def ExecuteTask(
-        self,
-        request: task_pb2.TaskRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> task_pb2.TaskResponse:
-        agent = self._agents.get(request.agent_id)
-        if agent is None:
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"Agent not found: {request.agent_id}")
-            return task_pb2.TaskResponse(
-                task_id=request.task_id,
-                status=task_pb2.FAILED,
-                error_message=f"Agent not found: {request.agent_id}",
-            )
-
-        task_input = TaskInput(
-            task_id=request.task_id,
-            workflow_id=request.workflow_id,
-            payload=request.payload,
-            context=dict(request.context),
-            config=TaskInputConfig(
-                max_llm_calls=request.config.max_llm_calls or 0,
-                max_tokens=request.config.max_tokens or 0,
-                allowed_tools=list(request.config.allowed_tools),
-            ),
-        )
-
-        try:
-            start = time.monotonic()
-            timeout = request.config.timeout_seconds or None
-            output: TaskOutput = await asyncio.wait_for(
-                agent.handle(task_input),
-                timeout=timeout,
-            )
-            duration_ms = int((time.monotonic() - start) * 1000)
-
-            # Review-fix P2: use json.dumps for non-str metadata values.
-            metadata: dict[str, str] = {}
-            for k, v in output.metadata.items():
-                metadata[k] = v if isinstance(v, str) else json.dumps(v)
-            metadata["duration_ms"] = str(duration_ms)
-
-            return task_pb2.TaskResponse(
-                task_id=request.task_id,
-                status=(
-                    task_pb2.COMPLETED
-                    if output.status == TaskStatus.COMPLETED
-                    else task_pb2.FAILED
-                ),
-                result=output.result,
-                metadata=metadata,
-                error_message=(
-                    "" if output.status == TaskStatus.COMPLETED else output.result
-                ),
-            )
-        except TimeoutError:
-            context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
-            context.set_details("Task execution timed out")
-            return task_pb2.TaskResponse(
-                task_id=request.task_id,
-                status=task_pb2.FAILED,
-                error_message="Task execution timed out",
-            )
-        except Exception:
-            logger.exception("Task execution failed: %s", request.task_id)
-            # S-01: return fixed string — type(exc).__name__ leaked internal
-            # implementation details (e.g. "SSLError", "ConnectionResetError").
-            # Full exception details are already logged above for debugging.
-            return task_pb2.TaskResponse(
-                task_id=request.task_id,
-                status=task_pb2.FAILED,
-                error_message="Internal error",
-            )
-
-    async def HealthCheck(
-        self,
-        request: task_pb2.HealthCheckRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> task_pb2.HealthCheckResponse:
-        # PR-review B4: delegate to agent.health_check()
-        if request.service:
-            agent = self._agents.get(request.service)
-            if agent is None:
-                # F-01: unknown agent ID must return NOT_SERVING so the
-                # orchestrator doesn't route tasks to a non-existent agent.
-                # N-01: log at debug level to help operators diagnose routing
-                # issues when the orchestrator probes a non-loaded agent.
-                logger.debug(
-                    "HealthCheck for unknown agent: %s", request.service
-                )
-                return task_pb2.HealthCheckResponse(
-                    status=task_pb2.NOT_SERVING
-                )
-            healthy = await agent.health_check()
-        else:
-            healthy = len(self._agents) > 0
-        return task_pb2.HealthCheckResponse(
-            status=task_pb2.SERVING if healthy else task_pb2.NOT_SERVING,
-        )
-
-    async def ExecuteTaskStream(
-        self,
-        request: task_pb2.TaskRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> None:
-        # TODO(v0.2): implement streaming execution with TaskProgress messages
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Streaming execution not implemented in v0.1")
-
-
-# ─── ChannelServiceServicer ──────────────────────────────────
-
-
-class ChannelServiceServicer(agent_message_pb2_grpc.ChannelServiceServicer):
-    """Receives inbound AgentMessage and routes it to persona agents.
-
-    Routes to agents listed in ``mentions``; if empty, broadcasts to all
-    agents on this server. Returns delivered=True as soon as the event is
-    queued — LLM processing happens asynchronously via the EventDispatcher.
-    """
-
-    def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher) -> None:
-        self._agents = agents
-        self._dispatcher = dispatcher
-        # PR #101 review: Python 3.11+ asyncio docs warn that the event loop
-        # only holds weak references to tasks, so a fire-and-forget
-        # ``asyncio.create_task(...)`` can be garbage-collected mid-flight if
-        # the caller does not retain a strong reference. SendMessage returns
-        # immediately after queueing, which is exactly that hazard. Keep a
-        # strong-ref set and drop tasks via a done-callback once they finish.
-        self._pending_dispatches: set[asyncio.Task] = set()
-
-    async def SendMessage(
-        self,
-        request: agent_message_pb2.AgentMessage,
-        context: grpc.aio.ServicerContext,
-    ) -> agent_message_pb2.SendMessageResponse:
-        targets = list(request.mentions) if request.mentions else list(self._agents.keys())
-        if not targets:
-            return agent_message_pb2.SendMessageResponse(
-                message_id=request.message_id,
-                delivered=False,
-            )
-        event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
-            payload={"content": request.content, "channel_id": request.channel_id},
-            channel_id=request.channel_id or None,
-            sender_id=request.sender_id or None,
-            message_id=request.message_id or None,
-        )
-        for target_id in targets:
-            task = asyncio.create_task(
-                self._dispatch_and_log(target_id, event),
-                name=f"channel-dispatch-{target_id}-{request.message_id or 'anon'}",
-            )
-            self._pending_dispatches.add(task)
-            task.add_done_callback(self._pending_dispatches.discard)
-        return agent_message_pb2.SendMessageResponse(
-            message_id=request.message_id,
-            delivered=True,
-        )
-
-    async def _dispatch_and_log(self, target_id: str, event: AgentEvent) -> None:
-        """Wrapper around ``EventDispatcher.dispatch`` that logs failures.
-
-        PR #101 review: fire-and-forget ``create_task`` surfaces exceptions only
-        as ``Task exception was never retrieved`` warnings at GC time, which is
-        easy to miss in production logs. Wrapping in a try/except at the task
-        boundary ensures dispatch failures are recorded with enough context to
-        correlate them back to the inbound message.
-        """
-        try:
-            await self._dispatcher.dispatch(target_id, event)
-        except Exception:
-            logger.exception(
-                "Channel dispatch to agent %s failed (message_id=%s, sender=%s)",
-                target_id,
-                event.message_id,
-                event.sender_id,
-            )
-
-    async def Subscribe(
-        self,
-        request: agent_message_pb2.SubscribeRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> None:
-        # TODO(v0.3): implement server-side streaming channel subscriptions
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Channel subscriptions not yet implemented")
 
 
 # ─── AgentServer ─────────────────────────────────────────────
@@ -279,7 +81,7 @@ class AgentServer:
     async def start(self) -> None:
         """Start the gRPC server."""
         self._server = grpc.aio.server()
-        servicer = AgentServiceServicer(self.agents)
+        servicer = AgentServiceServicer(self.agents, self._dispatcher)
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, self._server)
         channel_servicer = ChannelServiceServicer(self.agents, self._dispatcher)
         agent_message_pb2_grpc.add_ChannelServiceServicer_to_server(

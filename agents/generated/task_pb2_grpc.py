@@ -51,6 +51,11 @@ class AgentServiceStub(object):
                 request_serializer=task__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=task__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
+        self.SendChatMessage = channel.unary_unary(
+                '/persatrix.v1.AgentService/SendChatMessage',
+                request_serializer=task__pb2.ChatRequest.SerializeToString,
+                response_deserializer=task__pb2.ChatResponse.FromString,
+                _registered_method=True)
 
 
 class AgentServiceServicer(object):
@@ -79,6 +84,13 @@ class AgentServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SendChatMessage(self, request, context):
+        """Send a chat message to the agent and return a synchronous reply.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -96,6 +108,11 @@ def add_AgentServiceServicer_to_server(servicer, server):
                     servicer.HealthCheck,
                     request_deserializer=task__pb2.HealthCheckRequest.FromString,
                     response_serializer=task__pb2.HealthCheckResponse.SerializeToString,
+            ),
+            'SendChatMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendChatMessage,
+                    request_deserializer=task__pb2.ChatRequest.FromString,
+                    response_serializer=task__pb2.ChatResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -181,6 +198,33 @@ class AgentService(object):
             '/persatrix.v1.AgentService/HealthCheck',
             task__pb2.HealthCheckRequest.SerializeToString,
             task__pb2.HealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SendChatMessage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/persatrix.v1.AgentService/SendChatMessage',
+            task__pb2.ChatRequest.SerializeToString,
+            task__pb2.ChatResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -91,3 +91,39 @@ class HealthCheckRequest(Message):
 class HealthCheckResponse(Message):
     status: int
     def __init__(self, *, status: int = ...) -> None: ...
+
+class ChatRequest(Message):
+    agent_id: str
+    user_id: str
+    message: str
+    session_id: str
+    timeout_seconds: int
+    participant_type: str
+    def __init__(
+        self,
+        *,
+        agent_id: str = ...,
+        user_id: str = ...,
+        message: str = ...,
+        session_id: str = ...,
+        timeout_seconds: int = ...,
+        participant_type: str = ...,
+    ) -> None: ...
+
+class ChatResponse(Message):
+    reply: str
+    session_id: str
+    agent_id: str
+    timestamp: int
+    agent_display_name: str
+    reply_status: str
+    def __init__(
+        self,
+        *,
+        reply: str = ...,
+        session_id: str = ...,
+        agent_id: str = ...,
+        timestamp: int = ...,
+        agent_display_name: str = ...,
+        reply_status: str = ...,
+    ) -> None: ...
