@@ -2151,7 +2151,7 @@ class TestInjectMemoryContext:
 
         # Record an interaction to create a relationship.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2303,7 +2303,7 @@ class TestInjectMemoryContext:
 
         # Bootstrap a relationship with trust but zero interactions.
         await agent._relationship_memory.update_trust(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             delta=0.1,
             reason="config bootstrap",
         )
@@ -2391,7 +2391,7 @@ class TestInjectMemoryContext:
 
         # Record interaction without sentiment to keep trust at ~0.5.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="neutral",
             sentiment=0.0,
@@ -2421,7 +2421,7 @@ class TestInjectMemoryContext:
 
         # Record interaction to create a relationship with long notes.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="iron-fox",
+            other_id="iron-fox",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.8,
@@ -2438,7 +2438,8 @@ class TestInjectMemoryContext:
         # the fixture.  (PR review: coupling note for future maintainers.)
         long_notes = "n" * 600
         async with agent._relationship_memory._db.execute(
-            "UPDATE relationships SET notes = ? WHERE agent_id = ? AND other_agent_id = ?",
+            "UPDATE relationships SET notes = ? "
+            "WHERE participant_id = ? AND other_participant_id = ?",
             (long_notes, "ember-owl", "iron-fox"),
         ):
             pass
@@ -2611,7 +2612,7 @@ class TestInjectMemoryContext:
 
         # Record an interaction so there is a relationship to inject.
         await agent._relationship_memory.record_interaction(
-            other_agent_id="alice",
+            other_id="alice",
             interaction_type="collaboration",
             outcome="success",
             sentiment=0.9,

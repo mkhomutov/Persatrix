@@ -55,8 +55,10 @@ class TestDataclasses:
     def test_interaction_fields(self):
         i = Interaction(
             id="i1",
-            agent_id="a",
-            other_agent_id="b",
+            participant_id="a",
+            participant_type="agent",
+            other_participant_id="b",
+            other_participant_type="agent",
             interaction_type="task_delegation",
             outcome="success",
             sentiment=0.8,
@@ -67,7 +69,8 @@ class TestDataclasses:
 
     def test_relationship_summary_defaults(self):
         s = RelationshipSummary(
-            other_agent_id="b",
+            other_participant_id="b",
+            other_participant_type="agent",
             trust_score=0.5,
             interaction_count=0,
             last_interaction_at=None,
@@ -358,7 +361,8 @@ class TestRecordInteraction:
 class TestGetRelationshipSummary:
     async def test_unknown_agent_returns_defaults(self, memory):
         summary = await memory.get_relationship_summary("unknown")
-        assert summary.other_agent_id == "unknown"
+        assert summary.other_participant_id == "unknown"
+        assert summary.other_participant_type == "agent"
         assert summary.trust_score == _DEFAULT_TRUST
         assert summary.interaction_count == 0
         assert summary.last_interaction_at is None
@@ -428,8 +432,8 @@ class TestGetAllRelationships:
         rels = await memory.get_all_relationships()
         assert len(rels) == 2
         # Ordered by trust_score DESC
-        assert rels[0].other_agent_id == "bob"
-        assert rels[1].other_agent_id == "alice"
+        assert rels[0].other_participant_id == "bob"
+        assert rels[1].other_participant_id == "alice"
 
     async def test_recent_interactions_not_populated(self, memory):
         """get_all_relationships() does not populate recent_interactions."""
@@ -569,9 +573,9 @@ class TestAgentIsolation:
         rels_a = await mem_a.get_all_relationships()
         rels_b = await mem_b.get_all_relationships()
         assert len(rels_a) == 1
-        assert rels_a[0].other_agent_id == "bob"
+        assert rels_a[0].other_participant_id == "bob"
         assert len(rels_b) == 1
-        assert rels_b[0].other_agent_id == "charlie"
+        assert rels_b[0].other_participant_id == "charlie"
 
 
 # ─── Concurrent record_interaction (F-4-2) ─────────────────
@@ -590,26 +594,26 @@ class TestConcurrentRecordInteraction:
         assert summary.interaction_count == 2
 
 
-# ─── Empty other_agent_id validation (R-1 / F-4-1) ─────────
+# ─── Empty other_id validation (R-1 / F-4-1) ───────────────
 
 
 class TestEmptyOtherAgentId:
-    """update_trust() and record_interaction() reject empty other_agent_id."""
+    """update_trust() and record_interaction() reject empty other_id."""
 
     async def test_update_trust_rejects_empty(self, memory):
-        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+        with pytest.raises(ValueError, match="other_id must not be empty"):
             await memory.update_trust("", 0.1, "reason")
 
     async def test_update_trust_rejects_whitespace(self, memory):
-        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+        with pytest.raises(ValueError, match="other_id must not be empty"):
             await memory.update_trust("   ", 0.1, "reason")
 
     async def test_record_interaction_rejects_empty(self, memory):
-        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+        with pytest.raises(ValueError, match="other_id must not be empty"):
             await memory.record_interaction("", "chat")
 
     async def test_record_interaction_rejects_whitespace(self, memory):
-        with pytest.raises(ValueError, match="other_agent_id must not be empty"):
+        with pytest.raises(ValueError, match="other_id must not be empty"):
             await memory.record_interaction("   ", "chat")
 
 
