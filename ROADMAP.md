@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-20 (RFC 0016 PR 2/7 merged — Migration 4 + RelationshipMemory generalization + prompt injection)  
+> **Last updated**: 2026-04-20 (RFC 0016 PR 3/7 merged — Proto extension + Python gRPC servicer + EventDispatcher flag)  
 > **Current phase**: v0.2.1 (Human Participant & Chat Interface) — 🚧 In Progress  
-> **Current milestone**: v0.2.1 — RFC 0016 PR 2/7 merged; next: PR 3 (Proto extension + Python gRPC servicer + EventDispatcher flag)
+> **Current milestone**: v0.2.1 — RFC 0016 PR 3/7 merged; next: PR 4 (Go REST endpoint + gRPC dispatch + integration test)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -45,7 +45,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | 👍 Accepted |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | 🚧 Implementing |
 
 ---
 
@@ -265,7 +265,7 @@ v0.2.0 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 👍 Accepted | 7 | 2/7 |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 🚧 Implementing | 7 | 3/7 |
 
 ### Dependency Chain (v0.2.1)
 
@@ -290,7 +290,7 @@ v0.2.1 complete
 | `Participant` Protocol + `UserParticipant` | — | `agents/participant.py` | 0016 | ✅ Complete (PR #119) |
 | Memory generalization | — | `agents/memory/relationship.py`, `agents/memory/migrations.py` | 0016 | ✅ Complete (PR #120) |
 | Chat REST endpoint | `internal/server/` | — | 0016 |
-| Chat gRPC dispatch | `internal/executor/` | `agents/server.py` | 0016 |
+| Chat gRPC dispatch | `internal/executor/` | `agents/server_servicers.py` | 0016 | ✅ Complete (PR #121) |
 | `persatrix chat` CLI | — | — | 0016 (`cli/src/commands/chat.rs`) |
 
 ---
@@ -581,6 +581,7 @@ v0.5.0 complete
 | [#115](https://github.com/mkhomutov/Persatrix/pull/115) | docs(rfcs): correct author attribution across all RFCs and add RFC 0015 | 0015 (RFC) + attribution | 2026-04-19 |
 | [#119](https://github.com/mkhomutov/Persatrix/pull/119) | feat(agents): Participant Protocol + UserParticipant + UserStore | 0016 (1/7) | 2026-04-20 |
 | [#120](https://github.com/mkhomutov/Persatrix/pull/120) | feat(agents): generalize RelationshipMemory to participant pairs | 0016 (2/7) | 2026-04-20 |
+| [#121](https://github.com/mkhomutov/Persatrix/pull/121) | feat(agents): SendChatMessage gRPC servicer + EventDispatcher flag | 0016 (3/7) | 2026-04-20 |
 
 ---
 

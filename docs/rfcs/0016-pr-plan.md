@@ -195,13 +195,15 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `make proto` succeeds (Go + Python stubs regenerated)
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `ChatRequest`/`ChatResponse` messages in `proto/task.proto`
-- [ ] `SendChatMessage` servicer handles all OQ 5/6/7/9/11/13/16 requirements
-- [ ] `execute_actions` flag on `EventDispatcher.dispatch()`
-- [ ] `participant_type` validated at servicer boundary
+- [x] `make proto` succeeds (Go + Python stubs regenerated)
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `ChatRequest`/`ChatResponse` messages in `proto/task.proto`
+- [x] `SendChatMessage` servicer handles all OQ 5/6/7/9/11/13/16 requirements
+- [x] `execute_actions` flag on `EventDispatcher.dispatch()`
+- [x] `participant_type` validated at servicer boundary
+
+**Merged**: PR #121 — 2026-04-20
 
 ---
 
