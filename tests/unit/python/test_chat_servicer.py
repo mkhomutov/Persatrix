@@ -398,6 +398,40 @@ class TestSendChatMessage:
             other_participant_type="user",
         )
 
+    async def test_relationship_memory_failure_still_returns_reply(self):
+        """Reply is returned even when record_interaction() raises.
+
+        Validates the exception handler at server_servicers.py that wraps
+        the relationship memory call — the reply must never be lost due to
+        a memory subsystem failure.  (Review finding: untested path.)
+        """
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]}),
+        ]
+        agent = _StubAgent(agent_id="ember-owl", config={"model": "test"})
+        memory = MagicMock()
+        memory.relationship = MagicMock()
+        memory.relationship.record_interaction = AsyncMock(
+            side_effect=RuntimeError("memory db unavailable"),
+        )
+        agent.memory = memory  # type: ignore[attr-defined]
+
+        dispatcher = MagicMock(spec=EventDispatcher)
+        dispatcher.dispatch = AsyncMock(return_value=actions)
+        dispatcher.executor = MagicMock()
+        dispatcher.executor.execute = AsyncMock(return_value=[])
+
+        servicer = AgentServiceServicer({"ember-owl": agent}, dispatcher)
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(user_id="local", participant_type="user"), context,
+        )
+
+        assert resp.reply == "hi"
+        assert resp.reply_status == "ok"
+        memory.relationship.record_interaction.assert_called_once()
+
     # ─── Input Validation Length Limits ──────────────────────
 
     async def test_session_id_exceeds_max_length(self):
@@ -465,63 +499,6 @@ class TestSendChatMessage:
         # -10 is truthy → raw_timeout=-10 → max(1, min(-10, 300)) = 1
         assert captured_timeouts[0] == 1
         assert resp.reply_status == "ok"
-
-    async def test_user_id_too_long_rejected(self):
-        """user_id exceeding 256 chars returns INVALID_ARGUMENT."""
-        servicer = _make_servicer([])
-        context = _mock_context()
-
-        resp = await servicer.SendChatMessage(
-            _chat_request(user_id="x" * 257), context,
-        )
-
-        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
-        assert resp.reply_status == "error"
-
-    async def test_message_too_long_rejected(self):
-        """message exceeding 32768 chars returns INVALID_ARGUMENT (review fix: DoS)."""
-        servicer = _make_servicer([])
-        context = _mock_context()
-
-        resp = await servicer.SendChatMessage(
-            _chat_request(message="x" * 32769), context,
-        )
-
-        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
-        assert resp.reply_status == "error"
-
-    async def test_session_id_too_long_rejected(self):
-        """session_id exceeding 128 chars returns INVALID_ARGUMENT (review fix)."""
-        servicer = _make_servicer([])
-        context = _mock_context()
-
-        resp = await servicer.SendChatMessage(
-            _chat_request(session_id="s" * 129), context,
-        )
-
-        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
-        assert resp.reply_status == "error"
-
-    async def test_negative_timeout_clamped_to_min(self):
-        """Negative timeout_seconds is clamped to 1 (review fix: edge case)."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
-        servicer = _make_servicer(actions)
-        context = _mock_context()
-
-        captured_timeouts: list[float] = []
-        original_wait_for = asyncio.wait_for
-
-        async def _patched_wait_for(coro, timeout):
-            captured_timeouts.append(timeout)
-            return await original_wait_for(coro, timeout)
-
-        with patch("agents.server_servicers.asyncio.wait_for", side_effect=_patched_wait_for):
-            await servicer.SendChatMessage(
-                _chat_request(timeout_seconds=-5), context,
-            )
-
-        # -5 is non-zero so not defaulted → max(1, min(-5, 300)) = 1
-        assert captured_timeouts[0] == 1
 
     async def test_empty_message_still_dispatches(self):
         """Empty message string is dispatched normally (agent decides reply)."""
