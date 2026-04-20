@@ -71,9 +71,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 
 ---
 
-## Execution Report
+## Execution Reports
 
-Results for a release execution run are recorded in `v0.2-execution-report.md` (created in PR 11).
+| Version | Report | Status |
+|---------|--------|--------|
+| v0.2.0 | [v0.2-execution-report.md](v0.2-execution-report.md) | ✅ Complete |
+| v0.2.1 | [v0.2.1-execution-report.md](v0.2.1-execution-report.md) | 🔄 In progress |
 
 ---
 
