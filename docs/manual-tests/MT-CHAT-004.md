@@ -209,7 +209,7 @@ and `other_participant_type="user"`.
 
 ---
 
-### Step 4: Verify Trust Score is Non-Zero
+### Step 4: Verify Trust Score Remains at Default (0.5)
 
 **Action**: The trust score is checked in the output from Step 3.
 

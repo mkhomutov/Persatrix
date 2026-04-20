@@ -202,7 +202,9 @@ import asyncio
 from persatrix_agents.participant import UserStore
 
 async def main():
-    store = UserStore("ember-owl")
+    # UserStore takes db_path, not agent_id — use the default path
+    # (same as the running agent) so the query hits the right database.
+    store = UserStore()
     await store.initialize()
 
     user = await store.get("mt-chat-003-user")
