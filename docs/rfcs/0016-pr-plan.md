@@ -249,14 +249,16 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/ -v -race` passes
-- [ ] `go test ./internal/executor/ -v -race` passes
-- [ ] `pytest tests/integration/ -v` passes
-- [ ] `POST /api/v1/agents/{id}/chat` registered
-- [ ] Message length validation enforced
-- [ ] gRPC error → HTTP status mapping correct
-- [ ] `agent_display_name` populated from Registry
-- [ ] `reply_status` field set correctly
+- [x] `go test ./internal/server/ -v -race` passes
+- [x] `go test ./internal/executor/ -v -race` passes
+- [x] `pytest tests/integration/ -v` passes
+- [x] `POST /api/v1/agents/{id}/chat` registered
+- [x] Message length validation enforced
+- [x] gRPC error → HTTP status mapping correct
+- [x] `agent_display_name` populated from Registry
+- [x] `reply_status` field set correctly
+
+**Merged**: PR #123 — 2026-04-20
 
 ---
 
