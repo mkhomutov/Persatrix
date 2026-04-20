@@ -294,3 +294,60 @@ func TestHandleChat_PassesFieldsToGRPC(t *testing.T) {
 	assert.Equal(t, int32(15), captured.TimeoutSeconds)
 	assert.Equal(t, "user", captured.ParticipantType)
 }
+
+// TestHandleChat_InvalidAgentIDFormat verifies that agent IDs not matching
+// resourceIDRegex (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$) are rejected at the
+// handler boundary, consistent with handleGetAgent/handleDeleteAgent.
+// (PR #123 review finding F-01)
+func TestHandleChat_InvalidAgentIDFormat(t *testing.T) {
+	srv, _ := testServerWithChat(t, &mockChatExecutor{
+		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
+			return nil, nil
+		},
+	})
+
+	tests := []struct {
+		name    string
+		agentID string
+	}{
+		{"uppercase", "Agent-One"},
+		{"underscore", "agent_one"},
+		{"leading hyphen", "-bad-id"},
+		{"trailing hyphen", "bad-id-"},
+		{"dot separated", "agent.v2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(chatRequest{Message: "hello"})
+			rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/"+tt.agentID+"/chat", body)
+			assert.Equal(t, 400, rec.Code)
+			assert.Contains(t, rec.Body.String(), "invalid agent ID format")
+		})
+	}
+}
+
+// TestHandleChat_MultiByteLengthLimit verifies the message length check counts
+// Unicode characters (runes), not bytes. A 4000-character CJK string is ~12000
+// bytes but should pass the 4000-character limit. (PR #123 review finding F-02)
+func TestHandleChat_MultiByteLengthLimit(t *testing.T) {
+	chatExec := &mockChatExecutor{
+		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
+			return &taskpb.ChatResponse{ReplyStatus: "ok"}, nil
+		},
+	}
+	srv, reg := testServerWithChat(t, chatExec)
+	registerTestAgent(t, reg, "test-agent", "Test Agent")
+
+	// 4000 multi-byte characters (3 bytes each = 12000 bytes).
+	// Should pass: exactly at the character limit.
+	msg := strings.Repeat("あ", chatMaxMessageLength)
+	body, _ := json.Marshal(chatRequest{Message: msg})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
+	assert.Equal(t, 200, rec.Code, "4000 multi-byte chars should be accepted")
+
+	// 4001 multi-byte characters — should be rejected.
+	msg2 := strings.Repeat("あ", chatMaxMessageLength+1)
+	body2, _ := json.Marshal(chatRequest{Message: msg2})
+	rec2 := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body2)
+	assert.Equal(t, 400, rec2.Code, "4001 multi-byte chars should be rejected")
+}

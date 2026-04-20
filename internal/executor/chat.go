@@ -16,6 +16,11 @@ import (
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
+// chatMaxTimeoutSeconds is the maximum timeout a client can request for a chat
+// gRPC call. Prevents resource exhaustion from clients holding connections open
+// indefinitely. (PR #123 review finding F-03)
+const chatMaxTimeoutSeconds = 300
+
 // ChatExecutor sends chat messages to agents via gRPC.
 type ChatExecutor interface {
 	SendChatMessage(ctx context.Context, agentID string, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error)
@@ -96,6 +101,7 @@ func (e *GRPCChatExecutor) SendChatMessage(ctx context.Context, agentID string, 
 	opts = append(opts, e.dialOpts...)
 
 	// TODO(v0.2): connection pooling — reuse connections across calls
+	// TODO(v0.2): mTLS for production gRPC transport
 	conn, err := grpc.NewClient(agent.Address, opts...)
 	if err != nil {
 		span.RecordError(err)
@@ -109,7 +115,14 @@ func (e *GRPCChatExecutor) SendChatMessage(ctx context.Context, agentID string, 
 	// Use request timeout_seconds if provided, otherwise use executor default.
 	timeout := e.timeout
 	if req.GetTimeoutSeconds() > 0 {
-		timeout = time.Duration(req.GetTimeoutSeconds()) * time.Second
+		reqTimeout := time.Duration(req.GetTimeoutSeconds()) * time.Second
+		// Cap at chatMaxTimeoutSeconds to prevent resource exhaustion from
+		// malicious or buggy clients. (PR #123 review finding F-03)
+		maxTimeout := time.Duration(chatMaxTimeoutSeconds) * time.Second
+		if reqTimeout > maxTimeout {
+			reqTimeout = maxTimeout
+		}
+		timeout = reqTimeout
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout)

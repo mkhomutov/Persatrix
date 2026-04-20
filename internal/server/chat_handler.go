@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -41,6 +42,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "agent_id is required", http.StatusBadRequest)
 		return
 	}
+	// Validate agent ID format — defense-in-depth consistent with handleGetAgent
+	// and handleDeleteAgent. Prevents arbitrary strings (path traversal, injection
+	// chars) from reaching the registry layer. (PR #123 review finding F-01)
+	if !resourceIDRegex.MatchString(agentID) {
+		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
+		return
+	}
 
 	var req chatRequest
 	if !decodeJSON(w, r, &req) {
@@ -52,7 +60,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Message) > chatMaxMessageLength {
+	// Use RuneCountInString to count characters, not bytes, so multi-byte
+	// UTF-8 text (emoji, CJK) is measured consistently with the documented
+	// "4000 characters" limit. (PR #123 review finding F-02)
+	if utf8.RuneCountInString(req.Message) > chatMaxMessageLength {
 		writeError(w, "BAD_REQUEST", "message exceeds maximum length of 4000 characters", http.StatusBadRequest)
 		return
 	}
@@ -99,6 +110,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				writeError(w, "DEADLINE_EXCEEDED", "agent did not respond in time", http.StatusGatewayTimeout)
 				return
 			case grpcodes.Internal:
+				// gRPC Internal from agent → HTTP 503 (agent-side failure, not orchestrator)
 				writeError(w, "INTERNAL", "agent internal error", http.StatusServiceUnavailable)
 				return
 			case grpcodes.Unavailable:

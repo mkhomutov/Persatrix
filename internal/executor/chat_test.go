@@ -209,3 +209,32 @@ func TestNewGRPCChatExecutor_NilLogger(t *testing.T) {
 	assert.NotNil(t, exec)
 	assert.NotNil(t, exec.logger)
 }
+
+// TestSendChatMessage_TimeoutCappedAtMax verifies that request timeout_seconds
+// exceeding chatMaxTimeoutSeconds is clamped to the maximum, preventing resource
+// exhaustion from malicious or buggy clients. (PR #123 review finding F-03)
+func TestSendChatMessage_TimeoutCappedAtMax(t *testing.T) {
+	called := make(chan time.Duration, 1)
+	exec, reg := setupChatTestEnv(t, func(ctx context.Context, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			called <- time.Until(deadline)
+		}
+		return &taskpb.ChatResponse{ReplyStatus: "ok"}, nil
+	}, WithChatTimeout(10*time.Second))
+
+	registerHealthyAgent(t, reg, "test-agent")
+
+	// Request 999999 seconds — should be capped to chatMaxTimeoutSeconds (300s).
+	_, err := exec.SendChatMessage(context.Background(), "test-agent", &taskpb.ChatRequest{
+		AgentId:        "test-agent",
+		Message:        "hello",
+		TimeoutSeconds: 999999,
+	})
+	require.NoError(t, err)
+
+	timeout := <-called
+	// Should be close to 300 seconds (chatMaxTimeoutSeconds), not 999999.
+	assert.LessOrEqual(t, timeout, time.Duration(chatMaxTimeoutSeconds+5)*time.Second)
+	assert.Greater(t, timeout, 200*time.Second)
+}
