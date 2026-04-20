@@ -136,6 +136,14 @@
             "allowed_commands": { "type": "array", "items": { "type": "string" } },
             "max_execution_seconds": { "type": "integer" }
           }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read": { "type": "boolean", "description": "Allow reading notes from memory" },
+            "write": { "type": "boolean", "description": "Allow writing/updating/deleting notes in memory" }
+          }
         }
       }
     },
