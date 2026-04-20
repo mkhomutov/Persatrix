@@ -520,6 +520,174 @@ func (x *HealthCheckResponse) GetStatus() HealthStatus {
 	return HealthStatus_UNKNOWN
 }
 
+type ChatRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AgentId         string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // empty → server generates UUID
+	TimeoutSeconds  int32                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`   // 0 → server default (30s)
+	ParticipantType string                 `protobuf:"bytes,6,opt,name=participant_type,json=participantType,proto3" json:"participant_type,omitempty"` // defaults to "user" when empty
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ChatRequest) Reset() {
+	*x = ChatRequest{}
+	mi := &file_task_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatRequest) ProtoMessage() {}
+
+func (x *ChatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatRequest.ProtoReflect.Descriptor instead.
+func (*ChatRequest) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ChatRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ChatRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ChatRequest) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ChatRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ChatRequest) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *ChatRequest) GetParticipantType() string {
+	if x != nil {
+		return x.ParticipantType
+	}
+	return ""
+}
+
+type ChatResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Reply            string                 `protobuf:"bytes,1,opt,name=reply,proto3" json:"reply,omitempty"`
+	SessionId        string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentId          string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Timestamp        int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                        // Unix epoch seconds
+	AgentDisplayName string                 `protobuf:"bytes,5,opt,name=agent_display_name,json=agentDisplayName,proto3" json:"agent_display_name,omitempty"` // populated by orchestrator from Registry
+	ReplyStatus      string                 `protobuf:"bytes,6,opt,name=reply_status,json=replyStatus,proto3" json:"reply_status,omitempty"`                  // "ok" | "empty" | "error"
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ChatResponse) Reset() {
+	*x = ChatResponse{}
+	mi := &file_task_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatResponse) ProtoMessage() {}
+
+func (x *ChatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatResponse.ProtoReflect.Descriptor instead.
+func (*ChatResponse) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ChatResponse) GetReply() string {
+	if x != nil {
+		return x.Reply
+	}
+	return ""
+}
+
+func (x *ChatResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ChatResponse) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ChatResponse) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *ChatResponse) GetAgentDisplayName() string {
+	if x != nil {
+		return x.AgentDisplayName
+	}
+	return ""
+}
+
+func (x *ChatResponse) GetReplyStatus() string {
+	if x != nil {
+		return x.ReplyStatus
+	}
+	return ""
+}
+
 var File_task_proto protoreflect.FileDescriptor
 
 const file_task_proto_rawDesc = "" +
@@ -562,7 +730,23 @@ const file_task_proto_rawDesc = "" +
 	"\x12HealthCheckRequest\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\"I\n" +
 	"\x13HealthCheckResponse\x122\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1a.persatrix.v1.HealthStatusR\x06status*^\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1a.persatrix.v1.HealthStatusR\x06status\"\xce\x01\n" +
+	"\vChatRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12'\n" +
+	"\x0ftimeout_seconds\x18\x05 \x01(\x05R\x0etimeoutSeconds\x12)\n" +
+	"\x10participant_type\x18\x06 \x01(\tR\x0fparticipantType\"\xcd\x01\n" +
+	"\fChatResponse\x12\x14\n" +
+	"\x05reply\x18\x01 \x01(\tR\x05reply\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
+	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus*^\n" +
 	"\n" +
 	"TaskStatus\x12\v\n" +
 	"\aPENDING\x10\x00\x12\v\n" +
@@ -575,11 +759,12 @@ const file_task_proto_rawDesc = "" +
 	"\fHealthStatus\x12\v\n" +
 	"\aUNKNOWN\x10\x00\x12\v\n" +
 	"\aSERVING\x10\x01\x12\x0f\n" +
-	"\vNOT_SERVING\x10\x022\xf6\x01\n" +
+	"\vNOT_SERVING\x10\x022\xc0\x02\n" +
 	"\fAgentService\x12D\n" +
 	"\vExecuteTask\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskResponse\x12L\n" +
 	"\x11ExecuteTaskStream\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskProgress0\x01\x12R\n" +
-	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
+	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponse\x12H\n" +
+	"\x0fSendChatMessage\x12\x19.persatrix.v1.ChatRequest\x1a\x1a.persatrix.v1.ChatResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
 
 var (
 	file_task_proto_rawDescOnce sync.Once
@@ -594,7 +779,7 @@ func file_task_proto_rawDescGZIP() []byte {
 }
 
 var file_task_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_task_proto_goTypes = []any{
 	(TaskStatus)(0),             // 0: persatrix.v1.TaskStatus
 	(HealthStatus)(0),           // 1: persatrix.v1.HealthStatus
@@ -604,27 +789,31 @@ var file_task_proto_goTypes = []any{
 	(*TaskProgress)(nil),        // 5: persatrix.v1.TaskProgress
 	(*HealthCheckRequest)(nil),  // 6: persatrix.v1.HealthCheckRequest
 	(*HealthCheckResponse)(nil), // 7: persatrix.v1.HealthCheckResponse
-	nil,                         // 8: persatrix.v1.TaskRequest.ContextEntry
-	nil,                         // 9: persatrix.v1.TaskResponse.MetadataEntry
+	(*ChatRequest)(nil),         // 8: persatrix.v1.ChatRequest
+	(*ChatResponse)(nil),        // 9: persatrix.v1.ChatResponse
+	nil,                         // 10: persatrix.v1.TaskRequest.ContextEntry
+	nil,                         // 11: persatrix.v1.TaskResponse.MetadataEntry
 }
 var file_task_proto_depIdxs = []int32{
-	8, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
-	3, // 1: persatrix.v1.TaskRequest.config:type_name -> persatrix.v1.TaskConfig
-	0, // 2: persatrix.v1.TaskResponse.status:type_name -> persatrix.v1.TaskStatus
-	9, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
-	0, // 4: persatrix.v1.TaskProgress.status:type_name -> persatrix.v1.TaskStatus
-	1, // 5: persatrix.v1.HealthCheckResponse.status:type_name -> persatrix.v1.HealthStatus
-	2, // 6: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
-	2, // 7: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
-	6, // 8: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
-	4, // 9: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
-	5, // 10: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
-	7, // 11: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	10, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
+	3,  // 1: persatrix.v1.TaskRequest.config:type_name -> persatrix.v1.TaskConfig
+	0,  // 2: persatrix.v1.TaskResponse.status:type_name -> persatrix.v1.TaskStatus
+	11, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
+	0,  // 4: persatrix.v1.TaskProgress.status:type_name -> persatrix.v1.TaskStatus
+	1,  // 5: persatrix.v1.HealthCheckResponse.status:type_name -> persatrix.v1.HealthStatus
+	2,  // 6: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
+	2,  // 7: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
+	6,  // 8: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
+	8,  // 9: persatrix.v1.AgentService.SendChatMessage:input_type -> persatrix.v1.ChatRequest
+	4,  // 10: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
+	5,  // 11: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
+	7,  // 12: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
+	9,  // 13: persatrix.v1.AgentService.SendChatMessage:output_type -> persatrix.v1.ChatResponse
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_task_proto_init() }
@@ -638,7 +827,7 @@ func file_task_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_task_proto_rawDesc), len(file_task_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

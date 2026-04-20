@@ -343,6 +343,8 @@ class EventDispatcher:
         self,
         target_id: str,
         event: AgentEvent,
+        *,
+        execute_actions: bool = True,
     ) -> list[AgentAction]:
         """Dispatch an event to a target agent, execute resulting actions.
 
@@ -352,6 +354,13 @@ class EventDispatcher:
         success/failure) are handled internally and not reflected in
         the return value.
         (F-64-DR2-01: clarify return semantics — pre-execution objects.)
+
+        Args:
+            execute_actions: When ``False`` the agent's decided actions are
+                returned without being passed to ``ActionExecutor.execute()``.
+                This is used by ``SendChatMessage`` to extract the reply text
+                before firing side-effects so that the reply is never lost if
+                a downstream action raises. (OQ 7)
 
         .. note::
 
@@ -424,8 +433,11 @@ class EventDispatcher:
 
         # Execute resulting actions, propagating cascade depth so that
         # SEND_MESSAGE actions inherit the current depth for child dispatches.
-        await self._executor.execute(
-            target_id, actions, cascade_depth=depth + 1,
-        )
+        # Skipped when execute_actions=False so callers (e.g. SendChatMessage
+        # servicer) can inspect actions before firing side-effects. (OQ 7)
+        if execute_actions:
+            await self._executor.execute(
+                target_id, actions, cascade_depth=depth + 1,
+            )
 
         return actions

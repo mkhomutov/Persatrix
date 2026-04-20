@@ -22,6 +22,7 @@ const (
 	AgentService_ExecuteTask_FullMethodName       = "/persatrix.v1.AgentService/ExecuteTask"
 	AgentService_ExecuteTaskStream_FullMethodName = "/persatrix.v1.AgentService/ExecuteTaskStream"
 	AgentService_HealthCheck_FullMethodName       = "/persatrix.v1.AgentService/HealthCheck"
+	AgentService_SendChatMessage_FullMethodName   = "/persatrix.v1.AgentService/SendChatMessage"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -34,6 +35,8 @@ type AgentServiceClient interface {
 	ExecuteTaskStream(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TaskProgress], error)
 	// Health check (grpc.health.v1 compatible).
 	HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error)
+	// Send a chat message to the agent and return a synchronous reply.
+	SendChatMessage(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (*ChatResponse, error)
 }
 
 type agentServiceClient struct {
@@ -83,6 +86,16 @@ func (c *agentServiceClient) HealthCheck(ctx context.Context, in *HealthCheckReq
 	return out, nil
 }
 
+func (c *agentServiceClient) SendChatMessage(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (*ChatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChatResponse)
+	err := c.cc.Invoke(ctx, AgentService_SendChatMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -93,6 +106,8 @@ type AgentServiceServer interface {
 	ExecuteTaskStream(*TaskRequest, grpc.ServerStreamingServer[TaskProgress]) error
 	// Health check (grpc.health.v1 compatible).
 	HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
+	// Send a chat message to the agent and return a synchronous reply.
+	SendChatMessage(context.Context, *ChatRequest) (*ChatResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -111,6 +126,9 @@ func (UnimplementedAgentServiceServer) ExecuteTaskStream(*TaskRequest, grpc.Serv
 }
 func (UnimplementedAgentServiceServer) HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HealthCheck not implemented")
+}
+func (UnimplementedAgentServiceServer) SendChatMessage(context.Context, *ChatRequest) (*ChatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendChatMessage not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -180,6 +198,24 @@ func _AgentService_HealthCheck_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_SendChatMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).SendChatMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_SendChatMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).SendChatMessage(ctx, req.(*ChatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -194,6 +230,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HealthCheck",
 			Handler:    _AgentService_HealthCheck_Handler,
+		},
+		{
+			MethodName: "SendChatMessage",
+			Handler:    _AgentService_SendChatMessage_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

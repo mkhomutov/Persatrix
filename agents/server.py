@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 import time
+import uuid
 
 import aiohttp
 import grpc
@@ -21,8 +22,9 @@ import grpc.aio
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2, agent_message_pb2_grpc, task_pb2, task_pb2_grpc
+from .participant import validate_participant_type
 from .persona_runtime import _LLMPersonaAgent
-from .persona_types import AgentEvent, EventType
+from .persona_types import ActionType, AgentEvent, EventType
 from .server_persona import (
     initialize_persona_agents,
     load_agent,
@@ -36,10 +38,11 @@ logger = logging.getLogger("Persatrix.agent.server")
 
 
 class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
-    """gRPC servicer implementing ExecuteTask, HealthCheck, and ExecuteTaskStream."""
+    """gRPC servicer: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage."""
 
-    def __init__(self, agents: dict[str, BaseAgent]):
+    def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):
         self._agents = agents
+        self._dispatcher = dispatcher or EventDispatcher()
 
     async def ExecuteTask(
         self,
@@ -149,6 +152,168 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # TODO(v0.2): implement streaming execution with TaskProgress messages
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Streaming execution not implemented in v0.1")
+
+    async def SendChatMessage(
+        self,
+        request: task_pb2.ChatRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> task_pb2.ChatResponse:
+        """Handle a synchronous chat message from a human participant.
+
+        Builds a MESSAGE_RECEIVED AgentEvent, dispatches it with
+        ``execute_actions=False`` to extract the reply before firing
+        side-effects, then executes remaining actions. Records the
+        interaction in relationship memory (OQ 11). (RFC 0016, PR 3)
+        """
+        agent_id = request.agent_id
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(f"Agent not found: {agent_id}")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
+
+        # Validate participant_type — default to "user" when empty (OQ 3).
+        participant_type = request.participant_type or "user"
+        try:
+            validate_participant_type(participant_type)
+        except ValueError as exc:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details(str(exc))
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
+
+        # Generate or reuse session_id (OQ 9).
+        session_id = request.session_id or str(uuid.uuid4())
+
+        # Clamp timeout: at least 1s, at most 300s, default 30s (OQ 6/13).
+        raw_timeout = request.timeout_seconds or 30
+        clamped_timeout = max(1, min(raw_timeout, 300))
+
+        user_id = request.user_id
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={
+                "content": request.message,
+                "user_id": user_id,
+                "participant_type": participant_type,
+            },
+            sender_id=user_id or None,
+            metadata={"session_id": session_id},
+        )
+
+        try:
+            # dispatch(execute_actions=False) returns actions without firing
+            # side-effects so we can extract the reply first (OQ 5/7).
+            actions = await asyncio.wait_for(
+                self._dispatcher.dispatch(agent_id, event, execute_actions=False),
+                timeout=clamped_timeout,
+            )
+        except TimeoutError:
+            context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
+            context.set_details("Chat dispatch timed out")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                session_id=session_id,
+                reply="",
+                reply_status="error",
+            )
+        except Exception:
+            logger.exception("SendChatMessage failed for agent %s", agent_id)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Internal error")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                session_id=session_id,
+                reply="",
+                reply_status="error",
+            )
+
+        # Extract reply with priority: user-targeted SEND_MESSAGE → any
+        # SEND_MESSAGE → COMPLETE_TASK → empty (OQ 5).
+        reply, reply_status = _extract_chat_reply(actions, user_id)
+
+        # Execute remaining actions (side-effects) after reply is secured.
+        await self._dispatcher.executor.execute(
+            agent_id, actions, cascade_depth=1,
+        )
+
+        # Record human→agent interaction in relationship memory (OQ 11).
+        if hasattr(agent, "memory") and hasattr(agent.memory, "relationship"):
+            try:
+                await agent.memory.relationship.record_interaction(
+                    other_id=user_id or "unknown",
+                    interaction_type="chat",
+                    outcome=reply or None,
+                    other_participant_type=participant_type,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to record chat interaction for agent %s with %s",
+                    agent_id, user_id, exc_info=True,
+                )
+
+        return task_pb2.ChatResponse(
+            reply=reply,
+            session_id=session_id,
+            agent_id=agent_id,
+            timestamp=int(time.time()),
+            agent_display_name="",  # orchestrator fills from Registry (OQ 8/15)
+            reply_status=reply_status,
+        )
+
+
+# ─── Chat Reply Extraction ────────────────────────────────────
+
+
+def _extract_chat_reply(
+    actions: list,
+    user_id: str,
+) -> tuple[str, str]:
+    """Extract a chat reply text from a list of agent actions.
+
+    Priority (OQ 5):
+    1. ``SEND_MESSAGE`` whose ``mentions`` list contains ``user_id``.
+    2. Any ``SEND_MESSAGE`` action.
+    3. ``COMPLETE_TASK`` result payload.
+    4. Empty string (reply_status="empty").
+
+    Returns ``(reply_text, reply_status)`` where ``reply_status`` is one of
+    ``"ok"``, ``"empty"``.
+    """
+    send_messages = [
+        a for a in actions if a.action_type == ActionType.SEND_MESSAGE
+    ]
+
+    # Priority 1: user-targeted SEND_MESSAGE
+    if user_id:
+        for action in send_messages:
+            mentions = action.payload.get("mentions", [])
+            if user_id in mentions:
+                return action.payload.get("content", ""), "ok"
+
+    # Priority 2: any SEND_MESSAGE
+    if send_messages:
+        return send_messages[0].payload.get("content", ""), "ok"
+
+    # Priority 3: COMPLETE_TASK result
+    complete = next(
+        (a for a in actions if a.action_type == ActionType.COMPLETE_TASK), None
+    )
+    if complete is not None:
+        result = complete.payload.get("result", "")
+        return result, "ok"
+
+    # Priority 4: empty
+    logger.warning("SendChatMessage: no reply action found in agent response")
+    return "", "empty"
 
 
 # ─── ChannelServiceServicer ──────────────────────────────────
@@ -279,7 +444,7 @@ class AgentServer:
     async def start(self) -> None:
         """Start the gRPC server."""
         self._server = grpc.aio.server()
-        servicer = AgentServiceServicer(self.agents)
+        servicer = AgentServiceServicer(self.agents, self._dispatcher)
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, self._server)
         channel_servicer = ChannelServiceServicer(self.agents, self._dispatcher)
         agent_message_pb2_grpc.add_ChannelServiceServicer_to_server(
