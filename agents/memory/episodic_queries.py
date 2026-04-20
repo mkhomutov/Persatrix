@@ -129,7 +129,7 @@ async def recall_fts5(
             """,
             (query, agent_id, min_importance, time.time(), limit),
         ) as cursor:
-            return await cursor.fetchall()
+            return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
         logger.warning(
             "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
@@ -165,7 +165,7 @@ async def recall_like(
         """,
         (agent_id, min_importance, pattern, pattern, time.time(), limit),
     ) as cursor:
-        return await cursor.fetchall()
+        return list(await cursor.fetchall())
 
 
 async def recall_recency(
@@ -188,7 +188,7 @@ async def recall_recency(
         """,
         (agent_id, min_importance, time.time(), limit),
     ) as cursor:
-        return await cursor.fetchall()
+        return list(await cursor.fetchall())
 
 
 # ─── Interaction counter helpers ─────────────────────────────
@@ -289,5 +289,6 @@ async def load_agent_state(
     ) as cursor:
         row = await cursor.fetchone()
     if row and row[0]:
-        return row[0]
+        result: str = row[0]
+        return result
     return None

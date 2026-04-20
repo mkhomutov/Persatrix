@@ -196,7 +196,9 @@ class RelationshipMemory:
         row = await cursor.fetchone()
         await db.commit()
 
-        new_trust = row[0]
+        if row is None:
+            return insert_trust
+        new_trust: float = row[0]
         logger.debug(
             "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
             self._agent_id,

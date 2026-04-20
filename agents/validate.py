@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-import jsonschema
+import jsonschema  # type: ignore[import-untyped]
 import yaml
 
 # Map config filenames to their schema files.
@@ -42,12 +43,13 @@ class ValidationError:
         return f"  ERROR: {loc}: {self.message}"
 
 
-def _load_schema(schemas_dir: Path, schema_file: str) -> dict:
+def _load_schema(schemas_dir: Path, schema_file: str) -> dict[str, Any]:
     """Load and parse a JSON schema file."""
     schema_path = schemas_dir / schema_file
     if not schema_path.exists():
         raise FileNotFoundError(f"Schema not found: {schema_path}")
-    return json.loads(schema_path.read_text(encoding="utf-8"))
+    result: dict[str, Any] = json.loads(schema_path.read_text(encoding="utf-8"))
+    return result
 
 
 def _validate_yaml_against_schema(

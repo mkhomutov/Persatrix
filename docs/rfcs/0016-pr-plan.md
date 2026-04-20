@@ -513,6 +513,8 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 - [x] `make lint` clean
 - [x] `make validate` passes
 
+**Merged**: PR #127 — 2026-04-20
+
 ---
 
 ### PR 7: `feature/v021-rfc0016-close` — RFC Close
@@ -528,18 +530,18 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 | `docs/rfcs/0016-human-participant-chat-interface.md` | Status → `✅ Implemented` |
 | `ROADMAP.md` | RFC 0016 status → `✅ Implemented`, merged count = 7/7, component status updates |
 | `docs/rfcs/0016-pr-plan.md` | All checklists complete |
-| `CHANGELOG.md` | Add v0.2.1 section with RFC 0016 summary entry covering all 7 PRs (deferred from PR 2 review finding #4) |
+| ~~`CHANGELOG.md`~~ | ~~Add v0.2.1 section~~ — deferred to v0.2.1 release process |
 
 #### Key implementation details
 
-This is a documentation-only PR. No code changes — only status markers and tracking tables are updated.
+This PR closes the RFC with status marker updates and also resolves pre-existing mypy type errors across the `agents/` package, enabling strict mypy enforcement in CI (removes `continue-on-error: true`). The mypy fixes are type-annotation-only changes with no runtime behavior impact (except a defensive null guard in `relationship.py`). The `types-grpcio` stub package is added as a dev dependency.
 
 - RFC 0016 header status changes from `🚧 Implementing` to `✅ Implemented`.
 - `ROADMAP.md` RFC Tracker row for 0016 updates status to `✅ Implemented` and merged count to `7/7`.
 - `ROADMAP.md` Component Status tables mark all RFC 0016 components as `✅ Complete` with the final PR reference.
 - `ROADMAP.md` Merged PR History table adds entries for PR 6 and PR 7.
 - `ROADMAP.md` header updates `Last updated` and `Current milestone` lines to reflect RFC 0016 completion.
-- `CHANGELOG.md` adds a v0.2.1 section summarizing the full RFC 0016 feature set: `Participant` Protocol, `UserParticipant`, memory generalization, `SendChatMessage` gRPC, REST chat endpoint, and `persatrix chat` CLI command. The entry is written in past tense assuming PR 7 is the final merge in the sequence.
+- `CHANGELOG.md` update deferred to v0.2.1 release process (not included in this PR).
 - All PR checklists in `0016-pr-plan.md` are checked off, and PR 7 is marked with its merged PR number and date.
 
 #### Tests
@@ -548,10 +550,10 @@ No new tests. `make test`, `make lint`, and `make validate` are run to confirm n
 
 #### PR checklist
 
-- [ ] RFC 0016 status = `✅ Implemented`
-- [ ] ROADMAP.md RFC Tracker updated
-- [ ] ROADMAP.md Component Status tables updated
-- [ ] ROADMAP.md Merged PR History includes all 7 PRs
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes
+- [x] RFC 0016 status = `✅ Implemented`
+- [x] ROADMAP.md RFC Tracker updated
+- [x] ROADMAP.md Component Status tables updated
+- [x] ROADMAP.md Merged PR History includes all 7 PRs
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes

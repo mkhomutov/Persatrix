@@ -7,6 +7,7 @@ truncation, and note injection into the persona agent's context window.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
@@ -91,7 +92,9 @@ class _MemoryContextMixin:
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
 
-    # Also uses _format_event() from _LLMPersonaAgent in __init__.py (via composition).
+    # Stub declaration for method provided by concrete class (via composition).
+    if TYPE_CHECKING:
+        def _format_event(self, event: AgentEvent) -> str: ...
 
     async def _inject_memory_context(
         self, event: AgentEvent, *, query: str | None = None,

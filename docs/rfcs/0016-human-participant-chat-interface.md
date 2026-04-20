@@ -1,7 +1,7 @@
 # RFC 0016 — Human Participant & Chat Interface
 
 **Type**: feature
-**Status**: 🚧 Implementing
+**Status**: ✅ Implemented
 **Author**: Maksim Khomutov
 **Date**: 2026-04-19
 **Accepted**: 2026-04-20
