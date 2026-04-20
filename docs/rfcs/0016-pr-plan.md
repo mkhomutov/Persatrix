@@ -456,6 +456,42 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 | 11 | `ChatRequest` with very long messages or unicode content | Verify serde round-trip with edge-case payloads. |
 | 12 | `session_id` propagation across multiple requests | Verify the CLI stores and reuses the server-allocated session ID (integration-level). |
 
+#### Key implementation details
+
+This PR is a consolidation pass: it addresses all "Should Fix" review findings from PRs 1–5 and fills their documented test gaps. There is no new feature work — every change either fixes a correctness/robustness issue caught during review or adds a missing test that the reviewer identified.
+
+**Python agent fixes (PRs 1–3 findings):**
+
+- `UserStore.get_or_create()` is rewritten to use `INSERT OR IGNORE` followed by an unconditional re-SELECT, eliminating the TOCTOU race. All `UserStore` queries are migrated from `execute_fetchall()` to the `async with db.execute() as cursor: await cursor.fetchone()` pattern used elsewhere in the memory subsystem.
+- `UserStore.update_last_seen()` gains `validate_participant_id()` at its top, aligning with `get_or_create()` which already validates.
+- `_apply_migrations()` replaces the `globals().get()` dispatch with an explicit `_MIGRATION_HANDLERS: dict[int, Callable]` registry for IDE discoverability and refactoring safety.
+- `SendChatMessage` servicer adds an early `if not agent_id:` guard returning `INVALID_ARGUMENT` instead of letting empty IDs fall through to the `NOT_FOUND` path.
+- The `cascade_depth=1` assumption in `executor.execute()` is documented with an inline comment explaining why it is correct for the current chat call path.
+- A new test asserts the exact `AgentEvent` payload structure passed to `dispatch()`, guarding the servicer→dispatcher contract.
+
+**Rust CLI fixes (PR 5 findings):**
+
+- The REPL loop changes `?` propagation on connection errors and JSON deserialization failures to `match` arms that print the error and `continue`, preserving the session and `session_id` state.
+- Spinner clear width is widened from 40 to ≥60 characters (or computed from spinner text length) to cover long agent IDs.
+
+**Test additions:** ~14 new tests across Python and Rust, covering concurrent `get_or_create`, nonexistent participant `update_last_seen`, store re-initialization, long `display_name`, `PersonaAgent` Protocol conformance, unknown migration version, mixed-type decay, event payload assertion, malformed agent IDs, `SEND_MESSAGE` with missing content, concurrent gRPC calls, long/unicode CLI payloads, and session ID propagation.
+
+#### Tests
+
+- Concurrent `get_or_create` calls via `asyncio.gather()` — verifies idempotency of `INSERT OR IGNORE`.
+- `update_last_seen` on nonexistent participant — verifies validation error after fix.
+- `UserStore.initialize()` called twice — verifies close-then-reopen re-initialization.
+- `display_name` with 10,000+ char string — verifies length limit enforcement or graceful storage.
+- `PersonaAgent` satisfies `Participant` Protocol via `isinstance()` check.
+- Unknown migration version raises `RuntimeError` (or `KeyError` after registry refactor).
+- `apply_decay()` with mixed `other_participant_type` values — verifies uniform decay.
+- `AgentEvent` payload structure assertion: correct `payload` keys, `sender_id`, `metadata["session_id"]`.
+- Malformed/empty `agent_id` returns `INVALID_ARGUMENT`.
+- `_extract_chat_reply` with `SEND_MESSAGE` having no `content` key — verifies `.get("content", "")` fallback.
+- Concurrent `SendChatMessage` requests via `t.Run` parallel subtests.
+- `ChatRequest` with very long messages and unicode content — serde round-trip.
+- `session_id` propagation across multiple CLI requests — integration-level.
+
 #### PR checklist
 
 - [ ] All deferred review findings addressed
@@ -492,6 +528,23 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 | `docs/rfcs/0016-human-participant-chat-interface.md` | Status → `✅ Implemented` |
 | `ROADMAP.md` | RFC 0016 status → `✅ Implemented`, merged count = 7/7, component status updates |
 | `docs/rfcs/0016-pr-plan.md` | All checklists complete |
+| `CHANGELOG.md` | Add v0.2.1 section with RFC 0016 summary entry covering all 7 PRs (deferred from PR 2 review finding #4) |
+
+#### Key implementation details
+
+This is a documentation-only PR. No code changes — only status markers and tracking tables are updated.
+
+- RFC 0016 header status changes from `🚧 Implementing` to `✅ Implemented`.
+- `ROADMAP.md` RFC Tracker row for 0016 updates status to `✅ Implemented` and merged count to `7/7`.
+- `ROADMAP.md` Component Status tables mark all RFC 0016 components as `✅ Complete` with the final PR reference.
+- `ROADMAP.md` Merged PR History table adds entries for PR 6 and PR 7.
+- `ROADMAP.md` header updates `Last updated` and `Current milestone` lines to reflect RFC 0016 completion.
+- `CHANGELOG.md` adds a v0.2.1 section summarizing the full RFC 0016 feature set: `Participant` Protocol, `UserParticipant`, memory generalization, `SendChatMessage` gRPC, REST chat endpoint, and `persatrix chat` CLI command.
+- All PR checklists in `0016-pr-plan.md` are checked off, and PR 7 is marked with its merged PR number and date.
+
+#### Tests
+
+No new tests. `make test`, `make lint`, and `make validate` are run to confirm no regressions from documentation-only changes.
 
 #### PR checklist
 
