@@ -199,3 +199,99 @@ class TestParticipantProtocol:
     def test_user_participant_satisfies_protocol(self):
         user = UserParticipant(participant_id="local", display_name="Local User")
         assert isinstance(user, Participant)
+
+    def test_persona_agent_satisfies_protocol(self):
+        """PersonaAgent (via BaseAgent) satisfies the Participant Protocol.
+
+        (PR 6 review fix: PR 1 test gap #8.)
+        """
+        from agents.persona import create_persona_agent
+
+        config = {
+            "name": "Ember Owl",
+            "role": "tester",
+            "model": "test-model",
+            "persona": {
+                "background": "Test",
+                "behavior": {"formality": 0.5},
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=None,
+        )
+        assert isinstance(agent, Participant)
+        assert agent.participant_id == "ember-owl"
+        assert agent.participant_type == "agent"
+        assert agent.display_name == "Ember Owl"
+
+
+# ─── PR 6 review follow-up tests ───────────────────────────
+
+
+class TestUserStoreFollowUps:
+    """Tests for review findings from PR 1 (PR 6 follow-ups)."""
+
+    async def test_concurrent_get_or_create(self, store: UserStore):
+        """Concurrent get_or_create calls are idempotent (INSERT OR IGNORE fix).
+
+        (PR 6 review fix: PR 1 test gap #4.)
+        """
+        import asyncio
+
+        results = await asyncio.gather(
+            store.get_or_create("alice-01", display_name="Alice"),
+            store.get_or_create("alice-01", display_name="Alice v2"),
+            store.get_or_create("alice-01", display_name="Alice v3"),
+        )
+        # All return the same participant_id
+        assert all(r.participant_id == "alice-01" for r in results)
+        # display_name is from the first insert (INSERT OR IGNORE)
+        assert all(r.display_name == results[0].display_name for r in results)
+
+    async def test_update_last_seen_nonexistent(self, store: UserStore):
+        """update_last_seen on nonexistent participant raises ValueError.
+
+        After the validation fix, invalid participant_ids are rejected.
+        For valid IDs that don't exist, the UPDATE is a no-op (0 rows affected).
+        (PR 6 review fix: PR 1 test gap #5.)
+        """
+        # Valid ID format but not in DB — should succeed silently (0 rows updated)
+        await store.update_last_seen("nobody-99")
+        # Invalid format — should raise ValueError from validation
+        with pytest.raises(ValueError, match="Invalid participant_id"):
+            await store.update_last_seen("BAD ID")
+
+    async def test_initialize_twice(self, store: UserStore):
+        """UserStore.initialize() called twice works (close-then-reopen).
+
+        (PR 6 review fix: PR 1 test gap #6.)
+        """
+        await store.get_or_create("alice-01", display_name="Alice")
+        # Re-initialize (close + reopen)
+        await store.initialize()
+        # Data should persist (in-memory DB is lost on reopen, but the
+        # table creation should succeed without error)
+        # For :memory: DBs, data is lost on re-initialize — this test
+        # verifies the re-initialization path doesn't error.
+        user = await store.get("alice-01")
+        # In-memory DB: data is gone after re-initialize (new connection)
+        # This is expected — the test validates the code path, not persistence.
+        assert user is None or user.participant_id == "alice-01"
+        # Verify we can create again after re-init
+        user2 = await store.get_or_create("bob-01", display_name="Bob")
+        assert user2.participant_id == "bob-01"
+
+    async def test_long_display_name(self, store: UserStore):
+        """display_name with 10,000+ chars is stored (no length limit enforced).
+
+        This documents the current behavior. A future PR may add a length
+        limit at the write boundary.
+        (PR 6 review fix: PR 1 test gap #7.)
+        """
+        long_name = "x" * 10001
+        user = await store.get_or_create("alice-01", display_name=long_name)
+        assert user.display_name == long_name
+        # Verify persistence
+        fetched = await store.get("alice-01")
+        assert fetched is not None
+        assert fetched.display_name == long_name

@@ -238,3 +238,36 @@ func TestSendChatMessage_TimeoutCappedAtMax(t *testing.T) {
 	assert.LessOrEqual(t, timeout, time.Duration(chatMaxTimeoutSeconds+5)*time.Second)
 	assert.Greater(t, timeout, 200*time.Second)
 }
+
+// TestSendChatMessage_Concurrent verifies that multiple concurrent
+// SendChatMessage calls complete without races under the -race detector.
+// (PR 6 review fix: PR 4 test gap #6.)
+func TestSendChatMessage_Concurrent(t *testing.T) {
+	exec, reg := setupChatTestEnv(t, func(_ context.Context, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
+		return &taskpb.ChatResponse{
+			Reply:       "Hello, " + req.UserId,
+			SessionId:   "sess-concurrent",
+			AgentId:     req.AgentId,
+			ReplyStatus: "ok",
+		}, nil
+	})
+
+	registerHealthyAgent(t, reg, "test-agent")
+
+	const numParallel = 5
+	t.Run("parallel", func(t *testing.T) {
+		for i := 0; i < numParallel; i++ {
+			t.Run("", func(t *testing.T) {
+				t.Parallel()
+				resp, err := exec.SendChatMessage(context.Background(), "test-agent", &taskpb.ChatRequest{
+					AgentId: "test-agent",
+					UserId:  "local",
+					Message: "concurrent test",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, "ok", resp.ReplyStatus)
+				assert.Equal(t, "Hello, local", resp.Reply)
+			})
+		}
+	})
+}

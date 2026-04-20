@@ -513,8 +513,11 @@ class TestSendChatMessage:
         assert resp.reply == "ok"
         assert resp.reply_status == "ok"
 
-    async def test_empty_agent_id_returns_not_found(self):
-        """Empty agent_id (proto default) → NOT_FOUND."""
+    async def test_empty_agent_id_returns_invalid_argument(self):
+        """Empty agent_id → INVALID_ARGUMENT (not NOT_FOUND).
+
+        (PR 6 review fix: PR 3 finding #2.)
+        """
         servicer = _make_servicer([])
         context = _mock_context()
 
@@ -522,5 +525,82 @@ class TestSendChatMessage:
             _chat_request(agent_id=""), context,
         )
 
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        context.set_details.assert_called_once_with("agent_id is required")
+        assert resp.reply_status == "error"
+
+
+# ─── PR 6 review follow-up tests ────────────────────────────
+
+
+class TestChatServicerFollowUps:
+    """Tests for review findings from PRs 1–5 (PR 6 follow-ups)."""
+
+    async def test_agent_event_payload_structure(self):
+        """Verify the AgentEvent payload passed to dispatch() has correct structure.
+
+        Asserts payload keys (content, user_id, participant_type), sender_id,
+        and metadata["session_id"].
+        (PR 6 review fix: PR 3 finding #1 / test gap #9.)
+        """
+        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]})]
+        servicer = _make_servicer(actions)
+        context = _mock_context()
+
+        await servicer.SendChatMessage(
+            _chat_request(
+                agent_id="ember-owl",
+                user_id="local",
+                message="hello world",
+                session_id="sess-abc",
+                participant_type="user",
+            ),
+            context,
+        )
+
+        # Inspect dispatch() call arguments
+        dispatch_call = servicer._dispatcher.dispatch
+        dispatch_call.assert_called_once()
+        call_args = dispatch_call.call_args
+
+        agent_id_arg = call_args.args[0]
+        event_arg = call_args.args[1]
+
+        assert agent_id_arg == "ember-owl"
+        assert event_arg.payload["content"] == "hello world"
+        assert event_arg.payload["user_id"] == "local"
+        assert event_arg.payload["participant_type"] == "user"
+        assert event_arg.sender_id == "local"
+        assert event_arg.metadata["session_id"] == "sess-abc"
+
+        # execute_actions=False keyword argument
+        assert call_args.kwargs.get("execute_actions") is False
+
+    async def test_malformed_agent_id_returns_not_found(self):
+        """Agent ID with special chars that doesn't exist → NOT_FOUND.
+
+        Valid (non-empty) agent IDs that don't match any registered agent
+        return NOT_FOUND. Format validation is left to the orchestrator layer.
+        (PR 6 review fix: PR 3 test gap #10.)
+        """
+        servicer = _make_servicer([], agent_id="ember-owl")
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(agent_id="no-such-agent"), context,
+        )
+
         context.set_code.assert_called_once_with(grpc.StatusCode.NOT_FOUND)
         assert resp.reply_status == "error"
+
+    def test_extract_reply_send_message_missing_content(self):
+        """SEND_MESSAGE with no 'content' key falls back to empty string via .get().
+
+        (PR 6 review fix: PR 3 test gap #11.)
+        """
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"mentions": ["local"]}),
+        ]
+        reply, status = _extract_chat_reply(actions, "local")
+        assert reply == ""
+        assert status == "ok"

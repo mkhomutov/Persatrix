@@ -95,10 +95,19 @@ pub(crate) async fn cmd_chat(
         // Spawn a spinner task that activates after ~2 seconds
         let spinner_active = Arc::new(AtomicBool::new(false));
         let spinner_done = Arc::new(AtomicBool::new(false));
+        let spinner_text = format!("Waiting for {}...", agent_id);
+        // Clear width computed dynamically from spinner text length (spinner
+        // prefix "⠋ " is 2 display chars) to handle long agent IDs without
+        // a hardcoded magic number. (PR 6 review fix: PR 5 finding #3.)
+        // NOTE: `str::len()` returns byte count, which equals display width
+        // because agent IDs are pure ASCII per the project convention
+        // (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`). If the ID pattern is ever
+        // relaxed to allow non-ASCII, switch to a unicode-width crate.
+        let clear_width = spinner_text.len() + 2;
         let spinner_handle = {
             let active = Arc::clone(&spinner_active);
             let done = Arc::clone(&spinner_done);
-            let aid = agent_id.to_string();
+            let text = spinner_text.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 if done.load(Ordering::SeqCst) {
@@ -110,10 +119,10 @@ pub(crate) async fn cmd_chat(
                 loop {
                     if done.load(Ordering::SeqCst) {
                         // Clear spinner line
-                        eprint!("\r{}\r", " ".repeat(40));
+                        eprint!("\r{}\r", " ".repeat(clear_width));
                         return;
                     }
-                    eprint!("\r{} Waiting for {}...", frames[i % frames.len()], aid);
+                    eprint!("\r{} {}", frames[i % frames.len()], text);
                     i += 1;
                     tokio::time::sleep(Duration::from_millis(80)).await;
                 }
@@ -126,10 +135,19 @@ pub(crate) async fn cmd_chat(
         spinner_done.store(true, Ordering::SeqCst);
         spinner_handle.abort();
         if spinner_active.load(Ordering::SeqCst) {
-            eprint!("\r{}\r", " ".repeat(40));
+            eprint!("\r{}\r", " ".repeat(clear_width));
         }
 
-        let resp = resp.map_err(|e| format!("connection failed: {e}"))?;
+        // Connection error: print and continue instead of propagating,
+        // preserving the session and session_id state.
+        // (PR 6 review fix: PR 5 finding #1.)
+        let resp = match resp {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{} connection failed: {e}", "error:".red().bold());
+                continue;
+            }
+        };
 
         if !resp.status().is_success() {
             let msg = api_error_message(resp).await;
@@ -137,10 +155,16 @@ pub(crate) async fn cmd_chat(
             continue;
         }
 
-        let chat_resp: ChatResponse = resp
-            .json()
-            .await
-            .map_err(|e| format!("invalid response: {e}"))?;
+        // JSON deserialization error: print and continue instead of
+        // propagating, preserving the session and session_id state.
+        // (PR 6 review fix: PR 5 finding #2.)
+        let chat_resp: ChatResponse = match resp.json().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{} invalid response: {e}", "error:".red().bold());
+                continue;
+            }
+        };
 
         // Capture session_id from first response
         if session_id.is_empty() && !chat_resp.session_id.is_empty() {

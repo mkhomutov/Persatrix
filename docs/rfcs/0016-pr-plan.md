@@ -494,24 +494,24 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 
 #### PR checklist
 
-- [ ] All deferred review findings addressed
-- [ ] PR 1 findings: `get_or_create` uses `INSERT OR IGNORE` (idempotent)
-- [ ] PR 1 findings: query style aligned to cursor context manager pattern
-- [ ] PR 1 findings: `update_last_seen` validates `participant_id`
-- [ ] PR 1 findings: 5 new tests added (concurrent get_or_create, update_last_seen nonexistent, re-init, long display_name, PersonaAgent conformance)
-- [ ] PR 2 findings: migration handler dispatch uses explicit registry dict instead of `globals().get()`
-- [ ] PR 2 findings: 2 new tests added (unknown migration version RuntimeError, apply_decay with mixed participant types)
-- [ ] PR 3 findings: test verifies `AgentEvent` payload structure passed to `dispatch()`
-- [ ] PR 3 findings: empty `agent_id` returns `INVALID_ARGUMENT` instead of `NOT_FOUND`
-- [ ] PR 3 findings: `cascade_depth=1` assumption documented or derived from context
-- [ ] PR 3 findings: 3 new tests added (event payload assertion, malformed agent_id, SEND_MESSAGE missing content key)
-- [ ] PR 4 findings: 1 new test added (concurrent SendChatMessage)
-- [ ] PR 5 findings: connection error in REPL loop catches and `continue`s instead of propagating
-- [ ] PR 5 findings: JSON deserialization error in REPL loop catches and `continue`s instead of propagating
-- [ ] PR 5 findings: spinner clear width computed dynamically from spinner text length
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes
+- [x] All deferred review findings addressed
+- [x] PR 1 findings: `get_or_create` uses `INSERT OR IGNORE` (idempotent)
+- [x] PR 1 findings: query style aligned to cursor context manager pattern
+- [x] PR 1 findings: `update_last_seen` validates `participant_id`
+- [x] PR 1 findings: 5 new tests added (concurrent get_or_create, update_last_seen nonexistent, re-init, long display_name, PersonaAgent conformance)
+- [x] PR 2 findings: migration handler dispatch uses explicit registry dict instead of `globals().get()`
+- [x] PR 2 findings: 2 new tests added (unknown migration version RuntimeError, apply_decay with mixed participant types)
+- [x] PR 3 findings: test verifies `AgentEvent` payload structure passed to `dispatch()`
+- [x] PR 3 findings: empty `agent_id` returns `INVALID_ARGUMENT` instead of `NOT_FOUND`
+- [x] PR 3 findings: `cascade_depth=1` assumption documented or derived from context
+- [x] PR 3 findings: 3 new tests added (event payload assertion, malformed agent_id, SEND_MESSAGE missing content key)
+- [x] PR 4 findings: 1 new test added (concurrent SendChatMessage)
+- [x] PR 5 findings: connection error in REPL loop catches and `continue`s instead of propagating
+- [x] PR 5 findings: JSON deserialization error in REPL loop catches and `continue`s instead of propagating
+- [x] PR 5 findings: spinner clear width computed dynamically from spinner text length
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes
 
 ---
 
