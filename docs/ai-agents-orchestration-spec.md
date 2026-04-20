@@ -698,12 +698,12 @@ external_input:
 | Error handling           | Circuit breakers, fallback chains, dead letter queue for failed tasks |
 | Health checks            | gRPC health protocol for agents, liveness/readiness for orchestrator |
 | Graceful shutdown        | Drain mode, task handoff, state persistence on SIGTERM |
-| Config validation        | JSON Schema validation for all YAML configs, `orch validate` command |
+| Config validation        | JSON Schema validation for all YAML configs, `persatrix validate` command |
 | OTEL instrumentation     | Traces + metrics with GenAI semconv for all LLM/tool calls |
 | Cost tracking            | Token usage per agent/workflow, estimated USD, budget alerts |
 | Structured logging       | JSON logs with OTEL trace correlation                |
-| Testing framework        | Mock LLM replay, sandbox mode, `orch test` command   |
-| CLI                      | `orch run`, `orch validate`, `orch test`, `orch agents`, `orch status` |
+| Testing framework        | Mock LLM replay, sandbox mode, `persatrix test` command   |
+| CLI                      | `persatrix run`, `persatrix validate`, `persatrix test`, `persatrix agents`, `persatrix status` |
 | Local execution          | Single-machine, in-process agents                    |
 | YAML-based config        | Versioned schemas for agents, workflows, MCP servers |
 
@@ -1110,9 +1110,9 @@ Persatrix/
 
 ### Phase 4 — CLI, Testing & Polish (Weeks 7–8)
 - [ ] Rust CLI: `run`, `validate`, `test`, `agents`, `status`, `logs`
-- [ ] `orch validate`: JSON Schema validation for all YAML configs
+- [ ] `persatrix validate`: JSON Schema validation for all YAML configs
 - [ ] Testing framework: mock LLM replay, sandbox mode
-- [ ] `orch test`: run agent unit tests, workflow integration tests
+- [ ] `persatrix test`: run agent unit tests, workflow integration tests
 - [ ] Structured JSON logging with OTEL trace correlation
 - [ ] Error messages and developer experience polish
 - [ ] End-to-end integration tests (including MCP + permission + resilience scenarios)
@@ -1127,9 +1127,9 @@ Persatrix/
 All YAML configs are validated against JSON Schema before the system starts:
 
 ```bash
-orch validate                              # validate all configs
-orch validate --config agents.yaml         # validate a specific file
-orch validate --strict                     # fail on warnings too
+persatrix validate                              # validate all configs
+persatrix validate --config agents.yaml         # validate a specific file
+persatrix validate --strict                     # fail on warnings too
 ```
 
 JSON Schema definitions live in `schemas/` and are versioned:
@@ -1145,8 +1145,8 @@ agent:
 Migration tooling for schema upgrades:
 
 ```bash
-orch migrate --from 0.1 --to 0.2           # upgrade config files
-orch migrate --dry-run                      # show what would change
+persatrix migrate --from 0.1 --to 0.2           # upgrade config files
+persatrix migrate --dry-run                      # show what would change
 ```
 
 ### 12.2 Health Checks & Liveness
@@ -1269,11 +1269,11 @@ testing:
 ```
 
 ```bash
-orch test                                    # run all tests
-orch test --agent code-writer               # test a single agent
-orch test --workflow feature-builder        # test a workflow end-to-end
-orch test --persona ember-owl              # test persona consistency
-orch test --record                           # record LLM responses for replay
+persatrix test                                    # run all tests
+persatrix test --agent code-writer               # test a single agent
+persatrix test --workflow feature-builder        # test a workflow end-to-end
+persatrix test --persona ember-owl              # test persona consistency
+persatrix test --record                           # record LLM responses for replay
 ```
 
 ### 12.6 Human Participants
@@ -1314,8 +1314,8 @@ When a message is sent to a human agent, the framework:
 Change agent configuration without restarting the process:
 
 ```bash
-orch agent reload ember-owl                # reload persona, tools, permissions
-orch agent reload ember-owl --config new-ember.yaml  # load from specific file
+persatrix agent reload ember-owl                # reload persona, tools, permissions
+persatrix agent reload ember-owl --config new-ember.yaml  # load from specific file
 ```
 
 Hot-reloadable fields: system prompt, persona, tools, permissions, temperature,
@@ -1363,16 +1363,16 @@ state:
   checkpoints:
     format: "sqlite_snapshot"               # single file, portable
     include_llm_cache: true                 # include cached LLM responses
-    # Restore: orch restore checkpoint-2026-04-08-1200.db
+    # Restore: persatrix restore checkpoint-2026-04-08-1200.db
 ```
 
 ```bash
-orch export --output snapshot.json          # export full state
-orch export --anonymize --output research-data.json
-orch restore snapshot.json                  # restore from export
-orch checkpoint                             # create named checkpoint
-orch checkpoint list                        # list available checkpoints
-orch restore --checkpoint "2026-04-08-1200" # restore from checkpoint
+persatrix export --output snapshot.json          # export full state
+persatrix export --anonymize --output research-data.json
+persatrix restore snapshot.json                  # restore from export
+persatrix checkpoint                             # create named checkpoint
+persatrix checkpoint list                        # list available checkpoints
+persatrix restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 ```
 
 ---
@@ -1417,6 +1417,6 @@ orch restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 10. All tool invocations are recorded in the audit log
 11. Every workflow execution emits OTEL-compliant traces viewable in Jaeger or any OTEL backend
 12. Token usage and estimated cost are tracked per agent, per workflow, and exportable
-13. `orch validate` catches invalid YAML config before any agent runs
-14. `orch test --workflow <name>` runs end-to-end test with mock LLM responses
+13. `persatrix validate` catches invalid YAML config before any agent runs
+14. `persatrix test --workflow <name>` runs end-to-end test with mock LLM responses
 15. Agent health checks detect and restart crashed agent processes within 30 seconds

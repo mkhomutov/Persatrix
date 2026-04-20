@@ -39,7 +39,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "THIRD_PARTY_NOTICES.md"
 SELF_NAMES = {
     "github.com/mkhomutov/persatrix",
     "persatrix-agents",
-    "orch",
+    "persatrix",
 }
 
 _OR_RE = re.compile(r"\s+OR\s+", re.IGNORECASE)

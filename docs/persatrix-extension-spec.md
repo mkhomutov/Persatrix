@@ -1076,7 +1076,7 @@ with it.
 
 ```yaml
 # Migration command
-orch agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
+persatrix agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
 ```
 
 ### E6.4 Communication Over the Mesh
@@ -1322,20 +1322,20 @@ deployment:
 
 ```bash
 # Node management
-orch node register --config node.yaml
-orch node list
-orch node status node-tokyo-01
-orch node drain node-tokyo-01          # gracefully migrate agents off this node
+persatrix node register --config node.yaml
+persatrix node list
+persatrix node status node-tokyo-01
+persatrix node drain node-tokyo-01          # gracefully migrate agents off this node
 
 # Agent placement
-orch agent deploy ember-owl --to node-aws-01
-orch agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
-orch agent locate ember-owl           # → ember-owl@node-aws-01
+persatrix agent deploy ember-owl --to node-aws-01
+persatrix agent migrate orbit-kite --from node-tokyo-01 --to node-aws-02
+persatrix agent locate ember-owl           # → ember-owl@node-aws-01
 
 # Mesh diagnostics
-orch mesh status                       # show all nodes, latencies, health
-orch mesh ping node-tokyo-01           # measure RTT to a node
-orch mesh trace ember-owl orbit-kite # show routing path between two agents
+persatrix mesh status                       # show all nodes, latencies, health
+persatrix mesh ping node-tokyo-01           # measure RTT to a node
+persatrix mesh trace ember-owl orbit-kite # show routing path between two agents
 ```
 
 ### E6.8 Sub-Agents in a Distributed Context
@@ -1673,13 +1673,13 @@ The replay data is structured for both **programmatic access** (API/CLI) and
 
 ```bash
 # CLI replay
-orch replay session-abc123                 # step-by-step in terminal
-orch replay session-abc123 --agent sarah   # filter to one agent's perspective
-orch replay session-abc123 --from step:15  # start from a specific step
-orch replay session-abc123 --export json   # export for external tools
+persatrix replay session-abc123                 # step-by-step in terminal
+persatrix replay session-abc123 --agent sarah   # filter to one agent's perspective
+persatrix replay session-abc123 --from step:15  # start from a specific step
+persatrix replay session-abc123 --export json   # export for external tools
 
 # Export to AgentOps dashboard
-orch export session-abc123 --format agentops --endpoint https://app.agentops.ai
+persatrix export session-abc123 --format agentops --endpoint https://app.agentops.ai
 ```
 
 ### E8.5 Evaluation & Quality Gates
@@ -2752,7 +2752,7 @@ embeddings:
 
 ## E11. Use Case Blueprints
 
-Predefined configurations that users can `orch init --blueprint <name>` to
+Predefined configurations that users can `persatrix init --blueprint <name>` to
 scaffold a complete agent society.
 
 ### E11.1 Blueprint: Software Team
@@ -2927,8 +2927,8 @@ Also includes foundational observability:
 | Trust domains                  | Per-domain permission boundaries (full / restricted / isolated) |
 | Latency-aware routing          | Affinity rules, co-locate frequently interacting agents |
 | Offline handling               | Message queuing for disconnected nodes, agent status broadcasts |
-| Agent migration                | `orch agent migrate` with state transfer             |
-| Mesh CLI                       | `orch node`, `orch mesh status`, `orch mesh trace`   |
+| Agent migration                | `persatrix agent migrate` with state transfer             |
+| Mesh CLI                       | `persatrix node`, `persatrix mesh status`, `persatrix mesh trace`   |
 | Data residency rules           | Pin agents/channels to regions, block cross-region transit |
 | A2A server mode                | Expose persona agents as A2A-compatible remote agents with Agent Cards |
 | A2A client mode                | Discover and delegate to external A2A agents         |

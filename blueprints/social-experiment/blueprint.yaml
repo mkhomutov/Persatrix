@@ -1,5 +1,5 @@
 # Blueprint: Social Experiment
-# Usage: orch init --blueprint social-experiment
+# Usage: persatrix init --blueprint social-experiment
 
 blueprint:
   id: "social-experiment"

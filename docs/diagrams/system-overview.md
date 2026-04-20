@@ -39,7 +39,7 @@ graph LR
 
     DB[(memory.db<br/>SQLite + FTS5)]
 
-    User -->|orch run| CLI
+    User -->|persatrix run| CLI
     CLI -->|HTTP/JSON| REST
     REST --> PLAN
     REST --> STATE

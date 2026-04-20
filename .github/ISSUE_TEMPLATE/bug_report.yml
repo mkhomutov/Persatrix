@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: Persatrix version
-      description: "Output of `orch --version`, the released tag, or the commit you built from."
+      description: "Output of `persatrix --version`, the released tag, or the commit you built from."
       placeholder: "v0.2.0"
     validations:
       required: true

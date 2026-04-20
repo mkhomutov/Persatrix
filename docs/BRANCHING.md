@@ -180,7 +180,7 @@ Week 1-2: Foundation
     ├─ feature/v01-base-agent-interface       # Python BaseAgent + gRPC server
     ├─ feature/v01-executor-grpc              # Go gRPC executor
     ├─ feature/v01-otel-foundation            # OTEL tracer + exporter setup
-    └─ feature/v01-config-validation          # JSON Schema + orch validate
+    └─ feature/v01-config-validation          # JSON Schema + persatrix validate
 
 Week 3-4: Tools & MCP
     ├─ feature/v01-tools-builtin              # file_read, file_write, shell_exec
@@ -200,7 +200,7 @@ Week 5-6: Workflows & Security
     └─ feature/v01-cost-tracking              # token counting + budget alerts
 
 Week 7-8: CLI & Polish
-    ├─ feature/v01-cli-core                   # orch run, validate, test, status
+    ├─ feature/v01-cli-core                   # persatrix run, validate, test, status
     ├─ feature/v01-testing-framework          # mock LLM replay, sandbox mode
     ├─ feature/v01-health-checks              # gRPC health, liveness/readiness
     ├─ feature/v01-graceful-shutdown           # drain, task handoff
@@ -257,7 +257,7 @@ Week 13-14: Optimization & Polish
     ├─ feature/v03-a2a-client                 # discover + delegate to external
     ├─ feature/v03-wire-compression           # gRPC zstd, delta sync
     ├─ feature/v03-platform-exporters         # AgentOps, Langfuse, Datadog
-    ├─ feature/v03-mesh-cli                   # orch node, mesh status, trace
+    ├─ feature/v03-mesh-cli                   # persatrix node, mesh status, trace
     └─ feature/v03-data-residency             # region pinning, transit rules
 
   release/0.3.0
@@ -402,7 +402,7 @@ Semantic versioning: `MAJOR.MINOR.PATCH`
 7. Build and publish artifacts:
    - Go binary (persatrix-server)
    - Python package (Persatrix-agents on PyPI)
-   - Rust binary (orch CLI)
+   - Rust binary (persatrix CLI)
    - Docker images (ghcr.io/Persatrix/*)
 8. GitHub Release with changelog (auto-generated from conventional commits)
 ```
@@ -491,7 +491,7 @@ final squashed commit on `main` matters.
 **Q: How do I handle a breaking change to the agent YAML schema?**
 A: Breaking changes should only happen at MINOR version boundaries (v0.2.0,
 v0.3.0). Bump the `schema_version` field, add a migration path in
-`orch migrate`, and document the change in the changelog. Never ship a
+`persatrix migrate`, and document the change in the changelog. Never ship a
 breaking schema change in a PATCH release.
 
 **Q: What if a v0.2 feature is ready but v0.1 hasn't shipped yet?**
