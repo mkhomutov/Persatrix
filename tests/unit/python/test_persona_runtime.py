@@ -3181,3 +3181,74 @@ class TestMemoryNamespace:
         assert hasattr(agent.memory, "relationship")
         await agent.close_memory()
 
+
+# ─── User-Identity Memory Instruction Tests ────────────────────────────────────
+
+
+class TestUserIdentitySystemPromptInstruction:
+    """Verify _build_system_prompt contains the user-identity instruction added
+    to help the agent remember who it is talking to.
+
+    The instruction tells the agent to:
+    - check stored notes on first contact via recall_notes
+    - store the user's real name/role immediately via store_note with topic
+      'contact:<user_id>' when the user identifies themselves
+    """
+
+    async def _make_agent(self) -> _LLMPersonaAgent:
+        agent = create_persona_agent(
+            agent_id="ember-owl",
+            config=_PERSONA_CONFIG,
+            llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+        return agent
+
+    async def test_user_identity_recall_instruction_present(self):
+        """System prompt instructs agent to call recall_notes at conversation start."""
+        agent = await self._make_agent()
+        prompt = agent._build_system_prompt()
+        assert "recall_notes" in prompt
+        # The instruction should mention querying by user_id to look up existing
+        # contact notes before asking who the user is.
+        assert "user_id" in prompt
+        await agent.close_memory()
+
+    async def test_user_identity_store_note_instruction_present(self):
+        """System prompt instructs agent to call store_note with contact:<user_id> topic."""
+        agent = await self._make_agent()
+        prompt = agent._build_system_prompt()
+        assert "contact:<user_id>" in prompt
+        await agent.close_memory()
+
+    async def test_user_identity_instruction_is_part_of_memory_section(self):
+        """User-identity instruction lives in the same memory-tools paragraph."""
+        agent = await self._make_agent()
+        prompt = agent._build_system_prompt()
+        # Both the memory-tool intro and the user-identity guidance should be in
+        # the same contiguous block (no blank line between them).
+        mem_tool_pos = prompt.index("MUST call store_note")
+        contact_pos = prompt.index("contact:<user_id>")
+        # They should be within 600 chars of each other (same paragraph).
+        assert abs(mem_tool_pos - contact_pos) < 600, (
+            "User-identity instruction appears to be separated from the "
+            "memory-tools instruction"
+        )
+        await agent.close_memory()
+
+    async def test_user_identity_instruction_absent_when_no_memory_tools(self):
+        """When an agent has no memory tools the whole block is omitted."""
+        agent = await self._make_agent()
+        agent._memory_tools = []
+        prompt = agent._build_system_prompt()
+        assert "contact:<user_id>" not in prompt
+        await agent.close_memory()
+
+    async def test_user_id_attribute_described_in_prompt(self):
+        """The prompt tells the agent where to find the sender's user_id."""
+        agent = await self._make_agent()
+        prompt = agent._build_system_prompt()
+        # The instruction references the user_id attribute from the message delimiter
+        assert "user_id" in prompt
+        await agent.close_memory()
+
