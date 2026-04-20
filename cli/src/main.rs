@@ -5,13 +5,14 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
+use commands::chat::cmd_chat;
 use commands::logs::cmd_logs;
 use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
 
 /// Persatrix CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
-#[command(name = "orch", version, about)]
+#[command(name = "persatrix", version, about)]
 struct Cli {
     /// Orchestrator server address
     #[arg(long, default_value = "http://localhost:8080", global = true)]
@@ -76,6 +77,14 @@ enum Commands {
         /// Filter by agent
         #[arg(long)]
         agent: Option<String>,
+    },
+    /// Chat with a persona agent
+    Chat {
+        /// Agent ID to chat with
+        agent_id: String,
+        /// User identity for the conversation
+        #[arg(long, default_value = "local")]
+        user: String,
     },
     /// Manage blueprints
     Init {
@@ -226,6 +235,7 @@ async fn main() {
             follow,
             agent,
         } => cmd_logs(&client, server, &execution_id, follow, agent.as_deref()).await,
+        Commands::Chat { agent_id, user } => cmd_chat(&client, server, &agent_id, &user).await,
         Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
         Commands::Test {
             agent,

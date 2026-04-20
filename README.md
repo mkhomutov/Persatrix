@@ -101,7 +101,7 @@ docker compose up -d
 
 ```bash
 # Via CLI
-orch run workflows/feature-builder.yaml --input "Build a REST API for user management"
+persatrix run workflows/feature-builder.yaml --input "Build a REST API for user management"
 
 # Via API
 curl -X POST http://localhost:8080/api/v1/workflows/run \
@@ -123,10 +123,10 @@ make run
 make run-agent AGENT=ember-owl
 
 # 3. Ping it through the orchestrator
-orch agent test --persona ember-owl
+persatrix agent test --persona ember-owl
 
 # 4. Inspect its registration and status
-orch agent info ember-owl
+persatrix agent info ember-owl
 ```
 
 Live tick-loop output — decisions, memory writes, tool calls — streams in the

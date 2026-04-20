@@ -298,15 +298,17 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `Chat` command variant in enum
-- [ ] REPL loop reads stdin, sends POST, prints reply
-- [ ] `--user` flag with `"local"` default
-- [ ] `session_id` maintained across requests
-- [ ] Spinner after ~2s
-- [ ] Empty reply handling (`reply_status == "empty"`)
-- [ ] `exit` and Ctrl-C terminate cleanly
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `Chat` command variant in enum
+- [x] REPL loop reads stdin, sends POST, prints reply
+- [x] `--user` flag with `"local"` default
+- [x] `session_id` maintained across requests
+- [x] Spinner after ~2s
+- [x] Empty reply handling (`reply_status == "empty"`)
+- [x] `exit` and Ctrl-C terminate cleanly
+
+**Merged**: PR #125 — 2026-04-20
 
 ---
 
@@ -420,9 +422,39 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 |---|-------------|--------|
 | 7 | PR is +1,134 / -5 lines, exceeding the 500-line BRANCHING.md limit. | ~794 lines are tests, ~15 are auto-generated FILEMAP. Production code is ~326 lines (within spirit of the rule). Acceptable given test-heavy composition. Note for future PR sizing. |
 
-##### From PR 5 review
+##### From PR 5 review (PR #125)
 
-_TBD — populated after PR 5 review._
+**Should Fix:**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 1 | `cli/src/commands/chat.rs` | Connection error terminates REPL. `resp.map_err(...)?` at line 132 propagates transient network errors (timeout, refused), killing the session and destroying accumulated `session_id` state. HTTP non-success is handled gracefully (lines 134–137, `continue`), but connection-level failures exit the loop. | Change `?` to `match` with `Err(e)` arm that prints error and `continue`s, preserving the session. |
+| 2 | `cli/src/commands/chat.rs` | Malformed JSON response terminates REPL. `resp.json().await.map_err(...)?` at lines 140–143 exits on deserialization failure. A server returning 200 with malformed body kills the session. | Same pattern — catch error, print, `continue`. |
+| 3 | `cli/src/commands/chat.rs` | Spinner clear width hardcoded at 40 chars (lines 113, 129). `" ".repeat(40)` may not clear the full spinner line if `agent_id` is long. With the resource-ID pattern the practical max is bounded, but "⠋ Waiting for {35-char-id}..." would be ~53 chars. | Increase to `" ".repeat(60)` or compute from actual spinner text length. |
+
+**Nice to Have (follow-up):**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 4 | `scripts/bump_version.py` | `sys.exit(1)` inside `bump()` on invalid semver instead of raising an exception. Prevents unit testing the validation path. | Refactor to raise `ValueError`; add unit tests for semver validation, pattern matching, and dry-run behavior. |
+| 5 | CLI | No `--session` flag for resuming previous chats. User cannot reconnect to a previous conversation by passing a session ID. | Add `--session <id>` optional arg: `persatrix chat nexus-7 --session abc-123`. |
+| 6 | `docs/manual-tests/` | No formal MT-CLI-002 document for the chat REPL manual test. PR description mentions manual testing but doesn't create the document. | Create `MT-CLI-002.md` following the existing manual test template. |
+| 7 | CLI | No SSE/streaming support for chat responses. Long LLM calls show only a spinner; incremental output would improve UX. | Consider SSE streaming in a future PR. The spinner addresses the UX gap in the interim. |
+
+**Advisory notes (no action needed):**
+
+| # | Observation | Context |
+|---|-------------|--------|
+| 8 | `_client` parameter unused in `cmd_chat()` (line 13). Function creates its own `reqwest::Client` with 300s timeout instead of using the shared one. | Underscore prefix makes intent clear. Consistent with other commands' signatures. Not a bug. |
+| 9 | `scripts/bump_version.py` + `docs/guides/version-bump.md` + `bump-version` Makefile target are tangential to the PR's stated scope (chat command + binary rename). | Useful additions but expand review surface. Acceptable given they shipped together with the binary rename. |
+| 10 | PR is +622 / -121 lines. Production Rust code is ~169 lines; the rest is doc rename sweep, serde tests, and bump script. | Within spirit of the 500-line rule given composition. |
+
+**Test gaps to fill:**
+
+| # | Test | Purpose |
+|---|------|---------|
+| 11 | `ChatRequest` with very long messages or unicode content | Verify serde round-trip with edge-case payloads. |
+| 12 | `session_id` propagation across multiple requests | Verify the CLI stores and reuses the server-allocated session ID (integration-level). |
 
 #### PR checklist
 
@@ -438,6 +470,9 @@ _TBD — populated after PR 5 review._
 - [ ] PR 3 findings: `cascade_depth=1` assumption documented or derived from context
 - [ ] PR 3 findings: 3 new tests added (event payload assertion, malformed agent_id, SEND_MESSAGE missing content key)
 - [ ] PR 4 findings: 1 new test added (concurrent SendChatMessage)
+- [ ] PR 5 findings: connection error in REPL loop catches and `continue`s instead of propagating
+- [ ] PR 5 findings: JSON deserialization error in REPL loop catches and `continue`s instead of propagating
+- [ ] PR 5 findings: spinner clear width widened (≥60 chars or computed from text length)
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes

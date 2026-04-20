@@ -24,7 +24,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 
 | ID | Title | Status |
 |----|-------|--------|
-| [MT-CLI-001](MT-CLI-001.md) | `orch run` end-to-end against a running orchestrator | Active |
+| [MT-CLI-001](MT-CLI-001.md) | `persatrix run` end-to-end against a running orchestrator | Active |
 
 ## Config
 

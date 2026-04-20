@@ -78,7 +78,7 @@ Entire areas that are implied or mentioned but never specified.
 |---|-------------|--------|
 | 21 | **Error handling & resilience** | No specification for: LLM provider errors (rate limits, 5xx, context overflow), agent process crashes, MCP server failures, bridge connection drops, partial workflow failures. Only "retry on failure" is mentioned. Need: circuit breakers, fallback chains, dead letter queues, graceful degradation. |
 | 22 | **Testing framework** | No testing strategy section. How do you test agents? Mock LLM responses? Record/replay? Deterministic seed mode? Test personas in isolation? Test workflows end-to-end? This is critical for AgentOps lifecycle (development → testing → production). |
-| 23 | **Configuration validation** | How is YAML validated? What errors does the user see for invalid schemas? Are there JSON Schema definitions for agent/workflow/org/channel configs? Can you `orch validate` before running? |
+| 23 | **Configuration validation** | How is YAML validated? What errors does the user see for invalid schemas? Are there JSON Schema definitions for agent/workflow/org/channel configs? Can you `persatrix validate` before running? |
 | 24 | **Schema versioning & migration** | No version field in any YAML schema. How do you evolve the agent definition format? What happens when upgrading from v0.1 to v0.2 config format? Need: schema version field, migration tooling, backward compatibility policy. |
 | 25 | **Health checks & liveness** | How does the orchestrator know an agent process is alive? gRPC health checking protocol? Heartbeat? What's the detection time for a dead agent? This is especially critical for distributed mesh. |
 | 26 | **Graceful shutdown & draining** | What happens to in-flight tasks when a node shuts down? When an agent is unregistered? When a workflow is cancelled? Need: drain mode, task handoff, state persistence, cleanup hooks. |
@@ -127,7 +127,7 @@ Entire areas that are implied or mentioned but never specified.
 
 | # | Issue | Details |
 |---|-------|---------|
-| 44 | **Inconsistent project name** | Main spec never names the project. Extension uses "Persatrix" throughout. CLI examples use `orch`. The YAML examples show `Persatrix/` as the project root. Should be established once in §1 of the main spec. |
+| 44 | **Inconsistent project name** | Main spec never names the project. Extension uses "Persatrix" throughout. CLI examples use `persatrix`. The YAML examples show `Persatrix/` as the project root. Should be established once in §1 of the main spec. |
 | 45 | **No license or contribution model** | No mention of: license choice, contribution guidelines, code of conduct, or governance model. This affects adoption decisions. |
 
 ---

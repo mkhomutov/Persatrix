@@ -1,5 +1,5 @@
 # Blueprint: Software Development Team
-# Usage: orch init --blueprint software-team
+# Usage: persatrix init --blueprint software-team
 
 blueprint:
   id: "software-team"

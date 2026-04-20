@@ -18,7 +18,7 @@ sequenceDiagram
     participant LLM as LLM Provider
     participant Cost as Cost tracker<br/>(internal/cost)
 
-    User->>CLI: orch run workflow.yaml
+    User->>CLI: persatrix run workflow.yaml
     CLI->>Srv: POST /api/v1/workflows/run
     Srv->>Plan: parse + validate DAG
     Plan->>Plan: cycle detection + topological sort

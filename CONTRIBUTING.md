@@ -78,7 +78,7 @@ make build-agents          # pip install -e ".[dev]"
 make test-python           # pytest tests/unit/python/ -v --tb=short
 
 # Rust CLI
-make build-cli             # → cli/target/release/orch
+make build-cli             # → cli/target/release/persatrix
 
 # Config validation
 make validate              # validate YAML against JSON schemas
