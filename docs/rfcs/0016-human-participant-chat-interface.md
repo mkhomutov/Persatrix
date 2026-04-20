@@ -464,7 +464,7 @@ No input sanitization is applied to user message content — the delimiter + sys
 1. `proto/task.proto` — add `SendChatMessage` RPC + `ChatRequest` / `ChatResponse` messages
 2. `make proto` — regenerate Go and Python stubs
 3. `agents/dispatch.py` — add `execute_actions: bool = True` keyword argument to `EventDispatcher.dispatch()` (OQ 7 decision)
-4. `agents/server.py` — implement `SendChatMessage` servicer: build `AgentEvent`, call `dispatch(execute_actions=False)`, extract reply using OQ 5 priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), execute remaining non-reply actions separately. Store `session_id` in `event.metadata` (OQ 9). Wrap dispatch in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 6). Catch exceptions and return gRPC `INTERNAL` status. After extracting the reply, call `RelationshipMemory.record_interaction()` with `other_participant_type="user"` (OQ 11).
+4. `agents/server.py` — implement `SendChatMessage` servicer: build `AgentEvent`, call `dispatch(execute_actions=False)`, extract reply using OQ 5 priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), execute remaining non-reply actions separately. Store `session_id` in `event.metadata` (OQ 9). Wrap dispatch in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 6). Catch exceptions and return gRPC `INTERNAL` status. After extracting the reply, call `RelationshipMemory.record_interaction()` with `other_participant_type="user"` (OQ 11). Validate `participant_type` against `VALID_PARTICIPANT_TYPES` at the servicer boundary before forwarding to storage — defense-in-depth complementing the storage-layer validation described in OQ 3.
 5. `internal/server/` — `POST /api/v1/agents/{id}/chat` handler with message length validation. Map gRPC `INTERNAL` to HTTP 503, `DEADLINE_EXCEEDED` to HTTP 504. Populate `agent_display_name` from `Registry` metadata (OQ 8). Set `reply_status` field (OQ 16).
 6. `internal/executor/` or `internal/chat/` — gRPC `SendChatMessage` call with the existing agent connection pool
 7. Integration test: full round-trip via REST + gRPC
@@ -745,6 +745,7 @@ The REST layer always returns HTTP 200 for successfully-processed requests (incl
 ## Related Documentation
 
 - [RFC 0005 — Persona Agent & Memory System](0005-persona-agent-memory.md) — episodic memory, relationship memory, and event dispatch that this RFC extends
+- [RFC 0006 — Efficiency & Execution Limits](0006-efficiency-execution-limits.md) — budget gating that bounds runaway spending on the chat endpoint (referenced in Security Considerations §6)
 - [RFC 0009 — Agent Identity, Security & Sandboxing](0009-security-sandboxing.md) — future dependency for user authentication and identity tokens
 - [RFC 0011 — Channels + Bridges](../rfcs/README.md) — future dependency for multi-user channel routing and external bridges (not yet written; see ROADMAP for scope)
 - [Architecture overview](../../.github/copilot-instructions.md)
