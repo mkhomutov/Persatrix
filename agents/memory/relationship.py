@@ -254,6 +254,16 @@ class RelationshipMemory:
         Relationships already within 0.001 of neutral (0.5) are skipped
         to avoid unnecessary writes.
 
+        .. note::
+
+           Decay applies to ALL relationships for this agent regardless of
+           ``other_participant_type`` — both agent and user relationships
+           are decayed uniformly.  The WHERE clause filters only on
+           ``participant_id`` and ``participant_type`` (the agent's own
+           identity).  Add an ``other_participant_type`` filter in a
+           follow-up if selective decay is needed.
+           (PR #120 review F-5: apply_decay() signature asymmetry.)
+
         Returns the number of relationships updated.
         """
         if math.isnan(decay_rate) or math.isinf(decay_rate) or not 0.0 < decay_rate <= 1.0:
@@ -523,6 +533,12 @@ class RelationshipMemory:
                 continue
 
             # INSERT OR IGNORE — only seeds if no row exists.
+            # NOTE: participant_type and other_participant_type are
+            # hardcoded to 'agent' because the config schema
+            # (config/agents.yaml) only contains agent_id entries.
+            # When user relationships become configurable via YAML,
+            # this will need updating to read type from the config entry.
+            # (PR #120 review F-6: _seed_trust() hardcodes 'agent' types.)
             await db.execute(
                 """
                 INSERT OR IGNORE INTO relationships

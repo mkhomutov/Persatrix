@@ -229,9 +229,17 @@ class _LLMPersonaAgent(
                 # instructions (OQ 4, OQ 14 — prompt injection mitigation).
                 sender_type = event.metadata.get("sender_participant_type", "agent")
                 if sender_type == "user":
+                    # Sanitize content: strip delimiter sequences that could
+                    # allow a user to close the <|user_message|> block early
+                    # and inject text that appears to come from the system.
+                    # Also sanitize sender to prevent attribute injection
+                    # via embedded double-quotes.
+                    # (PR #120 review F-2: delimiter escape injection.)
+                    safe_content = content.replace("<|", "\\<|").replace("|>", "\\|>")
+                    safe_sender = sender.replace('"', "")
                     return (
-                        f'<|user_message user_id="{sender}"|>\n'
-                        f"{content}\n"
+                        f'<|user_message user_id="{safe_sender}"|>\n'
+                        f"{safe_content}\n"
                         f"<|/user_message|>"
                     )
                 return f"Message from {sender}:\n\n{content}"

@@ -190,9 +190,21 @@ class _MemoryContextMixin:
         # 2. Relationship summary for the sender (if present).
         sender_id = event.sender_id
         if sender_id:
+            # Extract sender's participant type from event metadata so
+            # user relationships are queried correctly.  Without this,
+            # get_relationship_summary() defaults to "agent" and silently
+            # misses user-type relationships — making the "(Human user)"
+            # labeling below dead code.
+            # (PR #120 review F-1: other_participant_type not propagated.)
+            sender_type = (
+                event.metadata.get("sender_participant_type", "agent")
+                if event.metadata
+                else "agent"
+            )
             try:
                 rel = await self._relationship_memory.get_relationship_summary(
                     sender_id,
+                    other_participant_type=sender_type,
                 )
             except Exception:
                 logger.warning(

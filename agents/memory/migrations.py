@@ -176,6 +176,27 @@ async def _apply_migration_4(db: aiosqlite.Connection) -> None:
     )
 
     # -- 2. Rebuild relationships: 12-step ALTER TABLE --
+    # Crash recovery: if a previous run crashed between DROP TABLE
+    # relationships and ALTER TABLE RENAME, the staging table exists
+    # but the final name does not.  Complete the interrupted rename to
+    # avoid data loss.  (PR #120 review F-3: migration crash-recovery gap.)
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='relationships_new'"
+    )
+    if await cursor.fetchone():
+        cursor2 = await db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='relationships'"
+        )
+        if not await cursor2.fetchone():
+            await db.execute(
+                "ALTER TABLE relationships_new RENAME TO relationships"
+            )
+        else:
+            # Both tables exist — drop the staging table (incomplete copy).
+            await db.execute("DROP TABLE relationships_new")
+
     # Check if migration already partially ran (crash recovery).
     cursor = await db.execute(
         "SELECT name FROM sqlite_master "
@@ -252,6 +273,24 @@ async def _apply_migration_4(db: aiosqlite.Connection) -> None:
     )
 
     # -- 3. Rebuild interactions: 12-step ALTER TABLE --
+    # Crash recovery for interactions_new (same pattern as relationships).
+    # (PR #120 review F-3.)
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='interactions_new'"
+    )
+    if await cursor.fetchone():
+        cursor2 = await db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='interactions'"
+        )
+        if not await cursor2.fetchone():
+            await db.execute(
+                "ALTER TABLE interactions_new RENAME TO interactions"
+            )
+        else:
+            await db.execute("DROP TABLE interactions_new")
+
     cursor = await db.execute(
         "SELECT name FROM sqlite_master "
         "WHERE type='table' AND name='interactions'"
@@ -319,6 +358,15 @@ async def _apply_migration_4(db: aiosqlite.Connection) -> None:
         "other_participant_id, other_participant_type, created_at DESC)"
     )
 
+    # NOTE: this commit makes the DDL changes durable, but the version
+    # record in schema_version is written by _apply_migrations() AFTER
+    # this function returns.  If the process crashes between this commit
+    # and the version INSERT, the migration re-runs on restart.  The
+    # crash-recovery guards above (PRAGMA table_info + relationships_new
+    # check) make the re-run safe by detecting the already-migrated schema.
+    # Removing this commit would not help because SQLite DDL (CREATE TABLE,
+    # DROP TABLE) causes implicit commits in many modes.
+    # (PR #120 review F-7: migration version recording atomicity.)
     await db.commit()
 
 # FTS5 DDL — applied only when FTS5 is available.
@@ -399,6 +447,16 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
                 await handler(db)
             elif sql:
                 await db.executescript(sql)
+            else:
+                # No callable handler found and SQL is empty — this is a
+                # programming error (e.g. a typo in the handler name).
+                # Without this guard, the migration would silently be
+                # recorded as applied without actually running.
+                # (PR #120 review F-4: globals().get() dispatch fragility.)
+                raise RuntimeError(
+                    f"Migration v{version} has no SQL and no callable "
+                    f"handler '_apply_migration_{version}()'"
+                )
             await db.execute(
                 "INSERT INTO schema_version VALUES (?, ?, ?)",
                 (version, time.time(), desc),
