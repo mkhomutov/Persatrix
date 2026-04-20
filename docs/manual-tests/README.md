@@ -39,6 +39,15 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-PERSONA-001](MT-PERSONA-001.md) | Start semi-autonomous persona; verify tick loop and logged actions | Active |
 | [MT-PERSONA-002](MT-PERSONA-002.md) | Persona handles an inbound channel message and produces a logged response | Active |
 
+## Chat
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CHAT-001](MT-CHAT-001.md) | Chat REST endpoint: send message, receive reply | Active |
+| [MT-CHAT-002](MT-CHAT-002.md) | `persatrix chat` CLI interactive session | Active |
+| [MT-CHAT-003](MT-CHAT-003.md) | Chat session continuity: messages persist across agent restart | Active |
+| [MT-CHAT-004](MT-CHAT-004.md) | User-agent relationship: trust score evolves after chat exchanges | Active |
+
 ## Memory
 
 | ID | Title | Status |
