@@ -1,9 +1,10 @@
 # RFC 0016 — Human Participant & Chat Interface
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: 👍 Accepted
 **Author**: Maksim Khomutov
 **Date**: 2026-04-19
+**Accepted**: 2026-04-20
 **Target**: v0.2.1
 **Depends on**: RFC 0005
 
@@ -730,15 +731,15 @@ The REST layer always returns HTTP 200 for successfully-processed requests (incl
 
 ## Decision / Next Steps
 
-**Status**: 📋 Proposed — open for review.
+**Status**: 👍 Accepted — all 16 open questions resolved with decisions inline. PR plan created in [0016-pr-plan.md](0016-pr-plan.md).
 
 **Prerequisites for implementation:**
 - RFC 0005 ✅ Implemented — all memory and event dispatch primitives are in place.
 - No other blocking RFC dependencies.
 
-**Estimated scope**: 3 PRs, one per phase. Each PR is independently deployable. Total estimated line count: ~540 lines new/changed across Python, Go, Rust, and proto.
+**Estimated scope**: 7 PRs (5 core + 1 follow-up + 1 close). Each core PR is independently deployable. Total estimated line count: ~540 lines new/changed across Python, Go, Rust, and proto (calibrated: ~920 lines).
 
-**Recommended next step**: Accept this RFC and begin Phase 1 (participant abstraction and memory generalization) as the first PR after v0.2.0 release.
+**Next step**: Begin Phase 1 implementation (PR 1 — Participant Protocol + UserParticipant + UserStore).
 
 ---
 
