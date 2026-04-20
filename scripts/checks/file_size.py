@@ -64,7 +64,6 @@ EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
 # rather than grow; remove each once it falls back under its threshold.
 GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # Code — candidates for a follow-up split (tracked in watch-list).
-    "agents/server.py",
     "internal/executor/executor.go",
     # Long-form reference docs. The 3000/8000-word limit targets typical
     # prose; these are enumerated planning and specification documents whose

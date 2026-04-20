@@ -18,7 +18,7 @@ from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher
 from agents.generated import task_pb2
 from agents.persona_types import ActionType, AgentAction
-from agents.server import AgentServiceServicer, _extract_chat_reply
+from agents.server_servicers import AgentServiceServicer, _extract_chat_reply
 from agents.tools.registry import clear_registry
 
 
@@ -320,7 +320,7 @@ class TestSendChatMessage:
             captured_timeouts.append(timeout)
             return await original_wait_for(coro, timeout)
 
-        with patch("agents.server.asyncio.wait_for", side_effect=_patched_wait_for):
+        with patch("agents.server_servicers.asyncio.wait_for", side_effect=_patched_wait_for):
             await servicer.SendChatMessage(
                 _chat_request(timeout_seconds=9999), context,
             )
@@ -340,7 +340,7 @@ class TestSendChatMessage:
             captured_timeouts.append(timeout)
             return await original_wait_for(coro, timeout)
 
-        with patch("agents.server.asyncio.wait_for", side_effect=_patched_wait_for):
+        with patch("agents.server_servicers.asyncio.wait_for", side_effect=_patched_wait_for):
             await servicer.SendChatMessage(
                 _chat_request(timeout_seconds=0), context,
             )
@@ -447,7 +447,7 @@ class TestSendChatMessage:
             captured_timeouts.append(timeout)
             return await original_wait_for(coro, timeout)
 
-        with patch("agents.server.asyncio.wait_for", side_effect=_patched_wait_for):
+        with patch("agents.server_servicers.asyncio.wait_for", side_effect=_patched_wait_for):
             await servicer.SendChatMessage(
                 _chat_request(timeout_seconds=-5), context,
             )
