@@ -389,9 +389,34 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 | 10 | `agent_id` with special characters or very long string | Verify `NOT_FOUND` (or `INVALID_ARGUMENT` after fix #2) for malformed agent IDs. |
 | 11 | `_extract_chat_reply` with `SEND_MESSAGE` having no `content` key | Verify returns `("", "ok")` via `.get("content", "")` fallback. |
 
-##### From PR 4 review
+##### From PR 4 review (PR #123)
 
-_TBD — populated after PR 4 review._
+**Applied during review (not deferred to PR 6):**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 1 | `internal/server/chat_handler.go` | `chatMaxMessageLength` comment claims "Configurable via WithChatMaxMessageLength" but no such option exists. Misleading for future developers. | Removed the false configurability claim from the comment. Applied directly to the PR branch. |
+
+**Nice to Have (follow-up):**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 2 | `internal/executor/chat.go` | gRPC connection created and closed per `SendChatMessage` call — no connection pooling. Will cause latency and FD pressure at scale. `TODO(v0.2)` present in code. | Add connection pool in v0.2 when chat workload justifies it. |
+| 3 | `internal/executor/chat.go` | `insecure.NewCredentials()` used for gRPC transport. Acceptable for v0.1 local dev but must not reach production. `TODO(v0.2)` for mTLS present in code. | Implement mTLS in v0.2 security hardening pass. |
+| 4 | `internal/server/server.go` | No auth or rate limiting on chat endpoint. Unauthenticated with no request-rate controls. 300s timeout cap and 1 MiB body limit mitigate but don't prevent connection exhaustion. `TODO(v0.2)` noted. | Add per-IP/per-session rate limiter and auth middleware in v0.2. Cross-cutting concern shared with all REST endpoints. |
+| 5 | `internal/server/chat_handler.go` + `internal/executor/chat.go` | Dual registry lookup: handler calls `registry.Get()` for display name, executor calls `registry.Get()` for health/address. Intentional defense-in-depth documented with inline comment. Negligible overhead for in-memory registry. | Consolidate for v0.2 SQLite registry migration by passing `AgentInfo` from handler to executor. |
+
+**Test gaps to fill:**
+
+| # | Test | Purpose |
+|---|------|---------|
+| 6 | Concurrent `SendChatMessage` requests via `t.Run` parallel subtests | While the code path is stateless, exercising concurrent calls would increase confidence in `-race` compatibility. |
+
+**Advisory notes (no action needed):**
+
+| # | Observation | Context |
+|---|-------------|--------|
+| 7 | PR is +1,134 / -5 lines, exceeding the 500-line BRANCHING.md limit. | ~794 lines are tests, ~15 are auto-generated FILEMAP. Production code is ~326 lines (within spirit of the rule). Acceptable given test-heavy composition. Note for future PR sizing. |
 
 ##### From PR 5 review
 
@@ -410,6 +435,7 @@ _TBD — populated after PR 5 review._
 - [ ] PR 3 findings: empty `agent_id` returns `INVALID_ARGUMENT` instead of `NOT_FOUND`
 - [ ] PR 3 findings: `cascade_depth=1` assumption documented or derived from context
 - [ ] PR 3 findings: 3 new tests added (event payload assertion, malformed agent_id, SEND_MESSAGE missing content key)
+- [ ] PR 4 findings: 1 new test added (concurrent SendChatMessage)
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes

@@ -18,7 +18,8 @@ import (
 )
 
 // chatMaxMessageLength is the maximum allowed message length in characters.
-// Configurable via WithChatMaxMessageLength; defaults to 4000.
+// (PR #123 review finding F-04: removed misleading configurability claim —
+// this is a compile-time constant; no WithChatMaxMessageLength option exists.)
 const chatMaxMessageLength = 4000
 
 var chatHandlerTracer = otel.Tracer("persatrix/server/chat")
