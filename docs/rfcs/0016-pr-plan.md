@@ -472,9 +472,9 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 **Rust CLI fixes (PR 5 findings):**
 
 - The REPL loop changes `?` propagation on connection errors and JSON deserialization failures to `match` arms that print the error and `continue`, preserving the session and `session_id` state.
-- Spinner clear width is widened from 40 to ≥60 characters (or computed from spinner text length) to cover long agent IDs.
+- Spinner clear width is computed dynamically from the spinner text length (e.g. `format!("Waiting for {}...", agent_id).len() + 2` for the spinner prefix) instead of the hardcoded `" ".repeat(40)`, ensuring long agent IDs are fully cleared. The dynamic approach is preferred over a static increase to 60 because it requires no magic number and adapts to any ID length.
 
-**Test additions:** ~14 new tests across Python and Rust, covering concurrent `get_or_create`, nonexistent participant `update_last_seen`, store re-initialization, long `display_name`, `PersonaAgent` Protocol conformance, unknown migration version, mixed-type decay, event payload assertion, malformed agent IDs, `SEND_MESSAGE` with missing content, concurrent gRPC calls, long/unicode CLI payloads, and session ID propagation.
+**Test additions:** ~14 new tests across Python, Go, and Rust, covering concurrent `get_or_create`, nonexistent participant `update_last_seen`, store re-initialization, long `display_name`, `PersonaAgent` Protocol conformance, unknown migration version, mixed-type decay, event payload assertion, malformed agent IDs, `SEND_MESSAGE` with missing content, concurrent gRPC calls, long/unicode CLI payloads, and session ID propagation.
 
 #### Tests
 
@@ -488,7 +488,7 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 - `AgentEvent` payload structure assertion: correct `payload` keys, `sender_id`, `metadata["session_id"]`.
 - Malformed/empty `agent_id` returns `INVALID_ARGUMENT`.
 - `_extract_chat_reply` with `SEND_MESSAGE` having no `content` key — verifies `.get("content", "")` fallback.
-- Concurrent `SendChatMessage` requests via `t.Run` parallel subtests.
+- Concurrent `SendChatMessage` requests via `t.Run` parallel subtests (Go, from PR 4 review findings).
 - `ChatRequest` with very long messages and unicode content — serde round-trip.
 - `session_id` propagation across multiple CLI requests — integration-level.
 
@@ -508,7 +508,7 @@ This PR is a consolidation pass: it addresses all "Should Fix" review findings f
 - [ ] PR 4 findings: 1 new test added (concurrent SendChatMessage)
 - [ ] PR 5 findings: connection error in REPL loop catches and `continue`s instead of propagating
 - [ ] PR 5 findings: JSON deserialization error in REPL loop catches and `continue`s instead of propagating
-- [ ] PR 5 findings: spinner clear width widened (≥60 chars or computed from text length)
+- [ ] PR 5 findings: spinner clear width computed dynamically from spinner text length
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes
@@ -539,7 +539,7 @@ This is a documentation-only PR. No code changes — only status markers and tra
 - `ROADMAP.md` Component Status tables mark all RFC 0016 components as `✅ Complete` with the final PR reference.
 - `ROADMAP.md` Merged PR History table adds entries for PR 6 and PR 7.
 - `ROADMAP.md` header updates `Last updated` and `Current milestone` lines to reflect RFC 0016 completion.
-- `CHANGELOG.md` adds a v0.2.1 section summarizing the full RFC 0016 feature set: `Participant` Protocol, `UserParticipant`, memory generalization, `SendChatMessage` gRPC, REST chat endpoint, and `persatrix chat` CLI command.
+- `CHANGELOG.md` adds a v0.2.1 section summarizing the full RFC 0016 feature set: `Participant` Protocol, `UserParticipant`, memory generalization, `SendChatMessage` gRPC, REST chat endpoint, and `persatrix chat` CLI command. The entry is written in past tense assuming PR 7 is the final merge in the sequence.
 - All PR checklists in `0016-pr-plan.md` are checked off, and PR 7 is marked with its merged PR number and date.
 
 #### Tests
