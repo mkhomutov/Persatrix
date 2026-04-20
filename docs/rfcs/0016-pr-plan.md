@@ -86,11 +86,13 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `agents/participant.py` exports `Participant`, `UserParticipant`, `UserStore`, `VALID_PARTICIPANT_TYPES`
-- [ ] `BaseAgent` has `participant_id`, `participant_type`, `display_name` properties
-- [ ] `participant_id` regex validation enforced at `UserStore.get_or_create()`
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `agents/participant.py` exports `Participant`, `UserParticipant`, `UserStore`, `VALID_PARTICIPANT_TYPES`
+- [x] `BaseAgent` has `participant_id`, `participant_type`, `display_name` properties
+- [x] `participant_id` regex validation enforced at `UserStore.get_or_create()`
+
+**Merged**: PR #119 — 2026-04-20
 
 ---
 
