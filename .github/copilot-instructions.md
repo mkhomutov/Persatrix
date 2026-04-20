@@ -47,7 +47,7 @@ make all
 
 # Component builds
 make build-orchestrator    # → bin/persatrix-server
-make build-cli             # → cli/target/release/orch
+make build-cli             # → cli/target/release/persatrix
 make build-agents          # pip install -e ".[dev]"
 
 # Tests

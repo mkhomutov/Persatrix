@@ -58,6 +58,26 @@ pub(crate) struct ApiError {
     pub(crate) code: Option<String>,
 }
 
+// ─── Chat types ──────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub(crate) struct ChatRequest {
+    pub(crate) message: String,
+    pub(crate) user_id: String,
+    pub(crate) session_id: String,
+    pub(crate) participant_type: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ChatResponse {
+    pub(crate) reply: String,
+    pub(crate) session_id: String,
+    #[allow(dead_code)]
+    pub(crate) agent_id: String,
+    pub(crate) agent_display_name: String,
+    pub(crate) reply_status: String,
+}
+
 fn fmt_option(val: &Option<String>) -> String {
     match val {
         Some(s) => s.clone(),
@@ -339,5 +359,54 @@ mod tests {
     fn validate_resource_id_rejects_leading_trailing_hyphen() {
         assert!(validate_resource_id("-agent", "id").is_err());
         assert!(validate_resource_id("agent-", "id").is_err());
+    }
+
+    // ─── Chat serde contract tests ──────────────────────────────────────
+
+    #[test]
+    fn chat_request_serializes_correctly() {
+        let req = ChatRequest {
+            message: "Hello".to_string(),
+            user_id: "local".to_string(),
+            session_id: "".to_string(),
+            participant_type: "user".to_string(),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["message"], "Hello");
+        assert_eq!(json["user_id"], "local");
+        assert_eq!(json["session_id"], "");
+        assert_eq!(json["participant_type"], "user");
+    }
+
+    #[test]
+    fn chat_response_deserializes_correctly() {
+        let json = serde_json::json!({
+            "reply": "I'm nexus-7.",
+            "session_id": "abc-123",
+            "agent_id": "nexus-7",
+            "timestamp": 1713600000,
+            "agent_display_name": "Nexus Seven",
+            "reply_status": "ok"
+        });
+        let resp: ChatResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.reply, "I'm nexus-7.");
+        assert_eq!(resp.session_id, "abc-123");
+        assert_eq!(resp.agent_display_name, "Nexus Seven");
+        assert_eq!(resp.reply_status, "ok");
+    }
+
+    #[test]
+    fn chat_response_deserializes_empty_reply() {
+        let json = serde_json::json!({
+            "reply": "",
+            "session_id": "abc-123",
+            "agent_id": "nexus-7",
+            "timestamp": 1713600000,
+            "agent_display_name": "Nexus Seven",
+            "reply_status": "empty"
+        });
+        let resp: ChatResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.reply_status, "empty");
+        assert!(resp.reply.is_empty());
     }
 }

@@ -49,8 +49,8 @@ build-orchestrator: ## Build Go orchestrator binary
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
 	cd cli && $(CARGO) build --release
-	@cp cli/target/release/orch $(GO_BIN)/orch 2>/dev/null || true
-	@echo "✓ CLI built → $(GO_BIN)/orch"
+	@cp cli/target/release/persatrix$(EXE) $(GO_BIN)/persatrix$(EXE) 2>/dev/null || true
+	@echo "✓ CLI built → $(GO_BIN)/persatrix$(EXE)"
 
 build-agents: ## Install Python agent dependencies
 	@echo "→ Installing Python agent dependencies..."

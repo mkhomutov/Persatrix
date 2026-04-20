@@ -54,7 +54,7 @@ orchestrator.
 - ☐ Full build complete: `make all` (builds orchestrator + CLI)
 - ☐ Orchestrator running in a separate terminal: `make run`
 - ☐ Config valid: `make validate` exits 0
-- ☐ CLI binary present: `ls bin/orch` (or `ls bin/orch.exe` on Windows)
+- ☐ CLI binary present: `ls bin/persatrix` (or `ls bin/persatrix.exe` on Windows)
 
 ### Test Data
 
@@ -65,12 +65,12 @@ orchestrator.
 
 ## Test Procedure
 
-### Step 1: Verify the `orch` Binary Exists
+### Step 1: Verify the `persatrix` Binary Exists
 
 **Action**:
 
 ```bash
-./bin/orch --help
+./bin/persatrix --help
 ```
 
 **Expected Result**: Usage text is printed listing subcommands: `run`, `status`, `validate`,
@@ -87,7 +87,7 @@ orchestrator.
 **Action**:
 
 ```bash
-./bin/orch validate config/
+./bin/persatrix validate config/
 ```
 
 **Expected Result**: Command exits 0 with a message indicating all files are valid.
@@ -103,7 +103,7 @@ orchestrator.
 **Action**:
 
 ```bash
-./bin/orch run feature-builder --input '{"user_request":"Add a ping endpoint"}'
+./bin/persatrix run feature-builder --input '{"user_request":"Add a ping endpoint"}'
 ```
 
 (If the orchestrator is not on the default `http://localhost:8080`, pass
@@ -129,13 +129,13 @@ OK Workflow feature-builder submitted (run_id: <uuid>)
 **Action**: Replace `<RUN_ID>` with the value printed in Step 3.
 
 ```bash
-./bin/orch status <RUN_ID>
+./bin/persatrix status <RUN_ID>
 ```
 
-If no specific run ID is available, `orch status` with no argument lists all runs:
+If no specific run ID is available, `persatrix status` with no argument lists all runs:
 
 ```bash
-./bin/orch status
+./bin/persatrix status
 ```
 
 **Expected Result**: Human-readable status output includes `Run ID`, `Workflow`, and `Status`
@@ -153,7 +153,7 @@ fields (`running`, `completed`, or `failed`).
 **Action**:
 
 ```bash
-./bin/orch agent list
+./bin/persatrix agent list
 ```
 
 **Expected Result**: Exit 0 with either:
@@ -173,11 +173,11 @@ Output is always human-readable text, never raw JSON.
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | `orch --help` prints subcommand list | ☑ |
-| 2 | `orch validate config/` exits 0 | ☑ |
-| 3 | `orch run` returns a run ID | ☑ |
-| 4 | `orch status <id>` returns run status | ☑ |
-| 5 | `orch agent list` exits 0 | ☑ |
+| 1 | `persatrix --help` prints subcommand list | ☑ |
+| 2 | `persatrix validate config/` exits 0 | ☑ |
+| 3 | `persatrix run` returns a run ID | ☑ |
+| 4 | `persatrix status <id>` returns run status | ☑ |
+| 5 | `persatrix agent list` exits 0 | ☑ |
 
 ---
 
@@ -185,27 +185,27 @@ Output is always human-readable text, never raw JSON.
 
 ### Edge Case 1: Orchestrator Not Running
 
-**Scenario**: `orch run` is invoked before starting the orchestrator.
+**Scenario**: `persatrix run` is invoked before starting the orchestrator.
 
 **Expected Behavior**: The CLI prints a connection-refused error to stderr and exits non-zero.
 It must not panic.
 
 ### Edge Case 2: Unknown Workflow Name
 
-**Scenario**: `orch run nonexistent-workflow --input '{}'`
+**Scenario**: `persatrix run nonexistent-workflow --input '{}'`
 
 **Expected Behavior**: CLI prints the orchestrator's error response (4xx) and exits non-zero.
 
 ### Edge Case 3: Missing `<WORKFLOW>` Argument
 
-**Scenario**: `orch run` invoked with no arguments.
+**Scenario**: `persatrix run` invoked with no arguments.
 
 **Expected Behavior**: clap prints a usage error to stderr and exits non-zero:
 ```
 error: the following required arguments were not provided:
   <WORKFLOW>
 
-Usage: orch.exe run <WORKFLOW>
+Usage: persatrix.exe run <WORKFLOW>
 ```
 
 ---
@@ -223,7 +223,7 @@ Usage: orch.exe run <WORKFLOW>
 ## Notes
 
 - Build the CLI with `make all` or `make build-cli` (runs `cargo build --release` in `cli/`).
-- The CLI binary path is `bin/orch` on Unix and `bin/orch.exe` on Windows.
+- The CLI binary path is `bin/persatrix` on Unix and `bin/persatrix.exe` on Windows.
 - Stub subcommands are intentionally not tested here:
   - `init`, `replay`, `cost`, `state` — v0.2 stubs: accept arguments, print
     `Command 'X' not yet implemented` (yellow), and exit 0.
