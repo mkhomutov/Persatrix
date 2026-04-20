@@ -149,6 +149,8 @@ PR 7 (RFC close)
 **Branch**: `feature/v021-proto-grpc-servicer`
 **Estimated size**: ~250–425 lines (implementation + tests + proto + generated stubs)
 
+> **Size risk**: Regenerated proto stubs across two language targets (Python + Go) may push this PR beyond the 500-line limit. If so, split into PR 3a (proto definitions + regenerated stubs) and PR 3b (servicer implementation + tests), following the RFC 0005 sub-PR splitting precedent.
+
 #### Scope
 
 | File | Change |

@@ -1,7 +1,7 @@
 # RFC 0016 — Human Participant & Chat Interface
 
 **Type**: feature
-**Status**: � Accepted
+**Status**: 👍 Accepted
 **Author**: Maksim Khomutov
 **Date**: 2026-04-19
 **Accepted**: 2026-04-20
@@ -731,7 +731,7 @@ The REST layer always returns HTTP 200 for successfully-processed requests (incl
 
 ## Decision / Next Steps
 
-**Status**: � Accepted — all 16 open questions resolved with decisions inline. PR plan created in [0016-pr-plan.md](0016-pr-plan.md).
+**Status**: 👍 Accepted — all 16 open questions resolved with decisions inline. PR plan created in [0016-pr-plan.md](0016-pr-plan.md).
 
 **Prerequisites for implementation:**
 - RFC 0005 ✅ Implemented — all memory and event dispatch primitives are in place.

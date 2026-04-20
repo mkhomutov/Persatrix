@@ -45,7 +45,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | � Accepted |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | 👍 Accepted |
 
 ---
 
@@ -265,7 +265,7 @@ v0.2.0 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | � Accepted | 7 | 0/7 |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 👍 Accepted | 7 | 0/7 |
 
 ### Dependency Chain (v0.2.1)
 
