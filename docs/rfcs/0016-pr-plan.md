@@ -86,11 +86,13 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `agents/participant.py` exports `Participant`, `UserParticipant`, `UserStore`, `VALID_PARTICIPANT_TYPES`
-- [ ] `BaseAgent` has `participant_id`, `participant_type`, `display_name` properties
-- [ ] `participant_id` regex validation enforced at `UserStore.get_or_create()`
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `agents/participant.py` exports `Participant`, `UserParticipant`, `UserStore`, `VALID_PARTICIPANT_TYPES`
+- [x] `BaseAgent` has `participant_id`, `participant_type`, `display_name` properties
+- [x] `participant_id` regex validation enforced at `UserStore.get_or_create()`
+
+**Merged**: PR #119 — 2026-04-20
 
 ---
 
@@ -306,15 +308,55 @@ PR 7 (RFC close)
 
 **Depends on**: PR 5 merged (all core PRs complete)
 **Branch**: `feature/v021-chat-followups`
-**Estimated size**: TBD — populated from accumulated review findings during PRs 1–5
+**Estimated size**: ~150–300 lines (fixes + new tests)
 
 #### Scope
 
-Review findings from PRs 1–5, grouped by component. Scope to be determined during implementation.
+Review findings from PRs 1–5, grouped by component. Items below are populated from review reports as PRs are reviewed.
+
+##### From PR 1 review (PR #119)
+
+**Should Fix:**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 1 | `agents/participant.py` | `get_or_create()` TOCTOU race: SELECT-then-INSERT is not atomic. Two concurrent callers for the same ID could race to INSERT, causing `IntegrityError`. | Replace INSERT with `INSERT OR IGNORE INTO users (...) VALUES (?, ?, ?, ?, ?)`, then unconditionally re-SELECT to return the final state. |
+| 2 | `agents/participant.py` | `get_or_create()` and `get()` use `execute_fetchall()` instead of the `async with db.execute() as cursor:` + `fetchone()` pattern used everywhere else in the memory subsystem. | Refactor to cursor context manager pattern for style consistency. |
+| 3 | `agents/participant.py` | `update_last_seen()` does not validate `participant_id` (unlike `get_or_create()`). Silently succeeds on nonexistent participants. | Add `validate_participant_id(participant_id)` at the top of the method. |
+
+**Test gaps to fill:**
+
+| # | Test | Purpose |
+|---|------|---------|
+| 4 | Concurrent `get_or_create` calls via `asyncio.gather()` | Verify idempotency after `INSERT OR IGNORE` fix (exposes TOCTOU if unfixed). |
+| 5 | `update_last_seen` on nonexistent participant | Document and verify the expected behavior (silent no-op or error after validation fix). |
+| 6 | `UserStore.initialize()` called twice | Verify close-then-reopen re-initialization path works correctly. |
+| 7 | `display_name` with very long string (10,000+ chars) | Verify no unbounded storage issues; consider adding a length limit (e.g., 255 chars) at write boundary. |
+| 8 | `PersonaAgent` satisfies `Participant` Protocol | Explicit conformance test (currently only `BaseAgent` via `_StubAgent` and `UserParticipant` are tested). |
+
+##### From PR 2 review
+
+_TBD — populated after PR 2 review._
+
+##### From PR 3 review
+
+_TBD — populated after PR 3 review._
+
+##### From PR 4 review
+
+_TBD — populated after PR 4 review._
+
+##### From PR 5 review
+
+_TBD — populated after PR 5 review._
 
 #### PR checklist
 
 - [ ] All deferred review findings addressed
+- [ ] PR 1 findings: `get_or_create` uses `INSERT OR IGNORE` (idempotent)
+- [ ] PR 1 findings: query style aligned to cursor context manager pattern
+- [ ] PR 1 findings: `update_last_seen` validates `participant_id`
+- [ ] PR 1 findings: 5 new tests added (concurrent get_or_create, update_last_seen nonexistent, re-init, long display_name, PersonaAgent conformance)
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes

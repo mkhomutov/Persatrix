@@ -92,6 +92,25 @@ class BaseAgent(ABC):
         """
         ...
 
+    # -- Participant Protocol properties (RFC 0016) -----------------------
+
+    @property
+    def participant_id(self) -> str:
+        """Participant identity — delegates to ``agent_id``."""
+        return self.agent_id
+
+    @property
+    def participant_type(self) -> str:
+        """Participant kind — always ``"agent"`` for BaseAgent subclasses."""
+        return "agent"
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable display name — delegates to ``name``."""
+        return self.name
+
+    # -- Agent metadata properties ----------------------------------------
+
     @property
     def capabilities(self) -> list[str]:
         """Declare what this agent can do (config-driven, deep-review d5)."""

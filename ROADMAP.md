@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-20 (v0.2.0 released — first public release; RFC 0016 accepted for v0.2.1)  
+> **Last updated**: 2026-04-20 (RFC 0016 PR 1/7 merged — Participant Protocol + UserParticipant + UserStore)  
 > **Current phase**: v0.2.1 (Human Participant & Chat Interface) — 🚧 In Progress  
-> **Current milestone**: v0.2.1 — RFC 0016 accepted, PR plan created
+> **Current milestone**: v0.2.1 — RFC 0016 PR 1/7 merged; next: PR 2 (Migration 4 + RelationshipMemory generalization)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -265,7 +265,7 @@ v0.2.0 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 👍 Accepted | 7 | 0/7 |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | 👍 Accepted | 7 | 1/7 |
 
 ### Dependency Chain (v0.2.1)
 
@@ -287,8 +287,8 @@ v0.2.1 complete
 
 | Component | Go Package | Python Module | Target RFC |
 |-----------|-----------|---------------|------------|
-| `Participant` Protocol + `UserParticipant` | — | `agents/participant.py` | 0016 |
-| Memory generalization | — | `agents/memory/relationship.py`, `agents/memory/migrations.py` | 0016 |
+| `Participant` Protocol + `UserParticipant` | — | `agents/participant.py` | 0016 | ✅ Complete (PR #119) |
+| Memory generalization | — | `agents/memory/relationship.py`, `agents/memory/migrations.py` | 0016 | 🔲 Pending (PR 2) |
 | Chat REST endpoint | `internal/server/` | — | 0016 |
 | Chat gRPC dispatch | `internal/executor/` | `agents/server.py` | 0016 |
 | `persatrix chat` CLI | — | — | 0016 (`cli/src/commands/chat.rs`) |
@@ -579,6 +579,7 @@ v0.5.0 complete
 | [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
 | [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
 | [#115](https://github.com/mkhomutov/Persatrix/pull/115) | docs(rfcs): correct author attribution across all RFCs and add RFC 0015 | 0015 (RFC) + attribution | 2026-04-19 |
+| [#119](https://github.com/mkhomutov/Persatrix/pull/119) | feat(agents): Participant Protocol + UserParticipant + UserStore | 0016 (1/7) | 2026-04-20 |
 
 ---
 
