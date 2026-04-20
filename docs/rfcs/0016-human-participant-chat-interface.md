@@ -64,6 +64,12 @@ The architectural work is generalizing three Python types from "agent-only" to "
 - v0.3.0 channels (agent-to-agent) ship without a human-in-the-loop primitive, making it harder to build anything interactive on top.
 - The `Participant` generalization deferred here has to happen eventually — every future RFC that touches memory or messaging will be cleaner if the abstraction already exists.
 
+This RFC directly addresses spec audit finding #28 ("Human as a participant"), which identified that human-in-the-loop was only specified as approval gates (§6.5) with no mechanism for a human as an actual participant in the agent society.
+
+**Relationship to spec §12.6 (Human Participants):**
+
+The core spec §12.6 envisions humans as bridge-connected agent types configured in YAML (`type: "human"`, `delivery: "bridge:slack"`). That model is correct for v0.5.0 external bridges where a Slack or email user appears as a regular agent in the org. RFC 0016 takes a complementary approach for the v0.2.1 local use case: humans are `Participant` Protocol implementors with direct CLI/REST access and no bridge requirement. The `Participant` Protocol unifies both paths — a `UserParticipant` (v0.2.1 local chat) and a future `BridgeParticipant` (v0.5.0 Slack/email) both satisfy the same structural interface. When §12.6's bridge-connected humans land, they will implement `Participant` with `participant_type: "bridge_user"` and the memory, relationship, and dispatch infrastructure generalized here will work unchanged.
+
 ## Goals
 
 1. Define a `Participant` Protocol in `agents/participant.py` with `participant_id: str`, `participant_type: str`, and `display_name: str`.
@@ -86,6 +92,7 @@ The architectural work is generalizing three Python types from "agent-only" to "
 - **Streaming chat responses.** v0.2.1 uses synchronous request-response. SSE streaming is a natural follow-up when channels arrive.
 - **User memory management commands** (e.g., `persatrix memory clear --user <id>`).
 - **Cross-session conversation threading.** Messages within a session are sequential. Threading is RFC 0011.
+- **Chat history retrieval endpoint** (e.g., `GET /api/v1/agents/{id}/chat/history`). Past conversations are accessible only via memory inspection tools for v0.2.1. A dedicated history API is a natural v0.2.2 follow-up.
 
 ---
 
@@ -133,6 +140,8 @@ class UserParticipant:
 
 Users are created lazily on first chat session and retrieved by `participant_id` on subsequent sessions. For single-user local installs, `participant_id` defaults to `"local"` unless overridden via `--user <id>`. The underlying SQLite row uses `participant_id` as the primary key.
 
+`display_name` defaults to `participant_id` unless overridden via a future `--display-name` flag. For v0.2.1, `participant_id` and `display_name` may be identical (e.g., both `"local"`). The `user_id` value must be non-empty and should follow the agent ID pattern (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) for consistency, though this is not strictly enforced in v0.2.1.
+
 ```python
 class UserStore:
     """CRUD for UserParticipant records in the agent SQLite database."""
@@ -148,10 +157,10 @@ class UserStore:
 
 **`RelationshipMemory` schema change:**
 
-The `relationships` and `interactions` tables currently use `agent_id` / `other_agent_id`. Migration 3 renames these to `participant_id` / `other_participant_id` and adds a `participant_type` column to both tables. Existing rows are backfilled with `participant_type = "agent"`.
+The `relationships` and `interactions` tables currently use `agent_id` / `other_agent_id`. Migration 4 renames these to `participant_id` / `other_participant_id` and adds a `participant_type` column to both tables. Existing rows are backfilled with `participant_type = "agent"`.
 
 ```sql
--- Migration 3 (excerpt)
+-- Migration 4 (excerpt)
 ALTER TABLE relationships RENAME COLUMN agent_id TO participant_id;
 ALTER TABLE relationships RENAME COLUMN other_agent_id TO other_participant_id;
 ALTER TABLE relationships ADD COLUMN participant_type TEXT NOT NULL DEFAULT 'agent';
@@ -162,6 +171,8 @@ ALTER TABLE interactions ADD COLUMN participant_type TEXT NOT NULL DEFAULT 'agen
 
 The `RelationshipMemory` API surface changes minimally: `agent_id` parameters become `participant_id`, with `participant_type` added where needed. Callers that pass their own `agent_id` are unaffected in behavior; they now pass `participant_type="agent"` explicitly or via the updated default.
 
+The Python dataclasses `Interaction` and `RelationshipSummary` in `relationship.py` also rename their `agent_id` / `other_agent_id` fields to `participant_id` / `other_participant_id`. All `RelationshipMemory` method signatures (`get_trust()`, `update_trust()`, `record_interaction()`, `get_relationship_summary()`) update parameter names accordingly. Existing callers (all internal) are updated in the same PR.
+
 **`EpisodicMemory` — no schema change needed:**
 
 Episodes already store `sender_id` as a free-form `TEXT` column. When a user sends a message, the episode is recorded with `sender_id = user_participant_id`. The recall and summarization paths are unaffected.
@@ -169,7 +180,7 @@ Episodes already store `sender_id` as a free-form `TEXT` column. When a user sen
 **New `users` table:**
 
 ```sql
--- Migration 3 (continued)
+-- Migration 4 (continued)
 CREATE TABLE IF NOT EXISTS users (
     participant_id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
@@ -228,6 +239,8 @@ No changes to `EventDispatcher.dispatch()` or `_LLMPersonaAgent.on_event()` are 
 
 The `SendChatMessage` gRPC call is synchronous (unary RPC). The agent's reply is extracted from the `SEND_MESSAGE` or `COMPLETE_TASK` action produced by `on_event()` and returned in `ChatResponse.reply`.
 
+**Session ID generation**: The `session_id` UUID is generated by the **Python agent servicer** (not the orchestrator) on the first `ChatRequest` where `session_id` is empty. The orchestrator passes the field through transparently. This keeps session state entirely agent-side, consistent with the design principle that the orchestrator stores no per-session state.
+
 ### E. Proto Extension
 
 Add to `proto/task.proto` (existing `AgentService`):
@@ -236,7 +249,7 @@ Add to `proto/task.proto` (existing `AgentService`):
 service AgentService {
   // Existing RPCs...
   rpc ExecuteTask(TaskRequest) returns (TaskResponse);
-  rpc ExecuteTaskStream(TaskRequest) returns (stream TaskStreamEvent);
+  rpc ExecuteTaskStream(TaskRequest) returns (stream TaskProgress);
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 
   // New in RFC 0016
@@ -248,6 +261,7 @@ message ChatRequest {
   string user_id    = 2;
   string message    = 3;
   string session_id = 4;  // opaque per-session UUID; empty = create new session
+  int32  timeout_seconds = 5;  // max wait for agent reply; 0 = use server default (60s)
 }
 
 message ChatResponse {
@@ -364,10 +378,11 @@ No other changes to the LLM loop or prompt construction are required.
 
 **Deliverables**:
 1. `agents/participant.py` — `Participant` Protocol + `UserParticipant` dataclass + `UserStore`
-2. `agents/memory/migrations.py` — Migration 3: `users` table + `participant_type` columns on `relationships` and `interactions` tables
+2. `agents/memory/migrations.py` — Migration 4: `users` table + `participant_type` columns on `relationships` and `interactions` tables
 3. `agents/memory/relationship.py` — rename `agent_id`/`other_agent_id` → `participant_id`/`other_participant_id`, add `participant_type` parameter with `"agent"` default
 4. `agents/persona_runtime/memory_context.py` — label user participants distinctly in prompt injection
-5. Unit tests: `UserParticipant` CRUD, relationship memory with user participant type, migration idempotency
+5. Prompt injection delimiter: wrap user message content with `[User message]` / `[End user message]` markers in the LLM prompt construction path (see Open Question 5). This is mandatory in Phase 1 as a low-cost security baseline, even though v0.2.1 is single-user.
+6. Unit tests: `UserParticipant` CRUD, relationship memory with user participant type, migration idempotency
 
 **Dependencies**: RFC 0005 ✅ Implemented.
 
@@ -402,7 +417,7 @@ No other changes to the LLM loop or prompt construction are required.
 
 **Python agents (`agents/`)**:
 - `agents/participant.py` — new file (~80 lines)
-- `agents/memory/migrations.py` — Migration 3 SQL (~30 lines)
+- `agents/memory/migrations.py` — Migration 4 SQL (~30 lines)
 - `agents/memory/relationship.py` — entity ID field renaming, `participant_type` parameter (~40 lines changed)
 - `agents/server.py` — `SendChatMessage` servicer method (~50 lines)
 - `agents/persona_runtime/memory_context.py` — user participant label branch (~10 lines)
@@ -436,7 +451,7 @@ No other changes to the LLM loop or prompt construction are required.
 - `UserStore.update_last_seen()` updates `last_seen_at` without modifying other fields.
 - `RelationshipMemory.record_interaction()` with `participant_type="user"` stores a row with the correct type and is retrieved by `get_relationship_summary()`.
 - `RelationshipMemory` trust decay behaves identically for user and agent participant types.
-- Migration 3 is idempotent (run twice, no error, no duplicate rows).
+- Migration 4 is idempotent (run twice, no error, no duplicate rows).
 - All existing relationship memory tests pass after the entity ID rename (backfill correctness).
 
 **Unit tests (Go)**:
@@ -444,10 +459,12 @@ No other changes to the LLM loop or prompt construction are required.
 - `POST /api/v1/agents/{id}/chat` returns HTTP 400 for `message` exceeding the length limit.
 - `POST /api/v1/agents/{id}/chat` returns HTTP 404 for an unknown `agent_id`.
 - `SendChatMessage` gRPC call returns the agent reply extracted from the `COMPLETE_TASK` action.
+- `SendChatMessage` when agent returns `DO_NOTHING`: servicer returns empty reply string and logs a warning.
 
 **Integration tests**:
 - Full round-trip: REST POST → orchestrator → gRPC → agent `on_event()` → relationship memory updated → reply returned.
 - Second message in the same session: agent relationship memory contains an interaction record from the first message.
+- First request with empty `session_id` returns a server-generated UUID; subsequent requests with that UUID continue the same session.
 
 **Manual tests**:
 - `persatrix chat <agent_id>`: banner printed, messages exchanged, agent stays in character.
@@ -465,13 +482,13 @@ Free-form IDs (e.g., `"local"`, `"alice"`) are ergonomic for local use. UUID-bac
 Synchronous (unary gRPC, blocking REST) is simpler for v0.2.1 and sufficient for short persona responses. Streaming (SSE on REST side, server-streaming gRPC) is better for long-running agentic responses. *Proposed default*: synchronous for v0.2.1. Streaming is a follow-up in v0.3.0, likely as part of channel message delivery.
 
 **3. How to handle the `RelationshipMemory` column rename in production databases?**
-SQLite supports `ALTER TABLE RENAME COLUMN` since version 3.25.0 (2018). Persatrix requires Python 3.11+ and the `aiosqlite` package, which bundles an adequate SQLite version on all supported platforms. The migration runs `RENAME COLUMN` with `UPDATE ... SET participant_type = 'agent' WHERE participant_type IS NULL` to backfill existing rows. *Decision*: use `ALTER TABLE RENAME COLUMN` in Migration 3 with backfill.
+SQLite supports `ALTER TABLE RENAME COLUMN` since version 3.25.0 (2018). Persatrix requires Python 3.11+ and the `aiosqlite` package, which bundles an adequate SQLite version on all supported platforms. The migration runs `RENAME COLUMN` with `UPDATE ... SET participant_type = 'agent' WHERE participant_type IS NULL` to backfill existing rows. *Decision*: use `ALTER TABLE RENAME COLUMN` in Migration 4 with backfill.
 
 **4. Should `participant_type` be an enum or a free-form string?**
 Free-form (`"agent"`, `"user"`) is extensible to future types (`"system"`, `"service"`, `"role"`). An enum enforces the allowed set at the application layer. *Proposed default*: free-form string for v0.2.1, validated against an allowlist (`{"agent", "user"}`) at the storage boundary. New types are added to the allowlist when a defining RFC lands.
 
 **5. Prompt injection risk for multi-user scenarios?**
-For v0.2.1 (single local user) the risk is self-inflicted and acceptable. For future multi-user scenarios, user-supplied message content must be clearly delimited in the LLM prompt to prevent injection attacks. *Proposed default*: add a `[User message]` / `[End user message]` wrapper to the prompt injection site in Phase 1, even though it is not strictly required for v0.2.1. This is a low-cost future-proofing measure.
+For v0.2.1 (single local user) the risk is self-inflicted and acceptable. For future multi-user scenarios, user-supplied message content must be clearly delimited in the LLM prompt to prevent injection attacks. *Decision*: add a `[User message]` / `[End user message]` wrapper to the prompt injection site in Phase 1 as a **mandatory deliverable** (see Phase 1, item 5). This is a low-cost security baseline that should not be deferred even for single-user scenarios.
 
 **6. How does the agent produce a `reply` string from `on_event()` actions?**
 `on_event()` returns a list of `AgentAction` objects. The `SendChatMessage` servicer extracts the reply by looking for the first `COMPLETE_TASK` action (`payload["result"]`) or `SEND_MESSAGE` action (`payload["content"]`). If neither is present (e.g., agent returned `DO_NOTHING`), the servicer returns an empty string. *Proposed default*: check `SEND_MESSAGE` first (more natural for conversational responses), then fall back to `COMPLETE_TASK`. Log a warning on `DO_NOTHING` so operators can tune the agent's conversational behavior.
@@ -496,6 +513,6 @@ For v0.2.1 (single local user) the risk is self-inflicted and acceptable. For fu
 
 - [RFC 0005 — Persona Agent & Memory System](0005-persona-agent-memory.md) — episodic memory, relationship memory, and event dispatch that this RFC extends
 - [RFC 0009 — Agent Identity, Security & Sandboxing](0009-security-sandboxing.md) — future dependency for user authentication and identity tokens
-- [RFC 0011 — Channels + Bridges](../rfcs/README.md) — future dependency for multi-user channel routing and external bridges
+- [RFC 0011 — Channels + Bridges](../rfcs/README.md) — future dependency for multi-user channel routing and external bridges (not yet written; see ROADMAP for scope)
 - [Architecture overview](../../.github/copilot-instructions.md)
 - [Persatrix Roadmap](../../ROADMAP.md)
