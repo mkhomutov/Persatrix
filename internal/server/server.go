@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
+	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
@@ -30,6 +31,9 @@ type Server struct {
 
 	// Cost components (optional — nil when cost tracking is not configured).
 	costReporter *cost.CostReporter
+
+	// Chat components (optional — nil when chat dispatch is not configured).
+	chatExecutor executor.ChatExecutor
 }
 
 // ServerOption configures optional Server dependencies.
@@ -39,6 +43,13 @@ type ServerOption func(*Server)
 func WithCostReporter(reporter *cost.CostReporter) ServerOption {
 	return func(s *Server) {
 		s.costReporter = reporter
+	}
+}
+
+// WithChatExecutor injects a ChatExecutor for the chat endpoint.
+func WithChatExecutor(ce executor.ChatExecutor) ServerOption {
+	return func(s *Server) {
+		s.chatExecutor = ce
 	}
 }
 
@@ -111,6 +122,11 @@ func (s *Server) registerRoutes() {
 
 	// Cost summary endpoint (RFC 0006 PR 4b)
 	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummaryImpl)
+
+	// Chat endpoint (RFC 0016 PR 4)
+	// TODO(v0.2): per-IP or per-session rate limiting — chat accepts unauthenticated
+	// traffic and has no request-rate controls beyond the 300s timeout cap.
+	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
