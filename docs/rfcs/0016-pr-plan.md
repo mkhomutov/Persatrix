@@ -298,15 +298,17 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy -- -D warnings` clean
-- [ ] `Chat` command variant in enum
-- [ ] REPL loop reads stdin, sends POST, prints reply
-- [ ] `--user` flag with `"local"` default
-- [ ] `session_id` maintained across requests
-- [ ] Spinner after ~2s
-- [ ] Empty reply handling (`reply_status == "empty"`)
-- [ ] `exit` and Ctrl-C terminate cleanly
+- [x] `cargo build --release` succeeds
+- [x] `cargo clippy -- -D warnings` clean
+- [x] `Chat` command variant in enum
+- [x] REPL loop reads stdin, sends POST, prints reply
+- [x] `--user` flag with `"local"` default
+- [x] `session_id` maintained across requests
+- [x] Spinner after ~2s
+- [x] Empty reply handling (`reply_status == "empty"`)
+- [x] `exit` and Ctrl-C terminate cleanly
+
+**Merged**: PR #125 — 2026-04-20
 
 ---
 
