@@ -359,9 +359,33 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 | 5 | `globals().get()` fallthrough `RuntimeError` guard | Verify unknown migration version raises `RuntimeError` (after switching to explicit registry, this becomes a KeyError test). |
 | 6 | `apply_decay()` with mixed participant types | Verify decay applies uniformly regardless of `other_participant_type`. |
 
-##### From PR 3 review
+##### From PR 3 review (PR #121)
 
-_TBD — populated after PR 3 review._
+**Should Fix:**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 1 | `tests/unit/python/test_chat_servicer.py` | No test verifies the `AgentEvent` payload structure passed to `dispatch()`. The event contract (keys: `content`, `user_id`, `participant_type`; `sender_id`; `metadata["session_id"]`) is only inferred from the happy path. | Add a test that inspects `dispatcher.dispatch.call_args` to assert expected `AgentEvent` fields: `payload` keys, `sender_id`, and `metadata["session_id"]`. |
+| 2 | `agents/server_servicers.py` | Empty `agent_id` falls through to the `NOT_FOUND` path. "Not found" vs "not provided" are different failure modes — the error is misleading for empty input. | Add early check `if not agent_id:` returning `INVALID_ARGUMENT` with `"agent_id is required"` before the dict lookup. |
+| 3 | `agents/server_servicers.py` | `cascade_depth=1` hard-coded in `executor.execute()` call. Assumes `SendChatMessage` is always a top-level call. If the dispatch already incremented depth internally, the executor starts at depth 1. Correct for current chat use case but fragile if `SendChatMessage` is ever called from a nested context. | Document the assumption with an inline comment, or derive depth from the dispatch context. |
+
+**Nice to Have (follow-up):**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 4 | `proto/task.proto` | `reply_status` is a free-form `string` (`"ok"`, `"empty"`, `"error"`) rather than a proto `enum`. Loses compile-time exhaustiveness in Go consumers. | Promote to `ReplyStatus` enum (`OK = 0; EMPTY = 1; ERROR = 2`) in a future proto revision. |
+| 5 | `agents/server_servicers.py` | No rate limiting per `user_id` or per session on `SendChatMessage`. | Add middleware-level gRPC rate limiter. Cross-cutting concern beyond this PR's scope. |
+| 6 | `agents/server_servicers.py` | `logger.exception("SendChatMessage failed for agent %s", agent_id)` uses `%s` interpolation instead of structured fields. | Use `extra={"agent_id": agent_id, "user_id": user_id}` for better log aggregation. Minor style point — consistent with current codebase. |
+| 7 | `agents/server_servicers.py` | `user_id` not validated for format/charset — only length (256 chars). Empty `user_id` allowed; `record_interaction()` falls back to `"unknown"`. | Consider validating `user_id` format or at minimum documenting the intentional empty-allowed semantics. |
+| 8 | `agents/server_servicers.py` | `_extract_chat_reply()` logs at `WARNING` when actions are non-empty but no reply is extractable. Could be noisy for agents that intentionally return only `DO_NOTHING` or `DELEGATE` actions. | Consider lowering to `DEBUG` or adding an action-type check before warning. |
+
+**Test gaps to fill:**
+
+| # | Test | Purpose |
+|---|------|---------|
+| 9 | `AgentEvent` payload structure assertion | Verify `dispatch()` receives event with correct `payload` keys, `sender_id`, and `metadata["session_id"]` (guards the servicer→dispatcher contract). |
+| 10 | `agent_id` with special characters or very long string | Verify `NOT_FOUND` (or `INVALID_ARGUMENT` after fix #2) for malformed agent IDs. |
+| 11 | `_extract_chat_reply` with `SEND_MESSAGE` having no `content` key | Verify returns `("", "ok")` via `.get("content", "")` fallback. |
 
 ##### From PR 4 review
 
@@ -380,6 +404,10 @@ _TBD — populated after PR 5 review._
 - [ ] PR 1 findings: 5 new tests added (concurrent get_or_create, update_last_seen nonexistent, re-init, long display_name, PersonaAgent conformance)
 - [ ] PR 2 findings: migration handler dispatch uses explicit registry dict instead of `globals().get()`
 - [ ] PR 2 findings: 2 new tests added (unknown migration version RuntimeError, apply_decay with mixed participant types)
+- [ ] PR 3 findings: test verifies `AgentEvent` payload structure passed to `dispatch()`
+- [ ] PR 3 findings: empty `agent_id` returns `INVALID_ARGUMENT` instead of `NOT_FOUND`
+- [ ] PR 3 findings: `cascade_depth=1` assumption documented or derived from context
+- [ ] PR 3 findings: 3 new tests added (event payload assertion, malformed agent_id, SEND_MESSAGE missing content key)
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes
