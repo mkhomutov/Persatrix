@@ -135,13 +135,15 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] Migration 4 executes cleanly on fresh DB and on DB with existing relationship data
-- [ ] Composite PK prevents user/agent ID collision
-- [ ] All existing relationship memory tests pass with renamed parameters
-- [ ] `<|user_message|>` delimiters applied in `_format_event()` for user messages
-- [ ] System prompt instruction in `_build_system_prompt()`
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] Migration 4 executes cleanly on fresh DB and on DB with existing relationship data
+- [x] Composite PK prevents user/agent ID collision
+- [x] All existing relationship memory tests pass with renamed parameters
+- [x] `<|user_message|>` delimiters applied in `_format_event()` for user messages
+- [x] System prompt instruction in `_build_system_prompt()`
+
+**Merged**: PR #120 — 2026-04-20
 
 ---
 
