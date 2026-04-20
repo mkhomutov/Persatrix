@@ -334,9 +334,28 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 | 7 | `display_name` with very long string (10,000+ chars) | Verify no unbounded storage issues; consider adding a length limit (e.g., 255 chars) at write boundary. |
 | 8 | `PersonaAgent` satisfies `Participant` Protocol | Explicit conformance test (currently only `BaseAgent` via `_StubAgent` and `UserParticipant` are tested). |
 
-##### From PR 2 review
+##### From PR 2 review (PR #120)
 
-_TBD — populated after PR 2 review._
+**Should Fix:**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 1 | `agents/memory/migrations.py` | `globals().get()` dispatch in `_apply_migrations()` is fragile — a typo in handler function name silently falls through. The `RuntimeError` guard mitigates this, but the pattern is unusual and not IDE-friendly. | Replace with explicit registry `_MIGRATION_HANDLERS: dict[int, Callable] = {4: _apply_migration_4}` for better discoverability and IDE support (Find Usages, refactoring). |
+
+**Nice to Have (follow-up):**
+
+| # | File | Finding | Fix |
+|---|------|---------|-----|
+| 2 | `agents/memory/relationship.py` | `apply_decay()` accepts `participant_type` but not `other_participant_type` — decays all relationships regardless of the other participant's type. Documented in docstring. | Add `other_participant_type` keyword arg when selective decay (e.g., agent vs user relationships) is needed. Acceptable for v0.2 where decay is uniform. |
+| 3 | `agents/memory/relationship.py` | `_seed_trust()` hardcodes `'agent'` participant type. Config-based trust seeding only supports agent-to-agent relationships. | Update when `config/agents.yaml` schema supports user relationship entries. Documented with TODO comment. |
+| 4 | `CHANGELOG.md` | No changelog entry for this PR. | Add entry as part of RFC 0016 tracking (can be in PR 7). |
+
+**Test gaps to fill:**
+
+| # | Test | Purpose |
+|---|------|---------|
+| 5 | `globals().get()` fallthrough `RuntimeError` guard | Verify unknown migration version raises `RuntimeError` (after switching to explicit registry, this becomes a KeyError test). |
+| 6 | `apply_decay()` with mixed participant types | Verify decay applies uniformly regardless of `other_participant_type`. |
 
 ##### From PR 3 review
 
@@ -357,6 +376,8 @@ _TBD — populated after PR 5 review._
 - [ ] PR 1 findings: query style aligned to cursor context manager pattern
 - [ ] PR 1 findings: `update_last_seen` validates `participant_id`
 - [ ] PR 1 findings: 5 new tests added (concurrent get_or_create, update_last_seen nonexistent, re-init, long display_name, PersonaAgent conformance)
+- [ ] PR 2 findings: migration handler dispatch uses explicit registry dict instead of `globals().get()`
+- [ ] PR 2 findings: 2 new tests added (unknown migration version RuntimeError, apply_decay with mixed participant types)
 - [ ] `make test` passes
 - [ ] `make lint` clean
 - [ ] `make validate` passes
