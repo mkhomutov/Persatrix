@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -154,3 +154,8 @@ clean: ## Remove build artifacts
 	cd cli && $(CARGO) clean
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+
+# ─── Version ────────────────────────────────────────────
+bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])
+	@test -n "$(VERSION)" || (echo "error: VERSION is required (e.g. make bump-version VERSION=0.3.0)" && exit 1)
+	$(PYTHON) scripts/bump_version.py $(VERSION) $(DRY_RUN)
