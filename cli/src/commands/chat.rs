@@ -16,6 +16,10 @@ pub(crate) async fn cmd_chat(
     user_id: &str,
 ) -> Result<(), String> {
     validate_resource_id(agent_id, "agent ID")?;
+    // Validate user_id with the same resource-ID rules as agent_id.
+    // Prevents arbitrary strings (whitespace, special chars) from propagating
+    // to the server and into logs. Default "local" passes this check.
+    validate_resource_id(user_id, "user ID")?;
 
     // Build a dedicated client with a longer timeout for chat (agent LLM
     // calls can take a while).
@@ -44,6 +48,10 @@ pub(crate) async fn cmd_chat(
         "Ctrl-C".bold(),
     );
 
+    // Blocking stdin read inside an async fn: intentional for a CLI REPL where
+    // only one operation (read → send → display) happens at a time. The tokio
+    // multi-thread runtime keeps other tasks (spinner) runnable on separate
+    // worker threads. For non-blocking reads, consider tokio::io::stdin().
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let mut session_id = String::new();
@@ -58,6 +66,10 @@ pub(crate) async fn cmd_chat(
         io::stdout().flush().ok();
 
         let mut line = String::new();
+        // On Unix, Ctrl-C sends SIGINT which interrupts the blocking read_line,
+        // causing it to return Err(Interrupted) → caught by Err(_) below.
+        // On Windows with ctrlc v3, console reads are similarly interrupted.
+        // The `running` flag is a fallback checked at the top of each iteration.
         match reader.read_line(&mut line) {
             Ok(0) => break, // EOF
             Ok(_) => {}

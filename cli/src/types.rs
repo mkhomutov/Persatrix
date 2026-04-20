@@ -74,7 +74,13 @@ pub(crate) struct ChatResponse {
     pub(crate) session_id: String,
     #[allow(dead_code)]
     pub(crate) agent_id: String,
+    /// Forward-compatible: defaults to "" if server omits the field (e.g. older
+    /// server version). The REPL falls back to agent_id when empty.
+    #[serde(default)]
     pub(crate) agent_display_name: String,
+    /// Forward-compatible: defaults to "" if server omits the field.
+    /// The REPL treats empty the same as a non-"empty" status (shows reply).
+    #[serde(default)]
     pub(crate) reply_status: String,
 }
 
@@ -408,5 +414,27 @@ mod tests {
         let resp: ChatResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.reply_status, "empty");
         assert!(resp.reply.is_empty());
+    }
+
+    #[test]
+    fn chat_response_defaults_missing_optional_fields() {
+        // Forward-compatibility: older server versions may omit
+        // agent_display_name and reply_status. #[serde(default)] ensures
+        // deserialization succeeds with empty-string defaults.
+        let json = serde_json::json!({
+            "reply": "Hello there",
+            "session_id": "abc-123",
+            "agent_id": "nexus-7"
+        });
+        let resp: ChatResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.reply, "Hello there");
+        assert!(
+            resp.agent_display_name.is_empty(),
+            "should default to empty string"
+        );
+        assert!(
+            resp.reply_status.is_empty(),
+            "should default to empty string"
+        );
     }
 }
