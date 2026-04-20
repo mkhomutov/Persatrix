@@ -82,10 +82,10 @@ enum HealthStatus {
 message ChatRequest {
   string agent_id = 1;
   string user_id = 2;
-  string message = 3;
-  string session_id = 4;          // empty → server generates UUID
-  int32 timeout_seconds = 5;      // 0 → server default (30s)
-  string participant_type = 6;    // defaults to "user" when empty
+  string message = 3;              // max 32768 chars enforced server-side
+  string session_id = 4;           // empty → server generates UUID; max 128 chars
+  int32 timeout_seconds = 5;       // 0 → server default (30s)
+  string participant_type = 6;     // defaults to "user" when empty
 }
 
 message ChatResponse {

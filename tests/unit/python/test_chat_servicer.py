@@ -409,3 +409,73 @@ class TestSendChatMessage:
 
         context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
         assert resp.reply_status == "error"
+
+    async def test_message_too_long_rejected(self):
+        """message exceeding 32768 chars returns INVALID_ARGUMENT (review fix: DoS)."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(message="x" * 32769), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
+
+    async def test_session_id_too_long_rejected(self):
+        """session_id exceeding 128 chars returns INVALID_ARGUMENT (review fix)."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(session_id="s" * 129), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
+
+    async def test_negative_timeout_clamped_to_min(self):
+        """Negative timeout_seconds is clamped to 1 (review fix: edge case)."""
+        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        servicer = _make_servicer(actions)
+        context = _mock_context()
+
+        captured_timeouts: list[float] = []
+        original_wait_for = asyncio.wait_for
+
+        async def _patched_wait_for(coro, timeout):
+            captured_timeouts.append(timeout)
+            return await original_wait_for(coro, timeout)
+
+        with patch("agents.server.asyncio.wait_for", side_effect=_patched_wait_for):
+            await servicer.SendChatMessage(
+                _chat_request(timeout_seconds=-5), context,
+            )
+
+        # -5 is non-zero so not defaulted → max(1, min(-5, 300)) = 1
+        assert captured_timeouts[0] == 1
+
+    async def test_empty_message_still_dispatches(self):
+        """Empty message string is dispatched normally (agent decides reply)."""
+        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "ok", "mentions": []})]
+        servicer = _make_servicer(actions)
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(message=""), context,
+        )
+
+        assert resp.reply == "ok"
+        assert resp.reply_status == "ok"
+
+    async def test_empty_agent_id_returns_not_found(self):
+        """Empty agent_id (proto default) → NOT_FOUND."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(agent_id=""), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.NOT_FOUND)
+        assert resp.reply_status == "error"

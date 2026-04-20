@@ -24,7 +24,7 @@ from .dispatch import EventDispatcher
 from .generated import agent_message_pb2, agent_message_pb2_grpc, task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_runtime import _LLMPersonaAgent
-from .persona_types import ActionType, AgentEvent, EventType
+from .persona_types import ActionType, AgentAction, AgentEvent, EventType
 from .server_persona import (
     initialize_persona_agents,
     load_agent,
@@ -190,11 +190,34 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
 
         # Generate or reuse session_id (OQ 9).
+        # Cap length to prevent oversized values propagating into metadata/
+        # logs. (Review fix: defence-in-depth for client-supplied session_id.)
+        if request.session_id and len(request.session_id) > 128:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("session_id exceeds 128 characters")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
         session_id = request.session_id or str(uuid.uuid4())
 
         # Clamp timeout: at least 1s, at most 300s, default 30s (OQ 6/13).
         raw_timeout = request.timeout_seconds or 30
         clamped_timeout = max(1, min(raw_timeout, 300))
+
+        # Validate message length — defence-in-depth against oversized
+        # payloads propagating through event dispatch into the LLM client.
+        # 32 768 chars is generous for a single chat message and aligned with
+        # typical LLM context-window limits. (Review fix: DoS via multi-MB message.)
+        if len(request.message) > 32768:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("message exceeds 32768 characters")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
 
         user_id = request.user_id
 
@@ -293,7 +316,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 
 
 def _extract_chat_reply(
-    actions: list,
+    actions: list[AgentAction],
     user_id: str,
 ) -> tuple[str, str]:
     """Extract a chat reply text from a list of agent actions.
