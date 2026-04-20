@@ -120,13 +120,13 @@ class Participant(Protocol):
     display_name: str
 
 
-# Validated allowlist for participant_type values (OQ 4 decision).
+# Validated allowlist for participant_type values (OQ 3 decision).
 # New types are added here (single-line change, no migration) when a
 # defining RFC lands.
 VALID_PARTICIPANT_TYPES: frozenset[str] = frozenset({"agent", "user"})
 ```
 
-`PersonaAgent` and `TaskAgent` satisfy `Participant` implicitly via three read-only properties added to `BaseAgent` (OQ 16 decision): `participant_id` (delegates to `agent_id`), `participant_type` (returns `"agent"`), and `display_name` (delegates to `self.name`). No `__init__` signature changes are needed, and no existing callers break.
+`PersonaAgent` and `TaskAgent` satisfy `Participant` implicitly via three read-only properties added to `BaseAgent` (OQ 10 decision): `participant_id` (delegates to `agent_id`), `participant_type` (returns `"agent"`), and `display_name` (delegates to `self.name`). No `__init__` signature changes are needed, and no existing callers break.
 
 Using `Protocol` (structural subtyping) means existing agents do not need to inherit from a new base class. The abstraction is opt-in at the type-checking level and transparent at runtime.
 
@@ -157,7 +157,7 @@ class UserStore:
     async def get(self, db: aiosqlite.Connection, participant_id: str) -> UserParticipant | None: ...
 ```
 
-`UserStore` shares the same database connection and migration infrastructure as `EpisodicMemory` and `RelationshipMemory`.
+`UserStore` shares the same database connection, `db_path` parameter, and migration infrastructure as `EpisodicMemory` and `RelationshipMemory`. v0.2.1 assumes a single shared database file (`data/memory.db`) per agent process; `create_persona_agent()` passes the same path to all four stores (episodic, relationship, working, user).
 
 ### C. Memory Generalization
 
@@ -167,19 +167,63 @@ The `relationships` and `interactions` tables currently use `agent_id` / `other_
 
 ```sql
 -- Migration 4 (excerpt)
--- Executed in a single transaction to avoid half-migrated state (OQ 3 decision).
--- A SQLite version guard (>= 3.25.0) is checked before execution.
-ALTER TABLE relationships RENAME COLUMN agent_id TO participant_id;
-ALTER TABLE relationships RENAME COLUMN other_agent_id TO other_participant_id;
-ALTER TABLE relationships ADD COLUMN participant_type TEXT NOT NULL DEFAULT 'agent';
-ALTER TABLE interactions RENAME COLUMN agent_id TO participant_id;
-ALTER TABLE interactions RENAME COLUMN other_agent_id TO other_participant_id;
-ALTER TABLE interactions ADD COLUMN participant_type TEXT NOT NULL DEFAULT 'agent';
+-- Uses the 12-step ALTER TABLE pattern to rebuild tables with a composite PK
+-- that includes participant_type, preventing ID collisions between user and
+-- agent participants (OQ 12 decision). Executed in a single transaction to
+-- avoid half-migrated state on process crash.
+
+-- 1. Rebuild relationships table with new composite PK
+CREATE TABLE relationships_new (
+    participant_id TEXT NOT NULL,
+    participant_type TEXT NOT NULL DEFAULT 'agent',
+    other_participant_id TEXT NOT NULL,
+    other_participant_type TEXT NOT NULL DEFAULT 'agent',
+    trust_score REAL NOT NULL DEFAULT 0.5,
+    interaction_count INTEGER NOT NULL DEFAULT 0,
+    last_interaction_at REAL,
+    notes TEXT,
+    PRIMARY KEY (participant_id, participant_type, other_participant_id, other_participant_type)
+);
+INSERT INTO relationships_new
+    (participant_id, other_participant_id, trust_score,
+     interaction_count, last_interaction_at, notes)
+SELECT agent_id, other_agent_id, trust_score,
+       interaction_count, last_interaction_at, notes
+FROM relationships;
+DROP TABLE relationships;
+ALTER TABLE relationships_new RENAME TO relationships;
+
+-- 2. Rebuild interactions table with participant_type columns
+CREATE TABLE interactions_new (
+    id TEXT PRIMARY KEY,
+    participant_id TEXT NOT NULL,
+    participant_type TEXT NOT NULL DEFAULT 'agent',
+    other_participant_id TEXT NOT NULL,
+    other_participant_type TEXT NOT NULL DEFAULT 'agent',
+    interaction_type TEXT NOT NULL,
+    outcome TEXT,
+    sentiment REAL NOT NULL DEFAULT 0.0,
+    created_at REAL NOT NULL
+);
+INSERT INTO interactions_new
+    (id, participant_id, other_participant_id,
+     interaction_type, outcome, sentiment, created_at)
+SELECT id, agent_id, other_agent_id,
+       interaction_type, outcome, sentiment, created_at
+FROM interactions;
+DROP TABLE interactions;
+ALTER TABLE interactions_new RENAME TO interactions;
+
+-- Recreate index with new column names (old index dropped with old table)
+CREATE INDEX idx_interactions_lookup
+    ON interactions(participant_id, participant_type,
+                    other_participant_id, other_participant_type,
+                    created_at DESC);
 ```
 
 The `RelationshipMemory` API surface changes minimally: `agent_id` parameters become `participant_id`, with `participant_type` added where needed. Callers that pass their own `agent_id` are unaffected in behavior; they now pass `participant_type="agent"` explicitly or via the updated default.
 
-The Python dataclasses `Interaction` and `RelationshipSummary` in `relationship.py` also rename their `agent_id` / `other_agent_id` fields to `participant_id` / `other_participant_id`. All `RelationshipMemory` method signatures (`get_trust()`, `update_trust()`, `record_interaction()`, `get_relationship_summary()`) update parameter names accordingly. Existing callers (all internal) are updated in the same PR.
+The Python dataclasses `Interaction` and `RelationshipSummary` in `relationship.py` rename their `agent_id` / `other_agent_id` fields to `participant_id` / `other_participant_id` and gain `participant_type` / `other_participant_type` fields. All `RelationshipMemory` method signatures (`get_trust()`, `update_trust()`, `record_interaction()`, `get_relationship_summary()`) update parameter names accordingly and accept `participant_type`/`other_participant_type` parameters with `"agent"` defaults. Existing callers (all internal) are updated in the same PR.
 
 **`EpisodicMemory` — no schema change needed:**
 
@@ -230,9 +274,9 @@ persatrix chat <agent_id>
                                                                          │
                                                                          ▼
                                                                 RelationshipMemory.record_interaction(
-                                                                    participant_id=agent_id,
                                                                     other_participant_id=user_id,
-                                                                    participant_type="user",
+                                                                    other_participant_type="user",
+                                                                    interaction_type="chat_message",
                                                                     ...
                                                                 )
                                                                 ChatResponse(reply=agent_reply)
@@ -243,11 +287,11 @@ persatrix chat <agent_id>
     ▼  printed to terminal
 ```
 
-No changes to `_LLMPersonaAgent.on_event()` are required. The event shape is identical to an agent-to-agent `MESSAGE_RECEIVED`; only `sender_id` and `metadata["participant_type"]` differ. `EventDispatcher.dispatch()` gains an `execute_actions` keyword argument (OQ 8) so the servicer can extract the reply before executing side-effect actions.
+No changes to `_LLMPersonaAgent.on_event()` are required. The event shape is identical to an agent-to-agent `MESSAGE_RECEIVED`; only `sender_id` and `metadata["participant_type"]` differ. `EventDispatcher.dispatch()` gains an `execute_actions` keyword argument (OQ 7) so the servicer can extract the reply before executing side-effect actions.
 
-The `SendChatMessage` gRPC call is synchronous (unary RPC). The servicer calls `dispatch(execute_actions=False)`, extracts the reply using OQ 9's priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), then feeds remaining actions into `ActionExecutor`. The dispatch is wrapped in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 7) to bound wait time when the agent's tick loop holds the lock.
+The `SendChatMessage` gRPC call is synchronous (unary RPC). The servicer calls `dispatch(execute_actions=False)`, extracts the reply using OQ 5's priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), then feeds remaining actions into `ActionExecutor`. The dispatch is wrapped in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 6) to bound wait time when the agent's tick loop holds the lock. After extracting the reply, the servicer calls `RelationshipMemory.record_interaction()` with `other_participant_type="user"` (OQ 11; episodic recording is already handled by `_on_event_inner()` step 6).
 
-**Session ID generation**: The `session_id` UUID is generated by the **Python agent servicer** (not the orchestrator) on the first `ChatRequest` where `session_id` is empty. The orchestrator passes the field through transparently. This keeps session state entirely agent-side, consistent with the design principle that the orchestrator stores no per-session state. The `session_id` is stored in `event.metadata["session_id"]` for episodic memory records (OQ 15) but is not used for memory scoping in v0.2.1.
+**Session ID generation**: The `session_id` UUID is generated by the **Python agent servicer** (not the orchestrator) on the first `ChatRequest` where `session_id` is empty. The orchestrator passes the field through transparently. This keeps session state entirely agent-side, consistent with the design principle that the orchestrator stores no per-session state. The `session_id` is stored in `event.metadata["session_id"]` for episodic memory records (OQ 9) but is not used for memory scoping in v0.2.1.
 
 ### E. Proto Extension
 
@@ -277,11 +321,12 @@ message ChatResponse {
   string session_id         = 2;
   string agent_id           = 3;
   int64  timestamp          = 4;
-  string agent_display_name = 5;  // OQ 13: populated by orchestrator from Registry metadata
+  string agent_display_name = 5;  // OQ 8: populated by orchestrator from Registry metadata
+  string reply_status       = 6;  // OQ 16: "ok", "empty", or "error"
 }
 ```
 
-No changes to `ChannelService` or `AgentMessage` in `agent_message.proto` — those are reserved for RFC 0011 channel routing.
+No changes to `ChannelService` or `AgentMessage` in `agent_message.proto` — those are reserved for RFC 0011 channel routing. `SendChatMessage` is intentionally separate from `ChannelService.SendMessage` because it requires synchronous reply semantics, whereas `SendMessage` is fire-and-forget.
 
 ### F. REST API for Chat
 
@@ -303,16 +348,17 @@ HTTP 200 OK
   "session_id":         "a3f7e2b1-...",
   "agent_id":           "nexus-7",
   "timestamp":          1745030400,
-  "agent_display_name": "Nexus Seven"
+  "agent_display_name": "Nexus Seven",
+  "reply_status":       "ok"
 }
 
 HTTP 400  agent_id missing or message empty or message exceeds length limit
 HTTP 404  agent not found in registry
 HTTP 503  agent gRPC call failed (INTERNAL)
-HTTP 504  agent response timed out (DEADLINE_EXCEEDED; OQ 7)
+HTTP 504  agent response timed out (DEADLINE_EXCEEDED; OQ 6)
 ```
 
-The orchestrator looks up the agent gRPC address via `Registry` (OQ 14: existing agent registration flow provides discoverability; no changes needed), calls `SendChatMessage`, populates `agent_display_name` from Registry metadata (OQ 13), and returns the response. No session state is stored in the orchestrator — session continuity lives in the agent's episodic and relationship memory.
+The orchestrator looks up the agent gRPC address via `Registry` (existing agent registration flow provides discoverability; no changes needed), calls `SendChatMessage`, populates `agent_display_name` from Registry metadata (OQ 8), and returns the response. No session state is stored in the orchestrator — session continuity lives in the agent's episodic and relationship memory.
 
 **Message length limit**: The orchestrator rejects messages longer than `chat_max_message_length` (default: 4000 characters, configurable). This prevents token exhaustion attacks and is the only input validation applied at this layer.
 
@@ -332,8 +378,9 @@ Behavior:
    - Prompts `You: `, reads a line from stdin.
    - On `exit` or empty EOF, exits cleanly.
    - POSTs to `POST /api/v1/agents/{agent_id}/chat` with the message.
-   - Shows a `Waiting for <agent_id>...` spinner after ~2 seconds of no response (OQ 7).
-   - Prints `<display_name>: <reply>` (using `agent_display_name` from the response; falls back to `agent_id` if empty; OQ 13).
+   - Shows a `Waiting for <agent_id>...` spinner after ~2 seconds of no response (OQ 6).
+   - Prints `<display_name>: <reply>` (using `agent_display_name` from the response; falls back to `agent_id` if empty; OQ 8).
+   - When `reply_status` is `"empty"`, prints `<display_name> did not respond.` in dimmed style instead of a blank line (OQ 16).
    - Repeats.
 4. The `session_id` received from the first response is reused for all subsequent messages in the same REPL process.
 5. History is not persisted client-side — it lives in the agent's memory.
@@ -362,7 +409,7 @@ else:
     label = f"Agent '{relationship.other_participant_id}'"
 ```
 
-Additionally, user message content in the LLM prompt is wrapped with XML-style delimiters (OQ 5 decision) and accompanied by a system prompt instruction:
+Additionally, user message content in the LLM prompt is wrapped with XML-style delimiters (OQ 4 decision) and accompanied by a system prompt instruction:
 
 ```
 <|user_message user_id="{user_id}"|>
@@ -378,7 +425,7 @@ No input sanitization is applied to user message content — the delimiter + sys
 
 ## Security Considerations
 
-1. **Prompt injection via user input.** User messages are injected into the LLM system prompt as conversation context. The existing `_sanitize_tool_input()` path (RFC 0005) applies only to tool call arguments, not to natural language conversation. Mitigated in Phase 1 with XML-style delimiter wrapping (`<|user_message|>` / `<|/user_message|>`) and an explicit system prompt instruction telling the model to treat delimited content as raw user input (see OQ 5 decision and Section H). For multi-user scenarios (v0.3.0), the primary defense is RFC 0009's auth boundary.
+1. **Prompt injection via user input.** User messages are injected into the LLM system prompt as conversation context. The existing `_sanitize_tool_input()` path (RFC 0005) applies only to tool call arguments, not to natural language conversation. Mitigated in Phase 1 with XML-style delimiter wrapping (`<|user_message|>` / `<|/user_message|>`) and an explicit system prompt instruction telling the model to treat delimited content as raw user input (see OQ 4 decision and Section H). For multi-user scenarios (v0.3.0), the primary defense is RFC 0009's auth boundary.
 
 2. **User identity without authentication.** `user_id` is caller-supplied with no verification. Any caller can impersonate any `user_id`. For v0.2.1 (local CLI, single trusted user) this is acceptable. When network-accessible multi-user deployments arrive, RFC 0009 identity tokens will gate this endpoint; `user_id` will become a claim inside a verified token, not a raw parameter.
 
@@ -400,11 +447,11 @@ No input sanitization is applied to user message content — the delimiter + sys
 
 **Deliverables**:
 1. `agents/participant.py` — `Participant` Protocol + `UserParticipant` dataclass + `UserStore`
-2. `agents/base.py` — add `participant_id`, `participant_type`, and `display_name` read-only properties to `BaseAgent` (OQ 16 decision)
-3. `agents/memory/migrations.py` — Migration 4: `users` table + `participant_type` columns on `relationships` and `interactions` tables (OQ 12: indexes survive rename, no recreation needed)
-4. `agents/memory/relationship.py` — rename `agent_id`/`other_agent_id` → `participant_id`/`other_participant_id`, add `participant_type` parameter with `"agent"` default
+2. `agents/base.py` — add `participant_id`, `participant_type`, and `display_name` read-only properties to `BaseAgent` (OQ 10 decision)
+3. `agents/memory/migrations.py` — Migration 4: `users` table + rebuild `relationships` and `interactions` tables with composite PK including `participant_type`/`other_participant_type` (12-step ALTER TABLE pattern; OQ 12 decision)
+4. `agents/memory/relationship.py` — rename `agent_id`/`other_agent_id` → `participant_id`/`other_participant_id`, add `participant_type`/`other_participant_type` parameters with `"agent"` defaults
 5. `agents/persona_runtime/memory_context.py` — label user participants distinctly in prompt injection
-6. Prompt injection delimiter: wrap user message content with XML-style `<|user_message user_id="..."|>` / `<|/user_message|>` delimiters in the LLM prompt construction path, and add an explicit system prompt instruction telling the model to treat delimited content as raw user input (see OQ 5 decision). This is mandatory in Phase 1 as a low-cost security baseline, even though v0.2.1 is single-user.
+6. Prompt injection delimiter: wrap user message content with XML-style `<|user_message user_id="..."|>` / `<|/user_message|>` delimiters in the LLM prompt construction path, and add an explicit system prompt instruction telling the model to treat delimited content as raw user input (see OQ 4 decision). This is mandatory in Phase 1 as a low-cost security baseline, even though v0.2.1 is single-user.
 7. Unit tests: `UserParticipant` CRUD, relationship memory with user participant type, migration idempotency, `BaseAgent` satisfies `Participant` Protocol
 
 **Dependencies**: RFC 0005 ✅ Implemented.
@@ -416,9 +463,9 @@ No input sanitization is applied to user message content — the delimiter + sys
 **Deliverables**:
 1. `proto/task.proto` — add `SendChatMessage` RPC + `ChatRequest` / `ChatResponse` messages
 2. `make proto` — regenerate Go and Python stubs
-3. `agents/dispatch.py` — add `execute_actions: bool = True` keyword argument to `EventDispatcher.dispatch()` (OQ 8 decision)
-4. `agents/server.py` — implement `SendChatMessage` servicer: build `AgentEvent`, call `dispatch(execute_actions=False)`, extract reply using OQ 9 priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), execute remaining non-reply actions separately. Store `session_id` in `event.metadata` (OQ 15). Wrap dispatch in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 7). Catch exceptions and return gRPC `INTERNAL` status.
-5. `internal/server/` — `POST /api/v1/agents/{id}/chat` handler with message length validation. Map gRPC `INTERNAL` to HTTP 503, `DEADLINE_EXCEEDED` to HTTP 504. Populate `agent_display_name` from `Registry` metadata (OQ 13).
+3. `agents/dispatch.py` — add `execute_actions: bool = True` keyword argument to `EventDispatcher.dispatch()` (OQ 7 decision)
+4. `agents/server.py` — implement `SendChatMessage` servicer: build `AgentEvent`, call `dispatch(execute_actions=False)`, extract reply using OQ 5 priority order (user-targeted `SEND_MESSAGE` → any `SEND_MESSAGE` → `COMPLETE_TASK` → empty string), execute remaining non-reply actions separately. Store `session_id` in `event.metadata` (OQ 9). Wrap dispatch in `asyncio.wait_for(timeout=timeout_seconds)` (OQ 6). Catch exceptions and return gRPC `INTERNAL` status. After extracting the reply, call `RelationshipMemory.record_interaction()` with `other_participant_type="user"` (OQ 11).
+5. `internal/server/` — `POST /api/v1/agents/{id}/chat` handler with message length validation. Map gRPC `INTERNAL` to HTTP 503, `DEADLINE_EXCEEDED` to HTTP 504. Populate `agent_display_name` from `Registry` metadata (OQ 8). Set `reply_status` field (OQ 16).
 6. `internal/executor/` or `internal/chat/` — gRPC `SendChatMessage` call with the existing agent connection pool
 7. Integration test: full round-trip via REST + gRPC
 
@@ -441,11 +488,11 @@ No input sanitization is applied to user message content — the delimiter + sys
 
 **Python agents (`agents/`)**:
 - `agents/participant.py` — new file (~80 lines)
-- `agents/base.py` — three `Participant` Protocol properties (~15 lines; OQ 16)
+- `agents/base.py` — three `Participant` Protocol properties (~15 lines; OQ 10)
 - `agents/memory/migrations.py` — Migration 4 SQL (~30 lines)
-- `agents/memory/relationship.py` — entity ID field renaming, `participant_type` parameter (~40 lines changed)
-- `agents/dispatch.py` — `execute_actions` kwarg on `dispatch()` (~5 lines; OQ 8)
-- `agents/server.py` — `SendChatMessage` servicer method (~60 lines; OQ 7/8/9/15)
+- `agents/memory/relationship.py` — entity ID field renaming, `participant_type`/`other_participant_type` parameters (~40 lines changed)
+- `agents/dispatch.py` — `execute_actions` kwarg on `dispatch()` (~5 lines; OQ 7)
+- `agents/server.py` — `SendChatMessage` servicer method (~60 lines; OQ 5/6/7/9/11)
 - `agents/persona_runtime/memory_context.py` — user participant label branch (~10 lines)
 
 **Go orchestrator (`internal/`)**:
@@ -479,18 +526,21 @@ No input sanitization is applied to user message content — the delimiter + sys
 - `RelationshipMemory` trust decay behaves identically for user and agent participant types.
 - Migration 4 is idempotent (run twice, no error, no duplicate rows).
 - All existing relationship memory tests pass after the entity ID rename (backfill correctness).
-- `BaseAgent` subclasses satisfy the `Participant` Protocol via read-only properties (OQ 16).
-- `EventDispatcher.dispatch(execute_actions=False)` returns actions without executing them (OQ 8).
-- `SendChatMessage` servicer extracts user-targeted `SEND_MESSAGE` when multiple actions are returned (OQ 9).
-- `SendChatMessage` servicer returns `DEADLINE_EXCEEDED` when `asyncio.wait_for` times out (OQ 7).
-- `session_id` is stored in `event.metadata["session_id"]` in episodic memory records (OQ 15).
+- `BaseAgent` subclasses satisfy the `Participant` Protocol via read-only properties (OQ 10).
+- `EventDispatcher.dispatch(execute_actions=False)` returns actions without executing them (OQ 7).
+- `SendChatMessage` servicer extracts user-targeted `SEND_MESSAGE` when multiple actions are returned (OQ 5).
+- `SendChatMessage` servicer returns `DEADLINE_EXCEEDED` when `asyncio.wait_for` times out (OQ 6).
+- `session_id` is stored in `event.metadata["session_id"]` in episodic memory records (OQ 9).
+- `SendChatMessage` servicer calls `record_interaction()` with `other_participant_type="user"` after reply extraction (OQ 11).
+- PK collision: user and agent with same ID can both have distinct relationship rows (OQ 12).
 
 **Unit tests (Go)**:
 - `POST /api/v1/agents/{id}/chat` returns HTTP 400 for empty `message`.
 - `POST /api/v1/agents/{id}/chat` returns HTTP 400 for `message` exceeding the length limit.
 - `POST /api/v1/agents/{id}/chat` returns HTTP 404 for an unknown `agent_id`.
-- `POST /api/v1/agents/{id}/chat` returns HTTP 504 when gRPC returns `DEADLINE_EXCEEDED` (OQ 7).
-- `ChatResponse` includes `agent_display_name` populated from Registry metadata (OQ 13).
+- `POST /api/v1/agents/{id}/chat` returns HTTP 504 when gRPC returns `DEADLINE_EXCEEDED` (OQ 6).
+- `ChatResponse` includes `agent_display_name` populated from Registry metadata (OQ 8).
+- `ChatResponse` includes `reply_status` field set to `"ok"`, `"empty"`, or `"error"` (OQ 16).
 - `SendChatMessage` gRPC call returns the agent reply extracted from the `COMPLETE_TASK` action.
 - `SendChatMessage` when agent returns `DO_NOTHING`: servicer returns empty reply string and logs a warning.
 - `SendChatMessage` when `on_event()` raises an exception: servicer returns gRPC `INTERNAL` error; REST layer maps to HTTP 503.
@@ -504,7 +554,8 @@ No input sanitization is applied to user message content — the delimiter + sys
 - `persatrix chat <agent_id>`: banner printed, messages exchanged, agent stays in character.
 - `exit` and Ctrl-C both terminate the REPL cleanly.
 - Reconnecting to the same agent with the same `--user` ID: agent's response references the prior session (confirms relationship memory persistence).
-- Spinner appears after ~2s when agent is processing (OQ 7).
+- Spinner appears after ~2s when agent is processing (OQ 6).
+- Empty reply: CLI prints `<display_name> did not respond.` in dimmed style (OQ 16).
 
 ---
 
@@ -516,10 +567,7 @@ Free-form IDs (e.g., `"local"`, `"alice"`) are ergonomic for local use. UUID-bac
 **2. Synchronous vs. streaming chat response?**
 Synchronous (unary gRPC, blocking REST) is simpler for v0.2.1 and sufficient for short persona responses. Streaming (SSE on REST side, server-streaming gRPC) is better for long-running agentic responses. *Decision*: **synchronous for v0.2.1**. The `timeout_seconds` field in `ChatRequest` (default 60s) bounds wait time; the CLI should display a "waiting..." indicator so the user knows the request is in flight. Streaming is a follow-up in v0.3.0, likely as part of channel message delivery.
 
-**3. How to handle the `RelationshipMemory` column rename in production databases?**
-SQLite supports `ALTER TABLE RENAME COLUMN` since version 3.25.0 (2018). Persatrix requires Python 3.11+ and the `aiosqlite` package, which bundles an adequate SQLite version on all supported platforms. *Decision*: **use `ALTER TABLE RENAME COLUMN` in Migration 4 with backfill**. Add a SQLite version guard at migration time (`SELECT sqlite_version()`, assert ≥ 3.25.0) as cheap insurance against exotic embedded deployments. Execute the rename and backfill in a **single transaction** to avoid half-migrated state on process crash.
-
-**4. Should `participant_type` be an enum or a free-form string?**
+**3. Should `participant_type` be an enum or a free-form string?**
 Free-form (`"agent"`, `"user"`) is extensible to future types (`"system"`, `"service"`, `"role"`). An enum enforces the allowed set at the application layer. *Decision*: **free-form string**, validated against a `frozenset` allowlist defined as a module constant in `agents/participant.py`:
 
 ```python
@@ -528,7 +576,7 @@ VALID_PARTICIPANT_TYPES: frozenset[str] = frozenset({"agent", "user"})
 
 Validation is enforced at the `UserStore` and `RelationshipMemory` write boundaries. A Python `Enum` is not used because `participant_type` flows through proto (string field) and SQLite (TEXT column) — a validated string is the right level of formality. New types are added to the allowlist (single-line change, no migration) when a defining RFC lands.
 
-**5. Prompt injection risk for multi-user scenarios?**
+**4. Prompt injection risk for multi-user scenarios?**
 For v0.2.1 (single local user) the risk is self-inflicted and acceptable. For future multi-user scenarios, user-supplied message content must be clearly delimited in the LLM prompt to prevent injection attacks. *Decision*: **three-layer defense, all mandatory in Phase 1**:
 
 1. **XML-style delimiter wrapping** in the LLM prompt construction path (replaces the previously proposed bracket-style markers). XML-like delimiters are empirically harder for adversarial inputs to escape:
@@ -545,24 +593,33 @@ For v0.2.1 (single local user) the risk is self-inflicted and acceptable. For fu
 
 For multi-user scenarios (v0.3.0), the real defense is RFC 0009's auth boundary — untrusted users cannot reach the endpoint without a valid token.
 
-**6. How does the agent produce a `reply` string from `on_event()` actions?**
-`on_event()` returns a list of `AgentAction` objects. The `SendChatMessage` servicer extracts the reply by looking for the first `COMPLETE_TASK` action (`payload["result"]`) or `SEND_MESSAGE` action (`payload["content"]`). *Decision*: **check `SEND_MESSAGE` first** (more natural for conversational responses), then fall back to `COMPLETE_TASK`, then empty string. Full priority order:
+**5. Reply extraction: which action is the user's reply?**
+`on_event()` returns a list of `AgentAction` objects. The `SendChatMessage` servicer must extract a single reply string from these actions. A persona agent might produce `[SEND_MESSAGE(mentions=["other-agent"]), SEND_MESSAGE(mentions=["local"]), UPDATE_STATE(...)]` — the servicer must identify which action is addressed to the user.
 
-1. First `SEND_MESSAGE` action → `payload["content"]`
-2. Else first `COMPLETE_TASK` action → `payload["result"]`
-3. Else → empty string + log warning at `WARNING` level
+The current `SEND_MESSAGE` payload uses `mentions: list[str]` for routing targets (see `ActionExecutor._handle_send_message()`), not a `target_id` field. Reply extraction uses this existing field — no prompt engineering or action schema changes are needed.
 
-**Update**: OQ 9 refines this to filter `SEND_MESSAGE` by `target_id == user_id` first, then fall back to any `SEND_MESSAGE`, then `COMPLETE_TASK`. See OQ 9 for the full revised priority order.
+*Decision*: **filter `SEND_MESSAGE` by `user_id in payload["mentions"]` first, with fallbacks.**
+
+Priority order for reply extraction:
+
+1. First `SEND_MESSAGE` where `user_id in payload.get("mentions", [])` → `payload["content"]`
+2. Else first `SEND_MESSAGE` (any mentions) → `payload["content"]` (best-effort fallback for agents that don't set explicit targets)
+3. Else first `COMPLETE_TASK` → `payload["result"]`
+4. Else → empty string + log warning at `WARNING` level
+
+The chat-specific prompt injection (Section H) instructs the LLM to include the user's `participant_id` in `mentions` when replying to a user message — a natural extension of the existing convention where agents mention target agents in `SEND_MESSAGE` actions.
+
+After extracting the reply action, the servicer feeds the remaining actions (other `SEND_MESSAGE` targets, `UPDATE_STATE`, etc.) back into `ActionExecutor.execute()` via OQ 7's `execute_actions=False` pattern so side-effects still fire.
 
 Additionally, if `on_event()` raises an exception (LLM timeout, tool failure), the `SendChatMessage` servicer catches it and returns a gRPC error with `INTERNAL` status code. The REST layer maps this to HTTP 503. This error path is an explicit Phase 2 deliverable.
 
-**7. How does synchronous chat interact with the per-agent tick loop lock?**
+**6. How does synchronous chat interact with the per-agent tick loop lock?**
 `_LLMPersonaAgent.on_event()` acquires `self._lock` for the entire LLM call duration (up to 300s default via `_DEFAULT_EVENT_TIMEOUT`). If a `SendChatMessage` request arrives while `on_tick()` holds the lock, the user blocks silently until the tick finishes. The `timeout_seconds` field in `ChatRequest` defaults to 60s, but the agent-side `event_timeout` default is 300s — which one governs the user's wait? Should the CLI show a "waiting for agent..." indicator? Should chat requests preempt or deprioritize ticks? *Decision*: **`timeout_seconds` from `ChatRequest` governs the user's wait. No tick preemption.**
 
 The `SendChatMessage` servicer wraps the `dispatch()` call in `asyncio.wait_for(timeout=request.timeout_seconds or 60)`. If the tick holds the lock, the user waits up to that timeout. On timeout, the servicer returns gRPC `DEADLINE_EXCEEDED`; the REST layer maps it to HTTP 504. The CLI shows a `Waiting for <agent_id>...` spinner after ~2 seconds of no response (client-side UX, no protocol change). Tick preemption (priority queue or lock interruption) is not worth the complexity for v0.2.1 — if 60s proves problematic, a future RFC can add prioritized event scheduling. The effective max wait is `min(timeout_seconds, agent event_timeout)`. Long ticks can cause user-visible latency; this is acceptable for v0.2.1 local use.
 
-**8. Reply extraction path: bypass `EventDispatcher` or intercept before `ActionExecutor`?**
-The RFC says the `SendChatMessage` servicer calls `EventDispatcher.dispatch()`, which calls `agent.on_event()`, which returns `list[AgentAction]`. But `EventDispatcher.dispatch()` currently feeds actions into `ActionExecutor`, which executes them — including `SEND_MESSAGE` cascading to other agents. If the servicer uses `dispatch()`, the reply may be executed (sent to another agent) before the servicer can extract it. If the servicer calls `on_event()` directly, it bypasses dispatch infrastructure (logging, cascade depth tracking). The RFC must specify whether `SendChatMessage` (a) calls `on_event()` directly, (b) adds a "synchronous" mode to `EventDispatcher.dispatch()` that returns actions without executing them, or (c) takes another approach. *Decision*: **option (b) — add an `execute_actions` flag to `EventDispatcher.dispatch()`.**
+**7. Reply extraction path: bypass `EventDispatcher` or intercept before `ActionExecutor`?**
+The RFC says the `SendChatMessage` servicer calls `EventDispatcher.dispatch()`, which calls `agent.on_event()`, which returns `list[AgentAction]`. But `EventDispatcher.dispatch()` currently feeds actions into `ActionExecutor`, which executes them — including `SEND_MESSAGE` cascading to other agents. If the servicer uses `dispatch()`, the reply may be executed (sent to another agent) before the servicer can extract it. If the servicer calls `on_event()` directly, it bypasses dispatch infrastructure (logging, cascade depth tracking). *Decision*: **add an `execute_actions` flag to `EventDispatcher.dispatch()`.**
 
 Add a keyword argument to `dispatch()`:
 
@@ -577,59 +634,21 @@ async def dispatch(
     return actions
 ```
 
-The `SendChatMessage` servicer calls `dispatch(target_id, event, execute_actions=False)`, extracts the user-targeted reply from the returned actions (see OQ 9), then feeds the remaining non-reply actions back into `self._executor.execute()` so that side-effects (e.g., `SEND_MESSAGE` to other agents, `UPDATE_STATE`) still execute. This preserves cascade depth tracking, event copying, and logging while giving the servicer control over action execution. Calling `on_event()` directly (option a) would bypass too much dispatch infrastructure.
+The `SendChatMessage` servicer calls `dispatch(target_id, event, execute_actions=False)`, extracts the user-targeted reply from the returned actions (see OQ 5), then feeds the remaining non-reply actions back into `self._executor.execute()` so that side-effects (e.g., `SEND_MESSAGE` to other agents, `UPDATE_STATE`) still execute. This preserves cascade depth tracking, event copying, and logging while giving the servicer control over action execution. Calling `on_event()` directly would bypass too much dispatch infrastructure.
 
-**9. Multi-action responses: which `SEND_MESSAGE` is the reply?**
-`on_event()` returns a list of actions. A persona agent might produce `[SEND_MESSAGE(target="other-agent", ...), SEND_MESSAGE(target=user_id, ...), UPDATE_STATE(...)]`. OQ 6's priority order takes the *first* `SEND_MESSAGE`, which could be addressed to another agent, not the user. Should the servicer filter `SEND_MESSAGE` actions by `target_id == user_id`? If no action targets the user, should it fall through to `COMPLETE_TASK`? *Decision*: **filter `SEND_MESSAGE` by `target_id == user_participant_id` first, with fallbacks.**
+`execute_actions` is a per-call override; it does not affect child dispatches. When the servicer subsequently feeds non-reply actions into `ActionExecutor.execute()`, any child `_handle_send_message()` calls `self._dispatcher.dispatch()` with the default `execute_actions=True`. Only the top-level `SendChatMessage` dispatch passes `False`.
 
-Revised priority order for reply extraction:
-
-1. First `SEND_MESSAGE` where `payload["target_id"] == user_id` → `payload["content"]`
-2. Else first `SEND_MESSAGE` (any target) → `payload["content"]` (best-effort fallback for agents that don't set explicit targets)
-3. Else first `COMPLETE_TASK` → `payload["result"]`
-4. Else → empty string + log warning at `WARNING` level
-
-This supersedes OQ 6's original priority order. After extracting the reply action, the servicer feeds the remaining actions (other `SEND_MESSAGE` targets, `UPDATE_STATE`, etc.) back into `ActionExecutor.execute()` so side-effects still fire. This ties into OQ 8's `execute_actions=False` pattern.
-
-**10. Per-agent vs. shared SQLite database — where does the `users` table live?**
-`RelationshipMemory` and `EpisodicMemory` are constructed per-agent with a `db_path` (default `data/memory.db`). If all agents share one DB file, a single `users` table works. If agents use separate DB files (e.g., `data/{agent_id}/memory.db`), the `users` table is duplicated per agent, and a user chatting with two agents creates two independent `UserParticipant` records with potentially divergent `last_seen_at` timestamps. *Decision*: **`data/memory.db` is the shared default per agent process. Declare this as a contract.**
-
-v0.2.1 assumes a single shared database file per agent process. Since v0.1 already warns against multi-agent-per-process (S-03 in `server.py`), the `users` table is effectively per-process and thus per-agent. `UserStore` accepts the same `db_path` parameter as the other memory stores, and `create_persona_agent()` passes the same path to all four stores (episodic, relationship, working, user).
-
-If a future RFC introduces per-agent database isolation (e.g., `data/{agent_id}/memory.db`), the `users` table should migrate to a shared "platform" database separate from per-agent memory. That is a v0.3.0 concern and not addressed here.
-
-**11. Why not reuse `ChannelServiceServicer.SendMessage` for chat routing?**
-`ChannelServiceServicer.SendMessage` in `agents/server.py` already builds an `AgentEvent(event_type=MESSAGE_RECEIVED, ...)` and dispatches it to target agents. The only difference is it's fire-and-forget (returns `delivered=True` immediately). The RFC introduces an entirely new synchronous RPC instead of adding a synchronous response mode to the existing path. *Decision*: **separate RPCs. Do not reuse `SendMessage`.**
-
-`SendChatMessage` is a synchronous request-response RPC on `AgentService` (orchestrator-to-agent operations); `ChannelService.SendMessage` is a fire-and-forget broadcast (agent-to-agent messaging). The delivery semantics differ in three ways:
-
-1. `SendMessage` creates background tasks and returns `delivered=True` immediately; `SendChatMessage` must await the agent's response and return it.
-2. `SendMessage` logs dispatch errors asynchronously; `SendChatMessage` must propagate errors to the caller (gRPC `INTERNAL` → HTTP 503).
-3. They serve different proto services (`ChannelService` vs `AgentService`) for different consumers with different expectations.
-
-Grafting synchronous-reply semantics onto the existing async path would require conditional code paths, a mechanism to await fire-and-forget tasks, and divergent error handling — violating Single Responsibility more than two clean RPCs do. Consolidation can be revisited when channels gain reply semantics (v0.3.0).
-
-**12. Do SQLite indexes survive `ALTER TABLE RENAME COLUMN`?**
-Migration 3 creates `idx_interactions_lookup ON interactions(agent_id, other_agent_id, created_at DESC)`. After Migration 4's `ALTER TABLE RENAME COLUMN agent_id TO participant_id`, SQLite (≥ 3.25.0) does update index definitions to reference the new column name. *Decision*: **confirmed — indexes survive the rename. No recreation needed.**
-
-SQLite ≥ 3.25.0 automatically updates index definitions when `ALTER TABLE RENAME COLUMN` is executed (per [SQLite documentation](https://www.sqlite.org/lang_altertable.html): *"The RENAME COLUMN TO syntax changes the column-name… References to the column within… index definitions… are also updated."*). After Migration 4, `idx_interactions_lookup` automatically becomes `(participant_id, other_participant_id, created_at DESC)`. `get_relationship_summary()` queries continue to hit the covering index post-rename without index recreation. Add a confirming comment in the Migration 4 SQL.
-
-**13. Should `ChatResponse` include `agent_display_name`?**
+**8. Should `ChatResponse` include `agent_display_name`?**
 `ChatResponse` returns `agent_id` but not `display_name`. The CLI prints `<agent_id>: <reply>`. If the agent's display name differs from its ID (e.g., ID `nexus-7` but display name `Nexus Seven`), the CLI cannot show it. *Decision*: **yes, include `agent_display_name` in `ChatResponse`.**
 
-Add `string agent_display_name = 5;` to `ChatResponse`. Proto3 addition is backward-compatible (unknown fields are ignored by older clients). The Go orchestrator populates it from `Registry` metadata (already available at lookup time, no new queries). The CLI prints `<display_name>:` when available, falling back to `<agent_id>:` if empty. This avoids a separate `GetAgentInfo` round-trip per message and prevents a UX-breaking format change if the field were added later.
+Add `string agent_display_name = 5;` to `ChatResponse`. Proto3 addition is backward-compatible (unknown fields are ignored by older clients). The Go orchestrator is the single owner of this field — it populates `agent_display_name` from `Registry` metadata (already available at lookup time, no new queries). The Python agent servicer leaves the field empty; the orchestrator overwrites it after receiving the gRPC response. If the Registry has no display name, the orchestrator falls back to `agent_id`. Single-writer semantics avoid divergence between Registry `Name` and agent-side `self.name`. The CLI prints `<display_name>:` when available, falling back to `<agent_id>:` if empty.
 
-**14. How does the orchestrator obtain the persona agent's gRPC address?**
-The RFC says "The orchestrator looks up the agent gRPC address via `Registry`." The current `Registry` stores agent metadata from `POST /api/v1/agents/register`, but the persona agent boot sequence (`server_persona.py`) starts a gRPC server locally without necessarily registering its address with the orchestrator. *Decision*: **already solved by the existing registration flow. No changes needed.**
-
-`AgentServer.start()` binds the gRPC server and then registers with the orchestrator via `POST /api/v1/agents/register`, passing the `advertise_address` (defaults to `host:port`, overridable for Docker/K8s). The `Registry` stores this address and the `/chat` handler uses it to connect. Persona agents follow the same boot path as task agents — `server_persona.py` calls `AgentServer.start()` which handles registration. No registration changes are required for this RFC.
-
-**15. What is `session_id` used for on the agent side?**
+**9. What is `session_id` used for on the agent side?**
 The RFC says session ID is generated agent-side and "session continuity lives in the agent's episodic and relationship memory." But episodic memory records episodes keyed by `agent_id` + `sender_id`, not by `session_id`. The `session_id` is returned to the client and passed back on subsequent requests, but nothing in the agent stores it, queries by it, or uses it to scope memory recall. *Decision*: **`session_id` is an opaque correlation token in v0.2.1. It is stored in episode metadata but not used for memory scoping.**
 
 The servicer stores `session_id` in `event.metadata["session_id"]` so it flows into episodic memory records (the `metadata` dict is already free-form). This costs nothing and makes the data retroactively useful when conversation threading lands in v0.3.0. For v0.2.1, no agent-side logic branches on `session_id` — it is purely a client-side token for maintaining conversation identity across requests. Implementors should not build session-scoped recall infrastructure; session-scoped memory queries are deferred to v0.3.0.
 
-**16. Backward compatibility: how do existing agents satisfy the `Participant` Protocol?**
+**10. Backward compatibility: how do existing agents satisfy the `Participant` Protocol?**
 The RFC says `PersonaAgent` and `TaskAgent` satisfy `Participant` "once they expose these three attributes" (`participant_id`, `participant_type`, `display_name`). This means modifying `__init__` signatures for both classes. What are the default values? *Decision*: **add three read-only properties to `BaseAgent`. No `__init__` signature changes.**
 
 Add three properties to `BaseAgent` (the common ancestor of both `TaskAgent` and `PersonaAgent`):
@@ -650,29 +669,62 @@ def display_name(self) -> str:
 
 This makes `TaskAgent`, `PersonaAgent`, and `_LLMPersonaAgent` all satisfy the `Participant` Protocol without any `__init__` signature changes, without modifying `create_persona_agent()`, and without breaking any existing callers. The properties are trivial delegations to attributes that already exist on `BaseAgent`. `UserParticipant` satisfies the Protocol via its dataclass fields.
 
-**17. `SEND_MESSAGE` payload uses `mentions`, not `target_id` — how does reply extraction work?**
-OQ 9's reply extraction priority filters `SEND_MESSAGE` actions by `payload["target_id"] == user_id`. However, the current `AgentAction` payload schema for `SEND_MESSAGE` uses `mentions: list[str]` for routing targets, not a `target_id` field. `ActionExecutor._handle_send_message()` iterates over `payload["mentions"]` to dispatch events to each mentioned agent. The `target_id` field referenced in OQ 9 does not exist in the current action schema. The RFC must specify: (a) does the LLM prompt engineering change to instruct the persona to produce a `target_id` field? (b) should reply extraction filter on `user_id in payload["mentions"]` instead? (c) does `_on_event_inner()` need modification to produce a differently shaped action for chat replies? This is a structural gap — the OQ 9 priority order references a field that no existing code produces.
+**11. Who records the episodic memory entry and relationship interaction for chat messages?**
+The Section D call chain shows `RelationshipMemory.record_interaction()` being called after `on_event()`, but does not specify which component is responsible. *Decision*: **episodic recording is already handled by `_on_event_inner()` step 6 — no change needed. The `SendChatMessage` servicer explicitly calls `record_interaction()` for relationship tracking.**
 
-**18. Who records the episodic memory entry and relationship interaction for chat messages?**
-The RFC's Section D call chain shows `RelationshipMemory.record_interaction()` being called after `on_event()`, but does not specify which component is responsible for the call. When a `MESSAGE_RECEIVED` event arrives from another agent today, does the framework (`_on_event_inner()`, `EventDispatcher`, or `ActionExecutor`) automatically record an episodic episode and a relationship interaction? Or must the `SendChatMessage` servicer explicitly call `record_interaction()` and `store()` for chat messages? If the existing `on_event()` flow already records episodes for any `MESSAGE_RECEIVED` (making user messages "just work"), this should be stated explicitly. If not, Phase 2 must include explicit recording logic in the servicer, which is not currently listed as a deliverable.
+`_on_event_inner()` stores an episode at step 6 for every event it processes, with `context={"event": event.payload, "sender": event.sender_id}`. User messages flow through the same code path, so episodic recording "just works".
 
-**19. `execute_actions=False` and child dispatch re-entrancy — confirm cascade semantics**
-OQ 8 adds `execute_actions=False` to `dispatch()`. The servicer then manually calls `self._executor.execute()` for non-reply actions. `ActionExecutor.__init__` holds a reference to the same `EventDispatcher`, and `_handle_send_message()` calls `self._dispatcher.dispatch()` — which defaults to `execute_actions=True`. Confirm explicitly that only the top-level `SendChatMessage` dispatch uses `execute_actions=False`, and that all child dispatches triggered by `ActionExecutor` use the default `execute_actions=True`. Without this confirmation, there is a risk of misunderstanding where someone might set `execute_actions=False` as a dispatcher-level default rather than a per-call override.
+`record_interaction()` on `RelationshipMemory` is not called anywhere in the current event processing pipeline — it is a manual API. The `SendChatMessage` servicer calls it after extracting the reply:
 
-**20. `participant_type` not in composite primary key — PK collision between user and agent IDs**
-Migration 4 renames the composite PK on `relationships` from `(agent_id, other_agent_id)` to `(participant_id, other_participant_id)`, but does not add `participant_type` to the PK. If an agent named `local` and a user named `local` both interact with the same target agent, only one relationship row can exist — the second `INSERT ... ON CONFLICT` would silently merge the user and agent relationship into one row, corrupting trust scores and interaction counts. The RFC must decide: (a) add `participant_type` (or `other_participant_type`) to the composite PK to allow distinct rows per participant type pair, (b) enforce disjoint ID namespaces between users and agents (e.g., prefix user IDs with `user-`), or (c) accept the collision risk for v0.2.1 with a documented limitation. Option (a) is the cleanest but requires updating all `ON CONFLICT` clauses and index definitions. Option (b) changes the user ID format. Option (c) risks silent data corruption if any agent happens to share an ID with a user.
+```python
+await agent.relationship_memory.record_interaction(
+    other_participant_id=user_id,
+    other_participant_type="user",
+    interaction_type="chat_message",
+    outcome="replied",
+    sentiment=0.0,  # neutral default; sentiment analysis is a future enhancement
+)
+```
 
-**21. Maximum `timeout_seconds` and interaction with agent-side `event_timeout`**
-`ChatRequest.timeout_seconds` is `int32` with 0 meaning "use server default (60s)". OQ 7 states the effective max wait is `min(timeout_seconds, agent event_timeout)`, but this is mentioned only in the last paragraph and not reflected in the proto contract or REST API documentation. Questions: (a) should the orchestrator or agent enforce a maximum allowable `timeout_seconds` (e.g., 300s cap) to prevent callers from requesting arbitrarily long waits? (b) if a caller sends `timeout_seconds = 600` but the agent's `_DEFAULT_EVENT_TIMEOUT` is 300s, the `asyncio.wait_for` fires at 600s while the agent's own timeout fires at 300s — resulting in an exception caught inside `on_event()`, not by `wait_for`. The error path differs depending on which timeout fires first. This should be specified.
+This is an explicit Phase 2 deliverable.
 
-**22. Where in the prompt construction pipeline do user-message delimiters get applied?**
-Section H specifies XML-style delimiters (`<|user_message user_id="..."|>`) around user message content and a system prompt instruction. But it does not specify which code path applies each piece. `_format_event()` in `persona_runtime` transforms `AgentEvent` into a plain-text user message string. `_build_system_prompt()` constructs the system prompt. `_on_event_inner()` adds the formatted message as `{"role": "user", "content": user_message}`. The RFC must specify: (a) is the delimiter wrapping applied inside `_format_event()` (conditional on `metadata["participant_type"] == "user"`)? If so, agent-to-agent messages remain unwrapped. (b) Is the system prompt instruction added inside `_build_system_prompt()` unconditionally, or only when the current event is from a user participant? (c) If `_format_event()` wraps the content, the working memory sections (episodic recall, relationship context) injected into the system prompt are outside the delimiters — is that the intended boundary?
+**12. `participant_type` not in composite primary key — PK collision between user and agent IDs**
+Migration 4 renames the composite PK on `relationships` from `(agent_id, other_agent_id)` to `(participant_id, other_participant_id)`, but does not add `participant_type` to the PK. If an agent named `local` and a user named `local` both interact with the same target, only one relationship row can exist — the second `INSERT ... ON CONFLICT` would silently merge them, corrupting trust scores. *Decision*: **add `participant_type` and `other_participant_type` to the composite PK via the 12-step ALTER TABLE pattern.**
 
-**23. Who owns `agent_display_name` — orchestrator or agent servicer?**
-`ChatResponse.agent_display_name` (field 5) is described in OQ 13 as "populated by orchestrator from Registry metadata." However, the Python agent servicer constructs the `ChatResponse` proto object. Does the agent servicer leave `agent_display_name` empty, and the Go orchestrator overwrites it after receiving the gRPC response? Or does the agent servicer populate it from `agent.name`, with the orchestrator passing it through? Having two components potentially writing the same field risks divergence (Registry `Name` vs. agent `self.name`). The RFC should specify a single owner and document whether the other component ignores or validates the field.
+```sql
+PRIMARY KEY (participant_id, participant_type, other_participant_id, other_participant_type)
+```
 
-**24. Empty reply UX — what does the CLI display when the agent does not respond?**
-OQ 9's priority order falls through to "empty string + log warning" when no `SEND_MESSAGE` or `COMPLETE_TASK` action is returned (e.g., agent returns `[DO_NOTHING]`). The REST endpoint returns HTTP 200 with `"reply": ""`. The CLI would print `<agent_name>: ` followed by a blank line, which is confusing. Should the REST layer return a different HTTP status (e.g., 204 No Content) for empty replies? Should the CLI display a special message like `<agent did not respond>` or `<no reply>`? Should the servicer retry the dispatch once before returning empty? This is a UX decision that affects all three layers (agent, orchestrator, CLI) and should be decided before implementation to avoid inconsistent handling.
+SQLite does not support `ALTER TABLE` to change a PK, so Migration 4 uses the [12-step ALTER TABLE](https://www.sqlite.org/lang_altertable.html#otheralter) pattern: create new table → copy data → drop old → rename. This replaces the previously specified `ALTER TABLE RENAME COLUMN` approach and eliminates the SQLite 3.25.0 dependency entirely (the 12-step pattern works on any SQLite version). All `ON CONFLICT` clauses and index definitions include the type columns. See Section C for the updated migration SQL.
+
+**13. Maximum `timeout_seconds` and interaction with agent-side `event_timeout`**
+`ChatRequest.timeout_seconds` is `int32` with 0 meaning "use server default (60s)". OQ 6 states the effective max wait is `min(timeout_seconds, agent event_timeout)`, but the error paths differ depending on which timeout fires first. *Decision*: **cap `timeout_seconds` at 300s server-side and document the two-timeout interaction.**
+
+1. The agent servicer clamps `timeout_seconds` to `max(1, min(timeout_seconds, 300))` before use. This prevents callers from requesting arbitrarily long waits.
+2. `asyncio.wait_for(timeout=clamped_timeout)` wraps the entire `dispatch()` call. If the agent's internal `event_timeout` (300s default) fires first, `on_event()` returns an error action, which the servicer extracts as a reply. If `wait_for` fires first, the servicer returns gRPC `DEADLINE_EXCEEDED`.
+3. Both timeout paths result in the same client-visible behavior (HTTP 504), but the agent-side error is logged differently (LLM timeout vs. lock contention). Document in the proto comment: *"`timeout_seconds` governs the gRPC deadline. Capped at 300s. If the agent's internal event timeout fires first, the result is the same: DEADLINE_EXCEEDED."*
+
+**14. Where in the prompt construction pipeline do user-message delimiters get applied?**
+Section H specifies XML-style delimiters and a system prompt instruction, but not which code paths apply them. *Decision*: **delimiters in `_format_event()`, system instruction unconditionally in `_build_system_prompt()`.**
+
+**(a)** Delimiter wrapping is applied inside `_format_event()`, conditional on `event.metadata.get("participant_type") == "user"`. Agent-to-agent messages remain unwrapped — the threat model is external user input, not trusted agent messages.
+
+**(b)** The system prompt instruction is added **unconditionally** inside `_build_system_prompt()`. It is ~20 tokens and harmless when no user messages are present. Adding it conditionally would require threading participant-type state into the system prompt builder, which is unnecessary coupling.
+
+**(c)** Working memory sections (episodic recall, relationship context) are injected into the system prompt, outside the delimiters. This is the correct boundary: delimiters protect the model from raw user-authored content in the conversation turn, not from the agent's own memory.
+
+**15. Who owns `agent_display_name` — orchestrator or agent servicer?**
+`ChatResponse.agent_display_name` (field 5) could be populated by either the Python agent servicer (from `agent.name`) or the Go orchestrator (from Registry metadata). *Decision*: **the Go orchestrator is the single owner.** Absorbed into OQ 8's decision text. The agent servicer leaves `agent_display_name` empty; the orchestrator overwrites it from Registry metadata after receiving the gRPC response. Single-writer semantics avoid divergence.
+
+**16. Empty reply UX — what does the CLI display when the agent does not respond?**
+OQ 5's priority order falls through to "empty string + log warning" when no `SEND_MESSAGE` or `COMPLETE_TASK` action is returned (e.g., agent returns `[DO_NOTHING]`). The REST endpoint returns HTTP 200 with `"reply": ""`, and the CLI would print a blank line. *Decision*: **add a `reply_status` field to `ChatResponse` and handle it in the CLI.**
+
+Add `string reply_status = 6;` to `ChatResponse`. Values:
+- `"ok"` — agent replied normally.
+- `"empty"` — agent processed the event but produced no reply content.
+- `"error"` — agent encountered an error during processing.
+
+The REST layer always returns HTTP 200 for successfully-processed requests (including empty replies). The CLI checks `reply_status`: if `"empty"`, it prints `<display_name> did not respond.` in dimmed style. No retry is attempted — the agent already processed the event and stored an episode; retrying would duplicate it. A different HTTP status (204) would complicate client parsing and break the "always JSON" contract.
 
 ---
 
