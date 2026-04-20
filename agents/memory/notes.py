@@ -254,7 +254,7 @@ class NoteStore:
                 """,
                 (safe_query, self._agent_id, limit),
             ) as cursor:
-                return await cursor.fetchall()
+                return list(await cursor.fetchall())
         except sqlite3.OperationalError as exc:
             logger.warning(
                 "Notes FTS5 query failed for %r (sanitized: %r), falling back to LIKE: %s",
@@ -285,7 +285,7 @@ class NoteStore:
             """,
             (self._agent_id, pattern, pattern, pattern, limit),
         ) as cursor:
-            return await cursor.fetchall()
+            return list(await cursor.fetchall())
 
     async def _recall_notes_recency(
         self,
@@ -302,7 +302,7 @@ class NoteStore:
             """,
             (self._agent_id, limit),
         ) as cursor:
-            return await cursor.fetchall()
+            return list(await cursor.fetchall())
 
     def _row_to_note(self, row: aiosqlite.Row) -> Note:
         """Convert a database row to a Note dataclass."""

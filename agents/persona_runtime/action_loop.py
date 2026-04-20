@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
@@ -64,16 +64,20 @@ class _ActionLoopMixin:
     name: str
     role: str
     persona: dict[str, Any]
-    _llm_client: LLMClient
+    _llm_client: LLMClient | None
     _working_memory: WorkingMemory
     _state: PersonaState
     _episodic_memory: EpisodicMemory
     _memory_tools: list[ToolDefinition]
 
-    # Also uses methods from other mixins / concrete class (via composition):
-    # - _inject_memory_context: _MemoryContextMixin
-    # - _persist_persona_state: _StatePersistenceMixin
-    # - _build_system_prompt, _format_event: _LLMPersonaAgent
+    # Stub declarations for methods provided by sibling mixins / concrete class.
+    if TYPE_CHECKING:
+        def _format_event(self, event: AgentEvent) -> str: ...
+        async def _inject_memory_context(
+            self, event: AgentEvent, *, query: str | None = None,
+        ) -> None: ...
+        def _build_system_prompt(self) -> str: ...
+        async def _persist_persona_state(self) -> None: ...
 
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
         """Build tool definitions including memory tools.
