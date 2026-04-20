@@ -204,6 +204,10 @@ func main() {
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
+	// RFC 0016 PR 4: Initialize chat executor for human→agent chat dispatch.
+	chatExec := executor.NewGRPCChatExecutor(reg, logger)
+	srvOpts = append(srvOpts, server.WithChatExecutor(chatExec))
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))

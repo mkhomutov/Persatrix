@@ -51,3 +51,22 @@ type errorResponse struct {
 	Error string `json:"error"`
 	Code  string `json:"code"`
 }
+
+// chatRequest is the JSON request body for POST /api/v1/agents/{id}/chat.
+type chatRequest struct {
+	Message         string `json:"message"`
+	UserID          string `json:"user_id"`
+	SessionID       string `json:"session_id"`
+	TimeoutSeconds  int32  `json:"timeout_seconds"`
+	ParticipantType string `json:"participant_type"`
+}
+
+// chatResponse is the JSON response for POST /api/v1/agents/{id}/chat.
+type chatResponse struct {
+	Reply            string `json:"reply"`
+	SessionID        string `json:"session_id"`
+	AgentID          string `json:"agent_id"`
+	Timestamp        int64  `json:"timestamp"`
+	AgentDisplayName string `json:"agent_display_name"`
+	ReplyStatus      string `json:"reply_status"`
+}
