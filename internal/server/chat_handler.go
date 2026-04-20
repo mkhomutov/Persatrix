@@ -75,6 +75,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up agent in registry for display name and to verify it exists.
+	// NOTE: The executor performs a second registry lookup to check health status
+	// and retrieve the gRPC address. This intentional duplication serves as
+	// defense-in-depth — the handler can short-circuit with 404 before touching
+	// the executor, while the executor verifies health at call time. Acceptable
+	// overhead for v0.1 in-memory registry; consolidate for v0.2 SQLite migration.
+	// (PR #123 review finding S-01)
 	agent, err := s.registry.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {

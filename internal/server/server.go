@@ -124,6 +124,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummaryImpl)
 
 	// Chat endpoint (RFC 0016 PR 4)
+	// TODO(v0.2): per-IP or per-session rate limiting — chat accepts unauthenticated
+	// traffic and has no request-rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
