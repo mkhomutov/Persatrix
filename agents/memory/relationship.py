@@ -12,52 +12,20 @@ import logging
 import math
 import time
 import uuid
-from dataclasses import dataclass, field
 from typing import Any
 
 import aiosqlite
 
 from .migrations import _apply_migrations
+from .relationship_types import (
+    _DEFAULT_TRUST,
+    _MAX_RECENT_INTERACTIONS,
+    _MAX_TRUST_DELTA,
+    Interaction,
+    RelationshipSummary,
+)
 
 logger = logging.getLogger(__name__)
-
-# Maximum per-call trust delta — prevents single interactions from
-# swinging trust dramatically.
-_MAX_TRUST_DELTA = 0.2
-
-# Default trust score for unknown agent pairs.
-_DEFAULT_TRUST = 0.5
-
-# Maximum number of recent interactions returned by get_relationship_summary().
-_MAX_RECENT_INTERACTIONS = 10
-
-
-@dataclass
-class Interaction:
-    """A single recorded interaction between two participants."""
-
-    id: str
-    participant_id: str
-    participant_type: str
-    other_participant_id: str
-    other_participant_type: str
-    interaction_type: str
-    outcome: str | None
-    sentiment: float
-    created_at: float
-
-
-@dataclass
-class RelationshipSummary:
-    """Summary of a relationship for LLM prompt injection."""
-
-    other_participant_id: str
-    other_participant_type: str
-    trust_score: float
-    interaction_count: int
-    last_interaction_at: float | None
-    notes: str | None
-    recent_interactions: list[Interaction] = field(default_factory=list)
 
 
 class RelationshipMemory:
@@ -118,6 +86,33 @@ class RelationshipMemory:
             )
         return self._db
 
+    @staticmethod
+    def _validate_other_id(other_id: str) -> None:
+        """Reject empty other_id (F-4-1)."""
+        if not other_id or not other_id.strip():
+            raise ValueError("other_id must not be empty")
+
+    @staticmethod
+    def _validate_participant_types(
+        participant_type: str, other_participant_type: str,
+    ) -> None:
+        """Validate participant types at write boundary (OQ 3)."""
+        from ..participant import validate_participant_type
+        validate_participant_type(participant_type)
+        validate_participant_type(other_participant_type)
+
+    def _truncate_field(
+        self, value: str, other_id: str, label: str,
+    ) -> str:
+        """Cap a string field to 1024 chars to prevent unbounded storage."""
+        if len(value) > 1024:
+            logger.warning(
+                "%s truncated from %d to 1024 chars for %s→%s",
+                label, len(value), self._agent_id, other_id,
+            )
+            return value[:1021] + "..."
+        return value
+
     # ─── Trust CRUD ─────────────────────────────────────────
 
     async def get_trust(
@@ -162,45 +157,17 @@ class RelationshipMemory:
            is retained.
         """
         db = self._ensure_db()
-        # Reject empty other_id — downstream queries silently return
-        # no results and produce meaningless relationship entries (F-4-1).
-        if not other_id or not other_id.strip():
-            raise ValueError("other_id must not be empty")
-        # Validate participant types at write boundary (OQ 3).
-        from ..participant import validate_participant_type
-        validate_participant_type(participant_type)
-        validate_participant_type(other_participant_type)
-        # Reject non-finite deltas: NaN propagates through max()/min()
-        # unpredictably in Python and corrupts trust_score in SQLite,
-        # breaking subsequent comparisons (e.g. apply_decay() threshold).
+        self._validate_other_id(other_id)
+        self._validate_participant_types(participant_type, other_participant_type)
         if math.isnan(delta) or math.isinf(delta):
             raise ValueError(f"delta must be a finite number, got {delta}")
-        # Clamp delta to prevent extreme single-event swings.
         delta = max(-_MAX_TRUST_DELTA, min(_MAX_TRUST_DELTA, delta))
+        reason = self._truncate_field(reason, other_id, "reason")
 
-        # Cap reason length to prevent unbounded strings entering LLM
-        # prompts via get_relationship_summary() (F-4-3).
-        if len(reason) > 1024:
-            logger.warning(
-                "reason truncated from %d to 1024 chars for %s→%s",
-                len(reason), self._agent_id, other_id,
-            )
-            reason = reason[:1021] + "..."
-
-        # Pre-compute trust for the INSERT path (new relationship).
         insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
 
-        # Use SQL-level arithmetic in ON CONFLICT to avoid a TOCTOU race:
-        # a prior implementation read trust via get_trust() then wrote the
-        # computed value, allowing a concurrent coroutine to cause a lost
-        # update between the SELECT and UPSERT await points.
-        #
-        # The INSERT path sets last_interaction_at = NULL because a trust
-        # update is not an interaction — only record_interaction() should
-        # populate that field.
-        # Use RETURNING to get the post-upsert trust_score in a single
-        # round-trip, avoiding a separate get_trust() SELECT.  Requires
-        # SQLite >= 3.35 (Python 3.11+ ships >= 3.39).
+        # SQL-level arithmetic in ON CONFLICT avoids TOCTOU race.
+        # RETURNING avoids a separate get_trust() round-trip (SQLite >= 3.35).
         cursor = await db.execute(
             """
             INSERT INTO relationships
@@ -248,29 +215,15 @@ class RelationshipMemory:
     ) -> int:
         """Decay all trust scores toward 0.5 (neutral).
 
-        Bidirectional: trust above 0.5 decays downward, trust below 0.5
-        decays upward. Formula: ``new = old + decay_rate * (0.5 - old)``.
-
-        Relationships already within 0.001 of neutral (0.5) are skipped
-        to avoid unnecessary writes.
-
-        .. note::
-
-           Decay applies to ALL relationships for this agent regardless of
-           ``other_participant_type`` — both agent and user relationships
-           are decayed uniformly.  The WHERE clause filters only on
-           ``participant_id`` and ``participant_type`` (the agent's own
-           identity).  Add an ``other_participant_type`` filter in a
-           follow-up if selective decay is needed.
-           (PR #120 review F-5: apply_decay() signature asymmetry.)
+        Formula: ``new = old + decay_rate * (0.5 - old)``.
+        Rows within 0.001 of neutral are skipped.  Decays all
+        ``other_participant_type`` values uniformly (PR #120 F-5).
 
         Returns the number of relationships updated.
         """
         if math.isnan(decay_rate) or math.isinf(decay_rate) or not 0.0 < decay_rate <= 1.0:
             raise ValueError(f"decay_rate must be in (0.0, 1.0], got {decay_rate}")
         db = self._ensure_db()
-
-        # Apply decay in a single UPDATE: trust + rate * (0.5 - trust)
         cursor = await db.execute(
             """
             UPDATE relationships
@@ -313,34 +266,16 @@ class RelationshipMemory:
         """
         db = self._ensure_db()
 
-        # Reject empty other_id (F-4-1).
-        if not other_id or not other_id.strip():
-            raise ValueError("other_id must not be empty")
-
-        # Validate participant types at write boundary (OQ 3).
-        from ..participant import validate_participant_type
-        validate_participant_type(participant_type)
-        validate_participant_type(other_participant_type)
-
-        # Reject empty interaction_type: it has no semantic value and would
-        # produce meaningless entries in get_relationship_summary() output
-        # injected into LLM prompts.
+        self._validate_other_id(other_id)
+        self._validate_participant_types(participant_type, other_participant_type)
         if not interaction_type or not interaction_type.strip():
             raise ValueError("interaction_type must not be empty")
-
-        # Clamp sentiment to [-1.0, 1.0] and reject NaN/Inf for consistency
-        # with other bounded numeric fields (trust delta, decay rate).
         if math.isnan(sentiment) or math.isinf(sentiment):
             raise ValueError(f"sentiment must be a finite number, got {sentiment}")
         sentiment = max(-1.0, min(1.0, sentiment))
 
-        # Cap outcome to avoid unbounded storage (F-4-4).
-        if outcome and len(outcome) > 1024:
-            logger.warning(
-                "outcome truncated from %d to 1024 chars for %s→%s",
-                len(outcome), self._agent_id, other_id,
-            )
-            outcome = outcome[:1021] + "..."
+        if outcome:
+            outcome = self._truncate_field(outcome, other_id, "outcome")
 
         interaction_id = str(uuid.uuid4())
         now = time.time()
@@ -533,12 +468,8 @@ class RelationshipMemory:
                 continue
 
             # INSERT OR IGNORE — only seeds if no row exists.
-            # NOTE: participant_type and other_participant_type are
-            # hardcoded to 'agent' because the config schema
-            # (config/agents.yaml) only contains agent_id entries.
-            # When user relationships become configurable via YAML,
-            # this will need updating to read type from the config entry.
-            # (PR #120 review F-6: _seed_trust() hardcodes 'agent' types.)
+            # Types hardcoded to 'agent': config schema only has agent_id
+            # entries (PR #120 F-6).
             await db.execute(
                 """
                 INSERT OR IGNORE INTO relationships
