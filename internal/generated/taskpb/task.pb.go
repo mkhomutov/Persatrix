@@ -526,7 +526,7 @@ type ChatRequest struct {
 	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                        // max 32768 chars enforced server-side
 	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // empty → server generates UUID; max 128 chars
-	TimeoutSeconds  int32                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`   // 0 → server default (30s)
+	TimeoutSeconds  int32                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`   // 0 → server default (30s); negative values clamped to 1s
 	ParticipantType string                 `protobuf:"bytes,6,opt,name=participant_type,json=participantType,proto3" json:"participant_type,omitempty"` // defaults to "user" when empty
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
