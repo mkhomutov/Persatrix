@@ -113,43 +113,49 @@ class UserStore:
         """Return existing user or create a new one.
 
         Validates *participant_id* and *participant_type* at the write boundary.
+        Uses ``INSERT OR IGNORE`` followed by an unconditional re-SELECT to
+        eliminate the TOCTOU race in the previous SELECT-then-INSERT pattern.
+        (PR 6 review fix: PR 1 finding #1.)
         """
         validate_participant_id(participant_id)
         validate_participant_type(participant_type)
 
         db = self._ensure_db()
-        row = await db.execute_fetchall(
-            "SELECT participant_id, display_name, participant_type, "
-            "created_at, last_seen_at FROM users WHERE participant_id = ?",
-            (participant_id,),
-        )
-        if row:
-            return UserParticipant(
-                participant_id=row[0][0],
-                display_name=row[0][1],
-                participant_type=row[0][2],
-                created_at=row[0][3],
-                last_seen_at=row[0][4],
-            )
 
         now = time.time()
         name = display_name or participant_id
         await db.execute(
-            "INSERT INTO users (participant_id, display_name, participant_type, "
-            "created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO users (participant_id, display_name, "
+            "participant_type, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
             (participant_id, name, participant_type, now, now),
         )
         await db.commit()
+
+        # Unconditional re-SELECT returns the row whether it was just
+        # created or already existed.
+        async with db.execute(
+            "SELECT participant_id, display_name, participant_type, "
+            "created_at, last_seen_at FROM users WHERE participant_id = ?",
+            (participant_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None  # INSERT OR IGNORE guarantees the row exists
         return UserParticipant(
-            participant_id=participant_id,
-            display_name=name,
-            participant_type=participant_type,
-            created_at=now,
-            last_seen_at=now,
+            participant_id=row[0],
+            display_name=row[1],
+            participant_type=row[2],
+            created_at=row[3],
+            last_seen_at=row[4],
         )
 
     async def update_last_seen(self, participant_id: str) -> None:
-        """Update ``last_seen_at`` without modifying other fields."""
+        """Update ``last_seen_at`` without modifying other fields.
+
+        Validates *participant_id* at the write boundary.
+        (PR 6 review fix: PR 1 finding #3.)
+        """
+        validate_participant_id(participant_id)
         db = self._ensure_db()
         await db.execute(
             "UPDATE users SET last_seen_at = ? WHERE participant_id = ?",
@@ -160,17 +166,18 @@ class UserStore:
     async def get(self, participant_id: str) -> UserParticipant | None:
         """Return the user or ``None`` if not found."""
         db = self._ensure_db()
-        row = await db.execute_fetchall(
+        async with db.execute(
             "SELECT participant_id, display_name, participant_type, "
             "created_at, last_seen_at FROM users WHERE participant_id = ?",
             (participant_id,),
-        )
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row:
             return None
         return UserParticipant(
-            participant_id=row[0][0],
-            display_name=row[0][1],
-            participant_type=row[0][2],
-            created_at=row[0][3],
-            last_seen_at=row[0][4],
+            participant_id=row[0],
+            display_name=row[1],
+            participant_type=row[2],
+            created_at=row[3],
+            last_seen_at=row[4],
         )

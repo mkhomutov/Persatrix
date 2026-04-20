@@ -437,4 +437,53 @@ mod tests {
             "should default to empty string"
         );
     }
+
+    // ─── PR 6 review follow-up: edge-case serde tests ──────────────────
+
+    #[test]
+    fn chat_request_serializes_long_message() {
+        // Verify serde round-trip with very long messages.
+        // (PR 6 review fix: PR 5 test gap #11.)
+        let long_msg = "x".repeat(50_000);
+        let req = ChatRequest {
+            message: long_msg.clone(),
+            user_id: "local".to_string(),
+            session_id: "sess-123".to_string(),
+            participant_type: "user".to_string(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["message"].as_str().unwrap().len(), 50_000);
+    }
+
+    #[test]
+    fn chat_request_serializes_unicode_content() {
+        // Verify serde round-trip with multi-byte unicode content.
+        // (PR 6 review fix: PR 5 test gap #11.)
+        let unicode_msg = "こんにちは世界 🌍🚀 привет мир";
+        let req = ChatRequest {
+            message: unicode_msg.to_string(),
+            user_id: "local".to_string(),
+            session_id: "".to_string(),
+            participant_type: "user".to_string(),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["message"], unicode_msg);
+    }
+
+    #[test]
+    fn chat_response_deserializes_unicode_reply() {
+        // Verify deserialization of unicode reply content.
+        // (PR 6 review fix: PR 5 test gap #11.)
+        let json = serde_json::json!({
+            "reply": "你好！我是 nexus-7 🤖",
+            "session_id": "abc-123",
+            "agent_id": "nexus-7",
+            "agent_display_name": "Нексус Семь",
+            "reply_status": "ok"
+        });
+        let resp: ChatResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.reply, "你好！我是 nexus-7 🤖");
+        assert_eq!(resp.agent_display_name, "Нексус Семь");
+    }
 }

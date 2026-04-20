@@ -159,6 +159,18 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         interaction in relationship memory (OQ 11). (RFC 0016, PR 3)
         """
         agent_id = request.agent_id
+
+        # Early check: empty agent_id is a client error (INVALID_ARGUMENT),
+        # not a "not found" condition. (PR 6 review fix: PR 3 finding #2.)
+        if not agent_id:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("agent_id is required")
+            return task_pb2.ChatResponse(
+                agent_id=agent_id,
+                reply="",
+                reply_status="error",
+            )
+
         agent = self._agents.get(agent_id)
         if agent is None:
             context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -273,6 +285,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # Execute remaining actions (side-effects) after reply is secured.
         # Wrapped in try/except so the already-extracted reply is never lost
         # if a downstream action raises (review fix: two-phase guarantee).
+        # cascade_depth=1 is correct because SendChatMessage is always a
+        # top-level call (not invoked from within a nested dispatch).  If
+        # this changes in the future, derive depth from the dispatch context.
+        # (PR 6 review fix: PR 3 finding #3.)
         try:
             await self._dispatcher.executor.execute(
                 agent_id, actions, cascade_depth=1,

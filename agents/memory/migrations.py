@@ -369,6 +369,16 @@ async def _apply_migration_4(db: aiosqlite.Connection) -> None:
     # (PR #120 review F-7: migration version recording atomicity.)
     await db.commit()
 
+
+# ─── Migration handler registry ─────────────────────────────
+# Explicit dict replaces the previous globals().get() dispatch, which was
+# fragile (typo in handler name silently fell through) and not IDE-friendly
+# (Find Usages / refactoring didn't discover the dynamic lookup).
+# (PR 6 review fix: PR 2 finding #1.)
+_MIGRATION_HANDLERS: dict[int, object] = {
+    4: _apply_migration_4,
+}
+
 # FTS5 DDL — applied only when FTS5 is available.
 _FTS5_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(
@@ -442,20 +452,24 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
             # inside a manually managed transaction instead.
 
             # Check for a callable migration handler (e.g. _apply_migration_4).
-            handler = globals().get(f"_apply_migration_{version}")
+            # Uses the explicit _MIGRATION_HANDLERS registry instead of
+            # globals().get() for IDE discoverability and refactoring safety.
+            # (PR 6 review fix: PR 2 finding #1.)
+            handler = _MIGRATION_HANDLERS.get(version)
             if handler is not None:
                 await handler(db)
             elif sql:
                 await db.executescript(sql)
             else:
                 # No callable handler found and SQL is empty — this is a
-                # programming error (e.g. a typo in the handler name).
+                # programming error (e.g. migration version not registered
+                # in _MIGRATION_HANDLERS).
                 # Without this guard, the migration would silently be
                 # recorded as applied without actually running.
                 # (PR #120 review F-4: globals().get() dispatch fragility.)
                 raise RuntimeError(
                     f"Migration v{version} has no SQL and no callable "
-                    f"handler '_apply_migration_{version}()'"
+                    f"handler in _MIGRATION_HANDLERS"
                 )
             await db.execute(
                 "INSERT INTO schema_version VALUES (?, ?, ?)",
