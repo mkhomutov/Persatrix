@@ -20,6 +20,7 @@ from ..persona_types import (
     ActionType,
     AgentAction,
     AgentEvent,
+    EventType,
     PersonaState,
 )
 from ..tools.registry import ToolDefinition, get_tool, list_tools
@@ -325,7 +326,18 @@ class _ActionLoopMixin:
         # _format_event() is pure; computing it here avoids a redundant call
         # inside _inject_memory_context().  (F-60-2: deduplicate _format_event.)
         user_message = self._format_event(event)
-        await self._inject_memory_context(event, query=user_message)
+
+        # Use raw event content for memory queries, not the formatted version.
+        # _format_event() wraps user messages in <|user_message|> XML-style
+        # delimiters for prompt injection mitigation — these delimiters break
+        # FTS5 full-text search queries and produce no useful keyword matches.
+        # (Bug: FTS5 receives '<|user_message user_id="..."|>...<|/user_message|>'
+        # instead of the actual message text.)
+        if event.event_type == EventType.MESSAGE_RECEIVED:
+            memory_query = event.payload.get("content", "")
+        else:
+            memory_query = user_message
+        await self._inject_memory_context(event, query=memory_query)
 
         # 1. Build system prompt and append working memory context.
         system_prompt = self._build_system_prompt()

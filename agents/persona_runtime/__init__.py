@@ -24,6 +24,7 @@ from __future__ import annotations
 
 __all__ = [
     "_LLMPersonaAgent",
+    "_MemoryNamespace",
     "_coerce_event_timeout",
     "_truncate_with_ellipsis",
 ]
@@ -31,6 +32,7 @@ __all__ = [
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from ..base import TaskInput
@@ -86,6 +88,24 @@ def _coerce_event_timeout(
         return default
 
 
+# ─── Memory namespace ─────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class _MemoryNamespace:
+    """Lightweight namespace exposing memory tiers for external callers.
+
+    ``server_servicers.py`` accesses ``agent.memory.relationship`` to record
+    chat interactions.  ``_LLMPersonaAgent`` stores the tiers as private
+    attributes; this frozen dataclass provides a stable public interface
+    without leaking internals.
+    """
+
+    episodic: EpisodicMemory
+    relationship: RelationshipMemory
+    working: WorkingMemory
+
+
 # ─── LLM-Powered Persona Agent ────────────────────────────
 
 
@@ -117,8 +137,18 @@ class _LLMPersonaAgent(
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
         self._memory_tools = memory_tools
+        self._memory_ns = _MemoryNamespace(
+            episodic=episodic_memory,
+            relationship=relationship_memory,
+            working=working_memory,
+        )
         self._state = PersonaState()
         self._lock = asyncio.Lock()
+
+    @property
+    def memory(self) -> _MemoryNamespace:
+        """Public access to memory tiers for external callers."""
+        return self._memory_ns
 
     @property
     def persona_state(self) -> dict[str, Any]:

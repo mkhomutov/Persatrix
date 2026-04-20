@@ -2279,8 +2279,12 @@ class TestInjectMemoryContext:
 
         # Episodic recall should NOT be called for TICK events.
         recall_spy.assert_not_called()
-        # Notes recall should still be attempted.
-        notes_spy.assert_called_once()
+        # Notes recall is still attempted: first the keyword query, then
+        # (if no results) the recency fallback with empty query.
+        assert notes_spy.call_count >= 1
+        # First call uses the tick query.
+        first_call_query = notes_spy.call_args_list[0].args[0]
+        assert "tick" in first_call_query.lower() or "goals" in first_call_query.lower()
 
         # No episodic section injected.
         assert agent._working_memory.get_section("episodic_recall") is None
@@ -2687,13 +2691,12 @@ class TestInjectMemoryContext:
         )
         await agent.close_memory()
 
-    async def test_stale_notes_cleared_when_no_match(self):
+    async def test_stale_notes_cleared_when_no_notes_exist(self):
         """F-60-R1: stale recent_notes section is removed when the next
-        event's topic query finds no matching notes.
+        event finds no notes at all (neither FTS5 match nor recency).
 
         Without the upfront remove_section() guard, notes from event N
-        would persist as recent_notes and reach the LLM for event N+1
-        even if the topics are unrelated.
+        would persist as recent_notes and reach the LLM for event N+1.
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -2716,8 +2719,12 @@ class TestInjectMemoryContext:
             "Expected recent_notes after first event"
         )
 
-        # Event 2: completely unrelated topic — recall_notes returns empty.
-        # The stale section from event 1 must be cleared.
+        # Delete all notes so neither FTS5 nor recency fallback can find any.
+        notes = await agent._episodic_memory.recall_notes("", limit=100)
+        for note in notes:
+            await agent._episodic_memory.delete_note(note.id)
+
+        # Event 2: no notes remain in DB — section must be cleared.
         event2 = AgentEvent(
             event_type=EventType.TASK_ASSIGNED,
             payload={"task": "zzz-no-match-zzz"},
@@ -2725,7 +2732,7 @@ class TestInjectMemoryContext:
         with patch.object(agent, "_format_event", return_value="zzz-no-match-zzz"):
             await agent._inject_memory_context(event2)
         assert agent._working_memory.get_section("recent_notes") is None, (
-            "Stale recent_notes from event 1 persisted into unrelated event 2"
+            "Stale recent_notes from event 1 persisted into event 2"
         )
         await agent.close_memory()
 
@@ -2958,5 +2965,219 @@ class TestFormatEventUserDelimiters:
         # The sender_id in the tag attribute should not contain raw double-quotes
         assert 'user_id="evil"user"' not in msg
         assert 'user_id="eviluser"' in msg
+        await agent.close_memory()
+
+
+# ─── Memory Query Stripping Delimiters ───────────────────────
+
+
+class TestMemoryQueryStripsDelimiters:
+    """Verify _on_event_inner() passes raw event content — not the
+    _format_event() version with <|user_message|> delimiters — to
+    _inject_memory_context() as the memory search query.
+
+    When the formatted version (containing XML-style delimiters) was
+    used as the FTS5 query, the search failed with syntax errors and
+    LIKE fallback produced no results because '<|user_message ...|>'
+    never appears in stored notes.
+    """
+
+    async def test_user_message_passes_raw_content_to_memory(self):
+        """MESSAGE_RECEIVED with user sender uses raw content for memory query."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "remember me?"},
+            sender_id="max",
+            metadata={"sender_participant_type": "user"},
+        )
+
+        with patch.object(
+            agent, "_inject_memory_context", new_callable=AsyncMock,
+        ) as mock_inject:
+            async with agent._lock:
+                await agent._on_event_inner(event)
+
+            # query= must be the raw content, NOT the <|user_message|>-wrapped version.
+            _, kwargs = mock_inject.call_args
+            assert kwargs["query"] == "remember me?"
+
+        await agent.close_memory()
+
+    async def test_agent_message_passes_formatted_content_to_memory(self):
+        """MESSAGE_RECEIVED from an agent (no delimiters) passes formatted string."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "collaboration request"},
+            sender_id="iron-fox",
+            metadata={"sender_participant_type": "agent"},
+        )
+
+        with patch.object(
+            agent, "_inject_memory_context", new_callable=AsyncMock,
+        ) as mock_inject:
+            async with agent._lock:
+                await agent._on_event_inner(event)
+
+            _, kwargs = mock_inject.call_args
+            # Agent messages use _format_event() which produces
+            # "Message from iron-fox:\n\ncollaboration request" —
+            # no delimiters, so the formatted string is fine for FTS5.
+            assert "collaboration request" in kwargs["query"]
+
+        await agent.close_memory()
+
+
+# ─── Note Recency Fallback ───────────────────────────────────
+
+
+class TestNoteRecencyFallback:
+    """When FTS5 keyword search returns no notes, the memory context
+    injection falls back to the most recent notes so the agent retains
+    awareness of its stored knowledge even when the user's message
+    shares no keywords with note content (e.g. 'hi', 'remember me?').
+    """
+
+    async def test_recency_fallback_injects_notes_on_keyword_miss(self):
+        """Notes stored under unrelated keywords are still injected
+        via recency when the user's query has no FTS5/LIKE overlap.
+        """
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store notes with specific keywords that won't match "hi".
+        await agent._episodic_memory.store_note(
+            topic="Team Member - Max",
+            content="Max is the creator of Persatrix",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hi"},
+        )
+        with patch.object(agent, "_format_event", return_value="hi"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is not None, (
+            "Recency fallback should inject notes when FTS5 finds no match"
+        )
+        assert "Max" in section.content
+        assert "Persatrix" in section.content
+        await agent.close_memory()
+
+    async def test_recency_fallback_skipped_when_fts5_matches(self):
+        """When FTS5 finds matching notes, recency fallback is not used."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_note(
+            topic="architecture",
+            content="Consider event sourcing for architecture",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TASK_ASSIGNED,
+            payload={"task": "architecture"},
+        )
+        with patch.object(agent, "_format_event", return_value="architecture"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is not None
+        assert "event sourcing" in section.content
+        await agent.close_memory()
+
+    async def test_recency_fallback_returns_empty_when_no_notes_exist(self):
+        """When no notes exist at all, fallback produces no section."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hello"},
+        )
+        with patch.object(agent, "_format_event", return_value="hello"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is None, (
+            "No notes in DB means no section, even with recency fallback"
+        )
+        await agent.close_memory()
+
+    async def test_recency_fallback_limits_to_three(self):
+        """Recency fallback retrieves at most 3 notes (not 5)."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        for i in range(6):
+            await agent._episodic_memory.store_note(
+                topic=f"topic-{i}",
+                content=f"Note content number {i} about something unique",
+            )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "greetings"},
+        )
+        with patch.object(agent, "_format_event", return_value="greetings"):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is not None
+        # Count note entries — each starts with "- [topic-N]"
+        note_lines = [l for l in section.content.split("\n") if l.startswith("- [")]
+        assert len(note_lines) == 3, (
+            f"Recency fallback should return 3 notes, got {len(note_lines)}"
+        )
+        await agent.close_memory()
+
+
+# ─── Memory Namespace Property ───────────────────────────────
+
+
+class TestMemoryNamespace:
+    """Verify _LLMPersonaAgent.memory exposes a _MemoryNamespace
+    so server_servicers.py can access agent.memory.relationship
+    for recording chat interactions.
+    """
+
+    async def test_memory_property_exposes_all_tiers(self):
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        ns = agent.memory
+        assert ns.episodic is agent._episodic_memory
+        assert ns.relationship is agent._relationship_memory
+        assert ns.working is agent._working_memory
+        await agent.close_memory()
+
+    async def test_hasattr_memory_returns_true(self):
+        """server_servicers.py uses hasattr(agent, 'memory') guard."""
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        assert hasattr(agent, "memory")
+        assert hasattr(agent.memory, "relationship")
         await agent.close_memory()
 
