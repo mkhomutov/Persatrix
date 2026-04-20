@@ -196,6 +196,9 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         session_id = request.session_id or str(uuid.uuid4())
 
         # Clamp timeout: at least 1s, at most 300s, default 30s (OQ 6/13).
+        # `or 30` treats protobuf zero-default as "use server default".
+        # Negative int32 values are truthy, so they pass through to the
+        # clamp where max(1, ...) normalises them to the 1s minimum.
         raw_timeout = request.timeout_seconds or 30
         clamped_timeout = max(1, min(raw_timeout, 300))
 

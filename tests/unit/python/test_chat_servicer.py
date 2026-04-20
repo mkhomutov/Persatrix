@@ -398,6 +398,74 @@ class TestSendChatMessage:
             other_participant_type="user",
         )
 
+    # ─── Input Validation Length Limits ──────────────────────
+
+    async def test_session_id_exceeds_max_length(self):
+        """session_id longer than 128 chars triggers INVALID_ARGUMENT."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(session_id="x" * 129), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
+        context.set_details.assert_called_once_with("session_id exceeds 128 characters")
+
+    async def test_message_exceeds_max_length(self):
+        """message longer than 32768 chars triggers INVALID_ARGUMENT."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(message="a" * 32769), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
+        context.set_details.assert_called_once_with("message exceeds 32768 characters")
+
+    async def test_user_id_exceeds_max_length(self):
+        """user_id longer than 256 chars triggers INVALID_ARGUMENT."""
+        servicer = _make_servicer([])
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(user_id="u" * 257), context,
+        )
+
+        context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+        assert resp.reply_status == "error"
+        context.set_details.assert_called_once_with("user_id exceeds 256 characters")
+
+    async def test_negative_timeout_clamped_to_minimum(self):
+        """Negative timeout_seconds is clamped to 1s by max(1, ...) guard.
+
+        Protobuf int32 allows negative values; the server treats them as
+        'use minimum' rather than rejecting, since the clamp guarantees a
+        safe positive timeout.  (Review finding: document this edge case.)
+        """
+        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "ok", "mentions": []})]
+        servicer = _make_servicer(actions)
+        context = _mock_context()
+
+        captured_timeouts: list[float] = []
+        original_wait_for = asyncio.wait_for
+
+        async def _patched_wait_for(coro, timeout):
+            captured_timeouts.append(timeout)
+            return await original_wait_for(coro, timeout)
+
+        with patch("agents.server_servicers.asyncio.wait_for", side_effect=_patched_wait_for):
+            resp = await servicer.SendChatMessage(
+                _chat_request(timeout_seconds=-10), context,
+            )
+
+        # -10 is truthy → raw_timeout=-10 → max(1, min(-10, 300)) = 1
+        assert captured_timeouts[0] == 1
+        assert resp.reply_status == "ok"
+
     async def test_user_id_too_long_rejected(self):
         """user_id exceeding 256 chars returns INVALID_ARGUMENT."""
         servicer = _make_servicer([])

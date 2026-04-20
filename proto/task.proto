@@ -84,7 +84,7 @@ message ChatRequest {
   string user_id = 2;
   string message = 3;              // max 32768 chars enforced server-side
   string session_id = 4;           // empty → server generates UUID; max 128 chars
-  int32 timeout_seconds = 5;       // 0 → server default (30s)
+  int32 timeout_seconds = 5;       // 0 → server default (30s); negative values clamped to 1s
   string participant_type = 6;     // defaults to "user" when empty
 }
 
