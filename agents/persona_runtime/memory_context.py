@@ -7,7 +7,7 @@ truncation, and note injection into the persona agent's context window.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
@@ -46,29 +46,89 @@ _TRUST_DEVIATION_THRESHOLD: float = 0.01
 # ─── Helper Functions ──────────────────────────────────────
 
 
-def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
-    """Truncate *text* to *max_chars* with word-boundary awareness.
+def _truncate_with_ellipsis(
+    text: str,
+    limit: int,
+    *,
+    mode: Literal["chars", "tokens"] = "chars",
+) -> str:
+    """Truncate *text* to *limit* with word-boundary or token-boundary awareness.
 
-    If *text* fits within *max_chars*, it is returned unchanged.
-    Otherwise it is sliced to *max_chars* and an attempt is made to cut at
-    the last space so the LLM sees a complete word.  If the slice contains
-    no space, the full slice is used.  ``"..."`` is always appended to
-    signal truncation (giving a 3-char overage in the worst case, which
-    is acceptable).
+    If *text* fits within *limit* (measured in chars or tokens, depending on
+    *mode*), it is returned unchanged.
+
+    In ``"chars"`` mode (default):
+        Slices to *limit* chars, cuts at the last space so the LLM sees a
+        complete word, and appends ``"..."`` to signal truncation.  If the
+        slice contains no space, the full slice is used (3-char overage in
+        the worst case, which is acceptable).
+
+    In ``"tokens"`` mode:
+        Truncates at a token boundary using tiktoken ``cl100k_base`` when
+        available, falling back to char-proportional slicing when tiktoken is
+        absent.  The ellipsis ``"\u2026"`` (U+2026) counts toward the token
+        budget.  Never panics on missing tiktoken.
 
     Extracted from _inject_memory_context() where the same pattern was
     copy-pasted for episode summaries, relationship notes, and note content.
     (PR #60 review: truncation pattern duplicated 3 times.)
     """
-    if len(text) <= max_chars:
+    if mode == "tokens":
+        return _truncate_with_ellipsis_tokens(text, limit)
+
+    # Original char mode (unchanged).
+    if len(text) <= limit:
         return text
-    sliced = text[:max_chars]
+    sliced = text[:limit]
     truncated = sliced.rsplit(" ", 1)[0]
     # Zero-space guard: if the slice has no space, rsplit returns it
     # unchanged (len(truncated) == len(sliced)), so we use the full slice.
     if len(truncated) == len(sliced):
         truncated = sliced
     return truncated + "..."
+
+
+def _truncate_with_ellipsis_tokens(text: str, token_limit: int) -> str:
+    """Token-mode implementation for :func:`_truncate_with_ellipsis`.
+
+    Truncates *text* to fit within *token_limit* tokens (including the
+    ellipsis ``\u2026``).  Uses tiktoken when available; falls back to
+    char-proportional slicing.  Never panics on missing tiktoken.
+    """
+    ellipsis = "\u2026"
+    if token_limit <= 0:
+        return ellipsis
+
+    try:
+        import tiktoken  # type: ignore[import-untyped]
+
+        enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(text)
+        if len(tokens) <= token_limit:
+            return text
+        ellipsis_tokens = len(enc.encode(ellipsis))
+        content_budget = token_limit - ellipsis_tokens
+        if content_budget <= 0:
+            return ellipsis
+        truncated = enc.decode(tokens[:content_budget])
+        return truncated + ellipsis
+    except ImportError:
+        pass
+    except Exception:
+        logger.warning(
+            "tiktoken truncation failed, falling back to char-proportional",
+            exc_info=True,
+        )
+
+    # Char-proportional fallback: approximate token_limit via chars/4.
+    # Reserve 1 token for the ellipsis.
+    total_approx = len(text) // 4
+    if total_approx <= token_limit:
+        return text
+    content_budget = token_limit - 1
+    if content_budget <= 0:
+        return ellipsis
+    return text[: content_budget * 4] + ellipsis
 
 
 # ─── Mixin ─────────────────────────────────────────────────
