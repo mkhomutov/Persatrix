@@ -456,7 +456,57 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 ##### From PR 3 review
 
-*(populated after PR 3 review)*
+1. **Asymmetric `min_score` validation on `EpisodicMemory.recall_notes()`**
+   ([agents/memory/episodic.py](../../agents/memory/episodic.py)). `EpisodicMemory.recall()`
+   validates `min_score` at the public façade; `recall_notes()` only validates by delegation to
+   `NoteStore.recall_notes()`. A future refactor swapping the `NoteStore` backend or removing its
+   guard would silently lose validation at the façade. Mirror the `recall()` guard locally in
+   `recall_notes()`:
+   ```python
+   if min_score is not None and not 0.0 <= min_score <= 1.0:
+       raise ValueError(f"min_score must be in [0.0, 1.0] or None, got {min_score}")
+   ```
+   Three lines; refactor-resistant.
+
+2. **Annotate `_DEFAULT_EPISODIC_MIN_SCORE` / `_DEFAULT_NOTES_MIN_SCORE` as PR-4-pending**
+   ([agents/memory/episodic.py](../../agents/memory/episodic.py)). The two constants are defined
+   with calibration commentary but not consumed by any code in PR 3 — `recall()` and
+   `recall_notes()` still default `min_score=None`. Until PR 4 wires them as method defaults they
+   read as "defined but unused". Add a one-line comment beside the block:
+   `# Wired into recall()/recall_notes() defaults by PR 4 (RFC 0017 §D); not consumed by this PR.`
+   Obsolete once PR 4 merges — drop from PR 6 scope if that happens first.
+
+3. **Dedupe `effective_min_score = min_score if min_score is not None else 0.0` idiom**
+   ([agents/memory/episodic_queries.py](../../agents/memory/episodic_queries.py),
+   [agents/memory/notes.py](../../agents/memory/notes.py)). The same three-line snippet appears
+   verbatim in `recall_fts5` and `_recall_notes_fts5`. Extract a private helper
+   `_resolve_min_score(min_score: float | None) -> float` (co-located with `_normalize_bm25` in
+   `episodic_queries.py`) and import from `notes.py`. Makes the "None means no SQL-side filter"
+   contract a single line of truth.
+
+4. **Test gap: `min_score=None` and `min_score=0.0` produce identical SQL behaviour**
+   ([tests/unit/python/test_episodic_memory.py](../../tests/unit/python/test_episodic_memory.py)).
+   No test pins the contract that the two call shapes are observationally equivalent (both return
+   all FTS5-matching rows without a score floor). Add one test that runs the same corpus with
+   `min_score=None` and `min_score=0.0` and asserts identical result IDs and ordering. Guards
+   against a future refactor silently changing no-op semantics (e.g., adding a non-zero implicit
+   floor inside the helper from finding 3).
+
+5. **Test gap: FTS5 query sanitises to empty + `min_score` provided**
+   ([tests/unit/python/test_episodic_memory.py](../../tests/unit/python/test_episodic_memory.py)).
+   `TestRecallMinScore` covers the empty-query passthrough case but not the case where the query
+   *sanitises* to empty (e.g., punctuation-only input) and falls through to `recall_recency` with
+   `min_score` set. Expected behaviour: `min_score` is silently ignored on the recency path
+   (no BM25 score exists), same as today's empty-query path. Pin this explicitly.
+
+6. **(Nice-to-have) Confirm notes-tier calibration provenance in PR 4's description**
+   (follow-up documentation, not a code change). The PR #147 description documents the episodic
+   BM25 histogram that selected `_DEFAULT_EPISODIC_MIN_SCORE = 0.20` but does not show an
+   independent notes histogram. Both constants currently share the value `0.20`. When PR 4 wires
+   the defaults into `_inject_memory_context`, include in that PR's description a short note
+   confirming the notes-tier threshold was independently validated (or explicitly acknowledging
+   both tiers use the same default on the shared BM25 distribution shape). Documentation only;
+   no repo change required.
 
 ##### From PR 4 review
 
