@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-21 (v0.2.1 ✅ Complete — all release prep PRs merged)  
+> **Last updated**: 2026-04-21 (v0.2.1 ✅ Released — tag `v0.2.1` pushed)  
 > **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — 📋 Planned  
-> **Current milestone**: v0.2.1 released; next: RFC 0017 authoring
+> **Current milestone**: RFC 0017 authoring
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
