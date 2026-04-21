@@ -12,6 +12,7 @@ Contains gRPC servicer implementations used by AgentServer:
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -248,7 +249,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 "participant_type": participant_type,
             },
             sender_id=user_id or None,
-            metadata={"session_id": session_id},
+            metadata={
+                "session_id": session_id,
+                "sender_participant_type": participant_type,
+            },
         )
 
         try:
@@ -342,6 +346,20 @@ def _extract_chat_reply(
     Returns ``(reply_text, reply_status)`` where ``reply_status`` is one of
     ``"ok"``, ``"empty"``.
     """
+    def _sanitize_reply(text: str) -> str:
+        """Strip internal delimiter tags that should never be visible to users.
+
+        The persona runtime wraps user messages in ``<|user_message …|>`` /
+        ``<|/user_message|>`` delimiters for prompt-injection mitigation.
+        If the LLM echoes these back in its response, strip them so the
+        raw markup never reaches the end user.
+        """
+        return re.sub(
+            r"<\|/?user_message[^|]*\|>",
+            "",
+            text,
+        ).strip()
+
     send_messages = [
         a for a in actions if a.action_type == ActionType.SEND_MESSAGE
     ]
@@ -351,11 +369,11 @@ def _extract_chat_reply(
         for action in send_messages:
             mentions = action.payload.get("mentions", [])
             if user_id in mentions:
-                return action.payload.get("content", ""), "ok"
+                return _sanitize_reply(action.payload.get("content", "")), "ok"
 
     # Priority 2: any SEND_MESSAGE
     if send_messages:
-        return send_messages[0].payload.get("content", ""), "ok"
+        return _sanitize_reply(send_messages[0].payload.get("content", "")), "ok"
 
     # Priority 3: COMPLETE_TASK result
     complete = next(
@@ -363,7 +381,7 @@ def _extract_chat_reply(
     )
     if complete is not None:
         result = complete.payload.get("result", "")
-        return result, "ok"
+        return _sanitize_reply(result), "ok"
 
     # Priority 4: empty — only warn when the agent returned actions but
     # none were reply-extractable; an empty action list is expected for

@@ -636,3 +636,49 @@ class TestFTS5QuerySanitization:
         await memory.store_note("any", "some content here")
         notes = await memory.recall_notes('":*^()')
         assert isinstance(notes, list)
+
+    # ── Extended regex tests for broader sanitizer ─────────────
+
+    def test_comma_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "hi, do you remember me?").strip() == "hi  do you remember me"
+
+    def test_period_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "Autonomous tick. Review goals.").strip() == "Autonomous tick  Review goals"
+
+    def test_angle_brackets_stripped(self):
+        result = _FTS5_SPECIAL.sub(" ", '<|user_message user_id="local"|>').strip()
+        # All non-alphanumeric chars stripped; underscores become spaces too.
+        assert "<" not in result
+        assert "|" not in result
+        assert ">" not in result
+        assert "local" in result
+
+    def test_pipe_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "option|alternative").strip() == "option alternative"
+
+    def test_mixed_punctuation_stripped(self):
+        assert _FTS5_SPECIAL.sub(" ", "I am Max, the creator of Persatrix.").strip() == "I am Max  the creator of Persatrix"
+
+    def test_hyphen_stripped(self):
+        """Hyphens are non-alphanumeric and should be stripped."""
+        assert _FTS5_SPECIAL.sub(" ", "ember-owl").strip() == "ember owl"
+
+    # ── Integration tests for punctuation queries ──────────────
+
+    async def test_comma_query_does_not_raise(self, memory):
+        """Comma in query must not cause FTS5 syntax error."""
+        await memory.store_note("greetings", "hi there, welcome back")
+        notes = await memory.recall_notes("hi, remember me?")
+        assert isinstance(notes, list)
+
+    async def test_period_query_finds_notes(self, memory):
+        """Period in query is stripped; remaining tokens still match."""
+        await memory.store_note("goals", "Ship the release on time with quality")
+        notes = await memory.recall_notes("Ship the release. On time.")
+        assert any(n.topic == "goals" for n in notes)
+
+    async def test_delimiter_tags_query_does_not_raise(self, memory):
+        """XML-style delimiter tags in query do not cause errors."""
+        await memory.store_note("team", "Max is the creator")
+        notes = await memory.recall_notes('<|user_message user_id="local"|>\nhi\n<|/user_message|>')
+        assert isinstance(notes, list)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -75,6 +76,11 @@ _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
 # result sets and resource exhaustion.
 MAX_RECALL_LIMIT = 100
 
+# FTS5 query sanitizer: strip all non-alphanumeric characters except spaces
+# to prevent syntax errors from punctuation in natural language queries
+# (commas, periods, colons, angle brackets, pipes, etc.).
+_FTS5_SANITIZE = re.compile(r'[^a-zA-Z0-9\s]+')
+
 
 # ─── Row conversion ─────────────────────────────────────────
 
@@ -112,6 +118,9 @@ async def recall_fts5(
     Falls back to LIKE search if the query contains malformed FTS5 syntax
     (e.g. lone ``*``, unbalanced quotes, bare ``NOT``).
     """
+    safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
+    if not safe_query:
+        return await recall_like(db, agent_id, query, limit, min_importance)
     try:
         async with db.execute(
             f"""
@@ -127,7 +136,7 @@ async def recall_fts5(
                 DESC
             LIMIT ?
             """,
-            (query, agent_id, min_importance, time.time(), limit),
+            (safe_query, agent_id, min_importance, time.time(), limit),
         ) as cursor:
             return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
