@@ -417,6 +417,13 @@ class _LLMPersonaAgent(
                 return [AgentAction(ActionType.DO_NOTHING, {})]
             # Recover energy only after successful completion so timed-out
             # ticks don't accumulate free energy.
+            # NEW-L-2 (PR #149 re-review): on a suppressed tick (RFC 0017 §F
+            # empty-context short-circuit), _on_event_inner early-returns
+            # before _persist_persona_state(), so this energy increment is
+            # in-memory only until the next state-mutating event persists.
+            # recover_energy() is idempotent, so replay across restart
+            # converges to the same value — benign, but worth noting when
+            # comparing per-tick DB write rates pre/post RFC 0017 PR 5.
             self._state.recover_energy()
             return actions
 

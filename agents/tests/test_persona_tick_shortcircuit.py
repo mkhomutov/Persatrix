@@ -317,7 +317,11 @@ class TestDebugLog:
             f"Expected exactly 1 suppression log, found {len(suppression_logs)}"
         )
         assert suppression_logs[0].levelno == logging.DEBUG
-        assert suppression_logs[0].agent_id == "test-agent"  # type: ignore[attr-defined]
+        # NEW-N-2 (PR #149 re-review): use getattr for symmetry with the
+        # filter above — keeps the assertion message clean if `extra`
+        # propagation ever changes (otherwise the bare attribute access
+        # raises AttributeError instead of producing a clear assert).
+        assert getattr(suppression_logs[0], "agent_id", None) == "test-agent"
 
     @pytest.mark.asyncio
     async def test_debug_log_not_emitted_when_llm_called(
