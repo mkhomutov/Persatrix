@@ -38,7 +38,7 @@ graph TB
         SERVER --> PLANNER
         SERVER --> STATE
         SERVER --> COST
-        SERVER -->|chat dispatch| EXECUTOR
+        SERVER --> EXECUTOR
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
@@ -103,6 +103,10 @@ graph TB
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
+
+The `SERVER --> EXECUTOR` edge represents the chat dispatch path
+(`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`); the
+workflow path still flows `SERVER → PLANNER → SCHEDULER → EXECUTOR`.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
