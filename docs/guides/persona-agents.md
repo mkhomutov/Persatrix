@@ -5,10 +5,12 @@ one in config, the three-tier memory system, and the cost budgets that keep a
 persona from running away with your API bill.
 
 > **Spec-level detail** lives in [RFC 0005](../rfcs/0005-persona-agent-memory.md)
-> (persona runtime + memory system) and
+> (persona runtime + memory system),
 > [RFC 0006](../rfcs/0006-efficiency-execution-limits.md) (execution limits,
-> budgets, and defaults). This guide is deliberately non-exhaustive and points
-> into those RFCs for design rationale.
+> budgets, and defaults), and
+> [RFC 0016](../rfcs/0016-human-participant-chat-interface.md)
+> (the human chat surface introduced in v0.2.1). This guide is deliberately
+> non-exhaustive and points into those RFCs for design rationale.
 
 ---
 
@@ -354,9 +356,163 @@ Each completed step also records cost metadata (`EstimatedCostUSD`,
 is visible through the workflow-run APIs and OTEL spans
 ([internal/scheduler/budget.go:226–240](../../internal/scheduler/budget.go#L226-L240)).
 
+> **Chat is currently outside cost tracking.** The chat dispatch path
+> ([internal/server/chat_handler.go:30–155](../../internal/server/chat_handler.go#L30-L155) →
+> [internal/executor/chat.go:75–145](../../internal/executor/chat.go#L75-L145)) does not yet
+> call `BudgetEnforcer.CheckBudget` and chat replies are not recorded by the
+> cost reporter. Per-agent `max_llm_calls` and `max_tokens` from
+> `config/agents.yaml` still bound a single chat turn (the limits are
+> enforced inside the action loop), but daily / per-workflow USD caps do
+> **not** apply to `persatrix chat` traffic. Wiring chat into
+> `BudgetEnforcer` is a planned follow-up.
+
 ---
 
-## 4. Where to go next
+## 4. Chatting with a persona agent
+
+v0.2.1 adds a synchronous human-to-agent chat surface so you can talk to a
+persona agent from a terminal instead of authoring a workflow. The CLI
+command is `persatrix chat <agent_id>`; under the hood it calls the new
+REST endpoint `POST /api/v1/agents/{id}/chat` on the orchestrator, which
+dispatches a `SendChatMessage` gRPC call to the agent.
+
+> **Spec-level detail** for the chat surface lives in
+> [RFC 0016](../rfcs/0016-human-participant-chat-interface.md). The
+> manual tests exercising it are
+> [MT-CHAT-001](../manual-tests/MT-CHAT-001.md) through
+> [MT-CHAT-004](../manual-tests/MT-CHAT-004.md).
+
+### Starting the stack
+
+Chat needs the orchestrator and the target persona agent both running.
+
+> **Prerequisite — `ANTHROPIC_API_KEY`.** Chat is a live LLM round-trip, not
+> a stub, so the agent process must see `ANTHROPIC_API_KEY` in its
+> environment. Export it in the shell that launches the agent (host path)
+> or pass it through to the agent container (Docker path) before running
+> the commands below — otherwise the agent will start but every chat turn
+> will fail.
+
+The simplest local stack is Docker:
+
+```bash
+make docker-build
+make docker-up   # orchestrator + all agents declared in config/agents.yaml
+make build-cli   # → cli/target/release/persatrix
+```
+
+If you would rather run the orchestrator and an agent on the host:
+
+```bash
+make run                                 # orchestrator on :8080
+make run-agent AGENT=ember-owl PORT=50051  # in a second terminal
+```
+
+The orchestrator binds to `:8080` by default; override with `--server` on
+the CLI if you have it elsewhere.
+
+### Opening a chat
+
+```bash
+persatrix chat ember-owl
+```
+
+The REPL connects to `http://localhost:8080/api/v1/agents/ember-owl/chat`
+and prints a banner, then prompts for input:
+
+```text
+Connected to ember-owl. Type exit or Ctrl-C to quit.
+You: How would you triage a flaky integration test?
+ember-owl: ...
+```
+
+Flags:
+
+- `--user <id>` — the participant identity to attribute messages to.
+  Defaults to your OS username, normalized to the resource-ID format
+  (lowercase alphanumeric + hyphens). The resolver reads `USERNAME`
+  (Windows) then `USER` (POSIX) and falls back to `local` if neither is
+  set, so minimal containers without those env vars get a usable default
+  rather than an error
+  ([cli/src/main.rs:240–250](../../cli/src/main.rs#L240-L250)). The same
+  resource-ID rules are enforced server-side and on the CLI before any
+  request is sent
+  ([cli/src/commands/chat.rs:22](../../cli/src/commands/chat.rs#L22)).
+- `--server <url>` — orchestrator base URL. Defaults to
+  `http://localhost:8080`.
+
+Type `exit`, send EOF (Ctrl-D on Unix, Ctrl-Z + Enter on Windows), or hit
+Ctrl-C to quit. The REPL handles Ctrl-C gracefully via a shared flag rather
+than crashing.
+
+### Session persistence
+
+The REST contract carries a `session_id` field on every request and reply.
+The first request from the REPL sends an empty `session_id`; the server
+allocates a new one and returns it on the response. Subsequent requests
+reuse that ID for the lifetime of the REPL process, so the agent sees one
+continuous conversation per `persatrix chat` invocation.
+
+`session_id` is currently used as a client-side conversation token only —
+it is recorded into `event.metadata["session_id"]` and flows into episodic
+memory records, but no agent-side logic branches on it. Cross-session
+threading and session-scoped memory queries are deferred to v0.3.0
+(see [RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md)).
+
+### Relationship memory evolution
+
+User messages are processed by the persona runtime as `MESSAGE_RECEIVED`
+events with `participant_type: "user"` in the event metadata. The
+relationship memory tier (§2) treats the user as a first-class participant
+thanks to the v0.2.1 generalization — `RelationshipMemory` now keys on
+`(participant_id, participant_type)` pairs rather than agent-only entity
+IDs.
+
+After a few exchanges with `--user alice` you can inspect the trust score
+and interaction count the same way you would for an agent–agent
+relationship (see [MT-CHAT-004](../manual-tests/MT-CHAT-004.md) for the
+recorded procedure). Trust starts at the seed value declared in
+`agents.yaml` (or `0.5` neutral if unseeded) and updates via
+`record_interaction` / `update_trust` calls in the action loop, exactly the
+same mechanism that drives agent–agent trust.
+
+User identity itself is persisted in a new `users` table in the agent
+SQLite database via `UserStore`
+([agents/participant.py](../../agents/participant.py)), so the same
+`--user` ID is recognised across agent restarts.
+
+### Known limitations
+
+The v0.2.1 chat surface is intentionally minimal. The following are
+deferred (matched against
+[RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md)):
+
+| Area | v0.2.1 behaviour | Deferred to |
+|------|------------------|-------------|
+| Concurrency | Single `UserParticipant` per session | v0.3.0 (RFC 0011) |
+| Authentication | Sessions are local; `--user` is caller-supplied | v0.3.0 (RFC 0009) |
+| Streaming | Synchronous request-response, no SSE | future RFC |
+| Agent-initiated messages | No notification path; agents can only reply within an active session | future RFC |
+| Channel routing | Point-to-point user ↔ agent only | v0.3.0 (RFC 0011) |
+| Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | v0.2.2 candidate |
+| Cost gating | Chat dispatch bypasses `BudgetEnforcer` (see callout in §3) | follow-up |
+| Rate limiting | No per-user rate limit on the chat endpoint | v0.3.0 (RFC 0009) |
+| Web / GUI | CLI only | future RFC |
+
+> **Operational warning — no authentication.** Because `--user` is
+> caller-supplied and the chat endpoint performs no authentication in
+> v0.2.1, do not expose the orchestrator chat endpoint on a network shared
+> with untrusted callers. Treat `persatrix chat` as a local-developer
+> surface until RFC 0009 lands.
+
+The chat endpoint enforces a 4000-character message ceiling (counted in
+runes, not bytes, so emoji and CJK text are measured consistently) and
+rejects unknown agent IDs with `404`. Both behaviours are exercised by
+[MT-CHAT-001](../manual-tests/MT-CHAT-001.md).
+
+---
+
+## 5. Where to go next
 
 - **RFC 0005 — Persona Agent & Memory System**:
   [docs/rfcs/0005-persona-agent-memory.md](../rfcs/0005-persona-agent-memory.md).
@@ -365,6 +521,10 @@ is visible through the workflow-run APIs and OTEL spans
   [docs/rfcs/0006-efficiency-execution-limits.md](../rfcs/0006-efficiency-execution-limits.md).
   Design rationale for the three-level cascade, budget enforcement, response
   cache, and derived deadlines.
+- **RFC 0016 — Human Participant & Chat Interface**:
+  [docs/rfcs/0016-human-participant-chat-interface.md](../rfcs/0016-human-participant-chat-interface.md).
+  Design rationale for the `Participant` Protocol, the chat REST/gRPC surface,
+  and the v0.2.1 non-goals.
 - **Manual tests** exercising the persona and memory surfaces:
   [docs/manual-tests/README.md](../manual-tests/README.md) — in particular the
   `MT-PERSONA-*`, `MT-MEMORY-*`, and `MT-COST-*` suites.
