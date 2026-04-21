@@ -217,6 +217,19 @@ class TestMemoryBudgetE2EFourEventStream:
         FTS5 matches above the threshold against the seeded astronomy/cooking/
         planning/code/travel episodes, so the allocate-loop admits nothing.
         """
+        # PR #148 review M-1: the zero-admission assertion depends on FTS5
+        # BM25 scoring being available.  On SQLite builds without FTS5,
+        # ``recall()`` falls through to the LIKE path which (per RFC 0017
+        # §C) scores every match at 1.0 and ignores ``min_score`` entirely
+        # — a single keyword overlap (e.g. "review" appearing in both the
+        # TICK query and the "planning" episode summary) would then admit
+        # tokens and break the assertion.  Skip cleanly in LIKE-fallback
+        # environments rather than emit a flaky failure.
+        if not seeded_episodic._fts5:
+            pytest.skip(
+                "Requires SQLite FTS5: LIKE fallback ignores min_score "
+                "(RFC 0017 §C) so zero-admission cannot be guaranteed.",
+            )
         for et, content in [("TICK", ""), ("MESSAGE_RECEIVED", "hi")]:
             mixin, event = _make_mixin_with_real_episodic(
                 seeded_episodic, event_type=et, content=content,
@@ -295,6 +308,16 @@ class TestMemoryBudgetE2EFourEventStream:
         - Post-PR-4: recall() runs, DB returns 0 results, allocate-loop admits 0
         The unit test `test_tick_calls_episodic_recall` verifies the path difference.
         """
+        # PR #148 review M-1: see ``test_low_signal_events_admit_zero_tokens``
+        # above for the LIKE-fallback rationale.  The TICK query
+        # contains the token "review", which appears in the seeded
+        # "planning" episode summary; under LIKE fallback that match
+        # would score 1.0 and bypass ``min_score``.
+        if not seeded_episodic._fts5:
+            pytest.skip(
+                "Requires SQLite FTS5: LIKE fallback ignores min_score "
+                "(RFC 0017 §C) so zero-admission cannot be guaranteed.",
+            )
         mixin, event = _make_mixin_with_real_episodic(
             seeded_episodic,
             event_type="TICK",

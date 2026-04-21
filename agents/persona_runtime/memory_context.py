@@ -17,8 +17,16 @@ from ..memory.episodic import (
 )
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
-from ..persona_types import AgentEvent  # noqa: TCH001
 from .memory_budget import MemoryBudget, _truncate_to_token_limit
+
+if TYPE_CHECKING:
+    # ``from __future__ import annotations`` makes every annotation in this
+    # module a string; ``AgentEvent`` is therefore never evaluated at
+    # runtime and only needs to be importable for type checkers.  Keeping
+    # it inside ``TYPE_CHECKING`` removes the need for the previous
+    # TCH001 suppression on the runtime import.
+    # (PR #148 review finding L-1: resolve TCH001 suppression.)
+    from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -196,9 +204,15 @@ class _MemoryContextMixin:
         :meth:`MemoryBudget.try_add`; items that exceed the remaining budget
         are truncated or dropped.
 
-        The method preserves the existing TICK skip and ``should_fall_back``
-        heuristic unchanged — both are removed in PR 4 once the recall-layer
-        ``min_score`` threshold makes them redundant.
+        PR 4 (RFC 0017): the TICK skip and ``should_fall_back`` recency-note
+        fallback have been removed.  ``recall()`` and ``recall_notes()`` are
+        now invoked for every event type; the ``min_score`` thresholds
+        (``_DEFAULT_EPISODIC_MIN_SCORE`` / ``_DEFAULT_NOTES_MIN_SCORE``)
+        applied at the DB layer are the sole filters for low-signal content.
+        Zero-admission events (TICK, short greetings) are expected to be
+        short-circuited by PR 5's empty-context guard, which consumes the
+        ``memory_admitted_tokens`` field on the returned
+        :class:`MemoryInjectionResult`.
 
         Design: each memory tier is wrapped in ``except Exception`` to ensure
         one tier's failure (DB lock, I/O error, corrupted data) never blocks
@@ -434,4 +448,9 @@ class _MemoryContextMixin:
                 ))
 
         memory_admitted_tokens = _MEMORY_BUDGET_TOKENS - budget.remaining
+        # TODO(RFC-0017-PR5): consume ``memory_admitted_tokens`` in the
+        # caller (``_on_event_inner``) to short-circuit the LLM call when
+        # zero memory was admitted for a TICK / low-signal event.  Until
+        # PR 5 lands, this value is computed but unused in production;
+        # PR 4's unit tests assert it for the contract.
         return MemoryInjectionResult(memory_admitted_tokens=memory_admitted_tokens)

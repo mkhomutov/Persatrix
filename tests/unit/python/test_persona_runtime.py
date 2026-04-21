@@ -3034,7 +3034,7 @@ class TestMemoryQueryStripsDelimiters:
 # ─── Note Recency Fallback ───────────────────────────────────
 
 
-class TestNoteRecencyFallback:
+class TestNoteInjectionBehavior:
     """Tests for note injection behavior after RFC 0017 PR 4.
 
     PR 4 removes the ``should_fall_back`` recency-note fallback that was
@@ -3042,10 +3042,12 @@ class TestNoteRecencyFallback:
     min_score threshold on recall/recall_notes is now the only filter;
     low-signal queries produce empty results and no section injection.
 
-    Tests that previously verified fallback *behavior* are updated to
-    verify the new *no-fallback* contracts.  Tests that verified the
-    fallback was *skipped* (matching FTS5 results, no notes exist, etc.)
-    remain valid because the outcome is unchanged.
+    Class renamed from ``TestNoteRecencyFallback`` in PR #148 (review
+    finding N-1) so the name no longer references the deleted fallback.
+    The assertions remain valid because the *outcomes* were unchanged \u2014
+    only the underlying *reason* (min_score filtering vs. fallback gate)
+    shifted.  Individual test docstrings (see M-2 findings) were updated
+    to explain the new mechanism.
     """
 
     async def test_low_signal_query_does_not_inject_notes(self):
@@ -3108,7 +3110,13 @@ class TestNoteRecencyFallback:
         await agent.close_memory()
 
     async def test_recency_fallback_returns_empty_when_no_notes_exist(self):
-        """When no notes exist at all, fallback produces no section."""
+        """Empty notes table → no ``recent_notes`` section.
+
+        Trivially true post-PR 4: ``recall_notes`` returns ``[]`` when the
+        table is empty regardless of ``min_score``, and the no-results path
+        skips section injection.  Kept as a regression guard against the
+        section being created with empty content.
+        """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
@@ -3123,7 +3131,7 @@ class TestNoteRecencyFallback:
 
         section = agent._working_memory.get_section("recent_notes")
         assert section is None, (
-            "No notes in DB means no section, even with recency fallback"
+            "Empty notes table must not produce a recent_notes section."
         )
         await agent.close_memory()
 
@@ -3161,11 +3169,16 @@ class TestNoteRecencyFallback:
         await agent.close_memory()
 
     async def test_recency_fallback_skipped_for_non_message_events(self):
-        """Recency fallback only fires for MESSAGE_RECEIVED events.
+        """TICK event with no keyword-overlapping notes → no section.
 
-        TICK and TASK_ASSIGNED events use boilerplate queries and the
-        recency-note injection there is pure noise that grows the prompt
-        on every autonomous tick. (PR #131 review F-1.)
+        Pre-PR 4 this was guaranteed by the MESSAGE_RECEIVED gate inside
+        ``should_fall_back``.  Post-PR 4 the gate is gone: ``recall_notes``
+        is invoked for TICK as well, but the seeded note has no token
+        overlap with the TICK query, so FTS5 returns no results above
+        ``_DEFAULT_NOTES_MIN_SCORE`` and no section is injected.  The test
+        therefore protects the *outcome* (no noise on autonomous ticks)
+        even though the underlying mechanism shifted from gate to
+        threshold filter.  (PR #148 review M-2 — docstring updated.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -3189,16 +3202,22 @@ class TestNoteRecencyFallback:
 
         section = agent._working_memory.get_section("recent_notes")
         assert section is None, (
-            "TICK events should not trigger the recency-note fallback"
+            "TICK events must not surface unrelated notes (filtered by "
+            "min_score post-PR 4)."
         )
         await agent.close_memory()
 
     async def test_recency_fallback_skipped_when_episodes_retrieved(self):
-        """Recency fallback skipped when episodic recall already returned results.
+        """Unrelated note is not injected when episodic recall finds matches.
 
-        When the episodic tier produced relevant context, piling on three
-        arbitrary recent notes adds tokens without adding signal.
-        (PR #131 review F-1: unconditional fallback inflates every prompt.)
+        Pre-PR 4 the ``should_fall_back`` guard short-circuited the
+        fallback whenever episodes were present, preventing arbitrary
+        recent notes from being piled on a prompt that already had
+        signal.  Post-PR 4 the fallback no longer exists; the unrelated
+        note simply scores below ``_DEFAULT_NOTES_MIN_SCORE`` and is
+        filtered at the DB layer.  The assertion (notes section absent)
+        remains valid; only the mechanism changed.
+        (PR #148 review M-2 — docstring updated.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -3233,10 +3252,12 @@ class TestNoteRecencyFallback:
         assert ep_section is not None
         assert "pottery glaze" in ep_section.content
 
-        # Recency fallback should NOT have fired because episodes were found.
+        # Recency fallback no longer exists; assert the unrelated note was
+        # filtered by min_score rather than by the (deleted) fallback gate.
         notes_section = agent._working_memory.get_section("recent_notes")
         assert notes_section is None, (
-            "Recency fallback should skip when episodes already provided signal"
+            "Unrelated note must not be injected when episodes already match "
+            "(filtered by min_score post-PR 4)."
         )
         await agent.close_memory()
 
