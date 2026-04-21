@@ -357,8 +357,8 @@ is visible through the workflow-run APIs and OTEL spans
 ([internal/scheduler/budget.go:226–240](../../internal/scheduler/budget.go#L226-L240)).
 
 > **Chat is currently outside cost tracking.** The chat dispatch path
-> ([internal/server/chat_handler.go](../../internal/server/chat_handler.go) →
-> [internal/executor/chat.go](../../internal/executor/chat.go)) does not yet
+> ([internal/server/chat_handler.go:30–155](../../internal/server/chat_handler.go#L30-L155) →
+> [internal/executor/chat.go:75–145](../../internal/executor/chat.go#L75-L145)) does not yet
 > call `BudgetEnforcer.CheckBudget` and chat replies are not recorded by the
 > cost reporter. Per-agent `max_llm_calls` and `max_tokens` from
 > `config/agents.yaml` still bound a single chat turn (the limits are
@@ -385,6 +385,14 @@ dispatches a `SendChatMessage` gRPC call to the agent.
 ### Starting the stack
 
 Chat needs the orchestrator and the target persona agent both running.
+
+> **Prerequisite — `ANTHROPIC_API_KEY`.** Chat is a live LLM round-trip, not
+> a stub, so the agent process must see `ANTHROPIC_API_KEY` in its
+> environment. Export it in the shell that launches the agent (host path)
+> or pass it through to the agent container (Docker path) before running
+> the commands below — otherwise the agent will start but every chat turn
+> will fail.
+
 The simplest local stack is Docker:
 
 ```bash
@@ -400,9 +408,8 @@ make run                                 # orchestrator on :8080
 make run-agent AGENT=ember-owl PORT=50051  # in a second terminal
 ```
 
-An `ANTHROPIC_API_KEY` must be exported for the agent process — chat is a
-live LLM round-trip, not a stub. The orchestrator binds to `:8080` by
-default; override with `--server` on the CLI if you have it elsewhere.
+The orchestrator binds to `:8080` by default; override with `--server` on
+the CLI if you have it elsewhere.
 
 ### Opening a chat
 
@@ -421,10 +428,16 @@ ember-owl: ...
 
 Flags:
 
-- `--user <id>` — the participant identity to attribute messages to. Defaults
-  to your normalized OS username (lowercase alphanumeric + hyphens). The
-  same value is required to satisfy the resource-ID contract
-  ([cli/src/commands/chat.rs](../../cli/src/commands/chat.rs)).
+- `--user <id>` — the participant identity to attribute messages to.
+  Defaults to your OS username, normalized to the resource-ID format
+  (lowercase alphanumeric + hyphens). The resolver reads `USERNAME`
+  (Windows) then `USER` (POSIX) and falls back to `local` if neither is
+  set, so minimal containers without those env vars get a usable default
+  rather than an error
+  ([cli/src/main.rs:240–250](../../cli/src/main.rs#L240-L250)). The same
+  resource-ID rules are enforced server-side and on the CLI before any
+  request is sent
+  ([cli/src/commands/chat.rs:22](../../cli/src/commands/chat.rs#L22)).
 - `--server <url>` — orchestrator base URL. Defaults to
   `http://localhost:8080`.
 
@@ -485,6 +498,12 @@ deferred (matched against
 | Cost gating | Chat dispatch bypasses `BudgetEnforcer` (see callout in §3) | follow-up |
 | Rate limiting | No per-user rate limit on the chat endpoint | v0.3.0 (RFC 0009) |
 | Web / GUI | CLI only | future RFC |
+
+> **Operational warning — no authentication.** Because `--user` is
+> caller-supplied and the chat endpoint performs no authentication in
+> v0.2.1, do not expose the orchestrator chat endpoint on a network shared
+> with untrusted callers. Treat `persatrix chat` as a local-developer
+> surface until RFC 0009 lands.
 
 The chat endpoint enforces a 4000-character message ceiling (counted in
 runes, not bytes, so emoji and CJK text are measured consistently) and
