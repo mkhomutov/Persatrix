@@ -76,7 +76,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | Version | Report | Status |
 |---------|--------|--------|
 | v0.2.0 | [v0.2-execution-report.md](v0.2-execution-report.md) | ✅ Complete |
-| v0.2.1 | [v0.2.1-execution-report.md](v0.2.1-execution-report.md) | 🔄 In progress |
+| v0.2.1 | [v0.2.1-execution-report.md](v0.2.1-execution-report.md) | ✅ Complete |
 
 ---
 

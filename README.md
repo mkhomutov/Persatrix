@@ -271,7 +271,7 @@ Persatrix/
 |---------|-------------------|--------|
 | **v0.1** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
 | **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release |
-| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Release-ready |
+| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Released |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
