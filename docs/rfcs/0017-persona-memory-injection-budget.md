@@ -1,7 +1,7 @@
 # RFC 0017 — Persona Memory Injection Token Budget
 
 **Type**: architecture
-**Status**: 👍 Accepted
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-04-21
 **Accepted**: 2026-04-21

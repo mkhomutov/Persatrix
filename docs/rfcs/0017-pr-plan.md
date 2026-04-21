@@ -97,12 +97,14 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ -v` passes
-- [ ] `ruff check agents/` clean
+- [x] `pytest agents/tests/ -v` passes
+- [x] `ruff check agents/` clean
 - [ ] `mypy agents/` clean
-- [ ] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget` with the [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) `try_add(text, *, min_tokens=32) -> str | None` signature
-- [ ] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
-- [ ] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
+- [x] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget` with the [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) `try_add(text, *, min_tokens=32) -> str | None` signature
+- [x] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
+- [x] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
+
+**Open**: PR #145 — 2026-04-21
 
 ---
 
