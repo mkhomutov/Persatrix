@@ -25,6 +25,7 @@ from agents.persona_runtime import (
     _coerce_event_timeout,
     _truncate_with_ellipsis,
 )
+from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_behavior import DIMENSION_DESCRIPTIONS, render_behavior
 from agents.persona_types import (
     ActionType,
@@ -723,7 +724,17 @@ class TestLLMPersonaAgent:
     async def test_on_tick_recovers_energy(self):
         agent = await self._make_agent()
         agent._state.energy = 0.5
-        await agent.on_tick()
+        # Patch _inject_memory_context to return non-zero tokens so the
+        # RFC 0017 §F empty-context TICK short-circuit does not fire.
+        # Without this, the TICK returns DO_NOTHING early without calling
+        # the LLM, preventing energy drain and resulting in 0.6 instead of
+        # the expected 0.55 (0.5 + 0.1 recovery - 0.05 drain).
+        with patch.object(
+            agent,
+            "_inject_memory_context",
+            return_value=MemoryInjectionResult(memory_admitted_tokens=200),
+        ):
+            await agent.on_tick()
         # Energy recovered by 0.1, then drained by 0.05 for the action
         assert agent._state.energy == pytest.approx(0.55)
 
@@ -1997,7 +2008,14 @@ class TestTickTimeout:
         )
         await agent.initialize_memory()
 
-        actions = await agent.on_tick()
+        # Patch _inject_memory_context to return non-zero tokens so the
+        # RFC 0017 §F empty-context TICK short-circuit does not fire.
+        with patch.object(
+            agent,
+            "_inject_memory_context",
+            return_value=MemoryInjectionResult(memory_admitted_tokens=200),
+        ):
+            actions = await agent.on_tick()
         assert len(actions) >= 1
         assert actions[0].action_type == ActionType.COMPLETE_TASK
         await agent.close_memory()
@@ -2027,7 +2045,15 @@ class TestTickTimeout:
 
         # Set energy to a known value
         agent._state.energy = 0.5
-        await agent.on_tick()  # times out
+        # Patch _inject_memory_context to ensure the timeout path is tested
+        # (not the short-circuit path). This ensures we test the actual
+        # timeout behavior rather than the RFC 0017 §F short-circuit.
+        with patch.object(
+            agent,
+            "_inject_memory_context",
+            return_value=MemoryInjectionResult(memory_admitted_tokens=200),
+        ):
+            await agent.on_tick()  # times out
         # Energy must NOT have increased — timed-out tick produces no work
         assert agent._state.energy == pytest.approx(0.5)
         await agent.close_memory()
@@ -2045,7 +2071,14 @@ class TestTickTimeout:
         await agent.initialize_memory()
 
         agent._state.energy = 0.5
-        await agent.on_tick()
+        # Patch _inject_memory_context to return non-zero tokens so the
+        # RFC 0017 §F empty-context TICK short-circuit does not fire.
+        with patch.object(
+            agent,
+            "_inject_memory_context",
+            return_value=MemoryInjectionResult(memory_admitted_tokens=200),
+        ):
+            await agent.on_tick()
         # Energy should have recovered (+0.1) minus drain for actions.
         # The mock LLM returns a COMPLETE_TASK action which drains 0.05,
         # so net change is +0.1 - 0.05 = +0.05.
