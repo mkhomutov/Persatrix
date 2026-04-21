@@ -55,6 +55,7 @@ graph LR
     EXEC -->|gRPC ExecuteTask| AGSVC
     CHATEXEC -->|gRPC SendChatMessage| AGSVC
     EXEC --> REG
+    CHATEXEC --> REG
 
     AGSVC --> TASK
     AGSVC --> PERS
@@ -93,6 +94,10 @@ graph LR
 | Chat message routing (REST → gRPC) | Orchestrator (Go) |
 | Agent discovery, secrets, gRPC transport | Orchestrator (Go) |
 | User-facing commands (workflow run + chat REPL) | CLI (Rust) |
+
+`EXEC` and `CHATEXEC` are both types in the same `internal/executor` Go
+package; they are drawn as sibling nodes to make the dual gRPC dispatch
+(workflow `ExecuteTask` vs chat `SendChatMessage`) visible.
 
 See [component-architecture.md](component-architecture.md) for the module-level
 view of each component.

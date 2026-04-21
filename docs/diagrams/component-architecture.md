@@ -38,7 +38,7 @@ graph TB
         SERVER --> PLANNER
         SERVER --> STATE
         SERVER --> COST
-        SERVER --> EXECUTOR
+        SERVER -->|chat dispatch| EXECUTOR
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
@@ -87,7 +87,6 @@ graph TB
         TASK --> TOOLS
         PRUNTIME --> TOOLS
         PERSONA --> SUB
-        PART --> MEM
     end
 
     Rust -.->|REST/JSON| Go

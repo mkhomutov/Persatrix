@@ -66,7 +66,6 @@ sequenceDiagram
     participant ChatExec as Chat executor<br/>(internal/executor)
     participant Reg as Registry<br/>(internal/registry)
     participant Agent as PersonaAgent<br/>(agents/persona*)
-    participant Part as Participant / UserStore<br/>(agents/participant.py)
     participant Mem as Memory stores<br/>(agents/memory)
     participant LLM as LLM Provider
 
@@ -77,8 +76,7 @@ sequenceDiagram
     Srv->>ChatExec: dispatch SendChatMessage
     ChatExec->>Agent: SendChatMessage(ChatRequest) [gRPC]
 
-    Agent->>Part: upsert UserParticipant(user_id)
-    Part-->>Agent: UserParticipant record
+    Note over Agent: UserStore.get_or_create() is not yet wired into the<br/>chat path; relationship memory is keyed on user_id directly.
     Agent->>Mem: load working context + episodic recall
     Mem-->>Agent: context window
     Agent->>LLM: complete(system+context+message)
