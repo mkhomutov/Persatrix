@@ -1226,7 +1226,7 @@ class TestDeleteOldEpisodes:
         # With 90-day retention and a frozen clock, cutoff == boundary_time.
         # The SQL uses "created_at < cutoff" (strict), so the boundary
         # episode must be preserved.
-        with patch("agents.memory.episodic.time") as mock_time:
+        with patch("agents.memory.episodic_retention.time") as mock_time:
             mock_time.time.return_value = frozen_now
             deleted = await memory.delete_old_episodes(90)
 

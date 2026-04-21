@@ -11,6 +11,7 @@ Checks executed:
   3. ``cargo fmt --check`` (Rust CLI)
   4. Doc links check
   5. Doc status markers check
+  6. File size check (code: ≤500 lines, docs: ≤3000 words)
 
 Usage::
 
@@ -72,6 +73,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
     ("doc status", ["{python}", "scripts/checks/doc_status_markers.py"]),
+    ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
 ]
 
 
