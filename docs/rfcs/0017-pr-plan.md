@@ -97,12 +97,14 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget` with the [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) `try_add(text, *, min_tokens=32) -> str | None` signature
-- [ ] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
-- [ ] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
+- [x] `pytest agents/tests/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget` with the [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) `try_add(text, *, min_tokens=32) -> str | None` signature
+- [x] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
+- [x] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
+
+**Open**: PR #145 — 2026-04-21
 
 ---
 
@@ -289,7 +291,39 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 ##### From PR 1 review
 
-*(populated after PR 1 review)*
+1. **`_count_tokens("")` fallback returns 1, tiktoken returns 0** (`agents/persona_runtime/memory_budget.py`).
+   `max(1, len("") // 4)` evaluates to `max(1, 0) = 1`; tiktoken returns 0 for an empty encode.
+   No caller currently observes the difference (`try_add` short-circuits on `if not text:` before reaching
+   `_count_tokens`), but the guard was intended for non-empty text.  Fix: change `max(1, …)` to `max(0, …)`
+   so both paths agree on 0 for empty input and the helper's contract is consistent with tiktoken.
+
+2. **Ellipsis character mismatch between `_truncate_with_ellipsis` modes** (`agents/persona_runtime/memory_context.py`).
+   Chars mode appends `"..."` (three ASCII dots); tokens mode appends `"…"` (U+2026).  PR 2's allocate-loop
+   will use the tokens path exclusively for memory injection, so the two styles will coexist in the same
+   working-memory context window only during the transition.  After PR 2, audit whether any char-mode call site
+   inside `_inject_memory_context` remains; if none remain, normalise both modes to `"…"` for output
+   consistency and update the char-mode tests accordingly.
+
+3. **`min_tokens=32` default not directly exercised in `test_memory_budget.py`** (`agents/tests/test_memory_budget.py`).
+   Every test that exercises the truncation-threshold passes an explicit `min_tokens` override.
+   Add one test that calls `budget.try_add(text)` without a kwarg override, where the truncated form
+   falls between 1 and 31 tokens, so the default floor of 32 is the deciding factor (drop vs. admit).
+   This validates the default value is wired correctly and exercises the boundary the RFC commits to.
+
+4. **`_truncate_with_ellipsis_tokens` private one-liner wrapper in `memory_context.py`** (`agents/persona_runtime/memory_context.py`).
+   The wrapper exists only to keep `_truncate_with_ellipsis` readable; it delegates verbatim to
+   `_truncate_to_token_limit` and is not exported or independently tested.  Once PR 2 confirms the
+   `memory_context → memory_budget` import direction (no cycle introduced by adding `MemoryBudget`),
+   inline `_truncate_with_ellipsis_tokens` into `_truncate_with_ellipsis`.  Reduces indirection with
+   no behavioural change; single test update to verify the inline.
+
+5. **`test_sequence_fills_budget_greedily` invariant is narrower than documented** (`agents/tests/test_memory_budget.py`).
+   The test asserts "once we see the first `None`, all subsequent must also be `None`" and uses a
+   homogeneous list of identical items to verify it.  This assertion holds only when all items have the
+   same token count; the greedy allocator's actual contract is weaker — a later *smaller* item could still
+   fit after a larger one is dropped.  Add a comment to the test clarifying it holds for homogeneous
+   inputs, and add a companion test with mixed-size items (one large item dropped, one small item admitted
+   afterwards) to directly exercise the RFC's intended greedy-order semantics.
 
 ##### From PR 2 review
 
