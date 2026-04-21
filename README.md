@@ -23,7 +23,8 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 
 **v0.2.1** (Human Participant & Chat Interface) adds:
 
-- Open a terminal and talk to a persona agent: `persatrix chat <agent_id>`.
+- A `persatrix chat <agent_id>` REPL for talking to a persona agent from a
+  terminal.
 - A first-class `Participant` abstraction that treats human users alongside agents.
 - Persistent user identity — the agent remembers who you are across restarts and
   builds a relationship with you over repeated conversations.
@@ -159,8 +160,8 @@ actions, and writes results back. State survives process restarts.
 
 ### Chat with a Persona Agent (v0.2.1)
 
-With the orchestrator and the agent running (steps 1–2 above), open a chat
-session from a third terminal:
+With the orchestrator and the agent running (steps 1–2 above, or via Docker
+Compose), open a chat session from another terminal:
 
 ```bash
 # Interactive REPL — type messages, receive replies, `exit` to quit
