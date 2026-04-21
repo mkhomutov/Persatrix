@@ -20,7 +20,9 @@ Module pin (RFC 0017 PR plan open-at-plan-time resolution):
 
 from __future__ import annotations
 
+import copy
 import logging
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,7 +37,7 @@ from agents.tick import TickScheduler
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-_PERSONA_CONFIG: dict = {
+_PERSONA_CONFIG: dict[str, Any] = {
     "id": "test-agent",
     "type": "persona",
     "name": "Test Agent",
@@ -81,14 +83,17 @@ def _make_client(response: LLMResponse = _SUBSTANTIVE_RESPONSE) -> LLMClient:
 
 async def _make_agent(
     *,
-    goal_progress: dict | None = None,
-    recent_context: list | None = None,
+    goal_progress: dict[str, float] | None = None,
+    recent_context: list[str] | None = None,
     client: LLMClient | None = None,
 ) -> _LLMPersonaAgent:
     """Create an initialized _LLMPersonaAgent with optional state preset."""
     agent = create_persona_agent(
         agent_id="test-agent",
-        config={**_PERSONA_CONFIG},
+        # Deep-copy so per-test mutations of nested dicts (``persona``,
+        # ``permissions``, ``memory``) cannot leak across tests via the
+        # shared module-level _PERSONA_CONFIG reference.
+        config=copy.deepcopy(_PERSONA_CONFIG),
         llm_client=client or _make_client(),
     )
     await agent.initialize_memory()
@@ -168,12 +173,13 @@ class TestTickShortCircuit:
             "_inject_memory_context",
             return_value=_zero_injection(),
         ):
-            actions = await agent.on_event(AgentEvent(event_type=EventType.TICK))
+            await agent.on_event(AgentEvent(event_type=EventType.TICK))
 
         # Active goal → guard condition 3 is False → short-circuit must NOT fire.
+        # Key assertion is that the LLM was called; the returned action type
+        # depends on the mock response and is not asserted here (the prior
+        # ``or True`` tautology was removed per PR #149 review M-2).
         client._provider.create_message.assert_called_once()  # type: ignore[attr-defined]
-        assert any(a.action_type != ActionType.DO_NOTHING for a in actions) or True
-        # (Action type depends on LLM mock; key assertion is LLM was called.)
 
     @pytest.mark.asyncio
     async def test_d_empty_context_tick_with_pending_turn_calls_llm(self) -> None:

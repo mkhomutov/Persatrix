@@ -55,7 +55,6 @@ _MAX_SUB_AGENT_LLM_CALLS: int = 50
 _PERSONA_DEFAULT_MAX_LLM_CALLS: int = 10
 _PERSONA_DEFAULT_MAX_TOKENS: int = 4096
 
-
 # ─── Mixin ─────────────────────────────────────────────────
 
 
@@ -352,8 +351,14 @@ class _ActionLoopMixin:
         # Suppress the LLM call when all four conditions hold:
         #   1. This is an autonomous TICK event (not a user/task event).
         #   2. No memory was admitted (zero relevant episodes, notes, or
-        #      relationships) — the recall-layer min_score threshold already
-        #      filtered low-signal content at the DB layer (PR 4).
+        #      relationships).  This includes the nominal case (recall-layer
+        #      min_score threshold filtered low-signal content at the DB
+        #      layer per PR 4) and the failure case (all three memory tier
+        #      lookups raised exceptions and were swallowed by
+        #      ``_inject_memory_context``'s except-and-continue handlers,
+        #      which log warnings per tier).  In both cases paying for an
+        #      LLM call provides no incremental value; the per-tier warning
+        #      logs preserve operator visibility into DB outages.
         #   3. No active goal payload — the agent has nothing to work toward.
         #   4. No pending conversation turn — no user is waiting for a reply.
         # On match: return DO_NOTHING so TickScheduler increments idle_count

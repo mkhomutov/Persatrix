@@ -448,9 +448,8 @@ class _MemoryContextMixin:
                 ))
 
         memory_admitted_tokens = _MEMORY_BUDGET_TOKENS - budget.remaining
-        # TODO(RFC-0017-PR5): consume ``memory_admitted_tokens`` in the
-        # caller (``_on_event_inner``) to short-circuit the LLM call when
-        # zero memory was admitted for a TICK / low-signal event.  Until
-        # PR 5 lands, this value is computed but unused in production;
-        # PR 4's unit tests assert it for the contract.
+        # Consumed by ``_ActionLoopMixin._on_event_inner`` for the RFC 0017
+        # §F empty-context TICK short-circuit (PR 5): a zero value, combined
+        # with no active goal and no pending turn, suppresses the LLM call
+        # on autonomous TICK events.
         return MemoryInjectionResult(memory_admitted_tokens=memory_admitted_tokens)
