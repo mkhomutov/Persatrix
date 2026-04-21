@@ -249,12 +249,41 @@ class TestInjectMemoryContextTierOrdering:
         assert "relationship_context" in section_names
         # Total admitted tokens (budget accounting) must be within budget.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS
+        # Verify the lower-priority tier was actually impacted by the
+        # shared budget: at most ~2 of the 5 large episodes (≈600 tokens
+        # each) can fit into the remaining budget after the relationship
+        # block is admitted.  Without this assertion the test would pass
+        # even if the budget were silently bypassed for episodic.
+        # (PR #146 review.)
+        ep_section = next(
+            (s for s in mixin._working_memory._sections if s.name == "episodic_recall"),
+            None,
+        )
+        if ep_section is not None:
+            ep_lines = [
+                line for line in ep_section.content.splitlines()
+                if line.startswith("- ")
+            ]
+            assert len(ep_lines) < 5, (
+                "Budget should have limited episodic admission "
+                f"(got {len(ep_lines)}/5)"
+            )
 
     @pytest.mark.asyncio
     async def test_relationship_exhausting_budget_starves_other_tiers(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Relationship block consuming entire budget → episodic and notes admit zero."""
+        # Lift the per-field ``rel.notes`` security cap so this test can
+        # construct a relationship block that genuinely dominates the
+        # 1500-token budget.  The invariant under test is the
+        # *budget-allocation* ordering (relationship wins, lower tiers
+        # starve), independent of the security-driven char cap.
+        # (PR #146 review.)
+        from agents.persona_runtime import memory_context as mc
+
+        monkeypatch.setattr(mc, "_REL_NOTES_INTERIM_CHARS", 1_000_000)
+
         # Build a relationship block that is itself very large.
         big_notes = "relationship detail word " * 600  # ~2400 tokens > budget
         rel = _FakeRelSummary(
@@ -276,6 +305,16 @@ class TestInjectMemoryContextTierOrdering:
         # Regardless of what was admitted (the large relationship block may be
         # truncated-and-admitted or dropped), admitted tokens must be within budget.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS
+        # Verify the tier-ordering invariant promised in the docstring:
+        # if the relationship block (~2400 tokens, truncated to fit the
+        # 1500-token budget) consumes the budget, the lower-priority
+        # episodic and notes tiers must admit zero items and therefore
+        # add no sections.  Without these assertions the test would pass
+        # silently even if budget enforcement broke for the lower tiers.
+        # (PR #146 review.)
+        section_names = [s.name for s in mixin._working_memory._sections]
+        assert "episodic_recall" not in section_names
+        assert "recent_notes" not in section_names
 
 
 class TestInjectMemoryContextMidTierTruncation:
@@ -443,3 +482,59 @@ class TestInjectMemoryContextTickAndFallback:
         assert "episodic_recall" not in section_names
         assert "recent_notes" not in section_names
         assert "relationship_context" not in section_names
+
+
+# ─── Exception-path resiliency (RFC 0017 PR 2) ────────────────────────────────
+
+
+class TestInjectMemoryContextExceptionResiliency:
+    """Each tier wraps its query in ``except Exception`` with the contract
+    "never fail the event".  These tests cover the resiliency paths that
+    were previously uncovered (PR #146 review): a DB lock, I/O error, or
+    other transient failure on any tier must NOT propagate to the caller,
+    and ``_inject_memory_context`` must still return a valid
+    ``MemoryInjectionResult``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_episodic_recall_exception_does_not_raise(self) -> None:
+        """A failing episodic.recall() is logged and treated as no results."""
+        mixin, event = _make_mixin()
+        mixin._episodic_memory.recall.side_effect = RuntimeError("DB locked")  # type: ignore[attr-defined]
+
+        result = await mixin._inject_memory_context(event)
+
+        assert isinstance(result, MemoryInjectionResult)
+        # No episodic content was admitted.
+        assert "episodic_recall" not in [
+            s.name for s in mixin._working_memory._sections
+        ]
+
+    @pytest.mark.asyncio
+    async def test_relationship_lookup_exception_does_not_raise(self) -> None:
+        """A failing relationship lookup is logged and treated as no rel."""
+        mixin, event = _make_mixin(sender_id="alice")
+        mixin._relationship_memory.get_relationship_summary.side_effect = (  # type: ignore[attr-defined]
+            OSError("disk full")
+        )
+
+        result = await mixin._inject_memory_context(event)
+
+        assert isinstance(result, MemoryInjectionResult)
+        assert "relationship_context" not in [
+            s.name for s in mixin._working_memory._sections
+        ]
+
+    @pytest.mark.asyncio
+    async def test_notes_recall_exception_does_not_raise(self) -> None:
+        """A failing notes recall is logged and treated as no notes."""
+        mixin, event = _make_mixin()
+        mixin._episodic_memory.recall_notes.side_effect = RuntimeError("DB locked")  # type: ignore[attr-defined]
+
+        result = await mixin._inject_memory_context(event)
+
+        assert isinstance(result, MemoryInjectionResult)
+        assert "recent_notes" not in [
+            s.name for s in mixin._working_memory._sections
+        ]
+

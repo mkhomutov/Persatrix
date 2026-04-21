@@ -41,6 +41,20 @@ _MIN_TOKENS_RELATIONSHIP: int = 64
 _MIN_TOKENS_EPISODIC: int = 32
 _MIN_TOKENS_NOTES: int = 24
 
+# Interim per-field cap on ``rel.notes`` (chars).  The pre-RFC-0017 code
+# used ``_MAX_RELATIONSHIP_NOTES_CHARS = 300`` as an interim mitigation
+# against prompt injection from peer-authored relationship notes.  After
+# the allocate-loop rewrite the only remaining bound on the relationship
+# block is the per-block budget (~1500 tokens ≈ 6000 chars), which is far
+# larger than the original notes cap.  Restore a per-field bound here so
+# the prompt-injection surface for ``rel.notes`` does not silently expand
+# from ~300 chars to ~6000 chars when the budget order favours this tier.
+# 400 chars (~100 tokens at 4 chars/token) matches the original interim
+# limit with mild headroom; the TODO(v0.3) note below tracks full
+# sanitisation once A2A allows external agents.
+# (PR #146 review finding: prompt-injection surface regression.)
+_REL_NOTES_INTERIM_CHARS: int = 400
+
 # Trust score defaults for relationship context filtering.
 # A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
 # useful signal to the LLM.  Only inject trust when it has deviated by more
@@ -53,7 +67,7 @@ _TRUST_DEVIATION_THRESHOLD: float = 0.01
 # ─── Result type ───────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True)
 class MemoryInjectionResult:
     """Return value of :meth:`_MemoryContextMixin._inject_memory_context`.
 
@@ -319,12 +333,27 @@ class _MemoryContextMixin:
                 # external agents — a compromised peer could store prompt
                 # injection text in its relationship notes.
                 # (PR #60 review: internal prompt injection via peer memory.)
-                rel_lines.append(f"  Notes: {rel.notes}")
+                # Interim per-field char cap retained from pre-RFC-0017
+                # code: the per-block budget alone allows ~6000 chars of
+                # notes if the relationship tier wins the budget.  Capping
+                # here keeps the worst-case injection surface bounded
+                # independent of budget allocation order.
+                # (PR #146 review.)
+                capped_notes = rel.notes[:_REL_NOTES_INTERIM_CHARS]
+                rel_lines.append(f"  Notes: {capped_notes}")
             rel_text = "\n".join(rel_lines)
             admitted_rel = budget.try_add(rel_text, min_tokens=_MIN_TOKENS_RELATIONSHIP)
             if admitted_rel is not None:
                 self._working_memory.add_section(ContextSection(
                     name="relationship_context",
+                    # ``token_count`` uses ``estimate_tokens`` (chars/4) so
+                    # WorkingMemory's own budget logic stays consistent with
+                    # the rest of its sections; the allocate-loop above used
+                    # tiktoken via MemoryBudget for the authoritative bound.
+                    # The two counts can diverge ~10–20% on prose and 2–3×
+                    # on code/JSON/CJK; this is acceptable because the
+                    # WorkingMemory budget is a soft secondary cap.
+                    # (PR #146 review.)
                     content=admitted_rel,
                     priority=8,
                     token_count=estimate_tokens(admitted_rel),
@@ -341,11 +370,21 @@ class _MemoryContextMixin:
                 if admitted is not None:
                     ep_items.append(admitted)
             if ep_items:
+                # NB: the ``"Relevant past episodes:\n"`` header is added
+                # AFTER the per-item budget loop and is not itself charged
+                # against the budget (~5 tokens of header overhead per
+                # non-empty tier).  ``memory_admitted_tokens`` therefore
+                # underreports actual injected tokens by a small constant.
+                # Acceptable for PR 5's empty-context check (the error
+                # direction is safe: zero stays zero); to be revisited if
+                # the budget needs to become a hard upper bound.
+                # (PR #146 review.)
                 text = "Relevant past episodes:\n" + "\n".join(ep_items)
                 self._working_memory.add_section(ContextSection(
                     name="episodic_recall",
                     content=text,
                     priority=7,
+                    # See relationship tier for the chars/4 vs tiktoken note.
                     token_count=estimate_tokens(text),
                     compressible=True,
                 ))
@@ -361,11 +400,13 @@ class _MemoryContextMixin:
                 if admitted is not None:
                     note_items.append(admitted)
             if note_items:
+                # See episodic tier above re: untracked header overhead.
                 text = "Relevant notes:\n" + "\n".join(note_items)
                 self._working_memory.add_section(ContextSection(
                     name="recent_notes",
                     content=text,
                     priority=6,
+                    # See relationship tier for the chars/4 vs tiktoken note.
                     token_count=estimate_tokens(text),
                     compressible=True,
                 ))

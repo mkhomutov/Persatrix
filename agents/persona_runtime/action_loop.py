@@ -340,6 +340,10 @@ class _ActionLoopMixin:
             memory_query = event.payload.get("content", "")
         else:
             memory_query = user_message
+        # Return value (MemoryInjectionResult) is intentionally discarded
+        # here; it is consumed by RFC 0017 PR 5's empty-context TICK
+        # short-circuit, which lands later in the chain.
+        # (PR #146 review.)
         await self._inject_memory_context(event, query=memory_query)
 
         # 1. Build system prompt and append working memory context.
