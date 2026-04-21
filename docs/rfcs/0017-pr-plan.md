@@ -198,7 +198,7 @@ PR 7 (RFC close)
 
 ---
 
-### PR 4: `feature/v022-memory-gate-removal` — Wire `min_score` and Remove Legacy Gates
+### PR 4: `feature/v022-memory-gate-removal` — Wire `min_score` and Remove Legacy Gates — [#148](https://github.com/mkhomutov/Persatrix/pull/148) ⬆️ Open
 
 **Depends on**: PR 3 merged (`min_score` available on recall methods)
 **Branch**: `feature/v022-memory-gate-removal`
@@ -229,14 +229,14 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ -v` passes
-- [ ] `pytest tests/integration/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] TICK skip removed from `_inject_memory_context`
-- [ ] `should_fall_back` heuristic removed
-- [ ] Per-tier `min_score` defaults wired into recall calls
-- [ ] Integration test asserts token-bound and low-signal-zero contracts
+- [x] `pytest agents/tests/ -v` passes
+- [x] `pytest tests/integration/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] TICK skip removed from `_inject_memory_context`
+- [x] `should_fall_back` heuristic removed
+- [x] Per-tier `min_score` defaults wired into recall calls
+- [x] Integration test asserts token-bound and low-signal-zero contracts
 
 ---
 
