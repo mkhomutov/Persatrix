@@ -224,3 +224,25 @@ async def initialize_persona_agents(
                 agent_id,
                 interval,
             )
+            # Cost-safety notice — emitted at the moment LLM spend can begin
+            # accruing for an autonomous persona. See README.md "Cost Warning"
+            # and SECURITY.md "Responsible Use" for the full framing.
+            max_llm_calls = agent.config.get("max_llm_calls", "unset")
+            logger.warning(
+                "COST: persona '%s' is now running an autonomous tick loop "
+                "and will consume LLM tokens continuously.",
+                agent_id,
+            )
+            logger.warning(
+                "COST: tick_interval=%ss, max_actions_per_tick=%s, "
+                "idle_after_ticks=%s, max_llm_calls=%s.",
+                interval,
+                max_actions,
+                idle_after,
+                max_llm_calls,
+            )
+            logger.warning(
+                "COST: stop this agent explicitly when done — do not rely "
+                "on idle detection alone. Confirm hard spending limits are "
+                "set at your LLM provider's billing page."
+            )

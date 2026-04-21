@@ -30,3 +30,36 @@ Persatrix uses deny-by-default security for agent permissions. For details on th
 
 - [Agent Configuration](config/agents.yaml) — Agent permissions and capabilities
 - [Security Gates](internal/security/) — Go orchestrator security enforcement
+
+## Responsible Use
+
+Persatrix is experimental, pre-1.0 software distributed under
+[BUSL 1.1](LICENSE). It drives commercial LLM APIs and runs persona agents
+with autonomous tick loops, so misuse or undiscovered bugs can incur real
+monetary cost. Users running Persatrix are responsible for:
+
+- **Configuring spending limits at their LLM provider.** This is the
+  authoritative safeguard. Persatrix's internal budget controls
+  (`max_llm_calls` per agent, `max_daily_usd` in
+  [config/optimization.yaml](config/optimization.yaml), per-workflow token
+  budgets, response cache) are best-effort and have known limitations —
+  see the cost warning in [README.md](README.md#-cost-warning--read-before-running).
+- **Not running Persatrix in production environments** without significant
+  additional safeguards beyond what the project provides. The roadmap
+  through v0.3 explicitly treats current releases as experimental.
+- **Reviewing agent actions before allowing them to affect real systems.**
+  Persona behaviour is non-deterministic by design and tool permissions
+  default to deny — keep them that way unless you have audited the
+  alternative.
+- **Stopping persona agents explicitly when done.** Kill the `make run-agent`
+  process or the `agent-*` Docker Compose service. Do not rely on
+  `idle_after_ticks`, the empty-context tick short-circuit, or any other
+  automatic timeout alone.
+- **Reporting cost or security bugs responsibly** via the private
+  vulnerability reporting channel above (for security-sensitive issues) or
+  via [GitHub Issues](https://github.com/mkhomutov/Persatrix/issues) (for
+  unexpected-cost or budget-bypass bugs that are not directly exploitable).
+
+Persatrix authors and contributors are not liable for API costs, damages,
+or losses arising from use of this software, as stated in
+[LICENSE](LICENSE).
