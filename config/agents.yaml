@@ -166,6 +166,10 @@ agents:
       knowledge:
         domains: ["system design", "team management", "Go"]
         limitations: ["frontend/CSS", "ML internals"]
+    permissions:
+      memory:
+        read: true
+        write: true
     autonomy:
       level: "semi-autonomous"
       tick_interval_seconds: 60

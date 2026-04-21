@@ -61,8 +61,8 @@ build-agents: ## Install Python agent dependencies
 run: build ## Run the orchestrator
 	$(GO_BIN)/persatrix-server$(EXE) --config config/
 
-run-agent: ## Run a Python agent process (AGENT=coder)
-	PYTHONPATH="agents/generated" $(PYTHON) -m persatrix_agents.server --agent $(AGENT)
+run-agent: ## Run a Python agent process (AGENT=coder PORT=50051)
+	PYTHONPATH="agents/generated" $(PYTHON) -m persatrix_agents.server --agent $(AGENT) --port $(or $(PORT),50051)
 
 generate-persona-nickname: ## Generate nickname-style persona id/name pairs (COUNT=1 SEED=)
 	$(PYTHON) scripts/persona_nickname_generator.py --count $(or $(COUNT),1) $(if $(SEED),--seed $(SEED),)

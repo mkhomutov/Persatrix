@@ -1402,3 +1402,91 @@ class TestScoreExpressionSyntax:
 
         async with memory._db.execute(sql, (time.time(), "test-agent")) as cursor:
             await cursor.fetchone()
+
+
+# ─── FTS5 query sanitization (episodic_queries) ─────────────
+
+
+class TestEpisodicFTS5Sanitization:
+    """Verify recall_fts5() sanitizes punctuation that causes FTS5 syntax errors.
+
+    episodic_queries.recall_fts5() strips non-alphanumeric chars before
+    passing the query to FTS5 MATCH, preventing OperationalError from
+    commas, periods, angle brackets, pipes, etc.
+    """
+
+    async def test_comma_query_does_not_raise(self, memory: EpisodicMemory):
+        """Comma in query must not cause FTS5 syntax error."""
+        await memory.store_episode(
+            summary="Team standup meeting notes", context={}, importance=0.5,
+        )
+        results = await memory.recall("hi, do you remember me?")
+        assert isinstance(results, list)
+
+    async def test_period_query_does_not_raise(self, memory: EpisodicMemory):
+        """Period in query must not cause FTS5 syntax error."""
+        await memory.store_episode(
+            summary="Ship v2.0 on time with quality", context={}, importance=0.7,
+        )
+        results = await memory.recall("v2.0 timeline review.")
+        assert isinstance(results, list)
+
+    async def test_angle_brackets_query_does_not_raise(self, memory: EpisodicMemory):
+        """Angle brackets and pipes (XML-style delimiters) do not cause errors."""
+        await memory.store_episode(
+            summary="User sent a greeting", context={}, importance=0.5,
+        )
+        results = await memory.recall('<|user_message user_id="local"|>')
+        assert isinstance(results, list)
+
+    async def test_sanitized_query_still_matches(self, memory: EpisodicMemory):
+        """After stripping punctuation, alphanumeric tokens still match via FTS5."""
+        await memory.store_episode(
+            summary="Database schema migration completed",
+            context={},
+            importance=0.8,
+        )
+        await memory.store_episode(
+            summary="Fixed CSS styling on login page",
+            context={},
+            importance=0.5,
+        )
+        # Comma and question mark stripped; "database" and "schema" remain.
+        results = await memory.recall("database, schema?")
+        assert len(results) >= 1
+        assert "database" in results[0].summary.lower()
+
+    async def test_only_punctuation_falls_back_to_like(self, memory: EpisodicMemory):
+        """A query of only punctuation (sanitizes to empty) falls back gracefully."""
+        await memory.store_episode(
+            summary="Some episode content", context={}, importance=0.5,
+        )
+        results = await memory.recall(".,<>|!@#$%")
+        assert isinstance(results, list)
+
+
+class TestEpisodicFTS5SanitizeRegex:
+    """Unit tests for the _FTS5_SANITIZE regex in episodic_queries.py."""
+
+    def test_comma_stripped(self):
+        from agents.memory.episodic_queries import _FTS5_SANITIZE
+        assert _FTS5_SANITIZE.sub(" ", "hi, remember me?").strip() == "hi  remember me"
+
+    def test_period_stripped(self):
+        from agents.memory.episodic_queries import _FTS5_SANITIZE
+        assert _FTS5_SANITIZE.sub(" ", "v2.0 timeline").strip() == "v2 0 timeline"
+
+    def test_angle_brackets_stripped(self):
+        from agents.memory.episodic_queries import _FTS5_SANITIZE
+        result = _FTS5_SANITIZE.sub(" ", '<|user_message|>').strip()
+        assert "<" not in result
+        assert "|" not in result
+        assert ">" not in result
+
+    def test_plain_text_unchanged(self):
+        from agents.memory.episodic_queries import _FTS5_SANITIZE
+        assert _FTS5_SANITIZE.sub(" ", "database schema").strip() == "database schema"
+
+    def test_only_special_chars_becomes_empty(self):
+        from agents.memory.episodic_queries import _FTS5_SANITIZE
+        assert _FTS5_SANITIZE.sub(" ", ".,!@#$%^&*()").strip() == ""

@@ -572,6 +572,7 @@ class TestChatServicerFollowUps:
         assert event_arg.payload["participant_type"] == "user"
         assert event_arg.sender_id == "local"
         assert event_arg.metadata["session_id"] == "sess-abc"
+        assert event_arg.metadata["sender_participant_type"] == "user"
 
         # execute_actions=False keyword argument
         assert call_args.kwargs.get("execute_actions") is False
@@ -604,3 +605,138 @@ class TestChatServicerFollowUps:
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == ""
         assert status == "ok"
+
+    def test_extract_reply_strips_delimiter_tags(self):
+        """LLM-echoed <|user_message|> delimiters are stripped from reply text.
+
+        The persona runtime wraps user messages in delimiter tags for prompt
+        injection mitigation.  If the LLM echoes them back, the raw markup
+        must not reach the end user.
+        """
+        raw = (
+            '<|user_message|>\ndo you have access?\n<|/user_message|>\n\n'
+            'No, I do not have internet access.'
+        )
+        actions = [
+            AgentAction(ActionType.COMPLETE_TASK, {"result": raw}),
+        ]
+        reply, status = _extract_chat_reply(actions, "local")
+        assert status == "ok"
+        assert "<|user_message" not in reply
+        assert "<|/user_message" not in reply
+        assert "No, I do not have internet access." in reply
+
+    def test_extract_reply_strips_delimiters_from_send_message(self):
+        """Delimiter tags stripped from SEND_MESSAGE content too."""
+        content = '<|user_message user_id="local"|>\nhi\n<|/user_message|>\nHello!'
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "content": content,
+                "channel_id": "ch-1",
+                "mentions": ["local"],
+            }),
+        ]
+        reply, status = _extract_chat_reply(actions, "local")
+        assert status == "ok"
+        assert "<|user_message" not in reply
+        assert "Hello!" in reply
+
+
+# ─── Sanitize Reply Edge Cases ───────────────────────────────
+
+
+class TestSanitizeReplyEdgeCases:
+    """Edge-case coverage for _sanitize_reply (tag-stripping fix).
+
+    The persona runtime wraps user messages in ``<|user_message …|>``
+    delimiters.  If the LLM echoes those tags in its response, they must
+    be stripped before reaching the end user.
+    """
+
+    def test_clean_text_unchanged(self):
+        """Text without any delimiter tags passes through untouched."""
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": "Just a normal reply.", "mentions": []}),
+        ]
+        reply, status = _extract_chat_reply(actions, "local")
+        assert reply == "Just a normal reply."
+        assert status == "ok"
+
+    def test_only_tags_returns_empty(self):
+        """Reply consisting solely of delimiter tags becomes empty string."""
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "content": '<|user_message|>\n<|/user_message|>',
+                "mentions": [],
+            }),
+        ]
+        reply, status = _extract_chat_reply(actions, "local")
+        assert reply == ""
+        assert status == "ok"
+
+    def test_multiple_tag_pairs_stripped(self):
+        """Multiple echoed tag pairs are all removed."""
+        raw = (
+            '<|user_message|>\nfirst question\n<|/user_message|>\n'
+            'Answer one.\n'
+            '<|user_message|>\nsecond question\n<|/user_message|>\n'
+            'Answer two.'
+        )
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert "<|user_message" not in reply
+        assert "<|/user_message" not in reply
+        assert "Answer one." in reply
+        assert "Answer two." in reply
+
+    def test_tag_with_attributes_stripped(self):
+        """Tags with attributes like user_id are also stripped."""
+        raw = '<|user_message user_id="max"|>\nhi\n<|/user_message|>\nHello Max!'
+        actions = [
+            AgentAction(ActionType.COMPLETE_TASK, {"result": raw}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert "<|user_message" not in reply
+        assert "Hello Max!" in reply
+
+    def test_opening_tag_only_stripped(self):
+        """Lone opening tag (without closing) is still stripped."""
+        raw = '<|user_message|>\nSome leaked prefix\nActual reply here'
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert "<|user_message" not in reply
+        assert "Actual reply here" in reply
+
+    def test_closing_tag_only_stripped(self):
+        """Lone closing tag (without opening) is still stripped."""
+        raw = 'Actual reply<|/user_message|>'
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert "<|/user_message" not in reply
+        assert "Actual reply" in reply
+
+    async def test_sanitized_through_send_chat_message(self):
+        """End-to-end: tags in dispatch output are stripped in ChatResponse."""
+        raw = '<|user_message|>\ndo you recall?\n<|/user_message|>\nYes I do!'
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {
+                "content": raw,
+                "mentions": ["local"],
+            }),
+        ]
+        servicer = _make_servicer(actions)
+        context = _mock_context()
+
+        resp = await servicer.SendChatMessage(
+            _chat_request(user_id="local", message="do you recall?"), context,
+        )
+
+        assert "<|user_message" not in resp.reply
+        assert "Yes I do!" in resp.reply
+        assert resp.reply_status == "ok"

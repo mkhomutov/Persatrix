@@ -40,10 +40,12 @@ class Note:
 
 
 # FTS5 MATCH operator characters that cause parse errors when present in
-# freeform (LLM-generated) queries. Colons are the most critical: FTS5
-# interprets "word:phrase" as a column filter, failing with "no such column"
-# when the word isn't a declared FTS5 column (e.g. "tick: scheduler").
-_FTS5_SPECIAL = re.compile(r'[":*^()]+')
+# freeform (LLM-generated or user-generated) queries.  Rather than
+# enumerate every problematic character (colons, commas, periods, angle
+# brackets, pipes, etc.), strip all non-alphanumeric characters except
+# spaces.  This keeps meaningful search tokens while preventing FTS5
+# syntax errors that force repeated LIKE fallbacks.
+_FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
 
 # Maximum content size for a single note (10 KB).
 _MAX_NOTE_CONTENT_BYTES = 10_240

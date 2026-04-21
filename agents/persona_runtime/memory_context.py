@@ -275,6 +275,21 @@ class _MemoryContextMixin:
             )
             notes = []
 
+        # Recency fallback: when FTS5 keyword search found no notes, fall
+        # back to the most recent notes so the agent retains awareness of
+        # its stored knowledge even when the user's message shares no
+        # keywords with note content (e.g. "hi", "remember me?").
+        # Reduced limit (3) avoids injecting excessive low-relevance context.
+        if not notes:
+            try:
+                notes = await self._episodic_memory.recall_notes("", limit=3)
+            except Exception:
+                logger.warning(
+                    "Agent %s: recency note fallback failed, skipping",
+                    self.agent_id, exc_info=True,
+                )
+                notes = []
+
         if notes:
             lines = ["Relevant notes:"]
             for note in notes:
