@@ -157,7 +157,11 @@ Three IDs need to travel from orchestrator to agent and back into the agent's lo
 - Writes to a ring are non-blocking. Under sustained saturation, the oldest entry in that execution's ring is evicted to make room (the per-execution overwrite policy described above). Cross-process delivery from agents to the orchestrator is best-effort with bounded retry — drops on the agent shipper side are counted in a metric and surfaced as a `WARN` log on the agent, but do not block agent work.
 - Ring contents are lost on orchestrator restart. This is documented as a known limitation in the operations guide.
 
+*Ring lifecycle (added per PR #142 review, second pass).* Each execution's ring is created on first write (lazy) and **sealed** when the executor records a terminal state for that execution (`completed`, `failed`, `cancelled`). A sealed ring is immutable and remains queryable until LRU-evicted by the total-executions cap. This gives `persatrix logs` deterministic results for finished workflows while in-progress workflows continue to accept appends. The Phase 4 PR plan will pin the exact hook site (state-store transition or executor terminal handler).
+
 *Namespace rationale (added per PR #142 review).* The new package lives under `internal/observability/` rather than extending `internal/telemetry/` because `telemetry` is currently scoped to OTEL traces (and, in RFC 0019, metrics); logs follow a different lifecycle (per-execution ring + HTTP endpoint surface) and a different set of operator workflows (`persatrix logs` vs Jaeger). Keeping the two roots separate avoids overloading the `telemetry` package with an unrelated subsystem. A future RFC may consolidate `telemetry` and `observability` under one root once the boundaries stabilise; that consolidation is intentionally out of scope here.
+
+*Consolidation follow-up commitment (added per PR #142 review, second pass).* To prevent the provisional `telemetry/` ↔ `observability/` split from becoming permanent by inertia, the RFC closure checklist for RFC 0018 (Phase 5) **must** include opening a tracking issue titled "Consolidate `internal/telemetry/` and `internal/observability/`" with a v0.3.x or later target. The same commitment is mirrored in [RFC 0019](0019-opentelemetry-completion.md). This is logged here rather than in the ROADMAP because v0.2.3 is not yet implementing; ROADMAP placement happens at RFC closure.
 
 **Endpoint.** `handleGetLogs` is rewritten to:
 
@@ -290,6 +294,8 @@ No changes to: protos, schemas, JSON schemas, blueprints, workflows.
    - **(c)** Out of scope for v0.2.3 — orchestrator and agents each maintain their own buffer, `persatrix logs` queries both. More complex on the CLI side.
    Recommendation: **(a)** for v0.2.3; revisit if log volume becomes a problem.
 2. **Ring buffer capacity defaults.** Per-execution: 1000 entries. Total executions retained: 50. Total memory cap implied: ~50k entries. Acceptable? Confirm before Phase 4.
+
+   *Worked memory bound (added per PR #142 review, second pass).* A typical structured log entry serialises to roughly 300–800 bytes of JSON (timestamp + level + service + message + 4–6 attribute fields; the `attributes` bag dominates variance). Taking 500 bytes as a working average: 50 executions × 1000 entries × 500 B ≈ **25 MB** steady-state, with a hard ceiling near ~40 MB at 800 B/entry. This is well within the orchestrator's existing memory envelope (the in-memory state store and registry are the larger footprints) and acceptable as a default. The Phase 4 PR plan should expose both knobs (`PERSATRIX_LOGBUFFER_PER_EXEC`, `PERSATRIX_LOGBUFFER_MAX_EXEC`) as env vars so operators can tune for their own workloads.
 3. **Backward compatibility of log field names.** Renaming `executionID` → `execution_id` in zap output is a breaking change for any operator currently parsing Persatrix logs. CHANGELOG entry is sufficient at v0.2.x; no compatibility shim needed.
 4. **Should `pretty` mode be the default for `make run` (developer ergonomics)?** Recommendation: keep JSON default everywhere; document `PERSATRIX_LOG_FORMAT=pretty` as the standard local-dev override in the README quick-start.
 
@@ -302,6 +308,8 @@ No changes to: protos, schemas, JSON schemas, blueprints, workflows.
 1. Confirm v0.2.3 as the target milestone (this RFC adds v0.2.3 to the ROADMAP version map alongside RFC 0019).
 2. Resolve Open Question 1 (log shipping mechanism) before Phase 4 starts.
 3. Sign off on the schema in [Section B](#b-common-log-schema) as the cross-language contract.
+
+**Hard pre-implementation gate (added per PR #142 review, second pass).** This RFC's status will not flip from 📋 Proposed to 🚧 Implementing until [Open Question 1](#open-questions) (agent-side log shipping mechanism) is resolved and the chosen option is reflected in [Section E](#e-persatrix-logs-endpoint-and-storage). Several downstream claims in this RFC (no proto changes, no new authenticated HTTP surface, the Security Considerations bullet on the internal endpoint) are conditional on that decision; promoting to Implementing without it would lock in the conditional text as the contract.
 
 **Once accepted:**
 

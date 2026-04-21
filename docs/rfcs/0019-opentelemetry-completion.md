@@ -261,6 +261,8 @@ No changes to: protos, schemas, JSON schemas, blueprints, workflows, Rust CLI.
 
 *Namespace rationale (added per PR #142 review).* The new Python module lives under `agents/observability/` (paired with `internal/observability/` from RFC 0018) rather than under a hypothetical `agents/telemetry/`. Persatrix-Python today has no `telemetry` package, so the choice is between introducing one and introducing `observability/`. `observability/` is preferred because (a) it pairs symmetrically with the Go `internal/observability/` namespace introduced by RFC 0018, (b) it is the umbrella term most operators recognise, and (c) it leaves room for the log↔trace correlation follow-up to live alongside both subsystems without further reorganisation. The Go-side `internal/telemetry/` package keeps its current scope and is not renamed by this RFC.
 
+*Consolidation follow-up commitment (added per PR #142 review, second pass).* Mirroring the commitment in [RFC 0018](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-and-storage), the RFC closure checklist for RFC 0019 (Phase 4) **must** include opening (or linking to the RFC 0018-spawned) tracking issue for consolidating `internal/telemetry/` and `internal/observability/` (and their Python counterparts if the same split exists by then). This prevents the provisional split from becoming a permanent two-root convention by inertia.
+
 ---
 
 ## Test Strategy
@@ -280,6 +282,12 @@ No changes to: protos, schemas, JSON schemas, blueprints, workflows, Rust CLI.
 3. **Span attribute schema for tool arguments.** Today the schema deliberately omits arguments to avoid leaking secrets. Should we offer an opt-in `PERSATRIX_TRACE_TOOL_ARGS=1` for development debugging? Recommendation: defer; arguments are visible in the structured logs (RFC 0018) where the operator already has them.
 4. **Sampling strategy for agent-side traces.** Autonomous tick loops can produce high-volume traces. Recommendation: keep parity with the orchestrator's sampler for v0.2.3 (parent-based). If volume becomes a problem, a tail-based sampler can be introduced as a polish item.
 5. **Where to construct the gRPC client connection in Go for `otelgrpc` wiring.** Confirm during Phase 1 implementation; one of `internal/executor/dispatch.go` or its constructor site.
+
+   *Pinned (added per PR #142 review, second pass).* Verified against the live tree: there are **two** `grpc.NewClient` call sites in `internal/executor/`, both of which must be wired with `grpc.WithStatsHandler(otelgrpc.NewClientHandler())`:
+   - [internal/executor/dispatch.go](../../internal/executor/dispatch.go) line 321 (workflow-step task dispatch)
+   - [internal/executor/chat.go](../../internal/executor/chat.go) line 105 (chat-message dispatch added by RFC 0016)
+
+   Both sites already accept caller-provided `grpc.DialOption` slices via `WithDialOptions` / `WithChatDialOptions`, so the cleanest install is to inject the otelgrpc stats handler into those defaults from `cmd/orchestrator/main.go` (where the executor is constructed) rather than hard-coding it inside the dispatch sites. This keeps the executor package free of an OTEL import and matches the existing dependency-injection style.
 
 ---
 
