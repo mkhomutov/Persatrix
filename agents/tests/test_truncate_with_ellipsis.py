@@ -1,7 +1,7 @@
 """Unit tests for _truncate_with_ellipsis in memory_context.py (RFC 0017 §D).
 
-Covers the new ``mode="tokens"`` path added in PR 1, plus regression
-coverage for the existing ``mode="chars"`` (default) path.
+Split from test_persona_runtime_memory_context.py when that file exceeded
+the 500-line code size limit.
 """
 
 from __future__ import annotations

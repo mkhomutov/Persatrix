@@ -25,6 +25,9 @@ from ..persona_types import (
 )
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 
+if TYPE_CHECKING:
+    from .memory_context import MemoryInjectionResult
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["_ActionLoopMixin"]
@@ -76,7 +79,7 @@ class _ActionLoopMixin:
         def _format_event(self, event: AgentEvent) -> str: ...
         async def _inject_memory_context(
             self, event: AgentEvent, *, query: str | None = None,
-        ) -> None: ...
+        ) -> MemoryInjectionResult: ...
         def _build_system_prompt(self) -> str: ...
         async def _persist_persona_state(self) -> None: ...
 
@@ -337,6 +340,10 @@ class _ActionLoopMixin:
             memory_query = event.payload.get("content", "")
         else:
             memory_query = user_message
+        # Return value (MemoryInjectionResult) is intentionally discarded
+        # here; it is consumed by RFC 0017 PR 5's empty-context TICK
+        # short-circuit, which lands later in the chain.
+        # (PR #146 review.)
         await self._inject_memory_context(event, query=memory_query)
 
         # 1. Build system prompt and append working memory context.
