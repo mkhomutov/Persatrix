@@ -249,6 +249,11 @@ class _MemoryContextMixin:
             # get_relationship_summary() defaults to "agent" and silently
             # misses user-type relationships.
             # (PR #120 review F-1: other_participant_type not propagated.)
+            # TODO(v0.3): sanitize other_participant_id alongside rel.notes
+            # below when A2A allows external agents — the id flows directly
+            # into the LLM-visible label and could carry injection content
+            # if/when external agents may register arbitrary IDs.
+            # (PR #146 re-review: low-risk alignment with rel.notes TODO.)
             sender_type = (
                 event.metadata.get("sender_participant_type", "agent")
                 if event.metadata
@@ -348,7 +353,14 @@ class _MemoryContextMixin:
                 # here keeps the worst-case injection surface bounded
                 # independent of budget allocation order.
                 # (PR #146 review.)
-                capped_notes = rel.notes[:_REL_NOTES_INTERIM_CHARS]
+                # Use the shared word-boundary + ellipsis helper rather than
+                # a raw slice so the LLM-visible truncation marker matches
+                # episodic summaries and note content (consistent UX across
+                # all three tiers).
+                # (PR #146 re-review: truncation-style consistency.)
+                capped_notes = _truncate_with_ellipsis(
+                    rel.notes, _REL_NOTES_INTERIM_CHARS,
+                )
                 rel_lines.append(f"  Notes: {capped_notes}")
             rel_text = "\n".join(rel_lines)
             admitted_rel = budget.try_add(rel_text, min_tokens=_MIN_TOKENS_RELATIONSHIP)

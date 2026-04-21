@@ -134,7 +134,13 @@ class _FakeRelSummary:
     other_participant_id: str
     other_participant_type: str = "agent"
     interaction_count: int = 1
-    trust_score: float = 0.5
+    # Default away from _DEFAULT_TRUST_SCORE (0.5) so the trust-injection
+    # branch in _inject_memory_context (which only emits "Trust: ..." when
+    # the score deviates from the default by more than
+    # _TRUST_DEVIATION_THRESHOLD) is reachable from tests that do not
+    # explicitly set trust_score.
+    # (PR #146 re-review: trust branch unreachable with the prior 0.5 default.)
+    trust_score: float = 0.7
     notes: str = ""
 
 
@@ -219,17 +225,29 @@ class TestInjectMemoryContextTierOrdering:
 
     @pytest.mark.asyncio
     async def test_relationship_admitted_before_episodic_when_budget_tight(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When budget is tight, relationship (priority 8) wins over episodic (7)."""
-        # A relationship block + 5 large episodes; the relationship block
-        # should be admitted, episodes partially or not admitted.
+        # Episode summaries are clamped to ``_MAX_EPISODE_SUMMARY_CHARS`` (200)
+        # before reaching the budget, so 5 raw-large episodes alone fit
+        # comfortably inside the production 1500-token budget.  Tighten the
+        # budget for this test so the tier-ordering assertion exercises actual
+        # budget pressure rather than an effectively-unbounded episode size.
+        # (PR #146 follow-up: prior version asserted '5/5 episodes' against an
+        #  effectively-unbounded episode size; rewritten here after the
+        #  per-field char cap commit to drive contention via a tight budget.)
+        from agents.persona_runtime import memory_context as mc
+
+        # 100 tokens \u2248 enough for the relationship block (\u224817 tokens) plus
+        # at most 1\u20132 episode lines (\u224832 tokens each after token-truncation).
+        monkeypatch.setattr(mc, "_MEMORY_BUDGET_TOKENS", 100)
+
         rel = _FakeRelSummary(
             other_participant_id="alice",
             other_participant_type="user",
             interaction_count=3,
         )
-        big_summary = "episode detail word " * 150  # ~600 tokens each
+        big_summary = "episode detail word " * 150  # capped to 200 chars on inject
         episodes = [_FakeEpisode(summary=big_summary, id=f"ep-{i}") for i in range(5)]
 
         mixin, event = _make_mixin(
@@ -293,6 +311,60 @@ class TestInjectMemoryContextTierOrdering:
         assert "episodic_recall" not in section_names
         assert "recent_notes" not in section_names
 
+    @pytest.mark.asyncio
+    async def test_relationship_notes_capped_at_interim_char_limit(self) -> None:
+        """`rel.notes` longer than `_REL_NOTES_INTERIM_CHARS` is truncated before injection.
+
+        Pins the security-mitigation cap (PR #146) so a future refactor that
+        removes the per-field char limit on relationship notes — leaving only
+        the per-block token budget (~6000 chars) — fails this test rather
+        than silently expanding the prompt-injection surface for peer-authored
+        notes.  The existing
+        ``test_relationship_exhausting_budget_starves_other_tiers`` test had to
+        monkeypatch the cap away to assert budget-allocation behaviour, so the
+        cap itself had no direct coverage.
+        (PR #146 re-review: missing regression test for ``_REL_NOTES_INTERIM_CHARS``.)
+        """
+        from agents.persona_runtime import memory_context as mc
+
+        # Notes well above the cap but small enough that the relationship
+        # tier comfortably fits in the budget.
+        long_notes = "x" * (mc._REL_NOTES_INTERIM_CHARS * 3)
+        rel = _FakeRelSummary(
+            other_participant_id="carol",
+            interaction_count=2,
+            notes=long_notes,
+        )
+
+        mixin, event = _make_mixin(rel=rel, sender_id="carol")
+        await mixin._inject_memory_context(event)
+
+        rel_section = next(
+            (s for s in mixin._working_memory._sections
+             if s.name == "relationship_context"),
+            None,
+        )
+        assert rel_section is not None, "relationship section should be admitted"
+        # Extract the notes line: "  Notes: <capped>"
+        notes_line = next(
+            (line for line in rel_section.content.splitlines()
+             if line.startswith("  Notes: ")),
+            None,
+        )
+        assert notes_line is not None, "Notes line should be present"
+        notes_payload = notes_line[len("  Notes: "):]
+        # _truncate_with_ellipsis appends "..." (3 chars) after the cap;
+        # zero-space input means the full slice is used (no word-boundary
+        # backtrack), so the payload is exactly cap + 3.
+        assert len(notes_payload) <= mc._REL_NOTES_INTERIM_CHARS + 3, (
+            f"Notes payload {len(notes_payload)} chars exceeds cap "
+            f"{mc._REL_NOTES_INTERIM_CHARS} + ellipsis"
+        )
+        assert notes_payload.endswith("..."), (
+            "Truncated notes should end with '...' to match episodic/notes "
+            "truncation UX (PR #146 re-review consistency fix)."
+        )
+
 
 class TestInjectMemoryContextMidTierTruncation:
     """RFC 0017 PR 2: mid-tier truncation — oversized item admitted truncated."""
@@ -316,8 +388,13 @@ class TestInjectMemoryContextMidTierTruncation:
         recent_notes_section = next(
             s for s in mixin._working_memory._sections if s.name == "recent_notes"
         )
-        # Content was truncated (ends with ellipsis).
-        assert recent_notes_section.content.endswith("…")
+        # Content was truncated.  ``_truncate_with_ellipsis`` in char mode
+        # (now applied via ``_MAX_NOTE_CONTENT_CHARS`` before the budget loop)
+        # appends ``"..."`` (three ASCII dots), not the U+2026 unicode
+        # ellipsis used by the token-mode path.  After the per-field char cap
+        # commit, this short-circuits before the token-mode path is reached.
+        # (PR #146 follow-up: assertion updated from '…' to '...'.)
+        assert recent_notes_section.content.endswith("...")
 
     @pytest.mark.asyncio
     async def test_note_admitted_whole_when_it_fits(self) -> None:
@@ -332,7 +409,9 @@ class TestInjectMemoryContextMidTierTruncation:
             s for s in mixin._working_memory._sections if s.name == "recent_notes"
         )
         assert "short knowledge" in recent_notes_section.content
-        # No truncation ellipsis for a small item.
+        # No truncation marker for a small item (neither '...' from char mode
+        # nor '…' from token mode).
+        assert not recent_notes_section.content.endswith("...")
         assert not recent_notes_section.content.endswith("…")
 
 
