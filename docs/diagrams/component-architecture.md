@@ -9,7 +9,7 @@ graph TB
     subgraph Rust["Rust CLI — cli/"]
         direction TB
         MAIN["main.rs"]
-        CMD["commands/<br/>agent · workflow · logs · validate"]
+        CMD["commands/<br/>agent · workflow · logs · validate · chat"]
         TYPES["types.rs"]
         MAIN --> CMD
         CMD --> TYPES
@@ -17,10 +17,10 @@ graph TB
 
     subgraph Go["Go orchestrator — cmd/orchestrator + internal/"]
         direction TB
-        SERVER["server/<br/>REST API + SSE"]
+        SERVER["server/<br/>REST API + SSE<br/>+ POST /api/v1/agents/{id}/chat"]
         PLANNER["planner/<br/>YAML → DAG"]
         SCHEDULER["scheduler/<br/>stage runner + budget"]
-        EXECUTOR["executor/<br/>gRPC dispatch + retry"]
+        EXECUTOR["executor/<br/>gRPC ExecuteTask + SendChatMessage"]
         REGISTRY["registry/"]
         STATE["state/"]
         COST["cost/<br/>tokens · cache · reporter"]
@@ -38,6 +38,7 @@ graph TB
         SERVER --> PLANNER
         SERVER --> STATE
         SERVER --> COST
+        SERVER -->|chat dispatch| EXECUTOR
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
@@ -48,10 +49,11 @@ graph TB
 
     subgraph Py["Python agents — agents/ (persatrix_agents)"]
         direction TB
-        SRV["server.py<br/>+ server_persona.py"]
+        SRV["server.py<br/>+ server_persona.py<br/>+ server_servicers.py"]
         BASE["base.py"]
         TASK["task_agent.py"]
         PERSONA["persona.py"]
+        PART["participant.py<br/>UserParticipant · UserStore"]
         PRUNTIME["persona_runtime/<br/>memory_context · action_loop · state_persistence"]
         DISPATCH["dispatch.py · tick.py"]
         LLM["llm_client.py"]
@@ -74,6 +76,7 @@ graph TB
         end
 
         SRV --> BASE
+        SRV -. planned .-> PART
         BASE --> TASK
         BASE --> PERSONA
         PERSONA --> PRUNTIME
@@ -98,7 +101,21 @@ graph TB
 |-------|--------------------|
 | v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
+| v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
+
+The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
+path (`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`);
+the workflow path still flows `SERVER → PLANNER → SCHEDULER → EXECUTOR` and
+is unaffected by the chat surface.
+
+The `SRV -. planned .-> PART` edge is dashed because `agents/server.py` /
+`agents/server_servicers.py` ship `participant.py` in v0.2.1 but do not yet
+route chat traffic through `UserStore`. Only the pure validator
+`validate_participant_type` is imported today; relationship memory is keyed on
+`(agent_id, user_id)` and written directly. The dashed edge mirrors the
+`AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
+so the two diagrams agree about the v0.2.1 wiring gap.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation

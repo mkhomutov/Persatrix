@@ -5,17 +5,17 @@ fenced `mermaid` code block and renders natively on GitHub, in VS Code with
 Mermaid preview, or in any Mermaid-aware viewer.
 
 These diagrams describe the **current state of the whole system** (v0.1
-workflow surface + v0.2 persona, memory, and cost additions). They are not
-tied to a specific RFC — when a phase lands, update the diagrams in place
-rather than adding phase-prefixed copies.
+workflow surface + v0.2 persona, memory, and cost additions + v0.2.1
+human-agent chat surface). They are not tied to a specific RFC — when a phase
+lands, update the diagrams in place rather than adding phase-prefixed copies.
 
 ## Index
 
 | Diagram | Scope |
 |---------|-------|
-| [system-overview.md](system-overview.md) | Top-level runtime context: CLI ↔ Orchestrator ↔ Agents, external LLM providers, MCP servers, OTEL, SQLite |
-| [component-architecture.md](component-architecture.md) | Package-level layout across Rust, Go, and Python; shipped modules vs stubs reserved for later phases |
-| [workflow-execution.md](workflow-execution.md) | End-to-end workflow sequence: CLI → REST → planner → scheduler → executor → agent → LLM, with cost/budget accounting |
+| [system-overview.md](system-overview.md) | Top-level runtime context: CLI ↔ Orchestrator ↔ Agents, external LLM providers, MCP servers, OTEL, SQLite; includes human-user chat path (`persatrix chat` → `POST /api/v1/agents/{id}/chat` → `SendChatMessage` gRPC) |
+| [component-architecture.md](component-architecture.md) | Package-level layout across Rust, Go, and Python; shipped modules (including v0.2.1 chat surface: `agents/participant.py`, chat handler in `internal/server/`, `SendChatMessage` in `internal/executor/`, `persatrix chat` CLI command) vs stubs reserved for later phases |
+| [workflow-execution.md](workflow-execution.md) | Two sequences: (1) end-to-end workflow run (CLI → REST → planner → scheduler → executor → agent → LLM, with cost/budget accounting); (2) chat-message path (CLI → `POST /chat` → chat executor → `SendChatMessage` gRPC → PersonaAgent → memory → LLM → reply) |
 | [persona-runtime.md](persona-runtime.md) | Persona agent lifecycle: event-driven dispatch and autonomous tick loop, lock protocol, action-loop termination |
 | [memory-architecture.md](memory-architecture.md) | Four memory tiers (working, episodic, relationship, notes), SQLite persistence, context assembly order |
 
