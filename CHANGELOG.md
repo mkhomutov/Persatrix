@@ -165,6 +165,8 @@ All notable changes to this project will be documented in this file.
 - Ongoing manual test campaign and fixes (WIP) (#101)
 - Move repository to BUSL 1.1 (#63)
 
+[0.2.0]: https://github.com/mkhomutov/Persatrix/compare/v0.1.0...v0.2.0
+
 ## [0.1.0] - 2026-04-11
 
 ### 🚀 Features
@@ -238,5 +240,7 @@ All notable changes to this project will be documented in this file.
 ### 📦 Miscellaneous
 
 - Update FILEMAP.md
+
+[0.1.0]: https://github.com/mkhomutov/Persatrix/releases/tag/v0.1.0
 
 
