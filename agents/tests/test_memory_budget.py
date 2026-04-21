@@ -28,7 +28,9 @@ def _rough_tokens(text: str) -> int:
 
 class TestCountTokens:
     def test_empty_string_returns_at_least_one(self) -> None:
-        # _count_tokens falls back to max(1, len("")//4) = max(1, 0) = 1
+        # When tiktoken is available it returns 0 for an empty encode; the
+        # char-proportional fallback returns max(1, 0) = 1.  Both are valid
+        # results, so the assertion is >= 0 (not >= 1).
         assert _count_tokens("") >= 0  # empty is valid; tiktoken may return 0
 
     def test_short_ascii_positive(self) -> None:

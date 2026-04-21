@@ -155,6 +155,11 @@ class MemoryBudget:
             return text
 
         # Item exceeds remaining budget; try a truncated form.
+        # Note: enc.encode() is invoked 3× for oversized items — once in
+        # _count_tokens(text) above, once inside _truncate_to_token_limit
+        # (encode + decode), and once in _count_tokens(truncated) below.
+        # Acceptable for typical memory-snippet sizes; profile here first
+        # if allocation becomes a hotspot.
         truncated = _truncate_to_token_limit(text, self._remaining)
         truncated_count = _count_tokens(truncated)
         if truncated_count >= min_tokens:

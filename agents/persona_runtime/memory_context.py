@@ -13,6 +13,7 @@ from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
 from ..persona_types import AgentEvent, EventType
+from .memory_budget import _truncate_to_token_limit
 
 logger = logging.getLogger(__name__)
 
@@ -91,44 +92,17 @@ def _truncate_with_ellipsis(
 def _truncate_with_ellipsis_tokens(text: str, token_limit: int) -> str:
     """Token-mode implementation for :func:`_truncate_with_ellipsis`.
 
-    Truncates *text* to fit within *token_limit* tokens (including the
-    ellipsis ``\u2026``).  Uses tiktoken when available; falls back to
-    char-proportional slicing.  Never panics on missing tiktoken.
+    Delegates to :func:`~agents.persona_runtime.memory_budget._truncate_to_token_limit`,
+    which is the single authoritative implementation for token-boundary truncation.
+    Kept as a named helper so :func:`_truncate_with_ellipsis` remains readable.
+
+    PR 1 review finding: the original body was a near-identical copy of
+    ``_truncate_to_token_limit`` in ``memory_budget.py``.  Eliminated the
+    duplication by delegating here.  ``memory_context`` → ``memory_budget``
+    is the unidirectional dependency PR 2 will formalise when wiring
+    ``MemoryBudget`` into ``_inject_memory_context``.
     """
-    ellipsis = "\u2026"
-    if token_limit <= 0:
-        return ellipsis
-
-    try:
-        import tiktoken  # type: ignore[import-untyped]
-
-        enc = tiktoken.get_encoding("cl100k_base")
-        tokens = enc.encode(text)
-        if len(tokens) <= token_limit:
-            return text
-        ellipsis_tokens = len(enc.encode(ellipsis))
-        content_budget = token_limit - ellipsis_tokens
-        if content_budget <= 0:
-            return ellipsis
-        truncated = enc.decode(tokens[:content_budget])
-        return truncated + ellipsis
-    except ImportError:
-        pass
-    except Exception:
-        logger.warning(
-            "tiktoken truncation failed, falling back to char-proportional",
-            exc_info=True,
-        )
-
-    # Char-proportional fallback: approximate token_limit via chars/4.
-    # Reserve 1 token for the ellipsis.
-    total_approx = len(text) // 4
-    if total_approx <= token_limit:
-        return text
-    content_budget = token_limit - 1
-    if content_budget <= 0:
-        return ellipsis
-    return text[: content_budget * 4] + ellipsis
+    return _truncate_to_token_limit(text, token_limit)
 
 
 # ─── Mixin ─────────────────────────────────────────────────
