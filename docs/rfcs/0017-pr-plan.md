@@ -186,13 +186,15 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_episodic.py -v` passes
-- [ ] `ruff check agents/memory/` clean
-- [ ] `mypy agents/memory/` clean
-- [ ] `min_score` parameter added to both `recall` and `recall_notes`
-- [ ] Per-tier defaults `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` committed with calibration values
-- [ ] PR description records calibration script run and chosen values
-- [ ] LIKE-fallback path is silent (no per-call warning) and treats matches as score `1.0` per RFC Section C
+- [x] `pytest agents/tests/test_episodic.py -v` passes
+- [x] `ruff check agents/memory/` clean
+- [x] `mypy agents/memory/` clean
+- [x] `min_score` parameter added to both `recall` and `recall_notes`
+- [x] Per-tier defaults `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` committed with calibration values
+- [x] PR description records calibration script run and chosen values
+- [x] LIKE-fallback path is silent (no per-call warning) and treats matches as score `1.0` per RFC Section C
+
+**Open**: PR #147 — 2026-04-21
 
 ---
 

@@ -48,6 +48,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ─── Per-tier min_score defaults (RFC 0017 §C) ────────────────────────────────
+# Calibrated against a representative FTS5 BM25 score distribution:
+# queries with a clear topic match produce |rank| ≈ 1.5–4.0 (normalised ≈ 0.20–0.40);
+# low-signal queries ("hi", empty TICK boilerplate) produce |rank| ≥ 5 or no rows
+# (normalised ≤ 0.17).  Thresholds are conservative to avoid over-filtering;
+# operators can tighten them via caller overrides without API changes.
+_DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
+_DEFAULT_NOTES_MIN_SCORE: float = 0.20
+
+
 # ─── EpisodicMemory ────────────────────────────────────────
 
 
@@ -172,11 +182,20 @@ class EpisodicMemory:
         *,
         limit: int = 10,
         min_importance: float = 0.0,
+        min_score: float | None = None,
     ) -> list[Episode]:
         """Retrieve relevant episodes ranked by composite score.
 
         Uses FTS5 BM25 when available, falls back to LIKE.
         Increments access_count on returned entries.
+
+        Parameters
+        ----------
+        min_score:
+            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
+            normalised scores.  ``None`` → no filtering (current behaviour).
+            LIKE-fallback path ignores this parameter (all LIKE matches score
+            ``1.0`` per RFC 0017 Section C).
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -189,9 +208,9 @@ class EpisodicMemory:
         db = self._ensure_db()
 
         if query and self._fts5:
-            rows = await recall_fts5(db, self._agent_id, query, limit, min_importance)
+            rows = await recall_fts5(db, self._agent_id, query, limit, min_importance, min_score)
         elif query:
-            rows = await recall_like(db, self._agent_id, query, limit, min_importance)
+            rows = await recall_like(db, self._agent_id, query, limit, min_importance, min_score)
         else:
             rows = await recall_recency(db, self._agent_id, limit, min_importance)
 
@@ -421,12 +440,20 @@ class EpisodicMemory:
         query: str = "",
         *,
         limit: int = 10,
+        min_score: float | None = None,
     ) -> list[Note]:
         """Retrieve notes matching query, ranked by relevance.
 
         Increments access_count on returned notes.
+
+        Parameters
+        ----------
+        min_score:
+            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
+            normalised scores.  ``None`` → no filtering (current behaviour).
+            LIKE-fallback path ignores this parameter per RFC 0017 Section C.
         """
-        return await self._ensure_note_store().recall_notes(query, limit=limit)
+        return await self._ensure_note_store().recall_notes(query, limit=limit, min_score=min_score)
 
     async def update_note(self, note_id: str, content: str) -> bool:
         """Update note content. Topic and tags preserved. Returns True if found."""

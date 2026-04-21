@@ -144,19 +144,27 @@ class NoteStore:
         query: str = "",
         *,
         limit: int = 10,
+        min_score: float | None = None,
     ) -> list[Note]:
         """Retrieve notes matching query, ranked by relevance.
 
         Increments access_count on returned notes.
+
+        Parameters
+        ----------
+        min_score:
+            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
+            normalised scores.  ``None`` → no filtering.
+            LIKE-fallback path ignores this parameter per RFC 0017 Section C.
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
         limit = min(limit, _MAX_RECALL_LIMIT)
 
         if query and self._fts5:
-            rows = await self._recall_notes_fts5(query, limit)
+            rows = await self._recall_notes_fts5(query, limit, min_score)
         elif query:
-            rows = await self._recall_notes_like(query, limit)
+            rows = await self._recall_notes_like(query, limit, min_score)
         else:
             rows = await self._recall_notes_recency(limit)
 
@@ -238,11 +246,13 @@ class NoteStore:
         self,
         query: str,
         limit: int,
+        min_score: float | None = None,
     ) -> list[aiosqlite.Row]:
         """FTS5 search across topic, content, and tags."""
         safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
         if not safe_query:
-            return await self._recall_notes_like(query, limit)
+            return await self._recall_notes_like(query, limit, min_score)
+        effective_min_score = min_score if min_score is not None else 0.0
         try:
             async with self._db.execute(
                 f"""
@@ -251,10 +261,11 @@ class NoteStore:
                 JOIN notes n ON n.rowid = fts.rowid
                 WHERE notes_fts MATCH ?
                   AND n.agent_id = ?
+                  AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
                 ORDER BY fts.rank * -1 DESC
                 LIMIT ?
                 """,
-                (safe_query, self._agent_id, limit),
+                (safe_query, self._agent_id, effective_min_score, limit),
             ) as cursor:
                 return list(await cursor.fetchall())
         except sqlite3.OperationalError as exc:
@@ -264,14 +275,20 @@ class NoteStore:
                 safe_query,
                 exc,
             )
-            return await self._recall_notes_like(query, limit)
+            return await self._recall_notes_like(query, limit, min_score)
 
     async def _recall_notes_like(
         self,
         query: str,
         limit: int,
+        min_score: float | None = None,  # noqa: ARG002 — LIKE matches score 1.0
     ) -> list[aiosqlite.Row]:
-        """LIKE fallback when FTS5 is unavailable."""
+        """LIKE fallback when FTS5 is unavailable.
+
+        ``min_score`` is accepted for signature compatibility but is not
+        applied: LIKE matching is binary, so every match scores ``1.0``
+        per RFC 0017 Section C.
+        """
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         async with self._db.execute(

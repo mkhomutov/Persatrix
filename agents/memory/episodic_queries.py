@@ -38,6 +38,7 @@ __all__ = [
     "reset_interaction_count",
     "persist_agent_state",
     "load_agent_state",
+    "_normalize_bm25",
 ]
 
 
@@ -106,12 +107,27 @@ def row_to_episode(row: aiosqlite.Row) -> Episode:
 # ─── Recall query helpers ────────────────────────────────────
 
 
+def _normalize_bm25(raw: float | None) -> float:
+    """Normalise an FTS5 BM25 raw score into [0, 1].
+
+    FTS5 returns negative BM25 scores where more-negative means more relevant.
+    Mapping: ``1.0 / (1.0 + abs(raw))``.
+
+    Returns ``0.0`` for ``None`` or ``0.0`` input (no match signal).
+    The result is clamped to ``[0.0, 1.0]``.
+    """
+    if not raw:
+        return 0.0
+    return min(1.0, max(0.0, 1.0 / (1.0 + abs(raw))))
+
+
 async def recall_fts5(
     db: aiosqlite.Connection,
     agent_id: str,
     query: str,
     limit: int,
     min_importance: float,
+    min_score: float | None = None,
 ) -> list[aiosqlite.Row]:
     """FTS5 search with composite BM25 x importance x access x recency scoring.
 
@@ -125,6 +141,9 @@ async def recall_fts5(
         # rarely useful and surprising.  Fall through to a pure recency/
         # importance ranking so the caller still gets relevant episodes.
         return await recall_recency(db, agent_id, limit, min_importance)
+    # Normalised BM25 floor: 1.0/(1+|rank|) >= min_score  iff  |rank| <= (1/min_score - 1).
+    # Passing 0.0 when min_score is None/0.0 lets every match through.
+    effective_min_score = min_score if min_score is not None else 0.0
     try:
         async with db.execute(
             f"""
@@ -134,20 +153,21 @@ async def recall_fts5(
             WHERE episodes_fts MATCH ?
               AND e.agent_id = ?
               AND e.importance >= ?
+              AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
             ORDER BY
                 (fts.rank * -1)
                 * {_SCORE_EXPR}
                 DESC
             LIMIT ?
             """,
-            (safe_query, agent_id, min_importance, time.time(), limit),
+            (safe_query, agent_id, min_importance, effective_min_score, time.time(), limit),
         ) as cursor:
             return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
         logger.warning(
             "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
         )
-        return await recall_like(db, agent_id, query, limit, min_importance)
+        return await recall_like(db, agent_id, query, limit, min_importance, min_score)
 
 
 async def recall_like(
@@ -156,11 +176,16 @@ async def recall_like(
     query: str,
     limit: int,
     min_importance: float,
+    min_score: float | None = None,  # noqa: ARG001 — LIKE matches are binary (score=1.0)
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
     Escapes LIKE wildcard characters (``%``, ``_``) in the query so they
     are matched literally rather than treated as pattern metacharacters.
+
+    ``min_score`` is accepted for signature compatibility but is not applied:
+    LIKE matching is binary (match or not), so every match is treated as
+    score ``1.0`` per RFC 0017 Section C.
     """
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"

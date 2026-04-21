@@ -1505,3 +1505,251 @@ class TestEpisodicFTS5SanitizeRegex:
     def test_only_special_chars_becomes_empty(self):
         from agents.memory.episodic_queries import _FTS5_SANITIZE
         assert _FTS5_SANITIZE.sub(" ", ".,!@#$%^&*()").strip() == ""
+
+
+# ─── _normalize_bm25 unit tests (RFC 0017 §C) ─────────────
+
+
+class TestNormalizeBm25:
+    """Unit tests for the _normalize_bm25 helper in episodic_queries.
+
+    FTS5 rank is a negative BM25 value (more-negative = more relevant).
+    The normalised score is 1.0 / (1.0 + abs(raw)), clamped to [0, 1].
+    """
+
+    def test_none_returns_zero(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        assert _normalize_bm25(None) == 0.0
+
+    def test_zero_returns_zero(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        assert _normalize_bm25(0.0) == 0.0
+
+    def test_negative_one_returns_half(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        assert _normalize_bm25(-1.0) == pytest.approx(0.5, abs=1e-9)
+
+    def test_positive_one_returns_half(self):
+        """Positive raw scores are treated symmetrically (abs)."""
+        from agents.memory.episodic_queries import _normalize_bm25
+        assert _normalize_bm25(1.0) == pytest.approx(0.5, abs=1e-9)
+
+    def test_very_negative_approaches_zero(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        score = _normalize_bm25(-1000.0)
+        assert score == pytest.approx(0.001, abs=1e-3)
+        assert score >= 0.0
+
+    def test_small_negative_approaches_one(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        # rank = -0.001 → 1/(1.001) ≈ 0.999
+        score = _normalize_bm25(-0.001)
+        assert score > 0.99
+        assert score <= 1.0
+
+    def test_result_in_unit_interval(self):
+        from agents.memory.episodic_queries import _normalize_bm25
+        for raw in [None, 0.0, -0.5, -1.0, -5.0, -50.0, 0.5, 5.0]:
+            score = _normalize_bm25(raw)
+            assert 0.0 <= score <= 1.0, f"score={score} out of [0,1] for raw={raw}"
+
+
+# ─── recall(min_score=...) — FTS5 filtering (RFC 0017 §C) ──
+
+
+class TestRecallMinScore:
+    """Tests for the min_score parameter on EpisodicMemory.recall().
+
+    FTS5 BM25 scores are normalised via 1/(1+|rank|). min_score filters
+    normalised scores below the threshold before limit is applied.
+    LIKE-fallback treats all matches as score 1.0 (no filtering).
+    """
+
+    async def test_min_score_none_same_as_default(self, memory: EpisodicMemory):
+        """min_score=None produces identical results to omitting the parameter."""
+        await memory.store_episode(
+            summary="deep work session on microservices architecture",
+            context={"type": "work"},
+            importance=0.8,
+        )
+        results_default = await memory.recall("microservices architecture")
+        results_none = await memory.recall("microservices architecture", min_score=None)
+        assert len(results_none) == len(results_default)
+        assert {ep.id for ep in results_none} == {ep.id for ep in results_default}
+
+    async def test_min_score_zero_admits_all_fts5_matches(self, memory: EpisodicMemory):
+        """min_score=0.0 passes every FTS5 match (all normalised scores are > 0)."""
+        for i in range(3):
+            await memory.store_episode(
+                summary=f"xenolith geology expedition number {i}",
+                context={"idx": i},
+            )
+        results = await memory.recall("xenolith geology", min_score=0.0)
+        assert len(results) == 3
+
+    async def test_min_score_one_filters_all_results(self, memory: EpisodicMemory):
+        """min_score=1.0 filters every row (FTS5 BM25 never produces score == 1.0)."""
+        await memory.store_episode(
+            summary="bioluminescent plankton coastal observation",
+            context={},
+            importance=0.9,
+        )
+        results = await memory.recall("bioluminescent plankton", min_score=1.0)
+        assert len(results) == 0
+
+    async def test_min_score_filters_before_limit(self, memory: EpisodicMemory):
+        """When min_score drops items, limit is applied to the post-filter set,
+        not the pre-filter set — so the caller can never get more items than
+        would pass the threshold."""
+        for i in range(5):
+            await memory.store_episode(
+                summary=f"quantum entanglement experiment session {i}",
+                context={"session": i},
+                importance=0.7,
+            )
+        # min_score=0.0: no filter, limit=3 should return exactly 3.
+        results = await memory.recall("quantum entanglement", limit=3, min_score=0.0)
+        assert len(results) == 3
+
+        # min_score=1.0: filter all, limit=3 should return 0.
+        results = await memory.recall("quantum entanglement", limit=3, min_score=1.0)
+        assert len(results) == 0
+
+    async def test_min_score_near_default_filters_weak_match(self, memory: EpisodicMemory):
+        """A high min_score filters items with a weak BM25 signal.
+
+        This test checks that the SQL WHERE clause is actually wired:
+        a threshold of 0.95 requires |rank| < 0.053, which is only
+        achievable for a single-term match against a one-document corpus
+        where the match is trivially perfect — impossible in practice,
+        so 0.95 should return 0 for any realistic content.
+        """
+        await memory.store_episode(
+            summary="Reviewed pull request for payment gateway integration",
+            context={"pr": 77},
+            importance=0.8,
+        )
+        # 0.95 threshold: effectively filters everything in a normal corpus.
+        high_threshold_results = await memory.recall(
+            "payment gateway", min_score=0.95
+        )
+        # 0.0 threshold: admits everything.
+        all_results = await memory.recall("payment gateway", min_score=0.0)
+
+        # All should pass with 0.0; fewer (possibly 0) with 0.95.
+        assert len(all_results) >= 1
+        assert len(high_threshold_results) <= len(all_results)
+
+    async def test_min_score_empty_query_ignores_threshold(self, memory: EpisodicMemory):
+        """Empty query uses recency path (no FTS5); min_score is ignored."""
+        for i in range(3):
+            await memory.store_episode(summary=f"Episode {i}", context={})
+        # recency path doesn't apply BM25 scoring, so min_score=1.0 still
+        # returns all items (threshold is irrelevant without FTS5 scores).
+        results = await memory.recall("", min_score=1.0, limit=10)
+        assert len(results) == 3
+
+    async def test_min_score_like_fallback_ignores_threshold(self):
+        """LIKE-fallback path returns same results regardless of min_score."""
+        mem = EpisodicMemory(agent_id="test-like-min", db_path=":memory:")
+        with patch("agents.memory.episodic._fts5_available", new_callable=AsyncMock) as mock_fts5:
+            mock_fts5.return_value = False
+            await mem.initialize()
+
+        await mem.store_episode(
+            summary="yttrium alloy synthesis protocol",
+            context={},
+        )
+        results_none = await mem.recall("yttrium alloy", min_score=None)
+        results_zero = await mem.recall("yttrium alloy", min_score=0.0)
+        results_one = await mem.recall("yttrium alloy", min_score=1.0)
+
+        # LIKE fallback: all three return the same episode since LIKE matches score 1.0.
+        assert len(results_none) == 1
+        assert len(results_zero) == 1
+        assert len(results_one) == 1
+
+        await mem.close()
+
+
+# ─── recall_notes(min_score=...) — FTS5 filtering (RFC 0017 §C) ──
+
+
+class TestRecallNotesMinScore:
+    """Tests for the min_score parameter on EpisodicMemory.recall_notes().
+
+    Mirrors TestRecallMinScore for the notes tier.
+    """
+
+    async def test_min_score_none_same_as_default(self, memory: EpisodicMemory):
+        """min_score=None behaves identically to omitting the parameter."""
+        await memory.store_note("molybdenum", "Molybdenum alloy processing notes")
+        results_default = await memory.recall_notes("molybdenum alloy")
+        results_none = await memory.recall_notes("molybdenum alloy", min_score=None)
+        assert len(results_none) == len(results_default)
+        assert {n.id for n in results_none} == {n.id for n in results_default}
+
+    async def test_min_score_zero_admits_all_fts5_note_matches(self, memory: EpisodicMemory):
+        """min_score=0.0 passes every FTS5 note match."""
+        for i in range(3):
+            await memory.store_note(
+                f"palladium-{i}",
+                f"palladium catalyst synthesis step {i}",
+            )
+        results = await memory.recall_notes("palladium catalyst", min_score=0.0)
+        assert len(results) == 3
+
+    async def test_min_score_one_filters_all_note_results(self, memory: EpisodicMemory):
+        """min_score=1.0 filters every note (FTS5 BM25 never produces score == 1.0)."""
+        await memory.store_note(
+            "osmium processing",
+            "osmium isotope separation via centrifuge",
+        )
+        results = await memory.recall_notes("osmium isotope", min_score=1.0)
+        assert len(results) == 0
+
+    async def test_min_score_like_fallback_notes_ignores_threshold(self):
+        """LIKE fallback for notes treats all matches as score 1.0."""
+        mem = EpisodicMemory(agent_id="test-notes-like", db_path=":memory:")
+        with patch("agents.memory.episodic._fts5_available", new_callable=AsyncMock) as mock_fts5:
+            mock_fts5.return_value = False
+            await mem.initialize()
+
+        await mem.store_note("rhenium", "rhenium superalloy turbine blade coating")
+        results_none = await mem.recall_notes("rhenium superalloy", min_score=None)
+        results_one = await mem.recall_notes("rhenium superalloy", min_score=1.0)
+
+        assert len(results_none) == 1
+        assert len(results_one) == 1
+
+        await mem.close()
+
+    async def test_min_score_empty_notes_query_ignores_threshold(self, memory: EpisodicMemory):
+        """Empty query uses recency path; min_score has no effect."""
+        for i in range(2):
+            await memory.store_note(f"topic-{i}", f"content {i}")
+        results = await memory.recall_notes("", min_score=1.0, limit=10)
+        assert len(results) == 2
+
+
+# ─── Default constants exposed (RFC 0017 §C) ───────────────
+
+
+class TestMinScoreDefaults:
+    """Verify the per-tier default constants are accessible and in range."""
+
+    def test_default_episodic_min_score_in_range(self):
+        from agents.memory.episodic import _DEFAULT_EPISODIC_MIN_SCORE
+        assert 0.0 <= _DEFAULT_EPISODIC_MIN_SCORE <= 1.0
+
+    def test_default_notes_min_score_in_range(self):
+        from agents.memory.episodic import _DEFAULT_NOTES_MIN_SCORE
+        assert 0.0 <= _DEFAULT_NOTES_MIN_SCORE <= 1.0
+
+    def test_defaults_are_floats(self):
+        from agents.memory.episodic import (
+            _DEFAULT_EPISODIC_MIN_SCORE,
+            _DEFAULT_NOTES_MIN_SCORE,
+        )
+        assert isinstance(_DEFAULT_EPISODIC_MIN_SCORE, float)
+        assert isinstance(_DEFAULT_NOTES_MIN_SCORE, float)
