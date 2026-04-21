@@ -2,9 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.1] - 2026-04-21
 
-- No notable changes yet.
+> **Codename:** Talk to Your Agents
+
+### Highlights
+
+- Human-agent chat is now part of the core surface. Open a terminal and run
+  `persatrix chat <agent_id>` to start an interactive conversation with any persona agent.
+- A new `Participant` protocol and `UserParticipant` implementation give the system a
+  first-class model for human participants, with relationship-memory tracking per user-agent pair.
+- The `POST /api/v1/agents/{id}/chat` REST endpoint and the `SendChatMessage` gRPC RPC
+  are both live and tested (see MT-CHAT-001 through MT-CHAT-004 in the manual-test suite).
+- Binary renamed from `orch` to `persatrix` — the CLI is now a single, coherent tool.
+
+### Upgrade Notes
+
+- **New gRPC RPC:** `SendChatMessage` added to `AgentService` (proto/task.proto). Regenerate
+  gRPC stubs if you maintain a custom client.
+- **New REST endpoint:** `POST /api/v1/agents/{id}/chat` — accepts `{message, user_id, session_id}`
+  and returns `{reply, session_id, agent_display_name, reply_status}`.
+- **Binary rename:** the CLI binary is now `persatrix` (previously `orch`). Update any scripts
+  or CI steps that reference the old name.
+- **RelationshipMemory generalised:** `RelationshipMemory` now models arbitrary participant pairs
+  (agent↔agent or user↔agent). Existing agent-agent relationship data is unaffected.
+
+### 🚀 Features
+
+- *(agents)* Participant Protocol + UserParticipant + UserStore (RFC 0016 PR 1/7) (#119)
+- *(agents)* Generalize RelationshipMemory to participant pairs (RFC 0016 PR 2/7) (#120)
+- *(agents)* SendChatMessage gRPC servicer + EventDispatcher flag (RFC 0016 PR 3/7) (#121)
+- *(server)* Add REST chat endpoint and gRPC chat executor (RFC 0016 PR 4) (#123)
+- *(cli)* Add `persatrix chat` command and rename binary (RFC 0016 PR 5/7) (#125)
+
+### 🐛 Bug Fixes
+
+- *(agents,cli)* Address PR 1–5 review follow-ups (RFC 0016 PR 6/7) (#127)
+- *(persona-runtime)* Apply PR #131 deep-review follow-ups (#133)
+
+### 🔧 Refactoring
+
+- *(executor)* Split executor.go into executor.go + dispatch.go (#124)
+
+### 📚 Documentation
+
+- *(rfcs)* Correct author attribution across all RFCs (#115)
+- *(rfc)* RFC 0015 — Process Automation & Pattern Extraction (#114)
+- *(rfc)* RFC 0016 — Human Participant & Chat Interface (#116)
+- *(rfc)* Accept RFC 0016 and add PR implementation plan (#118)
+- *(rfc)* Close RFC 0016 — Human Participant & Chat Interface (PR 7/7) (#128)
+- *(diagrams)* Architecture diagram refresh for v0.2.1 chat surface (#132)
+- *(guide)* Add chat walkthrough to persona-agents guide (#135)
+- *(readme)* Refresh README for v0.2.1 chat surface (#136)
+- *(release)* Add v0.2.1 release checklist (#137)
+
+### 🧪 Testing
+
+- Author manual tests — chat & participant surface (MT-CHAT-001..004) (#130)
+- Execute manual test suite, record results (#131)
+
+[0.2.1]: https://github.com/mkhomutov/Persatrix/compare/v0.2.0...v0.2.1
 
 ## [0.2.0] - 2026-04-18
 
@@ -108,6 +165,8 @@ All notable changes to this project will be documented in this file.
 - Ongoing manual test campaign and fixes (WIP) (#101)
 - Move repository to BUSL 1.1 (#63)
 
+[0.2.0]: https://github.com/mkhomutov/Persatrix/compare/v0.1.0...v0.2.0
+
 ## [0.1.0] - 2026-04-11
 
 ### 🚀 Features
@@ -181,5 +240,7 @@ All notable changes to this project will be documented in this file.
 ### 📦 Miscellaneous
 
 - Update FILEMAP.md
+
+[0.1.0]: https://github.com/mkhomutov/Persatrix/releases/tag/v0.1.0
 
 

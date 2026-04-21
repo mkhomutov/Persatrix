@@ -580,14 +580,25 @@ v0.5.0 complete
 | [#104](https://github.com/mkhomutov/Persatrix/pull/104) | docs(diagrams): system, component, workflow, persona, memory architecture diagrams | v0.2 release prep (B-3) | 2026-04-18 |
 | [#105](https://github.com/mkhomutov/Persatrix/pull/105) | docs(changelog): generate v0.2.0 changelog + preserve unreleased section | v0.2 release prep (B-4) | 2026-04-18 |
 | [#106](https://github.com/mkhomutov/Persatrix/pull/106) | docs: v0.2.0 release checklist and pre-tag verification procedure | v0.2 release prep (D-1) | 2026-04-18 |
+| [#114](https://github.com/mkhomutov/Persatrix/pull/114) | docs(rfc): RFC 0015 — Process Automation & Pattern Extraction | 0015 (RFC) | 2026-04-19 |
 | [#115](https://github.com/mkhomutov/Persatrix/pull/115) | docs(rfcs): correct author attribution across all RFCs and add RFC 0015 | 0015 (RFC) + attribution | 2026-04-19 |
+| [#116](https://github.com/mkhomutov/Persatrix/pull/116) | docs(rfc): RFC 0016 — Human Participant & Chat Interface | 0016 (RFC) | 2026-04-19 |
+| [#118](https://github.com/mkhomutov/Persatrix/pull/118) | docs(rfc): accept RFC 0016 and add PR implementation plan | 0016 accept | 2026-04-19 |
 | [#119](https://github.com/mkhomutov/Persatrix/pull/119) | feat(agents): Participant Protocol + UserParticipant + UserStore | 0016 (1/7) | 2026-04-20 |
 | [#120](https://github.com/mkhomutov/Persatrix/pull/120) | feat(agents): generalize RelationshipMemory to participant pairs | 0016 (2/7) | 2026-04-20 |
 | [#121](https://github.com/mkhomutov/Persatrix/pull/121) | feat(agents): SendChatMessage gRPC servicer + EventDispatcher flag | 0016 (3/7) | 2026-04-20 |
 | [#123](https://github.com/mkhomutov/Persatrix/pull/123) | feat(server): add REST chat endpoint and gRPC chat executor | 0016 (4/7) | 2026-04-20 |
+| [#124](https://github.com/mkhomutov/Persatrix/pull/124) | refactor(executor): split executor.go into executor.go + dispatch.go | 0016 refactor | 2026-04-20 |
 | [#125](https://github.com/mkhomutov/Persatrix/pull/125) | feat(cli): add `persatrix chat` command and rename binary | 0016 (5/7) | 2026-04-20 |
 | [#127](https://github.com/mkhomutov/Persatrix/pull/127) | fix(agents,cli): address PR 1–5 review follow-ups | 0016 (6/7) | 2026-04-20 |
 | [#128](https://github.com/mkhomutov/Persatrix/pull/128) | docs(rfc): close RFC 0016 — Human Participant & Chat Interface (PR 7/7) | 0016 (7/7) | 2026-04-20 |
+| [#130](https://github.com/mkhomutov/Persatrix/pull/130) | docs(manual-tests): author chat surface tests (MT-CHAT-001..004) | v0.2.1 release prep | 2026-04-20 |
+| [#131](https://github.com/mkhomutov/Persatrix/pull/131) | docs(manual-tests): execute v0.2.1 manual test suite, record results | v0.2.1 release prep | 2026-04-21 |
+| [#132](https://github.com/mkhomutov/Persatrix/pull/132) | docs(diagrams): architecture diagram refresh for v0.2.1 chat surface | v0.2.1 release prep | 2026-04-21 |
+| [#133](https://github.com/mkhomutov/Persatrix/pull/133) | fix(persona-runtime): apply PR #131 deep-review follow-ups | 0016 follow-up | 2026-04-21 |
+| [#135](https://github.com/mkhomutov/Persatrix/pull/135) | docs(guide): add chat walkthrough to persona-agents guide | v0.2.1 release prep | 2026-04-21 |
+| [#136](https://github.com/mkhomutov/Persatrix/pull/136) | docs(readme): refresh README for v0.2.1 chat surface | v0.2.1 release prep | 2026-04-21 |
+| [#137](https://github.com/mkhomutov/Persatrix/pull/137) | docs(release): add v0.2.1 release checklist | v0.2.1 release prep | 2026-04-21 |
 
 ---
 
