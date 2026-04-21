@@ -3,7 +3,10 @@
 End-to-end sequence for a task-style workflow: from CLI submission, through
 DAG planning and stage-level scheduling, to per-step gRPC dispatch. This is
 the v0.1 surface; v0.2 layered cost accounting and budget enforcement onto
-the same path (highlighted below).
+the same path (highlighted below). v0.2.1 added the chat-message path shown
+in the second diagram.
+
+## Workflow execution sequence
 
 ```mermaid
 sequenceDiagram
@@ -52,6 +55,51 @@ sequenceDiagram
     end
 ```
 
+## Chat message sequence (v0.2.1)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Human as Human user
+    participant CLI as Rust CLI<br/>(persatrix chat)
+    participant Srv as REST Server<br/>(internal/server)
+    participant ChatExec as Chat executor<br/>(internal/executor)
+    participant Reg as Registry<br/>(internal/registry)
+    participant Agent as PersonaAgent<br/>(agents/persona*)
+    participant Part as Participant / UserStore<br/>(agents/participant.py)
+    participant Mem as Memory stores<br/>(agents/memory)
+    participant LLM as LLM Provider
+
+    Human->>CLI: persatrix chat <agent_id> [--user <user_id>]
+    CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, session_id? }
+    Srv->>Reg: look up agent endpoint
+    Reg-->>Srv: gRPC address
+    Srv->>ChatExec: dispatch SendChatMessage
+    ChatExec->>Agent: SendChatMessage(ChatRequest) [gRPC]
+
+    Agent->>Part: upsert UserParticipant(user_id)
+    Part-->>Agent: UserParticipant record
+    Agent->>Mem: load working context + episodic recall
+    Mem-->>Agent: context window
+    Agent->>LLM: complete(system+context+message)
+    LLM-->>Agent: reply text + usage
+    Agent->>Mem: store episodic episode (user msg + reply)
+    Agent->>Mem: update relationship memory (trust score, interaction count)
+    Agent-->>ChatExec: ChatResponse { reply, session_id, reply_status }
+    ChatExec-->>Srv: ChatResponse
+    Srv-->>CLI: 200 { reply, session_id, agent_display_name }
+    CLI-->>Human: print reply
+
+    loop User continues chatting
+        Human->>CLI: next message
+        Note over CLI,Srv: same session_id re-used
+        CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, session_id }
+    end
+
+    Human->>CLI: exit (or Ctrl-C)
+    CLI-->>Human: session ended
+```
+
 ## Step output templating
 
 Downstream steps reference upstream outputs with Jinja2-like syntax:
@@ -93,3 +141,11 @@ so the retry is invisible to scheduling, but the *outcome* is not.
 Cost tracking is orthogonal to the persona runtime — persona agents hit the
 same cost tracker when they call `LLMClient.complete()`. See
 [persona-runtime.md](persona-runtime.md) for the autonomous/event-driven flow.
+
+## What v0.2.1 added on this path
+
+- `POST /api/v1/agents/{id}/chat` REST endpoint in `internal/server/chat_handler.go`.
+- `SendChatMessage` gRPC RPC in `proto/task.proto` dispatched by `internal/executor/`.
+- `agents/participant.py` — `UserParticipant` and `UserStore` for per-user
+  identity persistence and relationship memory keyed on `(agent_id, user_id)`.
+- `persatrix chat <agent_id>` CLI command (interactive REPL).

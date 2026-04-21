@@ -2,13 +2,14 @@
 
 Top-level runtime context for Persatrix: which components exist, what they own,
 and what external systems they integrate with. This diagram describes the
-current state of the whole system — both the v0.1 workflow surface and the v0.2
-persona/memory/cost additions.
+current state of the whole system — the v0.1 workflow surface, the v0.2
+persona/memory/cost additions, and the v0.2.1 human-agent chat surface.
 
 ```mermaid
 graph LR
     subgraph External["External actors & services"]
-        User["Operator"]
+        Operator["Operator"]
+        HumanUser["Human user"]
         LLM["LLM providers<br/>Anthropic · OpenAI"]
         MCP["MCP servers<br/>stdio / HTTP"]
         OTEL["OTEL collector<br/>Jaeger / Tempo"]
@@ -23,6 +24,7 @@ graph LR
         PLAN["Planner<br/>internal/planner"]
         SCHED["Scheduler<br/>internal/scheduler"]
         EXEC["Executor<br/>internal/executor"]
+        CHATEXEC["Chat executor<br/>internal/executor"]
         REG["Registry<br/>internal/registry"]
         STATE["Run state<br/>internal/state"]
         COST["Cost & budgets<br/>internal/cost"]
@@ -33,28 +35,34 @@ graph LR
         AGSVC["gRPC servicer<br/>agents/server.py"]
         TASK["TaskAgent<br/>agents/task_agent.py"]
         PERS["PersonaAgent<br/>agents/persona*"]
+        PART["Participant / UserStore<br/>agents/participant.py"]
         TOOLS["Tool registry<br/>agents/tools"]
         MEM["Memory stores<br/>agents/memory"]
     end
 
     DB[(memory.db<br/>SQLite + FTS5)]
 
-    User -->|persatrix run| CLI
+    Operator -->|persatrix run| CLI
+    HumanUser -->|persatrix chat| CLI
     CLI -->|HTTP/JSON| REST
     REST --> PLAN
     REST --> STATE
     REST --> COST
+    REST -->|POST /api/v1/agents/{id}/chat| CHATEXEC
     PLAN --> SCHED
     SCHED --> EXEC
     SCHED --> COST
-    EXEC -->|gRPC| AGSVC
+    EXEC -->|gRPC ExecuteTask| AGSVC
+    CHATEXEC -->|gRPC SendChatMessage| AGSVC
     EXEC --> REG
 
     AGSVC --> TASK
     AGSVC --> PERS
+    AGSVC --> PART
     TASK --> TOOLS
     PERS --> TOOLS
     PERS --> MEM
+    PART --> DB
     MEM --> DB
 
     TASK -->|HTTPS| LLM
@@ -81,8 +89,10 @@ graph LR
 | Cost accounting, budget enforcement, response cache | Orchestrator (Go) |
 | LLM prompting, tool execution, persona behaviour | Agents (Python) |
 | Episodic / relationship / working memory | Agents (Python) |
+| Human participant identity, user store | Agents (Python) |
+| Chat message routing (REST → gRPC) | Orchestrator (Go) |
 | Agent discovery, secrets, gRPC transport | Orchestrator (Go) |
-| User-facing commands | CLI (Rust) |
+| User-facing commands (workflow run + chat REPL) | CLI (Rust) |
 
 See [component-architecture.md](component-architecture.md) for the module-level
 view of each component.
