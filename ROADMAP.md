@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-20 (RFC 0016 ✅ Implemented — all 7 PRs merged)  
-> **Current phase**: v0.2.1 (Human Participant & Chat Interface) — 🚧 In Progress  
-> **Current milestone**: v0.2.1 — RFC 0016 complete; next: release prep
+> **Last updated**: 2026-04-21 (v0.2.1 ✅ Released — tag `v0.2.1` pushed)  
+> **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — 📋 Planned  
+> **Current milestone**: RFC 0017 authoring
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -16,7 +16,7 @@ A version is ready when a developer can do something meaningful they could not d
 |---------|-------------------|--------|
 | **v0.1.0** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
-| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | 🚧 In Progress |
+| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | 📋 Planned |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
@@ -242,7 +242,7 @@ v0.2.0 complete
 
 ---
 
-## v0.2.1 — Talk to Your Agents
+## v0.2.1 — Talk to Your Agents ✅ Complete
 
 **What a user can do**: Open a terminal, type `persatrix chat <agent_id>`, and have a conversation with a persona agent. The agent remembers you and builds a relationship with you over time.
 
@@ -599,6 +599,9 @@ v0.5.0 complete
 | [#135](https://github.com/mkhomutov/Persatrix/pull/135) | docs(guide): add chat walkthrough to persona-agents guide | v0.2.1 release prep | 2026-04-21 |
 | [#136](https://github.com/mkhomutov/Persatrix/pull/136) | docs(readme): refresh README for v0.2.1 chat surface | v0.2.1 release prep | 2026-04-21 |
 | [#137](https://github.com/mkhomutov/Persatrix/pull/137) | docs(release): add v0.2.1 release checklist | v0.2.1 release prep | 2026-04-21 |
+| [#138](https://github.com/mkhomutov/Persatrix/pull/138) | chore(release): bump version to 0.2.1 and update changelog | v0.2.1 release prep | 2026-04-21 |
+| [#140](https://github.com/mkhomutov/Persatrix/pull/140) | chore(release): final pre-tag gate — v0.2.1 complete | v0.2.1 release prep | 2026-04-21 |
+| [#141](https://github.com/mkhomutov/Persatrix/pull/141) | docs(release): post-release follow-up for v0.2.1 | v0.2.1 release prep | 2026-04-21 |
 
 ---
 

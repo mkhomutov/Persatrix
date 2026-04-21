@@ -124,7 +124,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (63 packag
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (198 crates).
+Collected via `cargo license --json` inside `cli/` (205 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -137,11 +137,13 @@ Collected via `cargo license --json` inside `cli/` (198 crates).
 | `atomic-waker` | 1.1.2 | Apache-2.0 OR MIT | [link](https://github.com/smol-rs/atomic-waker) |
 | `base64` | 0.22.1 | Apache-2.0 OR MIT | [link](https://github.com/marshallpierce/rust-base64) |
 | `bitflags` | 2.11.0 | Apache-2.0 OR MIT | [link](https://github.com/bitflags/bitflags) |
+| `block2` | 0.6.2 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `bumpalo` | 3.20.2 | Apache-2.0 OR MIT | [link](https://github.com/fitzgen/bumpalo) |
 | `bytecount` | 0.6.9 | Apache-2.0 OR MIT | [link](https://github.com/llogiq/bytecount) |
 | `bytes` | 1.11.1 | MIT | [link](https://github.com/tokio-rs/bytes) |
 | `cc` | 1.2.59 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cc-rs) |
 | `cfg-if` | 1.0.4 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cfg-if) |
+| `cfg_aliases` | 0.2.1 | MIT | [link](https://github.com/katharostech/cfg_aliases) |
 | `clap` | 4.6.0 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
 | `clap_builder` | 4.6.0 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
 | `clap_derive` | 4.6.0 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
@@ -151,6 +153,8 @@ Collected via `cargo license --json` inside `cli/` (198 crates).
 | `core-foundation` | 0.9.4 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
 | `core-foundation` | 0.10.1 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
 | `core-foundation-sys` | 0.8.7 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
+| `ctrlc` | 3.5.2 | Apache-2.0 OR MIT | [link](https://github.com/Detegr/rust-ctrlc.git) |
+| `dispatch2` | 0.3.1 | Apache-2.0 OR MIT OR Zlib | [link](https://github.com/madsmtm/objc2) |
 | `displaydoc` | 0.2.5 | Apache-2.0 OR MIT | [link](https://github.com/yaahc/displaydoc) |
 | `encoding_rs` | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | [link](https://github.com/hsivonen/encoding_rs) |
 | `equivalent` | 1.0.2 | Apache-2.0 OR MIT | [link](https://github.com/indexmap-rs/equivalent) |
@@ -208,6 +212,9 @@ Collected via `cargo license --json` inside `cli/` (198 crates).
 | `mime` | 0.3.17 | Apache-2.0 OR MIT | [link](https://github.com/hyperium/mime) |
 | `mio` | 1.2.0 | MIT | [link](https://github.com/tokio-rs/mio) |
 | `native-tls` | 0.2.18 | Apache-2.0 OR MIT | [link](https://github.com/rust-native-tls/rust-native-tls) |
+| `nix` | 0.31.2 | MIT | [link](https://github.com/nix-rust/nix) |
+| `objc2` | 0.6.4 | MIT | [link](https://github.com/madsmtm/objc2) |
+| `objc2-encode` | 4.1.0 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `once_cell` | 1.21.4 | Apache-2.0 OR MIT | [link](https://github.com/matklad/once_cell) |
 | `once_cell_polyfill` | 1.70.2 | Apache-2.0 OR MIT | [link](https://github.com/polyfill-rs/once_cell_polyfill) |
 | `openssl` | 0.10.76 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
