@@ -55,6 +55,15 @@ _MIN_TOKENS_NOTES: int = 24
 # (PR #146 review finding: prompt-injection surface regression.)
 _REL_NOTES_INTERIM_CHARS: int = 400
 
+# Per-field char caps applied before the budget loop.  Prevents individual
+# items from dominating the prompt even when the token budget is generous.
+# Episode summaries beyond 200 chars rarely add recall value and can crowd
+# out other tiers.  Note content can be up to 10KB (_MAX_NOTE_CONTENT_BYTES);
+# capping at 500 chars keeps injected notes skimmable.
+# (PR #146 / F-60-R2-3: word-boundary truncation with ellipsis.)
+_MAX_EPISODE_SUMMARY_CHARS: int = 200
+_MAX_NOTE_CONTENT_CHARS: int = 500
+
 # Trust score defaults for relationship context filtering.
 # A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
 # useful signal to the LLM.  Only inject trust when it has deviated by more
@@ -364,8 +373,11 @@ class _MemoryContextMixin:
         if episodes:
             ep_items: list[str] = []
             for ep in episodes:
+                summary = _truncate_with_ellipsis(
+                    ep.summary, _MAX_EPISODE_SUMMARY_CHARS,
+                )
                 admitted = budget.try_add(
-                    f"- {ep.summary}", min_tokens=_MIN_TOKENS_EPISODIC,
+                    f"- {summary}", min_tokens=_MIN_TOKENS_EPISODIC,
                 )
                 if admitted is not None:
                     ep_items.append(admitted)
@@ -393,8 +405,11 @@ class _MemoryContextMixin:
         if notes:
             note_items: list[str] = []
             for note in notes:
+                content = _truncate_with_ellipsis(
+                    note.content, _MAX_NOTE_CONTENT_CHARS,
+                )
                 admitted = budget.try_add(
-                    f"- [{note.topic}] {note.content}",
+                    f"- [{note.topic}] {content}",
                     min_tokens=_MIN_TOKENS_NOTES,
                 )
                 if admitted is not None:
