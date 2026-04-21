@@ -15,6 +15,7 @@ from agents.llm_client import LLMClient, LLMResponse
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_types import (
     ActionType,
     AgentAction,
@@ -707,10 +708,21 @@ class TestTickScheduler:
         scheduler = TickScheduler(
             agent, interval=0.05, idle_after_ticks=3, executor=executor,
         )
-        scheduler.start()
-        # Wait for enough ticks to reach idle threshold
-        await asyncio.sleep(0.3)
-        await scheduler.stop()
+        # Patch _inject_memory_context to return non-zero tokens so the
+        # RFC 0017 §F empty-context TICK short-circuit does not fire.
+        # Without this, TICKs on an idle agent with no memory match all four
+        # short-circuit conditions and return DO_NOTHING, which increments
+        # idle_count unexpectedly. By injecting 200 tokens, the LLM is called
+        # and returns its normal COMPLETE_TASK action.
+        with patch.object(
+            agent,
+            "_inject_memory_context",
+            return_value=MemoryInjectionResult(memory_admitted_tokens=200),
+        ):
+            scheduler.start()
+            # Wait for enough ticks to reach idle threshold
+            await asyncio.sleep(0.3)
+            await scheduler.stop()
 
         # Default mock LLM returns text that falls through to COMPLETE_TASK
         # (not DO_NOTHING), so the idle counter should remain at zero —
