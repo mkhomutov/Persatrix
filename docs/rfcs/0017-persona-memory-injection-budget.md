@@ -1,7 +1,7 @@
 # RFC 0017 — Persona Memory Injection Token Budget
 
 **Type**: architecture
-**Status**: � Accepted
+**Status**: 👍 Accepted
 **Author**: Maksim Khomutov
 **Date**: 2026-04-21
 **Accepted**: 2026-04-21
@@ -210,7 +210,7 @@ if event.type == TICK
        return
 ```
 
-The "no active goal payload" and "no pending conversation turn" guards prevent suppressing legitimately context-bearing ticks (e.g., a tick that is meant to advance a long-running goal stored outside the three memory tiers). The exact predicate is implemented against the existing persona-runtime state — no new state is introduced.
+The "no active goal payload" and "no pending conversation turn" guards prevent suppressing legitimately context-bearing ticks (e.g., a tick that is meant to advance a long-running goal stored outside the three memory tiers). The exact attributes the predicate reads are pinned at PR-plan time once the persona-runtime TICK handler module is named; if the existing runtime state is not directly inspectable, Phase 2 may introduce a small read-only accessor pair (no new persisted state).
 
 **Effects.**
 
@@ -270,7 +270,7 @@ flowchart TD
 3. `_inject_memory_context` gates removed.
 4. **Empty-context TICK short-circuit** ([Section F](#f-empty-context-tick-short-circuit)): `_inject_memory_context` exposes `memory_admitted_tokens`; persona runtime's TICK path skips the LLM call when admitted tokens are zero AND no goal/turn payload is present, recording `DO_NOTHING` and a `DEBUG` log entry with reason `empty_context_tick`.
 5. Unit tests for `recall` / `recall_notes` low-score / high-score boundaries.
-6. Unit test for the TICK short-circuit: empty-context TICK produces no LLM call and increments `idle_count`; non-empty TICK and TICK with active goal still issue LLM calls.
+6. Unit test for the TICK short-circuit. Required cases: (a) empty-context TICK with no goal/turn → no LLM call, `idle_count` increments; (b) non-empty TICK → LLM call still issued; (c) empty-context TICK **with active goal payload** → LLM call still issued (positive guard); (d) empty-context TICK **with pending conversation turn** → LLM call still issued (positive guard); (e) **non-TICK** event with `memory_admitted_tokens == 0` (e.g., low-keyword `MESSAGE_RECEIVED`) → LLM call still issued (the short-circuit must not fire outside TICK).
 7. Integration test: synthetic event stream including TICK and "hi"-style messages, asserting `working_memory.total_tokens()` stays below ceiling AND that low-signal events inject ~zero memory tokens.
 
 **Dependencies.** Phase 1.
@@ -299,7 +299,7 @@ flowchart TD
 | Python agents | `agents/persona_runtime/__init__.py` (or TICK handler module) | Empty-context TICK short-circuit guard ([Section F](#f-empty-context-tick-short-circuit)) |
 | Tests | `agents/tests/test_persona_runtime_memory_context.py` (or equivalent) | Update for token-bound assertions; add allocator tests |
 | Tests | `agents/tests/test_episodic.py` (or equivalent) | Add `min_score` boundary tests |
-| Docs | [ROADMAP.md](../../ROADMAP.md) | Add v0.2.2 milestone row; add RFC 0017 to tracker; update RFC 0008 dependency note |
+| Docs | [ROADMAP.md](../../ROADMAP.md) | Status transitions across implementation: 👍 Accepted → 🚧 Implementing on first Phase 1 PR open → ✅ Implemented on final Phase 2 PR merge. (The v0.2.2 milestone row, the RFC 0017 tracker row, and the RFC 0008 dependency note are already in main.) |
 
 No changes to: protos, Go orchestrator, Rust CLI, configs, schemas, JSON schemas.
 
