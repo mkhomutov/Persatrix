@@ -280,7 +280,22 @@ class _MemoryContextMixin:
         # its stored knowledge even when the user's message shares no
         # keywords with note content (e.g. "hi", "remember me?").
         # Reduced limit (3) avoids injecting excessive low-relevance context.
-        if not notes:
+        #
+        # Two gates avoid unbounded prompt growth on every event:
+        #   1. ``MESSAGE_RECEIVED`` only — TICK / TASK_ASSIGNED queries are
+        #      boilerplate ("Autonomous tick: review your goals…") and the
+        #      recency notes injected against them are pure noise.
+        #   2. Skip when episodic recall already produced results — the
+        #      agent already has relevant memory signal; piling on three
+        #      arbitrary recent notes adds tokens without adding context.
+        # (PR #131 review F-1: unconditional recency-note fallback inflates
+        #  every prompt where FTS5 did not match.)
+        should_fall_back = (
+            not notes
+            and event.event_type == EventType.MESSAGE_RECEIVED
+            and not episodes
+        )
+        if should_fall_back:
             try:
                 notes = await self._episodic_memory.recall_notes("", limit=3)
             except Exception:

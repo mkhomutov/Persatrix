@@ -740,3 +740,24 @@ class TestSanitizeReplyEdgeCases:
         assert "<|user_message" not in resp.reply
         assert "Yes I do!" in resp.reply
         assert resp.reply_status == "ok"
+
+    def test_torn_opening_fragment_at_end_stripped(self):
+        """A torn opening fragment with no closing ``|>`` at end-of-string is stripped."""
+        raw = "Real reply text.\n<|user_mess"
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert reply == "Real reply text."
+        assert "<|" not in reply
+
+    def test_tag_with_inner_pipe_stripped(self):
+        """Tag whose attribute value contains a pipe (e.g. ``user_id="a|b"``) is stripped."""
+        raw = '<|user_message user_id="a|b"|>\nhi\n<|/user_message|>\nHello!'
+        actions = [
+            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+        ]
+        reply, _ = _extract_chat_reply(actions, "local")
+        assert "<|user_message" not in reply
+        assert "<|/user_message" not in reply
+        assert "Hello!" in reply

@@ -23,8 +23,8 @@ The runtime class is split across submodules for file-size hygiene:
 from __future__ import annotations
 
 __all__ = [
+    "MemoryNamespace",
     "_LLMPersonaAgent",
-    "_MemoryNamespace",
     "_coerce_event_timeout",
     "_truncate_with_ellipsis",
 ]
@@ -92,7 +92,7 @@ def _coerce_event_timeout(
 
 
 @dataclass(frozen=True, slots=True)
-class _MemoryNamespace:
+class MemoryNamespace:
     """Lightweight namespace exposing memory tiers for external callers.
 
     ``server_servicers.py`` accesses ``agent.memory.relationship`` to record
@@ -104,6 +104,11 @@ class _MemoryNamespace:
     episodic: EpisodicMemory
     relationship: RelationshipMemory
     working: WorkingMemory
+
+
+# Deprecated alias — kept for backward compatibility with external code
+# that imported the previously underscored name.  Prefer ``MemoryNamespace``.
+_MemoryNamespace = MemoryNamespace
 
 
 # ─── LLM-Powered Persona Agent ────────────────────────────
@@ -137,7 +142,7 @@ class _LLMPersonaAgent(
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
         self._memory_tools = memory_tools
-        self._memory_ns = _MemoryNamespace(
+        self._memory_ns = MemoryNamespace(
             episodic=episodic_memory,
             relationship=relationship_memory,
             working=working_memory,
@@ -146,7 +151,7 @@ class _LLMPersonaAgent(
         self._lock = asyncio.Lock()
 
     @property
-    def memory(self) -> _MemoryNamespace:
+    def memory(self) -> MemoryNamespace:
         """Public access to memory tiers for external callers."""
         return self._memory_ns
 
