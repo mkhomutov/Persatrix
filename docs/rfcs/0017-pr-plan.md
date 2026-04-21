@@ -139,13 +139,15 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] All three legacy char caps removed: `_MAX_EPISODE_SUMMARY_CHARS`, `_MAX_RELATIONSHIP_NOTES_CHARS`, `_MAX_NOTE_CONTENT_CHARS`
-- [ ] `_MEMORY_BUDGET_TOKENS` set to 1500
-- [ ] TICK skip and `should_fall_back` heuristic preserved (removed in PR 4)
-- [ ] `_inject_memory_context` returns `MemoryInjectionResult` with `memory_admitted_tokens: int` (return-shape pin from PR #144 review)
+- [x] `pytest agents/tests/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean (pre-existing grpc stubs errors only)
+- [x] All three legacy char caps removed: `_MAX_EPISODE_SUMMARY_CHARS`, `_MAX_RELATIONSHIP_NOTES_CHARS`, `_MAX_NOTE_CONTENT_CHARS`
+- [x] `_MEMORY_BUDGET_TOKENS` set to 1500
+- [x] TICK skip and `should_fall_back` heuristic preserved (removed in PR 4)
+- [x] `_inject_memory_context` returns `MemoryInjectionResult` with `memory_admitted_tokens: int` (return-shape pin from PR #144 review)
+
+**Open**: PR #146 — 2026-04-21
 
 ---
 
