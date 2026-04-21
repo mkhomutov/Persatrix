@@ -510,7 +510,70 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 ##### From PR 4 review
 
-*(populated after PR 4 review)*
+1. **Cross-module import of underscore-prefixed `min_score` defaults**
+   ([agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py),
+   [agents/memory/episodic.py](../../agents/memory/episodic.py)). PR 4 imports
+   `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` from `agents.memory.episodic`
+   across module boundaries. The leading underscore signals module-private; the persona runtime is
+   now the second consumer and RFC 0008's vector tier will be the third. Promote both names to
+   public API: rename to `DEFAULT_EPISODIC_MIN_SCORE` / `DEFAULT_NOTES_MIN_SCORE`, add to
+   `__all__` if the module declares one, and update the two import sites
+   ([memory_context.py](../../agents/persona_runtime/memory_context.py) and
+   [agents/tests/test_inject_memory_context_gates.py](../../agents/tests/test_inject_memory_context_gates.py)).
+   Pre-emptive fix for `ruff PLC2701` (`import-private-name`) if/when enabled. Companion to PR 3
+   review finding 2 (which annotated the constants as PR-4-pending) — once promoted, that comment
+   can be removed too.
+
+2. **`test_substantive_event_populates_memory_sections` accepts either tier and can mask an
+   episodic-only regression**
+   ([tests/integration/test_memory_budget_e2e.py](../../tests/integration/test_memory_budget_e2e.py)).
+   The assertion accepts the presence of *either* `episodic_recall` *or* `recent_notes` because
+   BM25 IDF for the seeded "telescope/aperture" terms can score the astronomy episode below the
+   0.20 threshold in the 5-episode corpus. The reasoning is documented and sound, but a regression
+   that breaks the episodic tier specifically (while leaving notes intact) would not fail this
+   test. Add a complementary test that *guarantees* the episodic tier is exercised — either seed
+   the corpus so the astronomy episode reliably scores above 0.20, or craft a query whose IDF
+   profile clears the threshold deterministically. Keep the existing tolerant test as a sanity
+   check for budget-ceiling behaviour.
+
+3. **Private `_fts5` attribute access in integration test gating**
+   ([tests/integration/test_memory_budget_e2e.py](../../tests/integration/test_memory_budget_e2e.py)).
+   `seeded_episodic._fts5` reads a private attribute of `EpisodicMemory` to decide whether to skip
+   the integration test on environments without FTS5. Same module-private smell as finding 1.
+   Expose a public `EpisodicMemory.has_fts5` (or `is_fts5_enabled`) read-only property and switch
+   the integration test to it. Single-line change in `agents/memory/episodic.py` plus one test-side
+   import.
+
+4. **Triplicate `_ConcreteMemoryMixin` test helper across three test files**
+   ([agents/tests/test_inject_memory_context.py](../../agents/tests/test_inject_memory_context.py),
+   [agents/tests/test_inject_memory_context_gates.py](../../agents/tests/test_inject_memory_context_gates.py),
+   [tests/integration/test_memory_budget_e2e.py](../../tests/integration/test_memory_budget_e2e.py)).
+   Three near-identical `_ConcreteMemoryMixin` definitions exist after PR 4. Extract a single
+   shared helper into `agents/tests/_helpers/memory_mixin.py` (or a `conftest.py` fixture) and
+   import it from all three sites. Pure de-duplication — no behavioural change.
+
+5. **Class-ordering nit: `_ConcreteMemoryMixin` defined after the `_make_mixin` factory that
+   references it**
+   ([agents/tests/test_inject_memory_context_gates.py](../../agents/tests/test_inject_memory_context_gates.py)).
+   Works due to runtime-only forward reference, but reads awkwardly. Move the class definition
+   above `_make_mixin`. Obsolete if finding 4 (shared helper) is taken first.
+
+6. **Import-order nit in integration test**
+   ([tests/integration/test_memory_budget_e2e.py](../../tests/integration/test_memory_budget_e2e.py)).
+   `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` are listed before `EpisodicMemory`
+   inside the `from agents.memory.episodic import (...)` block; ruff `I001` prefers alphabetical
+   ordering inside the parens. Trivial reorder. Obsolete if finding 1 is taken first (the renamed
+   public names will re-sort naturally).
+
+7. **(Nice-to-have) PR 5 should add a regression test that the cost-drain window is closed**
+   (follow-up scope for PR 5, surfaced during PR 4 review). PR 4 deletes the TICK skip and
+   `should_fall_back` heuristic. Until PR 5 lands, autonomous TICK events with empty contexts
+   issue full-cost LLM calls — a known cost-drain window the RFC explicitly accepts. PR 5's test
+   matrix already covers the short-circuit firing in mocked unit tests; add a higher-fidelity test
+   that drives a multi-tick autonomous loop end-to-end and asserts zero LLM calls during the
+   empty-context window. Catches the class of regression where the short-circuit is silently
+   bypassed (e.g., a future refactor of the TICK handler module). Documentation-only entry here;
+   the test itself is owned by PR 5.
 
 ##### From PR 5 review
 
