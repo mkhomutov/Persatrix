@@ -56,8 +56,10 @@ This is not a v0.2.x headline feature. It is operability hygiene that should lan
 2. Python agents emit structured logs via `structlog` with the schema in [Section B](#b-common-log-schema).
 3. Go orchestrator zap output conforms to the same schema (field renames where needed; the structured emit is already in place).
 4. `execution_id`, `step_id`, and `agent_id` are propagated from orchestrator into Python agents via gRPC metadata, bound to logger context on entry, and present on every log line emitted while handling that task.
-5. `GET /api/v1/executions/{id}/logs` returns a JSON array of log entries for that execution, drawn from a bounded in-memory ring buffer keyed by `execution_id`.
+5. `GET /api/v1/executions/{id}/logs` returns a JSON array of log entries for that execution, drawn from a bounded in-memory ring buffer keyed by `execution_id`. Orchestrator-side entries are always included; agent-side entries are included once the delivery mechanism resolved in [Open Question 1](#open-questions) is implemented (Phase 4). Until then the endpoint returns whatever is in the buffer and the response is well-formed.
 6. `persatrix logs <execution-id>` displays those entries with colourised level, timestamp, service, message; `--verbose` shows the full attribute map.
+
+   *Reviewer note (PR #142): Goal 5 was reworded from "returns a JSON array of log entries" to the conditional form above to remove an apparent contradiction with the Non-Goal that operators "pipe the JSON stream wherever they want" — the merged stream depends on the cross-process delivery decision in OQ1, so the goal cannot promise it unconditionally.*
 7. `PERSATRIX_LOG_FORMAT=pretty` toggles a human-friendly renderer for local development; default remains JSON.
 8. Rust CLI logging is in scope only for the `logs` command's display formatting. CLI-internal logging migration to `tracing` is deferred.
 
@@ -143,6 +145,8 @@ Three IDs need to travel from orchestrator to agent and back into the agent's lo
 
 **Note on overlap with RFC 0019.** RFC 0019's gRPC interceptors propagate W3C TraceContext for OTEL. The two interceptor concerns are independent (header keys differ, lifecycle differs) but should be installed in the same place and reviewed together. This RFC ships the logging-context interceptor; RFC 0019 ships the OTEL one.
 
+*Note on key conventions (added per PR #142 review).* Outbound gRPC metadata uses kebab-case keys (`persatrix-execution-id`) because gRPC HTTP/2 metadata keys are required to be lowercase and the kebab form matches existing HTTP-style header conventions used elsewhere in the codebase. OTEL span attribute keys in RFC 0019 use dotted notation (`persatrix.execution_id`) because that is the OTEL semantic-conventions style. The two namespaces are independent; the divergence is intentional, not an oversight.
+
 ### E. `persatrix logs` Endpoint and Storage
 
 **Storage.** A new `internal/observability/logbuffer` package implements a bounded ring buffer keyed by `execution_id`:
@@ -150,7 +154,10 @@ Three IDs need to travel from orchestrator to agent and back into the agent's lo
 - Each execution gets its own ring (capacity TBD per [Open Question 2](#open-questions); proposal: 1000 entries).
 - Total memory bound: `max_executions × per_execution_capacity` entries; LRU-evict whole executions when the total cap is reached.
 - Buffer accepts entries via a write hook called from a custom zap core (Go) and via a `structlog` processor that pushes to the orchestrator over a small internal HTTP endpoint or a side-channel (see Open Question 1).
+- Writes to a ring are non-blocking. Under sustained saturation, the oldest entry in that execution's ring is evicted to make room (the per-execution overwrite policy described above). Cross-process delivery from agents to the orchestrator is best-effort with bounded retry — drops on the agent shipper side are counted in a metric and surfaced as a `WARN` log on the agent, but do not block agent work.
 - Ring contents are lost on orchestrator restart. This is documented as a known limitation in the operations guide.
+
+*Namespace rationale (added per PR #142 review).* The new package lives under `internal/observability/` rather than extending `internal/telemetry/` because `telemetry` is currently scoped to OTEL traces (and, in RFC 0019, metrics); logs follow a different lifecycle (per-execution ring + HTTP endpoint surface) and a different set of operator workflows (`persatrix logs` vs Jaeger). Keeping the two roots separate avoids overloading the `telemetry` package with an unrelated subsystem. A future RFC may consolidate `telemetry` and `observability` under one root once the boundaries stabilise; that consolidation is intentionally out of scope here.
 
 **Endpoint.** `handleGetLogs` is rewritten to:
 
@@ -171,6 +178,7 @@ Three IDs need to travel from orchestrator to agent and back into the agent's lo
 
 - **Log content can leak secrets.** Existing call sites occasionally log argument summaries that may include LLM prompts, tool inputs, or user chat content. This RFC does not introduce redaction (explicit non-goal) but does introduce a CLI surface that exposes those logs over HTTP. The endpoint is currently unauthenticated, consistent with the rest of the v0.2.x REST API. Documented as a known limitation; resolved when RFC 0009's auth layer lands.
 - **Ring buffer DoS.** A workflow that emits very high log volume could fill its ring before useful entries are read. The bound is per-execution, so other executions are unaffected. The total cap prevents one runaway run from exhausting orchestrator memory.
+- **Agent → orchestrator log channel (conditional on [Open Question 1](#open-questions)).** If OQ1 resolves to option (a) — agents `POST` log entries to a new `/internal/logs` endpoint on the orchestrator — that endpoint must either bind to a loopback-only listener or require a shared secret. Otherwise any process on the host could inject log entries attributed to any `execution_id`. If OQ1 resolves to option (b) (gRPC streaming), authn piggybacks on whatever the agent gRPC channel uses today and no new surface is added. The PR plan for Phase 4 must include an explicit security review of the chosen channel.
 - **No new external dependencies for Go.** Python adds `structlog` (well-maintained, MIT licensed, no transitive C deps).
 - **`pretty` output is opt-in.** Pretty-printed logs may include ANSI escapes; JSON default is safe to pipe into machine consumers.
 

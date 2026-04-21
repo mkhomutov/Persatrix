@@ -147,6 +147,8 @@ New spans, organised by component:
 
 The `# TODO: OTEL span creation` at [`agents/tools/registry.py:138`](../../agents/tools/registry.py) is replaced by the `agent.tool.execute` span in this RFC's scope.
 
+*Semantics of `tool.success` (clarified per PR #142 review).* `tool.success=true` if and only if the wrapper returned a `ToolResult` with `success=True`. Both `ToolResult(success=False)` (controlled tool failure) and an unhandled exception escaping the tool body produce `tool.success=false`; in the exception case, the span additionally carries `record_exception(exc)` and `set_status(Status(StatusCode.ERROR))`. This collapses the two failure modes into one boolean for dashboards while preserving the distinction in the recorded exception event.
+
 Spans use the `tracer = trace.get_tracer(__name__)` pattern; instrumentation uses `with tracer.start_as_current_span(name, attributes={...}) as span:`. Errors are recorded via `span.record_exception(exc)` and `span.set_status(Status(StatusCode.ERROR))`.
 
 ### E. Span Naming and Attribute Conventions
@@ -252,9 +254,12 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Tests | `tests/integration/test_trace_e2e.py` (new) | E2E span-tree shape test against local Jaeger |
 | Docs | `docs/observability.md` | Append span-conventions and Jaeger-usage sections (file created by RFC 0018) |
 | Docs | [README.md](../../README.md) | Update OTEL paragraph |
+| Docs | [CHANGELOG.md](../../CHANGELOG.md) | Add an entry under v0.2.3 noting the Python OTLP exporter package swap (`opentelemetry-exporter-otlp-proto-grpc` → `opentelemetry-exporter-otlp-proto-http`); operator-visible because anyone running a custom OTEL collector on the gRPC port (`:4317`) will need to switch to the HTTP port (`:4318`). |
 | Docs | [ROADMAP.md](../../ROADMAP.md) | Add RFC 0019 to tracker; update v0.2.3 entry |
 
 No changes to: protos, schemas, JSON schemas, blueprints, workflows, Rust CLI.
+
+*Namespace rationale (added per PR #142 review).* The new Python module lives under `agents/observability/` (paired with `internal/observability/` from RFC 0018) rather than under a hypothetical `agents/telemetry/`. Persatrix-Python today has no `telemetry` package, so the choice is between introducing one and introducing `observability/`. `observability/` is preferred because (a) it pairs symmetrically with the Go `internal/observability/` namespace introduced by RFC 0018, (b) it is the umbrella term most operators recognise, and (c) it leaves room for the log↔trace correlation follow-up to live alongside both subsystems without further reorganisation. The Go-side `internal/telemetry/` package keeps its current scope and is not renamed by this RFC.
 
 ---
 
