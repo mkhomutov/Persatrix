@@ -3150,12 +3150,92 @@ class TestNoteRecencyFallback:
         )
         await agent.close_memory()
 
+    async def test_recency_fallback_skipped_for_non_message_events(self):
+        """Recency fallback only fires for MESSAGE_RECEIVED events.
+
+        TICK and TASK_ASSIGNED events use boilerplate queries and the
+        recency-note injection there is pure noise that grows the prompt
+        on every autonomous tick. (PR #131 review F-1.)
+        """
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        await agent._episodic_memory.store_note(
+            topic="unrelated-topic",
+            content="Some stored knowledge with no keyword overlap",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.TICK,
+            payload={},
+        )
+        with patch.object(
+            agent, "_format_event",
+            return_value="Autonomous tick: review your goals",
+        ):
+            await agent._inject_memory_context(event)
+
+        section = agent._working_memory.get_section("recent_notes")
+        assert section is None, (
+            "TICK events should not trigger the recency-note fallback"
+        )
+        await agent.close_memory()
+
+    async def test_recency_fallback_skipped_when_episodes_retrieved(self):
+        """Recency fallback skipped when episodic recall already returned results.
+
+        When the episodic tier produced relevant context, piling on three
+        arbitrary recent notes adds tokens without adding signal.
+        (PR #131 review F-1: unconditional fallback inflates every prompt.)
+        """
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        # Store an episode whose summary will FTS5-match the query.
+        await agent._episodic_memory.store_episode(
+            summary="discussion about pottery glaze chemistry",
+            context={},
+            importance=0.8,
+        )
+        # Store a note with NO keyword overlap with the query — would only
+        # surface via recency fallback.
+        await agent._episodic_memory.store_note(
+            topic="unrelated",
+            content="Completely unrelated stored knowledge",
+        )
+
+        event = AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "pottery glaze"},
+        )
+        with patch.object(
+            agent, "_format_event",
+            return_value="pottery glaze",
+        ):
+            await agent._inject_memory_context(event)
+
+        # Episodic recall should have populated its section.
+        ep_section = agent._working_memory.get_section("episodic_recall")
+        assert ep_section is not None
+        assert "pottery glaze" in ep_section.content
+
+        # Recency fallback should NOT have fired because episodes were found.
+        notes_section = agent._working_memory.get_section("recent_notes")
+        assert notes_section is None, (
+            "Recency fallback should skip when episodes already provided signal"
+        )
+        await agent.close_memory()
+
 
 # ─── Memory Namespace Property ───────────────────────────────
 
 
 class TestMemoryNamespace:
-    """Verify _LLMPersonaAgent.memory exposes a _MemoryNamespace
+    """Verify _LLMPersonaAgent.memory exposes a MemoryNamespace
     so server_servicers.py can access agent.memory.relationship
     for recording chat interactions.
     """

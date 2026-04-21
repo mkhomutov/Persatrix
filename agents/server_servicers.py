@@ -354,11 +354,33 @@ def _extract_chat_reply(
         If the LLM echoes these back in its response, strip them so the
         raw markup never reaches the end user.
         """
-        return re.sub(
+        # Primary precise sweep: known ``user_message`` delimiter shapes.
+        cleaned = re.sub(
             r"<\|/?user_message[^|]*\|>",
             "",
             text,
-        ).strip()
+        )
+        # Defense-in-depth: strip any other ``<|…|>`` token-like fragments
+        # that might slip through if the runtime adds new delimiter names
+        # (e.g. ``<|system|>``, ``<|assistant|>``) or if the LLM hallucinates
+        # one.  Allows inner pipes (e.g. ``user_id="a|b"``) by using a
+        # non-greedy body bounded to 128 chars to avoid catastrophically
+        # eating real reply content that happens to contain ``|>``.
+        cleaned = re.sub(
+            r"<\|/?[a-zA-Z_].{0,128}?\|>",
+            "",
+            cleaned,
+        )
+        # Fallback: strip a torn opening fragment at the very end of the
+        # string (no closing ``|>``), which can happen if the LLM cuts off
+        # mid-tag.  Anchored to end-of-string so we don't touch legitimate
+        # ``<|`` substrings elsewhere in the reply.
+        cleaned = re.sub(
+            r"<\|/?[a-zA-Z_][^|>\s]{0,64}\Z",
+            "",
+            cleaned,
+        )
+        return cleaned.strip()
 
     send_messages = [
         a for a in actions if a.action_type == ActionType.SEND_MESSAGE

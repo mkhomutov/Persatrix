@@ -120,7 +120,11 @@ async def recall_fts5(
     """
     safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
     if not safe_query:
-        return await recall_like(db, agent_id, query, limit, min_importance)
+        # Pure-punctuation query (e.g. ".,<>|!@#") sanitizes to empty.
+        # LIKE on the raw query would match literally on punctuation —
+        # rarely useful and surprising.  Fall through to a pure recency/
+        # importance ranking so the caller still gets relevant episodes.
+        return await recall_recency(db, agent_id, limit, min_importance)
     try:
         async with db.execute(
             f"""

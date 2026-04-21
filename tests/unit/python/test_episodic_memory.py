@@ -1456,13 +1456,28 @@ class TestEpisodicFTS5Sanitization:
         assert len(results) >= 1
         assert "database" in results[0].summary.lower()
 
-    async def test_only_punctuation_falls_back_to_like(self, memory: EpisodicMemory):
-        """A query of only punctuation (sanitizes to empty) falls back gracefully."""
+    async def test_only_punctuation_falls_back_to_recency(self, memory: EpisodicMemory):
+        """A query of only punctuation (sanitizes to empty) falls back to recency.
+
+        When the FTS5 sanitizer strips a query down to nothing, ``recall_fts5``
+        short-circuits to ``recall_recency`` rather than ``recall_like`` —
+        matching raw punctuation literally with LIKE rarely returns anything
+        useful, while a recency/importance ranking still surfaces relevant
+        episodes for the caller.
+        """
         await memory.store_episode(
-            summary="Some episode content", context={}, importance=0.5,
+            summary="First episode", context={}, importance=0.5,
+        )
+        await memory.store_episode(
+            summary="Second episode", context={}, importance=0.5,
         )
         results = await memory.recall(".,<>|!@#$%")
         assert isinstance(results, list)
+        # Recency fallback should return both stored episodes regardless of
+        # whether their summaries contain the punctuation chars.
+        assert len(results) == 2
+        summaries = {ep.summary for ep in results}
+        assert summaries == {"First episode", "Second episode"}
 
 
 class TestEpisodicFTS5SanitizeRegex:
