@@ -38,6 +38,9 @@ __all__ = [
     "reset_interaction_count",
     "persist_agent_state",
     "load_agent_state",
+    # `_normalize_bm25` is exported for testability (RFC 0017 §C); the
+    # underscore prefix marks it as not part of the stable public API.
+    # PR #147 review: documented to resolve `_`-prefix vs `__all__` tension.
     "_normalize_bm25",
 ]
 
@@ -115,6 +118,16 @@ def _normalize_bm25(raw: float | None) -> float:
 
     Returns ``0.0`` for ``None`` or ``0.0`` input (no match signal).
     The result is clamped to ``[0.0, 1.0]``.
+
+    Notes
+    -----
+    For ``raw == 0.0`` this helper returns ``0.0`` (treated as no-match),
+    while the equivalent SQL expression in :func:`recall_fts5`
+    (``1.0 / (1.0 + ABS(rank))``) would compute ``1.0`` for the same input.
+    In practice FTS5 never returns ``rank = 0.0`` for a MATCH row, so the
+    divergence has no operational impact — but callers using this helper
+    to predict SQL threshold outcomes should be aware of the edge case.
+    (PR #147 review.)
     """
     if not raw:
         return 0.0

@@ -164,7 +164,7 @@ PR 7 (RFC close)
 | `agents/memory/episodic.py` | Add `min_score: float \| None = None` parameter to both `recall()` and `recall_notes()`. When `None` → behaviour identical to today. When set → FTS5 results below the threshold are filtered. BM25 raw scores are normalised to `[0, 1]` via the documented mapping in [Section C](0017-persona-memory-injection-budget.md#c-relevance-threshold-in-the-recall-layer). LIKE-fallback path treats every match as score `1.0` and applies `limit` normally — silently, per RFC Section C (an earlier draft of this plan added a one-time `WARNING` log on the LIKE path; that addition is dropped to stay within the accepted RFC's documented contract — operators can detect FTS5 unavailability from existing initialisation logs). |
 | `agents/memory/episodic.py` | Add module-level constants `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` ([OQ3 resolution: per-tier](0017-persona-memory-injection-budget.md#open-questions)). Values committed from the calibration script output. |
 | *(throwaway)* `scripts/calibrate_min_score.py` | **Run locally, not committed.** Loads a populated FTS5 DB, computes BM25 score histograms across representative queries, prints recommended thresholds for episodes and notes. The PR description records the run output and the chosen values. |
-| `agents/tests/test_episodic.py` | Add `min_score` boundary tests: `min_score=None` (default, no filter), `min_score=0.0` (no filter), `min_score=1.0` (almost everything filtered), `min_score` near the calibrated default (mixed results). Assert FTS5 normalisation produces values in `[0, 1]`. Assert LIKE-fallback ignores `min_score` and logs the warning once per process. |
+| `tests/unit/python/test_episodic_memory.py` | Add `min_score` boundary tests: `min_score=None` (default, no filter), `min_score=0.0` (no filter), `min_score=1.0` (almost everything filtered), `min_score` near the calibrated default (mixed results). Assert FTS5 normalisation produces values in `[0, 1]`. Assert LIKE-fallback ignores `min_score` and logs the warning once per process. |
 
 #### Key implementation details
 
@@ -186,7 +186,7 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [x] `pytest agents/tests/test_episodic.py -v` passes
+- [x] `pytest tests/unit/python/test_episodic_memory.py -q` passes
 - [x] `ruff check agents/memory/` clean
 - [x] `mypy agents/memory/` clean
 - [x] `min_score` parameter added to both `recall` and `recall_notes`

@@ -160,6 +160,14 @@ class NoteStore:
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
         limit = min(limit, _MAX_RECALL_LIMIT)
+        # Validate min_score range — RFC 0017 §C specifies [0.0, 1.0].
+        # Mirrors the EpisodicMemory.recall() guard so misconfiguration
+        # surfaces at the public boundary rather than silently no-op'ing
+        # (negative) or filtering everything (>1.0). (PR #147 review.)
+        if min_score is not None and not 0.0 <= min_score <= 1.0:
+            raise ValueError(
+                f"min_score must be in [0.0, 1.0] or None, got {min_score}"
+            )
 
         if query and self._fts5:
             rows = await self._recall_notes_fts5(query, limit, min_score)

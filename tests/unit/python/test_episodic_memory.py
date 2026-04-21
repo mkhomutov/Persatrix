@@ -1621,14 +1621,26 @@ class TestRecallMinScore:
         This test checks that the SQL WHERE clause is actually wired:
         a threshold of 0.95 requires |rank| < 0.053, which is only
         achievable for a single-term match against a one-document corpus
-        where the match is trivially perfect — impossible in practice,
-        so 0.95 should return 0 for any realistic content.
+        where the match is trivially perfect — impossible in a realistic
+        multi-document corpus, so 0.95 should return 0.
         """
+        # Realistic corpus: the target plus distractors that share at least
+        # one query term, so BM25 IDF is non-trivial and no document scores
+        # close to the |rank| < 0.053 ceiling required by min_score=0.95.
+        # (PR #147 review: a single-document corpus produces trivially
+        # perfect BM25 scores and would defeat this assertion.)
         await memory.store_episode(
             summary="Reviewed pull request for payment gateway integration",
             context={"pr": 77},
             importance=0.8,
         )
+        for i in range(10):
+            await memory.store_episode(
+                summary=f"Other unrelated payment processing notes session {i}",
+                context={"i": i},
+                importance=0.5,
+            )
+
         # 0.95 threshold: effectively filters everything in a normal corpus.
         high_threshold_results = await memory.recall(
             "payment gateway", min_score=0.95
@@ -1636,9 +1648,12 @@ class TestRecallMinScore:
         # 0.0 threshold: admits everything.
         all_results = await memory.recall("payment gateway", min_score=0.0)
 
-        # All should pass with 0.0; fewer (possibly 0) with 0.95.
+        # All matches pass with 0.0; the 0.95 threshold filters to zero.
+        # Previous assertion `<= len(all_results)` was a tautology
+        # (filtering can never *add* results) and would not catch a
+        # regression where the SQL WHERE clause silently failed to apply.
         assert len(all_results) >= 1
-        assert len(high_threshold_results) <= len(all_results)
+        assert len(high_threshold_results) == 0
 
     async def test_min_score_empty_query_ignores_threshold(self, memory: EpisodicMemory):
         """Empty query uses recency path (no FTS5); min_score is ignored."""
@@ -1730,6 +1745,46 @@ class TestRecallNotesMinScore:
             await memory.store_note(f"topic-{i}", f"content {i}")
         results = await memory.recall_notes("", min_score=1.0, limit=10)
         assert len(results) == 2
+
+
+# ─── min_score range validation (PR #147 review) ───────────
+
+
+class TestMinScoreRangeValidation:
+    """min_score must be in [0.0, 1.0] or None.
+
+    Out-of-range values silently no-op (negative) or filter everything
+    (>1.0), making misconfiguration hard to debug in production.  Both
+    EpisodicMemory.recall() and NoteStore.recall_notes() validate at
+    the public boundary, mirroring the existing `limit` guard.
+    """
+
+    @pytest.mark.parametrize("bad_value", [-0.1, -1.0, 1.1, 2.0])
+    async def test_recall_rejects_out_of_range_min_score(
+        self, memory: EpisodicMemory, bad_value: float,
+    ):
+        with pytest.raises(ValueError, match="min_score must be in"):
+            await memory.recall("anything", min_score=bad_value)
+
+    @pytest.mark.parametrize("bad_value", [-0.1, -1.0, 1.1, 2.0])
+    async def test_recall_notes_rejects_out_of_range_min_score(
+        self, memory: EpisodicMemory, bad_value: float,
+    ):
+        with pytest.raises(ValueError, match="min_score must be in"):
+            await memory.recall_notes("anything", min_score=bad_value)
+
+    @pytest.mark.parametrize("ok_value", [None, 0.0, 0.5, 1.0])
+    async def test_recall_accepts_boundary_min_score(
+        self, memory: EpisodicMemory, ok_value: float | None,
+    ):
+        # Should not raise; result set may be empty for an empty corpus.
+        await memory.recall("anything", min_score=ok_value)
+
+    @pytest.mark.parametrize("ok_value", [None, 0.0, 0.5, 1.0])
+    async def test_recall_notes_accepts_boundary_min_score(
+        self, memory: EpisodicMemory, ok_value: float | None,
+    ):
+        await memory.recall_notes("anything", min_score=ok_value)
 
 
 # ─── Default constants exposed (RFC 0017 §C) ───────────────

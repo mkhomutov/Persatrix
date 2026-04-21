@@ -205,6 +205,14 @@ class EpisodicMemory:
                 limit, MAX_RECALL_LIMIT,
             )
             limit = MAX_RECALL_LIMIT
+        # Validate min_score range — RFC 0017 §C specifies [0.0, 1.0].
+        # Out-of-range values silently no-op (negative) or filter everything
+        # (>1.0), making misconfiguration hard to debug in production.
+        # Mirrors the existing `limit` guard above (PR #147 review).
+        if min_score is not None and not 0.0 <= min_score <= 1.0:
+            raise ValueError(
+                f"min_score must be in [0.0, 1.0] or None, got {min_score}"
+            )
         db = self._ensure_db()
 
         if query and self._fts5:
