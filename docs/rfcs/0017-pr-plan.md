@@ -60,19 +60,20 @@ PR 7 (RFC close)
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime/memory_budget.py` | **New** — `MemoryBudget` dataclass with `remaining: int`, `min_tokens: int`, and `allocate(item_text: str) -> tuple[str | None, int]` returning `(admitted_text, admitted_tokens)` |
+| `agents/persona_runtime/memory_budget.py` | **New** — `MemoryBudget` class with `__init__(total_tokens: int)`, a `remaining` property, and `try_add(text: str, *, min_tokens: int = 32) -> str \| None` (signature pinned by [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator); `min_tokens` is a per-call kwarg, not a constructor field, so each tier can pick its own floor). The admitted-token count is derived by callers from the `remaining` delta — no second return value. |
 | `agents/persona_runtime/memory_context.py` | Switch `_truncate_with_ellipsis` to a token-aware mode when called by budget callers; preserve char-mode for any non-budget callers during the transition |
 | `agents/tests/test_persona_runtime_memory_context.py` | Token-aware truncation tests (with and without `tiktoken`) |
 | `agents/tests/test_memory_budget.py` | **New** — `MemoryBudget` unit tests covering every branch in [Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) |
 
 #### Key implementation details
 
-- `MemoryBudget.allocate(item_text)`:
-  - If `remaining <= 0` → return `(None, 0)`.
+- `MemoryBudget.try_add(text, *, min_tokens=32)` — signature is verbatim from [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) and is part of the RFC's stable forward-compatible surface for RFC 0008. Behaviour:
+  - If `remaining <= 0` → return `None`.
   - Compute token count via the same path `WorkingMemory` uses (`tiktoken` if available, `len(text) // 4` fallback).
-  - If item fits whole → admit whole, decrement `remaining` by exact token count.
-  - If item exceeds `remaining` but truncating to `remaining` would still leave `>= min_tokens` → admit truncated copy via the new token-aware `_truncate_with_ellipsis`, decrement `remaining` to zero (or precisely by truncated token count).
-  - Else → drop entirely, leave `remaining` unchanged.
+  - If item fits whole → admit whole, decrement `remaining` by exact token count, return the original text.
+  - If item exceeds `remaining` but truncating to `remaining` would still leave `>= min_tokens` → admit truncated copy via the new token-aware `_truncate_with_ellipsis`, decrement `remaining` accordingly, return the truncated text.
+  - Else → drop entirely, leave `remaining` unchanged, return `None`.
+- The admitted-token count for a single call is `remaining_before - remaining_after`; the per-event total exposed in PR 2 is computed the same way over the whole allocate-loop. No tuple/record return type is added at the allocator level — keeping the single-value return matches the RFC and avoids API drift that would later need a follow-up to RFC 0008's contract.
 - `_truncate_with_ellipsis(text, limit, *, mode: Literal["chars", "tokens"] = "chars")`:
   - `mode="tokens"` truncates at the token boundary, then re-encodes/re-decodes via `tiktoken` if available; falls back to `len(text) // 4 ≈ tokens` approximation by slicing chars proportionally if `tiktoken` is absent. Never panics on missing `tiktoken`.
   - The ellipsis `…` itself counts toward the token budget.
@@ -81,12 +82,13 @@ PR 7 (RFC close)
 #### Tests
 
 `MemoryBudget`:
-- Empty input (`item_text == ""`) → returns `(None, 0)`, `remaining` unchanged.
-- Item smaller than `remaining` → admitted whole; `remaining` decremented by exact token count.
-- Item larger than `remaining` and truncated size `>= min_tokens` → admitted truncated; `remaining` reaches zero (or tracks exact admitted tokens).
-- Item larger than `remaining` and truncated size `< min_tokens` → dropped; `remaining` unchanged.
+- Empty input (`text == ""`) → returns `None`, `remaining` unchanged.
+- Item smaller than `remaining` → returns the original text; `remaining` decremented by exact token count.
+- Item larger than `remaining` and truncated size `>= min_tokens` → returns the truncated text; `remaining` decremented by the truncated item's exact token count (not necessarily reaching zero — the ellipsis token cost may leave a sliver).
+- Item larger than `remaining` and truncated size `< min_tokens` → returns `None`; `remaining` unchanged.
+- Per-call `min_tokens` overrides the default for that call only — exercised by passing different floors for relationship vs episodic vs notes tiers.
 - Sequence of items fills budget greedily in order; later items dropped when `remaining` exhausted; earlier items intact.
-- `remaining=0` initial budget → every call returns `(None, 0)`.
+- `total_tokens=0` initial budget → every call returns `None`.
 
 `_truncate_with_ellipsis` token mode:
 - Token count below limit → unchanged.
@@ -98,8 +100,9 @@ PR 7 (RFC close)
 - [ ] `pytest agents/tests/ -v` passes
 - [ ] `ruff check agents/` clean
 - [ ] `mypy agents/` clean
-- [ ] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget`
+- [ ] `agents/persona_runtime/memory_budget.py` exports `MemoryBudget` with the [RFC Section B](0017-persona-memory-injection-budget.md#b-memory-budget-allocator) `try_add(text, *, min_tokens=32) -> str | None` signature
 - [ ] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
+- [ ] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
 
 ---
 
@@ -113,23 +116,23 @@ PR 7 (RFC close)
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime/memory_context.py` | Replace `_MAX_RELATIONSHIP_CHARS`, `_MAX_EPISODE_CHARS`, `_MAX_NOTE_CHARS` with single `_MEMORY_BUDGET_TOKENS = 1500` (per [OQ1 resolution](0017-persona-memory-injection-budget.md#open-questions)). Rewrite `_inject_memory_context` as a uniform allocate-loop over the three tiers in priority order (relationship=8, episodic=7, notes=6 — [OQ4](0017-persona-memory-injection-budget.md#open-questions)). Each tier's items pass through `MemoryBudget.allocate()`. **Preserve the existing TICK skip and `should_fall_back` heuristic** — they are removed in PR 4 once the recall layer can stand in for them. Expose `memory_admitted_tokens` (sum returned by the allocator) on the function's return path so PR 5 can consume it. |
+| `agents/persona_runtime/memory_context.py` | Replace the three per-tier char caps `_MAX_EPISODE_SUMMARY_CHARS`, `_MAX_RELATIONSHIP_NOTES_CHARS`, `_MAX_NOTE_CONTENT_CHARS` (verified at [agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py)) with a single `_MEMORY_BUDGET_TOKENS = 1500` (per [OQ1 resolution](0017-persona-memory-injection-budget.md#open-questions)). Rewrite `_inject_memory_context` as a uniform allocate-loop over the three tiers in priority order (relationship=8, episodic=7, notes=6 — [OQ4](0017-persona-memory-injection-budget.md#open-questions)). Each tier's items pass through `MemoryBudget.try_add()`. **Preserve the existing TICK skip and `should_fall_back` heuristic** — they are removed in PR 4 once the recall layer can stand in for them. Compute `memory_admitted_tokens` as `_MEMORY_BUDGET_TOKENS - budget.remaining` after the loop and surface it on the function's return path so PR 5 can consume it. |
 | `agents/tests/test_persona_runtime_memory_context.py` | Replace char-cap assertions with token-bound assertions: `working_memory.total_tokens()` after `_inject_memory_context` is `<= base_prompt_tokens + _MEMORY_BUDGET_TOKENS`. Add tests asserting tier ordering (relationship admitted before episodic before notes when budget is tight). Add a test verifying `memory_admitted_tokens` is returned and equals the sum of per-tier admissions. |
 
 #### Key implementation details
 
 - The allocate-loop iterates tiers in fixed priority order (no fairness — [OQ4](0017-persona-memory-injection-budget.md#open-questions)). For each tier, items are queried via the existing recall paths *unchanged in this PR* (PR 3 adds `min_score`).
-- Each item from a tier is passed through `budget.allocate(format_item(item))`. The formatted, possibly-truncated string is then appended to the working memory section for that tier.
+- Each item from a tier is passed through `budget.try_add(format_item(item))` (with an optional per-tier `min_tokens` floor where it makes sense). The returned string — possibly truncated, or `None` if dropped — is appended to the working memory section for that tier.
 - `_MEMORY_BUDGET_TOKENS = 1500` is the committed Phase 1 default ([OQ1](0017-persona-memory-injection-budget.md#open-questions)). Acceptance does not gate retuning — any retune is a one-line constant change.
 - The TICK skip and `should_fall_back` short-circuit at the top of `_inject_memory_context` are **kept verbatim**. Their removal is PR 4's job; isolating it makes the diff reviewable and bisectable.
-- Return shape: the function previously returned implicitly via mutation of the working memory object. PR 2 adds an explicit return tuple `(memory_admitted_tokens: int, ...)` or attaches `memory_admitted_tokens` as an attribute on a small return record. The exact shape is pinned during PR 2 review; PR 5 only requires that the signal is reachable from the caller. Either way, callers ignoring the return value behave identically to today.
+- **Return shape (pinned at plan time, not deferred to PR 2 review):** introduce a small `MemoryInjectionResult` dataclass in `agents/persona_runtime/memory_context.py` with `memory_admitted_tokens: int` as its sole initial field. Reserved for additive extension (e.g., per-tier admitted counts) under RFC 0008's scheduler-budget composition without breaking existing callers. `_inject_memory_context` returns a `MemoryInjectionResult`; callers that ignore the return value behave identically to today. This pin resolves an open question flagged in PR #144 review — PR 5 needs a definite contract before it opens.
 
 #### Tests
 
 - Token bound holds: synthetic relationship/episodic/notes content far exceeding 1500 tokens → resulting working-memory injection ≤ 1500 tokens beyond baseline.
 - Tier ordering: when tier-1 (relationship) consumes the entire budget, tiers 2 and 3 admit zero items.
 - Mid-tier truncation: a single oversized note is admitted truncated when its truncated form ≥ `min_tokens`, dropped otherwise.
-- `memory_admitted_tokens` returned equals the per-tier admitted-tokens sum.
+- `MemoryInjectionResult.memory_admitted_tokens` equals `_MEMORY_BUDGET_TOKENS - budget.remaining` after the allocate-loop, and equals the sum of per-tier admissions.
 - All previously-passing memory-context tests still pass (the TICK skip and `should_fall_back` behaviour is unchanged).
 
 #### PR checklist
@@ -137,11 +140,10 @@ PR 7 (RFC close)
 - [ ] `pytest agents/tests/ -v` passes
 - [ ] `ruff check agents/` clean
 - [ ] `mypy agents/` clean
-- [ ] `_MAX_*_CHARS` constants removed from `memory_context.py`
+- [ ] All three legacy char caps removed: `_MAX_EPISODE_SUMMARY_CHARS`, `_MAX_RELATIONSHIP_NOTES_CHARS`, `_MAX_NOTE_CONTENT_CHARS`
 - [ ] `_MEMORY_BUDGET_TOKENS` set to 1500
 - [ ] TICK skip and `should_fall_back` heuristic preserved (removed in PR 4)
-- [ ] `memory_admitted_tokens` reachable from `_inject_memory_context` callers
-- [ ] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
+- [ ] `_inject_memory_context` returns `MemoryInjectionResult` with `memory_admitted_tokens: int` (return-shape pin from PR #144 review)
 
 ---
 
@@ -155,7 +157,7 @@ PR 7 (RFC close)
 
 | File | Change |
 |------|--------|
-| `agents/memory/episodic.py` | Add `min_score: float \| None = None` parameter to both `recall()` and `recall_notes()`. When `None` → behaviour identical to today. When set → FTS5 results below the threshold are filtered. BM25 raw scores are normalised to `[0, 1]` via the documented mapping in [Section C](0017-persona-memory-injection-budget.md#c-relevance-threshold-in-the-recall-layer). LIKE-fallback path documents that `min_score` is ignored when FTS5 is unavailable (LIKE has no scoring) and emits a one-time `WARNING` log on first such call. |
+| `agents/memory/episodic.py` | Add `min_score: float \| None = None` parameter to both `recall()` and `recall_notes()`. When `None` → behaviour identical to today. When set → FTS5 results below the threshold are filtered. BM25 raw scores are normalised to `[0, 1]` via the documented mapping in [Section C](0017-persona-memory-injection-budget.md#c-relevance-threshold-in-the-recall-layer). LIKE-fallback path treats every match as score `1.0` and applies `limit` normally — silently, per RFC Section C (an earlier draft of this plan added a one-time `WARNING` log on the LIKE path; that addition is dropped to stay within the accepted RFC's documented contract — operators can detect FTS5 unavailability from existing initialisation logs). |
 | `agents/memory/episodic.py` | Add module-level constants `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` ([OQ3 resolution: per-tier](0017-persona-memory-injection-budget.md#open-questions)). Values committed from the calibration script output. |
 | *(throwaway)* `scripts/calibrate_min_score.py` | **Run locally, not committed.** Loads a populated FTS5 DB, computes BM25 score histograms across representative queries, prints recommended thresholds for episodes and notes. The PR description records the run output and the chosen values. |
 | `agents/tests/test_episodic.py` | Add `min_score` boundary tests: `min_score=None` (default, no filter), `min_score=0.0` (no filter), `min_score=1.0` (almost everything filtered), `min_score` near the calibrated default (mixed results). Assert FTS5 normalisation produces values in `[0, 1]`. Assert LIKE-fallback ignores `min_score` and logs the warning once per process. |
@@ -166,7 +168,7 @@ PR 7 (RFC close)
 - `min_score` semantics: `None` preserves current behaviour exactly; explicit `0.0` is documented as "filter only items with literally zero relevance" and is *also* a no-op in practice but is semantically explicit (useful for callers that want to opt into the filtered path without choosing a threshold).
 - Calibration script is throwaway — not committed. The PR description must include the exact command run, the input DB description, and the histogram summary that justifies the committed defaults. This pattern matches the RFC's [OQ2 resolution](0017-persona-memory-injection-budget.md#open-questions).
 - `_inject_memory_context` is **not** modified in this PR. Wiring `min_score` into the call sites is PR 4's job. This isolates the recall-layer change from the gate-removal change.
-- If FTS5 unavailable → LIKE-fallback emits `logger.warning("min_score requested but FTS5 unavailable; threshold ignored", extra={"path": "like_fallback"})` once per process (gated by a module-level flag).
+- LIKE-fallback path is silent (no per-call warning). RFC Section C documents this as a known limitation of the fallback; production deployments should have FTS5. Operators can detect FTS5 absence from the existing `EpisodicMemory.initialize()` log path.
 
 #### Tests
 
@@ -176,7 +178,7 @@ PR 7 (RFC close)
 - `recall(min_score=_DEFAULT_EPISODIC_MIN_SCORE)` against a fixture DB returns the curated subset.
 - Same matrix for `recall_notes` with `_DEFAULT_NOTES_MIN_SCORE`.
 - `_normalize_bm25` returns `0.0` for missing/`None` raw scores; clamps to `[0, 1]` for extreme inputs.
-- LIKE-fallback path with `min_score=0.5` returns same results as `min_score=None` and emits exactly one warning across multiple calls in the same process.
+- LIKE-fallback path with any `min_score` value returns the same result set as `min_score=None` (LIKE matches normalise to `1.0`, so any threshold ≤ 1.0 admits everything). No warning is emitted.
 
 #### PR checklist
 
@@ -186,7 +188,7 @@ PR 7 (RFC close)
 - [ ] `min_score` parameter added to both `recall` and `recall_notes`
 - [ ] Per-tier defaults `_DEFAULT_EPISODIC_MIN_SCORE` and `_DEFAULT_NOTES_MIN_SCORE` committed with calibration values
 - [ ] PR description records calibration script run and chosen values
-- [ ] LIKE-fallback warning fires once per process
+- [ ] LIKE-fallback path is silent (no per-call warning) and treats matches as score `1.0` per RFC Section C
 
 ---
 
@@ -238,7 +240,7 @@ PR 7 (RFC close)
 **Branch**: `feature/v022-empty-context-tick-shortcircuit`
 **Estimated size**: ~200–350 lines (implementation + tests)
 
-> **Open at PR-plan time**: which file owns the TICK handler that issues the LLM call. RFC's Files Touched lists `agents/persona_runtime/__init__.py (or TICK handler module)`. The actual call site is in `agents/persona_behavior.py` / `agents/persona.py` — *not* in [`agents/tick.py`](../../agents/tick.py), which only schedules ticks via `TickScheduler`. PR 5's first commit pins the file by name with an inline reference back to this note. The two-accessor contract below assumes `PersonaAgent.handle_event(event)` (or its equivalent) is the call site.
+> **Open at PR-plan time**: which file owns the TICK handler that issues the LLM call. RFC's Files Touched lists `agents/persona_runtime/__init__.py (or TICK handler module)`. The actual call site is in `agents/persona_behavior.py` / `agents/persona.py` — *not* in [`agents/tick.py`](../../agents/tick.py), which only schedules ticks via `TickScheduler`. PR 5's **first commit** appends the resolved module name to this plan (in this same paragraph) so the decision survives the squash merge as a discoverable artifact, not just a PR-description field. The two-accessor contract below assumes `PersonaAgent.handle_event(event)` (or its equivalent) is the call site.
 
 #### Scope
 
@@ -269,7 +271,7 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 - [ ] All five required cases (a)–(e) implemented as separate test functions
 - [ ] `ruff check agents/` clean
 - [ ] `mypy agents/` clean
-- [ ] TICK handler module pinned by name in the PR description (resolves the open-at-plan-time question)
+- [ ] TICK handler module pinned by name **both** in the PR description **and** as an inline amendment to the open-at-plan-time paragraph above in this plan (per PR #144 review — pinning only in the PR description loses the decision after squash merge)
 - [ ] `idle_count` increments on short-circuited ticks
 - [ ] DEBUG log with `reason="empty_context_tick"` field
 
@@ -283,7 +285,7 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 
 #### Scope
 
-Review findings from PRs 1–5, grouped by component. Items below are populated from PR review reports as PRs are reviewed.
+Review findings from PRs 1–5, grouped by component. Items below are populated as PRs are reviewed. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file.
 
 ##### From PR 1 review
 
