@@ -25,6 +25,9 @@ from ..persona_types import (
 )
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 
+if TYPE_CHECKING:
+    from .memory_context import MemoryInjectionResult
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["_ActionLoopMixin"]
@@ -76,7 +79,7 @@ class _ActionLoopMixin:
         def _format_event(self, event: AgentEvent) -> str: ...
         async def _inject_memory_context(
             self, event: AgentEvent, *, query: str | None = None,
-        ) -> None: ...
+        ) -> MemoryInjectionResult: ...
         def _build_system_prompt(self) -> str: ...
         async def _persist_persona_state(self) -> None: ...
 
