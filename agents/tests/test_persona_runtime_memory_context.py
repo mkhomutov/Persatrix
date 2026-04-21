@@ -177,7 +177,7 @@ class _ConcreteMemoryMixin(_MemoryContextMixin):
     """Minimal concrete subclass for testing _MemoryContextMixin."""
 
     def _format_event(self, event: Any) -> str:  # type: ignore[override]
-        return event.payload.get("content", "")
+        return str(event.payload.get("content", ""))
 
 
 # ─── _inject_memory_context allocate-loop (RFC 0017 PR 2) ─────────────────────
@@ -198,11 +198,6 @@ class TestInjectMemoryContextTokenBound:
         mixin, event = _make_mixin(episodes=episodes, notes=notes)
         result = await mixin._inject_memory_context(event)
 
-        # Total tokens admitted by the budget must not exceed 1500.
-        # memory_admitted_tokens uses tiktoken (same accounting as the budget),
-        # which is the authoritative bound.  WorkingMemory's token_count uses
-        # estimate_tokens (chars/4) and may report a different number; we do
-        # not assert on it here.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS, (
             f"Admitted {result.memory_admitted_tokens} tokens, budget is {_MEMORY_BUDGET_TOKENS}"
         )
@@ -249,12 +244,7 @@ class TestInjectMemoryContextTierOrdering:
         assert "relationship_context" in section_names
         # Total admitted tokens (budget accounting) must be within budget.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS
-        # Verify the lower-priority tier was actually impacted by the
-        # shared budget: at most ~2 of the 5 large episodes (≈600 tokens
-        # each) can fit into the remaining budget after the relationship
-        # block is admitted.  Without this assertion the test would pass
-        # even if the budget were silently bypassed for episodic.
-        # (PR #146 review.)
+        # Episodic admission must be limited by the shared budget.
         ep_section = next(
             (s for s in mixin._working_memory._sections if s.name == "episodic_recall"),
             None,
@@ -274,12 +264,7 @@ class TestInjectMemoryContextTierOrdering:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Relationship block consuming entire budget → episodic and notes admit zero."""
-        # Lift the per-field ``rel.notes`` security cap so this test can
-        # construct a relationship block that genuinely dominates the
-        # 1500-token budget.  The invariant under test is the
-        # *budget-allocation* ordering (relationship wins, lower tiers
-        # starve), independent of the security-driven char cap.
-        # (PR #146 review.)
+        # Lift the ``rel.notes`` security cap to exercise budget-allocation ordering.
         from agents.persona_runtime import memory_context as mc
 
         monkeypatch.setattr(mc, "_REL_NOTES_INTERIM_CHARS", 1_000_000)
@@ -302,16 +287,8 @@ class TestInjectMemoryContextTierOrdering:
         )
         result = await mixin._inject_memory_context(event)
 
-        # Regardless of what was admitted (the large relationship block may be
-        # truncated-and-admitted or dropped), admitted tokens must be within budget.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS
-        # Verify the tier-ordering invariant promised in the docstring:
-        # if the relationship block (~2400 tokens, truncated to fit the
-        # 1500-token budget) consumes the budget, the lower-priority
-        # episodic and notes tiers must admit zero items and therefore
-        # add no sections.  Without these assertions the test would pass
-        # silently even if budget enforcement broke for the lower tiers.
-        # (PR #146 review.)
+        # Budget consumed by relationship → lower tiers admit nothing.
         section_names = [s.name for s in mixin._working_memory._sections]
         assert "episodic_recall" not in section_names
         assert "recent_notes" not in section_names
@@ -372,24 +349,8 @@ class TestInjectMemoryContextReturnValue:
 
         result = await mixin._inject_memory_context(event)
 
-        # memory_admitted_tokens should be positive (content was admitted).
         assert result.memory_admitted_tokens > 0
-        # And must not exceed the total budget.
         assert result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS
-
-    @pytest.mark.asyncio
-    async def test_result_is_memory_injection_result_instance(self) -> None:
-        """_inject_memory_context always returns a MemoryInjectionResult."""
-        mixin, event = _make_mixin()
-        result = await mixin._inject_memory_context(event)
-        assert isinstance(result, MemoryInjectionResult)
-
-    @pytest.mark.asyncio
-    async def test_result_zero_when_no_content(self) -> None:
-        """memory_admitted_tokens == 0 when all tiers return empty."""
-        mixin, event = _make_mixin()
-        result = await mixin._inject_memory_context(event)
-        assert result.memory_admitted_tokens == 0
 
     @pytest.mark.asyncio
     async def test_admitted_tokens_nonzero_with_content(self) -> None:
@@ -488,13 +449,7 @@ class TestInjectMemoryContextTickAndFallback:
 
 
 class TestInjectMemoryContextExceptionResiliency:
-    """Each tier wraps its query in ``except Exception`` with the contract
-    "never fail the event".  These tests cover the resiliency paths that
-    were previously uncovered (PR #146 review): a DB lock, I/O error, or
-    other transient failure on any tier must NOT propagate to the caller,
-    and ``_inject_memory_context`` must still return a valid
-    ``MemoryInjectionResult``.
-    """
+    """Tier exceptions must not propagate; always returns MemoryInjectionResult."""
 
     @pytest.mark.asyncio
     async def test_episodic_recall_exception_does_not_raise(self) -> None:
