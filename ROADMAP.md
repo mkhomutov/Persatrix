@@ -18,6 +18,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | 📋 Planned |
+| **v0.2.3** | Operability minor release — structured logs across Go/Python, working `persatrix logs` CLI, end-to-end OpenTelemetry traces from REST handler to LLM call | 📋 Planned |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -48,6 +49,8 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | 📋 Proposed |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | 📋 Proposed |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 📋 Proposed |
 
 ---
 
