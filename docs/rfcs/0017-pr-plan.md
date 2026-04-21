@@ -281,6 +281,8 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 - [x] `idle_count` increments on short-circuited ticks
 - [x] DEBUG log with `reason="empty_context_tick"` field
 
+**Open**: PR #149 — 2026-04-21
+
 ---
 
 ### PR 6: `feature/v022-rfc0017-followups` — Review Follow-Ups
