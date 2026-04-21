@@ -221,3 +221,56 @@ class TestMemoryBudgetTryAdd:
         assert result is not None
         admitted_cost = before - after
         assert admitted_cost == _count_tokens(result)
+
+
+# ─── Boundary cases (PR #145 review follow-up) ────────────────────────────────
+#
+# The cases below close coverage gaps flagged in the PR #145 review report
+# under "Nice to Have #1".  They exercise documented boundaries that the
+# original suite only probed indirectly:
+#
+#   1. Negative ``total_tokens`` constructor input — handled by ``max(0, ...)``
+#      in ``__init__`` but not previously asserted.
+#   2. ``min_tokens`` exactly equal to the truncated item's token count — the
+#      admittance condition is ``truncated_count >= min_tokens`` (inclusive),
+#      and earlier tests only probed clearly-above / clearly-below cases.
+#   3. ``_truncate_to_token_limit(text, 1)`` with tiktoken available —
+#      ``content_budget = 1 - ellipsis_tokens = 0`` for cl100k_base, which
+#      hits the ``content_budget <= 0`` branch returning bare ``"…"``.
+
+
+class TestBoundaryCases:
+    def test_negative_total_tokens_clamped_to_zero(self) -> None:
+        """``MemoryBudget(-1)`` must behave identically to ``MemoryBudget(0)``."""
+        budget = MemoryBudget(total_tokens=-1)
+        assert budget.remaining == 0
+        # Anything submitted to a zero-remaining budget is dropped.
+        assert budget.try_add("hello world") is None
+        assert budget.remaining == 0
+
+    def test_min_tokens_equal_to_truncated_count_admits(self) -> None:
+        """Boundary on ``truncated_count >= min_tokens`` (inclusive)."""
+        # Use a small budget so truncation is forced, then read the truncated
+        # count and re-run with min_tokens set to exactly that value.  The
+        # inclusive ``>=`` means the item must be admitted, not dropped.
+        budget_probe = MemoryBudget(total_tokens=20)
+        long_text = "word " * 200
+        truncated = budget_probe.try_add(long_text, min_tokens=1)
+        assert truncated is not None
+        exact_count = _count_tokens(truncated)
+
+        # Fresh budget so we re-trigger the same truncation path.
+        budget = MemoryBudget(total_tokens=20)
+        result = budget.try_add(long_text, min_tokens=exact_count)
+        assert result is not None  # admitted at the equality boundary
+        assert _count_tokens(result) == exact_count
+
+    def test_truncate_to_token_limit_one_returns_ellipsis(self) -> None:
+        """``token_limit=1`` exhausts budget on the ellipsis itself.
+
+        With cl100k_base, ``"…"`` (U+2026) encodes to 1 token, so
+        ``content_budget = 1 - 1 = 0`` triggers the ``content_budget <= 0``
+        early-return branch and the result is bare ``"…"`` (no content).
+        """
+        result = _truncate_to_token_limit("any sufficiently long text here", 1)
+        assert result == "…"
