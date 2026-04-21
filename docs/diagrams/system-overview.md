@@ -48,7 +48,7 @@ graph LR
     REST --> PLAN
     REST --> STATE
     REST --> COST
-    REST -->|POST /api/v1/agents/{id}/chat| CHATEXEC
+    REST -- "POST /api/v1/agents/{id}/chat" --> CHATEXEC
     PLAN --> SCHED
     SCHED --> EXEC
     SCHED --> COST
