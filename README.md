@@ -21,6 +21,13 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 - Submit classical task workflows from v0.1 alongside personas — the orchestrator
   handles both through the same gRPC surface.
 
+**v0.2.1** (Human Participant & Chat Interface) adds:
+
+- Open a terminal and talk to a persona agent: `persatrix chat <agent_id>`.
+- A first-class `Participant` abstraction that treats human users alongside agents.
+- Persistent user identity — the agent remembers who you are across restarts and
+  builds a relationship with you over repeated conversations.
+
 ---
 
 ## Why Persatrix
@@ -53,6 +60,21 @@ tasks in a workflow.
 
 > **Upgrade note from v0.1 baseline:** `max_llm_calls` default changed from `10` to
 > `5`. See [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## What's added in v0.2.1
+
+| Capability | Where it lives | Spec |
+|------------|----------------|------|
+| **`Participant` abstraction + `UserParticipant`** — persistent human identity stored in the agent SQLite database | [agents/participant.py](agents/participant.py) | [RFC 0016](docs/rfcs/0016-human-participant-chat-interface.md) |
+| **Memory generalization** — `RelationshipMemory` and `EpisodicMemory` now track user-agent exchanges | [agents/memory/](agents/memory/) | [RFC 0016](docs/rfcs/0016-human-participant-chat-interface.md) |
+| **Chat REST endpoint** — `POST /api/v1/agents/{id}/chat` for synchronous user→agent messages | [internal/server/](internal/server/) | [RFC 0016](docs/rfcs/0016-human-participant-chat-interface.md) |
+| **`SendChatMessage` gRPC RPC** — orchestrator→agent chat dispatch | [agents/server_servicers.py](agents/server_servicers.py), [internal/executor/](internal/executor/) | [RFC 0016](docs/rfcs/0016-human-participant-chat-interface.md) |
+| **`persatrix chat` CLI** — interactive REPL for chatting with a persona agent | [cli/src/commands/chat.rs](cli/src/commands/chat.rs) | [RFC 0016](docs/rfcs/0016-human-participant-chat-interface.md) |
+
+See the [chat walkthrough in the persona-agents guide](docs/guides/persona-agents.md#4-chatting-with-a-persona-agent)
+for an end-to-end run.
 
 ---
 
@@ -134,6 +156,29 @@ terminal where `make run-agent` (or the `agent-*` compose service) is running.
 The persona's tick loop fires every `autonomy.tick_interval_seconds`, reads
 episodic and relationship memory, decides on up to `autonomy.max_actions_per_tick`
 actions, and writes results back. State survives process restarts.
+
+### Chat with a Persona Agent (v0.2.1)
+
+With the orchestrator and the agent running (steps 1–2 above), open a chat
+session from a third terminal:
+
+```bash
+# Interactive REPL — type messages, receive replies, `exit` to quit
+persatrix chat ember-owl
+
+# Identify yourself with a stable user id so the agent recognises you next time
+persatrix chat ember-owl --user alice
+```
+
+Under the hood the CLI POSTs each message to
+`POST /api/v1/agents/{id}/chat`, the orchestrator dispatches a `SendChatMessage`
+gRPC call to the agent, and the agent's reply is rendered in the terminal.
+User identity, conversation episodes, and the trust score on the user-agent pair
+all persist across agent restarts.
+
+For a full walkthrough — including session continuity and relationship
+evolution — see
+[the chat section of the persona-agents guide](docs/guides/persona-agents.md#4-chatting-with-a-persona-agent).
 
 ### Inspect Cost & Budget (v0.2.0)
 
@@ -224,7 +269,8 @@ Persatrix/
 | Version | What a user can do | Status |
 |---------|-------------------|--------|
 | **v0.1** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
-| **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release — v0.2.1 in progress |
+| **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release |
+| **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Release-ready |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -256,6 +302,18 @@ completion.
 - The MCP bridge ([agents/tools/mcp_bridge.py](agents/tools/mcp_bridge.py)) is
   scaffolded but not yet functional — tracked as a follow-up to v0.2. Agents that
   reference MCP tools emit a startup warning and run without them.
+
+## Known Limitations in v0.2.1
+
+- **Single user per session** — `persatrix chat` assumes one `UserParticipant` at
+  a time; multi-user routing is part of RFC 0011 (v0.3.0).
+- **No authentication** — chat sessions are local and the user id is
+  caller-supplied; auth is RFC 0009 (v0.3.0).
+- **Synchronous request-response only** — chat replies are not streamed in v0.2.1.
+- **No agent-initiated messages** — agents reply to user messages but cannot
+  spontaneously notify users; notification infrastructure is deferred.
+- **No channel routing** — chat goes directly to a single agent; channels are
+  RFC 0011 (v0.3.0).
 
 ---
 
