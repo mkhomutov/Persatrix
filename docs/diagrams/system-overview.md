@@ -59,11 +59,11 @@ graph LR
 
     AGSVC --> TASK
     AGSVC --> PERS
-    AGSVC --> PART
+    AGSVC -. planned .-> PART
     TASK --> TOOLS
     PERS --> TOOLS
     PERS --> MEM
-    PART --> DB
+    PART -. planned .-> DB
     MEM --> DB
 
     TASK -->|HTTPS| LLM
@@ -98,6 +98,16 @@ graph LR
 `EXEC` and `CHATEXEC` are both types in the same `internal/executor` Go
 package; they are drawn as sibling nodes to make the dual gRPC dispatch
 (workflow `ExecuteTask` vs chat `SendChatMessage`) visible.
+
+The `AGSVC -. planned .-> PART` and `PART -. planned .-> DB` edges are drawn
+dashed because `agents/participant.py` (`UserParticipant`, `UserStore`) ships
+in v0.2.1 but is **not yet invoked from the chat path**. The current
+`SendChatMessage` servicer only calls `validate_participant_type` from
+`participant.py` and writes relationship memory directly via
+`agent.memory.relationship.record_interaction(...)`, keyed on `(agent_id,
+user_id)` without going through `UserStore.get_or_create()`. Wiring the
+participant store into the chat path is tracked as a follow-up; the diagram
+keeps the nodes visible so the architectural intent is preserved.
 
 See [component-architecture.md](component-architecture.md) for the module-level
 view of each component.

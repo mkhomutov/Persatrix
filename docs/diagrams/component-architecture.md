@@ -38,7 +38,7 @@ graph TB
         SERVER --> PLANNER
         SERVER --> STATE
         SERVER --> COST
-        SERVER --> EXECUTOR
+        SERVER -->|chat dispatch| EXECUTOR
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
@@ -76,7 +76,7 @@ graph TB
         end
 
         SRV --> BASE
-        SRV --> PART
+        SRV -. planned .-> PART
         BASE --> TASK
         BASE --> PERSONA
         PERSONA --> PRUNTIME
@@ -104,9 +104,18 @@ graph TB
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
 
-The `SERVER --> EXECUTOR` edge represents the chat dispatch path
-(`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`); the
-workflow path still flows `SERVER → PLANNER → SCHEDULER → EXECUTOR`.
+The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
+path (`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`);
+the workflow path still flows `SERVER → PLANNER → SCHEDULER → EXECUTOR` and
+is unaffected by the chat surface.
+
+The `SRV -. planned .-> PART` edge is dashed because `agents/server.py` /
+`agents/server_servicers.py` ship `participant.py` in v0.2.1 but do not yet
+route chat traffic through `UserStore`. Only the pure validator
+`validate_participant_type` is imported today; relationship memory is keyed on
+`(agent_id, user_id)` and written directly. The dashed edge mirrors the
+`AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
+so the two diagrams agree about the v0.2.1 wiring gap.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
