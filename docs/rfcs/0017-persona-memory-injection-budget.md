@@ -1,9 +1,10 @@
 # RFC 0017 — Persona Memory Injection Token Budget
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: � Accepted
 **Author**: Maksim Khomutov
 **Date**: 2026-04-21
+**Accepted**: 2026-04-21
 **Target**: v0.2.2
 **Depends on**: RFC 0005
 **Feeds into**: RFC 0008
@@ -22,6 +23,7 @@
   - [C. Relevance Threshold in the Recall Layer](#c-relevance-threshold-in-the-recall-layer)
   - [D. Token-Aware Truncation](#d-token-aware-truncation)
   - [E. Forward Compatibility with RFC 0008](#e-forward-compatibility-with-rfc-0008)
+  - [F. Empty-Context TICK Short-Circuit](#f-empty-context-tick-short-circuit)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -61,6 +63,7 @@ This RFC is the structural fix that prior patches were approximating, and it lan
 5. `_truncate_with_ellipsis` operates in tokens, not characters, when the budget is the controlling constraint.
 6. Existing memory-context unit and integration tests pass. New tests assert the token bound holds across a synthetic event stream, including the cases that previously needed gating (TICK, low-keyword "hi"-style messages).
 7. The allocator and `min_score` interfaces are documented as stable and forward-compatible with RFC 0008's scheduler budget and a future vector-recall implementation.
+8. **Empty-context TICK events do not invoke the LLM.** When the budget allocator admits zero memory items on a `TICK` event AND no other event-specific context (recent conversation turn, active goal payload) is present, the persona runtime short-circuits the tick: no LLM call is issued and the tick is counted toward `idle_after_ticks`. This closes the cost-drain window of up to `idle_after_ticks * interval` seconds (default 10 ticks × 60 s = 10 minutes) during which a freshly-loaded but contextually-idle agent currently issues full-cost LLM calls before idle suppression engages.
 
 ## Non-Goals
 
@@ -191,6 +194,44 @@ The two interfaces this RFC adds — `MemoryBudget` and `min_score` — are expl
 
 The forward-compatibility commitment is: code written against `MemoryBudget` and `min_score` in v0.2.2 will not need API changes when RFC 0008 lands.
 
+### F. Empty-Context TICK Short-Circuit
+
+**Problem.** [`TickScheduler`](../../agents/tick.py) only suppresses LLM calls after `idle_after_ticks` (default 10) consecutive `DO_NOTHING` actions. At the default `interval=60.0`, a freshly-loaded persona agent that has nothing meaningful to think about still issues up to **10 full LLM calls over ~10 minutes** before idle detection engages. With the budget allocator and relevance threshold from Sections B–C, those calls now provably carry zero memory tokens (the `min_score` threshold filters out the boilerplate tick query and the relationship/notes tiers contribute nothing without an interlocutor). Issuing an LLM call whose entire memory contribution is empty is a budget bug — the model has nothing to reason about beyond the static persona prompt.
+
+**Fix.** Extend `_inject_memory_context` (or its caller in the persona runtime) to expose a single signal: `memory_admitted_tokens` (the sum of tokens admitted by `MemoryBudget` for this event). The persona runtime's TICK handler checks:
+
+```
+if event.type == TICK
+   and memory_admitted_tokens == 0
+   and no active goal payload
+   and no pending conversation turn:
+       record DO_NOTHING (advances idle_count)
+       skip LLM call
+       return
+```
+
+The "no active goal payload" and "no pending conversation turn" guards prevent suppressing legitimately context-bearing ticks (e.g., a tick that is meant to advance a long-running goal stored outside the three memory tiers). The exact predicate is implemented against the existing persona-runtime state — no new state is introduced.
+
+**Effects.**
+
+- **Cost.** Eliminates the 10-call cold-start drain for idle agents loaded into memory but not engaged. At a representative ~2 k-token persona prompt × 10 calls × $0.50/M input tokens = ~$0.01 saved per cold-loaded idle agent. Negligible per agent; meaningful at fleet scale and during long-running test/dev sessions where the same agent process stays resident across many minutes of inactivity.
+- **Idle latency.** Idle suppression engages immediately on cold-start instead of after `idle_after_ticks * interval` seconds. The first meaningful event still wakes the scheduler via the existing `wake()` path — no behavioural regression.
+- **Telemetry.** A short-circuited tick logs at `DEBUG` with reason `empty_context_tick` so operators can distinguish suppression-by-emptiness from suppression-by-idle-count. No new metrics in this RFC; RFC 0019 (OTEL Completion) will pick up the counter if needed.
+
+**Why this belongs in RFC 0017.** The signal that makes the short-circuit safe — *zero memory items admitted at the budget layer* — only exists once Sections B–C land. Implementing the short-circuit independently would have to re-derive that signal by inspecting tier outputs separately, duplicating logic that the allocator already centralises. Folding it into Phase 2 (where the gates are removed and the relevance threshold is committed) keeps the change atomic.
+
+```mermaid
+flowchart TD
+    Tick[TICK fires] --> Inject[_inject_memory_context]
+    Inject --> Admitted{memory_admitted_tokens == 0?}
+    Admitted -->|no| LLM[Issue LLM call as today]
+    Admitted -->|yes| GoalCheck{active goal payload<br/>or pending turn?}
+    GoalCheck -->|yes| LLM
+    GoalCheck -->|no| Skip[Record DO_NOTHING<br/>advance idle_count<br/>log empty_context_tick]
+    Skip --> Done[Return — no LLM cost]
+    LLM --> Done2[Return]
+```
+
 ---
 
 ## Security Considerations
@@ -227,8 +268,10 @@ The forward-compatibility commitment is: code written against `MemoryBudget` and
 1. `min_score` parameter on both recall methods, with FTS5 normalisation and documented LIKE-fallback behaviour.
 2. Calibration script (throwaway, not committed) producing a default value; the value itself committed as a constant.
 3. `_inject_memory_context` gates removed.
-4. Unit tests for `recall` / `recall_notes` low-score / high-score boundaries.
-5. Integration test: synthetic event stream including TICK and "hi"-style messages, asserting `working_memory.total_tokens()` stays below ceiling AND that low-signal events inject ~zero memory tokens.
+4. **Empty-context TICK short-circuit** ([Section F](#f-empty-context-tick-short-circuit)): `_inject_memory_context` exposes `memory_admitted_tokens`; persona runtime's TICK path skips the LLM call when admitted tokens are zero AND no goal/turn payload is present, recording `DO_NOTHING` and a `DEBUG` log entry with reason `empty_context_tick`.
+5. Unit tests for `recall` / `recall_notes` low-score / high-score boundaries.
+6. Unit test for the TICK short-circuit: empty-context TICK produces no LLM call and increments `idle_count`; non-empty TICK and TICK with active goal still issue LLM calls.
+7. Integration test: synthetic event stream including TICK and "hi"-style messages, asserting `working_memory.total_tokens()` stays below ceiling AND that low-signal events inject ~zero memory tokens.
 
 **Dependencies.** Phase 1.
 
@@ -251,8 +294,9 @@ The forward-compatibility commitment is: code written against `MemoryBudget` and
 | Component | Files | Change |
 |-----------|-------|--------|
 | Python agents | `agents/persona_runtime/memory_budget.py` | Add (new module, `MemoryBudget` class) |
-| Python agents | `agents/persona_runtime/memory_context.py` | Rewrite (allocate-loop, gate removal, token-aware truncate) |
+| Python agents | `agents/persona_runtime/memory_context.py` | Rewrite (allocate-loop, gate removal, token-aware truncate, expose `memory_admitted_tokens`) |
 | Python agents | `agents/memory/episodic.py` | Add `min_score` parameter to `recall` and `recall_notes`; FTS5 BM25 normalisation |
+| Python agents | `agents/persona_runtime/__init__.py` (or TICK handler module) | Empty-context TICK short-circuit guard ([Section F](#f-empty-context-tick-short-circuit)) |
 | Tests | `agents/tests/test_persona_runtime_memory_context.py` (or equivalent) | Update for token-bound assertions; add allocator tests |
 | Tests | `agents/tests/test_episodic.py` (or equivalent) | Add `min_score` boundary tests |
 | Docs | [ROADMAP.md](../../ROADMAP.md) | Add v0.2.2 milestone row; add RFC 0017 to tracker; update RFC 0008 dependency note |
@@ -290,35 +334,33 @@ No changes to: protos, Go orchestrator, Rust CLI, configs, schemas, JSON schemas
 
 ## Open Questions
 
-1. **Default value for `_MEMORY_BUDGET_TOKENS`.**
-   Initial proposal: 1500 tokens (~6× current relationship cap, ~3× current note cap). Must be confirmed by manual smoke test against a populated DB before Phase 1 merges. Resolution required before Phase 1 review.
+> Acceptance status (2026-04-21): OQ1, OQ3, OQ4 resolved at acceptance time. OQ2 remains an empirical task scoped to Phase 2 (calibration script). OQ5 remains explicitly out of scope and deferred to RFC 0008.
 
-2. **Default value for `min_score` in `recall*`.**
-   Depends on FTS5 BM25 score distribution in a representative populated DB. Resolved by the throwaway calibration script in Phase 2. The committed default is the calibrated value; the script is not committed.
+1. **Default value for `_MEMORY_BUDGET_TOKENS`.** ✅ **Resolved at acceptance.**
+   The committed default is **1500 tokens** for Phase 1. Rationale: ~6× the current 300-char relationship cap and ~3× the 500-char note cap when converted at ~4 chars/token, leaving headroom for typical 3-tier worst-case while staying well under any production model's context window. The smoke-test step in Phase 1's manual test plan may propose a tuned value before Phase 1 merges; any retune is a one-line constant change and does not require re-acceptance of the RFC.
 
-3. **Should `min_score` be per-tier or global in `_inject_memory_context`?**
-   Recommendation: per-tier (episodic and notes get separate thresholds) because they have different content profiles. Notes are agent-authored and longer; episodes are summaries and shorter. Single global threshold is simpler but likely needs different defaults per tier anyway.
+2. **Default value for `min_score` in `recall*`.** ⏳ **Deferred to Phase 2 (empirical).**
+   Depends on FTS5 BM25 score distribution in a representative populated DB. Resolved by the throwaway calibration script in Phase 2. The committed default is the calibrated value; the script is not committed. Acceptance does not gate on this — the API contract (`min_score: float | None` in `[0, 1]`, `None` = current behaviour) is what's stable and forward-compatible per [Section E](#e-forward-compatibility-with-rfc-0008).
 
-4. **Fairness mode for the allocator?**
-   Recommendation: no. Greedy in priority order is simpler to reason about and tier priorities (relationship=8, episodic=7, notes=6) already encode the right ordering. Revisit if telemetry shows persistent low-tier starvation.
+3. **Should `min_score` be per-tier or global in `_inject_memory_context`?** ✅ **Resolved at acceptance: per-tier.**
+   Episodic and notes get separate thresholds. Rationale: notes are agent-authored prose with longer tokens; episodes are summaries with terser tokens — their BM25 distributions differ enough that a single global threshold would either over-filter notes or under-filter episodes. The Phase 2 calibration script produces two values (`_DEFAULT_EPISODIC_MIN_SCORE`, `_DEFAULT_NOTES_MIN_SCORE`).
 
-5. **Per-event vs per-turn budget?**
+4. **Fairness mode for the allocator?** ✅ **Resolved at acceptance: no.**
+   Greedy in priority order is the committed behaviour. Tier priorities (relationship=8, episodic=7, notes=6) already encode the right ordering. Revisit only if Phase 2 telemetry shows persistent low-tier starvation; that revisit is a future RFC, not a v0.2.2 concern.
+
+5. **Per-event vs per-turn budget?** ⏳ **Out of scope — deferred to RFC 0008.**
    This RFC scopes per-event. Multi-step LLM reasoning that triggers multiple `_inject_memory_context` calls within a single turn could blow the per-event budget cumulatively. Per-turn budgeting is RFC 0008 territory (scheduler-level) and the per-event allocator composes under it (see [Section E](#e-forward-compatibility-with-rfc-0008)).
 
 ---
 
 ## Decision / Next Steps
 
-**To accept this RFC:**
+**Accepted on 2026-04-21.** v0.2.2 confirmed as target milestone. The `MemoryBudget` API ([Section B](#b-memory-budget-allocator)) and `min_score` contract ([Section C](#c-relevance-threshold-in-the-recall-layer)) are the stable forward-compatible interface for RFC 0008. Open Questions 1, 3, and 4 are resolved at acceptance ([Open Questions](#open-questions)); OQ2 is an empirical Phase 2 task; OQ5 is out of scope.
 
-1. Confirm v0.2.2 as the target milestone (this RFC adds it to the ROADMAP version map).
-2. Sign off on the `MemoryBudget` API sketch in [Section B](#b-memory-budget-allocator) and the `min_score` contract in [Section C](#c-relevance-threshold-in-the-recall-layer) as the stable forward-compatible interface for RFC 0008.
-3. Resolve Open Question 3 (per-tier vs global `min_score`) before Phase 2 starts.
+**Next steps:**
 
-**Once accepted:**
-
-1. Author `docs/rfcs/0017-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3 with PR breakdown, dependencies, and size estimates.
-2. Status → 🚧 Implementing; ROADMAP updated.
+1. Author `docs/rfcs/0017-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3 with PR breakdown, dependencies, and size estimates. Phase 1 and Phase 2 from this RFC each likely split into 2 PRs to stay under the 500-line limit; the [empty-context TICK short-circuit](#f-empty-context-tick-short-circuit) is one of the Phase 2 PRs.
+2. On opening the first implementation PR: status → 🚧 Implementing; ROADMAP updated.
 3. Begin Phase 1 implementation.
 
 ---
