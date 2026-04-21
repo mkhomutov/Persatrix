@@ -10,10 +10,14 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ..memory.episodic import EpisodicMemory
+from ..memory.episodic import (
+    _DEFAULT_EPISODIC_MIN_SCORE,
+    _DEFAULT_NOTES_MIN_SCORE,
+    EpisodicMemory,
+)
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
-from ..persona_types import AgentEvent, EventType
+from ..persona_types import AgentEvent  # noqa: TCH001
 from .memory_budget import MemoryBudget, _truncate_to_token_limit
 
 logger = logging.getLogger(__name__)
@@ -272,54 +276,45 @@ class _MemoryContextMixin:
                 rel = None
 
         # Tier 2 (priority 7): Episodic recall.
-        # Keep TICK skip — removed in PR 4 once recall-layer min_score
-        # threshold subsumes it.
-        # (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
-        if event.event_type == EventType.TICK:
+        # PR 4: TICK skip removed — the recall-layer min_score threshold
+        # filters low-signal TICK content at the DB layer; zero-admission
+        # TICK events are handled by the PR 5 empty-context short-circuit.
+        # (RFC 0017 §D; previously: PR #60 TICK skip preserved through PR 2/3.)
+        try:
+            episodes = await self._episodic_memory.recall(
+                query,
+                limit=5,
+                min_score=_DEFAULT_EPISODIC_MIN_SCORE,
+            )
+        except Exception:
+            logger.warning(
+                "Agent %s: episodic recall failed, skipping",
+                self.agent_id, exc_info=True,
+            )
             episodes = []
-        else:
-            try:
-                episodes = await self._episodic_memory.recall(query, limit=5)
-            except Exception:
-                logger.warning(
-                    "Agent %s: episodic recall failed, skipping",
-                    self.agent_id, exc_info=True,
-                )
-                episodes = []
 
         # Tier 3 (priority 6): Recent notes matching event content.
-        # Notes recall runs even for TICK events because notes are
-        # agent-authored curated knowledge relevant to autonomous goal review.
-        # (PR #60 review: preserve TICK notes injection.)
+        # Notes recall runs for all event types (including TICK) because notes
+        # are agent-authored curated knowledge relevant to autonomous goal review.
+        # PR 4: min_score threshold filters low-signal matches at the DB layer;
+        # the recency fallback (should_fall_back) is removed because
+        # min_score makes "no FTS5 matches" a reliable signal — a threshold-
+        # filtered empty result means genuinely no relevant notes, not a
+        # missing FTS5 index fallback.  The fallback's recency query would
+        # re-admit those low-signal notes, defeating the threshold.
+        # (RFC 0017 §D; PR #131 F-1 fallback removed.)
         try:
-            notes = await self._episodic_memory.recall_notes(query, limit=5)
+            notes = await self._episodic_memory.recall_notes(
+                query,
+                limit=5,
+                min_score=_DEFAULT_NOTES_MIN_SCORE,
+            )
         except Exception:
             logger.warning(
                 "Agent %s: note recall failed, skipping",
                 self.agent_id, exc_info=True,
             )
             notes = []
-
-        # Recency fallback — keep should_fall_back heuristic; removed in PR 4
-        # once min_score makes "no FTS5 matches" a reliable signal.
-        # Two gates: MESSAGE_RECEIVED only, and skip when episodic recall
-        # already produced results.
-        # (PR #131 review F-1: unconditional recency-note fallback inflates
-        #  every prompt where FTS5 did not match.)
-        should_fall_back = (
-            not notes
-            and event.event_type == EventType.MESSAGE_RECEIVED
-            and not episodes
-        )
-        if should_fall_back:
-            try:
-                notes = await self._episodic_memory.recall_notes("", limit=3)
-            except Exception:
-                logger.warning(
-                    "Agent %s: recency note fallback failed, skipping",
-                    self.agent_id, exc_info=True,
-                )
-                notes = []
 
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Process tiers in fixed priority order (relationship=8 → episodic=7
