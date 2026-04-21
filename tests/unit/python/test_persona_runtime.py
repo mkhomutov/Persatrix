@@ -2245,14 +2245,14 @@ class TestInjectMemoryContext:
         assert agent._working_memory.get_section("recent_notes") is None
         await agent.close_memory()
 
-    async def test_tick_skips_episodic_recall(self):
-        """TICK events skip episodic recall to avoid low-signal FTS5 matches.
+    async def test_tick_calls_episodic_recall(self):
+        """TICK events now call episodic recall (TICK skip removed in PR 4).
 
-        The boilerplate "Autonomous tick: review your goals..." query would
-        match broadly in FTS5, wasting I/O.  Notes recall is still attempted
-        (notes contain the agent's personal knowledge relevant for autonomous
-        goal review), though results depend on FTS5/LIKE matching.
-        (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
+        RFC 0017 PR 4: the TICK skip at the top of _inject_memory_context is
+        deleted.  Recall is now called for all event types; the min_score
+        threshold filters low-signal results at the DB layer.  Notes recall
+        is still attempted for all events.
+        (Previously: PR #60 review TICK skip; removed in RFC 0017 PR 4.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -2266,7 +2266,7 @@ class TestInjectMemoryContext:
             importance=0.8,
         )
 
-        # Spy on recall to verify it's NOT called for TICK.
+        # Spy on recall to verify it IS called for TICK (skip removed).
         recall_spy = AsyncMock(wraps=agent._episodic_memory.recall)
         agent._episodic_memory.recall = recall_spy
 
@@ -2277,17 +2277,11 @@ class TestInjectMemoryContext:
         event = AgentEvent(event_type=EventType.TICK, payload={})
         await agent._inject_memory_context(event)
 
-        # Episodic recall should NOT be called for TICK events.
-        recall_spy.assert_not_called()
-        # Notes recall is still attempted: first the keyword query, then
-        # (if no results) the recency fallback with empty query.
+        # Episodic recall MUST be called for TICK events (skip removed).
+        recall_spy.assert_called_once()
+        # Notes recall is still attempted.
         assert notes_spy.call_count >= 1
-        # First call uses the tick query.
-        first_call_query = notes_spy.call_args_list[0].args[0]
-        assert "tick" in first_call_query.lower() or "goals" in first_call_query.lower()
 
-        # No episodic section injected.
-        assert agent._working_memory.get_section("episodic_recall") is None
         await agent.close_memory()
 
     async def test_zero_interaction_relationship_skips_injection(self):
@@ -3040,16 +3034,30 @@ class TestMemoryQueryStripsDelimiters:
 # ─── Note Recency Fallback ───────────────────────────────────
 
 
-class TestNoteRecencyFallback:
-    """When FTS5 keyword search returns no notes, the memory context
-    injection falls back to the most recent notes so the agent retains
-    awareness of its stored knowledge even when the user's message
-    shares no keywords with note content (e.g. 'hi', 'remember me?').
+class TestNoteInjectionBehavior:
+    """Tests for note injection behavior after RFC 0017 PR 4.
+
+    PR 4 removes the ``should_fall_back`` recency-note fallback that was
+    triggered by empty-notes + MESSAGE_RECEIVED + no-episodes.  The
+    min_score threshold on recall/recall_notes is now the only filter;
+    low-signal queries produce empty results and no section injection.
+
+    Class renamed from ``TestNoteRecencyFallback`` in PR #148 (review
+    finding N-1) so the name no longer references the deleted fallback.
+    The assertions remain valid because the *outcomes* were unchanged \u2014
+    only the underlying *reason* (min_score filtering vs. fallback gate)
+    shifted.  Individual test docstrings (see M-2 findings) were updated
+    to explain the new mechanism.
     """
 
-    async def test_recency_fallback_injects_notes_on_keyword_miss(self):
-        """Notes stored under unrelated keywords are still injected
-        via recency when the user's query has no FTS5/LIKE overlap.
+    async def test_low_signal_query_does_not_inject_notes(self):
+        """Low-signal 'hi' query does not inject notes (fallback removed, PR 4).
+
+        Previously, the should_fall_back path triggered recall_notes("", limit=3)
+        when the user's message had no FTS5 overlap with note keywords.  PR 4
+        removes that path; the min_score threshold is the sole filter.
+        A 'hi' query with no min_score-passing matches produces no section.
+        (Replaces: test_recency_fallback_injects_notes_on_keyword_miss.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -3069,12 +3077,12 @@ class TestNoteRecencyFallback:
         with patch.object(agent, "_format_event", return_value="hi"):
             await agent._inject_memory_context(event)
 
+        # Fallback removed: low-signal 'hi' produces no section.
         section = agent._working_memory.get_section("recent_notes")
-        assert section is not None, (
-            "Recency fallback should inject notes when FTS5 finds no match"
+        assert section is None, (
+            "Fallback removed in PR 4: low-signal 'hi' should not inject notes. "
+            "min_score threshold is the only filter."
         )
-        assert "Max" in section.content
-        assert "Persatrix" in section.content
         await agent.close_memory()
 
     async def test_recency_fallback_skipped_when_fts5_matches(self):
@@ -3102,7 +3110,13 @@ class TestNoteRecencyFallback:
         await agent.close_memory()
 
     async def test_recency_fallback_returns_empty_when_no_notes_exist(self):
-        """When no notes exist at all, fallback produces no section."""
+        """Empty notes table → no ``recent_notes`` section.
+
+        Trivially true post-PR 4: ``recall_notes`` returns ``[]`` when the
+        table is empty regardless of ``min_score``, and the no-results path
+        skips section injection.  Kept as a regression guard against the
+        section being created with empty content.
+        """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
@@ -3117,12 +3131,18 @@ class TestNoteRecencyFallback:
 
         section = agent._working_memory.get_section("recent_notes")
         assert section is None, (
-            "No notes in DB means no section, even with recency fallback"
+            "Empty notes table must not produce a recent_notes section."
         )
         await agent.close_memory()
 
-    async def test_recency_fallback_limits_to_three(self):
-        """Recency fallback retrieves at most 3 notes (not 5)."""
+    async def test_low_signal_query_admits_no_notes_regardless_of_count(self):
+        """Low-signal query with many notes: no notes injected (fallback removed, PR 4).
+
+        Previously the recency fallback capped at limit=3 to limit prompt inflation.
+        PR 4 removes the fallback entirely: low-signal queries produce no section
+        regardless of how many notes are stored.
+        (Replaces: test_recency_fallback_limits_to_three.)
+        """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
@@ -3141,21 +3161,24 @@ class TestNoteRecencyFallback:
         with patch.object(agent, "_format_event", return_value="greetings"):
             await agent._inject_memory_context(event)
 
+        # Fallback removed: low-signal 'greetings' produces no section.
         section = agent._working_memory.get_section("recent_notes")
-        assert section is not None
-        # Count note entries — each starts with "- [topic-N]"
-        note_lines = [l for l in section.content.split("\n") if l.startswith("- [")]
-        assert len(note_lines) == 3, (
-            f"Recency fallback should return 3 notes, got {len(note_lines)}"
+        assert section is None, (
+            "Fallback removed in PR 4: low-signal 'greetings' should not inject notes."
         )
         await agent.close_memory()
 
     async def test_recency_fallback_skipped_for_non_message_events(self):
-        """Recency fallback only fires for MESSAGE_RECEIVED events.
+        """TICK event with no keyword-overlapping notes → no section.
 
-        TICK and TASK_ASSIGNED events use boilerplate queries and the
-        recency-note injection there is pure noise that grows the prompt
-        on every autonomous tick. (PR #131 review F-1.)
+        Pre-PR 4 this was guaranteed by the MESSAGE_RECEIVED gate inside
+        ``should_fall_back``.  Post-PR 4 the gate is gone: ``recall_notes``
+        is invoked for TICK as well, but the seeded note has no token
+        overlap with the TICK query, so FTS5 returns no results above
+        ``_DEFAULT_NOTES_MIN_SCORE`` and no section is injected.  The test
+        therefore protects the *outcome* (no noise on autonomous ticks)
+        even though the underlying mechanism shifted from gate to
+        threshold filter.  (PR #148 review M-2 — docstring updated.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -3179,16 +3202,22 @@ class TestNoteRecencyFallback:
 
         section = agent._working_memory.get_section("recent_notes")
         assert section is None, (
-            "TICK events should not trigger the recency-note fallback"
+            "TICK events must not surface unrelated notes (filtered by "
+            "min_score post-PR 4)."
         )
         await agent.close_memory()
 
     async def test_recency_fallback_skipped_when_episodes_retrieved(self):
-        """Recency fallback skipped when episodic recall already returned results.
+        """Unrelated note is not injected when episodic recall finds matches.
 
-        When the episodic tier produced relevant context, piling on three
-        arbitrary recent notes adds tokens without adding signal.
-        (PR #131 review F-1: unconditional fallback inflates every prompt.)
+        Pre-PR 4 the ``should_fall_back`` guard short-circuited the
+        fallback whenever episodes were present, preventing arbitrary
+        recent notes from being piled on a prompt that already had
+        signal.  Post-PR 4 the fallback no longer exists; the unrelated
+        note simply scores below ``_DEFAULT_NOTES_MIN_SCORE`` and is
+        filtered at the DB layer.  The assertion (notes section absent)
+        remains valid; only the mechanism changed.
+        (PR #148 review M-2 — docstring updated.)
         """
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
@@ -3223,10 +3252,12 @@ class TestNoteRecencyFallback:
         assert ep_section is not None
         assert "pottery glaze" in ep_section.content
 
-        # Recency fallback should NOT have fired because episodes were found.
+        # Recency fallback no longer exists; assert the unrelated note was
+        # filtered by min_score rather than by the (deleted) fallback gate.
         notes_section = agent._working_memory.get_section("recent_notes")
         assert notes_section is None, (
-            "Recency fallback should skip when episodes already provided signal"
+            "Unrelated note must not be injected when episodes already match "
+            "(filtered by min_score post-PR 4)."
         )
         await agent.close_memory()
 

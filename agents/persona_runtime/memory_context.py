@@ -10,11 +10,23 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ..memory.episodic import EpisodicMemory
+from ..memory.episodic import (
+    _DEFAULT_EPISODIC_MIN_SCORE,
+    _DEFAULT_NOTES_MIN_SCORE,
+    EpisodicMemory,
+)
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
-from ..persona_types import AgentEvent, EventType
 from .memory_budget import MemoryBudget, _truncate_to_token_limit
+
+if TYPE_CHECKING:
+    # ``from __future__ import annotations`` makes every annotation in this
+    # module a string; ``AgentEvent`` is therefore never evaluated at
+    # runtime and only needs to be importable for type checkers.  Keeping
+    # it inside ``TYPE_CHECKING`` removes the need for the previous
+    # TCH001 suppression on the runtime import.
+    # (PR #148 review finding L-1: resolve TCH001 suppression.)
+    from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +204,15 @@ class _MemoryContextMixin:
         :meth:`MemoryBudget.try_add`; items that exceed the remaining budget
         are truncated or dropped.
 
-        The method preserves the existing TICK skip and ``should_fall_back``
-        heuristic unchanged — both are removed in PR 4 once the recall-layer
-        ``min_score`` threshold makes them redundant.
+        PR 4 (RFC 0017): the TICK skip and ``should_fall_back`` recency-note
+        fallback have been removed.  ``recall()`` and ``recall_notes()`` are
+        now invoked for every event type; the ``min_score`` thresholds
+        (``_DEFAULT_EPISODIC_MIN_SCORE`` / ``_DEFAULT_NOTES_MIN_SCORE``)
+        applied at the DB layer are the sole filters for low-signal content.
+        Zero-admission events (TICK, short greetings) are expected to be
+        short-circuited by PR 5's empty-context guard, which consumes the
+        ``memory_admitted_tokens`` field on the returned
+        :class:`MemoryInjectionResult`.
 
         Design: each memory tier is wrapped in ``except Exception`` to ensure
         one tier's failure (DB lock, I/O error, corrupted data) never blocks
@@ -272,54 +290,45 @@ class _MemoryContextMixin:
                 rel = None
 
         # Tier 2 (priority 7): Episodic recall.
-        # Keep TICK skip — removed in PR 4 once recall-layer min_score
-        # threshold subsumes it.
-        # (PR #60 review: TICK events waste I/O on low-signal FTS5 matches.)
-        if event.event_type == EventType.TICK:
+        # PR 4: TICK skip removed — the recall-layer min_score threshold
+        # filters low-signal TICK content at the DB layer; zero-admission
+        # TICK events are handled by the PR 5 empty-context short-circuit.
+        # (RFC 0017 §D; previously: PR #60 TICK skip preserved through PR 2/3.)
+        try:
+            episodes = await self._episodic_memory.recall(
+                query,
+                limit=5,
+                min_score=_DEFAULT_EPISODIC_MIN_SCORE,
+            )
+        except Exception:
+            logger.warning(
+                "Agent %s: episodic recall failed, skipping",
+                self.agent_id, exc_info=True,
+            )
             episodes = []
-        else:
-            try:
-                episodes = await self._episodic_memory.recall(query, limit=5)
-            except Exception:
-                logger.warning(
-                    "Agent %s: episodic recall failed, skipping",
-                    self.agent_id, exc_info=True,
-                )
-                episodes = []
 
         # Tier 3 (priority 6): Recent notes matching event content.
-        # Notes recall runs even for TICK events because notes are
-        # agent-authored curated knowledge relevant to autonomous goal review.
-        # (PR #60 review: preserve TICK notes injection.)
+        # Notes recall runs for all event types (including TICK) because notes
+        # are agent-authored curated knowledge relevant to autonomous goal review.
+        # PR 4: min_score threshold filters low-signal matches at the DB layer;
+        # the recency fallback (should_fall_back) is removed because
+        # min_score makes "no FTS5 matches" a reliable signal — a threshold-
+        # filtered empty result means genuinely no relevant notes, not a
+        # missing FTS5 index fallback.  The fallback's recency query would
+        # re-admit those low-signal notes, defeating the threshold.
+        # (RFC 0017 §D; PR #131 F-1 fallback removed.)
         try:
-            notes = await self._episodic_memory.recall_notes(query, limit=5)
+            notes = await self._episodic_memory.recall_notes(
+                query,
+                limit=5,
+                min_score=_DEFAULT_NOTES_MIN_SCORE,
+            )
         except Exception:
             logger.warning(
                 "Agent %s: note recall failed, skipping",
                 self.agent_id, exc_info=True,
             )
             notes = []
-
-        # Recency fallback — keep should_fall_back heuristic; removed in PR 4
-        # once min_score makes "no FTS5 matches" a reliable signal.
-        # Two gates: MESSAGE_RECEIVED only, and skip when episodic recall
-        # already produced results.
-        # (PR #131 review F-1: unconditional recency-note fallback inflates
-        #  every prompt where FTS5 did not match.)
-        should_fall_back = (
-            not notes
-            and event.event_type == EventType.MESSAGE_RECEIVED
-            and not episodes
-        )
-        if should_fall_back:
-            try:
-                notes = await self._episodic_memory.recall_notes("", limit=3)
-            except Exception:
-                logger.warning(
-                    "Agent %s: recency note fallback failed, skipping",
-                    self.agent_id, exc_info=True,
-                )
-                notes = []
 
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Process tiers in fixed priority order (relationship=8 → episodic=7
@@ -439,4 +448,9 @@ class _MemoryContextMixin:
                 ))
 
         memory_admitted_tokens = _MEMORY_BUDGET_TOKENS - budget.remaining
+        # TODO(RFC-0017-PR5): consume ``memory_admitted_tokens`` in the
+        # caller (``_on_event_inner``) to short-circuit the LLM call when
+        # zero memory was admitted for a TICK / low-signal event.  Until
+        # PR 5 lands, this value is computed but unused in production;
+        # PR 4's unit tests assert it for the contract.
         return MemoryInjectionResult(memory_admitted_tokens=memory_admitted_tokens)
