@@ -1233,11 +1233,16 @@ class TestInitializePersonaAgents:
         assert "iron-fox" in dispatcher._agents
         await ok_agent.close_memory()
 
-    async def test_tick_schedulers_dict_mutated_in_place(self):
+    async def test_tick_schedulers_dict_mutated_in_place(self, caplog):
         """The tick_schedulers dict passed in is mutated: autonomous agents are inserted.
 
         Validates the in-place mutation contract documented in the function's
         docstring — callers rely on the dict being populated, not on a return value.
+
+        Also asserts that the three COST: warning lines are actually emitted on the
+        autonomous path so that a silent regression (accidental deletion or wrong
+        condition guard) is caught by the test suite.
+        (PR #150 review: cost-warning log lines lacked a dedicated regression test.)
         """
         from agents.server_persona import initialize_persona_agents
 
@@ -1257,10 +1262,12 @@ class TestInitializePersonaAgents:
         dispatcher = EventDispatcher()
         schedulers: dict = {}
 
-        await initialize_persona_agents({"ember-owl": agent}, dispatcher, schedulers)
+        with caplog.at_level(logging.WARNING, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents({"ember-owl": agent}, dispatcher, schedulers)
 
         assert "ember-owl" in schedulers
         assert schedulers["ember-owl"].is_running
+        assert any("COST:" in r.message for r in caplog.records)
 
         await schedulers["ember-owl"].stop()
         await agent.close_memory()

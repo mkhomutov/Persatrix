@@ -218,6 +218,32 @@ async def initialize_persona_agents(
             )
             tick_schedulers[agent_id] = scheduler
             dispatcher.register_tick_scheduler(agent_id, scheduler)
+            # Cost-safety notice — emitted *before* scheduler.start() so the
+            # warning is guaranteed to reach the log before any LLM spend can
+            # begin.  Placing it after start() would invert the semantic order
+            # the PR description promised ("at the exact moment spend can begin")
+            # and mislead future maintainers.
+            # See README.md "Cost Warning" and SECURITY.md "Responsible Use".
+            max_llm_calls = agent.config.get("max_llm_calls", "unset")
+            logger.warning(
+                "COST: persona '%s' is about to start an autonomous tick loop "
+                "and will consume LLM tokens continuously.",
+                agent_id,
+            )
+            logger.warning(
+                "COST: tick_interval=%ss, max_actions_per_tick=%s, "
+                "idle_after_ticks=%s, max_llm_calls=%s.",
+                interval,
+                max_actions,
+                idle_after,
+                max_llm_calls,
+            )
+            logger.warning(
+                "COST: stop agent '%s' explicitly when done — do not rely "
+                "on idle detection alone. Confirm hard spending limits are "
+                "set at your LLM provider's billing page.",
+                agent_id,
+            )
             scheduler.start()
             logger.info(
                 "Started tick scheduler for %s (interval=%ds)",

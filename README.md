@@ -79,6 +79,59 @@ for an end-to-end run.
 
 ---
 
+## ⚠️ Cost Warning — Read Before Running
+
+Persatrix uses commercial LLM APIs (Anthropic by default; the model is selected
+per agent in [config/agents.yaml](config/agents.yaml)) and runs persona agents
+with autonomous tick loops that consume API tokens continuously while the
+agent process is alive.
+
+**This is experimental software (pre-1.0, BUSL-1.1). It has bugs. Some bugs
+may cost you money.**
+
+During testing of v0.2.1 the author accidentally left a persona agent running
+with a faulty empty-context idle check and lost roughly $35 USD in API costs
+before noticing. v0.2.2 ships the empty-context tick short-circuit
+([RFC 0017](docs/rfcs/0017-persona-memory-injection-budget.md)) that
+fixes that specific bug. Other bugs with similar cost implications almost
+certainly exist.
+
+**Before running Persatrix, every user must:**
+
+1. **Set hard spending limits at your LLM provider's billing page.** This is
+   the authoritative safeguard against runaway costs. Persatrix's own budget
+   controls (`max_llm_calls` per agent, `max_daily_usd` in
+   [config/optimization.yaml](config/optimization.yaml), per-workflow token
+   budgets) are best-effort and should never be your only protection.
+
+2. **Configure billing alerts at your LLM provider** so you are notified
+   immediately if spending exceeds expected thresholds.
+
+3. **Start with short test sessions.** Stop persona agents explicitly when
+   you are done — kill the `make run-agent` process or the `agent-*` Docker
+   Compose service. Do not rely on `idle_after_ticks` or the empty-context
+   short-circuit alone.
+
+4. **Review [config/agents.yaml](config/agents.yaml) and
+   [config/optimization.yaml](config/optimization.yaml) and set conservative
+   limits** appropriate to your budget — `max_llm_calls` per agent,
+   `tick_interval_seconds` (longer = cheaper), `max_actions_per_tick`,
+   `idle_after_ticks`, and the global `max_daily_usd` budget.
+
+5. **Monitor your provider's usage dashboard during initial runs.** Do not
+   assume budgets are being enforced correctly until you have verified
+   against your provider's authoritative numbers. Persatrix exposes
+   `GET /api/v1/cost/summary` for in-process accounting, but that is
+   independent from your provider's billing.
+
+Persatrix is distributed under [BUSL 1.1](LICENSE). No warranty is provided.
+The authors are not liable for API costs, lost data, or any other damages
+arising from use. Use at your own risk. See
+[SECURITY.md § Responsible Use](SECURITY.md#responsible-use) for the broader
+framing.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
