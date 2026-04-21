@@ -246,7 +246,7 @@ PR 7 (RFC close)
 **Branch**: `feature/v022-empty-context-tick-shortcircuit`
 **Estimated size**: ~200–350 lines (implementation + tests)
 
-> **Open at PR-plan time**: which file owns the TICK handler that issues the LLM call. RFC's Files Touched lists `agents/persona_runtime/__init__.py (or TICK handler module)`. The actual call site is in `agents/persona_behavior.py` / `agents/persona.py` — *not* in [`agents/tick.py`](../../agents/tick.py), which only schedules ticks via `TickScheduler`. PR 5's **first commit** appends the resolved module name to this plan (in this same paragraph) so the decision survives the squash merge as a discoverable artifact, not just a PR-description field. The two-accessor contract below assumes `PersonaAgent.handle_event(event)` (or its equivalent) is the call site.
+> **Open at PR-plan time**: which file owns the TICK handler that issues the LLM call. RFC's Files Touched lists `agents/persona_runtime/__init__.py (or TICK handler module)`. The actual call site is in `agents/persona_runtime/action_loop.py` — `_ActionLoopMixin._on_event_inner()` — which is mixed into `_LLMPersonaAgent` in `agents/persona_runtime/__init__.py`. `agents/persona_behavior.py` / `agents/persona.py` contain behavioral/ABC definitions only and do NOT own the LLM call. The two ambient state accessors added by this PR are `_has_active_goal_payload()` and `_has_pending_turn()`, both on `_LLMPersonaAgent` in `agents/persona_runtime/__init__.py`. PR 5's **first commit** appended this resolution (per the open-at-plan-time paragraph contract). The two-accessor contract below uses `PersonaState.goal_progress` and `PersonaState.recent_context` — no new persisted state introduced.
 
 #### Scope
 
@@ -273,13 +273,13 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_persona_tick_shortcircuit.py -v` passes
-- [ ] All five required cases (a)–(e) implemented as separate test functions
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] TICK handler module pinned by name **both** in the PR description **and** as an inline amendment to the open-at-plan-time paragraph above in this plan (per PR #144 review — pinning only in the PR description loses the decision after squash merge)
-- [ ] `idle_count` increments on short-circuited ticks
-- [ ] DEBUG log with `reason="empty_context_tick"` field
+- [x] `pytest agents/tests/test_persona_tick_shortcircuit.py -v` passes
+- [x] All five required cases (a)–(e) implemented as separate test functions
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] TICK handler module pinned by name **both** in the PR description **and** as an inline amendment to the open-at-plan-time paragraph above in this plan (per PR #144 review — pinning only in the PR description loses the decision after squash merge)
+- [x] `idle_count` increments on short-circuited ticks
+- [x] DEBUG log with `reason="empty_context_tick"` field
 
 ---
 

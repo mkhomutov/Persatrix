@@ -185,6 +185,36 @@ class _LLMPersonaAgent(
         """
         self._state.recover_energy()
 
+    def _has_active_goal_payload(self) -> bool:
+        """Return True if the agent has active goal progress tracked.
+
+        Used by the RFC 0017 §F empty-context TICK short-circuit in
+        ``_on_event_inner()``.  Returns True when ``goal_progress`` is
+        non-empty, meaning the agent is actively working toward one or
+        more goals.  No new persisted state is introduced — this reads
+        the existing ``PersonaState.goal_progress`` field.
+
+        TICK handler module pin (RFC 0017 PR plan open-at-plan-time):
+        The short-circuit lives in ``_ActionLoopMixin._on_event_inner``
+        (``agents/persona_runtime/action_loop.py``).  The two ambient
+        state accessors are ``_has_active_goal_payload`` and
+        ``_has_pending_turn``, both on ``_LLMPersonaAgent``
+        (``agents/persona_runtime/__init__.py``).
+        """
+        return bool(self._state.goal_progress)
+
+    def _has_pending_turn(self) -> bool:
+        """Return True if there is recent conversation context pending.
+
+        Used by the RFC 0017 §F empty-context TICK short-circuit in
+        ``_on_event_inner()``.  Returns True when ``recent_context`` is
+        non-empty, meaning an ongoing conversation exists whose context
+        the LLM should still consider on the next tick.  No new
+        persisted state — ``recent_context`` is already on
+        ``PersonaState`` (and is intentionally NOT persisted to disk).
+        """
+        return bool(self._state.recent_context)
+
     # ─── System prompt assembly ────────────────────────
 
     def _build_system_prompt(self) -> str:

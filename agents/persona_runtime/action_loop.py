@@ -82,6 +82,8 @@ class _ActionLoopMixin:
         ) -> MemoryInjectionResult: ...
         def _build_system_prompt(self) -> str: ...
         async def _persist_persona_state(self) -> None: ...
+        def _has_active_goal_payload(self) -> bool: ...
+        def _has_pending_turn(self) -> bool: ...
 
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
         """Build tool definitions including memory tools.
@@ -340,11 +342,35 @@ class _ActionLoopMixin:
             memory_query = event.payload.get("content", "")
         else:
             memory_query = user_message
-        # Return value (MemoryInjectionResult) is intentionally discarded
-        # here; it is consumed by RFC 0017 PR 5's empty-context TICK
-        # short-circuit, which lands later in the chain.
-        # (PR #146 review.)
-        await self._inject_memory_context(event, query=memory_query)
+        # RFC 0017 §F: capture the injection result for the empty-context
+        # TICK short-circuit below.  The MemoryInjectionResult exposes
+        # memory_admitted_tokens so we can decide whether any memory was
+        # actually relevant before paying the LLM call cost.
+        injection_result = await self._inject_memory_context(event, query=memory_query)
+
+        # RFC 0017 §F: empty-context TICK short-circuit.
+        # Suppress the LLM call when all four conditions hold:
+        #   1. This is an autonomous TICK event (not a user/task event).
+        #   2. No memory was admitted (zero relevant episodes, notes, or
+        #      relationships) — the recall-layer min_score threshold already
+        #      filtered low-signal content at the DB layer (PR 4).
+        #   3. No active goal payload — the agent has nothing to work toward.
+        #   4. No pending conversation turn — no user is waiting for a reply.
+        # On match: return DO_NOTHING so TickScheduler increments idle_count
+        # via its existing all_do_nothing branch.  Log at DEBUG with a stable
+        # reason field so RFC 0019 (OTEL) can promote it to a counter later.
+        if (
+            event.event_type == EventType.TICK
+            and injection_result.memory_admitted_tokens == 0
+            and not self._has_active_goal_payload()
+            and not self._has_pending_turn()
+        ):
+            logger.debug(
+                "Agent %s: empty-context tick suppressed",
+                self.agent_id,
+                extra={"reason": "empty_context_tick", "agent_id": self.agent_id},
+            )
+            return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # 1. Build system prompt and append working memory context.
         system_prompt = self._build_system_prompt()
