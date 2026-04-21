@@ -329,7 +329,79 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 ##### From PR 2 review
 
-*(populated after PR 2 review)*
+1. **`_REL_NOTES_INTERIM_CHARS = 400` re-introduces a per-tier char cap the RFC removes**
+   (`agents/persona_runtime/memory_context.py`). The constant slices `rel.notes` to 400 chars before
+   the budget allocator sees them, defeating budget-driven trade-offs (a high-trust note that would
+   fit in 600 chars is silently truncated) and re-creating the "uncoordinated cap" pattern RFC 0017
+   §B was authored to remove. Goal 2 of the RFC commits to "the three `_MAX_*_CHARS` constants are
+   replaced by a single tunable `_MEMORY_BUDGET_TOKENS`"; this is a fourth char constant in a
+   different guise. Either remove the constant and the slice (deferring peer-note volume mitigation
+   to v0.3 per the RFC's Non-Goals), or amend RFC 0017 with an explicit "Interim mitigations"
+   section that records the 400-char cap and its v0.3 retirement plan, then keep the constant.
+   Existing test `test_relationship_exhausting_budget_starves_other_tiers` already monkeypatches
+   the constant to 1_000_000 to assert the documented tier-starvation behaviour — a test that
+   bypasses its own production constant is a smell that supports removal.
+
+2. **Section header strings are not charged against the token budget**
+   (`agents/persona_runtime/memory_context.py`). The literals `"Relevant past episodes:\n"` and
+   `"Relevant notes:\n"` are prepended to their tier sections after `MemoryBudget.try_add(...)` has
+   admitted items, so they bypass the budget. Total injected memory can exceed
+   `_MEMORY_BUDGET_TOKENS` by ~5 tokens per non-empty lower tier, and `memory_admitted_tokens`
+   under-reports the real injected count. RFC Goal 1 promises "a hard, deterministic upper bound
+   expressed in tokens"; the docstring claims a strict bound. Fix options: (a) reserve a small
+   header-overhead constant via `MemoryBudget(total_tokens=_MEMORY_BUDGET_TOKENS - _HEADER_RESERVE)`,
+   or (b) call `budget.try_add(header)` first inside each tier's `if items:` block so the header is
+   admitted from the budget. Option (b) preserves the additive contract and removes the under-report.
+   PR 5's empty-context check is safe in direction (zero stays zero), so this can ride along here
+   without blocking PR 5.
+
+3. **`WorkingMemory.token_count` uses `chars/4` while `MemoryBudget` uses tiktoken**
+   (`agents/persona_runtime/memory_context.py`). All three `add_section(... token_count=estimate_tokens(...))`
+   call sites pass the chars/4 estimate while the allocator measures with tiktoken. The two
+   accountings can diverge ~10–20% on prose and 2–3× on code/JSON/CJK content. Acceptable as a soft
+   secondary cap, but flagged because an operator debugging "why was my section dropped despite
+   being under budget?" will trip over it. Fix: pass `accurate=True` to `estimate_tokens` for these
+   three call sites so both layers use tiktoken with a consistent fallback. Single-line change per
+   call site; no API impact.
+
+4. **`rel.other_participant_id` is interpolated unsanitised into the LLM-visible label**
+   (`agents/persona_runtime/memory_context.py`). The `f"{rel.other_participant_id} (Human user)"`
+   format string lands the participant ID directly in the prompt. Validated upstream today; v0.3
+   A2A admits external agents whose IDs are not under our control. The existing
+   `# TODO(v0.3): sanitize peer-supplied notes` comment near `rel.notes` should be expanded to
+   cover IDs as well so the v0.3 sanitisation sweep does not miss it. One-line comment edit.
+
+5. **`MemoryBudget._count_tokens` is invoked 3× per oversized item in `try_add`**
+   (`agents/persona_runtime/memory_budget.py`). The triple-encode cost is acknowledged in an
+   inline comment and is acceptable for memory-snippet sizes (≤ a few KB). No fix in this round;
+   captured here as a known starting point if the allocator ever shows up in profiling.
+
+6. **Test gap: zero-budget integration through `_inject_memory_context`**
+   (`agents/tests/test_persona_runtime_memory_context.py`). `MemoryBudget` itself has the
+   `total_tokens=0` test in `test_memory_budget.py`, but the integration path through
+   `_inject_memory_context` does not. The RFC commits to "retune by changing this single
+   constant"; the degenerate retune is uncovered. Add a test that monkeypatches
+   `mc._MEMORY_BUDGET_TOKENS = 0`, runs with non-empty episodes/notes/relationship, and asserts
+   all three sections absent and `result.memory_admitted_tokens == 0`.
+
+7. **Test gap: exactly-at-budget single-item boundary**
+   (`agents/tests/test_persona_runtime_memory_context.py`). Off-by-one boundary around
+   `count <= self._remaining` in `MemoryBudget.try_add` is not exercised at the integration
+   layer. Construct an item whose tiktoken count equals `_MEMORY_BUDGET_TOKENS`; assert it is
+   admitted whole and `budget.remaining == 0` afterwards.
+
+8. **Test gap: header-overhead invariant pinned (companion to finding 2)**
+   (`agents/tests/test_persona_runtime_memory_context.py`). Once finding 2 is fixed, add an
+   invariant test asserting that for non-empty tiers the section content's actual token count
+   equals `result.memory_admitted_tokens` (or `+ header_tokens` if option (a) is chosen). Pins
+   the regression so a future change can't silently re-introduce the under-report.
+
+9. **Test gap: third `should_fall_back` negative path**
+   (`agents/tests/test_persona_runtime_memory_context.py`). The `should_fall_back` gate has three
+   `and` clauses; only two negative paths are tested. Add a test with `event_type="TASK_ASSIGNED"`,
+   empty notes, and empty episodes, asserting `recall_notes` is called exactly once (no fallback
+   triggered). Note: this finding becomes obsolete once PR 4 deletes `should_fall_back`; if PR 4
+   merges before this finding is addressed, drop it from PR 6's scope.
 
 ##### From PR 3 review
 
