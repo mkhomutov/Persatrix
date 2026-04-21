@@ -104,7 +104,7 @@ PR 7 (RFC close)
 - [x] `_truncate_with_ellipsis` accepts `mode="tokens"` keyword and falls back gracefully without `tiktoken`
 - [x] ROADMAP.md RFC tracker row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR; this checklist line lives on PR 1 only and was moved here from PR 2 to resolve a contradiction surfaced in PR #144 review)
 
-**Open**: PR #145 — 2026-04-21
+**Merged**: PR #145 — 2026-04-21
 
 ---
 

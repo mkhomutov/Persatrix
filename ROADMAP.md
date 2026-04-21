@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-21 (RFC 0017 � Implementing — PR 1/7 open)  
+> **Last updated**: 2026-04-21 (RFC 0017 🚧 Implementing — PR 2/7 merged)  
 > **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — 🚧 Implementing  
-> **Current milestone**: RFC 0017 PR 1 — MemoryBudget allocator + token-aware truncation
+> **Current milestone**: RFC 0017 PR 3 — min_score on EpisodicMemory.recall / recall_notes
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -48,7 +48,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
-| [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | � Implementing (1/7) |
+| [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | 🚧 Implementing (2/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | 📋 Proposed |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 📋 Proposed |
 
@@ -603,8 +603,14 @@ v0.5.0 complete
 | [#136](https://github.com/mkhomutov/Persatrix/pull/136) | docs(readme): refresh README for v0.2.1 chat surface | v0.2.1 release prep | 2026-04-21 |
 | [#137](https://github.com/mkhomutov/Persatrix/pull/137) | docs(release): add v0.2.1 release checklist | v0.2.1 release prep | 2026-04-21 |
 | [#138](https://github.com/mkhomutov/Persatrix/pull/138) | chore(release): bump version to 0.2.1 and update changelog | v0.2.1 release prep | 2026-04-21 |
+| [#139](https://github.com/mkhomutov/Persatrix/pull/139) | chore(deps): bump rustls-webpki from 0.103.10 to 0.103.12 in /cli | security patch | 2026-04-21 |
 | [#140](https://github.com/mkhomutov/Persatrix/pull/140) | chore(release): final pre-tag gate — v0.2.1 complete | v0.2.1 release prep | 2026-04-21 |
 | [#141](https://github.com/mkhomutov/Persatrix/pull/141) | docs(release): post-release follow-up for v0.2.1 | v0.2.1 release prep | 2026-04-21 |
+| [#142](https://github.com/mkhomutov/Persatrix/pull/142) | docs(rfcs): add RFC 0018 (Structured Logging) and RFC 0019 (OTEL Completion) for v0.2.3 | 0018+0019 (RFC) | 2026-04-21 |
+| [#143](https://github.com/mkhomutov/Persatrix/pull/143) | docs(rfcs): accept RFC 0017 — persona memory injection token budget | 0017 accept | 2026-04-21 |
+| [#144](https://github.com/mkhomutov/Persatrix/pull/144) | docs(rfcs): add PR plan for RFC 0017 — persona memory injection budget | 0017 (PR plan) | 2026-04-21 |
+| [#145](https://github.com/mkhomutov/Persatrix/pull/145) | feat(agents): MemoryBudget allocator + token-aware truncation (RFC 0017 PR 1/7) | 0017 (1/7) | 2026-04-21 |
+| [#146](https://github.com/mkhomutov/Persatrix/pull/146) | feat(agents): _inject_memory_context allocate-loop rewrite (RFC 0017 PR 2/7) | 0017 (2/7) | 2026-04-21 |
 
 ---
 
