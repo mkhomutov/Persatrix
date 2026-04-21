@@ -403,6 +403,55 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
    triggered). Note: this finding becomes obsolete once PR 4 deletes `should_fall_back`; if PR 4
    merges before this finding is addressed, drop it from PR 6's scope.
 
+10. **PR description / RFC §B wording: "single budget" framing understates the merged shape**
+    (PR #146 description and `docs/rfcs/0017-persona-memory-injection-budget.md` §B). The PR-2
+    checklist line "All three legacy char caps removed" and RFC §B's "single token bound replaces
+    three char caps" framing are accurate about *names* but the implementation re-introduces three
+    smaller per-field caps — `_REL_NOTES_INTERIM_CHARS = 400` (security mitigation),
+    `_MAX_EPISODE_SUMMARY_CHARS = 200` and `_MAX_NOTE_CONTENT_CHARS = 500` (readability /
+    fairness). The hybrid model (token budget + per-field char caps) is the right engineering
+    trade-off (peer-input surface bounded independently of budget allocation order; predictable
+    per-item ceilings for the LLM) but is currently documented only via inline comments in
+    `memory_context.py`. Fix in PR 7's RFC close: amend RFC 0017 §B with a short "Implemented
+    shape" sub-section recording the hybrid model and the rationale for each retained cap, so the
+    RFC matches the code as merged. No code change required. (Re-review of PR #146 reclassified the
+    earlier finding #1 from "remove the cap" to "document the hybrid".)
+
+11. **`test_token_bound_holds_with_large_content` asserts a tautology**
+    (`agents/tests/test_persona_runtime_memory_context.py`). The single assertion
+    `result.memory_admitted_tokens <= _MEMORY_BUDGET_TOKENS` is true by construction of
+    `MemoryBudget.try_add` — `_remaining` only decrements from the initial budget, so the difference
+    `total - remaining` is mathematically bounded by `total`. The test would pass even if the
+    allocate-loop regressed to "admit nothing" or "admit only tier 1". Strengthen with: (a) a
+    positive lower-bound assertion `result.memory_admitted_tokens > 0` confirming the loop actually
+    admitted content under pressure, and (b) a cross-check against the working-memory side —
+    `sum(estimate_tokens(s.content) for s in mixin._working_memory._sections)` should be within the
+    documented header-overhead slack of `result.memory_admitted_tokens`. The cross-check makes the
+    test fail if header accounting is silently changed (companion to finding 2's header-overhead
+    fix).
+
+12. **End-to-end coverage of `MemoryBudget`-driven U+2026 truncation through `_inject_memory_context` is missing**
+    (`agents/tests/test_persona_runtime_memory_context.py`). The per-field char caps (200 / 500 /
+    400) short-circuit before `MemoryBudget.try_add` ever needs to truncate, so the U+2026 (`…`)
+    marker emitted by the budget-truncation path is exercised only at the unit level in
+    `agents/tests/test_memory_budget.py`. A regression that broke budget-driven truncation inside
+    the wired call site would not be caught by any integration-style test in this PR. Add one test
+    that drives 8+ in-cap items (notes or episodes) past the 1500-token block budget and asserts at
+    least one admitted line ends with `"…"` (U+2026) and not `"..."` (three ASCII dots). This also
+    pins down the intentional two-marker UX so a future "normalise to one marker" change is a
+    deliberate decision rather than an accidental drift.
+
+13. **(Nice-to-have) Normalise the two truncation markers, or document the dual-marker prompt UX**
+    (`agents/persona_runtime/memory_context.py`, `agents/persona_runtime/memory_budget.py`). Char-mode
+    truncation appends `"..."` (three ASCII dots, used by the per-field caps) and token-mode
+    appends `"…"` (U+2026, used by `MemoryBudget.try_add`). Both can appear in the same LLM prompt.
+    The LLM may interpret the two markers as semantically distinct (e.g., "...continued" vs
+    "...truncated for length"). Two acceptable resolutions: (a) normalise both modes to `"…"` and
+    update the small number of `endswith("...")` test assertions accordingly, or (b) add a
+    one-line system-prompt note explaining that both markers mean "content truncated". (a) is a
+    smaller diff and removes a class of confusion; flagged here as nice-to-have rather than a
+    finding because the current behaviour is documented in code.
+
 ##### From PR 3 review
 
 *(populated after PR 3 review)*
