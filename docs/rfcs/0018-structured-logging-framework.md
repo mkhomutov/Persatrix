@@ -25,15 +25,15 @@ Mirrored from [RFC 0019 § Relationship to RFC 0018](0019-opentelemetry-completi
 | Concern | Single source of truth |
 |---------|------------------------|
 | Trace + metric export | OTLP HTTP (port 4318) — RFC 0019 |
-| Log ingest (agent → orchestrator) | `LogService` streaming gRPC over the existing agent gRPC channel — this RFC, [Section E](#e-persatrix-logs-endpoint-storage-and-streaming) |
+| Log ingest (agent → orchestrator) | `LogService` streaming gRPC over the existing agent gRPC channel — RFC 0018 [Section E](#e-persatrix-logs-endpoint-storage-and-streaming) |
 | Log export to external backends (optional) | OTLP HTTP via the same Collector — operator-side, out of scope for v0.2.3 |
-| Schema version field | `schema_version: 1` (logs, this RFC); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics, RFC 0019) |
+| Schema version field | `schema_version: 1` (logs, RFC 0018); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics, RFC 0019) |
 | Correlation IDs | `execution_id`, `step_id`, `agent_id`, `workflow_id`, `trace_id`, `span_id` |
 | Cross-process propagation | W3C TraceContext + W3C Baggage |
 | Redaction hook | Shared interface, used by both log records and span attributes |
 | Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree; the rename happens in RFC 0019 Phase 1) |
 | Sampling discipline | Parent-based head sampling + Collector tail sampling |
-| Log↔trace enricher ownership | This RFC (owns the structlog chain and zap encoder where the enrichment lives); RFC 0019 only requires that the OTEL context is established before the enricher PR lands |
+| Log↔trace enricher ownership | RFC 0018 (owns the structlog chain and zap encoder where the enrichment lives); RFC 0019 only requires that the OTEL context is established before the enricher PR lands |
 
 ---
 
@@ -148,6 +148,8 @@ One JSON object per line, one event per object. Field emission order is **stable
 | 15 | `source` | object | `{file, line, function}` of the call site. |
 
 `service.kind` / `service.instance` / `service.role` are emitted as a flat-keyed group (e.g., `"service.kind": "agent"`, `"service.instance": "ember-owl"`) rather than nested, to keep `jq` / `grep` workflows simple.
+
+**Immutability of `service.*` on ingest.** `service.kind`, `service.instance`, and `service.role` are set by the emitter at the moment a log record is created and are **never rewritten by the orchestrator on ingest**. Agent-shipped records persisted into the orchestrator's ring buffer ([Section E](#e-persatrix-logs-endpoint-storage-and-streaming)) preserve their original `service.kind=agent` / `service.role=<role>` fields; the orchestrator's own records carry `service.kind=orchestrator`. The merged stream returned by the `logs` endpoint therefore lets a reader distinguish per-record provenance without consulting any out-of-band metadata.
 
 #### Versioning
 
@@ -407,7 +409,7 @@ issue would have nothing to track.
 | Docs | `docs/observability.md` | Add (new — schema + operations guide) |
 | Docs | [README.md](../../README.md) | Add `PERSATRIX_LOG_FORMAT=pretty` to quick-start |
 | Docs | [CHANGELOG.md](../../CHANGELOG.md) | v0.2.3 entry: zap field renames table; new endpoints; new env vars |
-| Docs | [ROADMAP.md](../../ROADMAP.md) | Add v0.2.3 milestone; add RFC 0018 to tracker |
+| Docs | [ROADMAP.md](../../ROADMAP.md) | Update RFC 0018 status (📋 → 🚧 → ✅) and the v0.2.3 "Observability Foundation" milestone row as PRs land (the milestone row and tracker entry already exist; implementation PRs flip status fields rather than add rows) |
 | Protos | `proto/log_service.proto` | Add (new) |
 | Generated | `internal/generated/log_service*.go`, `agents/generated/log_service*.py` | Regenerated |
 | Python agents | `agents/observability/__init__.py`, `agents/observability/logging.py`, `agents/observability/grpc_logging.py`, `agents/observability/log_shipper.py`, `agents/observability/redact.py` | Add (new modules) |
@@ -472,6 +474,7 @@ The following decisions are part of the spec; they are recorded here for traceab
 1. Confirm v0.2.3 as the target milestone (this RFC adds v0.2.3 to the ROADMAP version map alongside RFC 0019).
 2. Sign off on the schema in [Section B](#b-common-log-schema) as the cross-language contract (including `schema_version: "1"` and the structured `service.*` group).
 3. Sign off on `LogService` as a new public proto surface in `proto/log_service.proto`.
+4. Acknowledge the joint-PR-plan discipline: `docs/rfcs/0018-pr-plan.md` and `docs/rfcs/0019-pr-plan.md` MUST be authored as a coordinated pair (not independently), with the three Cross-RFC sequencing constraints below copied verbatim into both plans so the ordering is not re-derived inconsistently.
 
 **Cross-RFC sequencing (added per PR #160 review).** Coordinated with [RFC 0019 Decision / Next Steps](0019-opentelemetry-completion.md#decision--next-steps):
 

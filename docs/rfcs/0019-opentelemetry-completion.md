@@ -6,7 +6,7 @@
 **Date**: 2026-04-21 (rev 2026-04-22 — future-focused expansion; rev 2026-04-22b — apply PR #160 review)
 **Target**: v0.2.3
 **Depends on**: none
-**Pairs with**: RFC 0018 (Structured Logging Framework — both ship together in v0.2.3 with shared schema, redaction hook, and OTLP export; see [Relationship to RFC 0018](#relationship-to-rfc-0018))
+**Pairs with**: RFC 0018 (Structured Logging Framework — both ship together in v0.2.3 with shared schema, redaction hook, and a shared `internal/observability/` namespace; transport is split per signal — see [Relationship to RFC 0018](#relationship-to-rfc-0018))
 
 <!--
 Review note (PR #160): the `Schema version` field was removed from the frontmatter
@@ -68,16 +68,16 @@ in the PR description before merge — that is a metadata fix, not an RFC change
 
 | Concern | Single source of truth |
 |---------|------------------------|
-| Trace + metric export | OTLP HTTP (port 4318) — this RFC |
+| Trace + metric export | OTLP HTTP (port 4318) — RFC 0019 |
 | Log ingest (agent → orchestrator) | `LogService` streaming gRPC over the existing agent gRPC channel — RFC 0018 Section E |
 | Log export to external backends (optional) | OTLP HTTP via the same Collector — operator-side, out of scope for v0.2.3 |
-| Schema version field | `schema_version: 1` (logs); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics) |
+| Schema version field | `schema_version: 1` (logs, RFC 0018); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics, RFC 0019) |
 | Correlation IDs | `execution_id`, `step_id`, `agent_id`, `workflow_id`, `trace_id`, `span_id` |
 | Cross-process propagation | W3C TraceContext + W3C Baggage |
 | Redaction hook | Shared interface, used by both log records and span attributes |
-| Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree) |
+| Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree; the rename happens in RFC 0019 Phase 1) |
 | Sampling discipline | Parent-based head sampling + Collector tail sampling |
-| Log↔trace enricher ownership | RFC 0018 (owns the structlog chain and zap encoder where the enrichment lives); this RFC only requires that the OTEL context is established before the enricher PR lands |
+| Log↔trace enricher ownership | RFC 0018 (owns the structlog chain and zap encoder where the enrichment lives); RFC 0019 only requires that the OTEL context is established before the enricher PR lands |
 
 A merger of the two RFCs into one "Observability Foundation" document was considered and resolved as item 6 in [Resolved Decisions](#resolved-decisions): **keep split, ship as one delivery**. Both RFCs cross-reference this contract.
 
@@ -409,7 +409,6 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Go orchestrator | `go.mod`, `go.sum` | Add `otelgrpc`, `otelhttp` |
 | Go orchestrator | `internal/observability/metrics.go` | Add (new module) |
 | Go orchestrator | `cmd/orchestrator/main.go` | Inject `otelgrpc` client handler into executor dial options; wrap HTTP handler with `otelhttp`; init metrics |
-| Go orchestrator | `internal/executor/dispatch.go`, `internal/executor/chat.go` | (No code change required — dial options injected from caller) |
 | Tests | `agents/tests/conftest.py` | Add `InMemorySpanExporter` and `InMemoryMetricReader` fixtures |
 | Tests | `agents/tests/test_observability_tracing.py` (new) | Init + propagation + baggage unit tests |
 | Tests | `agents/tests/test_observability_metrics.py` (new) | Instrument inventory + exemplar emission tests |
@@ -418,7 +417,7 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Tests | `tests/integration/test_observability_e2e.py` (new) | E2E shape test: trace tree + correlated logs + metric exemplars against the local Collector + Jaeger + Prometheus stack |
 | Deploy | `config/observability/otel-collector.yaml` (new) | Reference Collector config with `tail_sampling` processor (path chosen per PR #160 review to align with `config/` convention) |
 | Deploy | `docker-compose.yaml` | Add Collector, Prometheus, Loki services; route OTLP through Collector |
-| Docs | `docs/observability.md` | Append span-conventions, metrics inventory, sampling/Collector, correlated-debugging, and Jaeger/Prometheus usage sections (file created by RFC 0018) |
+| Docs | `docs/observability.md` | Append span-conventions, metrics inventory, sampling/Collector, correlated-debugging, and Jaeger/Prometheus usage sections (file created by RFC 0018 Phase 1; ordering guaranteed by Cross-RFC sequencing constraint #3 in [Decision / Next Steps](#decision--next-steps)) |
 | Docs | [README.md](../../README.md) | Update OTEL paragraph to cover logs + traces + metrics |
 | Docs | [CHANGELOG.md](../../CHANGELOG.md) | Add an entry under v0.2.3 noting the Python OTLP exporter package swap (`opentelemetry-exporter-otlp-proto-grpc` → `opentelemetry-exporter-otlp-proto-http`); operator-visible because anyone running a custom OTEL collector on the gRPC port (`:4317`) will need to switch to the HTTP port (`:4318`). Also note the new Collector + Prometheus + Loki services in `docker-compose.yaml`. |
 | Docs | [ROADMAP.md](../../ROADMAP.md) | Group RFC 0018 + RFC 0019 as the v0.2.3 "Observability Foundation" delivery |
@@ -472,6 +471,7 @@ None remaining. All prior open questions are resolved in [Resolved Decisions](#r
 1. Confirm v0.2.3 as the target milestone (this RFC pairs with RFC 0018 on the same release).
 2. Sign off on the resolved decisions in [Resolved Decisions](#resolved-decisions) (interceptors, dual `agent.id` + `service.instance.id` with Gen-AI conventions, opt-in payload capture through redaction hook, head + tail sampling, pinned gRPC client sites, keep-split-ship-as-one-delivery).
 3. Sign off on the span-naming and Persatrix attribute conventions in [Section E](#e-span-naming-and-attribute-conventions), the metrics inventory in [Section F](#f-metrics), and the log↔trace correlation contract in [Section G](#g-logtrace-correlation) as the cross-codebase contract.
+4. Acknowledge the joint-PR-plan discipline: `docs/rfcs/0018-pr-plan.md` and `docs/rfcs/0019-pr-plan.md` MUST be authored as a coordinated pair (not independently), with the three Cross-RFC sequencing constraints below copied verbatim into both plans so the ordering is not re-derived inconsistently.
 
 **Cross-RFC sequencing (added per PR #160 review).** The two RFCs share namespace and code paths, so PR landing order matters:
 
