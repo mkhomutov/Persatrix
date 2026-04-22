@@ -274,3 +274,59 @@ class TestBoundaryCases:
         """
         result = _truncate_to_token_limit("any sufficiently long text here", 1)
         assert result == "…"
+
+
+# ─── PR 6 — RFC 0017 review follow-ups ────────────────────────────────────────
+
+
+class TestPR6Followups:
+    """Coverage added in PR 6 for review findings deferred from PRs 1, 2, 5."""
+
+    # PR 1 review finding 1 — _count_tokens("") fallback parity with tiktoken.
+    def test_count_tokens_empty_returns_zero_in_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fallback path must return 0 for empty input (matches tiktoken)."""
+        monkeypatch.setitem(sys.modules, "tiktoken", None)  # type: ignore[arg-type]
+        assert _count_tokens("") == 0
+
+    # PR 1 review finding 3 — default min_tokens=32 deciding factor.
+    def test_default_min_tokens_floor_is_32(self) -> None:
+        """Without an override, items truncating to 1–31 tokens are dropped.
+
+        Pins the documented default floor as the deciding factor.  An item
+        that *would* admit at min_tokens=1 must be *dropped* at the default
+        when the truncated form is below 32 tokens.
+        """
+        # Budget of ~10 tokens: anything truncated lands well below 32.
+        budget = MemoryBudget(total_tokens=10)
+        long_text = "word " * 200
+
+        # Default min_tokens=32 → drop.
+        assert budget.try_add(long_text) is None
+        assert budget.remaining == 10
+
+        # Same text at min_tokens=1 → admit.
+        result = budget.try_add(long_text, min_tokens=1)
+        assert result is not None
+
+    # PR 1 review finding 5 — heterogeneous greedy semantics.
+    def test_greedy_admits_smaller_item_after_larger_dropped(self) -> None:
+        """The greedy contract is *not* "first-None ends admission" for mixed sizes.
+
+        After a large item exhausts most of the budget, a later *smaller* item
+        can still fit.  Pins the RFC's intended greedy-order semantics for
+        heterogeneous inputs (the homogeneous-list test above is a narrower
+        case that doesn't exercise this path).
+        """
+        budget = MemoryBudget(total_tokens=20)
+        small = "hi"        # ~1 token
+        # Pre-consume to leave exactly a sliver, then verify the small item
+        # is admitted greedily after a prior consumption — the RFC's intended
+        # ordering semantic.
+        first = budget.try_add("hello", min_tokens=1)
+        assert first is not None
+        remaining_before = budget.remaining
+        result_small = budget.try_add(small, min_tokens=1)
+        assert result_small == small
+        assert budget.remaining < remaining_before

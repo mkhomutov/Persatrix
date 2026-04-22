@@ -22,9 +22,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.memory.episodic import (
+    DEFAULT_EPISODIC_MIN_SCORE,
+    DEFAULT_NOTES_MIN_SCORE,
     EpisodicMemory,
-    _DEFAULT_EPISODIC_MIN_SCORE,
-    _DEFAULT_NOTES_MIN_SCORE,
 )
 from agents.memory.working import WorkingMemory
 from agents.persona_runtime.memory_context import (
@@ -225,7 +225,7 @@ class TestMemoryBudgetE2EFourEventStream:
         # TICK query and the "planning" episode summary) would then admit
         # tokens and break the assertion.  Skip cleanly in LIKE-fallback
         # environments rather than emit a flaky failure.
-        if not seeded_episodic._fts5:
+        if not seeded_episodic.has_fts5:
             pytest.skip(
                 "Requires SQLite FTS5: LIKE fallback ignores min_score "
                 "(RFC 0017 §C) so zero-admission cannot be guaranteed.",
@@ -238,7 +238,7 @@ class TestMemoryBudgetE2EFourEventStream:
             assert result.memory_admitted_tokens == 0, (
                 f"Low-signal ({et!r}, {content!r}) admitted "
                 f"{result.memory_admitted_tokens} tokens; expected 0. "
-                f"Check that min_score={_DEFAULT_EPISODIC_MIN_SCORE} filters "
+                f"Check that min_score={DEFAULT_EPISODIC_MIN_SCORE} filters "
                 f"low-signal FTS5 results."
             )
 
@@ -313,7 +313,7 @@ class TestMemoryBudgetE2EFourEventStream:
         # contains the token "review", which appears in the seeded
         # "planning" episode summary; under LIKE fallback that match
         # would score 1.0 and bypass ``min_score``.
-        if not seeded_episodic._fts5:
+        if not seeded_episodic.has_fts5:
             pytest.skip(
                 "Requires SQLite FTS5: LIKE fallback ignores min_score "
                 "(RFC 0017 §C) so zero-admission cannot be guaranteed.",
@@ -328,7 +328,7 @@ class TestMemoryBudgetE2EFourEventStream:
         assert result.memory_admitted_tokens == 0, (
             f"TICK admitted {result.memory_admitted_tokens} tokens; expected 0. "
             f"The standard TICK query should not match seeded topics at "
-            f"min_score={_DEFAULT_EPISODIC_MIN_SCORE}."
+            f"min_score={DEFAULT_EPISODIC_MIN_SCORE}."
         )
 
     @pytest.mark.asyncio
@@ -358,11 +358,11 @@ class TestMemoryBudgetE2EFourEventStream:
 
 
 class TestMinScoreWiredIntoRecallCalls:
-    """PR 4: _DEFAULT_*_MIN_SCORE constants are passed to recall() calls."""
+    """PR 4: DEFAULT_*_MIN_SCORE constants are passed to recall() calls."""
 
     @pytest.mark.asyncio
     async def test_episodic_recall_receives_min_score_kwarg(self) -> None:
-        """recall() is called with min_score=_DEFAULT_EPISODIC_MIN_SCORE."""
+        """recall() is called with min_score=DEFAULT_EPISODIC_MIN_SCORE."""
         mixin = _ConcreteMemoryMixin()
         mixin.agent_id = "wire-test"
         mixin._working_memory = WorkingMemory(max_tokens=8192)
@@ -381,15 +381,15 @@ class TestMinScoreWiredIntoRecallCalls:
         await mixin._inject_memory_context(event)
 
         call_kwargs = mixin._episodic_memory.recall.call_args
-        assert call_kwargs.kwargs.get("min_score") == _DEFAULT_EPISODIC_MIN_SCORE, (
+        assert call_kwargs.kwargs.get("min_score") == DEFAULT_EPISODIC_MIN_SCORE, (
             f"recall() min_score kwarg is "
             f"{call_kwargs.kwargs.get('min_score')!r}, "
-            f"expected {_DEFAULT_EPISODIC_MIN_SCORE}"
+            f"expected {DEFAULT_EPISODIC_MIN_SCORE}"
         )
 
     @pytest.mark.asyncio
     async def test_recall_notes_receives_min_score_kwarg(self) -> None:
-        """recall_notes() is called with min_score=_DEFAULT_NOTES_MIN_SCORE."""
+        """recall_notes() is called with min_score=DEFAULT_NOTES_MIN_SCORE."""
         mixin = _ConcreteMemoryMixin()
         mixin.agent_id = "wire-test"
         mixin._working_memory = WorkingMemory(max_tokens=8192)
@@ -408,10 +408,10 @@ class TestMinScoreWiredIntoRecallCalls:
         await mixin._inject_memory_context(event)
 
         call_kwargs = mixin._episodic_memory.recall_notes.call_args
-        assert call_kwargs.kwargs.get("min_score") == _DEFAULT_NOTES_MIN_SCORE, (
+        assert call_kwargs.kwargs.get("min_score") == DEFAULT_NOTES_MIN_SCORE, (
             f"recall_notes() min_score kwarg is "
             f"{call_kwargs.kwargs.get('min_score')!r}, "
-            f"expected {_DEFAULT_NOTES_MIN_SCORE}"
+            f"expected {DEFAULT_NOTES_MIN_SCORE}"
         )
 
     @pytest.mark.asyncio
@@ -437,4 +437,4 @@ class TestMinScoreWiredIntoRecallCalls:
         # TICK skip removed: recall() must have been called.
         mixin._episodic_memory.recall.assert_called_once()
         call_kwargs = mixin._episodic_memory.recall.call_args
-        assert call_kwargs.kwargs.get("min_score") == _DEFAULT_EPISODIC_MIN_SCORE
+        assert call_kwargs.kwargs.get("min_score") == DEFAULT_EPISODIC_MIN_SCORE

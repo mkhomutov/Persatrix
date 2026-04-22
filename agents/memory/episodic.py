@@ -60,8 +60,18 @@ logger = logging.getLogger(__name__)
 # low-signal queries ("hi", empty TICK boilerplate) produce |rank| ≥ 5 or no rows
 # (normalised ≤ 0.17).  Thresholds are conservative to avoid over-filtering;
 # operators can tighten them via caller overrides without API changes.
-_DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
-_DEFAULT_NOTES_MIN_SCORE: float = 0.20
+#
+# Public API (PR 6 — RFC 0017 PR 4 review finding 1): the persona runtime is
+# already a consumer and RFC 0008's vector tier will be the third.  Public
+# names avoid ``ruff PLC2701`` (``import-private-name``) at consumer sites
+# and signal the cross-module contract.  The leading-underscore aliases are
+# retained for one release as a deprecation shim; remove in v0.3.
+DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
+DEFAULT_NOTES_MIN_SCORE: float = 0.20
+
+# Deprecated underscore aliases — remove in v0.3 once external pins clear.
+_DEFAULT_EPISODIC_MIN_SCORE: float = DEFAULT_EPISODIC_MIN_SCORE
+_DEFAULT_NOTES_MIN_SCORE: float = DEFAULT_NOTES_MIN_SCORE
 
 
 # ─── EpisodicMemory ────────────────────────────────────────
@@ -80,6 +90,17 @@ class EpisodicMemory:
     @property
     def agent_id(self) -> str:
         return self._agent_id
+
+    @property
+    def has_fts5(self) -> bool:
+        """Return True when the underlying SQLite build provides FTS5.
+
+        Public, read-only view of the internal ``_fts5`` flag set during
+        :meth:`initialize`.  Tests and operators that need to gate on FTS5
+        availability should use this property instead of reaching into the
+        private attribute.  (PR 6 — RFC 0017 PR 4 review finding 3.)
+        """
+        return self._fts5
 
     async def initialize(self) -> None:
         """Open database, run migrations, set up FTS5 if available."""
@@ -335,6 +356,13 @@ class EpisodicMemory:
             normalised scores.  ``None`` → no filtering (current behaviour).
             LIKE-fallback path ignores this parameter per RFC 0017 Section C.
         """
+        # Mirror the ``recall()`` validation at the public façade so a
+        # future ``NoteStore`` refactor that drops its own guard cannot
+        # silently lose validation.  (PR 6 — RFC 0017 PR 3 review finding 1.)
+        if min_score is not None and not 0.0 <= min_score <= 1.0:
+            raise ValueError(
+                f"min_score must be in [0.0, 1.0] or None, got {min_score}"
+            )
         return await self._ensure_note_store().recall_notes(query, limit=limit, min_score=min_score)
 
     async def update_note(self, note_id: str, content: str) -> bool:

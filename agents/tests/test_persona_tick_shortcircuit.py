@@ -31,7 +31,7 @@ from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_types import ActionType, AgentEvent, EventType
+from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tick import TickScheduler
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -230,6 +230,24 @@ class TestTickShortCircuit:
 # ─── Idle suppression ─────────────────────────────────────────────────────────
 
 
+def _simulate_do_nothing_tick(scheduler: TickScheduler, actions: list[AgentAction]) -> bool:
+    """Mirror ``TickScheduler._run()``'s ``all_do_nothing`` branch in tests.
+
+    Increments the scheduler's idle counter when every action is
+    ``DO_NOTHING``, exactly as the production loop does.  Centralising the
+    coupling to the private ``_idle_count`` attribute here keeps the
+    private-attribute access in one place so ``TickScheduler`` refactors
+    only need to update this helper, not every test.
+    (PR 6 — RFC 0017 PR 5 review finding 1.)
+
+    Returns the ``all_do_nothing`` bool for callers that want to assert on it.
+    """
+    all_do_nothing = all(a.action_type == ActionType.DO_NOTHING for a in actions)
+    if all_do_nothing:
+        scheduler._idle_count += 1  # type: ignore[attr-defined]
+    return all_do_nothing
+
+
 class TestIdleSuppression:
     """idle_count reaches idle_after_ticks with zero LLM calls during suppressed ticks."""
 
@@ -249,15 +267,11 @@ class TestIdleSuppression:
         ):
             actions = await agent.on_tick()
 
-        all_do_nothing = all(a.action_type == ActionType.DO_NOTHING for a in actions)
+        all_do_nothing = _simulate_do_nothing_tick(scheduler, actions)
         assert all_do_nothing, (
             "Suppressed TICK must return only DO_NOTHING actions so "
             "TickScheduler._run increments idle_count"
         )
-
-        # Simulate TickScheduler's all_do_nothing branch.
-        if all_do_nothing:
-            scheduler._idle_count += 1
 
         assert scheduler.idle_count == 1
         client._provider.create_message.assert_not_called()  # type: ignore[attr-defined]
@@ -278,8 +292,7 @@ class TestIdleSuppression:
         ):
             for _ in range(idle_after):
                 actions = await agent.on_tick()
-                if all(a.action_type == ActionType.DO_NOTHING for a in actions):
-                    scheduler._idle_count += 1
+                _simulate_do_nothing_tick(scheduler, actions)
 
         assert scheduler.is_idle
         # Zero LLM calls across all suppressed ticks.

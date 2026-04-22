@@ -391,3 +391,62 @@ class TestInjectMemoryContextExceptionResiliency:
         assert "recent_notes" not in [
             s.name for s in mixin._working_memory._sections
         ]
+
+
+# ─── PR 6 — RFC 0017 review follow-ups ───────────────────────────────────────
+
+
+class TestMemoryInjectionResultValidation:
+    """PR 6 — RFC 0017 PR 5 review finding 4: ``__post_init__`` guard."""
+
+    def test_negative_admitted_raises(self) -> None:
+        """A negative admitted count must refuse to construct.
+
+        Without this guard, the ``== 0`` empty-context TICK short-circuit in
+        ``_ActionLoopMixin._on_event_inner`` would silently *not* fire on
+        ``-1``, leaking LLM calls.
+        """
+        with pytest.raises(ValueError, match="memory_admitted_tokens must be >= 0"):
+            MemoryInjectionResult(memory_admitted_tokens=-1)
+
+    def test_zero_admitted_accepted(self) -> None:
+        # Zero is the canonical empty-context signal; must construct.
+        result = MemoryInjectionResult(memory_admitted_tokens=0)
+        assert result.memory_admitted_tokens == 0
+
+    def test_positive_admitted_accepted(self) -> None:
+        result = MemoryInjectionResult(memory_admitted_tokens=42)
+        assert result.memory_admitted_tokens == 42
+
+
+class TestZeroBudgetIntegration:
+    """PR 6 — RFC 0017 PR 2 review finding 6.
+
+    The degenerate retune (``_MEMORY_BUDGET_TOKENS = 0``) is what an
+    operator would set to disable memory injection.  Pin the contract that
+    every tier is dropped and ``memory_admitted_tokens == 0``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_zero_budget_drops_all_sections(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agents.persona_runtime.memory_context as mc
+
+        monkeypatch.setattr(mc, "_MEMORY_BUDGET_TOKENS", 0)
+        episodes = [_FakeEpisode(summary="historical context")]
+        notes = [_FakeNote(topic="t", content="note content")]
+        rel = _FakeRelSummary(
+            other_participant_id="peer-1", notes="rich relationship notes"
+        )
+        mixin, event = _make_mixin(
+            episodes=episodes, notes=notes, rel=rel, sender_id="peer-1",
+        )
+
+        result = await mixin._inject_memory_context(event)
+
+        assert result.memory_admitted_tokens == 0
+        section_names = [s.name for s in mixin._working_memory._sections]
+        assert "episodic_recall" not in section_names
+        assert "recent_notes" not in section_names
+        assert "relationship_context" not in section_names

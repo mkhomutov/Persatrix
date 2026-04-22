@@ -134,6 +134,19 @@ def _normalize_bm25(raw: float | None) -> float:
     return min(1.0, max(0.0, 1.0 / (1.0 + abs(raw))))
 
 
+def _resolve_min_score(min_score: float | None) -> float:
+    """Resolve ``None`` to ``0.0`` for SQL-side BM25 floor parameters.
+
+    ``None`` means "no SQL-side filter": passing ``0.0`` to the
+    ``(1.0/(1.0+ABS(rank))) >= ?`` predicate lets every match through
+    because the normalised score is always in ``(0, 1]`` for non-zero
+    ranks.  Centralised here so the contract is a single line of truth
+    shared by :func:`recall_fts5` and ``NoteStore._recall_notes_fts5``.
+    (PR 6 — RFC 0017 PR 3 review finding 3.)
+    """
+    return 0.0 if min_score is None else min_score
+
+
 async def recall_fts5(
     db: aiosqlite.Connection,
     agent_id: str,
@@ -155,8 +168,8 @@ async def recall_fts5(
         # importance ranking so the caller still gets relevant episodes.
         return await recall_recency(db, agent_id, limit, min_importance)
     # Normalised BM25 floor: 1.0/(1+|rank|) >= min_score  iff  |rank| <= (1/min_score - 1).
-    # Passing 0.0 when min_score is None/0.0 lets every match through.
-    effective_min_score = min_score if min_score is not None else 0.0
+    # ``_resolve_min_score`` maps ``None`` → 0.0 so every match passes.
+    effective_min_score = _resolve_min_score(min_score)
     try:
         async with db.execute(
             f"""

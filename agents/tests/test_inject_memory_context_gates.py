@@ -136,25 +136,25 @@ class TestInjectMemoryContextTickBehavior:
 
     @pytest.mark.asyncio
     async def test_min_score_passed_to_episodic_recall(self) -> None:
-        """recall() is called with min_score=_DEFAULT_EPISODIC_MIN_SCORE (PR 4)."""
-        from agents.memory.episodic import _DEFAULT_EPISODIC_MIN_SCORE
+        """recall() is called with min_score=DEFAULT_EPISODIC_MIN_SCORE (PR 4)."""
+        from agents.memory.episodic import DEFAULT_EPISODIC_MIN_SCORE
 
         mixin, event = _make_mixin()
         await mixin._inject_memory_context(event)
 
         call_kwargs = mixin._episodic_memory.recall.call_args  # type: ignore[attr-defined]
-        assert call_kwargs.kwargs.get("min_score") == _DEFAULT_EPISODIC_MIN_SCORE
+        assert call_kwargs.kwargs.get("min_score") == DEFAULT_EPISODIC_MIN_SCORE
 
     @pytest.mark.asyncio
     async def test_min_score_passed_to_recall_notes(self) -> None:
-        """recall_notes() is called with min_score=_DEFAULT_NOTES_MIN_SCORE (PR 4)."""
-        from agents.memory.episodic import _DEFAULT_NOTES_MIN_SCORE
+        """recall_notes() is called with min_score=DEFAULT_NOTES_MIN_SCORE (PR 4)."""
+        from agents.memory.episodic import DEFAULT_NOTES_MIN_SCORE
 
         mixin, event = _make_mixin()
         await mixin._inject_memory_context(event)
 
         call_kwargs = mixin._episodic_memory.recall_notes.call_args  # type: ignore[attr-defined]
-        assert call_kwargs.kwargs.get("min_score") == _DEFAULT_NOTES_MIN_SCORE
+        assert call_kwargs.kwargs.get("min_score") == DEFAULT_NOTES_MIN_SCORE
 
     @pytest.mark.asyncio
     async def test_no_recency_fallback_when_notes_empty(self) -> None:
