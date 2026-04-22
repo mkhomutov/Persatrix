@@ -79,6 +79,28 @@ for an end-to-end run.
 
 ---
 
+## What's added in v0.2.2
+
+v0.2.2 (Bounded Persona Memory Injection) is an internal hardening release —
+no new REST endpoints, gRPC RPCs, or CLI commands. It ships
+[RFC 0017](docs/rfcs/0017-persona-memory-injection-budget.md) in three layers:
+
+| Capability | Where it lives | Spec |
+|------------|----------------|------|
+| **Per-event memory token budget** — `MemoryBudget` allocator caps how much episodic + relationship + notes context a persona injects into a single event (default 1500 tokens) | [agents/persona_runtime/memory_context.py](agents/persona_runtime/memory_context.py) | [RFC 0017 §B](docs/rfcs/0017-persona-memory-injection-budget.md#b-memory-budget-allocator) |
+| **Relevance threshold on recall** — `EpisodicMemory.recall` and `recall_notes` accept a `min_score` parameter; below-threshold matches are dropped before truncation | [agents/memory/episodic.py](agents/memory/episodic.py), [agents/memory/episodic_queries.py](agents/memory/episodic_queries.py) | [RFC 0017 §C](docs/rfcs/0017-persona-memory-injection-budget.md#c-relevance-threshold) |
+| **Empty-context TICK short-circuit** — autonomous TICK events with zero admitted memory, no active goal, and no pending conversation turn skip the LLM call entirely and increment `idle_count` | [agents/persona_runtime/action_loop.py](agents/persona_runtime/action_loop.py) | [RFC 0017 §F](docs/rfcs/0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) |
+
+The empty-context TICK short-circuit closes the cost-leak class described in
+the [Cost Warning](#%EF%B8%8F-cost-warning--read-before-running) below — bored
+autonomous personas no longer burn tokens on context-free LLM calls.
+
+Operator impact: defaults are conservative; no config change is required. See
+the [v0.2.2 release checklist §3.1](docs/v0.2.2-release-checklist.md#31-required-upgrade-notes-in-changelog)
+for the full upgrade notes.
+
+---
+
 ## ⚠️ Cost Warning — Read Before Running
 
 Persatrix uses commercial LLM APIs (Anthropic by default; the model is selected
@@ -325,6 +347,7 @@ Persatrix/
 | **v0.1** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
 | **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Released |
+| **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural cost-leak fix unblocking RFC 0008 | 🚧 Release prep |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -368,6 +391,16 @@ completion.
   spontaneously notify users; notification infrastructure is deferred.
 - **No channel routing** — chat goes directly to a single agent; channels are
   RFC 0011 (v0.3.0).
+
+## Known Limitations in v0.2.2
+
+- **Per-event memory budget is a module constant** — `_MEMORY_BUDGET_TOKENS`
+  (default 1500) is not yet exposed as a per-agent or per-event config field.
+  Operators who need a different bound can patch the constant; a config-level
+  knob will be considered in a future RFC if there is demand.
+- **No new operator surface** — RFC 0017 is internal-only; there is no new
+  REST endpoint, gRPC RPC, or CLI command. Existing v0.2.1 limitations
+  (multi-user, auth, streaming, channel routing) all carry forward unchanged.
 
 ---
 
