@@ -42,19 +42,19 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 			// so operators can detect misconfiguration.
 			if agent.MaxLLMCalls < 0 {
 				s.logger.Warn("negative agent-level MaxLLMCalls, using default",
-					zap.String("agentID", step.AgentID),
+					zap.String("agent_id", step.AgentID),
 					zap.Int("value", agent.MaxLLMCalls),
 				)
 			}
 			if agent.MaxTokens < 0 {
 				s.logger.Warn("negative agent-level MaxTokens, using default",
-					zap.String("agentID", step.AgentID),
+					zap.String("agent_id", step.AgentID),
 					zap.Int("value", agent.MaxTokens),
 				)
 			}
 			if agent.TimeoutSeconds < 0 {
 				s.logger.Warn("negative agent-level TimeoutSeconds, using default",
-					zap.String("agentID", step.AgentID),
+					zap.String("agent_id", step.AgentID),
 					zap.Int("value", agent.TimeoutSeconds),
 				)
 			}
@@ -69,7 +69,7 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 			}
 		} else {
 			s.logger.Warn("failed to look up agent config for limit resolution, using defaults",
-				zap.String("agentID", step.AgentID),
+				zap.String("agent_id", step.AgentID),
 				zap.Error(err),
 			)
 		}
@@ -109,16 +109,16 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 	// should provide granular input_tokens/output_tokens data. (PR #86 review S-03)
 	if data.usedTokensFallback {
 		s.logger.Info("using tokens_used fallback (all tokens mapped to output, cost may be overestimated)",
-			zap.String("stepID", step.ID),
-			zap.String("agentID", step.AgentID),
+			zap.String("step_id", step.ID),
+			zap.String("agent_id", step.AgentID),
 			zap.Int64("tokensUsed", data.outputTokens),
 		)
 	}
 
 	if data.inputTokens == 0 && data.outputTokens == 0 {
 		s.logger.Warn("no token usage in step response metadata, recording zero",
-			zap.String("stepID", step.ID),
-			zap.String("agentID", step.AgentID),
+			zap.String("step_id", step.ID),
+			zap.String("agent_id", step.AgentID),
 		)
 	}
 
@@ -141,7 +141,7 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 		// unpriced models without adding a logger to CostConfig.EstimateCost.
 		if data.estimatedCostUSD == 0 && data.model != "" && (data.inputTokens > 0 || data.outputTokens > 0) {
 			s.logger.Debug("model not in pricing table, step cost recorded as $0",
-				zap.String("stepID", step.ID),
+				zap.String("step_id", step.ID),
 				zap.String("model", data.model),
 				zap.Int64("inputTokens", data.inputTokens),
 				zap.Int64("outputTokens", data.outputTokens),
@@ -254,7 +254,7 @@ func (s *WorkflowScheduler) resolveAgentModel(ctx context.Context, agentID strin
 		// This covers the non-nil-registry error path (e.g., agent deregistered
 		// between scheduling and dispatch) and aids test coverage validation.
 		s.logger.Debug("agent not found in registry for model resolution",
-			zap.String("agentID", agentID),
+			zap.String("agent_id", agentID),
 			zap.Error(err),
 		)
 		return ""
@@ -272,7 +272,7 @@ func parseMetadataInt64(metadata map[string]string, key string, logger *zap.Logg
 	n, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
 		logger.Warn("failed to parse metadata value as int64",
-			zap.String("stepID", stepID),
+			zap.String("step_id", stepID),
 			zap.String("key", key),
 			zap.String("value", val),
 			zap.Error(err),
@@ -284,7 +284,7 @@ func parseMetadataInt64(metadata map[string]string, key string, logger *zap.Logg
 	// TokenCounter and effectively bypass budget enforcement. (PR #86 review F-01)
 	if n < 0 {
 		logger.Warn("negative token value clamped to zero",
-			zap.String("stepID", stepID),
+			zap.String("step_id", stepID),
 			zap.String("key", key),
 			zap.Int64("value", n),
 		)

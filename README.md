@@ -207,6 +207,25 @@ curl -X POST http://localhost:8080/api/v1/workflows/run \
   -d '{"workflow": "feature-builder", "input": "Build a REST API for user management"}'
 ```
 
+### Local Logging — `PERSATRIX_LOG_FORMAT=pretty`
+
+Persatrix emits structured JSON logs by default
+(see [docs/observability.md](docs/observability.md), `schema_version: "1"`).
+For local debugging, swap to a colourised human-readable renderer with one env var:
+
+```bash
+# Pretty console output (Go orchestrator + Python agents)
+PERSATRIX_LOG_FORMAT=pretty make run
+PERSATRIX_LOG_FORMAT=pretty make run-agent AGENT=ember-owl
+
+# Default (JSON) — leave the env var unset.  This is also what CI, Docker
+# Compose, and the future `persatrix logs` endpoint consume.
+make run
+```
+
+Pretty mode is a developer affordance and is **not** a stable wire format.
+Production deployments must leave `PERSATRIX_LOG_FORMAT` unset.
+
 ### Run a Persona Agent (v0.2.0)
 
 Personas are declared in [config/agents.yaml](config/agents.yaml). A worked example

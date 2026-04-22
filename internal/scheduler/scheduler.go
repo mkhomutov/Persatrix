@@ -176,7 +176,7 @@ func (s *WorkflowScheduler) pollAndExecute(ctx context.Context, sem chan struct{
 func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	run, err := s.store.GetRun(ctx, runID)
 	if err != nil {
-		s.logger.Error("failed to get run", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to get run", zap.String("execution_id", runID), zap.Error(err))
 		return
 	}
 
@@ -193,15 +193,15 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	if run.Status != state.RunPending {
 		span.SetAttributes(attribute.String("persatrix.status", run.Status.String()))
 		s.logger.Info("run no longer pending, skipping",
-			zap.String("runID", runID),
+			zap.String("execution_id", runID),
 			zap.String("status", run.Status.String()),
 		)
 		return
 	}
 
 	s.logger.Info("executing run",
-		zap.String("runID", runID),
-		zap.String("workflowID", run.WorkflowID),
+		zap.String("execution_id", runID),
+		zap.String("workflow_id", run.WorkflowID),
 	)
 
 	// Resolve workflow file path.
@@ -246,12 +246,12 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	// won't be re-polled while in-flight. Acceptable for v0.1 — a persistent store
 	// backend should surface this via monitoring.
 	if err := s.store.UpdateRunStatus(ctx, runID, state.RunRunning); err != nil {
-		s.logger.Error("failed to set run status to running", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run status to running", zap.String("execution_id", runID), zap.Error(err))
 		return
 	}
 	now := time.Now()
 	if err := s.store.SetRunTimestamps(ctx, runID, &now, nil); err != nil {
-		s.logger.Error("failed to set run start time", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run start time", zap.String("execution_id", runID), zap.Error(err))
 	}
 
 	// outputs accumulates step output_key → output value across stages.
@@ -280,7 +280,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		}
 
 		s.logger.Debug("executing stage",
-			zap.String("runID", runID),
+			zap.String("execution_id", runID),
 			zap.Int("stage", stageIdx),
 			zap.Int("steps", len(stage)),
 		)
@@ -304,13 +304,13 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	cleanupCtx := context.WithoutCancel(ctx)
 	finished := time.Now()
 	if err := s.store.SetRunTimestamps(cleanupCtx, runID, nil, &finished); err != nil {
-		s.logger.Error("failed to set run finish time", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run finish time", zap.String("execution_id", runID), zap.Error(err))
 	}
 	if err := s.store.UpdateRunStatus(cleanupCtx, runID, state.RunCompleted); err != nil {
-		s.logger.Error("failed to set run status to completed", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run status to completed", zap.String("execution_id", runID), zap.Error(err))
 	}
 
-	s.logger.Info("run completed", zap.String("runID", runID))
+	s.logger.Info("run completed", zap.String("execution_id", runID))
 	span.SetAttributes(attribute.String("persatrix.status", state.RunCompleted.String()))
 	span.SetStatus(codes.Ok, "completed")
 }
@@ -319,7 +319,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 // It uses context.WithoutCancel so that cleanup store operations succeed even when
 // the parent context is already cancelled (e.g., during graceful shutdown).
 func (s *WorkflowScheduler) failRun(ctx context.Context, runID string, errMsg string) {
-	s.logger.Error("run failed", zap.String("runID", runID), zap.String("error", errMsg))
+	s.logger.Error("run failed", zap.String("execution_id", runID), zap.String("error", errMsg))
 
 	// Detach from parent cancellation — we must persist failure state regardless.
 	cleanupCtx := context.WithoutCancel(ctx)
@@ -328,13 +328,13 @@ func (s *WorkflowScheduler) failRun(ctx context.Context, runID string, errMsg st
 	// that sees RunFailed is guaranteed to also see a non-zero FinishedAt.
 	finished := time.Now()
 	if err := s.store.SetRunTimestamps(cleanupCtx, runID, nil, &finished); err != nil {
-		s.logger.Error("failed to set run finish time", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run finish time", zap.String("execution_id", runID), zap.Error(err))
 	}
 	if err := s.store.SetRunError(cleanupCtx, runID, errMsg); err != nil {
-		s.logger.Error("failed to set run error", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run error", zap.String("execution_id", runID), zap.Error(err))
 	}
 	if err := s.store.UpdateRunStatus(cleanupCtx, runID, state.RunFailed); err != nil {
-		s.logger.Error("failed to set run status to failed", zap.String("runID", runID), zap.Error(err))
+		s.logger.Error("failed to set run status to failed", zap.String("execution_id", runID), zap.Error(err))
 	}
 }
 

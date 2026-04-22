@@ -1666,7 +1666,7 @@ func TestParseMetadataInt64_MalformedValue(t *testing.T) {
 	entry := logs.All()[0]
 	assert.Equal(t, zap.WarnLevel, entry.Level)
 	assert.Contains(t, entry.Message, "failed to parse metadata value")
-	assert.Equal(t, "step-x", entry.ContextMap()["stepID"])
+	assert.Equal(t, "step-x", entry.ContextMap()["step_id"])
 	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
 	assert.Equal(t, "not-a-number", entry.ContextMap()["value"])
 }
@@ -1899,7 +1899,7 @@ func TestParseMetadataInt64_NegativeValue(t *testing.T) {
 	entry := logs.All()[0]
 	assert.Equal(t, zap.WarnLevel, entry.Level)
 	assert.Contains(t, entry.Message, "negative token value clamped to zero")
-	assert.Equal(t, "step-neg", entry.ContextMap()["stepID"])
+	assert.Equal(t, "step-neg", entry.ContextMap()["step_id"])
 	assert.Equal(t, "input_tokens", entry.ContextMap()["key"])
 	assert.Equal(t, int64(-500), entry.ContextMap()["value"])
 }
@@ -1956,7 +1956,7 @@ func TestUnpricedModel_DebugLog(t *testing.T) {
 			found = true
 			assert.Equal(t, zap.DebugLevel, entry.Level)
 			assert.Equal(t, "unknown-model-xyz", entry.ContextMap()["model"])
-			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
+			assert.Equal(t, "step1", entry.ContextMap()["step_id"])
 			break
 		}
 	}
@@ -2018,8 +2018,8 @@ func TestTokensUsedFallback_LogMessage(t *testing.T) {
 		if entry.Message == "using tokens_used fallback (all tokens mapped to output, cost may be overestimated)" {
 			found = true
 			assert.Equal(t, zap.InfoLevel, entry.Level)
-			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
-			assert.Equal(t, "test-agent", entry.ContextMap()["agentID"])
+			assert.Equal(t, "step1", entry.ContextMap()["step_id"])
+			assert.Equal(t, "test-agent", entry.ContextMap()["agent_id"])
 			assert.Equal(t, int64(750), entry.ContextMap()["tokensUsed"])
 			break
 		}
@@ -2170,7 +2170,7 @@ func TestStepMetadata_InfoLogOnCompletion(t *testing.T) {
 	for _, entry := range logs.All() {
 		if entry.Message == "step completed" {
 			found = true
-			assert.Equal(t, "step1", entry.ContextMap()["stepID"])
+			assert.Equal(t, "step1", entry.ContextMap()["step_id"])
 			assert.Equal(t, int64(500), entry.ContextMap()["tokensUsed"])
 			assert.Equal(t, int64(1), entry.ContextMap()["retryCount"])
 			assert.Equal(t, int64(750), entry.ContextMap()["wallTimeMs"])

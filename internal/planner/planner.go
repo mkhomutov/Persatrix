@@ -375,7 +375,7 @@ func (p *YAMLPlanner) Plan(_ context.Context, workflow *Workflow) (*ExecutionPla
 	}
 
 	p.logger.Debug("execution plan created",
-		zap.String("workflowID", workflow.ID),
+		zap.String("workflow_id", workflow.ID),
 		zap.Int("stages", len(stages)),
 		zap.Int("totalSteps", emitted),
 	)

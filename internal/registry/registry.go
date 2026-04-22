@@ -103,7 +103,7 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 	copy(stored.Capabilities, agent.Capabilities)
 
 	r.agents[agent.ID] = stored
-	r.logger.Debug("agent registered", zap.String("agentID", agent.ID), zap.String("address", agent.Address))
+	r.logger.Debug("agent registered", zap.String("agent_id", agent.ID), zap.String("address", agent.Address))
 	return nil
 }
 
@@ -118,7 +118,7 @@ func (r *InMemoryRegistry) Unregister(_ context.Context, agentID string) error {
 	}
 
 	delete(r.agents, agentID)
-	r.logger.Debug("agent unregistered", zap.String("agentID", agentID))
+	r.logger.Debug("agent unregistered", zap.String("agent_id", agentID))
 	return nil
 }
 
@@ -160,7 +160,7 @@ func (r *InMemoryRegistry) UpdateStatus(_ context.Context, agentID string, statu
 	}
 
 	agent.Status = status
-	r.logger.Debug("agent status updated", zap.String("agentID", agentID), zap.Int("status", int(status)))
+	r.logger.Debug("agent status updated", zap.String("agent_id", agentID), zap.Int("status", int(status)))
 	return nil
 }
 

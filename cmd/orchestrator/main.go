@@ -17,11 +17,14 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/observability"
+	"github.com/mkhomutov/persatrix/internal/observability/redact"
+	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/scheduler"
@@ -81,16 +84,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// PR review: development logger (DPanic panics, verbose stacktraces) was
-	// hardcoded regardless of --env flag. Use production logger for non-dev
-	// environments to get JSON output, appropriate log levels, and no DPanic.
-	var logger *zap.Logger
-	var err error
-	if *env == "development" {
-		logger, err = zap.NewDevelopment()
-	} else {
-		logger, err = zap.NewProduction()
+	// RFC 0018 PR 2: build the zap logger with the Persatrix-schema encoder
+	// (JSON wire format with schema_version + service.* + source) by default,
+	// or zap's development console encoder when PERSATRIX_LOG_FORMAT=pretty.
+	// Pretty mode is a developer affordance; it is not a stable wire format
+	// and is not consumed by the future persatrix logs endpoint.
+	//
+	// Env-validation discipline (matches --env / --deadline-mode above):
+	// only "json" / "" / "pretty" are accepted.  Anything else exits non-zero
+	// rather than silently falling through to JSON, so a typo in
+	// PERSATRIX_LOG_FORMAT=preety surfaces at startup.
+	logFormat := os.Getenv(zapenc.PrettyEnvVar)
+	switch logFormat {
+	case "", "json", zapenc.PrettyEnvValue:
+	default:
+		fmt.Fprintln(os.Stderr, "invalid "+zapenc.PrettyEnvVar+" value: "+logFormat+
+			" (must be json|pretty; unset == json)")
+		os.Exit(1)
 	}
+
+	logger, err := buildLogger(*env, logFormat)
 	if err != nil {
 		// PR #18 F-01: use fmt+os.Exit instead of panic for consistent startup
 		// error handling — produces a clean single-line message without a
@@ -314,4 +327,52 @@ func resolveDeadlineMode(explicit, env string) string {
 		return "static"
 	}
 	return "derived"
+}
+
+// buildLogger constructs the orchestrator's zap logger per RFC 0018 PR 2.
+//
+// Default (logFormat == "" || "json"): the Persatrix-schema encoder writes
+// JSON conforming to docs/observability.md (schema_version: "1") to stderr,
+// with a NoopRedactor in place until a security RFC ships a real one.
+//
+// Pretty (logFormat == "pretty"): zap's development console encoder writes
+// human-readable colourised output for local debugging.  Pretty mode is
+// intentionally NOT wrapped by the schema encoder — it is a developer
+// affordance, not the wire format consumed by persatrix logs.
+//
+// service.kind is hard-coded to "orchestrator"; service.instance defaults to
+// the hostname.  Both are documented in RFC 0018 § B as set by the emitter
+// at process start and never rewritten on ingest.
+func buildLogger(env, logFormat string) (*zap.Logger, error) {
+	if logFormat == zapenc.PrettyEnvValue {
+		// Dev console encoder: colour, caller, no JSON.  Matches the
+		// previous zap.NewDevelopment() shape so make run output stays
+		// recognisable in pretty mode.
+		return zap.NewDevelopment()
+	}
+
+	// Production schema encoder.  service.instance defaults to hostname
+	// (best-effort; an empty string is acceptable but loses cross-process
+	// provenance in logs that aggregate multiple orchestrator nodes).
+	instance, err := os.Hostname()
+	if err != nil || instance == "" {
+		instance = "orchestrator"
+	}
+
+	enc := zapenc.NewEncoder(zapenc.Options{
+		ServiceKind:     "orchestrator",
+		ServiceInstance: instance,
+		Redactor:        redact.NoopRedactor{},
+	})
+
+	// In production, suppress DEBUG (matches the previous
+	// zap.NewProduction() default level); in development, allow DEBUG so
+	// JSON-mode local runs still see the verbose output developers expect.
+	level := zap.InfoLevel
+	if env == "development" {
+		level = zap.DebugLevel
+	}
+
+	core := zapcore.NewCore(enc, zapcore.AddSync(os.Stderr), level)
+	return zap.New(core, zap.AddCaller()), nil
 }

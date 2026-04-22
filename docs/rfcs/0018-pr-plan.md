@@ -202,12 +202,12 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/zapenc/... -v -race` passes
-- [ ] `go test ./internal/... -v -race -cover` passes (no regressions in existing tests)
+- [x] `go test ./internal/observability/zapenc/... -v -race` passes
+- [x] `go test ./internal/... -v -race -cover` passes (no regressions in existing tests)
 - [ ] `golangci-lint run` clean
-- [ ] CHANGELOG v0.2.3 entry includes the full old→new field rename table
-- [ ] README quick-start mentions `PERSATRIX_LOG_FORMAT=pretty`
-- [ ] No `internal/observability/zapcore/` directory (collision-avoidance pin from PR #160 review)
+- [x] CHANGELOG v0.2.3 entry includes the full old→new field rename table
+- [x] README quick-start mentions `PERSATRIX_LOG_FORMAT=pretty`
+- [x] No `internal/observability/zapcore/` directory (collision-avoidance pin from PR #160 review)
 
 ---
 
