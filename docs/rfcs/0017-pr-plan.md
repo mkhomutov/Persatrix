@@ -147,7 +147,7 @@ PR 7 (RFC close)
 - [x] TICK skip and `should_fall_back` heuristic preserved (removed in PR 4)
 - [x] `_inject_memory_context` returns `MemoryInjectionResult` with `memory_admitted_tokens: int` (return-shape pin from PR #144 review)
 
-**Open**: PR #146 — 2026-04-21
+**Merged**: PR #146 — 2026-04-21
 
 ---
 
@@ -194,11 +194,11 @@ PR 7 (RFC close)
 - [x] PR description records calibration script run and chosen values
 - [x] LIKE-fallback path is silent (no per-call warning) and treats matches as score `1.0` per RFC Section C
 
-**Open**: PR #147 — 2026-04-21
+**Merged**: PR #147 — 2026-04-21
 
 ---
 
-### PR 4: `feature/v022-memory-gate-removal` — Wire `min_score` and Remove Legacy Gates — [#148](https://github.com/mkhomutov/Persatrix/pull/148) ⬆️ Open
+### PR 4: `feature/v022-memory-gate-removal` — Wire `min_score` and Remove Legacy Gates — [#148](https://github.com/mkhomutov/Persatrix/pull/148)
 
 **Depends on**: PR 3 merged (`min_score` available on recall methods)
 **Branch**: `feature/v022-memory-gate-removal`
@@ -237,6 +237,8 @@ PR 7 (RFC close)
 - [x] `should_fall_back` heuristic removed
 - [x] Per-tier `min_score` defaults wired into recall calls
 - [x] Integration test asserts token-bound and low-signal-zero contracts
+
+**Merged**: PR #148 — 2026-04-21
 
 ---
 
@@ -281,7 +283,7 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 - [x] `idle_count` increments on short-circuited ticks
 - [x] DEBUG log with `reason="empty_context_tick"` field
 
-**Open**: PR #149 — 2026-04-21
+**Merged**: PR #149 — 2026-04-21
 
 ---
 
@@ -579,7 +581,64 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 ##### From PR 5 review
 
-*(populated after PR 5 review)*
+1. **Private `_idle_count` mutation in `TestIdleSuppression`** (`agents/tests/test_persona_tick_shortcircuit.py`).
+   `scheduler._idle_count += 1` directly mutates a private attribute of `TickScheduler`. If the
+   attribute is renamed or reshaped, the test silently fails at the wrong assertion. **Preferred
+   fix**: extract a `_simulate_do_nothing_tick()` helper that mirrors the counter-increment logic
+   so the private-attribute coupling lives in one place and can be updated in a single spot if
+   `TickScheduler` is refactored. A weaker alternative — annotating the mutation with
+   `# type: ignore[attr-defined]` and an inline comment noting the intentional coupling to
+   `TickScheduler._run()`'s `all_do_nothing` branch — is acceptable only if the helper extraction
+   is deferred for cost reasons; it merely silences mypy without removing the coupling.
+
+2. **`action_loop.py` at the 500-line file-size ceiling** (`agents/persona_runtime/action_loop.py`).
+   After PR 5, the file lands at exactly 500 lines — the `scripts/checks/file_size.py` ceiling.
+   Any addition (even a one-line comment) will trip the CI size guard. Pre-emptively extract the
+   four-condition short-circuit guard into a small helper method
+   `_should_suppress_empty_context_tick(self, event, injection_result) -> bool` on the mixin,
+   or extract `_on_event_inner` into a sibling submodule. Whichever option is chosen should be
+   chosen before any further callers add lines to this file.
+
+3. **Test gap: DB-failure path through the empty-context short-circuit** — *(Closed in PR 5 (#149).)*
+   The test `TestDBFailurePath.test_all_tier_lookups_raising_suppresses_tick` in
+   `agents/tests/test_persona_tick_shortcircuit.py` (added in PR 5 per the deep-review nice-to-have)
+   already exercises this scenario. Note the DB-failure path on a TICK exercises **two** tiers, not
+   three: `_inject_memory_context` guards the relationship tier on `if sender_id:`
+   (`agents/persona_runtime/memory_context.py`), and TICK events carry no `sender_id`, so only
+   episodic recall + notes recall are invoked. The test patches those two tiers and asserts at least
+   two `logger.warning` calls with `exc_info=True`. PR 6 does not need to add another test; this
+   bullet is preserved for the historical record.
+
+4. **`MemoryInjectionResult` should validate `memory_admitted_tokens >= 0`**
+   (`agents/persona_runtime/memory_context.py`). `MemoryInjectionResult` is a `frozen=True`
+   dataclass but accepts any `int`. A `MemoryBudget` bug producing a negative admitted count
+   would cause the `== 0` guard in the TICK short-circuit to silently pass (not suppressing the
+   tick), since `-1 != 0`. Add a `__post_init__` method that raises `ValueError` for negative
+   values:
+   ```python
+   def __post_init__(self) -> None:
+       if self.memory_admitted_tokens < 0:
+           raise ValueError(
+               f"memory_admitted_tokens must be >= 0, got {self.memory_admitted_tokens}"
+           )
+   ```
+   Single change; no caller impact under correct operation.
+
+5. **(Nice-to-have) Trim `_has_active_goal_payload` docstring**
+   (`agents/persona_runtime/__init__.py`). The docstring carries the full 12-line TICK-handler-pin
+   block (TICK handler module, two-accessor contract, and RFC 0017 §F reference). The canonical
+   record is in `docs/rfcs/0017-pr-plan.md` §PR5 open-at-plan-time paragraph. Trim the docstring
+   to a one-line cross-reference comment to eliminate three diverging copies of the same
+   information.
+
+6. **(Design follow-up) `recent_context` has no TTL or drain logic**
+   (`agents/persona_runtime/__init__.py`). `_has_pending_turn()` returns `True` as long as
+   `PersonaState.recent_context` is non-empty. `recent_context` is never cleared after the
+   response is dispatched, so after any conversation the TICK short-circuit is permanently blocked
+   for the lifetime of the agent process. If the intent is "pending turn means a conversation
+   initiated within the last N seconds", add a timestamp-based expiry or a post-response drain in
+   the dispatcher. This is a pre-existing `PersonaState` design limitation made observable by
+   PR 5; a v0.3 follow-up issue should decide the correct drain semantics before A2A is enabled.
 
 #### Tests
 
