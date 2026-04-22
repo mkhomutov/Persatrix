@@ -1,0 +1,319 @@
+"""Persatrix structured-logging configuration (RFC 0018 Phase 1).
+
+This module is the Python-side entry point for the v0.2.3 observability
+foundation.  It builds a ``structlog`` processor chain that emits the
+versioned JSON line schema documented in :doc:`docs/observability.md`
+(``schema_version: "1"``).
+
+Public surface
+--------------
+* :func:`configure_logging` — build the chain once at process start.
+* :func:`get_logger`        — return a structlog ``BoundLogger`` for a module.
+* :func:`set_redactor`      — install a :class:`~agents.observability.redact.Redactor`
+                              implementation (defaults to :class:`NoopRedactor`).
+
+Environment variables
+---------------------
+``PERSATRIX_LOG_FORMAT``
+    ``json`` (default) or ``pretty``.  Pretty selects ``structlog.dev.ConsoleRenderer``
+    for human-readable local development; the default is the JSON wire format
+    consumed by the future ``persatrix logs`` endpoint (RFC 0018 Phase 4).
+
+Stdlib bridge
+-------------
+``get_logger`` returns a ``structlog.stdlib.BoundLogger`` backed by
+``structlog.stdlib.LoggerFactory``.  Every ``logger.info(...)`` call
+ultimately emits a stdlib ``LogRecord`` rendered by ``ProcessorFormatter`` on
+the root handler.  Two consequences:
+
+1. ``pytest``'s ``caplog`` fixture captures records from named loggers exactly
+   as it did with stdlib ``logging.getLogger`` — the existing
+   ``test_persona_tick_shortcircuit.py`` continues to work without rewrites.
+2. Third-party libraries that emit through stdlib ``logging`` (grpc, anthropic,
+   openai) flow through the same ``ProcessorFormatter`` and are rendered in the
+   same JSON schema, so a single CLI consumer sees one wire format.
+
+Cross-RFC coupling
+------------------
+* The OTEL processor reads ``opentelemetry.trace.get_current_span()`` (the
+  OTEL provider is initialised by RFC 0019 Phase 1, see
+  :mod:`agents.observability.tracing`).  When no span is active or its
+  context is invalid the ``trace_id`` / ``span_id`` keys are **omitted**
+  (not emitted as empty strings) — this preserves the schema's "Optional"
+  contract from RFC 0018 § B.
+* The redactor hook is the same shape RFC 0019 Phase 2 will call for opt-in
+  tool-payload capture as span attributes.
+"""
+
+from __future__ import annotations
+
+import logging as _stdlib_logging
+import os
+import sys
+from collections.abc import MutableMapping
+from typing import Any
+
+import structlog
+from opentelemetry import trace
+
+from .redact import NoopRedactor, Redactor
+
+# ─── Schema constants (RFC 0018 § B) ─────────────────────────────────────────
+
+#: Schema version emitted on every record.  Bumping this is a breaking change.
+SCHEMA_VERSION = "1"
+
+#: Required-then-optional emission order from RFC 0018 § B.  The
+#: ``_reorder_keys`` processor at the tail of the chain emits keys in this
+#: order; any unknown keys are appended in insertion order after the known set.
+_FIELD_ORDER: tuple[str, ...] = (
+    # Required (RFC § B table 1)
+    "schema_version",
+    "timestamp",
+    "level",
+    "service.kind",
+    "service.instance",
+    "message",
+    # Optional (RFC § B table 2)
+    "service.role",
+    "execution_id",
+    "step_id",
+    "agent_id",
+    "request_id",
+    "trace_id",
+    "span_id",
+    "attributes",
+    "source",
+)
+
+# ─── Module-level state ──────────────────────────────────────────────────────
+
+_redactor: Redactor = NoopRedactor()
+_configured: bool = False
+
+
+def set_redactor(redactor: Redactor) -> None:
+    """Install a :class:`~agents.observability.redact.Redactor`.
+
+    Safe to call before or after :func:`configure_logging`; the chain reads
+    the module-level ``_redactor`` at every record emission.
+    """
+    global _redactor
+    _redactor = redactor
+
+
+# ─── Processors ──────────────────────────────────────────────────────────────
+
+
+def _rename_event_to_message(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """structlog stores the positional message under ``event``; the schema
+    calls it ``message``.  Rename in place."""
+    if "event" in event_dict:
+        event_dict["message"] = event_dict.pop("event")
+    return event_dict
+
+
+def _add_schema_version(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    event_dict["schema_version"] = SCHEMA_VERSION
+    return event_dict
+
+
+def _normalise_level(
+    _logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Schema requires upper-case levels (``DEBUG`` / ``INFO`` / ``WARN`` /
+    ``ERROR``); structlog emits lower-case method names by default and uses
+    ``warning`` rather than ``warn``."""
+    raw = event_dict.pop("level", method_name).upper()
+    event_dict["level"] = "WARN" if raw == "WARNING" else raw
+    return event_dict
+
+
+def _add_otel_trace_context(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Add ``trace_id`` / ``span_id`` when an OTEL span is active.
+
+    Per RFC 0018 § B (Optional fields), absent fields are *omitted*, not
+    emitted as empty strings.  ``get_current_span()`` returns an
+    ``INVALID_SPAN`` sentinel when no span is in scope; we filter on
+    ``span_context.is_valid`` rather than truthiness of the IDs.
+    """
+    span = trace.get_current_span()
+    span_context = span.get_span_context() if span is not None else None
+    if span_context is not None and span_context.is_valid:
+        event_dict["trace_id"] = format(span_context.trace_id, "032x")
+        event_dict["span_id"] = format(span_context.span_id, "016x")
+    return event_dict
+
+
+def _apply_redactor(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Invoke the registered :class:`Redactor` exactly once per record.
+
+    The redactor receives a plain ``dict`` snapshot and may return either the
+    same object or a new one.
+    """
+    return _redactor.redact(dict(event_dict))  # type: ignore[return-value]
+
+
+def _reorder_keys(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Emit keys in the documented schema order; unknown keys are appended."""
+    ordered: dict[str, Any] = {}
+    for key in _FIELD_ORDER:
+        if key in event_dict:
+            ordered[key] = event_dict[key]
+    for key, value in event_dict.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered
+
+
+def _build_processors() -> list[structlog.types.Processor]:
+    """Shared processor chain — used both by ``structlog.configure()`` (for
+    structlog-native callers) and by ``ProcessorFormatter.foreign_pre_chain``
+    (for stdlib callers).
+    """
+    return [
+        # 1. Per-async-task contextvars (execution_id / step_id / agent_id
+        #    bound by the gRPC interceptor in RFC 0018 PR 3).
+        structlog.contextvars.merge_contextvars,
+        # 2. Schema-required fields.
+        _add_schema_version,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        _normalise_level,
+        _rename_event_to_message,
+        # 3. OTEL trace context (RFC 0019 Phase 1 dependency).
+        _add_otel_trace_context,
+        # 4. Redaction hook (RFC 0018 § F).
+        _apply_redactor,
+        # 5. Schema field order.
+        _reorder_keys,
+    ]
+
+
+def _select_renderer() -> structlog.types.Processor:
+    """``json`` (default) or ``pretty`` per ``PERSATRIX_LOG_FORMAT``."""
+    fmt = os.environ.get("PERSATRIX_LOG_FORMAT", "json").lower()
+    if fmt == "pretty":
+        return structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
+    return structlog.processors.JSONRenderer()
+
+
+# ─── Public API ──────────────────────────────────────────────────────────────
+
+
+def configure_logging(
+    *,
+    service_kind: str = "agent",
+    service_instance: str | None = None,
+    service_role: str | None = None,
+    level: str = "INFO",
+) -> None:
+    """Configure structlog + stdlib bridge for the current process.
+
+    Idempotent: subsequent calls update the bound ``service.*`` context but
+    do not rebuild the processor chain.
+
+    Parameters
+    ----------
+    service_kind
+        ``orchestrator`` / ``agent`` / ``cli`` per RFC 0018 § B.
+    service_instance
+        Process identity (e.g. agent ID).  Falls back to
+        ``PERSATRIX_AGENT_ID`` then to ``"unknown"``.
+    service_role
+        Optional persona / agent role (e.g. ``coder``, ``reviewer``).
+    level
+        Log level name (``DEBUG`` / ``INFO`` / ``WARN`` / ``ERROR``).
+    """
+    global _configured
+
+    instance = service_instance or os.environ.get("PERSATRIX_AGENT_ID", "unknown")
+    stdlib_level_name = "WARNING" if level.upper() == "WARN" else level.upper()
+    stdlib_level = getattr(_stdlib_logging, stdlib_level_name, _stdlib_logging.INFO)
+
+    if _configured:
+        # Re-bind service.* context; chain is already built.
+        _bind_service_context(service_kind, instance, service_role)
+        _stdlib_logging.getLogger().setLevel(stdlib_level)
+        return
+
+    shared_processors = _build_processors()
+
+    # ── structlog side ────────────────────────────────────────────────
+    structlog.configure(
+        processors=[
+            *shared_processors,
+            # Hand off to the stdlib root handler's ProcessorFormatter.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(stdlib_level),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # ── stdlib root handler with ProcessorFormatter ──────────────────
+    root = _stdlib_logging.getLogger()
+    root.setLevel(stdlib_level)
+    # Remove existing handlers so we don't double-emit if some module called
+    # ``logging.basicConfig`` earlier in the process lifetime.
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        # foreign_pre_chain runs for records that came in via stdlib
+        # ``logging.getLogger().info("msg")`` (third-party libs).  It applies
+        # the schema processors so foreign records also conform.
+        foreign_pre_chain=shared_processors,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _select_renderer(),
+        ],
+    )
+    handler = _stdlib_logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(formatter)
+    root.addHandler(handler)
+
+    _bind_service_context(service_kind, instance, service_role)
+    _configured = True
+
+
+def _bind_service_context(
+    service_kind: str, service_instance: str, service_role: str | None
+) -> None:
+    """Bind ``service.*`` context to the structlog contextvars set."""
+    ctx: dict[str, Any] = {
+        "service.kind": service_kind,
+        "service.instance": service_instance,
+    }
+    if service_role:
+        ctx["service.role"] = service_role
+    structlog.contextvars.bind_contextvars(**ctx)
+
+
+def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
+    """Return a structlog ``BoundLogger`` for the given module name.
+
+    Mirrors the stdlib ``logging.getLogger(__name__)`` ergonomics so the
+    PR 1 swap is mechanical.  When :func:`configure_logging` has not been
+    called the logger still works (structlog falls back to its built-in
+    defaults), but records will not carry the schema fields.
+    """
+    return structlog.get_logger(name)  # type: ignore[no-any-return]
+
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "configure_logging",
+    "get_logger",
+    "set_redactor",
+]

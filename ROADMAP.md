@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (RFC 0019 PR 1 merged as #163 — v0.2.3 section added to ROADMAP, component status tables updated for `internal/telemetry/` → `internal/observability/` rename + Python OTEL init, merged PR history updated; 0018 PR 1 is next per joint merge order #2)  
+> **Last updated**: 2026-04-22 (RFC 0018 PR 1 opened — schema doc + Python `structlog` chain + redactor surface + tests; status flipped to 🚧 Implementing per RFC Decision/Next Steps step 2)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged; 0018 PR 1 next — joint order #2)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged; 0018 PR 1 in review — joint order #2)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -49,7 +49,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
-| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | 📋 Proposed |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | � Implementing |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 🚧 Implementing |
 
 ---
@@ -366,14 +366,14 @@ v0.2.2 complete
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 1/5 |
-| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 📋 Proposed | 7 | 0/7 |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | � Implementing | 7 | 0/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
 
 ```
 0019 PR 1 (Phase 1 — telemetry→observability rename + Python OTEL init + gRPC + Baggage)  ✅ #163
   ↓
-0018 PR 1 (Phase 1 — Python structlog + schema doc + redactor surface)
+0018 PR 1 (Phase 1 — Python structlog + schema doc + redactor surface)  🚧 in review
   ↓
 0018 PR 2 (Phase 2 — Go zap rename + pretty + redactor wired + source)
   ↓

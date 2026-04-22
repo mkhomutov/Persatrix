@@ -20,6 +20,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from .base import BaseAgent
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
+from .observability.logging import configure_logging
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
@@ -301,9 +302,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    # RFC 0018 Phase 1 — structured logging via structlog + ProcessorFormatter
+    # bridge.  Replaces the prior ``logging.basicConfig`` call so all records
+    # (including those from third-party libs that still emit through stdlib
+    # ``logging``) flow through the schema chain documented in
+    # ``docs/observability.md``.  Existing call sites that use
+    # ``logging.getLogger(__name__)`` continue to work — they hit the
+    # ``foreign_pre_chain`` and are rendered with the same JSON schema.
+    # The mechanical ``getLogger`` -> ``get_logger`` swap and printf -> kwargs
+    # migration ship in a follow-up PR (RFC 0018 PR 1b).
+    configure_logging(
+        service_kind="agent",
+        service_instance=args.agent,
+        level=args.log_level,
     )
 
     # Initialise OTEL tracing before any gRPC or async code starts.

@@ -134,13 +134,17 @@ All PRs are sequential.
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean (pre-existing grpc stubs errors only)
-- [ ] All `logging.getLogger` call sites in `agents/` swapped to `get_logger`
-- [ ] `agents/observability/redact.py` exports a `Redactor` Protocol matching the surface RFC 0019 Phase 2 tool-payload capture will call
-- [ ] `docs/observability.md` documents the schema, field ordering, and `PERSATRIX_LOG_FORMAT=pretty`
-- [ ] ROADMAP.md RFC 0018 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR)
+- [x] `pytest agents/tests/ -v` passes (1206 tests, 2 skipped — full suite green)
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/observability/` clean (broader `mypy agents/` has pre-existing grpc-stub errors only)
+- [ ] ~~All `logging.getLogger` call sites in `agents/` swapped to `get_logger`~~ — **descoped to follow-up PR 1b**. The `ProcessorFormatter.foreign_pre_chain` configured by `configure_logging()` already renders all stdlib `logging.getLogger`-emitted records through the schema chain, so log output conforms to `schema_version: "1"` immediately after this PR. The mechanical swap + `extra={...}` → kwargs migration ships in a small follow-up PR (1b) so this PR stays under the 500-line BRANCHING.md limit and avoids touching unrelated test scaffolding (`test_persona_tick_shortcircuit.py` depends on stdlib `LogRecord` attribute propagation that requires per-call-site rewrites).
+- [x] `agents/observability/redact.py` exports a `Redactor` Protocol matching the surface RFC 0019 Phase 2 tool-payload capture will call
+- [x] `docs/observability.md` documents the schema, field ordering, and `PERSATRIX_LOG_FORMAT=pretty`
+- [x] ROADMAP.md RFC 0018 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR)
+
+#### Follow-up: PR 1b — `feature/v023-logging-python-getlogger-swap` (descoped from this PR)
+
+Mechanical migration of `logging.getLogger(__name__)` → `from .observability.logging import get_logger; logger = get_logger(__name__)` across `agents/` (~27 files), plus `logger.info("msg %s", x, extra={"k": v})` → `logger.info("msg", x=x, k=v)` for the ~25 printf-style call sites identified in the audit, plus targeted updates to `test_persona_tick_shortcircuit.py` to assert structlog event-dict fields rather than stdlib `LogRecord` attributes. Estimated size: ~250–400 lines. Joint order position remains #2 (1b is a sub-PR landing immediately after PR 1).
 
 ---
 
