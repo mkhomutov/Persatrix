@@ -1,7 +1,7 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised)  
-> **Current phase**: v0.2.3 (Structured Logging + OpenTelemetry) — 📋 Planned  
+> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised; v0.2.3 milestone description refreshed to "Observability Foundation" framing per PR #160 review)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 📋 Planned  
 > **Current milestone**: v0.2.2 released; v0.2.3 planning next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
@@ -18,7 +18,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
-| **v0.2.3** | Operability minor release — structured logs across Go/Python, working `persatrix logs` CLI, end-to-end OpenTelemetry traces from REST handler to LLM call | 📋 Planned |
+| **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | 📋 Planned |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
