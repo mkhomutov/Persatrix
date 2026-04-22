@@ -583,11 +583,13 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 
 1. **Private `_idle_count` mutation in `TestIdleSuppression`** (`agents/tests/test_persona_tick_shortcircuit.py`).
    `scheduler._idle_count += 1` directly mutates a private attribute of `TickScheduler`. If the
-   attribute is renamed or reshaped, the test silently fails at the wrong assertion. Add an explicit
-   `# type: ignore[attr-defined]` comment and inline documentation noting this is an intentional
-   coupling to `TickScheduler._run()`'s `all_do_nothing` branch. Alternatively, extract a
-   `_simulate_do_nothing_tick()` helper that mirrors the counter-increment logic so the duplication
-   lives in one place.
+   attribute is renamed or reshaped, the test silently fails at the wrong assertion. **Preferred
+   fix**: extract a `_simulate_do_nothing_tick()` helper that mirrors the counter-increment logic
+   so the private-attribute coupling lives in one place and can be updated in a single spot if
+   `TickScheduler` is refactored. A weaker alternative — annotating the mutation with
+   `# type: ignore[attr-defined]` and an inline comment noting the intentional coupling to
+   `TickScheduler._run()`'s `all_do_nothing` branch — is acceptable only if the helper extraction
+   is deferred for cost reasons; it merely silences mypy without removing the coupling.
 
 2. **`action_loop.py` at the 500-line file-size ceiling** (`agents/persona_runtime/action_loop.py`).
    After PR 5, the file lands at exactly 500 lines — the `scripts/checks/file_size.py` ceiling.
@@ -597,14 +599,15 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
    or extract `_on_event_inner` into a sibling submodule. Whichever option is chosen should be
    chosen before any further callers add lines to this file.
 
-3. **Test gap: DB-failure path through the empty-context short-circuit**
-   (`agents/tests/test_persona_tick_shortcircuit.py`). No test exercises the scenario where
-   `_inject_memory_context` returns `memory_admitted_tokens=0` because all three memory tier
-   lookups raised exceptions (rather than because the DB returned no results above threshold).
-   A regression in exception handling could silently suppress all autonomous reasoning on a
-   DB outage without operators noticing the distinction. Add a test that patches all three memory
-   tier query methods to raise `OSError`, calls `agent.on_event(TICK)`, asserts `DO_NOTHING` is
-   returned, and verifies exactly three `logger.warning` calls with `exc_info=True` were emitted.
+3. **Test gap: DB-failure path through the empty-context short-circuit** — *(Closed in PR 5 (#149).)*
+   The test `TestDBFailurePath.test_all_tier_lookups_raising_suppresses_tick` in
+   `agents/tests/test_persona_tick_shortcircuit.py` (added in PR 5 per the deep-review nice-to-have)
+   already exercises this scenario. Note the DB-failure path on a TICK exercises **two** tiers, not
+   three: `_inject_memory_context` guards the relationship tier on `if sender_id:`
+   (`agents/persona_runtime/memory_context.py`), and TICK events carry no `sender_id`, so only
+   episodic recall + notes recall are invoked. The test patches those two tiers and asserts at least
+   two `logger.warning` calls with `exc_info=True`. PR 6 does not need to add another test; this
+   bullet is preserved for the historical record.
 
 4. **`MemoryInjectionResult` should validate `memory_admitted_tokens >= 0`**
    (`agents/persona_runtime/memory_context.py`). `MemoryInjectionResult` is a `frozen=True`
