@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-04-22
+
+> **Codename:** Bounded Persona Memory Injection
+
+### Highlights
+
+- Persona-agent memory injection now enforces a per-event token budget. A new
+  `MemoryBudget` allocator distributes available tokens across the three memory
+  tiers (episodic, relationship, working) and truncates injected context to fit.
+- Episodic and relationship `recall` / `recall_notes` calls now accept a
+  `min_score` relevance threshold, reducing noise in injected memory.
+- TICK events that admit zero memory items after budget allocation are
+  short-circuited before reaching the LLM, eliminating spurious cost on
+  persona agents with empty context windows.
+
+### Upgrade Notes
+
+- **No breaking changes.** All RFC 0017 changes are internal to the Python
+  agent runtime. No proto changes, no new REST endpoints, no config schema
+  changes.
+- **Optional:** `min_score` defaults to `0.0` (matches previous behaviour).
+  Set it in `recall`/`recall_notes` tool calls to filter low-relevance
+  memories proactively.
+
+### 🚀 Features
+
+- *(agents)* `MemoryBudget` allocator + token-aware truncation (RFC 0017 PR 1/7) (#145)
+- *(agents)* `_inject_memory_context` allocate-loop rewrite (RFC 0017 PR 2/7) (#146)
+- *(memory)* `min_score` relevance threshold on `recall`/`recall_notes` (RFC 0017 PR 3/7) (#147)
+- *(agents)* Wire `min_score` and remove legacy gates (RFC 0017 PR 4/7) (#148)
+
+### 🐛 Bug Fixes
+
+- *(agents)* Short-circuit empty-context TICKs (RFC 0017 PR 5/7) (#149)
+- *(agents)* RFC 0017 PR 6 review follow-ups (#152)
+
+### 📚 Documentation
+
+- *(safety)* Add cost warning, responsible-use section, and runtime cost notice (#150)
+- *(rfcs)* Close RFC 0017 — Persona Memory Injection Token Budget (#153)
+- *(manual-tests)* Add MT-MEMORY-004 and MT-PERSONA-003 runbooks for RFC 0017 (#154)
+- *(release)* v0.2.2 release checklist + prep plan + README/guide refresh (#156)
+
+### 🧪 Testing
+
+- *(manual)* v0.2.2 execution report — 18 pass, 1 accepted-with-known-gap (#155)
+
+### 📦 Miscellaneous
+
+- *(deps)* Bump `rustls-webpki` from 0.103.10 to 0.103.12 in `/cli` (#139)
+
+[0.2.2]: https://github.com/mkhomutov/Persatrix/compare/v0.2.1...v0.2.2
+
 ## [0.2.1] - 2026-04-21
 
 > **Codename:** Talk to Your Agents
