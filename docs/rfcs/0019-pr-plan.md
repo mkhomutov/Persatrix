@@ -148,6 +148,8 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [x] `CompositePropagator(TraceContext + Baggage)` configured globally on both sides
 - [x] ROADMAP.md RFC 0019 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
 
+**Merged**: PR [#163](https://github.com/mkhomutov/Persatrix/pull/163) — 2026-04-22
+
 ---
 
 ### PR 2: `feature/v023-otel-semantic-spans` — Phase 2: Semantic Spans + Span Links + Log↔Trace Coordination
