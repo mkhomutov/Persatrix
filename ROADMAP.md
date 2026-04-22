@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (v0.2.2 release prep — checklist + prep plan added; README and persona-agents guide refreshed for RFC 0017)  
+> **Last updated**: 2026-04-22 (v0.2.2 release prep — checklist + prep plan added; README and persona-agents guide refreshed for RFC 0017; manual tests complete — execution report added; integration test fix for RFC 0017 §F)  
 > **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — ✅ Implemented  
 > **Current milestone**: v0.2.2 release prep — checklist drafted, version bump pending
 
