@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (v0.2.2 release prep — checklist + prep plan added; README and persona-agents guide refreshed for RFC 0017; manual tests complete — execution report added; integration test fix for RFC 0017 §F)  
-> **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — ✅ Implemented  
-> **Current milestone**: v0.2.2 release prep — checklist drafted, version bump pending
+> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised)  
+> **Current phase**: v0.2.3 (Structured Logging + OpenTelemetry) — 📋 Planned  
+> **Current milestone**: v0.2.2 released; v0.2.3 planning next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -17,7 +17,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.1.0** | Submit YAML workflows, orchestrate task agents via gRPC, poll status via REST | ✅ Complete — internal baseline |
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
-| **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Implemented |
+| **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
 | **v0.2.3** | Operability minor release — structured logs across Go/Python, working `persatrix logs` CLI, end-to-end OpenTelemetry traces from REST handler to LLM call | 📋 Planned |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
@@ -297,6 +297,44 @@ v0.2.1 complete
 | Chat REST endpoint | `internal/server/` | — | 0016 | ✅ Complete (PR #123) |
 | Chat gRPC dispatch | `internal/executor/` | `agents/server_servicers.py` | 0016 | ✅ Complete (PR #121) |
 | `persatrix chat` CLI | — | — | 0016 (`cli/src/commands/chat.rs`) | ✅ Complete (PR #125) |
+
+---
+
+## v0.2.2 — Bounded Persona Memory ✅ Complete
+
+**What a user can do**: Persona agents now operate with a deterministic per-event memory token budget — predictable context size, lower per-tick cost, and no more silent spending when nothing is happening.
+
+### What ships in v0.2.2
+
+- **`MemoryBudget` allocator** — per-event token ceiling distributing the available budget across episodic, relationship, and notes tiers (RFC 0017 §B)
+- **`_inject_memory_context` rewrite** — allocate-loop replaces ad-hoc injection; budget tracked uniformly across all memory types (RFC 0017 §C)
+- **`min_score` relevance threshold** — `EpisodicMemory.recall` / `recall_notes` accept `min_score` and filter out low-scoring matches before injection; legacy opaque gates removed (RFC 0017 §D)
+- **Empty-context TICK short-circuit** — when a TICK fires with no admitted memory, no active goal, and no pending conversation turn, the LLM call is skipped and `idle_count` is incremented (RFC 0017 §F)
+
+### What does not ship in v0.2.2
+
+- Operator-facing config for `_MEMORY_BUDGET_TOKENS` — per-event budget constant is not yet exposed as a per-agent config field; deferred pending demand
+- RFC 0008 (Memory & Context Optimization) — structural prerequisite now met; RFC 0008 implementation planned for v0.3.0
+
+### RFC Scope
+
+| RFC | Title | Status | PRs | Merged |
+|-----|-------|--------|-----|--------|
+| [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | ✅ Implemented | 7 | 7/7 |
+
+### Dependency Chain (v0.2.2)
+
+```
+v0.2.1 complete (RFC 0016 ✅)
+    ↓
+RFC 0017 Phase B (MemoryBudget allocator + allocate-loop rewrite)
+    ↓
+RFC 0017 Phase D (min_score relevance threshold)
+    ↓
+RFC 0017 Phase F (empty-context TICK short-circuit)
+    ↓
+v0.2.2 complete
+```
 
 ---
 
@@ -617,6 +655,10 @@ v0.5.0 complete
 | [#152](https://github.com/mkhomutov/Persatrix/pull/152) | fix(agents): RFC 0017 PR 6 review follow-ups (PR 6/7) | 0017 (6/7) | 2026-04-22 |
 | [#153](https://github.com/mkhomutov/Persatrix/pull/153) | docs(rfc): close RFC 0017 status and roadmap | 0017 (close) | 2026-04-22 |
 | [#154](https://github.com/mkhomutov/Persatrix/pull/154) | docs(manual-tests): add MT-MEMORY-004 and MT-PERSONA-003 for RFC 0017 | 0017 (7/7) | 2026-04-22 |
+| [#155](https://github.com/mkhomutov/Persatrix/pull/155) | test(manual): v0.2.2 execution report and integration test fix for RFC 0017 §F | v0.2.2 release prep | 2026-04-22 |
+| [#156](https://github.com/mkhomutov/Persatrix/pull/156) | docs(release): v0.2.2 release checklist + prep plan + README/guide refresh | v0.2.2 release prep | 2026-04-22 |
+| [#157](https://github.com/mkhomutov/Persatrix/pull/157) | chore(release): bump to v0.2.2 + curated changelog | v0.2.2 release prep | 2026-04-22 |
+| [#158](https://github.com/mkhomutov/Persatrix/pull/158) | docs(release): final pre-tag verification — flip README to Released, check off all gates | v0.2.2 release prep | 2026-04-22 |
 
 ---
 
