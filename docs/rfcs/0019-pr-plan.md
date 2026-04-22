@@ -135,18 +135,18 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/... -v -race -cover` passes (rename preserves all existing tests)
-- [ ] `pytest agents/tests/test_observability_tracing.py -v` passes
-- [ ] `pytest tests/integration/test_trace_propagation.py -v` passes
-- [ ] No `internal/telemetry/` directory remains
-- [ ] Pre-merge import-path audit: `grep -r 'internal/telemetry' --include='*.go' .` returns no matches <!-- Added per PR #161 review: the rename touches ~57 Go files; a grep verification is a low-cost safety net for any imports the automated update missed. -->
-- [ ] All `internal/telemetry` import paths in `internal/...` and `cmd/...` updated
-- [ ] `agents/pyproject.toml` Python OTLP exporter dep is the HTTP variant
-- [ ] CHANGELOG v0.2.3 entry covers the OTLP exporter swap (operator-visible) and the Go package rename
-- [ ] Both `grpc.NewClient` sites carry the `otelgrpc` client handler via the executor's dial-options slices
-- [ ] HTTP handler is wrapped with `otelhttp.NewHandler` in `cmd/orchestrator/main.go`
-- [ ] `CompositePropagator(TraceContext + Baggage)` configured globally on both sides
-- [ ] ROADMAP.md RFC 0019 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
+- [x] `go test ./internal/observability/... -v -race -cover` passes (rename preserves all existing tests)
+- [x] `pytest agents/tests/test_observability_tracing.py -v` passes
+- [x] `pytest tests/integration/test_trace_propagation.py -v` passes
+- [x] No `internal/telemetry/` directory remains
+- [x] Pre-merge import-path audit: `grep -r 'internal/telemetry' --include='*.go' .` returns no matches <!-- Added per PR #161 review: the rename touches ~57 Go files; a grep verification is a low-cost safety net for any imports the automated update missed. -->
+- [x] All `internal/telemetry` import paths in `internal/...` and `cmd/...` updated
+- [x] `agents/pyproject.toml` Python OTLP exporter dep is the HTTP variant
+- [x] CHANGELOG v0.2.3 entry covers the OTLP exporter swap (operator-visible) and the Go package rename
+- [x] Both `grpc.NewClient` sites carry the `otelgrpc` client handler via the executor's dial-options slices
+- [x] HTTP handler is wrapped with `otelhttp.NewHandler` in `cmd/orchestrator/main.go`
+- [x] `CompositePropagator(TraceContext + Baggage)` configured globally on both sides
+- [x] ROADMAP.md RFC 0019 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
 
 ---
 

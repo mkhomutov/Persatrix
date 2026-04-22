@@ -83,7 +83,7 @@ A merger of the two RFCs into one "Observability Foundation" document was consid
 
 ## Motivation
 
-Persatrix's OTEL implementation is roughly 50–60% of a full setup. The Go side ([`internal/telemetry`](../../internal/telemetry/telemetry.go)) is correct and complete: tracer provider, OTLP HTTP exporter, sampler, W3C TraceContext propagator, manual spans on workflow submit / run / step / gRPC dispatch. Local infra (`docker-compose.yaml`, Jaeger on `:16686`) is OTEL-ready. The README tells operators a tracing story.
+Persatrix's OTEL implementation is roughly 50–60% of a full setup. The Go side ([`internal/observability`](../../internal/observability/telemetry.go)) is correct and complete: tracer provider, OTLP HTTP exporter, sampler, W3C TraceContext propagator, manual spans on workflow submit / run / step / gRPC dispatch. Local infra (`docker-compose.yaml`, Jaeger on `:16686`) is OTEL-ready. The README tells operators a tracing story.
 
 What is missing today defeats the primary purpose of having OTEL in a polyglot system:
 
@@ -131,7 +131,7 @@ What happens if we do nothing: every multi-agent debugging story remains a manua
 
 | Concern | Go orchestrator | Python agents |
 |---------|-----------------|---------------|
-| Tracer provider | ✅ [`internal/telemetry/telemetry.go`](../../internal/telemetry/telemetry.go) | ❌ Not initialised |
+| Tracer provider | ✅ [`internal/observability/telemetry.go`](../../internal/observability/telemetry.go) | ❌ Not initialised |
 | OTLP exporter | ✅ HTTP via `otlptracehttp` | Deps present, not wired |
 | Propagator | ✅ W3C TraceContext | ❌ Not installed |
 | Resource attributes | ✅ Service name, version | ❌ N/A |
@@ -494,7 +494,7 @@ These constraints should be reflected in both RFCs' joint PR plan and in the v0.
 - [RFC 0018 — Structured Logging Framework](0018-structured-logging-framework.md) (paired RFC; targets the same release)
 - [Development Workflow](../development-workflow.md)
 - [Branching Strategy](../BRANCHING.md)
-- [internal/telemetry/telemetry.go](../../internal/telemetry/telemetry.go) (Go OTEL setup that the Python module mirrors)
+- [internal/observability/telemetry.go](../../internal/observability/telemetry.go) (Go OTEL setup that the Python module mirrors)
 - [agents/server.py](../../agents/server.py) (entry point gaining `init_tracing` call)
 - [agents/tools/registry.py](../../agents/tools/registry.py) (the OTEL TODO this RFC closes)
 - [docker-compose.yaml](../../docker-compose.yaml) (Jaeger + OTLP infrastructure already in place)
