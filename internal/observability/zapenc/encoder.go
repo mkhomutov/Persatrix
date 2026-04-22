@@ -33,6 +33,25 @@
 // JSON wire format consumed by the future persatrix logs endpoint
 // (RFC 0018 Phase 4).
 //
+// Known limitation — numeric precision (RFC 0018 PR 2 review, Should-Fix #1):
+// EncodeEntry round-trips the inner encoder's output through
+// json.Unmarshal → map[string]any → json.Marshal so it can reorder keys and
+// inject schema fields.  encoding/json decodes every JSON number into
+// float64, so int64 fields round-trip lossily once their absolute value
+// exceeds 2^53 (≈9.007e15).  No orchestrator field is anywhere near that
+// ceiling today (token counts, retry counters, durations in ms, epoch
+// nanoseconds for foreseeable timestamps all fit).  If a future field
+// approaches the ceiling — or if benchmarking shows the per-entry parse
+// cost is a hot-path regression — the encoder should be reimplemented as a
+// streaming zapcore.Encoder that owns []zapcore.Field accumulation directly
+// (the otelzap / sentryzap pattern) rather than re-parsing JSON.
+//
+// Pretty mode (PERSATRIX_LOG_FORMAT=pretty) bypasses this encoder entirely,
+// which also means it bypasses the configured Redactor.  Acceptable for a
+// developer affordance; once a real Redactor lands (RFC 0009 umbrella) the
+// pretty path will need its own redaction wiring or a "pretty-with-schema"
+// intermediate mode.
+//
 // Package name "zapenc" (not "zapcore") avoids collision with upstream
 // go.uber.org/zap/zapcore in importer files.  Pinned by RFC 0018
 // "Files Touched (Estimated)" per PR #160 review.
@@ -64,6 +83,13 @@ const PrettyEnvVar = "PERSATRIX_LOG_FORMAT"
 // PrettyEnvValue is the [PrettyEnvVar] value that selects the dev console
 // encoder.
 const PrettyEnvValue = "pretty"
+
+// JSONEnvValue is the [PrettyEnvVar] value that explicitly selects the
+// schema JSON encoder.  An unset env var also resolves to JSON; this
+// constant exists so callers (cmd/orchestrator/main.go env validation) do
+// not carry the literal string "json" as a magic value (RFC 0018 PR 2
+// review, Should-Fix #7).
+const JSONEnvValue = "json"
 
 // fieldOrder is the canonical emission order from RFC 0018 § B (and
 // docs/observability.md § 2/§ 3).  Tests assert this order byte-for-byte.
@@ -249,7 +275,25 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 	// 1. Apply legacy rename map.  Renames only happen when the target key
 	//    is not already present — call-site audits that pre-rename to the
 	//    schema name take precedence over the encoder's backstop.
-	for oldKey, newKey := range legacyRenames {
+	//
+	//    Iteration order matters (RFC 0018 PR 2 review, Should-Fix #2):
+	//    multiple legacy keys can collapse onto the same schema key (today
+	//    "runID" and "executionID" both map to "execution_id").  Plain
+	//    `range legacyRenames` is non-deterministic, so the surviving value
+	//    when both legacy keys are present at the same call site would be
+	//    randomised — exactly the drift the encoder-as-backstop is meant to
+	//    prevent.  Sort the legacy keys lexicographically and iterate in
+	//    that order so the precedence rule is stable and documentable
+	//    ("executionID" wins over "runID" because 'e' < 'r').  The first
+	//    iteration installs the schema key; subsequent collisions are
+	//    skipped by the `_, exists := record[newKey]; !exists` guard.
+	legacyKeys := make([]string, 0, len(legacyRenames))
+	for k := range legacyRenames {
+		legacyKeys = append(legacyKeys, k)
+	}
+	sort.Strings(legacyKeys)
+	for _, oldKey := range legacyKeys {
+		newKey := legacyRenames[oldKey]
 		if v, ok := record[oldKey]; ok {
 			if _, exists := record[newKey]; !exists {
 				record[newKey] = v
@@ -342,6 +386,15 @@ func (e *schemaEncoder) encodeFallbackEnvelope(entry zapcore.Entry, raw []byte, 
 
 // applyRedactor invokes r.Redact and recovers from any panic, returning the
 // original entry unchanged.  Mirrors the Python _apply_redactor processor.
+//
+// Defensive nil-return guard (RFC 0018 PR 2 review, Must-Fix #3): the
+// [redact.Redactor] interface contract does not forbid a nil return, and Go
+// permits `return nil` on `map[string]any`.  Without this guard,
+// serialiseOrdered(nil) would emit a `{}` envelope missing schema_version /
+// service.* — the same silent-drop class as the JSON-roundtrip fallback.
+// NoopRedactor returns the input so the path is latent today, but a future
+// real Redactor (or a buggy one in a downstream fork) could trip it; the
+// one-line `if out == nil` keeps the schema invariant intact regardless.
 func applyRedactor(r redact.Redactor, entry map[string]any) (out map[string]any) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -354,7 +407,11 @@ func applyRedactor(r redact.Redactor, entry map[string]any) (out map[string]any)
 			out = entry
 		}
 	}()
-	return r.Redact(entry)
+	out = r.Redact(entry)
+	if out == nil {
+		out = entry
+	}
+	return out
 }
 
 // serialiseOrdered marshals record into a buffer in fieldOrder, with unknown

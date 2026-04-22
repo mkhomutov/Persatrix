@@ -456,3 +456,60 @@ func TestEncoder_ConcurrentEncodeIsSafe(t *testing.T) {
 		}
 	}
 }
+
+// nilReturnRedactor returns nil from Redact — legal Go for map[string]any
+// but a footgun for the encoder's schema invariants if not guarded.
+type nilReturnRedactor struct{}
+
+func (nilReturnRedactor) Redact(_ map[string]any) map[string]any { return nil }
+
+// TestEncoder_RedactorNilReturnFallsBackToEntry covers the previously
+// unhandled nil-return path (RFC 0018 PR 2 review, Must-Fix #3).  Without
+// the `if out == nil { out = entry }` guard in applyRedactor, the resulting
+// envelope would lack schema_version / service.* and be silently dropped by
+// the downstream `schema_version: "1"` filter.
+func TestEncoder_RedactorNilReturnFallsBackToEntry(t *testing.T) {
+	opts := defaultOpts()
+	opts.Redactor = nilReturnRedactor{}
+	logger, buf := newTestLogger(t, opts)
+
+	require.NotPanics(t, func() {
+		logger.Info("nil-redactor")
+	})
+
+	record := parseLine(t, buf)
+	// The schema invariants must survive even when the Redactor returns
+	// nil — the guard restores the unredacted entry instead of letting
+	// serialiseOrdered emit an empty envelope.
+	assert.Equal(t, SchemaVersion, record["schema_version"], "schema_version must survive a nil-returning redactor")
+	assert.Equal(t, "orchestrator", record["service.kind"], "service.kind must survive a nil-returning redactor")
+	assert.Equal(t, "test-node", record["service.instance"], "service.instance must survive a nil-returning redactor")
+	assert.Equal(t, "nil-redactor", record["message"], "message must survive a nil-returning redactor")
+}
+
+// TestEncoder_LegacyRenameCollisionIsDeterministic guards the
+// non-determinism fix (RFC 0018 PR 2 review, Should-Fix #2).  Both "runID"
+// and "executionID" map to "execution_id"; before the sort-then-iterate
+// fix, the surviving value when both were present at one call site was
+// chosen by Go's randomised map iteration order.  Documented precedence:
+// "executionID" wins over "runID" because the iteration is lexicographic
+// and 'e' < 'r' (the first iteration installs the schema key, subsequent
+// collisions are skipped by the pre-existing-key guard).
+func TestEncoder_LegacyRenameCollisionIsDeterministic(t *testing.T) {
+	// Repeat enough times that randomised iteration would virtually
+	// guarantee at least one disagreeing run (1 / 2^N for N runs of a
+	// fair coin); 50 runs is overkill but cheap.
+	const runs = 50
+	for i := 0; i < runs; i++ {
+		logger, buf := newTestLogger(t, defaultOpts())
+		logger.Info("collision",
+			zap.String("runID", "from-runID"),
+			zap.String("executionID", "from-executionID"),
+		)
+		record := parseLine(t, buf)
+		assert.Equal(t, "from-executionID", record["execution_id"],
+			"executionID must deterministically win over runID (run %d)", i)
+		assert.NotContains(t, record, "runID", "legacy runID must be removed")
+		assert.NotContains(t, record, "executionID", "legacy executionID must be removed")
+	}
+}

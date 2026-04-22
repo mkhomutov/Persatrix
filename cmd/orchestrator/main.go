@@ -96,7 +96,7 @@ func main() {
 	// PERSATRIX_LOG_FORMAT=preety surfaces at startup.
 	logFormat := os.Getenv(zapenc.PrettyEnvVar)
 	switch logFormat {
-	case "", "json", zapenc.PrettyEnvValue:
+	case "", zapenc.JSONEnvValue, zapenc.PrettyEnvValue:
 	default:
 		fmt.Fprintln(os.Stderr, "invalid "+zapenc.PrettyEnvVar+" value: "+logFormat+
 			" (must be json|pretty; unset == json)")
