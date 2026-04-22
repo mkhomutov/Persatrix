@@ -54,6 +54,9 @@ _EXTRA_EXCLUDES = [
     # Generated dependency manifest; word count scales with the Go/Python/Rust
     # dependency graphs. Review it via `make notices` diff, not size limits.
     "THIRD_PARTY_NOTICES.md",
+    # PR review reports are local-only working artifacts and are intentionally
+    # not committed; local copies should not block repo-wide size checks.
+    "docs/pr-reviews/**",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
