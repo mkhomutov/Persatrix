@@ -79,7 +79,7 @@ in the PR description before merge — that is a metadata fix, not an RFC change
 | Sampling discipline | Parent-based head sampling + Collector tail sampling |
 | Log↔trace enricher ownership | RFC 0018 (owns the structlog chain and zap encoder where the enrichment lives); this RFC only requires that the OTEL context is established before the enricher PR lands |
 
-A merger of the two RFCs into one "Observability Foundation" document is recorded as [Open Question A](#open-questions). Pending that decision, both RFCs cross-reference this contract.
+A merger of the two RFCs into one "Observability Foundation" document was considered and resolved as item 6 in [Resolved Decisions](#resolved-decisions): **keep split, ship as one delivery**. Both RFCs cross-reference this contract.
 
 ## Motivation
 
@@ -457,17 +457,11 @@ Under the future-focused framing applied in revision 2026-04-22, the original op
    - [internal/executor/chat.go](../../internal/executor/chat.go) line 105 (chat-message dispatch added by RFC 0016)
 
    Both sites accept caller-provided `grpc.DialOption` slices via `WithDialOptions` / `WithChatDialOptions`; the otelgrpc stats handler is injected from `cmd/orchestrator/main.go` (where the executor is constructed). The executor package stays free of an OTEL import.
+6. **Merge RFC 0018 and RFC 0019 into one "Observability Foundation" RFC?** ✅ Resolved: **keep split, ship as one delivery.** The two RFCs are kept as separate documents for review tractability (each is large enough that a merged document would be hard to review in one pass), but they are treated as a single "Observability Foundation" delivery in [ROADMAP.md](../../ROADMAP.md) (v0.2.3 entry already reflects this framing, recorded 2026-04-22), share the design contract in [Relationship to RFC 0018](#relationship-to-rfc-0018), and will be released together. No separate namespace-consolidation follow-up is required — alignment is already enforced by that contract. Release notes treat them as a unit.
 
 ## Open Questions
 
-<!--
-Review note (PR #160): the prior single open question was numbered "6" because
-it continued the Resolved Decisions list. Renumbered to start at A inside this
-section to make the discontinuity intentional and avoid reader confusion when
-landing on the section directly.
--->
-
-**OQ-A.** **Merge RFC 0018 and RFC 0019 into one "Observability Foundation" RFC?** Both share OTLP export (for traces/metrics), schema-version fields, redaction hook, namespace, sampling discipline, and ship in the same release. The case for merging: one document, one decision tree, no consolidation follow-up. The case for keeping split: review tractability — each RFC is large enough that a merged document would be hard to review in one pass. **Recommendation:** keep split for review, but record both RFCs as a single "Observability Foundation" delivery in [ROADMAP.md](../../ROADMAP.md), drop the namespace consolidation follow-up (already aligned via the [Relationship to RFC 0018](#relationship-to-rfc-0018) contract), and treat them as a unit in release notes. Decide before authoring the PR plan.
+None remaining. All prior open questions are resolved in [Resolved Decisions](#resolved-decisions); the merge-vs-split question is resolved as item 6.
 
 ---
 
@@ -476,9 +470,8 @@ landing on the section directly.
 **To accept this RFC:**
 
 1. Confirm v0.2.3 as the target milestone (this RFC pairs with RFC 0018 on the same release).
-2. Sign off on the resolved decisions in [Resolved Decisions](#resolved-decisions) (interceptors, dual `agent.id` + `service.instance.id` with Gen-AI conventions, opt-in payload capture through redaction hook, head + tail sampling, pinned gRPC client sites).
+2. Sign off on the resolved decisions in [Resolved Decisions](#resolved-decisions) (interceptors, dual `agent.id` + `service.instance.id` with Gen-AI conventions, opt-in payload capture through redaction hook, head + tail sampling, pinned gRPC client sites, keep-split-ship-as-one-delivery).
 3. Sign off on the span-naming and Persatrix attribute conventions in [Section E](#e-span-naming-and-attribute-conventions), the metrics inventory in [Section F](#f-metrics), and the log↔trace correlation contract in [Section G](#g-logtrace-correlation) as the cross-codebase contract.
-4. Decide [Open Question A](#open-questions) (merge with RFC 0018 vs keep split).
 
 **Cross-RFC sequencing (added per PR #160 review).** The two RFCs share namespace and code paths, so PR landing order matters:
 
