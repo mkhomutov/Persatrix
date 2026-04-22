@@ -309,8 +309,15 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 ##### From PR 1 review
 
-<!-- TODO: populate after PR 1 review merges -->
-*(populated during PR 1 review)*
+Captured from the PR #163 review rounds 1–3. All round-1 and round-2 *Must Fix* items were addressed in-PR; the items below are the residual *Should Fix* / *Nice to Have* findings deferred here.
+
+- **Should Fix — resolve the unused `agents/tests/conftest.py::span_exporter` fixture.** The fixture is defined but no test consumes it; `agents/tests/test_observability_tracing.py` uses a local `_exporter()` helper and `tests/integration/test_trace_propagation.py` defines its own `mem_exporter`. Either delete the fixture or migrate the 13 unit tests in `test_observability_tracing.py` to consume it (replacing the local helper). Leaving the unused fixture invites PR 2/3 contributors to introduce a third pattern.
+- **Nice to Have — collapse duplicate `agents/server.py` imports.** Lines 23–24 import `init_tracing` and `tracing_shutdown` from `.observability.tracing` on two separate lines; combine into a single `from .observability.tracing import init_tracing, shutdown as tracing_shutdown`.
+- **Nice to Have — add a Go-side Baggage round-trip test.** Symmetric with the Python `test_baggage_propagator_round_trip`. A single test in `internal/observability/telemetry_test.go` using `propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})` and an in-memory carrier closes the cross-runtime gap.
+- **Nice to Have — update `cmd/orchestrator/main.go` startup-warning string.** Line 107 still reads `"failed to initialize telemetry, continuing without tracing"`; the variable rename (`obsCfg` / `obsShutdown`) was applied in PR 1 but this operator-visible log string was missed. Change `telemetry` → `observability` for consistency with the renamed package.
+- **Nice to Have — add a regression test for `init_tracing()` re-call behaviour.** The PR 1 docstring now correctly documents OTEL's one-way `set_tracer_provider`; lock the documented behaviour in with a test that calls `init_tracing()` twice and asserts (a) the returned tracer is fresh, and (b) a warning is logged on the second call.
+- **Nice to Have — add a unit test for `OTEL_EXPORTER_OTLP_ENDPOINT` path-normalisation.** The `/v1/traces` double-suffix guard added during PR 1 review has no explicit test; one `init_tracing()` call with a fake exporter and an inspection of the exporter endpoint is enough.
+- **Nice to Have — track the baggage-key allowlist as a real lint.** The PR 1 module docstring (`agents/observability/tracing.py` lines 22–32) mandates the `persatrix.*` namespace and forbids PII / secrets / credentials in baggage values, but enforcement is contributor-vigilance only. A lint or runtime guard that rejects unknown baggage keys would close the residual *Low* security finding from the round-3 review.
 
 ##### From PR 2 review
 
