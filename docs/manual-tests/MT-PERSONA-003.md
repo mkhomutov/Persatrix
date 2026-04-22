@@ -130,17 +130,29 @@ idle_after=10`.
 
 ```bash
 sleep 60
+
+# Primary check — matches the formatted log message text on any Python log formatter.
+grep -c "empty-context tick suppressed" logs/persona-003.log
+
+# Secondary check — only matches when the formatter renders extra fields inline.
 grep -c "empty_context_tick" logs/persona-003.log
 ```
 
-**Expected Result**: At least one `empty_context_tick` log entry per fired tick. With a 5-second
-interval and a 60-second wait, expect roughly 10–12 hits before idle suppression engages.
+> The primary grep targets the literal message string emitted by `action_loop.py`
+> (`"Agent %s: empty-context tick suppressed"`). Python's default log formatters do **not**
+> render `extra` dict fields inline, so `grep "empty_context_tick"` returns 0 on stock
+> formatters even when the feature is working correctly. Always use the primary grep as the
+> pass/fail gate.
+
+**Expected Result**: At least one `"empty-context tick suppressed"` log entry per fired tick.
+With a 5-second interval and a 60-second wait, expect roughly 10–12 hits before idle suppression
+engages.
 
 **Verification**:
-- [ ] Count is `>= 1`
+- [ ] Count from `"empty-context tick suppressed"` grep is `>= 1`
 - [ ] At least one log line matches: `Agent ember-owl: empty-context tick suppressed`
-- [ ] The log entry includes the `extra` field `reason=empty_context_tick` (visible if the log
-      formatter renders `extra` fields; otherwise confirm via the message text)
+- [ ] The log entry includes the `extra` field `reason=empty_context_tick` (visible only if the
+      log formatter renders `extra` fields; secondary grep confirms — see note above)
 
 ---
 
@@ -149,8 +161,13 @@ interval and a 60-second wait, expect roughly 10–12 hits before idle suppressi
 **Action**: Inspect the log for outbound HTTP traffic to the LLM API during Step 3's window:
 
 ```bash
-grep -E "api\.anthropic\.com|HTTP/1\.1 200" logs/persona-003.log | wc -l
+grep "api\.anthropic\.com" logs/persona-003.log | wc -l
 ```
+
+> The previous pattern `grep -E "api\.anthropic\.com|HTTP/1\.1 200"` was removed because
+> `HTTP/1.1 200` matches unrelated HTTP/1.1 traffic (health checks, gRPC-over-HTTP/1.1, etc.)
+> and produces a false-negative when the LLM client uses HTTP/2 (the HTTPX default when
+> `http2=True`). Matching on the Anthropic hostname alone is both necessary and sufficient.
 
 **Expected Result**: `0`. The short-circuit must fire before any LLM call; no outbound HTTP
 should appear for any of the suppressed ticks.
@@ -202,12 +219,16 @@ grpcurl -plaintext \
   persatrix.v1.ChannelService/SendMessage
 ```
 
+> The persona agent's gRPC port is configurable. If the default differs from `50054`, confirm
+> the actual port in the agent's startup log (consistent with
+> [MT-PERSONA-002](MT-PERSONA-002.md)).
+
 **Expected Result**: A `MESSAGE_RECEIVED` event flows through `_on_event_inner`; the
 short-circuit guard does **not** fire (event is not a TICK). The LLM is invoked normally.
 
 **Verification**:
 - [ ] `"delivered": true` in the gRPC response
-- [ ] At least one new `api.anthropic.com` / `HTTP/1.1 200` entry appears in the log after the
+- [ ] At least one new `api.anthropic.com` entry appears in the log after the
       message is sent
 - [ ] No new `empty_context_tick` log between message receipt and reply
 

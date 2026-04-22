@@ -18,7 +18,7 @@ enforced at the allocator layer and that an oversized content payload cannot exc
 
 **Scope**: `agents.persona_runtime.memory_budget.MemoryBudget` allocator behaviour, token-aware
 truncation, greedy in-priority-order admission, and the `MemoryInjectionResult.memory_admitted_tokens`
-contract that PR 5's TICK short-circuit consumes.
+contract that RFC 0017 §F's TICK short-circuit consumes.
 
 **Out of Scope**: LLM response quality; relevance-threshold (`min_score`) tuning (covered by
 `tests/unit/python/test_episodic_memory.py`); working-memory summarisation (covered by
