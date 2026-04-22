@@ -163,6 +163,17 @@ into working memory at a priority that controls how it's included in the
 prompt
 ([agents/persona_runtime/memory_context.py:96–200](../../agents/persona_runtime/memory_context.py#L96-L200)).
 
+> **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
+> (default 1500 tokens) caps the combined episodic + relationship + notes
+> context admitted into a single event, and `recall` / `recall_notes` accept
+> a `min_score` relevance threshold that drops weak matches before truncation.
+> When an autonomous TICK fires with zero admitted memory, no active goal,
+> and no pending conversation turn, the LLM call is skipped entirely and
+> `idle_count` is incremented — see
+> [RFC 0017 §B](../rfcs/0017-persona-memory-injection-budget.md#b-memory-budget-allocator)
+> and [§F](../rfcs/0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit)
+> for the spec.
+
 ### Episodic memory
 
 Episodes are ranked, searchable records of past interactions. The agent calls
