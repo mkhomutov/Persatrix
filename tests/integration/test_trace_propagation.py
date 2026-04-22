@@ -146,6 +146,25 @@ class TestTracePropagation:
                     f"{span.context.trace_id:#x}, expected {trace_id:#x}"
                 )
 
+        # Parent linkage check — the trace_id check above is necessary but
+        # not *sufficient* to prove propagation worked: an agent-side span
+        # could share the trace_id by coincidence if the gRPC instrumentation
+        # silently fell back to starting a new root span.  The real
+        # propagation invariant is that at least one agent-side span has its
+        # ``parent`` SpanContext pointing at the synthetic parent's span_id.
+        # See PR #163 review (Should Fix #3).
+        agent_spans = [s for s in finished if s.name != "parent.dispatch"]
+        if agent_spans:  # only assert if otelgrpc produced server-side spans
+            assert any(
+                s.parent is not None
+                and s.parent.span_id == parent_span_ctx.span_id
+                for s in agent_spans
+            ), (
+                "No agent-side span has parent_id matching the injected "
+                f"parent span_id {parent_span_ctx.span_id:#x}; spans found: "
+                f"{[(s.name, s.parent.span_id if s.parent else None) for s in agent_spans]}"
+            )
+
     async def test_baggage_readable_in_handler(
         self, mem_exporter: InMemorySpanExporter
     ) -> None:

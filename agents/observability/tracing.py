@@ -25,6 +25,9 @@ import os
 from collections.abc import Callable
 
 from opentelemetry import trace
+from opentelemetry.baggage.propagation import (
+    W3CBaggagePropagator,  # type: ignore[import-untyped]
+)
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
@@ -37,16 +40,14 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
-try:
-    from opentelemetry.baggage.propagation import (
-        W3CBaggagePropagator,  # type: ignore[import-untyped]
-    )
+_BAGGAGE_PROPAGATOR: TextMapPropagator = W3CBaggagePropagator()
 
-    _BAGGAGE_PROPAGATOR: TextMapPropagator = W3CBaggagePropagator()
-except ImportError:  # pragma: no cover — optional dep may vary between SDK builds
-    from opentelemetry.propagators.b3 import B3Format  # type: ignore[import-untyped]
-
-    _BAGGAGE_PROPAGATOR = B3Format()  # fallback; tests will still exercise W3C path
+# W3CBaggagePropagator has been part of opentelemetry-api since 1.0.0 and
+# ``agents/pyproject.toml`` pins ``opentelemetry-api>=1.28.0,<2``, so this
+# import is guaranteed to succeed.  An earlier draft of this module had a
+# ``try/except ImportError`` fallback to ``B3Format`` here, but B3 is a
+# *trace context* propagator (not a baggage propagator) so that fallback
+# would have silently dropped baggage on the floor — see PR #163 review.
 
 # Schema URL for the Persatrix observability schema (cross-language contract).
 _SCHEMA_URL = "https://persatrix.dev/schemas/observability/1.0.0"
@@ -125,12 +126,28 @@ def init_tracing(
     resource = Resource.create(attributes=attributes)
 
     # Resolve exporter and build the exporter_opts carrier for OTLP.
-    exporter_opts: dict[str, object] = {"endpoint": f"{otlp_endpoint}/v1/traces"}
-    if otlp_endpoint.startswith("http://") or _env(
-        "OTEL_EXPORTER_OTLP_INSECURE", ""
-    ).lower() in ("true", "1"):
-        # OTLPSpanExporter uses http by default; insecure flag not needed for plain http.
-        pass
+    #
+    # The OTEL spec defines two env vars:
+    #   - OTEL_EXPORTER_OTLP_ENDPOINT          → base URL (e.g. ``http://collector:4318``)
+    #   - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT   → full traces URL (path-qualified)
+    #
+    # The Python OTLP HTTP exporter's ``endpoint`` kwarg is interpreted as the
+    # *full* traces URL (no automatic path appending).  To match the Go side
+    # (``otlptracehttp.WithEndpointURL`` is given the base URL and the SDK
+    # appends ``/v1/traces``) and to remain robust if an operator follows the
+    # spec strictly and sets ``OTEL_EXPORTER_OTLP_ENDPOINT`` to the *base* URL
+    # *or* the *full* traces URL (a common confusion), we normalise here:
+    # only append ``/v1/traces`` when the endpoint does not already end with it.
+    # See PR #163 review (Must Fix #1) — without this guard, setting
+    # ``OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318/v1/traces`` would
+    # produce a silent ``…/v1/traces/v1/traces`` double-path 404.
+    normalised_endpoint = otlp_endpoint.rstrip("/")
+    if not normalised_endpoint.endswith("/v1/traces"):
+        normalised_endpoint = f"{normalised_endpoint}/v1/traces"
+    exporter_opts: dict[str, object] = {"endpoint": normalised_endpoint}
+    # NOTE: ``OTLPSpanExporter`` defaults to plain HTTP for ``http://`` URLs;
+    # no explicit insecure flag is needed.  ``OTEL_EXPORTER_OTLP_INSECURE`` is
+    # honoured by the SDK itself when present in the environment.
 
     # If an explicit exporter was provided (test mode), use SimpleSpanProcessor
     # so spans are exported synchronously — no async queue to flush.
@@ -190,9 +207,23 @@ def get_tracer(name: str) -> trace.Tracer:
 
 
 async def shutdown() -> None:
-    """Flush pending spans and shut down the tracer provider."""
+    """Flush pending spans and shut down the tracer provider.
+
+    .. note::
+        Although declared ``async`` for symmetry with the agent shutdown path,
+        the underlying ``TracerProvider.force_flush()`` and ``shutdown()``
+        calls are **synchronous and blocking** — they can block the asyncio
+        event loop for up to ``_BSP_EXPORT_TIMEOUT_MILLIS`` (10 s) while the
+        ``BatchSpanProcessor`` background thread drains.  This is acceptable
+        during graceful shutdown (the loop is being torn down anyway) but
+        callers running in a hot path should not invoke this function.
+        See PR #163 review (Should Fix #4).
+    """
     global _provider
     if _provider is not None:
+        # ``force_flush`` returns ``False`` on timeout (spans dropped); we do
+        # not log this here because the underlying SDK already emits a warning
+        # via the ``opentelemetry`` logger on flush failure.
         _provider.force_flush()
         _provider.shutdown()
         _provider = None
