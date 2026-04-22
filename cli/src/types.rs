@@ -486,4 +486,52 @@ mod tests {
         assert_eq!(resp.reply, "你好！我是 nexus-7 🤖");
         assert_eq!(resp.agent_display_name, "Нексус Семь");
     }
+
+    // ─── Tabled rendering tests (PR #162 review follow-up) ──────────────────
+    // Guard against future tabled attribute API renames. The `display_with = "fn"`
+    // syntax already became `display("fn")` in tabled 0.18 (this PR's migration).
+    // If tabled renames the convention again, the attribute silently becomes a
+    // no-op and the rendered output diverges — these tests catch that regression
+    // where the serde tests cannot.
+
+    #[test]
+    fn workflow_run_response_tabled_renders_none_as_dash() {
+        // Smoke-test #[tabled(display("fmt_option"))] on all three Option<String>
+        // fields (error, started_at, finished_at). All are None → each cell should
+        // render as em-dash (\u2014) via fmt_option.
+        use tabled::Table;
+        let row = WorkflowRunResponse {
+            run_id: "r1".into(),
+            workflow_id: "wf".into(),
+            status: "running".into(),
+            error: None,
+            started_at: None,
+            finished_at: None,
+        };
+        let output = Table::new(vec![row]).to_string();
+        assert!(
+            output.contains('\u{2014}'),
+            "expected em-dash (\\u2014) for None Option fields; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn agent_response_tabled_renders_empty_vec_as_dash() {
+        // Smoke-test #[tabled(display("fmt_vec"))] on capabilities. An empty Vec
+        // should render as em-dash (\u2014) via fmt_vec. Mirrors the intent of the
+        // workflow_run_response_tabled_renders_none_as_dash test above.
+        use tabled::Table;
+        let row = AgentResponse {
+            id: "a1".into(),
+            address: "localhost:50051".into(),
+            capabilities: vec![],
+            status: "healthy".into(),
+            agent_type: None,
+        };
+        let output = Table::new(vec![row]).to_string();
+        assert!(
+            output.contains('\u{2014}'),
+            "expected em-dash (\\u2014) for empty capabilities; got:\n{output}"
+        );
+    }
 }
