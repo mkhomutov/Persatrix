@@ -16,7 +16,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "ti
 reqwest = { version = "0.12", features = ["json"] }
 colored = "2"
 ctrlc = "3"                       # graceful Ctrl-C handling for chat REPL
-tabled = "0.16"                   # table output formatting
+tabled = "0.20"                   # table output formatting
 
 # Removed in PR review: tonic (gRPC — not used, CLI uses REST via reqwest),
 # serde_yml (no YAML parsing yet), indicatif (no progress bars yet).

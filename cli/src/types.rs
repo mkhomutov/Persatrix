@@ -29,11 +29,11 @@ pub(crate) struct WorkflowRunResponse {
     pub(crate) run_id: String,
     pub(crate) workflow_id: String,
     pub(crate) status: String,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) error: Option<String>,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) started_at: Option<String>,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) finished_at: Option<String>,
 }
 
@@ -41,7 +41,7 @@ pub(crate) struct WorkflowRunResponse {
 pub(crate) struct AgentResponse {
     pub(crate) id: String,
     pub(crate) address: String,
-    #[tabled(display_with = "fmt_vec")]
+    #[tabled(display("fmt_vec"))]
     pub(crate) capabilities: Vec<String>,
     pub(crate) status: String,
     /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
