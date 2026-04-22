@@ -15,9 +15,10 @@
 //
 // Both call sites pass a map[string]any (the structured event for logs, the
 // attribute bag for spans) and expect a map[string]any back.  Implementations
-// must not mutate the input map in place — the redactor is invoked on every
-// record / attribute bag and the caller assumes the input is unchanged when
-// the redactor decides to no-op.
+// MAY mutate the input map in place and return it; callers (the zap encoder
+// wrapper, the future span processor) treat the returned map as authoritative
+// and do not re-read the original after Redact returns.  See the [Redactor]
+// trust contract for the authoritative rules.
 //
 // The shape mirrors the Python [agents.observability.redact.Redactor]
 // Protocol byte-for-byte so a single redactor implementation in a future
@@ -32,6 +33,16 @@ package redact
 // [github.com/mkhomutov/persatrix/internal/observability/zapenc] swallows any
 // panic from a buggy Redactor and emits the unredacted record with an
 // out-of-band warning, mirroring the Python contract.
+//
+// Trust contract (RFC 0018 PR 2 review, Should-Fix #1): the Redactor receives
+// the *fully assembled* entry, including the authoritative schema fields
+// (schema_version, service.kind, service.instance, source).  It MAY mutate
+// or remove these fields — a real PII / secret scrubber may legitimately
+// need to redact a hostname (service.instance) or a source path leak.  Encoder
+// invariants therefore depend on Redactor implementations being trusted code:
+// tests covering a non-noop Redactor must assert that the schema-required
+// fields survive the round-trip, or the resulting log lines will fail the
+// downstream `schema_version: "1"` filter.
 type Redactor interface {
 	Redact(entry map[string]any) map[string]any
 }

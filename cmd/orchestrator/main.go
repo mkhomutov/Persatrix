@@ -351,12 +351,21 @@ func buildLogger(env, logFormat string) (*zap.Logger, error) {
 		return zap.NewDevelopment()
 	}
 
-	// Production schema encoder.  service.instance defaults to hostname
-	// (best-effort; an empty string is acceptable but loses cross-process
-	// provenance in logs that aggregate multiple orchestrator nodes).
-	instance, err := os.Hostname()
-	if err != nil || instance == "" {
-		instance = "orchestrator"
+	// Production schema encoder.  service.instance is, in priority order:
+	//   1. PERSATRIX_SERVICE_INSTANCE env var (operator-supplied, stable
+	//      across pod restarts, useful where os.Hostname() returns an
+	//      ephemeral synthetic name) — RFC 0018 PR 2 review, Should-Fix #2.
+	//   2. os.Hostname() (best-effort).
+	//   3. literal "orchestrator" (last resort; loses cross-process
+	//      provenance when multiple nodes hit this fallback).
+	instance := os.Getenv("PERSATRIX_SERVICE_INSTANCE")
+	if instance == "" {
+		host, err := os.Hostname()
+		if err != nil || host == "" {
+			instance = "orchestrator"
+		} else {
+			instance = host
+		}
 	}
 
 	enc := zapenc.NewEncoder(zapenc.Options{

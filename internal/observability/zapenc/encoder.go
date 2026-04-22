@@ -40,10 +40,11 @@ package zapenc
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
-	"sync"
+	"time"
 
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
@@ -104,7 +105,9 @@ var fieldOrderIndex = func() map[string]int {
 //
 // Only the schema's reserved IDs (RFC § B optional fields 8–13) are aliased
 // here.  Other camelCase keys (inputTokens, serviceName, etc.) are
-// site-local context and pass through to the attributes block unchanged.
+// site-local context and currently pass through to the **top-level** of the
+// emitted record unchanged — the `attributes` slot in [fieldOrder] is
+// reserved for a future PR that nests these site-local keys under it.
 var legacyRenames = map[string]string{
 	// Run-ID semantics: the orchestrator scheduler historically used "runID"
 	// for the workflow run identifier.  The schema names this concept
@@ -203,6 +206,15 @@ func (e *schemaEncoder) Clone() zapcore.Encoder {
 // zap's entry.Caller into a structured source object, invokes the Redactor,
 // and re-serialises the result in canonical key order.
 //
+// Trust note (RFC 0018 PR 2 review, Should-Fix #1): the Redactor is invoked
+// **after** schema_version / service.* / source injection, which means a
+// buggy or hostile Redactor can mutate or strip these authoritative fields.
+// This is deliberate — a future security RFC may need to scrub
+// service.instance (PII hostnames) or source.file (path leakage).  Encoder
+// invariants therefore depend on Redactor implementations being trusted;
+// tests covering a real (non-noop) Redactor must assert that the schema
+// fields survive the round-trip.
+//
 // The parse / re-serialise round-trip is intentional: it lets the encoder
 // reuse zap's well-tested primitive serialisers (Time / Duration / Object
 // encoding edge cases) instead of reimplementing them, and the per-entry
@@ -220,25 +232,29 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 	// so encoding/json sees a single complete object.
 	raw := bytes.TrimRight(rawBuf.Bytes(), "\n")
 	record := make(map[string]any, len(fields)+8)
-	if err := json.Unmarshal(raw, &record); err != nil {
-		// Fallback: emit the inner encoder's output unchanged.  This keeps
-		// the log line visible (rather than dropped) when an exotic field
-		// type produces JSON we cannot round-trip.  Operators see the line;
-		// the encoder test asserts this never happens for the schema fields.
-		out := pool.Get()
-		_, _ = out.Write(rawBuf.Bytes())
-		return out, nil
+	if err := jsonUnmarshal(raw, &record); err != nil {
+		// Fallback (RFC 0018 PR 2 review, Must-Fix #1): the inner encoder's
+		// JSON failed to round-trip.  We must NOT silently emit the raw
+		// (unrenamed, uninjected) bytes — downstream consumers filter on
+		// schema_version: "1" and would silently drop these entries,
+		// suppressing exactly the diagnostic an operator most needs.  Surface
+		// the failure out-of-band on stderrSink (mirrors the redactor-panic
+		// pattern) and synthesise a minimal schema-conformant envelope that
+		// wraps the raw payload as a base64 attribute so the data is still
+		// recoverable from the log stream.
+		fmt.Fprintf(stderrSink, "persatrix: encoder fallback, inner JSON did not round-trip (%v); emitting compliant envelope\n", err)
+		return e.encodeFallbackEnvelope(entry, raw, err), nil
 	}
 
 	// 1. Apply legacy rename map.  Renames only happen when the target key
 	//    is not already present — call-site audits that pre-rename to the
 	//    schema name take precedence over the encoder's backstop.
-	for old, new := range legacyRenames {
-		if v, ok := record[old]; ok {
-			if _, exists := record[new]; !exists {
-				record[new] = v
+	for oldKey, newKey := range legacyRenames {
+		if v, ok := record[oldKey]; ok {
+			if _, exists := record[newKey]; !exists {
+				record[newKey] = v
 			}
-			delete(record, old)
+			delete(record, oldKey)
 		}
 	}
 
@@ -279,6 +295,49 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 
 	// 5. Serialise in canonical schema order.
 	return serialiseOrdered(record)
+}
+
+// encodeFallbackEnvelope synthesises a minimal schema-conformant log line
+// when the inner encoder's JSON cannot be round-tripped (Must-Fix #1).  The
+// raw payload is base64-encoded under attributes.raw so operators can still
+// recover the original bytes without breaking the schema_version filter the
+// rest of the pipeline relies on.
+//
+// We deliberately do not run this envelope through the rename / redactor
+// pipeline: this is an emergency code path and we want minimal dependencies
+// on the very machinery that just failed.
+func (e *schemaEncoder) encodeFallbackEnvelope(entry zapcore.Entry, raw []byte, parseErr error) *buffer.Buffer {
+	envelope := map[string]any{
+		"schema_version":   SchemaVersion,
+		"timestamp":        entry.Time.UTC().Format(time.RFC3339Nano),
+		"level":            entry.Level.CapitalString(),
+		"service.kind":     e.opts.ServiceKind,
+		"service.instance": e.opts.ServiceInstance,
+		"message":          "encoder fallback: inner JSON did not round-trip",
+		"attributes": map[string]any{
+			"raw":         base64.StdEncoding.EncodeToString(raw),
+			"parse_error": parseErr.Error(),
+		},
+	}
+	if e.opts.ServiceRole != "" {
+		envelope["service.role"] = e.opts.ServiceRole
+	}
+	if entry.Caller.Defined {
+		envelope["source"] = map[string]any{
+			"file":     entry.Caller.File,
+			"line":     entry.Caller.Line,
+			"function": entry.Caller.Function,
+		}
+	}
+	out, err := serialiseOrdered(envelope)
+	if err != nil {
+		// Truly last-ditch: even the canonical serialiser failed.  Emit a
+		// hand-crafted single-line JSON so the log stream remains parseable.
+		out = pool.Get()
+		out.AppendString(`{"schema_version":"` + SchemaVersion + `","level":"ERROR","message":"encoder fallback: serialise failed"}`)
+		out.AppendString(zapcore.DefaultLineEnding)
+	}
+	return out
 }
 
 // applyRedactor invokes r.Redact and recovers from any panic, returning the
@@ -361,10 +420,20 @@ func serialiseOrdered(record map[string]any) (*buffer.Buffer, error) {
 // pool reuses [buffer.Buffer] allocations across EncodeEntry calls.
 var pool = buffer.NewPool()
 
-// stderrSink is the destination for the redactor-panic fallback warning.
-// Indirected through a package var so the encoder_test can capture and
-// assert the warning without hijacking os.Stderr globally.
-var (
-	stderrSink     = newStderr()
-	stderrSinkLock sync.Mutex //nolint:unused // reserved for future test-controlled override
-)
+// stderrSink is the destination for the encoder's out-of-band warnings
+// (redactor panics, JSON-roundtrip fallbacks).  Indirected through a package
+// var so the encoder_test can capture and assert the warning without
+// hijacking os.Stderr globally.
+//
+// The sink is only swapped from sequential tests that use t.Cleanup() to
+// restore it; we therefore do not protect it with a mutex.  If a future test
+// adds t.Parallel() or runtime swapping, reintroduce a sync.RWMutex and
+// take it on every read+write — do not re-add an unused lock as a
+// placeholder (RFC 0018 PR 2 review, Should-Fix #3).
+var stderrSink = newStderr()
+
+// jsonUnmarshal is the JSON parser used by EncodeEntry.  Indirected through
+// a package var so the fault-injection test can force the fallback path
+// (RFC 0018 PR 2 review, Must-Fix #1 — the path was previously untestable
+// because zap's inner JSON encoder always emits valid JSON in practice).
+var jsonUnmarshal = json.Unmarshal
