@@ -109,7 +109,7 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 | `cmd/orchestrator/main.go`, every `internal/...` importer | Update import paths from `…/internal/telemetry` to `…/internal/observability/otel` (or `…/observability` if the file is the only one in the package — pinned during PR 1 review). |
 | `agents/observability/__init__.py` | **New** — package marker (the same package RFC 0018 PR 1 will populate further). |
 | `agents/observability/tracing.py` | **New** — `init_tracing()` / `shutdown()` with: Resource attributes (`service.name`, `service.version`, `service.kind`, `service.instance.id`, OTEL Resource detectors); `schema_url=https://persatrix.dev/schemas/observability/1.0.0`; tuned `BatchSpanProcessor` (queue cap, max-export batch); a `CompositePropagator(TraceContext + Baggage)` registered as the global propagator. |
-| `agents/pyproject.toml` | Replace `opentelemetry-exporter-otlp-proto-grpc` with `opentelemetry-exporter-otlp-proto-http`; add `opentelemetry-instrumentation-grpc`, `opentelemetry-instrumentation-system-metrics`. |
+| `agents/pyproject.toml` | Replace `opentelemetry-exporter-otlp-proto-grpc` with `opentelemetry-exporter-otlp-proto-http`; add `opentelemetry-instrumentation-grpc`. (`opentelemetry-instrumentation-system-metrics` is deferred to PR 3 alongside its first consumer — see PR #163 review round 2 Nit #3.) |
 | `go.mod`, `go.sum` | Add `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` and `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`. |
 | `cmd/orchestrator/main.go` | Inject `otelgrpc.NewClientHandler()` into the executor's `WithDialOptions` / `WithChatDialOptions` slices (covers both pinned `grpc.NewClient` sites in `internal/executor/dispatch.go` and `internal/executor/chat.go`). Wrap the orchestrator HTTP handler with `otelhttp.NewHandler`. Configure the global propagator to `propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})`. |
 | `agents/server.py` | Call `init_tracing()` at startup; register `GrpcInstrumentorServer` on the gRPC server; await `shutdown()` on graceful shutdown. |
@@ -135,18 +135,20 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/... -v -race -cover` passes (rename preserves all existing tests)
-- [ ] `pytest agents/tests/test_observability_tracing.py -v` passes
-- [ ] `pytest tests/integration/test_trace_propagation.py -v` passes
-- [ ] No `internal/telemetry/` directory remains
-- [ ] Pre-merge import-path audit: `grep -r 'internal/telemetry' --include='*.go' .` returns no matches <!-- Added per PR #161 review: the rename touches ~57 Go files; a grep verification is a low-cost safety net for any imports the automated update missed. -->
-- [ ] All `internal/telemetry` import paths in `internal/...` and `cmd/...` updated
-- [ ] `agents/pyproject.toml` Python OTLP exporter dep is the HTTP variant
-- [ ] CHANGELOG v0.2.3 entry covers the OTLP exporter swap (operator-visible) and the Go package rename
-- [ ] Both `grpc.NewClient` sites carry the `otelgrpc` client handler via the executor's dial-options slices
-- [ ] HTTP handler is wrapped with `otelhttp.NewHandler` in `cmd/orchestrator/main.go`
-- [ ] `CompositePropagator(TraceContext + Baggage)` configured globally on both sides
-- [ ] ROADMAP.md RFC 0019 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
+- [x] `go test ./internal/observability/... -v -race -cover` passes (rename preserves all existing tests)
+- [x] `pytest agents/tests/test_observability_tracing.py -v` passes
+- [x] `pytest tests/integration/test_trace_propagation.py -v` passes
+- [x] No `internal/telemetry/` directory remains
+- [x] Pre-merge import-path audit: `grep -r 'internal/telemetry' --include='*.go' .` returns no matches <!-- Added per PR #161 review: the rename touches ~57 Go files; a grep verification is a low-cost safety net for any imports the automated update missed. -->
+- [x] All `internal/telemetry` import paths in `internal/...` and `cmd/...` updated
+- [x] `agents/pyproject.toml` Python OTLP exporter dep is the HTTP variant
+- [x] CHANGELOG v0.2.3 entry covers the OTLP exporter swap (operator-visible) and the Go package rename
+- [x] Both `grpc.NewClient` sites carry the `otelgrpc` client handler via the executor's dial-options slices
+- [x] HTTP handler is wrapped with `otelhttp.NewHandler` in `cmd/orchestrator/main.go`
+- [x] `CompositePropagator(TraceContext + Baggage)` configured globally on both sides
+- [x] ROADMAP.md RFC 0019 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2)
+
+**Merged**: PR [#163](https://github.com/mkhomutov/Persatrix/pull/163) — 2026-04-22
 
 ---
 
@@ -309,8 +311,15 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 ##### From PR 1 review
 
-<!-- TODO: populate after PR 1 review merges -->
-*(populated during PR 1 review)*
+Captured from the PR #163 review rounds 1–3. All round-1 and round-2 *Must Fix* items were addressed in-PR; the items below are the residual *Should Fix* / *Nice to Have* findings deferred here.
+
+- **Should Fix — resolve the unused `agents/tests/conftest.py::span_exporter` fixture.** The fixture is defined but no test consumes it; `agents/tests/test_observability_tracing.py` uses a local `_exporter()` helper and `tests/integration/test_trace_propagation.py` defines its own `mem_exporter`. Either delete the fixture or migrate the 13 unit tests in `test_observability_tracing.py` to consume it (replacing the local helper). Leaving the unused fixture invites PR 2/3 contributors to introduce a third pattern.
+- **Nice to Have — collapse duplicate `agents/server.py` imports.** Lines 23–24 import `init_tracing` and `tracing_shutdown` from `.observability.tracing` on two separate lines; combine into a single `from .observability.tracing import init_tracing, shutdown as tracing_shutdown`.
+- **Nice to Have — add a Go-side Baggage round-trip test.** Symmetric with the Python `test_baggage_propagator_round_trip`. A single test in `internal/observability/telemetry_test.go` using `propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})` and an in-memory carrier closes the cross-runtime gap.
+- **Nice to Have — update `cmd/orchestrator/main.go` startup-warning string.** Line 107 still reads `"failed to initialize telemetry, continuing without tracing"`; the variable rename (`obsCfg` / `obsShutdown`) was applied in PR 1 but this operator-visible log string was missed. Change `telemetry` → `observability` for consistency with the renamed package.
+- **Nice to Have — add a regression test for `init_tracing()` re-call behaviour.** The PR 1 docstring now correctly documents OTEL's one-way `set_tracer_provider`; lock the documented behaviour in with a test that calls `init_tracing()` twice and asserts (a) the returned tracer is fresh, and (b) a warning is logged on the second call.
+- **Nice to Have — add a unit test for `OTEL_EXPORTER_OTLP_ENDPOINT` path-normalisation.** The `/v1/traces` double-suffix guard added during PR 1 review has no explicit test; one `init_tracing()` call with a fake exporter and an inspection of the exporter endpoint is enough.
+- **Nice to Have — track the baggage-key allowlist as a real lint.** The PR 1 module docstring (`agents/observability/tracing.py` lines 22–32) mandates the `persatrix.*` namespace and forbids PII / secrets / credentials in baggage values, but enforcement is contributor-vigilance only. A lint or runtime guard that rejects unknown baggage keys would close the residual *Low* security finding from the round-3 review.
 
 ##### From PR 2 review
 

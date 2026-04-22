@@ -34,6 +34,9 @@ type Server struct {
 
 	// Chat components (optional — nil when chat dispatch is not configured).
 	chatExecutor executor.ChatExecutor
+
+	// handlerWrapper optionally wraps the composed HTTP handler (e.g. otelhttp).
+	handlerWrapper func(http.Handler) http.Handler
 }
 
 // ServerOption configures optional Server dependencies.
@@ -50,6 +53,14 @@ func WithCostReporter(reporter *cost.CostReporter) ServerOption {
 func WithChatExecutor(ce executor.ChatExecutor) ServerOption {
 	return func(s *Server) {
 		s.chatExecutor = ce
+	}
+}
+
+// WithHandlerWrapper sets a middleware that wraps the composed HTTP handler.
+// Applied as the outermost layer in Handler() — useful for OTEL HTTP tracing.
+func WithHandlerWrapper(wrapper func(http.Handler) http.Handler) ServerOption {
+	return func(s *Server) {
+		s.handlerWrapper = wrapper
 	}
 }
 
@@ -135,7 +146,8 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler returns the composed HTTP handler with middleware applied.
-// Execution order: recovery → requestID → logging → mux.
+// Execution order (outermost first): handlerWrapper (optional, e.g. otelhttp) →
+// recovery → requestID → logging → mux.
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
 // (Review finding F-01: r.WithContext creates a new *http.Request, so
@@ -146,6 +158,9 @@ func (s *Server) Handler() http.Handler {
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)
+	if s.handlerWrapper != nil {
+		h = s.handlerWrapper(h)
+	}
 	return h
 }
 

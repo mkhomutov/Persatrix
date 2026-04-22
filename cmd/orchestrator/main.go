@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,16 +14,19 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/observability"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/scheduler"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
-	"github.com/mkhomutov/persatrix/internal/telemetry"
 )
 
 const (
@@ -97,15 +101,15 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
-	telemetryCfg := telemetry.NewConfigFromEnv(*env)
-	telemetryShutdown, err := telemetry.Init(context.Background(), telemetryCfg, logger)
+	obsCfg := observability.NewConfigFromEnv(*env)
+	obsShutdown, err := observability.Init(context.Background(), obsCfg, logger)
 	if err != nil {
 		logger.Warn("failed to initialize telemetry, continuing without tracing", zap.Error(err))
 	} else {
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := telemetryShutdown(shutdownCtx); err != nil {
+			if err := obsShutdown(shutdownCtx); err != nil {
 				logger.Warn("telemetry shutdown failed", zap.Error(err))
 			}
 		}()
@@ -164,6 +168,9 @@ func main() {
 	execOpts := []executor.Option{
 		executor.WithTimeout(5 * time.Minute),
 		executor.WithDeadlineMode(executor.DeadlineMode(*deadlineMode)),
+		// Inject the otelgrpc client-side stats handler so every outbound
+		// ExecuteTask / HealthCheck gRPC call is recorded as a child span.
+		executor.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	}
 
 	// 9. Initialize cost tracker
@@ -205,8 +212,16 @@ func main() {
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 
 	// RFC 0016 PR 4: Initialize chat executor for human→agent chat dispatch.
-	chatExec := executor.NewGRPCChatExecutor(reg, logger)
+	chatExec := executor.NewGRPCChatExecutor(reg, logger,
+		// Inject the otelgrpc client-side stats handler for chat gRPC calls.
+		executor.WithChatDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
+	)
 	srvOpts = append(srvOpts, server.WithChatExecutor(chatExec))
+	// Wrap the HTTP handler with otelhttp so every inbound REST request is
+	// recorded as a server span (route attribute set by the pattern-based mux).
+	srvOpts = append(srvOpts, server.WithHandlerWrapper(func(h http.Handler) http.Handler {
+		return otelhttp.NewHandler(h, "persatrix-orchestrator")
+	}))
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)

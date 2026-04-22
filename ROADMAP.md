@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised; v0.2.3 milestone description refreshed to "Observability Foundation" framing per PR #160 review)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 📋 Planned  
-> **Current milestone**: v0.2.2 released; v0.2.3 planning next
+> **Last updated**: 2026-04-22 (RFC 0019 PR 1 merged as #163 — v0.2.3 section added to ROADMAP, component status tables updated for `internal/telemetry/` → `internal/observability/` rename + Python OTEL init, merged PR history updated; 0018 PR 1 is next per joint merge order #2)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged; 0018 PR 1 next — joint order #2)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -50,7 +50,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | 📋 Proposed |
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 📋 Proposed |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 🚧 Implementing |
 
 ---
 
@@ -98,7 +98,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
-| `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation | 🚧 In progress — Go telemetry→observability rename + otelgrpc + otelhttp wired (RFC 0019 PR 1 — #163) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
@@ -212,7 +212,7 @@ v0.2.0 complete
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
-| `internal/telemetry/` | OTEL span instrumentation | 🔲 TODO stub (v0.2.0+) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation | 🚧 In progress — Go telemetry→observability rename + otelgrpc + otelhttp wired (RFC 0019 PR 1 — #163) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
 
@@ -338,6 +338,78 @@ v0.2.2 complete
 
 ---
 
+## v0.2.3 — Observability Foundation 🚧 In Progress
+
+**What a user can do**: Observe your agent society end-to-end — structured JSON logs on a versioned schema across Go, Python, and CLI; distributed traces from REST handler to LLM call with OTEL Gen-AI semantic conventions; OTLP metrics with histogram exemplars; W3C Baggage propagation across the gRPC boundary; a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019.
+
+### What ships in v0.2.3
+
+- **`internal/observability/` Go package** — `internal/telemetry/` renamed verbatim; all OTEL instrumentation consolidated under the new name (RFC 0019 PR 1)
+- **Python OTEL initialisation** — `agents/observability/tracing.py` with `init_tracing()` / `shutdown()`, Resource attributes, `BatchSpanProcessor`, and a `CompositePropagator(TraceContext + Baggage)` registered globally (RFC 0019 PR 1)
+- **gRPC trace + baggage propagation** — Go executor injects `otelgrpc` client handler; Python server registers `GrpcInstrumentorServer`; baggage entries readable inside handlers (RFC 0019 PR 1)
+- **otelhttp handler wrap** — orchestrator HTTP handler wrapped with `otelhttp.NewHandler` (RFC 0019 PR 1)
+- **Semantic spans** — tick loop, event dispatch, memory ops, LLM calls (Gen-AI conventions), tool execution (RFC 0019 PR 2)
+- **Span Links** — A2A and sub-agent causality (RFC 0019 PR 2)
+- **OTLP metrics** — counters, histograms, gauges with exemplars on both Go and Python sides (RFC 0019 PR 3)
+- **Structured JSON logs** — Go (zap) and Python (structlog) on a versioned schema with a log-record redactor surface (RFC 0018 PRs 1–2)
+- **Log↔trace correlation** — structlog/zap enricher writes `trace_id` + `span_id` + known baggage entries into every log record (RFC 0018 PR 3)
+- **Collector tail-sampling pipeline** — reference `config/observability/otel-collector.yaml`; docker-compose adds Collector, Prometheus, Loki (dev) (RFC 0019 PR 4)
+- **`persatrix logs` CLI rewrite** — `--follow`, server-side filters, `--trace <id>` correlation (RFC 0018 PR 6)
+
+### What does not ship in v0.2.3
+
+- Distributed mesh telemetry (v0.6.0)
+- Per-agent operator dashboard / alerting rules
+
+### RFC Scope
+
+| RFC | Title | Status | PRs | Merged |
+|-----|-------|--------|-----|--------|
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 1/5 |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 📋 Proposed | 7 | 0/7 |
+
+### Joint Merge Order (RFCs 0018 + 0019)
+
+```
+0019 PR 1 (Phase 1 — telemetry→observability rename + Python OTEL init + gRPC + Baggage)  ✅ #163
+  ↓
+0018 PR 1 (Phase 1 — Python structlog + schema doc + redactor surface)
+  ↓
+0018 PR 2 (Phase 2 — Go zap rename + pretty + redactor wired + source)
+  ↓
+0019 PR 2 (Phase 2 — semantic spans + Span Links)
+  ↓
+0018 PR 3 (Phase 3 — cross-process correlation + OTEL trace IDs on logs)
+  ↓
+0019 PR 3 (Phase 3a — metrics)
+  ↓
+0019 PR 4 (Phase 3b — Collector + docker-compose + E2E + schema-parity test)
+  ↓
+0018 PR 4 (Phase 4a — proto/log_service.proto + ring buffer + disk store)
+  ↓
+0018 PR 5 (Phase 4b — LogService server + agent shipper + REST + SSE)
+  ↓
+0018 PR 6 (Phase 4c — CLI rewrite + E2E)
+  ↓
+0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)
+```
+
+### Planned Components (v0.2.3)
+
+| Component | Go Package | Python Module | Target RFC |
+|-----------|-----------|---------------|------------|
+| OTEL traces + gRPC propagation | `internal/observability/` | `agents/observability/tracing.py` | 0019 PR 1 ✅ |
+| Semantic spans + Span Links | `internal/observability/` | `agents/observability/` | 0019 PR 2 |
+| OTLP metrics | `internal/observability/metrics/` | `agents/observability/metrics.py` | 0019 PR 3 |
+| Collector pipeline | `config/observability/` | — | 0019 PR 4 |
+| Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 |
+| Structured logs (Go) | `internal/observability/` | — | 0018 PR 2 |
+| Log↔trace correlation | `internal/observability/` | `agents/observability/` | 0018 PR 3 |
+| Log storage + shipper | `internal/observability/` | `agents/observability/` | 0018 PRs 4–5 |
+| `persatrix logs` CLI rewrite | `cli/src/commands/logs.rs` | — | 0018 PR 6 |
+
+---
+
 ## v0.3.0 — Agent Conversations
 
 **What a user can do**: Give agents a shared channel and watch them talk, negotiate, and form opinions about each other over time.
@@ -389,7 +461,7 @@ v0.3.0 complete
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/` | — | 0011 |
-| Telemetry | `internal/telemetry/` | — | 0006+ |
+| Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |
 
 ---
 
@@ -659,6 +731,7 @@ v0.5.0 complete
 | [#156](https://github.com/mkhomutov/Persatrix/pull/156) | docs(release): v0.2.2 release checklist + prep plan + README/guide refresh | v0.2.2 release prep | 2026-04-22 |
 | [#157](https://github.com/mkhomutov/Persatrix/pull/157) | chore(release): bump to v0.2.2 + curated changelog | v0.2.2 release prep | 2026-04-22 |
 | [#158](https://github.com/mkhomutov/Persatrix/pull/158) | docs(release): final pre-tag verification — flip README to Released, check off all gates | v0.2.2 release prep | 2026-04-22 |
+| [#163](https://github.com/mkhomutov/Persatrix/pull/163) | feat(otel): telemetry→observability rename + Python OTEL init + gRPC + Baggage (RFC 0019 PR 1/5) | 0019 (1/5) | 2026-04-22 |
 
 ---
 

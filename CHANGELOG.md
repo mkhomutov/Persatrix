@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] — v0.2.3
+
+> **Codename:** Observability Foundation
+
+### ⚠️ Operator-Visible Changes
+
+- **Python OTLP exporter transport changed** (`grpc` → `http`): the
+  `opentelemetry-exporter-otlp-proto-grpc` dependency has been replaced with
+  `opentelemetry-exporter-otlp-proto-http`.  Any custom OTEL Collector
+  configuration that pointed the Python exporter at the gRPC port (`:4317`)
+  must be updated to the HTTP port (`:4318`).  The Go-side exporter was already
+  using HTTP; this brings both runtimes to the same endpoint.
+- **Go package rename** `internal/telemetry` → `internal/observability`: this
+  is an internal rename and has no impact on operators, but custom forks that
+  import the package directly must update their import paths.
+
 ## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
