@@ -15,10 +15,13 @@ import sys
 import aiohttp
 import grpc
 import grpc.aio
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .base import BaseAgent
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
+from .observability.tracing import init_tracing
+from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
 from .server_persona import (
     initialize_persona_agents,
@@ -303,6 +306,10 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    # Initialise OTEL tracing before any gRPC or async code starts.
+    init_tracing()
+    GrpcAioInstrumentorServer().instrument()
+
     agent = load_agent(args.agent, args.config, args.workspace)
     server = AgentServer(
         host=args.host,
@@ -334,6 +341,7 @@ def main() -> None:
         await server.start()
         await shutdown.wait()
         await server.stop()
+        await tracing_shutdown()
 
     asyncio.run(_run())
 

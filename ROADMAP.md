@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised; v0.2.3 milestone description refreshed to "Observability Foundation" framing per PR #160 review)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 📋 Planned  
-> **Current milestone**: v0.2.2 released; v0.2.3 planning next
+> **Last updated**: 2026-04-22 (v0.2.2 released — post-release document update: ROADMAP v0.2.2 section added, prep plan PR 4 marked merged, release checklist finalised; v0.2.3 milestone description refreshed to "Observability Foundation" framing per PR #160 review; RFC 0019 status → 🚧 Implementing on first PR open)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 open)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -50,7 +50,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | 📋 Proposed |
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 📋 Proposed |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | � Implementing |
 
 ---
 

@@ -1,5 +1,5 @@
-// Package telemetry configures OpenTelemetry tracing for the orchestrator.
-package telemetry
+// Package observability configures OpenTelemetry tracing for the orchestrator.
+package observability
 
 import (
 	"context"
