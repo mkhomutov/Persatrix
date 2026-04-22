@@ -252,7 +252,7 @@ short-circuit guard does **not** fire (event is not a TICK). The LLM is invoked 
 |------|-----------------|-----------|
 | 1 | Memory store is empty | ☐ |
 | 2 | Agent starts; scheduler log present | ☐ |
-| 3 | ≥ 1 `empty_context_tick` log entries during the wait window | ☐ |
+| 3 | ≥ 1 `"empty-context tick suppressed"` log entries during the wait window | ☐ |
 | 4 | Zero LLM HTTP calls during the empty-context window | ☐ |
 | 5 | Idle-skip log appears after 10 short-circuited ticks | ☐ |
 | 6 | (Optional) Inbound message bypasses short-circuit; LLM call observed | ☐ |

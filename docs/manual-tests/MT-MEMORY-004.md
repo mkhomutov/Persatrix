@@ -35,7 +35,8 @@ contract that RFC 0017 §F's TICK short-circuit consumes.
 
 **Related Automated Tests**:
 - Unit tests: `agents/tests/test_memory_budget.py`
-- Unit tests: `agents/tests/test_persona_runtime_memory_context.py`
+- Unit tests: `agents/tests/test_inject_memory_context.py`
+- Unit tests: `agents/tests/test_inject_memory_context_gates.py`
 - Integration tests: `tests/integration/test_memory_budget_e2e.py`
 
 ---
