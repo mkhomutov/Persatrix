@@ -156,6 +156,8 @@ The deep review on the second-round commits classified all remaining items as **
 
 Review report (local-only, not committed): `docs/pr-reviews/pr-164.md`.
 
+**Merged**: PR [#164](https://github.com/mkhomutov/Persatrix/pull/164) — 2026-04-22
+
 #### Follow-up: PR 1b — `feature/v023-logging-python-getlogger-swap` (descoped from this PR)
 
 Mechanical migration of `logging.getLogger(__name__)` → `from .observability.logging import get_logger; logger = get_logger(__name__)` across `agents/` (~27 files), plus `logger.info("msg %s", x, extra={"k": v})` → `logger.info("msg", x=x, k=v)` for the ~25 printf-style call sites identified in the audit, plus targeted updates to `test_persona_tick_shortcircuit.py` to assert structlog event-dict fields rather than stdlib `LogRecord` attributes. Estimated size: ~250–400 lines. Joint order position remains #2 (1b is a sub-PR landing immediately after PR 1).
