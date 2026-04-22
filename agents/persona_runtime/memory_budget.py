@@ -38,7 +38,12 @@ def _count_tokens(text: str) -> int:
         logger.warning(
             "tiktoken encoding failed, falling back to chars/4", exc_info=True
         )
-    return max(1, len(text) // 4)
+    # ``max(0, …)`` (not ``max(1, …)``) so empty input returns 0, matching
+    # the tiktoken path (``enc.encode("") == []``).  ``try_add`` short-
+    # circuits on ``if not text:`` before reaching this helper, so no caller
+    # currently observes the difference, but the contracts now agree.
+    # (PR 6 — RFC 0017 PR 1 review finding 1.)
+    return max(0, len(text) // 4)
 
 
 def _truncate_to_token_limit(text: str, token_limit: int) -> str:

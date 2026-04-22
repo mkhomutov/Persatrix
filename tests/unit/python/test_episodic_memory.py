@@ -1794,17 +1794,134 @@ class TestMinScoreDefaults:
     """Verify the per-tier default constants are accessible and in range."""
 
     def test_default_episodic_min_score_in_range(self):
-        from agents.memory.episodic import _DEFAULT_EPISODIC_MIN_SCORE
-        assert 0.0 <= _DEFAULT_EPISODIC_MIN_SCORE <= 1.0
+        from agents.memory.episodic import DEFAULT_EPISODIC_MIN_SCORE
+        assert 0.0 <= DEFAULT_EPISODIC_MIN_SCORE <= 1.0
 
     def test_default_notes_min_score_in_range(self):
-        from agents.memory.episodic import _DEFAULT_NOTES_MIN_SCORE
-        assert 0.0 <= _DEFAULT_NOTES_MIN_SCORE <= 1.0
+        from agents.memory.episodic import DEFAULT_NOTES_MIN_SCORE
+        assert 0.0 <= DEFAULT_NOTES_MIN_SCORE <= 1.0
 
     def test_defaults_are_floats(self):
         from agents.memory.episodic import (
+            DEFAULT_EPISODIC_MIN_SCORE,
+            DEFAULT_NOTES_MIN_SCORE,
+        )
+        assert isinstance(DEFAULT_EPISODIC_MIN_SCORE, float)
+        assert isinstance(DEFAULT_NOTES_MIN_SCORE, float)
+
+    def test_underscore_aliases_back_compat(self):
+        """PR 6 — RFC 0017 PR 4 finding 1.
+
+        The deprecated `_DEFAULT_*` names must remain importable for one
+        release with identical values, so external callers (or pinned tests)
+        keep working through the deprecation window.
+        """
+        from agents.memory.episodic import (
             _DEFAULT_EPISODIC_MIN_SCORE,
             _DEFAULT_NOTES_MIN_SCORE,
+            DEFAULT_EPISODIC_MIN_SCORE,
+            DEFAULT_NOTES_MIN_SCORE,
         )
-        assert isinstance(_DEFAULT_EPISODIC_MIN_SCORE, float)
-        assert isinstance(_DEFAULT_NOTES_MIN_SCORE, float)
+        assert _DEFAULT_EPISODIC_MIN_SCORE == DEFAULT_EPISODIC_MIN_SCORE
+        assert _DEFAULT_NOTES_MIN_SCORE == DEFAULT_NOTES_MIN_SCORE
+
+
+# ─── PR 6 — RFC 0017 review follow-ups ───────────────────────────────────────
+
+
+class TestRecallNotesMinScoreValidation:
+    """PR 6 — RFC 0017 PR 3 review finding 1.
+
+    Mirror the ``recall()`` ``min_score`` range guard at the public façade
+    so the validation survives a future ``NoteStore`` refactor that drops
+    the inner check.
+    """
+
+    async def test_recall_notes_negative_min_score_raises(
+        self, memory: EpisodicMemory
+    ):
+        with pytest.raises(ValueError, match="min_score must be in"):
+            await memory.recall_notes("anything", min_score=-0.1)
+
+    async def test_recall_notes_above_one_min_score_raises(
+        self, memory: EpisodicMemory
+    ):
+        with pytest.raises(ValueError, match="min_score must be in"):
+            await memory.recall_notes("anything", min_score=1.5)
+
+    async def test_recall_notes_none_min_score_accepted(
+        self, memory: EpisodicMemory
+    ):
+        # Should not raise — no result assertion needed; this is a guard test.
+        await memory.recall_notes("anything", min_score=None)
+
+    async def test_recall_notes_zero_and_one_boundaries_accepted(
+        self, memory: EpisodicMemory
+    ):
+        await memory.recall_notes("anything", min_score=0.0)
+        await memory.recall_notes("anything", min_score=1.0)
+
+
+class TestResolveMinScoreHelper:
+    """PR 6 — RFC 0017 PR 3 review finding 3.
+
+    The ``resolve_min_score`` helper centralises ``None → 0.0`` semantics
+    shared by ``recall_fts5`` and ``NoteStore._recall_notes_fts5``.
+    Renamed from ``_resolve_min_score`` in PR 6 review follow-ups
+    because it is imported cross-module by ``notes.py`` in production
+    code (see ``episodic_queries.__all__`` rationale).
+    """
+
+    def test_none_resolves_to_zero(self):
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(None) == 0.0
+
+    def test_zero_resolves_to_zero(self):
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(0.0) == 0.0
+
+    def test_explicit_value_passes_through(self):
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(0.42) == 0.42
+
+
+class TestRecallMinScoreNoneZeroEquivalence:
+    """PR 6 — RFC 0017 PR 3 review finding 4.
+
+    ``min_score=None`` and ``min_score=0.0`` must produce identical SQL
+    behaviour.  Pin the contract so a future change to the helper from
+    finding 3 cannot silently introduce a non-zero implicit floor.
+    """
+
+    async def test_recall_none_and_zero_return_identical_results(
+        self, memory: EpisodicMemory
+    ):
+        for i in range(4):
+            await memory.store_episode(
+                summary=f"helium ionisation experiment session {i}",
+                context={"i": i},
+                importance=0.5,
+            )
+        none_results = await memory.recall("helium ionisation", min_score=None)
+        zero_results = await memory.recall("helium ionisation", min_score=0.0)
+
+        assert [ep.id for ep in none_results] == [ep.id for ep in zero_results]
+
+
+class TestHasFTS5Property:
+    """PR 6 — RFC 0017 PR 4 review finding 3.
+
+    Public ``has_fts5`` property replaces direct ``_fts5`` access.
+    """
+
+    async def test_has_fts5_property_returns_internal_flag(
+        self, memory: EpisodicMemory
+    ):
+        # The fixture initialises memory; the property must reflect the
+        # internal flag exactly.
+        assert memory.has_fts5 == memory._fts5  # type: ignore[attr-defined]
+
+    async def test_has_fts5_is_read_only(self, memory: EpisodicMemory):
+        """The property has no setter — assignment must raise AttributeError."""
+        with pytest.raises(AttributeError):
+            memory.has_fts5 = False  # type: ignore[misc]

@@ -57,7 +57,7 @@ This RFC is the structural fix that prior patches were approximating, and it lan
 ## Goals
 
 1. Memory injection per event has a hard, deterministic upper bound expressed in tokens. The bound is enforced inside `_inject_memory_context`, not as an after-the-fact drop in `WorkingMemory.build_context`.
-2. The three `_MAX_*_CHARS` constants are replaced by a single tunable `_MEMORY_BUDGET_TOKENS`.
+2. The three `_MAX_*_CHARS` constants are replaced as the **dominant control surface** by a single tunable `_MEMORY_BUDGET_TOKENS`. (Per-field char caps are retained as an adversarial-input hardening layer above the allocator — see [§B "Implemented shape"](#implemented-shape-pr-2-follow-up--rfc-amendment) for the rationale and the post-implementation hybrid.)
 3. The `EventType.TICK` skip and the `should_fall_back` gate in `_inject_memory_context` are deleted. Behaviour equivalent to today's gating is achieved by the recall layer's relevance threshold.
 4. `EpisodicMemory.recall` and `EpisodicMemory.recall_notes` accept a `min_score` parameter (single float, normalised) that callers use to express a relevance floor. The default value is calibrated against the existing FTS5 BM25 distribution before merge.
 5. `_truncate_with_ellipsis` operates in tokens, not characters, when the budget is the controlling constraint.
@@ -158,6 +158,20 @@ flowchart TD
     NotesSec -->|no| Done
     NotesAdd --> Done[Return — total memory injection ≤ _MEMORY_BUDGET_TOKENS]
 ```
+
+#### Implemented shape (PR 2 follow-up — RFC amendment)
+
+PR 2 implementation added per-field char caps *in addition to* the token budget, retained from the pre-RFC structure:
+
+| Constant | Value | Where applied |
+|----------|-------|---------------|
+| `_REL_NOTES_INTERIM_CHARS` | `400` | Relationship-notes char ceiling, applied **before** `budget.try_add` |
+| `_MAX_EPISODE_SUMMARY_CHARS` | `200` | Per-episode summary char ceiling, applied **before** `budget.try_add` |
+| `_MAX_NOTE_CONTENT_CHARS` | `500` | Per-note content char ceiling, applied **before** `budget.try_add` |
+
+**Rationale for the hybrid.** A pure token budget is sufficient to bound *total* memory injection, but per-field caps cheaply bound the **worst-case input** to `MemoryBudget.try_add` so a single malicious or pathological item (e.g., a 50 kB peer note) never reaches the token-aware truncator. The caps are deliberately permissive — at ~4 chars/token they correspond to roughly 100/50/125 tokens respectively, all comfortably below the ~1500-token total budget — so they almost never bind in practice, but they cap allocator CPU on adversarial input.
+
+The original §B description (pure allocate-loop, no per-field caps) remains the *normative shape* of the budget allocator. The char caps are an **implementation hardening** layer above the allocator and are documented here so future contributors do not mistake them for a regression to the pre-RFC `_MAX_*_CHARS` design.
 
 ### C. Relevance Threshold in the Recall Layer
 

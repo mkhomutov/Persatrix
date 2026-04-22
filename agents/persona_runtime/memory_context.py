@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from ..memory.episodic import (
-    _DEFAULT_EPISODIC_MIN_SCORE,
-    _DEFAULT_NOTES_MIN_SCORE,
+    DEFAULT_EPISODIC_MIN_SCORE,
+    DEFAULT_NOTES_MIN_SCORE,
     EpisodicMemory,
 )
 from ..memory.relationship import RelationshipMemory
@@ -104,6 +104,17 @@ class MemoryInjectionResult:
 
     memory_admitted_tokens: int
 
+    def __post_init__(self) -> None:
+        # PR 6 — RFC 0017 PR 5 review finding 4: a negative admitted count
+        # would silently bypass the ``== 0`` short-circuit in
+        # ``_ActionLoopMixin._on_event_inner`` (PR 5).  Refuse to construct
+        # in that case so a future ``MemoryBudget`` accounting bug surfaces
+        # at the boundary, not as a missed cost-saving opportunity.
+        if self.memory_admitted_tokens < 0:
+            raise ValueError(
+                f"memory_admitted_tokens must be >= 0, got {self.memory_admitted_tokens}"
+            )
+
 
 # ─── Helper Functions ──────────────────────────────────────
 
@@ -136,7 +147,12 @@ def _truncate_with_ellipsis(
     (PR #60 review: truncation pattern duplicated 3 times.)
     """
     if mode == "tokens":
-        return _truncate_with_ellipsis_tokens(text, limit)
+        # PR 1 review finding 4: ``_truncate_with_ellipsis_tokens`` was a
+        # one-liner wrapper around ``_truncate_to_token_limit``.  Inlined
+        # here to remove indirection now that the
+        # ``memory_context → memory_budget`` import direction is known to
+        # be safe (no cycle).
+        return _truncate_to_token_limit(text, limit)
 
     # Original char mode (unchanged).
     if len(text) <= limit:
@@ -148,22 +164,6 @@ def _truncate_with_ellipsis(
     if len(truncated) == len(sliced):
         truncated = sliced
     return truncated + "..."
-
-
-def _truncate_with_ellipsis_tokens(text: str, token_limit: int) -> str:
-    """Token-mode implementation for :func:`_truncate_with_ellipsis`.
-
-    Delegates to :func:`~agents.persona_runtime.memory_budget._truncate_to_token_limit`,
-    which is the single authoritative implementation for token-boundary truncation.
-    Kept as a named helper so :func:`_truncate_with_ellipsis` remains readable.
-
-    PR 1 review finding: the original body was a near-identical copy of
-    ``_truncate_to_token_limit`` in ``memory_budget.py``.  Eliminated the
-    duplication by delegating here.  ``memory_context`` → ``memory_budget``
-    is the unidirectional dependency PR 2 will formalise when wiring
-    ``MemoryBudget`` into ``_inject_memory_context``.
-    """
-    return _truncate_to_token_limit(text, token_limit)
 
 
 # ─── Mixin ─────────────────────────────────────────────────
@@ -207,7 +207,7 @@ class _MemoryContextMixin:
         PR 4 (RFC 0017): the TICK skip and ``should_fall_back`` recency-note
         fallback have been removed.  ``recall()`` and ``recall_notes()`` are
         now invoked for every event type; the ``min_score`` thresholds
-        (``_DEFAULT_EPISODIC_MIN_SCORE`` / ``_DEFAULT_NOTES_MIN_SCORE``)
+        (``DEFAULT_EPISODIC_MIN_SCORE`` / ``DEFAULT_NOTES_MIN_SCORE``)
         applied at the DB layer are the sole filters for low-signal content.
         Zero-admission events (TICK, short greetings) are expected to be
         short-circuited by PR 5's empty-context guard, which consumes the
@@ -298,7 +298,7 @@ class _MemoryContextMixin:
             episodes = await self._episodic_memory.recall(
                 query,
                 limit=5,
-                min_score=_DEFAULT_EPISODIC_MIN_SCORE,
+                min_score=DEFAULT_EPISODIC_MIN_SCORE,
             )
         except Exception:
             logger.warning(
@@ -321,7 +321,7 @@ class _MemoryContextMixin:
             notes = await self._episodic_memory.recall_notes(
                 query,
                 limit=5,
-                min_score=_DEFAULT_NOTES_MIN_SCORE,
+                min_score=DEFAULT_NOTES_MIN_SCORE,
             )
         except Exception:
             logger.warning(
@@ -376,17 +376,16 @@ class _MemoryContextMixin:
             if admitted_rel is not None:
                 self._working_memory.add_section(ContextSection(
                     name="relationship_context",
-                    # ``token_count`` uses ``estimate_tokens`` (chars/4) so
-                    # WorkingMemory's own budget logic stays consistent with
-                    # the rest of its sections; the allocate-loop above used
-                    # tiktoken via MemoryBudget for the authoritative bound.
-                    # The two counts can diverge ~10–20% on prose and 2–3×
-                    # on code/JSON/CJK; this is acceptable because the
-                    # WorkingMemory budget is a soft secondary cap.
-                    # (PR #146 review.)
+                    # PR 6 — PR 2 review finding 3: pass ``accurate=True`` so
+                    # this tier's WorkingMemory token count uses tiktoken,
+                    # matching the authoritative count produced by
+                    # ``MemoryBudget`` above.  The two layers now agree on
+                    # the same accounting and operators debugging "why was
+                    # my section dropped" no longer have to reconcile a
+                    # chars/4 estimate against a tiktoken-measured budget.
                     content=admitted_rel,
                     priority=8,
-                    token_count=estimate_tokens(admitted_rel),
+                    token_count=estimate_tokens(admitted_rel, accurate=True),
                     compressible=True,
                 ))
 
@@ -417,8 +416,8 @@ class _MemoryContextMixin:
                     name="episodic_recall",
                     content=text,
                     priority=7,
-                    # See relationship tier for the chars/4 vs tiktoken note.
-                    token_count=estimate_tokens(text),
+                    # See relationship tier for the accurate=True rationale.
+                    token_count=estimate_tokens(text, accurate=True),
                     compressible=True,
                 ))
 
@@ -442,8 +441,8 @@ class _MemoryContextMixin:
                     name="recent_notes",
                     content=text,
                     priority=6,
-                    # See relationship tier for the chars/4 vs tiktoken note.
-                    token_count=estimate_tokens(text),
+                    # See relationship tier for the accurate=True rationale.
+                    token_count=estimate_tokens(text, accurate=True),
                     compressible=True,
                 ))
 
