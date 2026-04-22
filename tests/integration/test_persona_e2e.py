@@ -413,8 +413,11 @@ class TestTickSchedulerIntegration:
             await scheduler.stop(timeout=5.0)
 
             assert not scheduler.is_running
-            # At least one tick should have fired
-            assert agent._llm_client._provider.create_message.call_count >= 1
+            # At least one tick should have been processed.
+            # RFC 0017 §F: a fresh agent with empty memory short-circuits before
+            # the LLM call and returns DO_NOTHING, so idle_count is the reliable
+            # signal that the scheduler fired rather than create_message.call_count.
+            assert scheduler.idle_count >= 1
         finally:
             await agent.close_memory()
 

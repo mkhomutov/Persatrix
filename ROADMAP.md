@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (RFC 0017 ✅ Implemented — PR 6/7 merged; PR 7 open)  
+> **Last updated**: 2026-04-22 (v0.2.2 manual tests complete — execution report added; integration test fix for RFC 0017 §F)  
 > **Current phase**: v0.2.2 (Persona Memory Injection Token Budget) — ✅ Implemented  
-> **Current milestone**: v0.2.2 release prep kickoff
+> **Current milestone**: v0.2.2 release prep
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -615,6 +615,8 @@ v0.5.0 complete
 | [#148](https://github.com/mkhomutov/Persatrix/pull/148) | feat(agents): wire min_score and remove legacy gates (RFC 0017 PR 4/7) | 0017 (4/7) | 2026-04-21 |
 | [#149](https://github.com/mkhomutov/Persatrix/pull/149) | fix(agents): short-circuit empty-context TICKs (RFC 0017 PR 5/7) | 0017 (5/7) | 2026-04-21 |
 | [#152](https://github.com/mkhomutov/Persatrix/pull/152) | fix(agents): RFC 0017 PR 6 review follow-ups (PR 6/7) | 0017 (6/7) | 2026-04-22 |
+| [#153](https://github.com/mkhomutov/Persatrix/pull/153) | docs(rfc): close RFC 0017 status and roadmap | 0017 (close) | 2026-04-22 |
+| [#154](https://github.com/mkhomutov/Persatrix/pull/154) | docs(manual-tests): add MT-MEMORY-004 and MT-PERSONA-003 for RFC 0017 | 0017 (7/7) | 2026-04-22 |
 
 ---
 
