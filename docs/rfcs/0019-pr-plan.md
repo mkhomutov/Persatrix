@@ -137,6 +137,7 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [ ] `pytest agents/tests/test_observability_tracing.py -v` passes
 - [ ] `pytest tests/integration/test_trace_propagation.py -v` passes
 - [ ] No `internal/telemetry/` directory remains
+- [ ] Pre-merge import-path audit: `grep -r 'internal/telemetry' --include='*.go' .` returns no matches <!-- Added per PR #161 review: the rename touches ~57 Go files; a grep verification is a low-cost safety net for any imports the automated update missed. -->
 - [ ] All `internal/telemetry` import paths in `internal/...` and `cmd/...` updated
 - [ ] `agents/pyproject.toml` Python OTLP exporter dep is the HTTP variant
 - [ ] CHANGELOG v0.2.3 entry covers the OTLP exporter swap (operator-visible) and the Go package rename
@@ -319,12 +320,14 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 - Flip [RFC 0019 status](0019-opentelemetry-completion.md) → `✅ Implemented`; record merged-PR list.
 - Update [ROADMAP.md](../../ROADMAP.md) RFC tracker row (0019) → `✅ Implemented`; flip the v0.2.3 milestone row to `✅ Released` (joint with RFC 0018 — see [0018-pr-plan.md](0018-pr-plan.md) PR 7).
 - Add v0.2.3 manual-test report row(s) in `docs/manual-tests/` for any traces/metrics-specific manual checks (Jaeger trace lookup, Prometheus exemplar click-through, Collector tail-sampling spot-check).
+- Confirm [PR #161](https://github.com/mkhomutov/Persatrix/pull/161) (the RFC 0018 + 0019 PR plan document PR) appears in the [ROADMAP.md](../../ROADMAP.md) merged-PR table. <!-- Added per PR #161 review: development-workflow.md "Status Hygiene" requires every merged PR to appear in the ROADMAP table; the plan PR itself is subject to the same rule. -->
 
 #### PR checklist
 
 - [ ] All review follow-ups from PRs 1–4 addressed or explicitly deferred (with rationale)
 - [ ] [RFC 0019 status](0019-opentelemetry-completion.md) → `✅ Implemented`
 - [ ] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects joint observability close
+- [ ] PR #161 appears in ROADMAP merged-PR table
 - [ ] Manual-test report appended for v0.2.3 traces/metrics coverage
 - [ ] `make test` passes; `make lint` clean
 

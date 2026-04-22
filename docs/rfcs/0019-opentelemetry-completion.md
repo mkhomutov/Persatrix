@@ -256,7 +256,7 @@ Metrics ship on the same OTLP HTTP exporter as traces. A new module `agents/obse
 
 **Exemplars.** Histogram instruments emit exemplars by default (OTEL SDK feature); each histogram bucket sample carries the `trace_id` / `span_id` of the call that produced it. A p99 LLM-latency spike on the dashboard becomes one click to the actual slow trace in Jaeger.
 
-**Go-side metrics.** The orchestrator gains `internal/observability/metrics.go` with: `workflow.submitted`, `workflow.completed`, `workflow.duration`, `workflow.steps.dispatched`, `workflow.active`. Same OTLP exporter, same Resource conventions.
+**Go-side metrics.** The orchestrator gains `internal/observability/metrics/metrics.go` <!-- sub-package form per PR #161 review, consistent with `logbuffer/`, `redact/`, `zapenc/` --> with: `workflow.submitted`, `workflow.completed`, `workflow.duration`, `workflow.steps.dispatched`, `workflow.active`. Same OTLP exporter, same Resource conventions.
 
 **`otelhttp` on the REST surface.** The orchestrator's main HTTP handler is wrapped with `otelhttp.NewHandler` so route-level latency histograms (`http.server.request.duration`) come for free. Per-handler manual spans remain on the workflow-submit and chat paths; trivial endpoints (health, version) get the `otelhttp` span only.
 
@@ -373,7 +373,7 @@ Without links, v0.3 mesh traces will be a forest of disconnected trees. Adding t
 **Deliverables.**
 
 1. `agents/observability/metrics.py` (new) implementing `init_metrics` / `shutdown` with the instrument inventory in [Section F](#f-metrics).
-2. `internal/observability/metrics.go` (new) for orchestrator metrics; instrumentation at workflow submit / complete / step dispatch sites.
+2. `internal/observability/metrics/metrics.go` (new) for orchestrator metrics; instrumentation at workflow submit / complete / step dispatch sites.
 3. Histograms emit exemplars (default OTEL SDK behaviour, verified in test).
 4. `deploy/observability/otel-collector.yaml` (new) with the tail-sampling pipeline from [Section H](#h-sampling-back-pressure-and-the-collector-pipeline).
 5. `docker-compose.yaml` updated to add the Collector service in front of Jaeger; Prometheus added as the metrics backend; Loki added as the logs backend (development only).
@@ -407,7 +407,7 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Python agents | `agents/tools/registry.py` | Add `agent.tool.execute` span (with optional payload capture via redaction hook); record `agent.tool.invocations`, `agent.tool.duration`; remove L138 TODO |
 | Python agents | `agents/sub_agents/` (spawn site) | Add `agent.subagent.spawn` span; emit Span Link from sub-agent root span back to spawn span |
 | Go orchestrator | `go.mod`, `go.sum` | Add `otelgrpc`, `otelhttp` |
-| Go orchestrator | `internal/observability/metrics.go` | Add (new module) |
+| Go orchestrator | `internal/observability/metrics/metrics.go` | Add (new module) | <!-- Path corrected per PR #161 review: sub-package form `metrics/metrics.go` is consistent with the `logbuffer/`, `redact/`, and `zapenc/` sub-package pattern established by RFC 0018 for `internal/observability/`. -->
 | Go orchestrator | `cmd/orchestrator/main.go` | Inject `otelgrpc` client handler into executor dial options; wrap HTTP handler with `otelhttp`; init metrics |
 | Tests | `agents/tests/conftest.py` | Add `InMemorySpanExporter` and `InMemoryMetricReader` fixtures |
 | Tests | `agents/tests/test_observability_tracing.py` (new) | Init + propagation + baggage unit tests |

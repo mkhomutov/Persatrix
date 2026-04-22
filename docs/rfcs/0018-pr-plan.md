@@ -107,7 +107,7 @@ All PRs are sequential.
 | File | Change |
 |------|--------|
 | `docs/observability.md` | **New** — defines the schema in [RFC § B](0018-structured-logging-framework.md#b-common-log-schema), the field-ordering contract, `schema_version: "1"`, and the `PERSATRIX_LOG_FORMAT=pretty` env override. RFC 0019 will append span-conventions / metrics sections in its Phase 2 and 3. |
-| `agents/observability/__init__.py` | **New** — package marker. |
+| `agents/observability/__init__.py` | Pre-existing after 0019 PR 1 (joint order #1 creates this package marker as part of the `agents/observability/` namespace setup) — no action needed in this PR. <!-- Clarified per PR #161 review: listing this as `**New**` would mislead implementers into treating a pre-existing file as a merge conflict. 0019 PR 1 owns the package creation; 0018 PR 1 adds modules inside it. --> |
 | `agents/observability/logging.py` | **New** — `configure_logging()` builds the structlog chain (contextvars merge + OTEL processor placeholder + redactor hook + JSON renderer; pretty renderer when `PERSATRIX_LOG_FORMAT=pretty`). `get_logger(name)` returns a structlog `BoundLogger`. |
 | `agents/observability/redact.py` | **New** — `Redactor` Protocol; `NoopRedactor` default. The Protocol surface is the same shape used by RFC 0019 Phase 2 for tool-payload capture, ensuring one redaction contract across both signals. |
 | `agents/server.py`, `agents/base.py`, `agents/llm_client.py`, `agents/dispatch.py`, `agents/persona.py`, `agents/persona_behavior.py`, `agents/tick.py`, `agents/participant.py`, `agents/server_persona.py`, `agents/server_servicers.py`, `agents/task_agent.py`, `agents/validate.py`, `agents/persona_runtime/*.py`, `agents/sub_agents/*.py`, `agents/memory/*.py`, `agents/tools/*.py` | Replace `logging.getLogger(__name__)` with `from agents.observability.logging import get_logger; logger = get_logger(__name__)`. Replace any `logger.info("msg %s", x)` with structured `logger.info("msg", x=x)` form. No behavioural change to log content; this is a transport swap. |
@@ -210,7 +210,7 @@ All PRs are sequential.
 
 #### Key implementation details
 
-- Metadata keys use the gRPC convention (`x-persatrix-execution-id`, etc.); the interceptor strips the `x-persatrix-` prefix when binding to contextvars.
+- Metadata keys follow the kebab-case convention defined in [RFC § D](0018-structured-logging-framework.md#d-cross-process-correlation-ids): `persatrix-execution-id`, `persatrix-step-id`, `persatrix-agent-id`. The `x-` prefix is **not used** — the `x-` convention was deprecated for HTTP headers (RFC 6648) and adds no value for gRPC metadata. RFC § D explicitly documents the rationale: the `persatrix-` form is lowercase-clean per gRPC spec and matches existing header conventions in the codebase. The interceptor strips the `persatrix-` prefix when binding to structlog contextvars. <!-- Corrected per PR #161 review: the earlier `x-persatrix-` form would silently break correlation (Go injects without `x-`; Python would extract with `x-` — no match). -->
 - Order matters at server registration: `GrpcInstrumentorServer` (from RFC 0019 PR 1) → `LoggingMetadataInterceptor` (this PR). The OTEL interceptor establishes the trace context; the logging interceptor binds correlation IDs to that already-established context.
 - `trace_id` and `span_id` are emitted in the schema's Optional-fields block defined in [RFC § B](0018-structured-logging-framework.md#b-common-log-schema). When no span is active they are omitted (not emitted as empty strings) — preserves the schema's "Optional" contract.
 - The integration test runs against an in-process orchestrator + a single agent; no external services. Asserts via captured log streams (stdout) parsed as JSON.
@@ -245,7 +245,7 @@ All PRs are sequential.
 
 | File | Change |
 |------|--------|
-| `proto/log_service.proto` | **New** — defines `LogService.StreamLogs(stream LogEntry) returns (stream LogAck)` per [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming). `LogEntry` carries the schema's required + optional fields; `LogAck` advances the agent shipper's high-water mark. |
+| `proto/log_service.proto` | **New** — defines `LogService.StreamLogs(stream LogBatch) returns (stream LogAck)` per [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming). `LogBatch` wraps `repeated LogEntry entries` + `agent_id` (the batch-level `agent_id` avoids per-entry repetition when all entries in a batch share the same agent, which is the common shipper case). `LogEntry` carries the schema's required + optional fields; `LogAck` advances the agent shipper's high-water mark. <!-- Corrected per PR #161 review: the plan previously said `StreamLogs(stream LogEntry)` while RFC § E defines `StreamLogs(stream LogBatch)`; citing "per RFC § E" while contradicting it was a spec drift hazard. --> |
 | `internal/generated/log_service*.go`, `agents/generated/log_service*.py` | Regenerated stubs. |
 | `internal/observability/logbuffer/buffer.go` | **New** — per-execution ring buffer (default 1000 entries) keyed by `execution_id`; LRU eviction across executions (default 50 executions); seal-on-terminal (when execution completes/fails, ring is sealed and protected from eviction until disk-flushed). |
 | `internal/observability/logbuffer/disk.go` | **New** — append-only on-disk store under `PERSATRIX_LOGBUFFER_DIR` (default `data/logs/`) with a 512 MB cap (`PERSATRIX_LOGBUFFER_DISK_MB`); umask `0700` on directory creation per RFC § E. Warm-load on orchestrator start. |
@@ -255,7 +255,7 @@ All PRs are sequential.
 #### Key implementation details
 
 - Env-var knobs (defaults pinned in [RFC § Resolved Decisions #2](0018-structured-logging-framework.md#resolved-decisions)): `PERSATRIX_LOGBUFFER_PER_EXEC=1000`, `PERSATRIX_LOGBUFFER_MAX_EXEC=50`, `PERSATRIX_LOGBUFFER_DISK_MB=512`, `PERSATRIX_LOGBUFFER_DIR=data/logs`, `PERSATRIX_LOGBUFFER_DROP_LEVEL=DEBUG`, `PERSATRIX_LOGBUFFER_RATE_PER_EXEC=1000`.
-- Disk store layout: `<DIR>/<execution_id>/<sequence>.jsonl`; sealed rings are flushed in full before the in-memory ring is freed.
+- Disk store layout: `<DIR>/<execution_id>/<sequence>.jsonl` (directory per execution, monotonically-increasing sequence files, one JSON entry per line). **This supersedes the flat single-file layout described in [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming)** (`data/logs/<execution_id>.jsonl`): the per-sequence-file approach keeps individual file sizes bounded for long-running executions and allows sealed-ring flush-in-full without in-place JSONL rewrites. RFC § E is the authority for the `LogService` RPC shape and env-var knobs; the disk layout is an implementation detail that this PR plan supersedes. Sealed rings are flushed in full before the in-memory ring is freed. <!-- Note added per PR #161 review to prevent implementers from conflicting against RFC § E's flat-file layout. -->
 - LRU eviction never evicts a sealed ring with un-flushed entries (eviction is a no-op for such rings; oldest active ring is evicted instead).
 - Concurrency: per-execution ring uses an internal `sync.Mutex`; cross-execution LRU uses a top-level `sync.RWMutex`. Tests run with `-race`.
 
@@ -266,6 +266,7 @@ All PRs are sequential.
 - Disk persistence: write entries, restart (simulated by rebuilding the buffer from disk), assert all entries queryable.
 - Rate limit: 2× `PERSATRIX_LOGBUFFER_RATE_PER_EXEC` entries/sec → ~half are dropped; drop counter incremented; severity ≥ `WARN` always admitted regardless of rate.
 - Sealing: write entries, mark execution terminal, attempt eviction → sealed ring not evicted until disk-flushed.
+- Warm-load resilience: simulate a truncated final JSONL line in a pre-existing execution file on disk → ring loads all well-formed entries successfully; exactly one `WARN` log line emitted per affected file; subsequent entries written and read back without error. <!-- Added per PR #161 review: the Risk/Mitigation table documents this behaviour but without a test assertion it is unverified. -->
 - Concurrent writes: 10 goroutines × 100 entries each → no panics under `-race`; final entry count consistent with rate-limit drops.
 
 #### PR checklist
@@ -341,7 +342,7 @@ All PRs are sequential.
 
 | File | Change |
 |------|--------|
-| `cli/src/commands/logs.rs` | Rewrite. Subcommand: `persatrix logs <execution_id>` with flags `--verbose`, `--follow`, `--since <dur-or-rfc3339>`, `--workflow <name>`, `--level <DEBUG\|INFO\|WARN\|ERROR>`. `--follow` consumes the SSE endpoint; non-`--follow` mode hits the REST endpoint and renders. `id=_` is a documented value (`persatrix logs _ --since 1h`). |
+| `cli/src/commands/logs.rs` | Rewrite. Subcommand: `persatrix logs <execution_id>` with flags `--verbose`, `--follow`, `--since <dur-or-rfc3339>`, `--workflow <name>`, `--level <DEBUG\|INFO\|WARN\|ERROR>`, `--trace <trace_id>`. `--follow` consumes the SSE endpoint; non-`--follow` mode hits the REST endpoint and renders. `id=_` is a documented value (`persatrix logs _ --since 1h`). `--trace <trace_id>` filters to entries whose `trace_id` field matches, enabling the log↔trace correlation workflow described in [RFC 0019 § G](0019-opentelemetry-completion.md#g-logtrace-correlation). <!-- `--trace` added per PR #161 review: RFC 0019 § G and 0019 PR 4's E2E test both reference `persatrix logs --trace <trace_id>` as a first-class invocation; omitting it from the CLI rewrite scope would have left an undocumented gap. --> |
 | `cli/Cargo.toml` | Add `eventsource-stream` (or equivalent SSE client crate) if not present. |
 | `tests/integration/test_logs_e2e.py` | **New** — submit a small workflow; call `persatrix logs <id>` (via subprocess) → assert merged Go + Python entries, matching `execution_id`, valid `trace_id`. Run `persatrix logs --follow` against a long-running workflow → observe live entries within 2s. Restart the orchestrator mid-test → re-run `persatrix logs <id>` → assert pre-restart entries still present. |
 | `docs/observability.md` | Append an "Operations" section: CLI usage, env-var knobs (the six from PR 4), on-disk store layout, the `data/logs/` umask note, and a `persatrix logs --follow` walkthrough. |
@@ -408,12 +409,14 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 - Flip [RFC 0018 status](0018-structured-logging-framework.md) → `✅ Implemented`; record merged-PR list.
 - Update [ROADMAP.md](../../ROADMAP.md) RFC tracker row (0018) → `✅ Implemented`; ensure the v0.2.3 milestone row reflects the joint observability delivery alongside RFC 0019's close (see [0019-pr-plan.md](0019-pr-plan.md) PR 5).
 - Add v0.2.3 manual-test report row(s) in `docs/manual-tests/` for any logging-specific manual checks (CLI `--follow`, restart durability, `pretty` mode toggle).
+- Confirm [PR #161](https://github.com/mkhomutov/Persatrix/pull/161) (the RFC 0018 + 0019 PR plan document PR) appears in the [ROADMAP.md](../../ROADMAP.md) merged-PR table. <!-- Added per PR #161 review: development-workflow.md "Status Hygiene" requires every merged PR to appear in the ROADMAP table; the plan PR itself is subject to the same rule. -->
 
 #### PR checklist
 
 - [ ] All review follow-ups from PRs 1–6 addressed or explicitly deferred (with rationale)
 - [ ] [RFC 0018 status](0018-structured-logging-framework.md) → `✅ Implemented`
 - [ ] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects logging-side close
+- [ ] PR #161 appears in ROADMAP merged-PR table
 - [ ] Manual-test report appended for v0.2.3 logging coverage
 - [ ] `make test` passes; `make lint` clean
 
