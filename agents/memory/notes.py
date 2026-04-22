@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import aiosqlite
 
-from .episodic_queries import _resolve_min_score
+from .episodic_queries import resolve_min_score
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +262,7 @@ class NoteStore:
         safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
         if not safe_query:
             return await self._recall_notes_like(query, limit, min_score)
-        effective_min_score = _resolve_min_score(min_score)
+        effective_min_score = resolve_min_score(min_score)
         try:
             async with self._db.execute(
                 f"""

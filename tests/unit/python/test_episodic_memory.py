@@ -1865,21 +1865,24 @@ class TestRecallNotesMinScoreValidation:
 class TestResolveMinScoreHelper:
     """PR 6 — RFC 0017 PR 3 review finding 3.
 
-    The ``_resolve_min_score`` helper centralises ``None → 0.0`` semantics
+    The ``resolve_min_score`` helper centralises ``None → 0.0`` semantics
     shared by ``recall_fts5`` and ``NoteStore._recall_notes_fts5``.
+    Renamed from ``_resolve_min_score`` in PR 6 review follow-ups
+    because it is imported cross-module by ``notes.py`` in production
+    code (see ``episodic_queries.__all__`` rationale).
     """
 
     def test_none_resolves_to_zero(self):
-        from agents.memory.episodic_queries import _resolve_min_score
-        assert _resolve_min_score(None) == 0.0
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(None) == 0.0
 
     def test_zero_resolves_to_zero(self):
-        from agents.memory.episodic_queries import _resolve_min_score
-        assert _resolve_min_score(0.0) == 0.0
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(0.0) == 0.0
 
     def test_explicit_value_passes_through(self):
-        from agents.memory.episodic_queries import _resolve_min_score
-        assert _resolve_min_score(0.42) == 0.42
+        from agents.memory.episodic_queries import resolve_min_score
+        assert resolve_min_score(0.42) == 0.42
 
 
 class TestRecallMinScoreNoneZeroEquivalence:

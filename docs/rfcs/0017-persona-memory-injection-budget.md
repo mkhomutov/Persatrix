@@ -57,7 +57,7 @@ This RFC is the structural fix that prior patches were approximating, and it lan
 ## Goals
 
 1. Memory injection per event has a hard, deterministic upper bound expressed in tokens. The bound is enforced inside `_inject_memory_context`, not as an after-the-fact drop in `WorkingMemory.build_context`.
-2. The three `_MAX_*_CHARS` constants are replaced by a single tunable `_MEMORY_BUDGET_TOKENS`.
+2. The three `_MAX_*_CHARS` constants are replaced as the **dominant control surface** by a single tunable `_MEMORY_BUDGET_TOKENS`. (Per-field char caps are retained as an adversarial-input hardening layer above the allocator — see [§B "Implemented shape"](#implemented-shape-pr-2-follow-up--rfc-amendment) for the rationale and the post-implementation hybrid.)
 3. The `EventType.TICK` skip and the `should_fall_back` gate in `_inject_memory_context` are deleted. Behaviour equivalent to today's gating is achieved by the recall layer's relevance threshold.
 4. `EpisodicMemory.recall` and `EpisodicMemory.recall_notes` accept a `min_score` parameter (single float, normalised) that callers use to express a relevance floor. The default value is calibrated against the existing FTS5 BM25 distribution before merge.
 5. `_truncate_with_ellipsis` operates in tokens, not characters, when the budget is the controlling constraint.

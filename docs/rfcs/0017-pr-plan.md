@@ -483,8 +483,8 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
 3. **Dedupe `effective_min_score = min_score if min_score is not None else 0.0` idiom**
    ([agents/memory/episodic_queries.py](../../agents/memory/episodic_queries.py),
    [agents/memory/notes.py](../../agents/memory/notes.py)). The same three-line snippet appears
-   verbatim in `recall_fts5` and `_recall_notes_fts5`. Extract a private helper
-   `_resolve_min_score(min_score: float | None) -> float` (co-located with `_normalize_bm25` in
+   verbatim in `recall_fts5` and `_recall_notes_fts5`. Extract a helper
+   `resolve_min_score(min_score: float | None) -> float` (co-located with `_normalize_bm25` in
    `episodic_queries.py`) and import from `notes.py`. Makes the "None means no SQL-side filter"
    contract a single line of truth.
 
@@ -649,8 +649,8 @@ Test gaps deferred from earlier PR reviews are added here.
 - [x] All deferred review findings addressed (see Status by finding below)
 - [x] All deferred test gaps filled (PR 1 #3 #5; PR 2 #6 #7; PR 3 #4; PR 4 #3 partial; PR 5 #4)
 - [x] `make test` passes (1202 passed; one pre-existing unrelated TICK integration failure on main, not regressed by this PR)
-- [ ] `make lint` clean
-- [ ] `make validate` passes
+- [x] `make lint` clean
+- [x] `make validate` passes
 
 #### Status by finding (PR 6 implementation)
 
@@ -658,7 +658,7 @@ PR 1: #1 ✅ fixed; #2 ⏭ deferred (nice-to-have, see PR 2 #13); #3 ✅ test ad
 
 PR 2: #1 ✅ documented via RFC §B "Implemented shape" amendment (hybrid model is the intended shape, not a regression); #2 ⏭ deferred (header tokens are <5/tier, soft cap acceptable); #3 ✅ all three `add_section` call sites pass `accurate=True`; #4 ⏭ deferred (one-line comment, batch with v0.3 A2A sweep); #5 ⏭ acknowledged (no fix needed); #6 ✅ `TestZeroBudgetIntegration.test_zero_budget_drops_all_sections`; #7 ⏭ deferred (boundary not reached after PR 5; `_count_tokens` exact-match would require contrived input); #8/#9/#11/#12 ⏭ deferred (test-strengthening, mostly obsolete after PR 4 deletions); #10 ✅ documented via RFC §B amendment; #13 ⏭ deferred (nice-to-have).
 
-PR 3: #1 ✅ guard added at `recall_notes()` façade; #2 ⏭ obsolete (PR 4 merged); #3 ✅ `_resolve_min_score()` helper added in `episodic_queries.py`, used by both `recall_fts5` and `_recall_notes_fts5`; #4 ✅ `TestRecallMinScoreNoneZeroEquivalence`; #5 ⏭ deferred (low-value; recency path is well-covered).
+PR 3: #1 ✅ guard added at `recall_notes()` façade; #2 ⏭ obsolete (PR 4 merged); #3 ✅ `resolve_min_score()` helper added in `episodic_queries.py`, used by both `recall_fts5` and `_recall_notes_fts5` (helper renamed from `_resolve_min_score` per PR 6 review: cross-module production import ⇒ no underscore, mirroring `DEFAULT_*_MIN_SCORE` promotion); #4 ✅ `TestRecallMinScoreNoneZeroEquivalence`; #5 ⏭ deferred (low-value; recency path is well-covered).
 
 PR 4: #1 ✅ promoted to public `DEFAULT_EPISODIC_MIN_SCORE`/`DEFAULT_NOTES_MIN_SCORE` with deprecated underscore aliases; #2 ⏭ deferred (test-tightening); #3 ✅ `EpisodicMemory.has_fts5` property added, integration test switched; #4 ⏭ deferred (shared-helper extraction; net win but doubles diff size); #5 ⏭ obsolete (resolved if #4 taken); #6 ⏭ obsolete (#1 fix re-sorts the import block); #7 ⏭ documentation note acknowledged.
 
