@@ -1,12 +1,13 @@
-# RFC 0019 — OpenTelemetry Completion
+# RFC 0019 — OpenTelemetry Completion (Traces, Metrics, Correlation)
 
 **Type**: architecture
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
-**Date**: 2026-04-21
+**Date**: 2026-04-21 (rev 2026-04-22 — future-focused expansion)
 **Target**: v0.2.3
-**Depends on**: none (paired with RFC 0018)
-**Feeds into**: log↔trace correlation follow-up (post-v0.2.3)
+**Schema version**: 1
+**Depends on**: none
+**Pairs with**: RFC 0018 (Structured Logging Framework — both ship together in v0.2.3 with shared schema, redaction hook, and OTLP transport; see [Relationship to RFC 0018](#relationship-to-rfc-0018))
 
 ---
 
@@ -22,10 +23,15 @@
   - [C. gRPC Trace Context Propagation](#c-grpc-trace-context-propagation)
   - [D. Semantic Spans on the Python Side](#d-semantic-spans-on-the-python-side)
   - [E. Span Naming and Attribute Conventions](#e-span-naming-and-attribute-conventions)
+  - [F. Metrics](#f-metrics)
+  - [G. Log↔Trace Correlation](#g-logtrace-correlation)
+  - [H. Sampling, Back-Pressure, and the Collector Pipeline](#h-sampling-back-pressure-and-the-collector-pipeline)
+  - [I. Span Links and A2A Causality](#i-span-links-and-a2a-causality)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
+- [Resolved Decisions](#resolved-decisions)
 - [Open Questions](#open-questions)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
@@ -34,7 +40,25 @@
 
 ## Summary
 
-This RFC closes the cross-language gap in Persatrix's OpenTelemetry implementation: traces start in the Go orchestrator, cross the gRPC boundary into Python agents, and continue as child spans for memory operations, persona event dispatch, LLM calls, and tool executions. Coverage gaps that are not on the cross-language critical path (full automatic HTTP instrumentation, REST endpoint span uniformity, YAML observability config) are explicitly deferred. The result: an end-to-end trace tree from `POST /api/v1/workflows` to LLM call appears in Jaeger; the README's OTEL story stops being a half-truth.
+This RFC closes the cross-language gap in Persatrix's OpenTelemetry implementation and lands the **observability foundation** for the project's full lifetime: traces start in the Go orchestrator, cross the gRPC boundary into Python agents (with W3C TraceContext **and** W3C Baggage), and continue as child spans for memory operations, persona event dispatch, LLM calls (annotated with the OTEL Gen-AI semantic conventions), and tool executions. **Metrics** (counters, histograms, gauges) ship on the same OTLP transport. **Log↔trace correlation** (`trace_id` / `span_id` injected into every structured log line from RFC 0018) lands in the same release rather than as a follow-up. **Span Links** capture A2A and sub-agent causality so v0.3 mesh traces are not a forest of disconnected trees. A documented **OTEL Collector tail-sampling pipeline** is the canonical operator deployment from day 1.
+
+The scope is intentionally larger than "traces work end-to-end." The goal is to ship a complete OTLP-native observability surface (logs + traces + metrics, correlated, with a single redaction hook shared with RFC 0018) once, rather than re-litigate naming, sampling, and transport across three or four releases.
+
+### Relationship to RFC 0018
+
+RFC 0018 (Structured Logging) and this RFC are deliberately kept as separate documents for review tractability, but they share a single design contract:
+
+| Concern | Single source of truth |
+|---------|------------------------|
+| Wire transport | OTLP (HTTP, port 4318) |
+| Schema version field | `schema_version: 1` |
+| Correlation IDs | `execution_id`, `step_id`, `agent_id`, `workflow_id`, `trace_id`, `span_id` |
+| Cross-process propagation | W3C TraceContext + W3C Baggage |
+| Redaction hook | Shared interface, used by both log records and span attributes |
+| Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree) |
+| Sampling discipline | Parent-based head sampling + Collector tail sampling |
+
+A merger of the two RFCs into one "Observability Foundation" document is recorded as [Open Question 6](#open-questions). Pending that decision, both RFCs cross-reference this contract.
 
 ## Motivation
 
@@ -52,25 +76,29 @@ What happens if we do nothing: every multi-agent debugging story remains a manua
 
 ## Goals
 
-1. Python agent runtime initialises OTEL on startup, mirroring the Go orchestrator's pattern (OTLP exporter, same endpoint via `OTEL_EXPORTER_OTLP_ENDPOINT`, resource attributes identifying the agent service).
-2. gRPC requests from orchestrator carry W3C TraceContext into Python agents; agents resume the trace as child spans.
-3. Python agents emit semantic spans for: agent tick cycle, persona event dispatch, memory operations (episodic recall, episodic write, relationship lookup, relationship update), LLM calls (with model, token counts, cache hit/miss attributes), tool executions (with tool name, success/failure, duration).
-4. Span naming convention is documented and applied: `<service>.<component>.<operation>` (e.g., `agent.memory.episodic.query`).
-5. End-to-end verification: a workflow submitted to `POST /api/v1/workflows` produces a single trace tree in Jaeger spanning orchestrator HTTP handler → workflow run → step dispatch → gRPC client span → gRPC server span → tick / event handler → memory query → LLM call.
-6. The `# TODO: OTEL span creation` in [`agents/tools/registry.py`](../../agents/tools/registry.py) is removed and replaced with a real span.
+1. Python agent runtime initialises OTEL on startup (traces **and** metrics), mirroring the Go orchestrator's pattern (OTLP HTTP exporter, same endpoint via `OTEL_EXPORTER_OTLP_ENDPOINT`, resource attributes identifying the agent service, OTEL Resource detectors for process / host / container / k8s metadata, `schema_url` set to a versioned Persatrix URL).
+2. gRPC requests from orchestrator carry W3C TraceContext **and** W3C Baggage into Python agents; agents resume the trace as child spans and inherit baggage (`persatrix.execution_id`, `persatrix.step_id`, `persatrix.workflow_id`, plus future `persatrix.tenant_id` / `persatrix.organization_id` slots).
+3. Python agents emit semantic spans for: agent tick cycle, persona event dispatch (with sub-millisecond phases as **span events**, not separate spans), memory operations (episodic recall, episodic write, relationship lookup, relationship update), LLM calls (using **OTEL Gen-AI semantic conventions** — `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gen_ai.operation.name`), tool executions (with tool name, success/failure, duration, and optional argument capture routed through the RFC 0018 redaction hook).
+4. Span naming convention is documented and applied: `<service>.<component>.<operation>` (e.g., `agent.memory.episodic.query`). Persatrix-specific attributes use the reserved `persatrix.*` prefix; Gen-AI attributes use the upstream `gen_ai.*` prefix verbatim.
+5. **Span Links** capture A2A causality (event → triggered tick, parent agent → spawned sub-agent, dispatched message → handler).
+6. **Metrics** ship on the same OTLP exporter: counters (`agent.tool.invocations`, `agent.llm.calls`, `agent.llm.tokens`, `agent.event.dispatched`), histograms (`agent.llm.duration`, `agent.tool.duration`, `agent.persona.tick.interval`), gauges (`agent.active`, `workflow.active`). Histograms emit **exemplars** linking to trace samples.
+7. **Log↔trace correlation lands in v0.2.3, not as a follow-up.** Every structured log line from RFC 0018 emitted inside an active span carries `trace_id` and `span_id`; the Python logging interceptor and the Go zap field enricher both pull from the active OTEL context.
+8. **Tail sampling pipeline.** A documented OTEL Collector configuration ships under `docker-compose.yaml` (or a sibling override) implementing rules: keep all error spans, keep slow LLM calls (>p95), sample 1% of healthy autonomous tick traces.
+9. End-to-end verification: a workflow submitted to `POST /api/v1/workflows` produces a single trace tree in Jaeger spanning orchestrator HTTP handler → workflow run → step dispatch → gRPC client span → gRPC server span → tick / event handler → memory query → LLM call, with correlated log lines queryable by `trace_id` and a metrics dashboard showing the same execution.
+10. The `# TODO: OTEL span creation` in [`agents/tools/registry.py`](../../agents/tools/registry.py) is removed and replaced with a real span.
+11. A reusable `InMemorySpanExporter` / `InMemoryMetricReader` `pytest` fixture lives in `agents/tests/conftest.py` so every future agent feature is span- and metric-testable without docker-compose.
 
 ## Non-Goals
 
-- **Automatic HTTP / gRPC instrumentation via `otelhttp` and `otelgrpc` middleware.** Manual instrumentation already covers the critical paths. Adding the ecosystem auto-instrumentation removes a polish gap (some handlers untraced) without adding new capability. Deferred to a follow-up.
-- **Span coverage on every REST endpoint.** Health, version, list-style endpoints can stay uninstrumented for v0.2.3.
-- **YAML-based OTEL configuration.** `config/environments/development.yaml` has an `observability` section that isn't wired in. Env vars are adequate for v0.2.3; YAML wiring is a polish task.
-- **Log↔trace correlation fields (`trace_id` / `span_id` on log lines).** Depends on RFC 0018 landing structured logging first; both RFCs target v0.2.3 but the correlation work is a follow-up after both ship and is intentionally not on the v0.2.3 critical path.
-- **Metrics (counters, histograms, gauges).** Separate RFC if/when needed.
-- **Custom OTEL exporters beyond OTLP.**
-- **Production observability stack beyond Jaeger for local dev.**
-- **Performance benchmarking of OTEL overhead.**
+- **Span coverage on every REST endpoint.** Health, version, list-style endpoints can stay uninstrumented for v0.2.3. (`otelhttp` middleware on the public REST handler **is** in scope as a one-line install — see [Section F](#f-metrics).)
+- **YAML-based OTEL configuration.** `config/environments/development.yaml` has an `observability` section that isn't wired in. Env vars remain primary for v0.2.3; YAML wiring is a polish task tracked separately.
+- **Custom OTEL exporters beyond OTLP.** OTLP HTTP is the only supported transport.
+- **Production observability stack beyond Jaeger + Prometheus + Loki for local dev.** A reference Collector pipeline is documented; choosing the operator's production backend is out of scope.
+- **Performance benchmarking of OTEL overhead.** Recommended `BatchSpanProcessor` / `BatchLogRecordProcessor` settings are documented; formal benchmarking deferred.
 - **Trace-based alerting.**
-- **Custom OTEL processors or samplers.** The orchestrator's existing sampler config applies; agents inherit the same sampling discipline (see [Open Question 4](#open-questions)).
+- **Profiling signal (4th OTEL signal).** Namespace is left unblocked (`agents/observability/` and `internal/observability/` can host a future `profiling.py`) but no implementation in v0.2.3.
+- **Tool/function-call OTEL semantic conventions.** Adopt them when the upstream spec stabilises; current attribute set is forward-compatible (flat `tool.*` keys easily aliased).
+- **Multi-tenant attribute enforcement.** `persatrix.tenant_id` / `persatrix.organization_id` baggage slots are defined, but enforcement (RFC 0009) is out of scope here.
 
 ---
 
@@ -102,7 +130,15 @@ A new module `agents/observability/tracing.py` mirrors `internal/telemetry/telem
 
 **Exporter protocol decision.** The Go side uses OTLP-HTTP. Python deps currently include `opentelemetry-exporter-otlp-proto-grpc` (gRPC variant). For parity with the Go endpoint and to keep `:4318` as the single OTLP target, this RFC switches Python to `opentelemetry-exporter-otlp-proto-http`. Dependency change captured in [Files Touched](#files-touched-estimated).
 
-`agents/server.py` calls `init_tracing(agent_id)` early in startup, before the gRPC server is constructed, and registers `shutdown()` with the existing graceful-shutdown sequence.
+**Resource attributes.** The `Resource` carries:
+
+- `service.name=agent-<id>`, `service.version`, `service.instance.id`
+- `schema_url="https://persatrix.dev/schemas/observability/1.0.0"` (versioned, lets future consumers do schema-aware migrations)
+- Auto-detected attributes via OTEL Resource detectors: `ProcessResourceDetector`, `OTELResourceDetector` (env-var bridge), and — when running under containers/k8s — `ContainerResourceDetector` and `OTResourceDetector` for k8s metadata. One-line installs each; trivial now, painful to retrofit when Persatrix runs under k8s.
+
+**BatchSpanProcessor tuning.** Defaults (queue 2048, schedule 5s, max export batch 512) are wrong for autonomous tick loops. The RFC ships explicit values (`max_queue_size=8192`, `schedule_delay_millis=2000`, `max_export_batch_size=1024`) and configures the processor to **drop on overflow rather than block**. A `agent.observability.spans.dropped` counter records the drop rate so operators see exporter back-pressure on a dashboard.
+
+`agents/server.py` calls `init_tracing(agent_id)` and `init_metrics(agent_id)` early in startup, before the gRPC server is constructed, and registers `shutdown()` with the existing graceful-shutdown sequence.
 
 ### C. gRPC Trace Context Propagation
 
@@ -128,7 +164,9 @@ GrpcInstrumentorServer().instrument()
 
 Once instrumented, every incoming RPC handler runs inside an OTEL context with the parent span from the orchestrator.
 
-**Note on overlap with RFC 0018.** RFC 0018 installs a Python gRPC server interceptor for logging context (`execution_id` / `step_id` / `agent_id`). This RFC installs `GrpcInstrumentorServer` for OTEL. Both interceptors coexist; both should be initialised in `agents/server.py` and the order is documented (OTEL first so the logging interceptor can see `trace_id` once log↔trace correlation is implemented as a follow-up).
+**W3C Baggage propagation.** In addition to TraceContext, the global propagator is configured as a `CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])` on both sides. The Go orchestrator sets baggage entries (`persatrix.execution_id`, `persatrix.step_id`, `persatrix.workflow_id`) before the gRPC client call; Python agents read them via `baggage.get_all()` and use them to enrich both spans and structured log records (RFC 0018) without manual context plumbing. The same mechanism carries forward to v0.3 mesh and A2A calls — sub-agent spawns and downstream RPCs auto-tag every signal with the originating workflow context.
+
+**Note on overlap with RFC 0018.** RFC 0018 installs a Python gRPC server interceptor for logging context. This RFC installs `GrpcInstrumentorServer` for OTEL. Both interceptors coexist; OTEL is initialised first so the logging interceptor sees `trace_id` / `span_id` from the active context (see [Section G](#g-logtrace-correlation)).
 
 ### D. Semantic Spans on the Python Side
 
@@ -137,17 +175,19 @@ New spans, organised by component:
 | Site | Span name | Key attributes |
 |------|-----------|----------------|
 | `agents/persona_runtime/` tick loop | `agent.persona.tick` | `agent.id`, `tick.reason` |
-| `agents/persona_behavior.py` event dispatch | `agent.persona.event` | `agent.id`, `event.type`, `event.id` |
+| `agents/persona_behavior.py` event dispatch | `agent.persona.event` | `agent.id`, `event.type`, `event.id` — sub-millisecond phases (`received` → `queued` → `handled` → `completed`) emitted as **span events** on this single span, not nested spans |
 | `agents/memory/episodic.py` recall / recall_notes | `agent.memory.episodic.query` | `agent.id`, `query.kind` (recall \| recall_notes), `result.count`, `min_score` |
 | `agents/memory/episodic.py` record | `agent.memory.episodic.write` | `agent.id`, `episode.kind` |
 | `agents/memory/relationship.py` lookups | `agent.memory.relationship.lookup` | `agent.id`, `participant.id` |
 | `agents/memory/relationship.py` updates | `agent.memory.relationship.update` | `agent.id`, `participant.id`, `delta.kind` |
-| `agents/llm_client.py` LLM call | `agent.llm.call` | `agent.id`, `llm.model`, `llm.tokens.prompt`, `llm.tokens.completion`, `llm.cache.hit` |
-| `agents/tools/registry.py` execute | `agent.tool.execute` | `agent.id`, `tool.name`, `tool.success`, `tool.duration_ms` |
+| `agents/llm_client.py` LLM call | `agent.llm.call` | OTEL Gen-AI semantic conventions: `gen_ai.system` (e.g., `openai`, `anthropic`), `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gen_ai.operation.name` (e.g., `chat`, `text_completion`); plus Persatrix-specific `agent.id`, `persatrix.llm.cache.hit`. Vendor observability backends (Jaeger, Tempo, Honeycomb, Datadog) already render Gen-AI views keyed on these. |
+| `agents/tools/registry.py` execute | `agent.tool.execute` | `agent.id`, `tool.name`, `tool.success`, `tool.duration_ms`; optional `tool.arguments` / `tool.result` controlled by `PERSATRIX_TRACE_TOOL_PAYLOADS=none\|metadata\|full` and **routed through the RFC 0018 redaction hook** so traces and logs share one secrets-policy code path |
 
 The `# TODO: OTEL span creation` at [`agents/tools/registry.py:138`](../../agents/tools/registry.py) is replaced by the `agent.tool.execute` span in this RFC's scope.
 
 *Semantics of `tool.success` (clarified per PR #142 review).* `tool.success=true` if and only if the wrapper returned a `ToolResult` with `success=True`. Both `ToolResult(success=False)` (controlled tool failure) and an unhandled exception escaping the tool body produce `tool.success=false`; in the exception case, the span additionally carries `record_exception(exc)` and `set_status(Status(StatusCode.ERROR))`. This collapses the two failure modes into one boolean for dashboards while preserving the distinction in the recorded exception event.
+
+*Forward-compatibility note for tool spans.* When the upstream OTEL spec stabilises tool/function-call semantic conventions (currently in flight as part of Gen-AI), the `tool.*` attribute set will be aliased to the upstream namespace in a follow-up. The flat keying chosen here makes the alias mechanical (a `RENAME` view in the Collector or a one-shot rename in instrumentation).
 
 Spans use the `tracer = trace.get_tracer(__name__)` pattern; instrumentation uses `with tracer.start_as_current_span(name, attributes={...}) as span:`. Errors are recorded via `span.record_exception(exc)` and `span.set_status(Status(StatusCode.ERROR))`.
 
@@ -169,62 +209,154 @@ Attribute keys: snake_case, dot-separated for namespacing. Reserved keys mirror 
 | `persatrix.step_id` | string | Set on spans inside a workflow step |
 | `persatrix.workflow_id` | string | Workflow definition ID |
 
-The convention is documented in `docs/observability.md` (created by RFC 0018; this RFC adds a span-conventions section).
+The convention is documented in `docs/observability.md` (created by RFC 0018; this RFC adds a span-conventions section, a metrics section, and a Collector pipeline section).
+
+### F. Metrics
+
+Metrics ship on the same OTLP HTTP exporter as traces. A new module `agents/observability/metrics.py` mirrors the tracing module: `init_metrics(agent_id) -> Meter`, `shutdown()`, same Resource (so traces and metrics share `service.instance.id`).
+
+**Instrument inventory.**
+
+| Instrument | Type | Unit | Attributes |
+|------------|------|------|------------|
+| `agent.tool.invocations` | Counter | `{invocation}` | `agent.id`, `tool.name`, `tool.success` |
+| `agent.tool.duration` | Histogram | `ms` | `agent.id`, `tool.name`, `tool.success` |
+| `agent.llm.calls` | Counter | `{call}` | `agent.id`, `gen_ai.system`, `gen_ai.request.model`, `persatrix.llm.cache.hit` |
+| `agent.llm.tokens` | Counter | `{token}` | `agent.id`, `gen_ai.request.model`, `gen_ai.token.type` (`input` \| `output`) |
+| `agent.llm.duration` | Histogram | `ms` | `agent.id`, `gen_ai.request.model` |
+| `agent.event.dispatched` | Counter | `{event}` | `agent.id`, `event.type` |
+| `agent.persona.tick.interval` | Histogram | `ms` | `agent.id` |
+| `agent.active` | UpDownCounter | `{agent}` | (resource-only) |
+| `workflow.active` | UpDownCounter | `{workflow}` | (orchestrator side; resource-only) |
+| `agent.observability.spans.dropped` | Counter | `{span}` | `agent.id`, `reason` (`queue_full` \| `export_error`) |
+| `agent.observability.logs.dropped` | Counter | `{record}` | `agent.id`, `reason` |
+
+**Exemplars.** Histogram instruments emit exemplars by default (OTEL SDK feature); each histogram bucket sample carries the `trace_id` / `span_id` of the call that produced it. A p99 LLM-latency spike on the dashboard becomes one click to the actual slow trace in Jaeger.
+
+**Go-side metrics.** The orchestrator gains `internal/observability/metrics.go` with: `workflow.submitted`, `workflow.completed`, `workflow.duration`, `workflow.steps.dispatched`, `workflow.active`. Same OTLP exporter, same Resource conventions.
+
+**`otelhttp` on the REST surface.** The orchestrator's main HTTP handler is wrapped with `otelhttp.NewHandler` so route-level latency histograms (`http.server.request.duration`) come for free. Per-handler manual spans remain on the workflow-submit and chat paths; trivial endpoints (health, version) get the `otelhttp` span only.
+
+### G. Log↔Trace Correlation
+
+**In scope for v0.2.3.** Both interceptors land in the same release; the marginal cost over RFC 0018's logging interceptor is one field-enrichment line. Without correlation, RFC 0018's structured logs and this RFC's traces are two parallel, manually-correlated streams — defeating the point of shipping them together.
+
+**Mechanism.**
+
+- **Python.** RFC 0018's logging interceptor (and the standalone `agents/observability/logging.py` setup) reads the active span context via `trace.get_current_span().get_span_context()` and adds `trace_id` (hex) and `span_id` (hex) to every log record's structured attributes when valid.
+- **Go.** The orchestrator's zap field enricher (RFC 0018) pulls the span context from the request context (`trace.SpanFromContext(ctx).SpanContext()`) and adds the same two fields.
+- **Baggage enrichment.** The same enrichers also copy known baggage entries (`persatrix.execution_id`, `persatrix.step_id`, `persatrix.workflow_id`) onto log records — meaning a log line emitted three calls deep in a sub-agent automatically carries the originating workflow's IDs without any caller doing manual context plumbing.
+
+The `docs/observability.md` doc gains a "correlated debugging" walkthrough: from a Jaeger trace ID → `persatrix logs --trace <trace_id>` → the structured log lines for that trace, ordered by timestamp, across all participating processes.
+
+### H. Sampling, Back-Pressure, and the Collector Pipeline
+
+**Head sampling: parent-based.** The Python SDK uses `ParentBased(TraceIdRatioBased(<rate>))` matching the Go orchestrator's existing sampler. Default sampling rate is `1.0` for v0.2.3 (sample everything; tail sampler downstream decides what to keep).
+
+**Tail sampling: OTEL Collector.** Autonomous tick loops in v0.3 mesh will dwarf workflow-driven traces. Cheap to set up the Collector pipeline now; painful to retrofit during a v0.3 incident. A reference Collector configuration ships under `deploy/observability/otel-collector.yaml` and is referenced from `docker-compose.yaml`:
+
+```yaml
+processors:
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      - name: errors
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: slow-llm
+        type: latency
+        latency: { threshold_ms: 5000 }
+      - name: workflow-traces
+        type: string_attribute
+        string_attribute: { key: persatrix.workflow_id, values: [".+"], enabled_regex_matching: true, invert_match: false }
+      - name: healthy-tick-sample
+        type: probabilistic
+        probabilistic: { sampling_percentage: 1 }
+```
+
+**Back-pressure.** Both `BatchSpanProcessor` and `BatchLogRecordProcessor` are configured to drop on overflow rather than block (queues sized in [Section B](#b-python-otel-initialisation) for spans; mirrored for logs in RFC 0018). Drop counters (`agent.observability.spans.dropped`, `agent.observability.logs.dropped`) are emitted as metrics so operators see exporter or collector unavailability on a dashboard immediately.
+
+### I. Span Links and A2A Causality
+
+When one span causes work in another span tree (rather than being a synchronous parent), OTEL `Link`s record the relationship without forcing a parent/child:
+
+| Causality | Link source | Link target |
+|-----------|-------------|-------------|
+| Persona event triggers a tick | the `agent.persona.tick` span | the `agent.persona.event` span that scheduled it |
+| Parent agent spawns sub-agent | the sub-agent's root span | the parent's `agent.subagent.spawn` span |
+| Bridged message crosses a channel | the receiving handler span | the producing dispatch span |
+| Mesh A2A call (v0.3) | the receiving node's span | the originating node's span |
+
+Without links, v0.3 mesh traces will be a forest of disconnected trees. Adding the Link API call when an event/spawn/dispatch is enqueued is one line and forward-compatible with v0.3.
 
 ---
 
 ## Security Considerations
 
-- **Trace data may include sensitive information.** Span attributes can leak prompts, tool inputs, or user content if instrumentation copies payloads verbatim. This RFC's attribute schema deliberately avoids payload-bearing fields (`llm.tokens.prompt` is a count, not the prompt text). Tool execution span captures `tool.name` and duration, not arguments.
-- **OTLP exporter endpoint is an outbound network call.** Default `http://localhost:4318` is local Jaeger. Operators pointing to remote collectors need to apply their own auth; OTLP collector security is operator responsibility, consistent with how Go currently handles it.
-- **No new attack surfaces on the orchestrator.** The new `otelgrpc` client interceptor is outbound-only.
+- **Trace data may include sensitive information.** Span attributes can leak prompts, tool inputs, or user content if instrumentation copies payloads verbatim. The default attribute schema avoids payload-bearing fields (`gen_ai.usage.input_tokens` is a count, not the prompt text). The opt-in `PERSATRIX_TRACE_TOOL_PAYLOADS=full` mode routes tool arguments and results through the **shared RFC 0018 redaction hook** — there is one secrets-policy code path covering both logs and traces.
+- **Baggage entries are propagated downstream.** Baggage values appear on every span and log line in the trace tree, including across A2A boundaries. The schema deliberately reserves `persatrix.*` for non-sensitive correlation IDs; user content must never be placed in baggage. This is documented in `docs/observability.md`.
+- **OTLP exporter endpoint is an outbound network call.** Default `http://localhost:4318` is local Collector / Jaeger. Operators pointing to remote collectors need to apply their own auth; OTLP collector security is operator responsibility, consistent with how Go currently handles it.
+- **No new attack surfaces on the orchestrator.** The new `otelgrpc` client interceptor and `otelhttp` handler wrap are non-listening / outbound-only respectively.
 - **Python `GrpcInstrumentorServer` is server-side only and inert without an inbound RPC.** No new listening sockets.
-- **Ring buffer (RFC 0018) does not interact with span data.** Logs and traces remain separate streams in v0.2.3; correlation is a future follow-up.
+- **Metrics carry attribute cardinality risk.** Instruments are deliberately bounded — `tool.name`, `gen_ai.request.model`, `event.type` are low-cardinality enumerations. No instrument carries a per-execution ID as a metric attribute (that is what traces and logs are for).
 
 ---
 
 ## Phased Implementation Plan
 
-### Phase 1: Python OTEL Init + gRPC Context Propagation
+### Phase 1: Python OTEL Init + gRPC Context Propagation + Baggage
 
-**Summary.** Get traces crossing the language boundary. Minimum viable cross-process tracing.
+**Summary.** Get traces and baggage crossing the language boundary. Minimum viable cross-process tracing.
 
 **Deliverables.**
 
-1. `agents/observability/tracing.py` (new) implementing `init_tracing` / `shutdown`.
+1. `agents/observability/tracing.py` (new) implementing `init_tracing` / `shutdown` (with Resource detectors, `schema_url`, tuned `BatchSpanProcessor`).
 2. Switch Python OTLP exporter dependency from `opentelemetry-exporter-otlp-proto-grpc` to `opentelemetry-exporter-otlp-proto-http`.
-3. Add `opentelemetry-instrumentation-grpc` to `agents/pyproject.toml`.
-4. Add `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` to `go.mod`.
-5. Wire `otelgrpc` client handler in `internal/executor/`.
-6. `agents/server.py` initialises tracing and `GrpcInstrumentorServer` before serving.
-7. Integration test: send a request with a synthetic parent span context; assert agent-side span has matching trace ID.
+3. Add `opentelemetry-instrumentation-grpc` and `opentelemetry-instrumentation-system-metrics` to `agents/pyproject.toml`.
+4. Add `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` and `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` to `go.mod`.
+5. Wire `otelgrpc` client handler into the executor's dial options from `cmd/orchestrator/main.go` (covers both pinned `grpc.NewClient` sites).
+6. Wire `otelhttp.NewHandler` around the orchestrator's main HTTP handler.
+7. Configure `CompositePropagator(TraceContext + Baggage)` on both sides.
+8. `agents/server.py` initialises tracing and `GrpcInstrumentorServer` before serving.
+9. `agents/tests/conftest.py` ships an `InMemorySpanExporter` fixture.
+10. Integration test: send a request with a synthetic parent span context **and baggage**; assert agent-side span has matching trace ID and inherits baggage.
 
 **Dependencies.** None.
 
-### Phase 2: Semantic Spans on the Python Side
+### Phase 2: Semantic Spans + Span Links + Log↔Trace Correlation
 
-**Summary.** Add the spans listed in [Section D](#d-semantic-spans-on-the-python-side).
+**Summary.** Add the spans listed in [Section D](#d-semantic-spans-on-the-python-side), the Span Links from [Section I](#i-span-links-and-a2a-causality), and the log↔trace enricher from [Section G](#g-logtrace-correlation).
 
 **Deliverables.**
 
 1. Tick-loop span in `agents/persona_runtime/`.
-2. Event-dispatch span in `agents/persona_behavior.py`.
+2. Event-dispatch span in `agents/persona_behavior.py` with sub-millisecond phases as **span events** (not nested spans).
 3. Memory spans in `agents/memory/episodic.py` and `agents/memory/relationship.py`.
-4. LLM-call span in `agents/llm_client.py` with token-count attributes.
-5. Tool-execute span in `agents/tools/registry.py`; remove the TODO at line 138.
-6. Span-conventions section appended to `docs/observability.md`.
+4. LLM-call span in `agents/llm_client.py` using OTEL Gen-AI semantic conventions.
+5. Tool-execute span in `agents/tools/registry.py`; remove the TODO at line 138; opt-in payload capture via `PERSATRIX_TRACE_TOOL_PAYLOADS` routed through the RFC 0018 redaction hook.
+6. Span Links wired at: persona event → triggered tick, parent agent → spawned sub-agent, bridged-message dispatch → receiving handler.
+7. Log↔trace enricher: Python logging interceptor and Go zap field enricher both pull `trace_id` / `span_id` (and known baggage entries) from the active context and add them to every log record.
+8. Span-conventions and "correlated debugging" walkthrough sections appended to `docs/observability.md`.
 
-**Dependencies.** Phase 1.
+**Dependencies.** Phase 1; coordinated with RFC 0018 logging interceptor landing.
 
-### Phase 3: End-to-End Verification + Documentation
+### Phase 3: Metrics + Collector Pipeline + End-to-End Verification
 
-**Summary.** Prove the trace tree works; document the operator workflow.
+**Summary.** Land metrics on the same OTLP exporter, ship the documented Collector tail-sampling pipeline, and prove the trace + log + metric trio works end-to-end.
 
 **Deliverables.**
 
-1. E2E test: submit a workflow, query the local Jaeger API for the resulting trace, assert the expected span tree shape.
-2. Operator-facing section in `docs/observability.md` covering "viewing traces in Jaeger".
-3. README OTEL paragraph updated to reflect end-to-end coverage.
+1. `agents/observability/metrics.py` (new) implementing `init_metrics` / `shutdown` with the instrument inventory in [Section F](#f-metrics).
+2. `internal/observability/metrics.go` (new) for orchestrator metrics; instrumentation at workflow submit / complete / step dispatch sites.
+3. Histograms emit exemplars (default OTEL SDK behaviour, verified in test).
+4. `deploy/observability/otel-collector.yaml` (new) with the tail-sampling pipeline from [Section H](#h-sampling-back-pressure-and-the-collector-pipeline).
+5. `docker-compose.yaml` updated to add the Collector service in front of Jaeger; Prometheus added as the metrics backend; Loki added as the logs backend (development only).
+6. `agents/tests/conftest.py` ships an `InMemoryMetricReader` fixture.
+7. E2E test: submit a workflow, query Jaeger for the trace, query Prometheus for the resulting metrics, query Loki (or `persatrix logs --trace <trace_id>`) for the correlated log lines; assert the expected shape across all three signals.
+8. Operator-facing section in `docs/observability.md` covering "viewing traces in Jaeger", "querying metrics in Prometheus", "correlated debugging from a trace ID".
+9. README OTEL paragraph updated to reflect logs + traces + metrics end-to-end coverage.
 
 **Dependencies.** Phase 2.
 
@@ -239,55 +371,71 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Component | Files | Change |
 |-----------|-------|--------|
 | Python agents | `agents/observability/tracing.py` | Add (new module) |
-| Python agents | `agents/pyproject.toml` | Swap OTLP exporter to HTTP variant; add `opentelemetry-instrumentation-grpc` |
-| Python agents | `agents/server.py` | Initialise tracing + gRPC instrumentor at startup; register shutdown |
-| Python agents | `agents/persona_runtime/` (tick loop site) | Add `agent.persona.tick` span |
-| Python agents | `agents/persona_behavior.py` | Add `agent.persona.event` span |
+| Python agents | `agents/observability/metrics.py` | Add (new module) |
+| Python agents | `agents/pyproject.toml` | Swap OTLP exporter to HTTP variant; add `opentelemetry-instrumentation-grpc`, `opentelemetry-instrumentation-system-metrics` |
+| Python agents | `agents/server.py` | Initialise tracing, metrics, gRPC instrumentor at startup; register shutdown |
+| Python agents | `agents/persona_runtime/` (tick loop site) | Add `agent.persona.tick` span; record `agent.persona.tick.interval` histogram |
+| Python agents | `agents/persona_behavior.py` | Add `agent.persona.event` span (with phase span events); record `agent.event.dispatched` counter; emit Span Link to triggered tick |
 | Python agents | `agents/memory/episodic.py` | Add query / write spans |
 | Python agents | `agents/memory/relationship.py` | Add lookup / update spans |
-| Python agents | `agents/llm_client.py` | Add `agent.llm.call` span with token attributes |
-| Python agents | `agents/tools/registry.py` | Add `agent.tool.execute` span; remove L138 TODO |
-| Go orchestrator | `go.mod`, `go.sum` | Add `otelgrpc` |
-| Go orchestrator | `internal/executor/` (gRPC client construction site) | Wire `otelgrpc` client handler |
-| Tests | `agents/tests/test_observability_tracing.py` (new) | Init + propagation unit tests |
+| Python agents | `agents/llm_client.py` | Add `agent.llm.call` span with **Gen-AI semantic-convention attributes**; record `agent.llm.calls`, `agent.llm.tokens`, `agent.llm.duration` |
+| Python agents | `agents/tools/registry.py` | Add `agent.tool.execute` span (with optional payload capture via redaction hook); record `agent.tool.invocations`, `agent.tool.duration`; remove L138 TODO |
+| Python agents | `agents/sub_agents/` (spawn site) | Add `agent.subagent.spawn` span; emit Span Link from sub-agent root span back to spawn span |
+| Go orchestrator | `go.mod`, `go.sum` | Add `otelgrpc`, `otelhttp` |
+| Go orchestrator | `internal/observability/metrics.go` | Add (new module) |
+| Go orchestrator | `cmd/orchestrator/main.go` | Inject `otelgrpc` client handler into executor dial options; wrap HTTP handler with `otelhttp`; init metrics |
+| Go orchestrator | `internal/executor/dispatch.go`, `internal/executor/chat.go` | (No code change required — dial options injected from caller) |
+| Tests | `agents/tests/conftest.py` | Add `InMemorySpanExporter` and `InMemoryMetricReader` fixtures |
+| Tests | `agents/tests/test_observability_tracing.py` (new) | Init + propagation + baggage unit tests |
+| Tests | `agents/tests/test_observability_metrics.py` (new) | Instrument inventory + exemplar emission tests |
 | Tests | `tests/integration/test_trace_propagation.py` (new) | Cross-language propagation integration test |
-| Tests | `tests/integration/test_trace_e2e.py` (new) | E2E span-tree shape test against local Jaeger |
-| Docs | `docs/observability.md` | Append span-conventions and Jaeger-usage sections (file created by RFC 0018) |
-| Docs | [README.md](../../README.md) | Update OTEL paragraph |
-| Docs | [CHANGELOG.md](../../CHANGELOG.md) | Add an entry under v0.2.3 noting the Python OTLP exporter package swap (`opentelemetry-exporter-otlp-proto-grpc` → `opentelemetry-exporter-otlp-proto-http`); operator-visible because anyone running a custom OTEL collector on the gRPC port (`:4317`) will need to switch to the HTTP port (`:4318`). |
-| Docs | [ROADMAP.md](../../ROADMAP.md) | Add RFC 0019 to tracker; update v0.2.3 entry |
+| Tests | `tests/integration/test_log_trace_correlation.py` (new) | Asserts every structured log emitted inside a span carries `trace_id` / `span_id` |
+| Tests | `tests/integration/test_observability_e2e.py` (new) | E2E shape test: trace tree + correlated logs + metric exemplars against the local Collector + Jaeger + Prometheus stack |
+| Deploy | `deploy/observability/otel-collector.yaml` (new) | Reference Collector config with `tail_sampling` processor |
+| Deploy | `docker-compose.yaml` | Add Collector, Prometheus, Loki services; route OTLP through Collector |
+| Docs | `docs/observability.md` | Append span-conventions, metrics inventory, sampling/Collector, correlated-debugging, and Jaeger/Prometheus usage sections (file created by RFC 0018) |
+| Docs | [README.md](../../README.md) | Update OTEL paragraph to cover logs + traces + metrics |
+| Docs | [CHANGELOG.md](../../CHANGELOG.md) | Add an entry under v0.2.3 noting the Python OTLP exporter package swap (`opentelemetry-exporter-otlp-proto-grpc` → `opentelemetry-exporter-otlp-proto-http`); operator-visible because anyone running a custom OTEL collector on the gRPC port (`:4317`) will need to switch to the HTTP port (`:4318`). Also note the new Collector + Prometheus + Loki services in `docker-compose.yaml`. |
+| Docs | [ROADMAP.md](../../ROADMAP.md) | Group RFC 0018 + RFC 0019 as the v0.2.3 "Observability Foundation" delivery |
 
 No changes to: protos, schemas, JSON schemas, blueprints, workflows, Rust CLI.
 
-*Namespace rationale (added per PR #142 review).* The new Python module lives under `agents/observability/` (paired with `internal/observability/` from RFC 0018) rather than under a hypothetical `agents/telemetry/`. Persatrix-Python today has no `telemetry` package, so the choice is between introducing one and introducing `observability/`. `observability/` is preferred because (a) it pairs symmetrically with the Go `internal/observability/` namespace introduced by RFC 0018, (b) it is the umbrella term most operators recognise, and (c) it leaves room for the log↔trace correlation follow-up to live alongside both subsystems without further reorganisation. The Go-side `internal/telemetry/` package keeps its current scope and is not renamed by this RFC.
+*Namespace rationale (added per PR #142 review).* The new Python modules live under `agents/observability/` (paired with `internal/observability/` from RFC 0018). Persatrix-Python today has no `telemetry` package, so the choice is between introducing one and introducing `observability/`. `observability/` is preferred because (a) it pairs symmetrically with the Go `internal/observability/` namespace introduced by RFC 0018, (b) it is the umbrella term most operators recognise, and (c) it leaves room for the future profiling signal to live alongside both subsystems without further reorganisation.
 
-*Consolidation follow-up commitment (added per PR #142 review, second pass).* Mirroring the commitment in [RFC 0018](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-and-storage), the RFC closure checklist for RFC 0019 (Phase 4) **must** include opening (or linking to the RFC 0018-spawned) tracking issue for consolidating `internal/telemetry/` and `internal/observability/` (and their Python counterparts if the same split exists by then). This prevents the provisional split from becoming a permanent two-root convention by inertia.
+*On the Go-side `internal/telemetry/` package.* Under the future-focused framing (and the shared namespace contract in [Relationship to RFC 0018](#relationship-to-rfc-0018)), `internal/telemetry/` is **renamed to `internal/observability/`** as part of this RFC's Phase 1, eliminating the provisional two-root split. The previously-recorded namespace consolidation follow-up is therefore dropped.
 
 ---
 
 ## Test Strategy
 
-- **Unit tests — `agents/observability/tracing.py`**: `init_tracing` returns a working tracer; resource attributes set correctly; `shutdown` flushes pending spans; missing env vars fall back to defaults consistently with Go.
-- **Integration test — propagation**: invoke an `AgentService` RPC with a synthetic parent context in metadata; assert the agent-side span tree's root parent matches.
-- **Integration test — semantic span emission**: drive an agent through a tick + event + memory query + LLM call; assert spans with the expected names appear in an in-process span exporter.
-- **E2E test — span tree shape**: requires the docker-compose stack up. Submit a workflow, poll the Jaeger HTTP API for the resulting trace ID, assert the parent/child relationships listed in [Section D](#d-semantic-spans-on-the-python-side).
-- **Manual smoke**: `make docker-up`, submit a workflow, open `http://localhost:16686`, find the trace, eyeball it.
+- **Unit tests — `agents/observability/tracing.py`**: `init_tracing` returns a working tracer; resource attributes set correctly (including `schema_url` and detector-supplied keys); `shutdown` flushes pending spans; missing env vars fall back to defaults consistently with Go; `BatchSpanProcessor` overflow drops rather than blocks and increments `agent.observability.spans.dropped`.
+- **Unit tests — `agents/observability/metrics.py`**: instrument inventory matches [Section F](#f-metrics); units and attribute keys are correct; histograms emit exemplars carrying valid `trace_id` / `span_id`.
+- **Integration test — propagation**: invoke an `AgentService` RPC with a synthetic parent context **and baggage** in metadata; assert the agent-side span tree's root parent matches and baggage entries are accessible inside the handler.
+- **Integration test — semantic span emission**: drive an agent through a tick + event + memory query + LLM call; assert spans with the expected names appear in the in-process `InMemorySpanExporter` and the LLM span carries `gen_ai.*` attributes.
+- **Integration test — log↔trace correlation**: emit log lines from inside a span on both Go and Python sides; assert every record carries the active span's `trace_id` and `span_id`, and known baggage entries.
+- **Integration test — Span Links**: trigger a tick from an event and a sub-agent spawn from a parent agent; assert the resulting spans carry the expected `Link`s.
+- **E2E test — observability end-to-end**: requires the docker-compose stack up (orchestrator + agents + Collector + Jaeger + Prometheus + Loki). Submit a workflow, poll Jaeger for the resulting trace ID, poll Prometheus for the matching metrics (with exemplars), query Loki for the correlated log lines; assert the parent/child relationships, the metric counts, and that log lines link back to the same trace.
+- **Manual smoke**: `make docker-up`, submit a workflow, open `http://localhost:16686`, find the trace, click an exemplar in Prometheus to jump back to a span, run `persatrix logs --trace <trace_id>`.
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-1. **`otelgrpc` interceptors vs manual context propagation.** Recommendation: interceptors. Manual is more code with no benefit at this scope. Resolved unless review surfaces a concrete reason against.
-2. **Should agent span attributes use `agent.id` or `service.instance.id`?** OTEL semantic conventions suggest the latter; Persatrix-internal queries are easier with the former. Recommendation: set both — `service.instance.id` on the resource, `agent.id` on each span. Cheap.
-3. **Span attribute schema for tool arguments.** Today the schema deliberately omits arguments to avoid leaking secrets. Should we offer an opt-in `PERSATRIX_TRACE_TOOL_ARGS=1` for development debugging? Recommendation: defer; arguments are visible in the structured logs (RFC 0018) where the operator already has them.
-4. **Sampling strategy for agent-side traces.** Autonomous tick loops can produce high-volume traces. Recommendation: keep parity with the orchestrator's sampler for v0.2.3 (parent-based). If volume becomes a problem, a tail-based sampler can be introduced as a polish item.
-5. **Where to construct the gRPC client connection in Go for `otelgrpc` wiring.** Confirm during Phase 1 implementation; one of `internal/executor/dispatch.go` or its constructor site.
+Under the future-focused framing applied in revision 2026-04-22, the original open questions are resolved as follows:
 
-   *Pinned (added per PR #142 review, second pass).* Verified against the live tree: there are **two** `grpc.NewClient` call sites in `internal/executor/`, both of which must be wired with `grpc.WithStatsHandler(otelgrpc.NewClientHandler())`:
+1. **`otelgrpc` interceptors vs manual context propagation.** ✅ Resolved: **interceptors**. Ecosystem standard; manual is more code with no benefit.
+2. **`agent.id` vs `service.instance.id`.** ✅ Resolved: **set both**. `service.instance.id` on the Resource (OTEL convention), `agent.id` on every span (Persatrix query ergonomics). Additionally adopt the **OTEL Gen-AI semantic conventions** verbatim for LLM spans (see [Section D](#d-semantic-spans-on-the-python-side)) so vendor observability tools render Persatrix LLM traces correctly out of the box.
+3. **Tool argument capture.** ✅ Resolved: **opt-in `PERSATRIX_TRACE_TOOL_PAYLOADS=none\|metadata\|full`**, routed through the shared RFC 0018 redaction hook. One secrets-policy code path for both signals; production observability stacks expect payloads on traces, not just logs.
+4. **Sampling strategy.** ✅ Resolved: **parent-based head sampling (rate 1.0) + Collector tail sampling from day 1**. See [Section H](#h-sampling-back-pressure-and-the-collector-pipeline). Cheap to set up now, painful to retrofit during a v0.3 mesh incident.
+5. **gRPC client wire site.** ✅ Pinned to two `grpc.NewClient` call sites:
    - [internal/executor/dispatch.go](../../internal/executor/dispatch.go) line 321 (workflow-step task dispatch)
    - [internal/executor/chat.go](../../internal/executor/chat.go) line 105 (chat-message dispatch added by RFC 0016)
 
-   Both sites already accept caller-provided `grpc.DialOption` slices via `WithDialOptions` / `WithChatDialOptions`, so the cleanest install is to inject the otelgrpc stats handler into those defaults from `cmd/orchestrator/main.go` (where the executor is constructed) rather than hard-coding it inside the dispatch sites. This keeps the executor package free of an OTEL import and matches the existing dependency-injection style.
+   Both sites accept caller-provided `grpc.DialOption` slices via `WithDialOptions` / `WithChatDialOptions`; the otelgrpc stats handler is injected from `cmd/orchestrator/main.go` (where the executor is constructed). The executor package stays free of an OTEL import.
+
+## Open Questions
+
+6. **Merge RFC 0018 and RFC 0019 into one "Observability Foundation" RFC?** Both share OTLP transport, schema-version field, redaction hook, namespace, sampling discipline, and ship in the same release. The case for merging: one document, one decision tree, no consolidation follow-up. The case for keeping split: review tractability — each RFC is large enough that a merged document would be hard to review in one pass. **Recommendation:** keep split for review, but record both RFCs as a single "Observability Foundation" delivery in [ROADMAP.md](../../ROADMAP.md), drop the namespace consolidation follow-up (already aligned via the [Relationship to RFC 0018](#relationship-to-rfc-0018) contract), and treat them as a unit in release notes. Decide before authoring the PR plan.
 
 ---
 
@@ -296,13 +444,14 @@ No changes to: protos, schemas, JSON schemas, blueprints, workflows, Rust CLI.
 **To accept this RFC:**
 
 1. Confirm v0.2.3 as the target milestone (this RFC pairs with RFC 0018 on the same release).
-2. Sign off on `otelgrpc` interceptors over manual propagation ([Open Question 1](#open-questions)).
-3. Sign off on the span-naming convention in [Section E](#e-span-naming-and-attribute-conventions) as the cross-codebase contract.
+2. Sign off on the resolved decisions in [Resolved Decisions](#resolved-decisions) (interceptors, dual `agent.id` + `service.instance.id` with Gen-AI conventions, opt-in payload capture through redaction hook, head + tail sampling, pinned gRPC client sites).
+3. Sign off on the span-naming and Persatrix attribute conventions in [Section E](#e-span-naming-and-attribute-conventions), the metrics inventory in [Section F](#f-metrics), and the log↔trace correlation contract in [Section G](#g-logtrace-correlation) as the cross-codebase contract.
+4. Decide [Open Question 6](#open-questions) (merge with RFC 0018 vs keep split).
 
 **Once accepted:**
 
-1. Author `docs/rfcs/0019-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3.
-2. Status → 🚧 Implementing; ROADMAP updated.
+1. Author `docs/rfcs/0019-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3, sequenced against the RFC 0018 PR plan so shared deliverables (OTLP transport, redaction hook, `agents/observability/` namespace, log↔trace enrichment) land once.
+2. Status → 🚧 Implementing; ROADMAP updated; both RFCs grouped as "Observability Foundation" in the v0.2.3 entry.
 3. Begin Phase 1 implementation.
 
 ---
