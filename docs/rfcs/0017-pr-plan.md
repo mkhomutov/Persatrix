@@ -652,6 +652,8 @@ Test gaps deferred from earlier PR reviews are added here.
 - [x] `make lint` clean
 - [x] `make validate` passes
 
+**Merged**: PR #152 — 2026-04-22
+
 #### Status by finding (PR 6 implementation)
 
 PR 1: #1 ✅ fixed; #2 ⏭ deferred (nice-to-have, see PR 2 #13); #3 ✅ test added (`TestPR6Followups.test_default_min_tokens_floor_is_32`); #4 ✅ inlined; #5 ✅ test added (`test_greedy_admits_smaller_item_after_larger_dropped`).
@@ -692,9 +694,9 @@ No new tests. `make test`, `make lint`, and `make validate` are run to confirm n
 
 #### PR checklist
 
-- [ ] RFC 0017 status = `✅ Implemented`
-- [ ] ROADMAP.md RFC Tracker updated
-- [ ] ROADMAP.md merged-PR history includes PRs 1–7
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes
+- [x] RFC 0017 status = `✅ Implemented`
+- [x] ROADMAP.md RFC Tracker updated
+- [x] ROADMAP.md merged-PR history includes PRs 1–6 (PR 7 row is added on merge)
+- [ ] `make test` passes (known pre-existing failure on main: `tests/integration/test_persona_e2e.py::TestTickSchedulerIntegration::test_tick_fires_and_stops`)
+- [x] `make lint` clean
+- [x] `make validate` passes
