@@ -76,7 +76,7 @@ class TestInitTracing:
 
         # The schema_url is embedded in the tracer's instrumentation scope.
         with tracer.start_as_current_span("probe") as span:
-            scope = span.instrumentation_scope  # type: ignore[union-attr]
+            scope = span.instrumentation_scope  # type: ignore[union-attr,attr-defined]
             assert scope is not None
             assert scope.schema_url == _SCHEMA_URL
 
@@ -193,6 +193,6 @@ class TestGetTracer:
 
         tracer = get_tracer("my.module")
         with tracer.start_as_current_span("gt.probe") as span:
-            scope = span.instrumentation_scope  # type: ignore[union-attr]
+            scope = span.instrumentation_scope  # type: ignore[union-attr,attr-defined]
             assert scope is not None
             assert scope.schema_url == _SCHEMA_URL
