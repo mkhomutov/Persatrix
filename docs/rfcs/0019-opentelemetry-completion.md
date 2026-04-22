@@ -3,11 +3,18 @@
 **Type**: architecture
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
-**Date**: 2026-04-21 (rev 2026-04-22 — future-focused expansion)
+**Date**: 2026-04-21 (rev 2026-04-22 — future-focused expansion; rev 2026-04-22b — apply PR #160 review)
 **Target**: v0.2.3
-**Schema version**: 1
 **Depends on**: none
-**Pairs with**: RFC 0018 (Structured Logging Framework — both ship together in v0.2.3 with shared schema, redaction hook, and OTLP transport; see [Relationship to RFC 0018](#relationship-to-rfc-0018))
+**Pairs with**: RFC 0018 (Structured Logging Framework — both ship together in v0.2.3 with shared schema, redaction hook, and OTLP export; see [Relationship to RFC 0018](#relationship-to-rfc-0018))
+
+<!--
+Review note (PR #160): the `Schema version` field was removed from the frontmatter
+and folded into Section A ("Current State") below, where the OTEL Resource
+`schema_url` is the canonical home for the version. The RFC template does not
+define a `Schema version` frontmatter field; introducing one here would set an
+ad-hoc convention that diverges from the template.
+-->
 
 ---
 
@@ -40,25 +47,39 @@
 
 ## Summary
 
-This RFC closes the cross-language gap in Persatrix's OpenTelemetry implementation and lands the **observability foundation** for the project's full lifetime: traces start in the Go orchestrator, cross the gRPC boundary into Python agents (with W3C TraceContext **and** W3C Baggage), and continue as child spans for memory operations, persona event dispatch, LLM calls (annotated with the OTEL Gen-AI semantic conventions), and tool executions. **Metrics** (counters, histograms, gauges) ship on the same OTLP transport. **Log↔trace correlation** (`trace_id` / `span_id` injected into every structured log line from RFC 0018) lands in the same release rather than as a follow-up. **Span Links** capture A2A and sub-agent causality so v0.3 mesh traces are not a forest of disconnected trees. A documented **OTEL Collector tail-sampling pipeline** is the canonical operator deployment from day 1.
+This RFC closes the cross-language gap in Persatrix's OpenTelemetry implementation and lands the **observability foundation** for the project's full lifetime: traces start in the Go orchestrator, cross the gRPC boundary into Python agents (with W3C TraceContext **and** W3C Baggage), and continue as child spans for memory operations, persona event dispatch, LLM calls (annotated with the OTEL Gen-AI semantic conventions), and tool executions. **Metrics** (counters, histograms, gauges) ship on the same OTLP transport. **Log↔trace correlation** (`trace_id` / `span_id` injected into every structured log line emitted by RFC 0018's logger configuration) lands in the same release rather than as a follow-up. **Span Links** capture A2A and sub-agent causality so v0.3 mesh traces are not a forest of disconnected trees. A documented **OTEL Collector tail-sampling pipeline** is the canonical operator deployment from day 1.
 
-The scope is intentionally larger than "traces work end-to-end." The goal is to ship a complete OTLP-native observability surface (logs + traces + metrics, correlated, with a single redaction hook shared with RFC 0018) once, rather than re-litigate naming, sampling, and transport across three or four releases.
+The scope is intentionally larger than "traces work end-to-end." The goal is to ship traces + metrics + correlation alongside RFC 0018's logs, with a single redaction hook shared between the two, once — rather than re-litigate naming, sampling, and transport across three or four releases. (Logs themselves remain RFC 0018's deliverable; this RFC owns trace and metric signals plus the enrichers that join them to log records.)
 
 ### Relationship to RFC 0018
 
 RFC 0018 (Structured Logging) and this RFC are deliberately kept as separate documents for review tractability, but they share a single design contract:
 
+<!--
+Review note (PR #160): the previous "Wire transport | OTLP (HTTP, port 4318)" row
+conflicted with RFC 0018 Section E, which specifies a `LogService` streaming gRPC
+for the agent→orchestrator log ingest path (with documented rationale: one
+orchestrator↔agent transport, free HTTP/2 backpressure, distributed-deployment
+ready). The contract is now broken out per signal so the two RFCs no longer
+contradict each other. The PR description text claiming "Logs ship via the OTEL
+Logs SDK over OTLP" is inconsistent with both RFC bodies and should be updated
+in the PR description before merge — that is a metadata fix, not an RFC change.
+-->
+
 | Concern | Single source of truth |
 |---------|------------------------|
-| Wire transport | OTLP (HTTP, port 4318) |
-| Schema version field | `schema_version: 1` |
+| Trace + metric export | OTLP HTTP (port 4318) — this RFC |
+| Log ingest (agent → orchestrator) | `LogService` streaming gRPC over the existing agent gRPC channel — RFC 0018 Section E |
+| Log export to external backends (optional) | OTLP HTTP via the same Collector — operator-side, out of scope for v0.2.3 |
+| Schema version field | `schema_version: 1` (logs); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics) |
 | Correlation IDs | `execution_id`, `step_id`, `agent_id`, `workflow_id`, `trace_id`, `span_id` |
 | Cross-process propagation | W3C TraceContext + W3C Baggage |
 | Redaction hook | Shared interface, used by both log records and span attributes |
 | Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree) |
 | Sampling discipline | Parent-based head sampling + Collector tail sampling |
+| Log↔trace enricher ownership | RFC 0018 (owns the structlog chain and zap encoder where the enrichment lives); this RFC only requires that the OTEL context is established before the enricher PR lands |
 
-A merger of the two RFCs into one "Observability Foundation" document is recorded as [Open Question 6](#open-questions). Pending that decision, both RFCs cross-reference this contract.
+A merger of the two RFCs into one "Observability Foundation" document is recorded as [Open Question A](#open-questions). Pending that decision, both RFCs cross-reference this contract.
 
 ## Motivation
 
@@ -105,6 +126,8 @@ What happens if we do nothing: every multi-agent debugging story remains a manua
 ## Design / Implementation
 
 ### A. Current State
+
+*Schema version.* Trace + metric signals carry the OTEL Resource attribute `schema_url="https://persatrix.dev/schemas/observability/1.0.0"` (Section B). The structured-log schema is versioned independently as `schema_version: "1"` (RFC 0018 Section B). Both versions are tracked in CHANGELOG; bumping either is a release-notes event.
 
 | Concern | Go orchestrator | Python agents |
 |---------|-----------------|---------------|
@@ -253,7 +276,7 @@ The `docs/observability.md` doc gains a "correlated debugging" walkthrough: from
 
 **Head sampling: parent-based.** The Python SDK uses `ParentBased(TraceIdRatioBased(<rate>))` matching the Go orchestrator's existing sampler. Default sampling rate is `1.0` for v0.2.3 (sample everything; tail sampler downstream decides what to keep).
 
-**Tail sampling: OTEL Collector.** Autonomous tick loops in v0.3 mesh will dwarf workflow-driven traces. Cheap to set up the Collector pipeline now; painful to retrofit during a v0.3 incident. A reference Collector configuration ships under `deploy/observability/otel-collector.yaml` and is referenced from `docker-compose.yaml`:
+**Tail sampling: OTEL Collector.** Autonomous tick loops in v0.3 mesh will dwarf workflow-driven traces. Cheap to set up the Collector pipeline now; painful to retrofit during a v0.3 incident. A reference Collector configuration ships under `config/observability/otel-collector.yaml` and is referenced from `docker-compose.yaml` (path chosen per PR #160 review to align with the existing `config/` directory convention; the repository has no top-level `deploy/` directory today, and creating one for a single file would be a structural decision out of scope for this RFC):
 
 ```yaml
 processors:
@@ -296,6 +319,7 @@ Without links, v0.3 mesh traces will be a forest of disconnected trees. Adding t
 ## Security Considerations
 
 - **Trace data may include sensitive information.** Span attributes can leak prompts, tool inputs, or user content if instrumentation copies payloads verbatim. The default attribute schema avoids payload-bearing fields (`gen_ai.usage.input_tokens` is a count, not the prompt text). The opt-in `PERSATRIX_TRACE_TOOL_PAYLOADS=full` mode routes tool arguments and results through the **shared RFC 0018 redaction hook** — there is one secrets-policy code path covering both logs and traces.
+- **`PERSATRIX_TRACE_TOOL_PAYLOADS=full` is gated on a non-noop redactor** (added per PR #160 review). At startup, if the configured value is `full` *and* the registered `Redactor` is the default `NoopRedactor`, the agent runtime logs a `WARN` (`tool payload capture forced down to 'metadata' — register a non-noop Redactor to enable 'full'`) and force-downgrades the effective mode to `metadata`. This closes the most likely accidental data-leakage vector in the window between this RFC landing and the future security RFC (under RFC 0009) that ships a real redactor.
 - **Baggage entries are propagated downstream.** Baggage values appear on every span and log line in the trace tree, including across A2A boundaries. The schema deliberately reserves `persatrix.*` for non-sensitive correlation IDs; user content must never be placed in baggage. This is documented in `docs/observability.md`.
 - **OTLP exporter endpoint is an outbound network call.** Default `http://localhost:4318` is local Collector / Jaeger. Operators pointing to remote collectors need to apply their own auth; OTLP collector security is operator responsibility, consistent with how Go currently handles it.
 - **No new attack surfaces on the orchestrator.** The new `otelgrpc` client interceptor and `otelhttp` handler wrap are non-listening / outbound-only respectively.
@@ -337,10 +361,10 @@ Without links, v0.3 mesh traces will be a forest of disconnected trees. Adding t
 4. LLM-call span in `agents/llm_client.py` using OTEL Gen-AI semantic conventions.
 5. Tool-execute span in `agents/tools/registry.py`; remove the TODO at line 138; opt-in payload capture via `PERSATRIX_TRACE_TOOL_PAYLOADS` routed through the RFC 0018 redaction hook.
 6. Span Links wired at: persona event → triggered tick, parent agent → spawned sub-agent, bridged-message dispatch → receiving handler.
-7. Log↔trace enricher: Python logging interceptor and Go zap field enricher both pull `trace_id` / `span_id` (and known baggage entries) from the active context and add them to every log record.
+7. **Log↔trace enricher coordination only — implementation owned by RFC 0018 Phase 3.** This RFC's Phase 2 must land before RFC 0018 Phase 3 so that the OTEL context (provider + propagator + active span) is available when RFC 0018's structlog/zap enricher reads `trace_id` / `span_id` and known baggage entries. See [Section G](#g-logtrace-correlation) for the contract; the actual interceptor / encoder code ships in RFC 0018. <!-- Review note (PR #160): previously this deliverable claimed the enricher implementation, duplicating RFC 0018 Phase 3 deliverables 3–4. Reduced to a cross-reference to give PR-plan authors a single source of truth. -->
 8. Span-conventions and "correlated debugging" walkthrough sections appended to `docs/observability.md`.
 
-**Dependencies.** Phase 1; coordinated with RFC 0018 logging interceptor landing.
+**Dependencies.** Phase 1; coordinated with RFC 0018 Phase 3 (which owns the log↔trace enricher; see deliverable 7 above).
 
 ### Phase 3: Metrics + Collector Pipeline + End-to-End Verification
 
@@ -354,9 +378,10 @@ Without links, v0.3 mesh traces will be a forest of disconnected trees. Adding t
 4. `deploy/observability/otel-collector.yaml` (new) with the tail-sampling pipeline from [Section H](#h-sampling-back-pressure-and-the-collector-pipeline).
 5. `docker-compose.yaml` updated to add the Collector service in front of Jaeger; Prometheus added as the metrics backend; Loki added as the logs backend (development only).
 6. `agents/tests/conftest.py` ships an `InMemoryMetricReader` fixture.
-7. E2E test: submit a workflow, query Jaeger for the trace, query Prometheus for the resulting metrics, query Loki (or `persatrix logs --trace <trace_id>`) for the correlated log lines; assert the expected shape across all three signals.
-8. Operator-facing section in `docs/observability.md` covering "viewing traces in Jaeger", "querying metrics in Prometheus", "correlated debugging from a trace ID".
-9. README OTEL paragraph updated to reflect logs + traces + metrics end-to-end coverage.
+7. **Schema parity contract test** (added per PR #160 review): asserts that every Persatrix correlation ID listed in [RFC 0018 Section B](0018-structured-logging-framework.md#b-common-log-schema) Optional fields (`execution_id`, `step_id`, `agent_id`, `request_id`, `trace_id`, `span_id`) appears with a matching key in this RFC's [Section E](#e-span-naming-and-attribute-conventions) attribute conventions (under the `persatrix.*` prefix where applicable), and that the schema-version values declared in both RFCs (`schema_version: "1"` for logs; `schema_url=…/1.0.0` for traces/metrics) are pinned in code. Prevents silent drift between the two schemas across future revisions.
+8. E2E test: submit a workflow, query Jaeger for the trace, query Prometheus for the resulting metrics, query Loki (or `persatrix logs --trace <trace_id>`) for the correlated log lines; assert the expected shape across all three signals.
+9. Operator-facing section in `docs/observability.md` covering "viewing traces in Jaeger", "querying metrics in Prometheus", "correlated debugging from a trace ID".
+10. README OTEL paragraph updated to reflect logs + traces + metrics end-to-end coverage.
 
 **Dependencies.** Phase 2.
 
@@ -391,7 +416,7 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8.
 | Tests | `tests/integration/test_trace_propagation.py` (new) | Cross-language propagation integration test |
 | Tests | `tests/integration/test_log_trace_correlation.py` (new) | Asserts every structured log emitted inside a span carries `trace_id` / `span_id` |
 | Tests | `tests/integration/test_observability_e2e.py` (new) | E2E shape test: trace tree + correlated logs + metric exemplars against the local Collector + Jaeger + Prometheus stack |
-| Deploy | `deploy/observability/otel-collector.yaml` (new) | Reference Collector config with `tail_sampling` processor |
+| Deploy | `config/observability/otel-collector.yaml` (new) | Reference Collector config with `tail_sampling` processor (path chosen per PR #160 review to align with `config/` convention) |
 | Deploy | `docker-compose.yaml` | Add Collector, Prometheus, Loki services; route OTLP through Collector |
 | Docs | `docs/observability.md` | Append span-conventions, metrics inventory, sampling/Collector, correlated-debugging, and Jaeger/Prometheus usage sections (file created by RFC 0018) |
 | Docs | [README.md](../../README.md) | Update OTEL paragraph to cover logs + traces + metrics |
@@ -435,7 +460,14 @@ Under the future-focused framing applied in revision 2026-04-22, the original op
 
 ## Open Questions
 
-6. **Merge RFC 0018 and RFC 0019 into one "Observability Foundation" RFC?** Both share OTLP transport, schema-version field, redaction hook, namespace, sampling discipline, and ship in the same release. The case for merging: one document, one decision tree, no consolidation follow-up. The case for keeping split: review tractability — each RFC is large enough that a merged document would be hard to review in one pass. **Recommendation:** keep split for review, but record both RFCs as a single "Observability Foundation" delivery in [ROADMAP.md](../../ROADMAP.md), drop the namespace consolidation follow-up (already aligned via the [Relationship to RFC 0018](#relationship-to-rfc-0018) contract), and treat them as a unit in release notes. Decide before authoring the PR plan.
+<!--
+Review note (PR #160): the prior single open question was numbered "6" because
+it continued the Resolved Decisions list. Renumbered to start at A inside this
+section to make the discontinuity intentional and avoid reader confusion when
+landing on the section directly.
+-->
+
+**OQ-A.** **Merge RFC 0018 and RFC 0019 into one "Observability Foundation" RFC?** Both share OTLP export (for traces/metrics), schema-version fields, redaction hook, namespace, sampling discipline, and ship in the same release. The case for merging: one document, one decision tree, no consolidation follow-up. The case for keeping split: review tractability — each RFC is large enough that a merged document would be hard to review in one pass. **Recommendation:** keep split for review, but record both RFCs as a single "Observability Foundation" delivery in [ROADMAP.md](../../ROADMAP.md), drop the namespace consolidation follow-up (already aligned via the [Relationship to RFC 0018](#relationship-to-rfc-0018) contract), and treat them as a unit in release notes. Decide before authoring the PR plan.
 
 ---
 
@@ -446,7 +478,15 @@ Under the future-focused framing applied in revision 2026-04-22, the original op
 1. Confirm v0.2.3 as the target milestone (this RFC pairs with RFC 0018 on the same release).
 2. Sign off on the resolved decisions in [Resolved Decisions](#resolved-decisions) (interceptors, dual `agent.id` + `service.instance.id` with Gen-AI conventions, opt-in payload capture through redaction hook, head + tail sampling, pinned gRPC client sites).
 3. Sign off on the span-naming and Persatrix attribute conventions in [Section E](#e-span-naming-and-attribute-conventions), the metrics inventory in [Section F](#f-metrics), and the log↔trace correlation contract in [Section G](#g-logtrace-correlation) as the cross-codebase contract.
-4. Decide [Open Question 6](#open-questions) (merge with RFC 0018 vs keep split).
+4. Decide [Open Question A](#open-questions) (merge with RFC 0018 vs keep split).
+
+**Cross-RFC sequencing (added per PR #160 review).** The two RFCs share namespace and code paths, so PR landing order matters:
+
+1. **This RFC's Phase 1 lands before any RFC 0018 PR that adds packages under `internal/observability/`.** Phase 1 performs the `internal/telemetry/` → `internal/observability/` rename; landing it second would turn the rename PR into a rename-plus-merge-conflict-resolution PR.
+2. **This RFC's Phase 1 lands before RFC 0018 Phase 3.** RFC 0018 Phase 3 declares `RFC 0019 Phase 1 (OTEL initialised on Python side)` as a prerequisite; the cross-process correlation work needs the OTEL context already established.
+3. **RFC 0018 Phase 1 lands before this RFC's Phase 2** (so the redaction hook surface and the structlog/zap configuration the enricher attaches to exist before the Phase 2 spans need to call into them).
+
+These constraints should be reflected in both RFCs' joint PR plan and in the v0.2.3 ROADMAP entry.
 
 **Once accepted:**
 

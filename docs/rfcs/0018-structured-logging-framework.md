@@ -3,11 +3,37 @@
 **Type**: architecture
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
-**Date**: 2026-04-21 (rev 2026-04-22)
+**Date**: 2026-04-21 (rev 2026-04-22; rev 2026-04-22b — apply PR #160 review)
 **Target**: v0.2.3
-**Schema version**: 1
 **Depends on**: none
 **Pairs with**: RFC 0019 (OTEL completion — log↔trace correlation lands jointly in v0.2.3)
+
+<!--
+Review note (PR #160): the `Schema version` frontmatter field was removed; the
+log schema version is the central concept of [Section B](#b-common-log-schema)
+and is tracked there as `schema_version: "1"`. The RFC template does not
+include a `Schema version` frontmatter field; introducing it would set an
+ad-hoc convention.
+-->
+
+---
+
+## Relationship to RFC 0019
+
+Mirrored from [RFC 0019 § Relationship to RFC 0018](0019-opentelemetry-completion.md#relationship-to-rfc-0018) so reviewers landing in this document first see the same single source of truth (added per PR #160 review):
+
+| Concern | Single source of truth |
+|---------|------------------------|
+| Trace + metric export | OTLP HTTP (port 4318) — RFC 0019 |
+| Log ingest (agent → orchestrator) | `LogService` streaming gRPC over the existing agent gRPC channel — this RFC, [Section E](#e-persatrix-logs-endpoint-storage-and-streaming) |
+| Log export to external backends (optional) | OTLP HTTP via the same Collector — operator-side, out of scope for v0.2.3 |
+| Schema version field | `schema_version: 1` (logs, this RFC); OTEL `schema_url=https://persatrix.dev/schemas/observability/1.0.0` (traces + metrics, RFC 0019) |
+| Correlation IDs | `execution_id`, `step_id`, `agent_id`, `workflow_id`, `trace_id`, `span_id` |
+| Cross-process propagation | W3C TraceContext + W3C Baggage |
+| Redaction hook | Shared interface, used by both log records and span attributes |
+| Namespace | Go `internal/observability/`, Python `agents/observability/` (no separate `telemetry/` tree; the rename happens in RFC 0019 Phase 1) |
+| Sampling discipline | Parent-based head sampling + Collector tail sampling |
+| Log↔trace enricher ownership | This RFC (owns the structlog chain and zap encoder where the enrichment lives); RFC 0019 only requires that the OTEL context is established before the enricher PR lands |
 
 ---
 
@@ -223,7 +249,7 @@ Why streaming gRPC over an internal HTTP loopback endpoint:
 
 **Authentication.** The stream piggybacks on the existing agent gRPC channel auth (RFC 0009 will tighten this; today both channels are unauthenticated, consistent with the rest of the v0.2.x REST/gRPC surface).
 
-**Namespace rationale.** The new package lives under `internal/observability/` rather than extending `internal/telemetry/` because `telemetry` is currently scoped to OTEL traces (and, in RFC 0019, metrics); logs follow a different lifecycle (per-execution ring + on-disk store + HTTP/SSE endpoint surface). A future RFC may consolidate `telemetry` and `observability` under one root once the boundaries stabilise — a tracking issue is opened at RFC closure (mirrored in [RFC 0019](0019-opentelemetry-completion.md)).
+**Namespace rationale.** The new package lives under `internal/observability/` rather than extending `internal/telemetry/` because `telemetry` is currently scoped to OTEL traces (and, in RFC 0019, metrics); logs follow a different lifecycle (per-execution ring + on-disk store + HTTP/SSE endpoint surface). Under the future-focused framing, [RFC 0019 Phase 1](0019-opentelemetry-completion.md#phase-1-python-otel-init--grpc-context-propagation--baggage) renames `internal/telemetry/` → `internal/observability/` so the project ends v0.2.3 with a single root. <!-- Review note (PR #160): previously this paragraph mentioned a future consolidation RFC and a tracking issue opened at RFC closure; both are obsolete now that the rename is in RFC 0019's scope. -->
 
 #### REST endpoints
 
@@ -362,7 +388,15 @@ This RFC ships the hook surface, default no-op, and the wiring; it does **not** 
 
 ### Phase 5: Review Follow-Ups + RFC Close
 
-Per [development-workflow.md](../development-workflow.md) Phase 5–8. Closure checklist must include opening a tracking issue titled "Consolidate `internal/telemetry/` and `internal/observability/`" with a v0.3.x or later target (mirrored in RFC 0019).
+Per [development-workflow.md](../development-workflow.md) Phase 5–8.
+
+<!--
+Review note (PR #160): the previous version of this phase mandated opening a
+tracking issue titled "Consolidate `internal/telemetry/` and
+`internal/observability/`" at RFC closure. That follow-up is dropped because
+RFC 0019 Phase 1 performs the rename in v0.2.3 — the consolidation tracking
+issue would have nothing to track.
+-->
 
 ---
 
@@ -381,7 +415,7 @@ Per [development-workflow.md](../development-workflow.md) Phase 5–8. Closure c
 | Python agents | `agents/server.py`, `agents/base.py`, `agents/llm_client.py`, `agents/dispatch.py`, `agents/persona.py`, `agents/persona_behavior.py`, others | Replace `logging.getLogger` with `structlog.get_logger` |
 | Go orchestrator | `internal/observability/logbuffer/` | Add (new package) — ring + disk + LRU + rate limit |
 | Go orchestrator | `internal/observability/redact/` | Add (new package) — no-op redactor surface |
-| Go orchestrator | `internal/observability/zapcore/` | Add (new) — encoder wrapper for `service.*`, OTEL IDs, source, redaction hook |
+| Go orchestrator | `internal/observability/zapenc/` | Add (new) — zap encoder wrapper for `service.*`, OTEL IDs, source, redaction hook. <!-- PR #160 review: renamed from `zapcore/` to avoid collision with upstream `go.uber.org/zap/zapcore`, which would force every importer into aliased imports (`zapcore "github.com/mkhomutov/…/zapcore"`). --> |
 | Go orchestrator | `internal/executor/dispatch.go`, `internal/executor/chat.go` | Inject correlation IDs into outgoing gRPC metadata |
 | Go orchestrator | `cmd/orchestrator/main.go` | Wire encoder wrapper, register `LogService` server, register redactor (no-op) |
 | Go orchestrator | `internal/server/logs_handler.go` (new), `internal/server/logs_stream_handler.go` (new), `internal/server/server.go` | Implement endpoints; remove `handleGetLogs` from `stub_handlers.go` |
@@ -438,6 +472,12 @@ The following decisions are part of the spec; they are recorded here for traceab
 1. Confirm v0.2.3 as the target milestone (this RFC adds v0.2.3 to the ROADMAP version map alongside RFC 0019).
 2. Sign off on the schema in [Section B](#b-common-log-schema) as the cross-language contract (including `schema_version: "1"` and the structured `service.*` group).
 3. Sign off on `LogService` as a new public proto surface in `proto/log_service.proto`.
+
+**Cross-RFC sequencing (added per PR #160 review).** Coordinated with [RFC 0019 Decision / Next Steps](0019-opentelemetry-completion.md#decision--next-steps):
+
+1. **RFC 0019 Phase 1 lands before any new package under `internal/observability/` from this RFC.** RFC 0019 Phase 1 performs the `internal/telemetry/` → `internal/observability/` rename; landing this RFC's new packages first would force the rename PR into a rename-plus-merge-conflict-resolution PR.
+2. **RFC 0019 Phase 1 lands before this RFC's Phase 3.** Phase 3 already declares the dependency; this restates it for the joint PR plan.
+3. **This RFC's Phase 1 (Python structlog + redaction hook surface) lands before RFC 0019 Phase 2.** RFC 0019 Phase 2 spans need the redaction hook to exist for opt-in tool-payload capture, and the log↔trace enricher RFC 0019 cross-references is added in this RFC's Phase 3.
 
 **Once accepted:**
 
