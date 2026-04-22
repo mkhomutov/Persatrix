@@ -47,6 +47,7 @@ Cross-RFC coupling
 
 from __future__ import annotations
 
+import contextvars
 import logging as _stdlib_logging
 import os
 import sys
@@ -62,6 +63,18 @@ from .redact import NoopRedactor, Redactor
 
 #: Schema version emitted on every record.  Bumping this is a breaking change.
 SCHEMA_VERSION = "1"
+
+#: Allowed ``service.kind`` values per RFC 0018 § B.  Validated in
+#: :func:`configure_logging` so that schema conformance is enforced at the
+#: process boundary rather than discovered later by a downstream consumer
+#: that branches on the documented enum (PR #164 review — Should Fix #2).
+_VALID_SERVICE_KINDS: frozenset[str] = frozenset({"orchestrator", "agent", "cli"})
+
+#: Allowed log levels per RFC 0018 § B.  ``WARNING`` is also accepted on input
+#: as an ergonomic alias for ``WARN`` (matches the stdlib + existing
+#: ``--log-level`` CLI choices in :mod:`agents.server`); on the wire we always
+#: emit ``WARN`` via :func:`_normalise_level`.
+_VALID_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARN", "WARNING", "ERROR"})
 
 #: Required-then-optional emission order from RFC 0018 § B.  The
 #: ``_reorder_keys`` processor at the tail of the chain emits keys in this
@@ -90,6 +103,16 @@ _FIELD_ORDER: tuple[str, ...] = (
 
 _redactor: Redactor = NoopRedactor()
 _configured: bool = False
+
+#: Re-entry guard for :func:`_apply_redactor`'s fallback warning.  Without
+#: this, emitting a warning when the redactor raises would itself flow
+#: through the same processor chain (including ``_apply_redactor``) and
+#: re-trigger the same exception, producing unbounded recursion.  Using a
+#: :class:`~contextvars.ContextVar` keeps the guard async-task-local rather
+#: than process-global (PR #164 review — Must Fix #1, follow-up).
+_in_redactor_fallback: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_persatrix_in_redactor_fallback", default=False
+)
 
 
 def set_redactor(redactor: Redactor) -> None:
@@ -158,8 +181,36 @@ def _apply_redactor(
 
     The redactor receives a plain ``dict`` snapshot and may return either the
     same object or a new one.
+
+    A buggy or hostile redactor that raises must not take down every
+    ``logger.info(...)`` call in the process — the documented contract on
+    :meth:`agents.observability.redact.Redactor.redact` promises that errors
+    surface as the *unredacted* record being emitted with an out-of-band
+    warning.  We honour that contract here (PR #164 review — Must Fix #1) by
+    catching ``Exception`` and falling back to ``event_dict``.  ``BLE001`` is
+    silenced because this is the deliberate last line of defence around an
+    arbitrary user-supplied callable.
+
+    The warning is emitted via the **stdlib** logger; a contextvar guard
+    (:data:`_in_redactor_fallback`) skips the redactor on the warning record
+    itself, otherwise the warning would re-enter the chain and re-trigger
+    the same exception (unbounded recursion).
     """
-    return _redactor.redact(dict(event_dict))  # type: ignore[return-value]
+    if _in_redactor_fallback.get():
+        # We are inside the fallback warning emission; do not invoke the
+        # (broken) redactor again.
+        return event_dict
+    try:
+        return _redactor.redact(dict(event_dict))
+    except Exception:  # noqa: BLE001 — see docstring; deliberate broad catch.
+        token = _in_redactor_fallback.set(True)
+        try:
+            _stdlib_logging.getLogger("agents.observability.logging").warning(
+                "redactor raised; emitting unredacted record", exc_info=True,
+            )
+        finally:
+            _in_redactor_fallback.reset(token)
+        return event_dict
 
 
 def _reorder_keys(
@@ -220,24 +271,52 @@ def configure_logging(
     """Configure structlog + stdlib bridge for the current process.
 
     Idempotent: subsequent calls update the bound ``service.*`` context but
-    do not rebuild the processor chain.
+    do not rebuild the processor chain.  As a consequence,
+    ``PERSATRIX_LOG_FORMAT`` is read **once on the first call** and the
+    resulting renderer (JSON or pretty) is frozen for the remainder of the
+    process.  Re-exporting the env var between two ``configure_logging``
+    calls has no effect (PR #164 review — Should Fix #4).
 
     Parameters
     ----------
     service_kind
-        ``orchestrator`` / ``agent`` / ``cli`` per RFC 0018 § B.
+        ``orchestrator`` / ``agent`` / ``cli`` per RFC 0018 § B.  Validated
+        against the documented enum; an unknown value raises ``ValueError``
+        rather than silently emitting a non-conformant record.
     service_instance
         Process identity (e.g. agent ID).  Falls back to
         ``PERSATRIX_AGENT_ID`` then to ``"unknown"``.
     service_role
         Optional persona / agent role (e.g. ``coder``, ``reviewer``).
     level
-        Log level name (``DEBUG`` / ``INFO`` / ``WARN`` / ``ERROR``).
+        Log level name (``DEBUG`` / ``INFO`` / ``WARN`` / ``WARNING`` /
+        ``ERROR``).  ``WARNING`` is accepted as an ergonomic alias for
+        ``WARN``; the wire format always emits ``WARN``.
+
+    Raises
+    ------
+    ValueError
+        If ``service_kind`` is not in :data:`_VALID_SERVICE_KINDS` or
+        ``level`` is not in :data:`_VALID_LEVELS`.  Fail-fast keeps schema
+        conformance enforceable at the boundary rather than aspirational
+        (PR #164 review — Should Fix #2).
     """
     global _configured
 
+    # Validate against the documented schema enums *before* any side-effect.
+    if service_kind not in _VALID_SERVICE_KINDS:
+        raise ValueError(
+            f"service_kind={service_kind!r} not in {sorted(_VALID_SERVICE_KINDS)} "
+            f"(RFC 0018 § B)"
+        )
+    level_upper = level.upper()
+    if level_upper not in _VALID_LEVELS:
+        raise ValueError(
+            f"level={level!r} not in {sorted(_VALID_LEVELS)} (RFC 0018 § B)"
+        )
+
     instance = service_instance or os.environ.get("PERSATRIX_AGENT_ID", "unknown")
-    stdlib_level_name = "WARNING" if level.upper() == "WARN" else level.upper()
+    stdlib_level_name = "WARNING" if level_upper == "WARN" else level_upper
     stdlib_level = getattr(_stdlib_logging, stdlib_level_name, _stdlib_logging.INFO)
 
     if _configured:

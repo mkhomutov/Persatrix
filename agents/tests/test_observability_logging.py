@@ -58,12 +58,34 @@ def _reset_structlog() -> Iterator[None]:
 
 @pytest.fixture
 def captured_stderr(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
-    """Replace sys.stderr with a StringIO so the WriteLoggerFactory captures
-    output for assertion."""
+    """Replace ``sys.stderr`` with a ``StringIO`` so the ``StreamHandler``
+    installed by :func:`configure_logging` captures output for assertion.
+
+    ``configure_logging`` constructs ``logging.StreamHandler(stream=sys.stderr)``
+    where ``sys`` is ``logging_mod``'s import-bound reference.  Pytest's own
+    capture machinery defeats a plain ``monkeypatch.setattr("sys.stderr", buf)``
+    for handlers built *after* the patch, so we additionally swap
+    ``logging_mod.sys`` for a thin shim whose ``stderr`` is ``buf``.
+
+    PR #164 review — Should Fix #3 flagged that the previous shim exposed
+    *only* ``stderr`` and would ``AttributeError`` on any future processor /
+    renderer code touching ``sys.platform``, ``sys.exc_info`` etc.  The shim
+    below forwards every other attribute lookup to the real ``sys`` module
+    via ``__getattr__``, making it robust to such future edits while keeping
+    the capture mechanism intact.
+    """
+    import sys as _real_sys
+
     buf = io.StringIO()
+
+    class _SysShim:
+        stderr = buf
+
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
+            return getattr(_real_sys, name)
+
     monkeypatch.setattr("sys.stderr", buf)
-    # Re-import module-level reference too, since configure_logging snapshots sys.stderr.
-    monkeypatch.setattr(logging_mod, "sys", type("S", (), {"stderr": buf})())
+    monkeypatch.setattr(logging_mod, "sys", _SysShim())
     return buf
 
 
@@ -299,3 +321,93 @@ class TestServiceBinding:
         get_logger("test").info("hi")
         record = json.loads(captured_stderr.getvalue().strip().splitlines()[-1])
         assert "service.role" not in record
+
+
+# ─── 9. Foreign stdlib bridge (PR #164 review — Should Fix #1) ──────────────
+#
+# The descope of PR 1b (mechanical ``import logging`` → ``get_logger`` swap)
+# rests entirely on the claim that records emitted via stdlib
+# ``logging.getLogger("third_party").info(...)`` already flow through the
+# schema chain via ``ProcessorFormatter.foreign_pre_chain``.  Lock that
+# contract with a test so the descope rationale is machine-checked rather
+# than only validated by hand.
+
+
+class TestForeignStdlibBridge:
+    def test_stdlib_record_carries_schema_fields(
+        self, captured_stderr: io.StringIO
+    ) -> None:
+        import logging as _stdlib_logging
+
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        # Mimic what grpc / openai / anthropic do today.
+        _stdlib_logging.getLogger("third_party.lib").info("foreign-record")
+
+        line = captured_stderr.getvalue().strip().splitlines()[-1]
+        record = json.loads(line)
+        # All required schema fields must be present on a foreign record.
+        assert record["schema_version"] == SCHEMA_VERSION
+        assert record["service.kind"] == "agent"
+        assert record["service.instance"] == "ember-owl"
+        assert record["level"] == "INFO"
+        assert record["message"] == "foreign-record"
+        assert "timestamp" in record
+
+
+# ─── 10. Raising redactor falls back (PR #164 review — Must Fix #1) ─────────
+#
+# ``redact.py`` documents that errors surface as the unredacted record being
+# emitted with an out-of-band warning.  Lock that contract.
+
+
+class _BoomRedactor:
+    def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+
+class TestRaisingRedactor:
+    def test_record_still_emitted_when_redactor_raises(
+        self, captured_stderr: io.StringIO
+    ) -> None:
+        set_redactor(_BoomRedactor())
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+
+        # Must not raise out of ``logger.info``.
+        get_logger("test").info("survives", k="v")
+
+        # The original (unredacted) record is still on the wire.
+        # The fallback warning may also appear; pick the line carrying our
+        # message rather than the last line.
+        records = [
+            json.loads(line)
+            for line in captured_stderr.getvalue().strip().splitlines()
+            if line.startswith("{")
+        ]
+        survivors = [r for r in records if r.get("message") == "survives"]
+        assert survivors, "original record was dropped when redactor raised"
+        assert survivors[-1]["k"] == "v"
+
+
+# ─── 11. Enum validation (PR #164 review — Should Fix #2) ───────────────────
+
+
+class TestEnumValidation:
+    def test_invalid_service_kind_raises(self) -> None:
+        with pytest.raises(ValueError, match="service_kind"):
+            configure_logging(service_kind="Agent", service_instance="x")
+
+    def test_invalid_level_raises(self) -> None:
+        with pytest.raises(ValueError, match="level"):
+            configure_logging(
+                service_kind="agent", service_instance="x", level="VERBOSE"
+            )
+
+    def test_warning_alias_accepted(self, captured_stderr: io.StringIO) -> None:
+        # ``--log-level WARNING`` is the existing CLI default in agents/server.py;
+        # it must remain accepted even though the wire format is ``WARN``.
+        configure_logging(
+            service_kind="agent", service_instance="x", level="WARNING"
+        )
+        get_logger("test").warning("hi")
+        record = json.loads(captured_stderr.getvalue().strip().splitlines()[-1])
+        assert record["level"] == "WARN"
