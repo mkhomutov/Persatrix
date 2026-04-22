@@ -142,6 +142,20 @@ All PRs are sequential.
 - [x] `docs/observability.md` documents the schema, field ordering, and `PERSATRIX_LOG_FORMAT=pretty`
 - [x] ROADMAP.md RFC 0018 row: status → 🚧 Implementing on this PR opening (per RFC Decision/Next Steps step 2 — PR 1 is the first implementation PR)
 
+#### Review follow-ups (from PR #164 deep review, 2026-04-22)
+
+The deep review on the second-round commits classified all remaining items as **Should-Fix or Info, none blocking** (risk: Low–Medium). They are tracked here so PR 1 can land and the items can be handled in PR 1b or a dedicated follow-up:
+
+- [ ] Add a unit test for `set_redactor()` invoked **after** `configure_logging()` (current tests only cover the before-configure ordering). — handle in PR 1b
+- [ ] Extend `TestRaisingRedactor` to assert the out-of-band fallback warning actually reaches stderr (not just that the original record still emits). — handle in PR 1b
+- [ ] Document the re-entry handler-leak corner case in `configure_logging()` docstring (symmetrical with the now-documented `PERSATRIX_LOG_FORMAT` first-call freeze). — handle in PR 1b
+- [ ] Add a concurrency note to `agents/observability/logging.py` covering the module-global `_redactor` / `_configured` (single-process, configure-once-at-startup contract). — handle in PR 1b
+- [ ] Verify the two `\ufffd` glyphs in the [ROADMAP.md](../../ROADMAP.md) RFC 0018 row diff hunks render as 🚧 on github.com after merge; if not, repair encoding in a follow-up commit. — verify post-merge
+- [ ] File a tracking issue under RFC 0009 for the **real PII/secret scrubber** that replaces `NoopRedactor`, so the deferred work does not become "forever-deferred". — open issue before PR 1b merges
+- [ ] Net diff (876 LOC) exceeds the [BRANCHING.md](../BRANCHING.md) 500-line soft limit; acknowledged in the PR body and accepted by reviewers because the schema doc + structlog chain + redactor surface are a single atomic boundary. No action — recorded for future estimate calibration.
+
+Review report (local-only, not committed): `docs/pr-reviews/pr-164.md`.
+
 #### Follow-up: PR 1b — `feature/v023-logging-python-getlogger-swap` (descoped from this PR)
 
 Mechanical migration of `logging.getLogger(__name__)` → `from .observability.logging import get_logger; logger = get_logger(__name__)` across `agents/` (~27 files), plus `logger.info("msg %s", x, extra={"k": v})` → `logger.info("msg", x=x, k=v)` for the ~25 printf-style call sites identified in the audit, plus targeted updates to `test_persona_tick_shortcircuit.py` to assert structlog event-dict fields rather than stdlib `LogRecord` attributes. Estimated size: ~250–400 lines. Joint order position remains #2 (1b is a sub-PR landing immediately after PR 1).
