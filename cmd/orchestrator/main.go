@@ -101,15 +101,15 @@ func main() {
 	defer logger.Sync() //nolint:errcheck
 	log := logger.Sugar()
 
-	telemetryCfg := observability.NewConfigFromEnv(*env)
-	telemetryShutdown, err := observability.Init(context.Background(), telemetryCfg, logger)
+	obsCfg := observability.NewConfigFromEnv(*env)
+	obsShutdown, err := observability.Init(context.Background(), obsCfg, logger)
 	if err != nil {
 		logger.Warn("failed to initialize telemetry, continuing without tracing", zap.Error(err))
 	} else {
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := telemetryShutdown(shutdownCtx); err != nil {
+			if err := obsShutdown(shutdownCtx); err != nil {
 				logger.Warn("telemetry shutdown failed", zap.Error(err))
 			}
 		}()

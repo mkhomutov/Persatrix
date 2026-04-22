@@ -17,6 +17,7 @@ import pytest
 import grpc
 import grpc.aio
 from opentelemetry import baggage, context, propagate
+from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agents.generated import task_pb2, task_pb2_grpc
@@ -66,6 +67,27 @@ def mem_exporter() -> InMemorySpanExporter:
     return InMemorySpanExporter()
 
 
+@pytest.fixture
+def grpc_aio_server_instrumented():
+    """Install/uninstall the gRPC aio server instrumentor for one test.
+
+    PR #163 review (Should Fix #1): without this fixture the in-process
+    ``grpc.aio`` server in ``test_parent_span_propagated_via_metadata``
+    never produces a server-side span, so the parent-link assertion is a
+    silent no-op.  Installing the instrumentor inside a fixture (rather
+    than at module import) keeps the global side effect scoped to the
+    tests that actually exercise propagation, and the explicit
+    ``uninstrument()`` in teardown prevents bleed-through to unrelated
+    tests in the same pytest process.
+    """
+    instrumentor = GrpcAioInstrumentorServer()
+    instrumentor.instrument()
+    try:
+        yield instrumentor
+    finally:
+        instrumentor.uninstrument()
+
+
 # ─── tests ───────────────────────────────────────────────────────────────────
 
 
@@ -73,7 +95,9 @@ class TestTracePropagation:
     """Verify W3C TraceContext + Baggage propagation over gRPC metadata."""
 
     async def test_parent_span_propagated_via_metadata(
-        self, mem_exporter: InMemorySpanExporter
+        self,
+        mem_exporter: InMemorySpanExporter,
+        grpc_aio_server_instrumented: GrpcAioInstrumentorServer,
     ) -> None:
         """Agent-side span has the synthetic parent's trace_id in its context.
 
@@ -152,28 +176,45 @@ class TestTracePropagation:
         # silently fell back to starting a new root span.  The real
         # propagation invariant is that at least one agent-side span has its
         # ``parent`` SpanContext pointing at the synthetic parent's span_id.
-        # See PR #163 review (Should Fix #3).
+        # See PR #163 review round 2 (Should Fix #1).  The earlier
+        # ``if agent_spans:`` guard silently skipped this assertion when no
+        # server-side spans were produced — making the test trivially pass
+        # even if W3C TraceContext propagation regressed.  The
+        # ``grpc_aio_server_instrumented`` fixture now guarantees the in-process
+        # gRPC aio server emits a server-side span, so we assert presence
+        # *and* parent linkage unconditionally.
         agent_spans = [s for s in finished if s.name != "parent.dispatch"]
-        if agent_spans:  # only assert if otelgrpc produced server-side spans
-            assert any(
-                s.parent is not None
-                and s.parent.span_id == parent_span_ctx.span_id
-                for s in agent_spans
-            ), (
-                "No agent-side span has parent_id matching the injected "
-                f"parent span_id {parent_span_ctx.span_id:#x}; spans found: "
-                f"{[(s.name, s.parent.span_id if s.parent else None) for s in agent_spans]}"
-            )
+        assert agent_spans, (
+            "Expected at least one agent-side span from the instrumented "
+            "gRPC aio server, found none. Did GrpcAioInstrumentorServer "
+            "fail to install?"
+        )
+        assert any(
+            s.parent is not None
+            and s.parent.span_id == parent_span_ctx.span_id
+            for s in agent_spans
+        ), (
+            "No agent-side span has parent_id matching the injected "
+            f"parent span_id {parent_span_ctx.span_id:#x}; spans found: "
+            f"{[(s.name, s.parent.span_id if s.parent else None) for s in agent_spans]}"
+        )
 
-    async def test_baggage_readable_in_handler(
+    async def test_baggage_propagator_round_trip(
         self, mem_exporter: InMemorySpanExporter
     ) -> None:
-        """Baggage injected by the caller is accessible inside the gRPC handler."""
+        """Composite propagator round-trips baggage through inject/extract.
+
+        PR #163 review round 2 (Should Fix #2): this test was previously
+        named ``test_baggage_readable_in_handler``, but it does not exercise
+        a gRPC handler — it only validates that the global propagator wired
+        by ``init_tracing()`` correctly serialises and deserialises baggage
+        through a carrier dict.  Renamed to match behaviour.  End-to-end
+        "baggage readable inside the handler" coverage is provided by
+        ``test_parent_span_propagated_via_metadata`` (which exercises the
+        full gRPC server path with the instrumentor installed).
+        """
         tracer = init_tracing(exporter=mem_exporter)
 
-        # We verify that the propagator correctly round-trips baggage through
-        # carrier injection/extraction (unit-level check for the composite
-        # propagator wired in init_tracing).
         with tracer.start_as_current_span("baggage.probe") as _span:
             ctx = context.get_current()
             ctx = baggage.set_baggage("my.key", "my.value", context=ctx)

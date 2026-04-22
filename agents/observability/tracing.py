@@ -17,12 +17,22 @@ Environment variables (all optional; defaults match the Go side):
     PERSATRIX_SERVICE_ROLE         sets ``service.role`` (optional free-text)
     PERSATRIX_SERVICE_VERSION      sets ``service.version``
                                     (default: "0.2.3")
+
+Baggage key naming convention
+-----------------------------
+W3C Baggage entries set on the OTEL context propagate **in plaintext** across
+every gRPC hop and to the OTLP backend in trace metadata.  To make the leak
+surface easy to audit, all Persatrix-internal baggage keys MUST be namespaced
+with the ``persatrix.`` prefix (e.g. ``persatrix.workflow_id``,
+``persatrix.task_id``).  Do NOT place user-controlled data, PII, secrets, or
+credentials in baggage — anything written here is observable end-to-end.
+A lint check enforcing this prefix is tracked for a follow-up to RFC 0019.
+See PR #163 review round 2 (Should Fix #5).
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 
 from opentelemetry import trace
 from opentelemetry.baggage.propagation import (
@@ -38,6 +48,11 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_ON,
+    ParentBased,
+    TraceIdRatioBased,
+)
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 _BAGGAGE_PROPAGATOR: TextMapPropagator = W3CBaggagePropagator()
@@ -63,8 +78,13 @@ _BSP_EXPORT_TIMEOUT_MILLIS = 10_000
 
 # Module-level provider reference so shutdown() can flush it.
 _provider: TracerProvider | None = None
-# Stored drop-counter hook — no-op until RFC 0019 PR 3 wires the metrics instrument.
-_on_drop: Callable[[int], None] = lambda n: None  # noqa: E731
+# NOTE: a ``_DroppingBSP`` subclass and ``_on_drop`` callback hook lived here
+# in an earlier draft of this module to expose BatchSpanProcessor queue-overflow
+# events.  They were removed for this PR because the override only called the
+# parent ``on_end()`` and never invoked ``_on_drop`` — a misleading no-op until
+# the actual ``agent.observability.spans.dropped`` counter is wired.  The
+# subclass + hook will be reintroduced together in RFC 0019 PR 3 alongside the
+# real metric.  See PR #163 review round 2 (Should Fix #4).
 
 
 def _env(key: str, default: str) -> str:
@@ -75,26 +95,26 @@ def _env(key: str, default: str) -> str:
 def init_tracing(
     *,
     exporter: SpanExporter | None = None,
-    on_drop: Callable[[int], None] | None = None,
 ) -> trace.Tracer:
     """Initialise the global OTEL tracing provider and return the root tracer.
 
-    Calling this more than once replaces the previous provider (safe for tests
-    that need fresh state — use the ``InMemorySpanExporter`` fixture in
-    ``agents/tests/conftest.py``).
+    .. note::
+        OTEL's ``trace.set_tracer_provider`` is documented as a one-way
+        operation: subsequent calls log a warning and leave the global
+        provider untouched.  This function therefore replaces the
+        *module-level* ``_provider`` reference (so ``shutdown()`` flushes the
+        most recent provider) and re-registers the global propagator on
+        every call, but the **global tracer provider is set only once per
+        process**.  Tests that need fresh span state should call
+        ``init_tracing(exporter=InMemorySpanExporter())`` and use the
+        *returned* tracer directly rather than relying on
+        ``trace.get_tracer()`` to pick up the new provider.
 
     Args:
         exporter: Override the default ``OTLPSpanExporter`` — used by tests to
             inject an ``InMemorySpanExporter`` without touching env vars.
-        on_drop: Callable invoked with the number of spans dropped when the
-            ``BatchSpanProcessor`` queue overflows.  Wired to the
-            ``agent.observability.spans.dropped`` counter in RFC 0019 PR 3;
-            a no-op is used until that counter exists.
     """
-    global _provider, _on_drop
-
-    if on_drop is not None:
-        _on_drop = on_drop
+    global _provider
 
     service_name = _env("OTEL_SERVICE_NAME", _DEFAULT_SERVICE_NAME)
     otlp_endpoint = _env("OTEL_EXPORTER_OTLP_ENDPOINT", _DEFAULT_OTLP_ENDPOINT)
@@ -123,7 +143,7 @@ def init_tracing(
     if service_role:
         attributes["service.role"] = service_role
 
-    resource = Resource.create(attributes=attributes)
+    resource = Resource.create(attributes=attributes, schema_url=_SCHEMA_URL)
 
     # Resolve exporter and build the exporter_opts carrier for OTLP.
     #
@@ -154,14 +174,9 @@ def init_tracing(
     if exporter is None:
         real_exporter = OTLPSpanExporter(**exporter_opts)  # type: ignore[arg-type]
         # Build the BatchSpanProcessor with explicit queue and batch caps so
-        # behaviour is deterministic across environments.
-        class _DroppingBSP(BatchSpanProcessor):
-            """BatchSpanProcessor that calls _on_drop when the queue is full."""
-
-            def on_end(self, span: trace.Span) -> None:  # type: ignore[override]
-                super().on_end(span)  # type: ignore[arg-type]
-
-        processor: BatchSpanProcessor | SimpleSpanProcessor = _DroppingBSP(
+        # behaviour is deterministic across environments.  PR 3 will wrap
+        # this in a subclass that surfaces queue-drop events to a metric.
+        processor: BatchSpanProcessor | SimpleSpanProcessor = BatchSpanProcessor(
             real_exporter,
             max_queue_size=_BSP_MAX_QUEUE_SIZE,
             max_export_batch_size=_BSP_MAX_EXPORT_BATCH_SIZE,
@@ -170,12 +185,6 @@ def init_tracing(
     else:
         # Test path: synchronous export so no flush needed in assertions.
         processor = SimpleSpanProcessor(exporter)
-
-    from opentelemetry.sdk.trace.sampling import (
-        ALWAYS_ON,
-        ParentBased,
-        TraceIdRatioBased,
-    )
 
     sampler = (
         ParentBased(root=TraceIdRatioBased(sample_ratio))
