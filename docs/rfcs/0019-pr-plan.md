@@ -42,6 +42,8 @@ The two RFCs share namespace and code paths, so PR landing order matters:
 
 The two plans interleave. The combined order across both RFCs is:
 
+> **Maintenance note**: this ASCII diagram is intentionally duplicated **verbatim** in [0018-pr-plan.md](0018-pr-plan.md). If you edit the order here, update the paired plan in the same commit. <!-- Callout added per PR #161 review nice-to-have #3: verbatim duplication is the deliberate single-source-of-truth choice (both reviewers see the same order from either entry point), but it carries a drift hazard. -->
+
 ```
 0019 PR 1 (Phase 1 — telemetry→observability rename + Python OTEL init + gRPC + Baggage)
   ↓
@@ -151,7 +153,11 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 ### PR 2: `feature/v023-otel-semantic-spans` — Phase 2: Semantic Spans + Span Links + Log↔Trace Coordination
 
 **Joint order position**: #4 (after RFC 0018 PR 2).
-**Depends on**: PR 1 merged **and** RFC 0018 PR 1 merged (redactor `Protocol` exists for opt-in tool-payload capture). Coordinated with RFC 0018 PR 3 (which owns the log↔trace enricher implementation that this PR's spans feed).
+**Depends on**:
+- **Hard**: PR 1 merged (OTEL provider + propagator are the substrate every new span needs) **and** RFC 0018 PR 1 merged (redactor `Protocol` exists for opt-in tool-payload capture).
+- **Scheduling only**: ordered after RFC 0018 PR 2 to preserve the joint Go/Python alternation in [Joint Merge Order](#joint-merge-order-rfcs-0018--0019); 0019 PR 2 touches only Python files, so there is no code-level conflict with 0018 PR 2's Go encoder work.
+- **Coordinated with** RFC 0018 PR 3 (which owns the log↔trace enricher implementation that this PR's spans feed).
+<!-- Hard vs. scheduling split added per PR #161 review: prose previously listed only the hard deps while the dep-graph block above listed `0018 PR 1 + 0018 PR 2`, leaving reviewers unable to tell whether 0018 PR 2 was mandatory or merely sequencing. -->
 **Branch**: `feature/v023-otel-semantic-spans`
 **Estimated size**: ~400–500 lines (spans across multiple agent modules + tests + doc append)
 
@@ -159,7 +165,7 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime/__init__.py` (or `agents/persona_runtime/action_loop.py` — pinned in PR 2's first commit per the open-at-plan-time pattern) | Add `agent.persona.tick` span around the tick handler. |
+| `agents/persona_runtime/__init__.py` | Add `agent.persona.tick` span around the tick handler. <!-- Pinned per PR #161 review (was "or `agents/persona_runtime/action_loop.py` — pinned in PR 2's first commit"): `on_tick()` is defined in `agents/persona_runtime/__init__.py` (the `_LLMPersonaAgent` class); `action_loop.py` holds the multi-turn LLM loop (`_on_event_inner`) and is *not* the tick entry point. Pinning now removes a PR-time decision the plan can already make and aligns with the RFC 0017 PR 5 precedent this plan cites. --> |
 | `agents/persona_behavior.py` | Add `agent.persona.event` span around event dispatch with sub-millisecond phases recorded as **span events** (not nested spans), per [RFC § D](0019-opentelemetry-completion.md#d-semantic-spans-on-the-python-side). |
 | `agents/memory/episodic.py` | Add `agent.memory.episodic.recall` and `agent.memory.episodic.remember` spans (or the names pinned by [RFC § E](0019-opentelemetry-completion.md#e-span-naming-and-attribute-conventions) on PR 2 review). |
 | `agents/memory/relationship.py` | Add `agent.memory.relationship.lookup` and `agent.memory.relationship.update` spans. |
@@ -195,14 +201,14 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [ ] OTEL TODO at `agents/tools/registry.py:138` removed (search the file post-merge)
 - [ ] `PERSATRIX_TRACE_TOOL_PAYLOADS` documented in `docs/observability.md` Span Conventions section
 - [ ] Tool-payload capture routes through `agents.observability.redact.Redactor` (the same Protocol RFC 0018 PR 1 introduced)
-- [ ] TICK handler module pinned by name **both** in the PR description **and** as an inline amendment to the open-at-plan-time pin above (per RFC 0017 PR 5 precedent — pinning only in the PR description loses the decision after squash merge)
+- [ ] TICK span wraps `_LLMPersonaAgent.on_tick()` in `agents/persona_runtime/__init__.py` (module pinned in the plan above; this checkbox just re-asserts the implementation site)
 
 ---
 
 ### PR 3: `feature/v023-otel-metrics` — Phase 3a: Metrics (Python + Go)
 
 **Joint order position**: #6 (after RFC 0018 PR 3).
-**Depends on**: PR 2 merged. Independent of RFC 0018 PR 3 in code, but ordered after it so the log↔trace correlation contract is in place before metrics-with-exemplars start citing trace IDs.
+**Depends on**: PR 2 merged. Independent of RFC 0018 PR 3 in code; histogram exemplars only require the active OTEL span context established by PR 1, not the log↔trace enricher. The joint-order #6 placement is a **scheduling** choice: it lands logging correlation (operator-visible deliverables 0018 PRs 1–3) before introducing metrics + a visualisation backend (PR 4), keeping the user-facing deliverable cadence linear. <!-- Rationale corrected per PR #161 review: previous wording ("so the log↔trace correlation contract is in place before metrics-with-exemplars start citing trace IDs") implied a technical dependency on the enricher that does not exist — exemplars are emitted by the SDK from the active span context regardless of whether log records carry trace IDs. -->
 **Branch**: `feature/v023-otel-metrics`
 **Estimated size**: ~300–450 lines (Python metrics module + Go metrics module + instrumentation sites + tests)
 
@@ -299,20 +305,26 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
 
+<!-- Empty subsections below are intentional placeholders. Each is populated when the corresponding PR's review completes. The `<!-- TODO: populate after PR N review -->` markers below are added per PR #161 review so `git grep "TODO: populate after"` lists outstanding follow-up captures at any point. -->
+
 ##### From PR 1 review
 
+<!-- TODO: populate after PR 1 review merges -->
 *(populated during PR 1 review)*
 
 ##### From PR 2 review
 
+<!-- TODO: populate after PR 2 review merges -->
 *(populated during PR 2 review)*
 
 ##### From PR 3 review
 
+<!-- TODO: populate after PR 3 review merges -->
 *(populated during PR 3 review)*
 
 ##### From PR 4 review
 
+<!-- TODO: populate after PR 4 review merges -->
 *(populated during PR 4 review)*
 
 ##### RFC close

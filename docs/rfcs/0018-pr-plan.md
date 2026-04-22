@@ -41,6 +41,8 @@ The two RFCs share namespace and code paths, so PR landing order matters:
 
 The two plans interleave. The combined order across both RFCs is:
 
+> **Maintenance note**: this ASCII diagram is intentionally duplicated **verbatim** in [0019-pr-plan.md](0019-pr-plan.md). If you edit the order here, update the paired plan in the same commit. <!-- Callout added per PR #161 review nice-to-have #3: verbatim duplication is the deliberate single-source-of-truth choice (both reviewers see the same order from either entry point), but it carries a drift hazard. -->
+
 ```
 0019 PR 1 (Phase 1 — telemetry→observability rename + Python OTEL init + gRPC + Baggage)
   ↓
@@ -200,7 +202,7 @@ All PRs are sequential.
 
 | File | Change |
 |------|--------|
-| `internal/executor/dispatch.go` | Inject `execution_id` / `step_id` / `agent_id` / `workflow_id` into outgoing gRPC metadata using a new helper from `internal/observability/grpcmeta/` (or inline if the helper proves overkill — pinned in this PR's review). |
+| `internal/executor/dispatch.go` | Inject `execution_id` / `step_id` / `agent_id` / `workflow_id` into outgoing gRPC metadata using a new helper from `internal/observability/grpcmeta/` (`InjectIDs(ctx, md)` / `ExtractIDs(md) → ids` pair). The helper is pinned now, not deferred to PR-time, because the same logic is called from two sites (`internal/executor/dispatch.go` and `internal/executor/chat.go`) — inlining would duplicate the metadata-key constants and the pre-condition checks. <!-- Pinned per PR #161 review: open-at-plan-time hedge removed in line with the RFC 0017 PR 5 precedent this plan cites elsewhere; helper is the better choice because it is the only de-duplication point for the four metadata-key constants shared with the Python-side interceptor. --> |
 | `internal/executor/chat.go` | Same injection on the chat-message dispatch path added by RFC 0016. |
 | `agents/observability/grpc_logging.py` | **New** — server-side gRPC interceptor that reads the four metadata keys and binds them to structlog's contextvars for the duration of the handler. Registered in `agents/server.py` **after** `GrpcInstrumentorServer` from RFC 0019 (otel interceptor first, so the OTEL context is established before the logging interceptor reads it). |
 | `agents/server.py` | Wire `LoggingMetadataInterceptor` into the gRPC server's interceptor chain. |
@@ -380,28 +382,36 @@ All PRs are sequential.
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
 
+<!-- Empty subsections below are intentional placeholders. Each is populated when the corresponding PR's review completes. The `<!-- TODO: populate after PR N review merges -->` markers below are added per PR #161 review so `git grep "TODO: populate after"` lists outstanding follow-up captures at any point. -->
+
 ##### From PR 1 review
 
+<!-- TODO: populate after PR 1 review merges -->
 *(populated during PR 1 review)*
 
 ##### From PR 2 review
 
+<!-- TODO: populate after PR 2 review merges -->
 *(populated during PR 2 review)*
 
 ##### From PR 3 review
 
+<!-- TODO: populate after PR 3 review merges -->
 *(populated during PR 3 review)*
 
 ##### From PR 4 review
 
+<!-- TODO: populate after PR 4 review merges -->
 *(populated during PR 4 review)*
 
 ##### From PR 5 review
 
+<!-- TODO: populate after PR 5 review merges -->
 *(populated during PR 5 review)*
 
 ##### From PR 6 review
 
+<!-- TODO: populate after PR 6 review merges -->
 *(populated during PR 6 review)*
 
 ##### RFC close
