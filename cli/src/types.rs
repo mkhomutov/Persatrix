@@ -29,11 +29,11 @@ pub(crate) struct WorkflowRunResponse {
     pub(crate) run_id: String,
     pub(crate) workflow_id: String,
     pub(crate) status: String,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) error: Option<String>,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) started_at: Option<String>,
-    #[tabled(display_with = "fmt_option")]
+    #[tabled(display("fmt_option"))]
     pub(crate) finished_at: Option<String>,
 }
 
@@ -41,7 +41,7 @@ pub(crate) struct WorkflowRunResponse {
 pub(crate) struct AgentResponse {
     pub(crate) id: String,
     pub(crate) address: String,
-    #[tabled(display_with = "fmt_vec")]
+    #[tabled(display("fmt_vec"))]
     pub(crate) capabilities: Vec<String>,
     pub(crate) status: String,
     /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
@@ -123,53 +123,7 @@ pub(crate) async fn api_error_message(resp: reqwest::Response) -> String {
     }
 }
 
-/// Reject path parameters that could cause path-traversal or query-injection.
-pub(crate) fn validate_path_param(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err(format!("{label} cannot be empty"));
-    }
-    if value.contains('/')
-        || value.contains('\\')
-        || value.contains("..")
-        || value.contains('?')
-        || value.contains('#')
-        || value.contains('%')
-    {
-        return Err(format!(
-            "invalid {label}: contains characters not allowed in URL path"
-        ));
-    }
-    Ok(())
-}
-
-/// Validate that a resource ID matches `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
-pub(crate) fn validate_resource_id(value: &str, label: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err(format!("{label} cannot be empty"));
-    }
-    let bytes = value.as_bytes();
-    if !bytes[0].is_ascii_lowercase() && !bytes[0].is_ascii_digit() {
-        return Err(format!(
-            "invalid {label} {value:?}: must start with lowercase letter or digit"
-        ));
-    }
-    if bytes.len() > 1 {
-        let last = bytes[bytes.len() - 1];
-        if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
-            return Err(format!(
-                "invalid {label} {value:?}: must end with lowercase letter or digit"
-            ));
-        }
-        for &b in &bytes[1..bytes.len() - 1] {
-            if !b.is_ascii_lowercase() && !b.is_ascii_digit() && b != b'-' {
-                return Err(format!(
-                    "invalid {label} {value:?}: only lowercase letters, digits, and hyphens allowed"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
+pub(crate) use crate::validation::{validate_path_param, validate_resource_id};
 
 #[cfg(test)]
 mod tests {
@@ -299,74 +253,6 @@ mod tests {
         assert_eq!(resp.status, "offline");
     }
 
-    // ─── validate_path_param tests ──────────────────────────────────────
-
-    #[test]
-    fn validate_path_param_rejects_empty() {
-        assert!(validate_path_param("", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_traversal() {
-        assert!(validate_path_param("../etc/passwd", "test").is_err());
-        assert!(validate_path_param("foo/bar", "test").is_err());
-        assert!(validate_path_param("foo\\bar", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_query_fragment_injection() {
-        assert!(validate_path_param("id?admin=true", "test").is_err());
-        assert!(validate_path_param("id#fragment", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_rejects_percent_encoding() {
-        assert!(validate_path_param("id%2Ftraversal", "test").is_err());
-        assert!(validate_path_param("%00null", "test").is_err());
-    }
-
-    #[test]
-    fn validate_path_param_accepts_valid_ids() {
-        assert!(validate_path_param("my-agent-01", "test").is_ok());
-        assert!(validate_path_param("abc", "test").is_ok());
-        assert!(validate_path_param("550e8400-e29b-41d4-a716-446655440000", "test").is_ok());
-    }
-
-    // ─── validate_resource_id tests ──────────────────────────────────────
-
-    #[test]
-    fn validate_resource_id_accepts_valid_ids() {
-        assert!(validate_resource_id("a", "id").is_ok());
-        assert!(validate_resource_id("a1", "id").is_ok());
-        assert!(validate_resource_id("my-agent-01", "id").is_ok());
-        assert!(validate_resource_id("abc", "id").is_ok());
-        assert!(validate_resource_id("code-reviewer", "id").is_ok());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_empty() {
-        assert!(validate_resource_id("", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_uppercase() {
-        assert!(validate_resource_id("MyAgent", "id").is_err());
-        assert!(validate_resource_id("AGENT", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_special_chars() {
-        assert!(validate_resource_id("my_agent", "id").is_err());
-        assert!(validate_resource_id("my agent", "id").is_err());
-        assert!(validate_resource_id("agent.1", "id").is_err());
-    }
-
-    #[test]
-    fn validate_resource_id_rejects_leading_trailing_hyphen() {
-        assert!(validate_resource_id("-agent", "id").is_err());
-        assert!(validate_resource_id("agent-", "id").is_err());
-    }
-
     // ─── Chat serde contract tests ──────────────────────────────────────
 
     #[test]
@@ -485,5 +371,53 @@ mod tests {
         let resp: ChatResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.reply, "你好！我是 nexus-7 🤖");
         assert_eq!(resp.agent_display_name, "Нексус Семь");
+    }
+
+    // ─── Tabled rendering tests (PR #162 review follow-up) ──────────────────
+    // Guard against future tabled attribute API renames. The `display_with = "fn"`
+    // syntax already became `display("fn")` in tabled 0.18 (this PR's migration).
+    // If tabled renames the convention again, the attribute silently becomes a
+    // no-op and the rendered output diverges — these tests catch that regression
+    // where the serde tests cannot.
+
+    #[test]
+    fn workflow_run_response_tabled_renders_none_as_dash() {
+        // Smoke-test #[tabled(display("fmt_option"))] on all three Option<String>
+        // fields (error, started_at, finished_at). All are None → each cell should
+        // render as em-dash (\u2014) via fmt_option.
+        use tabled::Table;
+        let row = WorkflowRunResponse {
+            run_id: "r1".into(),
+            workflow_id: "wf".into(),
+            status: "running".into(),
+            error: None,
+            started_at: None,
+            finished_at: None,
+        };
+        let output = Table::new(vec![row]).to_string();
+        assert!(
+            output.contains('\u{2014}'),
+            "expected em-dash (\\u2014) for None Option fields; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn agent_response_tabled_renders_empty_vec_as_dash() {
+        // Smoke-test #[tabled(display("fmt_vec"))] on capabilities. An empty Vec
+        // should render as em-dash (\u2014) via fmt_vec. Mirrors the intent of the
+        // workflow_run_response_tabled_renders_none_as_dash test above.
+        use tabled::Table;
+        let row = AgentResponse {
+            id: "a1".into(),
+            address: "localhost:50051".into(),
+            capabilities: vec![],
+            status: "healthy".into(),
+            agent_type: None,
+        };
+        let output = Table::new(vec![row]).to_string();
+        assert!(
+            output.contains('\u{2014}'),
+            "expected em-dash (\\u2014) for empty capabilities; got:\n{output}"
+        );
     }
 }

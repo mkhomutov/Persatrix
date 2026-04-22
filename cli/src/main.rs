@@ -1,5 +1,6 @@
 mod commands;
 mod types;
+mod validation;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
