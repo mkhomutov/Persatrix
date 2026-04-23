@@ -6,14 +6,23 @@ Ollama, vLLM, Together, Groq, LM Studio) via a common LLMProvider protocol.
 Provider-specific message formats are encapsulated behind the protocol boundary.
 """
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+from .observability.spans import (
+    LLM_CALL_SPAN,
+    STOP_REASON_TO_GEN_AI,
+    gen_ai_attributes,
+)
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 # ─── Normalized Types ───────────────────────────────────────
@@ -77,6 +86,12 @@ class LLMResponse:
 class LLMProvider(Protocol):
     """Protocol for LLM provider implementations."""
 
+    # Stable identifier emitted as the OTEL ``gen_ai.system`` attribute
+    # (``"anthropic"``, ``"openai"``, …).  Declared here so call sites do
+    # not have to derive it from ``type().__name__`` (which silently
+    # produces wrong values for test doubles like ``AsyncMock``).
+    name: str
+
     async def create_message(
         self,
         *,
@@ -98,264 +113,14 @@ class LLMProvider(Protocol):
     ) -> list: ...
 
 
-# ─── Anthropic Provider ─────────────────────────────────────
+# ─── Provider Implementations (re-exported) ────────────────
 
 
-_ANTHROPIC_STOP_MAP: dict[str, StopReason] = {
-    "end_turn": StopReason.END_TURN,
-    "tool_use": StopReason.TOOL_USE,
-    "max_tokens": StopReason.MAX_TOKENS,
-}
-
-
-class AnthropicProvider:
-    """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
-
-    def __init__(self, api_key: str | None = None):
-        import anthropic
-
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
-
-    async def create_message(
-        self,
-        *,
-        model: str,
-        messages: list,
-        system: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-    ) -> LLMResponse:
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if system:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = tools
-        response = await self._client.messages.create(**kwargs)
-        return self._normalize(response)
-
-    def _normalize(self, response: Any) -> LLMResponse:
-        text_parts: list[str] = []
-        tool_calls: list[ToolCall] = []
-
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_calls.append(
-                    ToolCall(id=block.id, name=block.name, input=block.input)
-                )
-
-        stop_reason = _ANTHROPIC_STOP_MAP.get(response.stop_reason)
-        if stop_reason is None:
-            logger.warning(
-                "Unmapped Anthropic stop_reason %r, defaulting to END_TURN",
-                response.stop_reason,
-            )
-            stop_reason = StopReason.END_TURN
-
-        return LLMResponse(
-            text="\n".join(text_parts) if text_parts else None,
-            tool_calls=tool_calls,
-            stop_reason=stop_reason,
-            usage=Usage(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-            ),
-        )
-
-    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
-        return [
-            {
-                "name": t["name"],
-                "description": t["description"],
-                "input_schema": t["parameters"],
-            }
-            for t in tools
-        ]
-
-    def append_tool_round(
-        self,
-        messages: list,
-        response: LLMResponse,
-        tool_results: list[LLMToolResult],
-    ) -> list:
-        # Build assistant content blocks from the response
-        assistant_content: list[dict[str, Any]] = []
-        if response.text:
-            assistant_content.append({"type": "text", "text": response.text})
-        for tc in response.tool_calls:
-            assistant_content.append(
-                {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
-            )
-
-        # Build user message with tool_result blocks
-        result_blocks: list[dict[str, Any]] = []
-        for tr in tool_results:
-            block: dict[str, Any] = {
-                "type": "tool_result",
-                "tool_use_id": tr.tool_call_id,
-                "content": tr.content,
-            }
-            if tr.is_error:
-                block["is_error"] = True
-            result_blocks.append(block)
-
-        return [
-            *messages,
-            {"role": "assistant", "content": assistant_content},
-            {"role": "user", "content": result_blocks},
-        ]
-
-
-# ─── OpenAI Provider ────────────────────────────────────────
-
-
-_OPENAI_STOP_MAP: dict[str | None, StopReason] = {
-    "stop": StopReason.END_TURN,
-    "tool_calls": StopReason.TOOL_USE,
-    "length": StopReason.MAX_TOKENS,
-}
-
-
-class OpenAIProvider:
-    """Wraps openai.AsyncOpenAI, translates to LLMResponse.
-
-    Also supports any OpenAI-compatible API (Ollama, vLLM, Together, Groq,
-    LM Studio) via base_url override.
-    """
-
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        import openai
-
-        kwargs: dict[str, Any] = {}
-        if api_key:
-            kwargs["api_key"] = api_key
-        if base_url:
-            kwargs["base_url"] = base_url
-        self._client = openai.AsyncOpenAI(**kwargs)
-
-    async def create_message(
-        self,
-        *,
-        model: str,
-        messages: list,
-        system: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-    ) -> LLMResponse:
-        oai_messages: list[dict[str, Any]] = []
-        if system:
-            oai_messages.append({"role": "system", "content": system})
-        oai_messages.extend(messages)
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": oai_messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if tools:
-            kwargs["tools"] = tools
-        response = await self._client.chat.completions.create(**kwargs)
-        return self._normalize(response)
-
-    def _normalize(self, response: Any) -> LLMResponse:
-        choice = response.choices[0]
-        message = choice.message
-
-        tool_calls: list[ToolCall] = []
-        if message.tool_calls:
-            for tc in message.tool_calls:
-                # review-fix M2: OpenAI occasionally returns invalid JSON in
-                # function.arguments (especially with complex schemas).
-                # Fallback to empty dict keeps the agent loop running.
-                try:
-                    input_args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "Invalid JSON in tool call arguments for %s, "
-                        "falling back to empty input",
-                        tc.function.name,
-                    )
-                    input_args = {}
-                tool_calls.append(
-                    ToolCall(
-                        id=tc.id,
-                        name=tc.function.name,
-                        input=input_args,
-                    )
-                )
-
-        stop_reason = _OPENAI_STOP_MAP.get(choice.finish_reason)
-        if stop_reason is None:
-            logger.warning(
-                "Unmapped OpenAI finish_reason %r, defaulting to END_TURN",
-                choice.finish_reason,
-            )
-            stop_reason = StopReason.END_TURN
-
-        usage = Usage(0, 0)
-        if response.usage:
-            usage = Usage(
-                input_tokens=response.usage.prompt_tokens,
-                output_tokens=response.usage.completion_tokens,
-            )
-
-        return LLMResponse(
-            text=message.content,
-            tool_calls=tool_calls,
-            stop_reason=stop_reason,
-            usage=usage,
-        )
-
-    def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["parameters"],
-                },
-            }
-            for t in tools
-        ]
-
-    def append_tool_round(
-        self,
-        messages: list,
-        response: LLMResponse,
-        tool_results: list[LLMToolResult],
-    ) -> list:
-        # Build assistant message with tool_calls
-        oai_tool_calls = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.name, "arguments": json.dumps(tc.input)},
-            }
-            for tc in response.tool_calls
-        ]
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": response.text or "",
-            "tool_calls": oai_tool_calls,
-        }
-
-        # Build tool-role messages (one per result)
-        tool_msgs = [
-            {"role": "tool", "tool_call_id": tr.tool_call_id, "content": tr.content}
-            for tr in tool_results
-        ]
-
-        return [*messages, assistant_msg, *tool_msgs]
+# Provider classes live in :mod:`agents.llm_providers` so this module stays
+# under the 500-line review-friendly cap. They are re-exported here to keep
+# the historical ``from agents.llm_client import AnthropicProvider`` /
+# ``OpenAIProvider`` import paths working.
+from .llm_providers import AnthropicProvider, OpenAIProvider  # noqa: E402, I001
 
 
 # ─── LLM Client Facade ──────────────────────────────────────
@@ -368,7 +133,60 @@ class LLMClient:
         self._provider = provider
 
     async def create_message(self, **kwargs: Any) -> LLMResponse:
-        return await self._provider.create_message(**kwargs)
+        """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
+
+        Span attributes follow the OTEL Gen-AI semantic conventions
+        (``gen_ai.system``, ``gen_ai.request.model``,
+        ``gen_ai.usage.input_tokens`` / ``output_tokens``,
+        ``gen_ai.response.finish_reasons``) so vendor backends render
+        Persatrix LLM traces without project-specific configuration
+        (RFC 0019 § D / § E).
+        """
+        model = str(kwargs.get("model", ""))
+        # Prefer the provider's declared ``name`` attribute (Protocol
+        # contract).  Fall back to a lower-cased class-name derivation only
+        # when the attribute is missing or not a string — this keeps test
+        # doubles (``AsyncMock``) working without surfacing them as the
+        # ``gen_ai.system`` value in production traces.
+        provider_name = getattr(self._provider, "name", None)
+        if isinstance(provider_name, str) and provider_name:
+            system_name = provider_name
+        else:
+            system_name = (
+                type(self._provider).__name__.replace("Provider", "").lower()
+            )
+        with _tracer.start_as_current_span(
+            LLM_CALL_SPAN,
+            attributes=gen_ai_attributes(
+                system=system_name,
+                request_model=model,
+            ),
+        ) as span:
+            try:
+                response = await self._provider.create_message(**kwargs)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+            # Translate Persatrix-internal StopReason values to the OTEL
+            # Gen-AI canonical vocabulary so vendor backends render the
+            # ``gen_ai.response.finish_reasons`` attribute correctly.
+            # Unknown values fall through to ``"error"`` per the spec's
+            # generic bucket — this should never fire today (the enum is
+            # closed) but future StopReason additions degrade gracefully.
+            canonical_reason = STOP_REASON_TO_GEN_AI.get(
+                response.stop_reason.value, "error",
+            )
+            span.set_attributes(
+                gen_ai_attributes(
+                    system=system_name,
+                    request_model=model,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    finish_reasons=[canonical_reason],
+                ),
+            )
+            return response
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
         return self._provider.format_tool_definitions(tools)

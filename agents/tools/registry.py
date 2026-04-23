@@ -10,11 +10,31 @@ Tools are typed functions that agents can invoke. Three tiers:
 import functools
 import inspect
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+from ..observability.redact import NoopRedactor
+from ..observability.spans import (
+    TOOL_EXECUTE_SPAN,
+    apply_redaction,
+    get_redactor,
+    tool_payload_capture_mode,
+)
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
+
+# Process-wide latch so the ``full``-mode-with-no-op-redactor warning fires
+# at most once.  Operators who opt in to full payload capture without first
+# wiring a real redactor risk leaking secrets into trace backends; the
+# CHANGELOG documents the hazard but a runtime warning catches the case
+# without requiring CHANGELOG comprehension.
+_warned_full_mode_noop_redactor = False
 
 
 @dataclass
@@ -135,24 +155,76 @@ def tool(
         async def wrapper(*args: Any, **kwargs: Any) -> ToolResult:
             # TODO: Permission check before execution
             # TODO: Rate limit check
-            # TODO: OTEL span creation
             # TODO: Audit logging
-            try:
-                if inspect.iscoroutinefunction(func):
-                    result = await func(*args, **kwargs)
-                else:
-                    result = func(*args, **kwargs)
+            with _tracer.start_as_current_span(
+                TOOL_EXECUTE_SPAN,
+                attributes={"tool.name": tool_name},
+            ) as span:
+                # Opt-in payload capture (RFC 0019 § D).  Default mode is
+                # ``none`` so no payload data leaks into traces unless the
+                # operator opts in via ``PERSATRIX_TRACE_TOOL_PAYLOADS``.
+                # ``metadata`` emits arg names + types only; ``full`` runs
+                # values through the RFC 0018 redactor (a single secrets
+                # policy code path serves both logs and span attributes).
+                mode = tool_payload_capture_mode()
+                if mode != "none":
+                    payload: dict[str, Any] = {}
+                    for i, value in enumerate(args):
+                        payload[f"arg{i}"] = value
+                    payload.update(kwargs)
+                    if mode == "metadata":
+                        for key, value in payload.items():
+                            span.set_attribute(
+                                f"tool.arguments.{key}.type",
+                                type(value).__name__,
+                            )
+                    else:  # full
+                        global _warned_full_mode_noop_redactor
+                        if (
+                            not _warned_full_mode_noop_redactor
+                            and isinstance(get_redactor(), NoopRedactor)
+                        ):
+                            warnings.warn(
+                                "PERSATRIX_TRACE_TOOL_PAYLOADS=full is active "
+                                "but the installed redactor is NoopRedactor — "
+                                "raw tool payloads (potentially secrets) will "
+                                "be written to span attributes. Install a real "
+                                "redactor via "
+                                "agents.observability.spans.set_redactor() "
+                                "before enabling 'full' mode in production.",
+                                stacklevel=2,
+                            )
+                            _warned_full_mode_noop_redactor = True
+                        redacted = apply_redaction(payload)
+                        for key, value in redacted.items():
+                            span.set_attribute(
+                                f"tool.arguments.{key}", str(value),
+                            )
+                try:
+                    if inspect.iscoroutinefunction(func):
+                        result = await func(*args, **kwargs)
+                    else:
+                        result = func(*args, **kwargs)
 
-                if isinstance(result, ToolResult):
-                    return result
-                return ToolResult(success=True, data=result)
-            except Exception as e:
-                logger.exception("Tool '%s' failed", tool_name)
-                return ToolResult(
-                    success=False,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
+                    if isinstance(result, ToolResult):
+                        span.set_attribute("tool.success", result.success)
+                        if not result.success:
+                            span.set_status(
+                                Status(StatusCode.ERROR, result.error or ""),
+                            )
+                        return result
+                    span.set_attribute("tool.success", True)
+                    return ToolResult(success=True, data=result)
+                except Exception as e:
+                    logger.exception("Tool '%s' failed", tool_name)
+                    span.record_exception(e)
+                    span.set_attribute("tool.success", False)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    return ToolResult(
+                        success=False,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
 
         # PR-review MF1: Store the wrapper (not the original function) so
         # _execute_tools() goes through the decorator pipeline — permission

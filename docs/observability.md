@@ -163,7 +163,7 @@ discipline):
 
 | Section | Owning RFC + PR |
 |---------|-----------------|
-| Span semantic conventions (`persatrix.*` attribute namespace) | RFC 0019 PR 2 |
+| Span semantic conventions (`persatrix.*` attribute namespace) | RFC 0019 PR 2 (✅ § 10 below) |
 | Metric inventory + dimensions | RFC 0019 PR 3 |
 | Persisted log layout (`data/logs/<execution_id>/...`) + env knobs | RFC 0018 PR 4 |
 | `LogService` gRPC + REST + SSE endpoint shapes | RFC 0018 PR 5 |
@@ -171,3 +171,120 @@ discipline):
 
 When editing this doc, **never overwrite a section owned by another PR**;
 append instead.
+
+---
+
+## 10. Span conventions (RFC 0019 PR 2)
+
+This section is the operational reference for trace spans emitted by the
+Python agent runtime. The naming and attribute conventions come from
+[RFC 0019 § D](rfcs/0019-opentelemetry-completion.md#d-semantic-spans-on-the-python-side)
+and [§ E](rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-conventions).
+
+### 10.1 Naming
+
+`<service>.<component>.<operation>` — lowercase, dot-separated, no plurals.
+`agent.*` is the Python runtime; `orchestrator.*` is the Go orchestrator.
+
+### 10.2 Span inventory
+
+| Span name | Emitted from | Key attributes |
+|-----------|--------------|----------------|
+| `agent.persona.event` | `_LLMPersonaAgent.on_event()` | `agent.id`, `event.type`, `event.id`. Sub-millisecond phases recorded as **span events** (`received` → `queued` → `handled` → `completed`), not nested spans. |
+| `agent.persona.tick` | `_LLMPersonaAgent.on_tick()` | `agent.id`, `tick.reason`. Carries `Link(link.kind="trigger")` back to the event span when an event woke the tick scheduler (RFC 0019 § I). |
+| `agent.memory.episodic.recall` | `EpisodicMemory.recall()` | `agent.id`, `query.kind`, `query.empty`, `min_score`, `result.count` |
+| `agent.memory.episodic.remember` | `EpisodicMemory.store_episode()` | `agent.id`, `episode.kind` |
+| `agent.memory.relationship.lookup` | `RelationshipMemory.get_trust()` | `agent.id`, `participant.id` |
+| `agent.memory.relationship.update` | `RelationshipMemory.update_trust()` | `agent.id`, `participant.id`, `delta.kind`, `delta.value`, `trust.new` |
+| `agent.llm.call` | `LLMClient.create_message()` | OTEL **Gen-AI semantic conventions**: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
+| `agent.tool.execute` | `@tool` decorator wrapper in `tools/registry.py` | `tool.name`, `tool.success` (+ optional payload — see § 10.4) |
+| `agent.subagent.spawn` | `ActionExecutor` SPAWN_SUB_AGENT case (stub for RFC 0009) | `agent.id`, `subagent.role`, `subagent.status`. The sub-agent's root span will emit `Link(link.kind="spawn")` back here when the spawner ships in RFC 0009. |
+
+### 10.3 Span Links and A2A causality
+
+Per [RFC 0019 § I](rfcs/0019-opentelemetry-completion.md#i-span-links-and-a2a-causality),
+when one span causes work in another span tree (rather than being a synchronous
+parent), an OTEL `Link` records the relationship:
+
+| Causality | Link source | Link target | Status |
+|-----------|-------------|-------------|--------|
+| Persona event triggers a tick | `agent.persona.tick` | `agent.persona.event` that woke the scheduler | ✅ Wired (PR 2) |
+| Parent agent spawns sub-agent | sub-agent root span | parent's `agent.subagent.spawn` | ⏳ Span exists; Link wires when RFC 0009 ships the spawner |
+| Bridged message crosses a channel | receiving handler | producing dispatch | ⏳ RFC 0006 follow-up |
+| Mesh A2A call (v0.3) | receiving node | originating node | ⏳ v0.3 mesh |
+
+Links carry minimal attributes — `link.kind` distinguishes `trigger` /
+`spawn` / `bridge`. The load-bearing piece is the target's
+`trace_id` / `span_id`.
+
+### 10.4 Tool-payload capture (`PERSATRIX_TRACE_TOOL_PAYLOADS`)
+
+Tool argument and result capture is **opt-in** to keep secrets out of trace
+backends by default. The env var has three modes:
+
+| Mode | Behaviour | Span attributes added |
+|------|-----------|-----------------------|
+| `none` (default) | No payload data captured. | (none) |
+| `metadata` | Argument names and types only, no values. | `tool.arguments.<arg>.type` |
+| `full` | Argument values captured, **passed through the RFC 0018 redactor** (single secrets-policy code path for both logs and spans). | `tool.arguments.<arg>` |
+
+The redactor today is the no-op `NoopRedactor` shipped in RFC 0018 PR 1.
+A real redactor lands with the future security RFC under the RFC 0009
+umbrella; both signals will pick it up automatically because they share
+the same `agents.observability.spans.set_redactor()` hook.
+
+### 10.5 Persatrix-specific attribute namespace
+
+Persatrix uses **two** attribute conventions side-by-side, mirroring
+[RFC 0019 § E](rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-conventions):
+
+1. **Bare component-namespaced keys** — `agent.id`, `event.type`,
+   `episode.kind`, `tool.name`, `tool.success`, `participant.id`,
+   `delta.kind`, `delta.value`, `trust.new`, `subagent.role`,
+   `subagent.status`, `tick.reason`, `link.kind`, `query.kind`,
+   `query.empty`, `result.count`, `min_score`, `actions.count`,
+   `tool.arguments.<name>` / `tool.arguments.<name>.type`. These describe
+   the *local* span subject (the agent, the tool call, the relationship
+   row) and follow the OTEL convention of using a component prefix
+   (`agent.`, `tool.`, `event.`) without a vendor namespace. Collision
+   with future upstream OTEL keys is mitigated by the schema-version
+   pin (`schema_url=https://persatrix.dev/schemas/observability/1.0.0`)
+   — a future OTEL key under one of these prefixes can be migrated in
+   one schema bump rather than spreading vendor noise across every span
+   today.
+
+2. **`persatrix.*`-prefixed cross-cutting keys** — reserved for
+   workflow-context fields propagated via W3C Baggage across process
+   boundaries, where the prefix prevents collision with arbitrary
+   third-party span producers in the same trace:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `persatrix.execution_id` | string | Set on spans inside a workflow execution (via Baggage from RFC 0019 PR 1) |
+| `persatrix.step_id` | string | Set on spans inside a workflow step |
+| `persatrix.workflow_id` | string | Workflow definition ID |
+
+`gen_ai.*` attributes use the upstream OTEL Gen-AI semantic-convention
+namespace verbatim — no Persatrix-private renames — so vendor backends
+render Persatrix LLM traces correctly out of the box. The
+`gen_ai.response.finish_reasons` attribute emits the canonical OTEL
+vocabulary (`stop` / `length` / `tool_calls` / `content_filter` /
+`error`); Persatrix's internal `StopReason` enum is translated at the
+span emission site (see `agents.observability.spans.STOP_REASON_TO_GEN_AI`).
+
+### 10.6 Correlated debugging walkthrough
+
+Once RFC 0018 PR 3 lands the log↔trace enricher, the operator workflow is:
+
+1. Operator opens Jaeger and finds a slow `agent.llm.call` span.
+2. Copies the `trace_id` from the span detail panel.
+3. Runs `persatrix logs --trace <trace_id>` (RFC 0018 PR 6) — gets every
+   structured log line emitted under that trace, ordered by timestamp,
+   across all participating processes.
+4. The same `trace_id` keys an exemplar on the histogram metric (RFC 0019
+   PR 3), so a p99-latency spike on the dashboard is one click to the
+   trace and to the logs.
+
+The `agent.persona.event` → `agent.persona.tick` Link (§ 10.3) means an
+autonomous tick that produced the slow LLM call is already linked back to
+the originating user event without the operator having to follow timestamps.
