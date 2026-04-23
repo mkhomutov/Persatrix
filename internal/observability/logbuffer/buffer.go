@@ -11,6 +11,7 @@ package logbuffer
 import (
 	"errors"
 	"regexp"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,12 +19,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// errInvalidExecutionID is returned by Seal when the caller-supplied
-// execution ID would be unsafe to use as a filesystem path component.
-// Exported via the package's Err* surface in PR 5; for now it is an
-// internal sentinel kept package-private to avoid widening the public
-// API in a Phase 4a-only PR.
-var errInvalidExecutionID = errors.New("logbuffer: invalid execution_id")
+// ErrInvalidExecutionID is returned by Seal / Subscribe when the
+// caller-supplied execution ID would be unsafe to use as a filesystem
+// path component (validExecutionID).  Exposed publicly in PR 5 so the
+// gRPC LogServiceServer + REST handlers can map it onto
+// codes.InvalidArgument / 400 Bad Request.
+var ErrInvalidExecutionID = errors.New("logbuffer: invalid execution_id")
+
+// errInvalidExecutionID is the historical package-private alias kept so
+// in-package call sites do not have to be touched.  Both names refer to
+// the same error value; equality (`errors.Is`) holds either way.
+var errInvalidExecutionID = ErrInvalidExecutionID
 
 // Entry is the orchestrator's in-memory representation of a structured
 // log line. It is intentionally decoupled from the wire proto
@@ -106,6 +112,13 @@ func validExecutionID(s string) bool {
 	return executionIDPattern.MatchString(s)
 }
 
+// ValidExecutionID is the public facade for in-package callers (REST
+// + SSE handlers) so they can distinguish "well-formed but unknown"
+// (returns 200 with []) from "malformed" (returns 400).  Equivalent
+// to the package-private validator; kept as a re-export to avoid
+// widening the surface for future migrations.
+func ValidExecutionID(s string) bool { return validExecutionID(s) }
+
 // Config holds buffer + disk + rate-limit settings. Defaults match
 // RFC § Resolved Decisions #2.
 type Config struct {
@@ -129,17 +142,22 @@ type Config struct {
 	// RatePerExec is the token-bucket refill rate (entries / second)
 	// per execution. Default: PERSATRIX_LOGBUFFER_RATE_PER_EXEC=1000.
 	RatePerExec int
+	// MaxSubscribers caps the SSE / live-tail fan-out.  Over-cap
+	// Subscribe returns ErrSubscriberCapExceeded.  Default:
+	// MaxSubscribersDefault (PERSATRIX_LOGBUFFER_SUBSCRIBERS).
+	MaxSubscribers int
 }
 
 // Defaults returns a Config with all RFC-pinned defaults.
 func Defaults() Config {
 	return Config{
-		PerExecution:  1000,
-		MaxExecutions: 50,
-		Dir:           "data/logs",
-		DiskCapBytes:  512 * 1024 * 1024,
-		DropLevel:     "DEBUG",
-		RatePerExec:   1000,
+		PerExecution:   1000,
+		MaxExecutions:  50,
+		Dir:            "data/logs",
+		DiskCapBytes:   512 * 1024 * 1024,
+		DropLevel:      "DEBUG",
+		RatePerExec:    1000,
+		MaxSubscribers: MaxSubscribersDefault,
 	}
 }
 
@@ -162,12 +180,23 @@ type Buffer struct {
 	droppedInvalidID  atomic.Uint64
 	evictedActive     atomic.Uint64 // active rings evicted by LRU
 	evictedSealed     atomic.Uint64 // sealed rings evicted (after disk flush)
+	// PR #173 review Should-Fix #2: aggregate per-subscriber drop counts
+	// across the SSE fan-out so operators have a single signal for slow
+	// subscribers (the per-subscriber atomic.Uint64 in subscriber.dropped
+	// was previously read by nothing).
+	droppedSubscribers atomic.Uint64
 
 	// Per-execution one-shot WARN gate so a noisy execution emits
 	// exactly one rate-limit warning per process lifetime, per
 	// RFC § E "single throttled WARN log per execution".
 	rateWarnedMu sync.Mutex
 	rateWarned   map[string]struct{}
+
+	// SSE / live-tail subscribers (RFC 0018 PR 5).  Mutated under
+	// subMu by Subscribe / cancel; read under subMu.RLock by
+	// broadcast on the Append admit path.
+	subMu sync.RWMutex
+	subs  map[*subscriber]struct{}
 }
 
 // New constructs a Buffer, applying defaults for any zero-valued Config
@@ -190,6 +219,7 @@ func New(cfg Config, logger *zap.Logger) (*Buffer, error) {
 		rings:      make(map[string]*executionRing),
 		disk:       disk,
 		rateWarned: make(map[string]struct{}),
+		subs:       make(map[*subscriber]struct{}),
 	}
 	if err := b.warmLoad(); err != nil {
 		return nil, err
@@ -216,6 +246,9 @@ func applyDefaults(cfg Config) Config {
 	}
 	if cfg.RatePerExec <= 0 {
 		cfg.RatePerExec = d.RatePerExec
+	}
+	if cfg.MaxSubscribers <= 0 {
+		cfg.MaxSubscribers = d.MaxSubscribers
 	}
 	return cfg
 }
@@ -260,6 +293,11 @@ func (b *Buffer) Append(entry Entry) DropReason {
 		return DropRateLimit
 	}
 	ring.append(entry)
+	// Fan out to live-tail subscribers AFTER successful admit so the
+	// SSE stream order matches the on-disk order.  Non-blocking; a
+	// slow subscriber drops entries rather than back-pressuring Append
+	// (see subscribe.go).
+	b.broadcast(entry)
 	return DropNone
 }
 
@@ -330,14 +368,15 @@ func (b *Buffer) Close() error {
 // Stats returns a snapshot of the buffer's internal counters. Intended
 // for tests and for the future metrics wiring referenced in RFC 0019.
 type Stats struct {
-	ActiveRings       int
-	DroppedBelowLevel uint64
-	DroppedRate       uint64
-	DroppedClosed     uint64
-	DroppedNoExecID   uint64
-	DroppedInvalidID  uint64
-	EvictedActive     uint64
-	EvictedSealed     uint64
+	ActiveRings        int
+	DroppedBelowLevel  uint64
+	DroppedRate        uint64
+	DroppedClosed      uint64
+	DroppedNoExecID    uint64
+	DroppedInvalidID   uint64
+	EvictedActive      uint64
+	EvictedSealed      uint64
+	DroppedSubscribers uint64 // SSE fan-out drops aggregated across subscribers
 }
 
 // Stats returns counter snapshots.
@@ -346,15 +385,46 @@ func (b *Buffer) Stats() Stats {
 	n := len(b.rings)
 	b.mu.RUnlock()
 	return Stats{
-		ActiveRings:       n,
-		DroppedBelowLevel: b.droppedBelowLevel.Load(),
-		DroppedRate:       b.droppedRate.Load(),
-		DroppedClosed:     b.droppedClosed.Load(),
-		DroppedNoExecID:   b.droppedNoExecID.Load(),
-		DroppedInvalidID:  b.droppedInvalidID.Load(),
-		EvictedActive:     b.evictedActive.Load(),
-		EvictedSealed:     b.evictedSealed.Load(),
+		ActiveRings:        n,
+		DroppedBelowLevel:  b.droppedBelowLevel.Load(),
+		DroppedRate:        b.droppedRate.Load(),
+		DroppedClosed:      b.droppedClosed.Load(),
+		DroppedNoExecID:    b.droppedNoExecID.Load(),
+		DroppedInvalidID:   b.droppedInvalidID.Load(),
+		EvictedActive:      b.evictedActive.Load(),
+		EvictedSealed:      b.evictedSealed.Load(),
+		DroppedSubscribers: b.droppedSubscribers.Load(),
 	}
+}
+
+// ListExecutions returns the union of execution IDs known to the
+// buffer: those with an active ring and those persisted on disk.  The
+// returned slice is sorted lexicographically and de-duplicated.
+//
+// Used by the cross-execution `id=_` REST handler so it can iterate
+// every known execution.  Errors from the disk listing are logged and
+// the in-memory portion is still returned (best-effort surface; an
+// inability to read the disk root should not hide live executions).
+func (b *Buffer) ListExecutions() []string {
+	seen := make(map[string]struct{})
+	b.mu.RLock()
+	for id := range b.rings {
+		seen[id] = struct{}{}
+	}
+	b.mu.RUnlock()
+	if disk, err := b.disk.list(); err == nil {
+		for _, id := range disk {
+			seen[id] = struct{}{}
+		}
+	} else {
+		b.logger.Warn("logbuffer: disk listing failed", zap.Error(err))
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (b *Buffer) warnRateOnce(executionID string) {

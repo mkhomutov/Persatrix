@@ -51,6 +51,7 @@ _EXTRA_EXCLUDES = [
     # Local venvs (not present in CI but common during local runs).
     ".venv/**",
     "venv/**",
+    ".notices-venv/**",
     # Generated dependency manifest; word count scales with the Go/Python/Rust
     # dependency graphs. Review it via `make notices` diff, not size limits.
     "THIRD_PARTY_NOTICES.md",

@@ -21,6 +21,11 @@ from .base import BaseAgent
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
 from .observability.grpc_logging import LoggingMetadataInterceptor
+from .observability.log_shipper import (
+    Shipper,
+    queue_capacity_from_env,
+    set_active_shipper,
+)
 from .observability.logging import configure_logging
 from .observability.metrics import init_metrics, try_get_instruments
 from .observability.metrics import shutdown as metrics_shutdown
@@ -41,6 +46,23 @@ from .tick import TickScheduler
 logger = logging.getLogger("Persatrix.agent.server")
 
 
+def _default_grpc_target(orchestrator_url: str) -> str:
+    """Derive the default gRPC target from the orchestrator REST URL.
+
+    Strips the URL scheme + path and replaces the (REST, default 8080)
+    port with the canonical orchestrator gRPC port (9090).  Matches the
+    docker-compose service layout where the same host serves both
+    REST and gRPC, so a single ``--orchestrator-url`` argument is
+    sufficient for the common case.  Operators with a non-standard
+    layout pass ``--orchestrator-grpc=<host:port>`` explicitly.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(orchestrator_url)
+    host = parsed.hostname or "127.0.0.1"
+    return f"{host}:9090"
+
+
 # ─── AgentServer ─────────────────────────────────────────────
 
 
@@ -54,6 +76,7 @@ class AgentServer:
         shutdown_grace: int = 30,
         orchestrator_url: str = "http://127.0.0.1:8080",
         advertise_address: str | None = None,
+        orchestrator_grpc: str | None = None,
     ):
         self.host = host
         self.port = port
@@ -65,11 +88,19 @@ class AgentServer:
         # back (e.g. "agent-planner:50051").
         self._advertise_address_explicit = advertise_address is not None
         self.advertise_address = advertise_address or f"{host}:{port}"
+        # gRPC target for the orchestrator-side LogService (RFC 0018 PR 5).
+        # Defaults to the orchestrator REST host on the canonical 9090 port;
+        # operators in containerised deployments override via
+        # --orchestrator-grpc=<service>:9090.
+        self.orchestrator_grpc = orchestrator_grpc or _default_grpc_target(
+            self.orchestrator_url,
+        )
         self.agents: dict[str, BaseAgent] = {}
         self._server: grpc.aio.Server | None = None
         self._session: aiohttp.ClientSession | None = None
         self._dispatcher = EventDispatcher()
         self._tick_schedulers: dict[str, TickScheduler] = {}
+        self._log_shipper: Shipper | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -149,7 +180,26 @@ class AgentServer:
         # http_request tool (via builtin.http_session).
         self._session = aiohttp.ClientSession()
 
+        # RFC 0018 PR 5 — start the log shipper after the structlog chain
+        # is configured (configure_logging runs in main()) so the tail
+        # processor's first record (typically "Agent server listening")
+        # already has somewhere to enqueue.  The agent_id used for the
+        # batch-level field is the first registered agent (v0.1 hosts a
+        # single agent per process); a future multi-agent process would
+        # set per-entry agent_id on the structlog contextvars.
+        first_agent_id = next(iter(self.agents.keys()), "unknown")
+        self._log_shipper = Shipper(
+            self.orchestrator_grpc,
+            first_agent_id,
+            max_queue=queue_capacity_from_env(),
+        )
+        await self._log_shipper.start()
+        set_active_shipper(self._log_shipper)
+
         # Self-register with orchestrator after gRPC server is listening.
+        # PR #173 review fix: a duplicate self-register call was introduced
+        # alongside the shipper-start block, causing every agent to POST
+        # /api/v1/agents/register twice on startup.
         await self._self_register()
 
     async def _self_register(self) -> None:
@@ -264,6 +314,12 @@ class AgentServer:
         if self._session:
             await self._session.close()
             self._session = None
+        # Stop the log shipper last so the agent's own teardown logs
+        # are still drained to the orchestrator (best-effort within
+        # the configured shutdown timeout).
+        if self._log_shipper is not None:
+            await self._log_shipper.stop()
+            self._log_shipper = None
         logger.info("Agent server stopped.")
 
 
@@ -293,6 +349,12 @@ def main() -> None:
         "--orchestrator-url",
         default="http://127.0.0.1:8080",
         help="Orchestrator REST API URL for self-registration",
+    )
+    parser.add_argument(
+        "--orchestrator-grpc",
+        default=None,
+        help="Orchestrator gRPC target for the LogService stream (host:port). "
+             "Defaults to the orchestrator REST host on port 9090.",
     )
     parser.add_argument(
         "--advertise-address",
@@ -367,6 +429,7 @@ def main() -> None:
         shutdown_grace=args.shutdown_grace,
         orchestrator_url=args.orchestrator_url,
         advertise_address=args.advertise_address,
+        orchestrator_grpc=args.orchestrator_grpc,
     )
     server.register_agent(agent)
 

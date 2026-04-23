@@ -75,7 +75,7 @@ Concrete gaps:
 1. **No shared schema.** Three formats, none parseable as a unit.
 2. **No cross-process correlation.** `request_id` is added by `internal/server/middleware.go` but is not propagated into agent-side logs. `execution_id` and `step_id` are not in any log line on the Python side.
 3. **No log↔trace bridge.** RFC 0019 stands up end-to-end traces, but a log line and its corresponding span have nothing in common to join on. Operators land in Jaeger from a log line by manual timestamp scrolling.
-4. **`logs` CLI endpoint is a stub.** [`internal/server/stub_handlers.go`](../../internal/server/stub_handlers.go) returns 501 for `GET /api/v1/executions/{id}/logs`. The Rust CLI [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) is wired and discoverable in `--help`, so users find it, run it, and hit the stub. Worse than not having the command.
+4. **`logs` CLI endpoint was a stub.** Prior to RFC 0018 PR 5 (#TBD) `internal/server/stub_handlers.go` returned 501 for `GET /api/v1/executions/{id}/logs`. The Rust CLI [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) is wired and discoverable in `--help`, so users found it, ran it, and hit the stub. PR 5 replaces it with [`logs_handler.go`](../../internal/server/logs_handler.go) + [`logs_stream_handler.go`](../../internal/server/logs_stream_handler.go).
 5. **Logs are lost on orchestrator restart.** The most common moment an operator wants logs is right after the thing that crashed.
 
 What happens if we do nothing: every operator-facing issue requires the author to debug it for them. Every contributor PR review that depends on understanding cross-process behaviour requires running the code themselves rather than reading log output. The stubbed endpoint stays in `--help` indefinitely, and the v0.3.0 surface area expands on top of an observability story that doesn't work.
@@ -115,7 +115,7 @@ What happens if we do nothing: every operator-facing issue requires the author t
 | Go orchestrator | `go.uber.org/zap` (production config) | JSON, structured fields | `request_id` in middleware; `execution_id` / `step_id` partial |
 | Python agents | stdlib `logging`, free-form `%`-format messages | Plain text to stderr | None |
 | Rust CLI | `println!` / `eprintln!` | Plain text | N/A |
-| `logs` HTTP endpoint | [stub_handlers.go](../../internal/server/stub_handlers.go) | 501 Not Implemented | — |
+| `logs` HTTP endpoint | [logs_handler.go](../../internal/server/logs_handler.go) + [logs_stream_handler.go](../../internal/server/logs_stream_handler.go) | Implemented (PR 5) | — |
 | `persatrix logs` CLI | [logs.rs](../../cli/src/commands/logs.rs) | Wired but unusable end-to-end | — |
 
 ### B. Common Log Schema
@@ -380,7 +380,7 @@ This RFC ships the hook surface, default no-op, and the wiring; it does **not** 
 3. Custom zap core writing to the buffer alongside stdout.
 4. Agent-side `agents/observability/log_shipper.py` streaming via `LogService.StreamLogs` with bounded queue and reconnect-with-backoff.
 5. Orchestrator-side `LogService` server registered on the existing agent gRPC server.
-6. `internal/server/logs_handler.go`: `GET /api/v1/executions/{id}/logs` with `since` / `workflow` / `level` / `limit` filters; `id=_` for cross-execution. Remove from `stub_handlers.go`.
+6. `internal/server/logs_handler.go`: `GET /api/v1/executions/{id}/logs` with `since` / `workflow` / `level` / `limit` filters; `id=_` for cross-execution. Removed from the previous `stub_handlers.go`.
 7. `internal/server/logs_stream_handler.go`: SSE endpoint for `--follow`.
 8. `cli/src/commands/logs.rs`: rewrite display + `--verbose` + `--follow` + `--since` + `--workflow` + `--level`.
 9. E2E test: submit a workflow, call `persatrix logs <id>`, assert merged Go + Python entries; restart orchestrator, assert entries still queryable.
@@ -420,8 +420,8 @@ issue would have nothing to track.
 | Go orchestrator | `internal/observability/zapenc/` | Add (new) — zap encoder wrapper for `service.*`, OTEL IDs, source, redaction hook. <!-- PR #160 review: renamed from `zapcore/` to avoid collision with upstream `go.uber.org/zap/zapcore`, which would force every importer into aliased imports (`zapcore "github.com/mkhomutov/…/zapcore"`). --> |
 | Go orchestrator | `internal/executor/dispatch.go`, `internal/executor/chat.go` | Inject correlation IDs into outgoing gRPC metadata |
 | Go orchestrator | `cmd/orchestrator/main.go` | Wire encoder wrapper, register `LogService` server, register redactor (no-op) |
-| Go orchestrator | `internal/server/logs_handler.go` (new), `internal/server/logs_stream_handler.go` (new), `internal/server/server.go` | Implement endpoints; remove `handleGetLogs` from `stub_handlers.go` |
-| Go orchestrator | `internal/server/stub_handlers.go` | Remove `handleGetLogs` stub |
+| Go orchestrator | `internal/server/logs_handler.go` (new), `internal/server/logs_stream_handler.go` (new), `internal/server/server.go` | Implement endpoints; remove `handleGetLogs` from the previous `stub_handlers.go` |
+| Go orchestrator | (removed in PR 5) `internal/server/stub_handlers.go` | Removed entirely once `handleGetLogs` was the only resident stub |
 | Rust CLI | `cli/src/commands/logs.rs` | Rewrite: display, filters, `--follow` (SSE consumer) |
 | Rust CLI | `cli/Cargo.toml` | Add SSE / `eventsource-stream` dep if not present |
 | Tests | `agents/tests/test_observability_logging.py`, `agents/tests/test_grpc_logging_interceptor.py`, `agents/tests/test_log_shipper.py` (new) | Unit + integration |
@@ -496,6 +496,6 @@ The following decisions are part of the spec; they are recorded here for traceab
 - [RFC 0009 — Agent Identity, Security & Sandboxing](0009-security-sandboxing.md) (auth layer that will eventually gate `logs` endpoints and `LogService`; future home of the real redactor)
 - [Development Workflow](../development-workflow.md)
 - [Branching Strategy](../BRANCHING.md)
-- [internal/server/stub_handlers.go](../../internal/server/stub_handlers.go) (the stub being replaced)
+- (removed in PR 5) `internal/server/stub_handlers.go` — the stub being replaced
 - [cli/src/commands/logs.rs](../../cli/src/commands/logs.rs) (CLI command being completed)
 - [internal/server/middleware.go](../../internal/server/middleware.go) (`request_id` precedent)
