@@ -309,6 +309,16 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 **Branch**: `feature/v023-rfc0019-followups-close`
 **Estimated size**: ~150–300 lines (fixes + RFC status flip + ROADMAP + manual-test report append)
 
+#### Description
+
+The closeout PR ships three classes of work and nothing else. Anything not in one of these buckets is out of scope and should land in its own PR (or be opened as a tracked follow-up issue under the next RFC):
+
+1. **Apply or explicitly defer the per-PR review follow-ups captured below** for PRs 1–4. Each item is either implemented in this PR with a one-line `Review-fix (PR #N)` marker on the touching diff, or moved to a tracked issue with a link from the entry; "silently dropped" is not an option.
+2. **Status hygiene flip.** Per [development-workflow.md "Status Hygiene"](../development-workflow.md#status-hygiene): RFC 0019 status → `✅ Implemented`; [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; the v0.2.3 milestone row flips to `✅ Released` jointly with RFC 0018 (see [0018-pr-plan.md](0018-pr-plan.md) PR 7 — the two close PRs are opened together as a paired closeout, joint order #11); merged-PR table contains every RFC 0019 PR (1–4 plus this PR and the [PR #161](https://github.com/mkhomutov/Persatrix/pull/161) plan PR).
+3. **Manual-test report rows for the operator-visible v0.2.3 traces / metrics surface** appended under `docs/manual-tests/`: at minimum a Jaeger trace lookup by `persatrix.workflow_id`, a Prometheus exemplar click-through to the same trace, and a Collector tail-sampling spot-check (one error-tagged trace retained, untagged ticks sampled at the configured rate).
+
+**Hard exclusions**: any new tracing / metrics feature, any structural refactor whose driver is not a captured review item, and any code touching the v0.3 mesh / A2A surface. The PR is sized to stay under the 500-line BRANCHING.md soft limit; if the follow-up workload exceeds that, split *deferred items* into a tracked issue rather than carrying them into the closeout.
+
 #### Scope
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.

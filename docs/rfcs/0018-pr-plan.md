@@ -408,6 +408,16 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 **Branch**: `feature/v023-rfc0018-followups-close`
 **Estimated size**: ~150–350 lines (fixes + RFC status flip + ROADMAP + manual-test report append)
 
+#### Description
+
+Three buckets, nothing else; anything outside them goes to its own PR or a tracked issue:
+
+1. **Apply or explicitly defer the per-PR review follow-ups below** (PRs 1–6). Each item is either implemented here with a `Review-fix (PR #N)` marker, or linked to a tracked issue.
+2. **Status hygiene flip** per [development-workflow.md](../development-workflow.md#status-hygiene): RFC 0018 → `✅ Implemented`; [ROADMAP.md](../../ROADMAP.md) tracker + v0.2.3 milestone row updated (the milestone flips to `✅ Released` jointly with RFC 0019 — see [0019-pr-plan.md](0019-pr-plan.md) PR 5); merged-PR table covers PRs 1–6, this PR, and [PR #161](https://github.com/mkhomutov/Persatrix/pull/161).
+3. **Manual-test rows under `docs/manual-tests/`** for the v0.2.3 logging surface: `persatrix logs <id>` REST round-trip, `--follow` SSE reconnect, restart durability via `Buffer.Seal`, `PERSATRIX_LOG_FORMAT=pretty` toggle.
+
+**Excludes**: new features, refactors not driven by a captured review item, v0.3 mesh / A2A code. Stay under the 500-line BRANCHING.md limit; over-sized follow-ups split to tracked issues.
+
 #### Scope
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
