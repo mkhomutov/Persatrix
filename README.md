@@ -57,7 +57,7 @@ tasks in a workflow.
 | **Cost tracking & budgets** — token counting, per-run enforcement, `GET /api/v1/cost/summary` | [internal/cost/](internal/cost/), [internal/server/cost_handlers.go](internal/server/cost_handlers.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Execution limits** — `max_llm_calls`, derived per-call deadlines, shared retry budget | [internal/executor/](internal/executor/), [internal/scheduler/](internal/scheduler/) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Response cache** — in-memory cache keyed on prompt + config | [internal/cost/cache.go](internal/cost/cache.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
-| **OTEL observability** — logs + traces + metrics through an OpenTelemetry Collector with tail sampling, fanned out to Jaeger / Prometheus / Loki in `docker compose`; histogram exemplars carry the originating `trace_id` | [internal/observability/](internal/observability/), [agents/observability/](agents/observability/), [config/observability/](config/observability/) | [RFC 0018](docs/rfcs/0018-structured-logging-framework.md), [RFC 0019](docs/rfcs/0019-opentelemetry-completion.md) |
+| **OTEL tracing** — spans flowing through orchestrator → agents, visible in Jaeger | [internal/](internal/) | — |
 
 > **Upgrade note from v0.1 baseline:** `max_llm_calls` default changed from `10` to
 > `5`. See [CHANGELOG.md](CHANGELOG.md).
