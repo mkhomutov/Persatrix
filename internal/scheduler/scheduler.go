@@ -11,11 +11,13 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
@@ -50,6 +52,9 @@ type WorkflowScheduler struct {
 	tokenCounter   *cost.TokenCounter
 	budgetEnforcer *cost.BudgetEnforcer
 	costReporter   *cost.CostReporter
+
+	// Metrics instruments (optional — nil-safe).  Wired in RFC 0019 PR 3.
+	metrics *obsmetrics.Instruments
 }
 
 // Option configures a WorkflowScheduler.
@@ -81,6 +86,15 @@ func WithCostComponents(counter *cost.TokenCounter, enforcer *cost.BudgetEnforce
 		s.tokenCounter = counter
 		s.budgetEnforcer = enforcer
 		s.costReporter = reporter
+	}
+}
+
+// WithMetrics injects the orchestrator metric instruments so executeRun and
+// executeStep can record workflow / step lifecycle counters and histograms.
+// When nil, all metric recording is skipped (nil-safe per RFC 0019 § F).
+func WithMetrics(inst *obsmetrics.Instruments) Option {
+	return func(s *WorkflowScheduler) {
+		s.metrics = inst
 	}
 }
 
@@ -204,6 +218,49 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		zap.String("workflow_id", run.WorkflowID),
 	)
 
+	// RFC 0019 PR 3: emit workflow-start metrics.  Submitted-counter emission
+	// lives at the REST submit boundary (server.go); here we only bump the
+	// ``workflow.active`` gauge and record a duration timer so completion /
+	// failure paths can emit the histogram with stable attribute keys.
+	//
+	// PR-170 S2: metric attribute keys use the unprefixed dotted form
+	// (``workflow.id``, ``agent.id``) per RFC 0019 § F — the freshly-
+	// canonicalised orchestrator metric inventory.  ``persatrix.*`` is
+	// reserved for vendor-specific dimensions (e.g. ``persatrix.llm.cache.hit``
+	// on the agent side).  Span attributes intentionally retain the
+	// ``persatrix.workflow_id`` form — that is the established repo-wide
+	// span-attribute convention used by every tracer call site, and joining
+	// metrics to spans by trace_id (via exemplars) makes attribute-name
+	// alignment between the two signals unnecessary.
+	runStarted := time.Now()
+	wfAttrs := metric.WithAttributes(
+		attribute.String("workflow.id", run.WorkflowID),
+	)
+	if s.metrics != nil {
+		s.metrics.WorkflowActive.Add(ctx, 1, wfAttrs)
+	}
+	// Failure metric emission happens in a defer so every failRun() branch
+	// below participates without each branch having to call the recorder.
+	// ``runSucceeded`` is flipped to true at the tail of the happy path; the
+	// defer runs on the cleanupCtx so emission survives parent cancellation.
+	runSucceeded := false
+	defer func() {
+		if s.metrics == nil {
+			return
+		}
+		if runSucceeded {
+			return
+		}
+		cleanupCtx := context.WithoutCancel(ctx)
+		s.metrics.WorkflowFailed.Add(cleanupCtx, 1, wfAttrs)
+		s.metrics.WorkflowActive.Add(cleanupCtx, -1, wfAttrs)
+		s.metrics.WorkflowDuration.Record(
+			cleanupCtx,
+			float64(time.Since(runStarted).Milliseconds()),
+			wfAttrs,
+		)
+	}()
+
 	// Resolve workflow file path.
 	yamlPath, err := resolveWorkflowPath(s.workflowsDir, run.WorkflowID)
 	if err != nil {
@@ -313,6 +370,23 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	s.logger.Info("run completed", zap.String("execution_id", runID))
 	span.SetAttributes(attribute.String("persatrix.status", state.RunCompleted.String()))
 	span.SetStatus(codes.Ok, "completed")
+
+	// PR-170 N2: disarm the failure-emission defer *before* recording success
+	// metrics so a hypothetical panic inside ``Add`` / ``Record`` (extremely
+	// unlikely on these no-allocation hot paths, but technically possible)
+	// does not cause the defer to also classify the run as failed and
+	// double-count it on both the failed and completed counters.
+	runSucceeded = true
+
+	if s.metrics != nil {
+		s.metrics.WorkflowCompleted.Add(ctx, 1, wfAttrs)
+		s.metrics.WorkflowActive.Add(ctx, -1, wfAttrs)
+		s.metrics.WorkflowDuration.Record(
+			ctx,
+			float64(time.Since(runStarted).Milliseconds()),
+			wfAttrs,
+		)
+	}
 }
 
 // failRun marks a workflow run as failed with the given error message and sets FinishedAt.

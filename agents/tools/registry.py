@@ -10,6 +10,7 @@ Tools are typed functions that agents can invoke. Three tiers:
 import functools
 import inspect
 import logging
+import time
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -18,6 +19,11 @@ from typing import Any, get_type_hints
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..observability.metrics import (
+    current_agent_id,
+    tool_attrs,
+    try_get_instruments,
+)
 from ..observability.redact import NoopRedactor
 from ..observability.spans import (
     TOOL_EXECUTE_SPAN,
@@ -35,6 +41,27 @@ _tracer = trace.get_tracer(__name__)
 # CHANGELOG documents the hazard but a runtime warning catches the case
 # without requiring CHANGELOG comprehension.
 _warned_full_mode_noop_redactor = False
+
+
+def _record_tool_metrics(
+    *,
+    agent_id: str,
+    tool_name: str,
+    success: bool,
+    duration_ms: float,
+) -> None:
+    """Emit ``agent.tool.invocations`` + ``agent.tool.duration`` (RFC 0019 § F).
+
+    Nil-safe: returns silently when ``init_metrics()`` has not been called
+    so import-time tool execution (rare but supported in tests) never
+    crashes on a missing meter provider.
+    """
+    inst = try_get_instruments()
+    if inst is None:
+        return
+    attrs = tool_attrs(agent_id=agent_id, tool_name=tool_name, success=success)
+    inst.tool_invocations.add(1, attributes=attrs)
+    inst.tool_duration.record(duration_ms, attributes=attrs)
 
 
 @dataclass
@@ -156,6 +183,8 @@ def tool(
             # TODO: Permission check before execution
             # TODO: Rate limit check
             # TODO: Audit logging
+            tool_started = time.monotonic()
+            agent_id = current_agent_id()
             with _tracer.start_as_current_span(
                 TOOL_EXECUTE_SPAN,
                 attributes={"tool.name": tool_name},
@@ -212,14 +241,32 @@ def tool(
                             span.set_status(
                                 Status(StatusCode.ERROR, result.error or ""),
                             )
+                        _record_tool_metrics(
+                            agent_id=agent_id,
+                            tool_name=tool_name,
+                            success=result.success,
+                            duration_ms=(time.monotonic() - tool_started) * 1000.0,
+                        )
                         return result
                     span.set_attribute("tool.success", True)
+                    _record_tool_metrics(
+                        agent_id=agent_id,
+                        tool_name=tool_name,
+                        success=True,
+                        duration_ms=(time.monotonic() - tool_started) * 1000.0,
+                    )
                     return ToolResult(success=True, data=result)
                 except Exception as e:
                     logger.exception("Tool '%s' failed", tool_name)
                     span.record_exception(e)
                     span.set_attribute("tool.success", False)
                     span.set_status(Status(StatusCode.ERROR, str(e)))
+                    _record_tool_metrics(
+                        agent_id=agent_id,
+                        tool_name=tool_name,
+                        success=False,
+                        duration_ms=(time.monotonic() - tool_started) * 1000.0,
+                    )
                     return ToolResult(
                         success=False,
                         error=str(e),

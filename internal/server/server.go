@@ -14,6 +14,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
@@ -37,6 +38,9 @@ type Server struct {
 
 	// handlerWrapper optionally wraps the composed HTTP handler (e.g. otelhttp).
 	handlerWrapper func(http.Handler) http.Handler
+
+	// Metrics instruments (optional — nil-safe).  Wired in RFC 0019 PR 3.
+	metrics *obsmetrics.Instruments
 }
 
 // ServerOption configures optional Server dependencies.
@@ -61,6 +65,15 @@ func WithChatExecutor(ce executor.ChatExecutor) ServerOption {
 func WithHandlerWrapper(wrapper func(http.Handler) http.Handler) ServerOption {
 	return func(s *Server) {
 		s.handlerWrapper = wrapper
+	}
+}
+
+// WithMetrics injects the orchestrator metric instruments used by the
+// workflow-submit handler (orchestrator.workflow.submitted counter).
+// Nil-safe: when unset, no metrics are recorded.
+func WithMetrics(inst *obsmetrics.Instruments) ServerOption {
+	return func(s *Server) {
+		s.metrics = inst
 	}
 }
 

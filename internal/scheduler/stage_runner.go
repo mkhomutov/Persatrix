@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -168,6 +169,27 @@ func (s *WorkflowScheduler) executeStep(
 		Limits:      limits,
 		Cacheable:   step.Cacheable,
 	})
+	// RFC 0019 PR 3: step-level metrics.  Dispatch count is recorded
+	// unconditionally (success + failure both represent a dispatched step);
+	// duration is recorded in milliseconds to keep the histogram bucket
+	// distribution in the same unit family as the workflow-duration instrument.
+	//
+	// PR-170 S2: metric attribute keys are unprefixed dotted form per
+	// RFC 0019 § F.  See the matching comment in scheduler.go::executeRun
+	// for the full rationale.
+	stepAttrs := metric.WithAttributes(
+		attribute.String("workflow.id", workflowID),
+		attribute.String("agent.id", step.AgentID),
+		attribute.Bool("step.success", err == nil),
+	)
+	if s.metrics != nil {
+		s.metrics.StepDispatched.Add(ctx, 1, stepAttrs)
+		s.metrics.StepDuration.Record(
+			ctx,
+			float64(time.Since(startedAt).Milliseconds()),
+			stepAttrs,
+		)
+	}
 	if err != nil {
 		// Record token usage from any metadata the agent returned before failing.
 		// This preserves cost tracking for runs aborted by LLM truncation or other

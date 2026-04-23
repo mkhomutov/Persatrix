@@ -23,7 +23,7 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (27 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (29 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
@@ -38,10 +38,12 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (27 packages).
 | `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.68.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |
 | `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.68.0/instrumentation/net/http/otelhttp/LICENSE) |
 | `go.opentelemetry.io/otel` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/v1.43.0/LICENSE) |
+| `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.43.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE) |
 | `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.43.0/exporters/otlp/otlptrace/LICENSE) |
 | `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.43.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE) |
 | `go.opentelemetry.io/otel/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.43.0/metric/LICENSE) |
 | `go.opentelemetry.io/otel/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.43.0/sdk/LICENSE) |
+| `go.opentelemetry.io/otel/sdk/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.43.0/sdk/metric/LICENSE) |
 | `go.opentelemetry.io/otel/trace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.43.0/trace/LICENSE) |
 | `go.opentelemetry.io/proto/otlp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/LICENSE) |
 | `go.uber.org/multierr` | MIT | [link](https://github.com/uber-go/multierr/blob/v1.10.0/LICENSE.txt) |

@@ -263,14 +263,25 @@ Metrics ship on the same OTLP HTTP exporter as traces. A new module `agents/obse
 | `agent.llm.duration` | Histogram | `ms` | `agent.id`, `gen_ai.request.model` |
 | `agent.event.dispatched` | Counter | `{event}` | `agent.id`, `event.type` |
 | `agent.persona.tick.interval` | Histogram | `ms` | `agent.id` |
-| `agent.active` | UpDownCounter | `{agent}` | (resource-only) |
-| `workflow.active` | UpDownCounter | `{workflow}` | (orchestrator side; resource-only) |
+| `agent.active` | UpDownCounter | `{agent}` | `agent.id` |
+| `workflow.active` | UpDownCounter | `{workflow}` | `workflow.id` |
 | `agent.observability.spans.dropped` | Counter | `{span}` | `agent.id`, `reason` (`queue_full` \| `export_error`) |
 | `agent.observability.logs.dropped` | Counter | `{record}` | `agent.id`, `reason` |
 
-**Exemplars.** Histogram instruments emit exemplars by default (OTEL SDK feature); each histogram bucket sample carries the `trace_id` / `span_id` of the call that produced it. A p99 LLM-latency spike on the dashboard becomes one click to the actual slow trace in Jaeger.
+**Orchestrator-side instrument inventory.** The Go orchestrator gains `internal/observability/metrics/metrics.go` <!-- sub-package form per PR #161 review, consistent with `logbuffer/`, `redact/`, `zapenc/` --> with the following set. The `orchestrator.*` prefix distinguishes orchestrator-side metrics from agent-side `agent.*` (matching the span-naming convention in `docs/observability.md` § 10.1); the lone exception is `workflow.active`, which is left unprefixed because the concept (a workflow is in-flight) is not orchestrator-exclusive — a future in-process scheduler in the agent runtime would increment the same gauge.
 
-**Go-side metrics.** The orchestrator gains `internal/observability/metrics/metrics.go` <!-- sub-package form per PR #161 review, consistent with `logbuffer/`, `redact/`, `zapenc/` --> with: `workflow.submitted`, `workflow.completed`, `workflow.duration`, `workflow.steps.dispatched`, `workflow.active`. Same OTLP exporter, same Resource conventions.
+| Instrument | Type | Unit | Attributes |
+|------------|------|------|------------|
+| `orchestrator.workflow.submitted` | Counter | `{workflow}` | `workflow.id` |
+| `orchestrator.workflow.completed` | Counter | `{workflow}` | `workflow.id` |
+| `orchestrator.workflow.failed` | Counter | `{workflow}` | `workflow.id` |
+| `orchestrator.workflow.duration` | Histogram | `ms` | `workflow.id` |
+| `orchestrator.step.dispatched` | Counter | `{step}` | `workflow.id`, `agent.id`, `step.success` |
+| `orchestrator.step.duration` | Histogram | `ms` | `workflow.id`, `agent.id`, `step.success` |
+
+Same OTLP exporter, same Resource conventions as traces.
+
+**Exemplars.** Histogram instruments emit exemplars by default (OTEL SDK feature); each histogram bucket sample carries the `trace_id` / `span_id` of the call that produced it. A p99 LLM-latency spike on the dashboard becomes one click to the actual slow trace in Jaeger.
 
 **`otelhttp` on the REST surface.** The orchestrator's main HTTP handler is wrapped with `otelhttp.NewHandler` so route-level latency histograms (`http.server.request.duration`) come for free. Per-handler manual spans remain on the workflow-submit and chat paths; trivial endpoints (health, version) get the `otelhttp` span only.
 

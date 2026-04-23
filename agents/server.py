@@ -22,6 +22,8 @@ from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
 from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.logging import configure_logging
+from .observability.metrics import init_metrics, try_get_instruments
+from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
@@ -329,6 +331,33 @@ def main() -> None:
 
     # Initialise OTEL tracing before any gRPC or async code starts.
     init_tracing()
+    # Initialise metrics alongside tracing so instrument handles exist before
+    # the first LLM / tool / event call site records.  Any failure here is
+    # tolerated — the recording helpers are nil-safe.
+    try:
+        init_metrics()
+    except Exception:  # pragma: no cover — startup resilience
+        logger.exception(
+            "failed to initialize OTEL metrics, continuing without metric recording",
+        )
+        # PR-170 N3: a partial init (provider constructed, ``_Instruments``
+        # ctor raised) leaves the module-level provider live and exporting
+        # empty payloads on its periodic interval.  Tear it down inline
+        # (sync — no event loop yet) so we do not leak a background
+        # exporter for the lifetime of the process.  Done via a direct
+        # provider-handle reset rather than ``metrics.shutdown()`` (which
+        # is async and requires an event loop) to keep this in the
+        # synchronous startup path.
+        from agents.observability import metrics as _pmetrics
+
+        if _pmetrics._provider is not None:
+            try:
+                _pmetrics._provider.force_flush()
+                _pmetrics._provider.shutdown()
+            except Exception:  # pragma: no cover — best-effort cleanup
+                logger.exception("failed to clean up partial metrics provider")
+            _pmetrics._provider = None
+            _pmetrics._instruments = None
     GrpcAioInstrumentorServer().instrument()
 
     agent = load_agent(args.agent, args.config, args.workspace)
@@ -340,6 +369,15 @@ def main() -> None:
         advertise_address=args.advertise_address,
     )
     server.register_agent(agent)
+
+    # PR-170 M2: bump the ``agent.active`` UpDownCounter so dashboards built on
+    # the metric reflect the actual live agent population.  Paired with the
+    # ``-1`` decrement in ``_run()``'s teardown below.  Guarded by
+    # ``try_get_instruments()`` so a metrics-init failure (already swallowed
+    # above for startup resilience) does not break agent startup.
+    _inst = try_get_instruments()
+    if _inst is not None:
+        _inst.agent_active.add(1, attributes={"agent.id": agent.agent_id})
 
     async def _run() -> None:
         shutdown = asyncio.Event()
@@ -362,7 +400,18 @@ def main() -> None:
         await server.start()
         await shutdown.wait()
         await server.stop()
+        # PR-170 M2: decrement ``agent.active`` before flushing so the final
+        # exported value reflects the agent leaving the live set.  Read the
+        # instruments bag again rather than capturing ``_inst`` from the
+        # enclosing scope — keeps the symmetry with the ``+1`` site explicit
+        # and tolerates any post-init mutation of module state.
+        _inst_shutdown = try_get_instruments()
+        if _inst_shutdown is not None:
+            _inst_shutdown.agent_active.add(
+                -1, attributes={"agent.id": agent.agent_id},
+            )
         await tracing_shutdown()
+        await metrics_shutdown()
 
     asyncio.run(_run())
 

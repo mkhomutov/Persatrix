@@ -245,11 +245,13 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_observability_metrics.py -v` passes
-- [ ] `go test ./internal/observability/metrics/... -v -race` passes
-- [ ] Every instrument in [RFC § F](0019-opentelemetry-completion.md#f-metrics) is implemented
-- [ ] Histogram exemplars verified in unit test (not deferred to PR 4's E2E test)
-- [ ] `agents/observability/metrics.py:init_metrics()` exposes a `shutdown()` callable that flushes pending exports
+- [x] `pytest agents/tests/test_observability_metrics.py -v` passes
+- [x] `go test ./internal/observability/metrics/... -v -race` passes
+- [x] Every instrument in [RFC § F](0019-opentelemetry-completion.md#f-metrics) is implemented
+- [x] Histogram exemplars verified in unit test (not deferred to PR 4's E2E test)
+- [x] `agents/observability/metrics.py:init_metrics()` exposes a `shutdown()` callable that flushes pending exports
+
+**Merged**: PR [#170](https://github.com/mkhomutov/Persatrix/pull/170) — 2026-04-23
 
 ---
 
@@ -349,8 +351,23 @@ Captured from the PR #167 deep review. All round-1 *Must Fix* items (canonical `
 
 ##### From PR 3 review
 
-<!-- TODO: populate after PR 3 review merges -->
-*(populated during PR 3 review)*
+###### Should-Fix
+
+- **Should Fix — extract duplicated `_env` / `_int_env` helpers.** Both [agents/observability/metrics.py](../../agents/observability/metrics.py) and `agents/observability/tracing.py` carry their own copy of the env-var parser helpers. Extract into a shared `agents/observability/_env.py` module to prevent silent parser drift (e.g., one module trimming whitespace and the other not).
+
+###### Nice-to-Have
+
+- **Nice-to-Have — add a parametrised test for `_classify_llm_error()`.** The classifier in `agents/llm_client.py` powers the `llm.error_type` metric label; today it has no direct unit test, so cardinality changes there can ship undetected.
+- **Nice-to-Have — cover the Go `Init()` full path.** Existing tests exercise `NewInstruments`, `NewConfigFromEnv`, and recording helpers in isolation but skip the top-level `Init()` wiring (provider creation + meter registration + shutdown).
+- **Nice-to-Have — add lightweight recording-site wiring tests in both languages.** Per-call-site emission is currently deferred entirely to the PR 4 E2E suite; a few unit assertions ("calling `executeRun` with a fake meter increments `workflow.runs.total`") would catch regressions without waiting for the compose stack.
+- **Nice-to-Have — test the `runSucceeded=false` failure-defer cleanup path in `executeRun`.** The defer-based terminal emission has both branches; only the success branch is currently covered.
+- **Nice-to-Have — use the public `pmetrics.shutdown()` in the Python test fixture.** The current fixture pokes private state (`_meter_provider`) to reset between tests; switching to the public shutdown API keeps the fixture stable across SDK upgrades.
+
+###### Nits
+
+- **Nit — drop the redundant `+1/-1` in `_touch_all` for `agent_active`.** Now that `TestAgentActiveLifecycle` covers the gauge transitions, the touch-all helper can record a no-op `0` add instead of a paired increment/decrement.
+- **Nit — document the span-vs-metric attribute key convention divergence.** Spans use `persatrix.workflow_id` while metrics use `workflow.id` (deliberate, to keep metric cardinality keys aligned with OTEL semconv). Add a one-liner to [docs/observability.md](../../docs/observability.md) when PR 4 lands so operators searching for "workflow_id" in metrics aren't surprised.
+- **Nit — keep prep refactors out of feature PRs.** The `agents/persona_runtime/prompt_assembly.py` extraction was unrelated to OTEL metrics and was bundled in only to satisfy the 500-line file-size CI cap. Future PRs should land such prep in a separate refactor PR ahead of the feature work.
 
 ##### From PR 4 review
 
