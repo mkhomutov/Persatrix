@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -122,6 +123,16 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 	}
 	span.SetAttributes(attribute.String("persatrix.run_id", run.ID))
 	span.SetStatus(codes.Ok, "submitted")
+
+	// RFC 0019 PR 3: workflow.submitted counter.  Emission point is the REST
+	// boundary — one increment per accepted submission.  The active-gauge
+	// increment lives in the scheduler (executeRun) so runs that fail
+	// path-validation before reaching the scheduler do not leak gauge ticks.
+	if s.metrics != nil {
+		s.metrics.WorkflowSubmitted.Add(r.Context(), 1, metric.WithAttributes(
+			attribute.String("persatrix.workflow_id", req.WorkflowID),
+		))
+	}
 
 	writeJSON(w, submitWorkflowRunResponse{
 		RunID:      run.ID,

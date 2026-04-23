@@ -22,6 +22,8 @@ from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
 from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.logging import configure_logging
+from .observability.metrics import init_metrics
+from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
@@ -329,6 +331,15 @@ def main() -> None:
 
     # Initialise OTEL tracing before any gRPC or async code starts.
     init_tracing()
+    # Initialise metrics alongside tracing so instrument handles exist before
+    # the first LLM / tool / event call site records.  Any failure here is
+    # tolerated — the recording helpers are nil-safe.
+    try:
+        init_metrics()
+    except Exception:  # pragma: no cover — startup resilience
+        logger.exception(
+            "failed to initialize OTEL metrics, continuing without metric recording",
+        )
     GrpcAioInstrumentorServer().instrument()
 
     agent = load_agent(args.agent, args.config, args.workspace)
@@ -363,6 +374,7 @@ def main() -> None:
         await shutdown.wait()
         await server.stop()
         await tracing_shutdown()
+        await metrics_shutdown()
 
     asyncio.run(_run())
 

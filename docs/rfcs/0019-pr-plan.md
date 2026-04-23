@@ -245,11 +245,11 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_observability_metrics.py -v` passes
-- [ ] `go test ./internal/observability/metrics/... -v -race` passes
-- [ ] Every instrument in [RFC § F](0019-opentelemetry-completion.md#f-metrics) is implemented
-- [ ] Histogram exemplars verified in unit test (not deferred to PR 4's E2E test)
-- [ ] `agents/observability/metrics.py:init_metrics()` exposes a `shutdown()` callable that flushes pending exports
+- [x] `pytest agents/tests/test_observability_metrics.py -v` passes
+- [x] `go test ./internal/observability/metrics/... -v -race` passes
+- [x] Every instrument in [RFC § F](0019-opentelemetry-completion.md#f-metrics) is implemented
+- [x] Histogram exemplars verified in unit test (not deferred to PR 4's E2E test)
+- [x] `agents/observability/metrics.py:init_metrics()` exposes a `shutdown()` callable that flushes pending exports
 
 ---
 

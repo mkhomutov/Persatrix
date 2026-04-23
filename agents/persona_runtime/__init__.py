@@ -32,6 +32,7 @@ __all__ = [
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,11 @@ from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
+from ..observability.metrics import (
+    event_attrs,
+    tick_attrs,
+    try_get_instruments,
+)
 from ..observability.spans import PERSONA_EVENT_SPAN, PERSONA_TICK_SPAN
 from ..persona import PersonaAgent
 from ..persona_behavior import render_behavior
@@ -160,6 +166,11 @@ class _LLMPersonaAgent(
         # "event triggered me" causality across the asyncio task boundary.
         # Drained on every on_tick() invocation.
         self._pending_tick_links: list[Link] = []
+        # Wall-clock of the previous ``on_tick()`` invocation for the
+        # ``agent.persona.tick.interval`` histogram (RFC 0019 § F).
+        # ``None`` until the first tick; first sample is then recorded
+        # against the second tick so the interval is meaningful.
+        self._last_tick_monotonic: float | None = None
 
     @property
     def memory(self) -> MemoryNamespace:
@@ -388,6 +399,15 @@ class _LLMPersonaAgent(
             self._DEFAULT_EVENT_TIMEOUT,
             self.agent_id,
         )
+        _inst = try_get_instruments()
+        if _inst is not None:
+            _inst.event_dispatched.add(
+                1,
+                attributes=event_attrs(
+                    agent_id=self.agent_id,
+                    event_type=event.event_type.value,
+                ),
+            )
         with _tracer.start_as_current_span(
             PERSONA_EVENT_SPAN,
             attributes={
@@ -460,6 +480,14 @@ class _LLMPersonaAgent(
                 "tick.reason": "scheduled",
             },
         ) as span:
+            now_monotonic = time.monotonic()
+            _inst = try_get_instruments()
+            if _inst is not None and self._last_tick_monotonic is not None:
+                _inst.persona_tick_interval.record(
+                    (now_monotonic - self._last_tick_monotonic) * 1000.0,
+                    attributes=tick_attrs(agent_id=self.agent_id),
+                )
+            self._last_tick_monotonic = now_monotonic
             async with self._lock:
                 event = AgentEvent(event_type=EventType.TICK)
                 try:

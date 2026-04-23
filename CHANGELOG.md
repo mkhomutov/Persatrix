@@ -109,7 +109,37 @@ All notable changes to this project will be documented in this file.
   is the otelzap convention; `zapcore.Entry` has no `Context` field.)
 - `workflow_id` added to the Python structlog `_FIELD_ORDER`;
   `ExecuteRequest` gains `ExecutionID` / `StepID` populated by the
-  scheduler.## [0.2.2] - 2026-04-22
+  scheduler.
+
+### Added (RFC 0019 PR 3 — Phase 3a OTEL metrics, Python + Go)
+
+- **Python OTEL metrics**: new `agents/observability/metrics.py` providing
+  `init_metrics()` / `shutdown()` and the instrument inventory documented in
+  [RFC 0019 § F](docs/rfcs/0019-opentelemetry-completion.md#f-metrics):
+  counters (`agent.tool.invocations`, `agent.llm.calls`, `agent.llm.tokens`,
+  `agent.event.dispatched`, `agent.observability.spans.dropped`,
+  `agent.observability.logs.dropped`), histograms (`agent.tool.duration`,
+  `agent.llm.duration`, `agent.persona.tick.interval`), up/down counter
+  (`agent.active`). Recording call sites added in
+  [`tools/registry.py`](agents/tools/registry.py),
+  [`llm_client.py`](agents/llm_client.py), and
+  [`persona_runtime/__init__.py`](agents/persona_runtime/__init__.py);
+  provider lifecycle wired from [`server.py`](agents/server.py).
+- **Go OTEL metrics**: new `internal/observability/metrics` package providing
+  orchestrator-side `Instruments` (`orchestrator.workflow.submitted/completed/failed/active/duration`,
+  `orchestrator.step.dispatched/duration`), init/shutdown wired from
+  [`cmd/orchestrator/main.go`](cmd/orchestrator/main.go), with recording sites
+  in the scheduler (`executeRun`, stage runner) and the REST server's workflow
+  submit handler.
+- Exporter: OTLP HTTP via `otlpmetrichttp` (Go) and
+  `opentelemetry-exporter-otlp-proto-http` (Python); same endpoint as tracing
+  (`OTEL_EXPORTER_OTLP_ENDPOINT`, default `http://localhost:4318`). Histogram
+  exemplars carry the active span's `trace_id` / `span_id` so dashboards can
+  drill into the originating trace.
+- Tests: `agents/tests/test_observability_metrics.py` (inventory/units/exemplars/idempotency/helpers)
+  and `internal/observability/metrics/metrics_test.go` (inventory, counter
+  monotonicity, up/down gauge, histogram bucket sanity, env-var config,
+  endpoint helper).## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
 

@@ -8,6 +8,7 @@ Provider-specific message formats are encapsulated behind the protocol boundary.
 
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -15,6 +16,12 @@ from typing import Any, Protocol
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from .observability.metrics import (
+    llm_call_attrs,
+    llm_duration_attrs,
+    llm_token_attrs,
+    try_get_instruments,
+)
 from .observability.spans import (
     LLM_CALL_SPAN,
     STOP_REASON_TO_GEN_AI,
@@ -162,11 +169,30 @@ class LLMClient:
                 request_model=model,
             ),
         ) as span:
+            call_started = time.monotonic()
+            agent_id = os.environ.get("PERSATRIX_AGENT_ID", "unknown")
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.llm_calls.add(
+                    1,
+                    attributes=llm_call_attrs(
+                        agent_id=agent_id,
+                        system=system_name,
+                        request_model=model,
+                    ),
+                )
             try:
                 response = await self._provider.create_message(**kwargs)
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
+                if inst is not None:
+                    inst.llm_duration.record(
+                        (time.monotonic() - call_started) * 1000.0,
+                        attributes=llm_duration_attrs(
+                            agent_id=agent_id, request_model=model,
+                        ),
+                    )
                 raise
             # Translate Persatrix-internal StopReason values to the OTEL
             # Gen-AI canonical vocabulary so vendor backends render the
@@ -186,6 +212,30 @@ class LLMClient:
                     finish_reasons=[canonical_reason],
                 ),
             )
+            if inst is not None:
+                duration_ms = (time.monotonic() - call_started) * 1000.0
+                inst.llm_duration.record(
+                    duration_ms,
+                    attributes=llm_duration_attrs(
+                        agent_id=agent_id, request_model=model,
+                    ),
+                )
+                inst.llm_tokens.add(
+                    response.usage.input_tokens,
+                    attributes=llm_token_attrs(
+                        agent_id=agent_id,
+                        request_model=model,
+                        token_type="input",
+                    ),
+                )
+                inst.llm_tokens.add(
+                    response.usage.output_tokens,
+                    attributes=llm_token_attrs(
+                        agent_id=agent_id,
+                        request_model=model,
+                        token_type="output",
+                    ),
+                )
             return response
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:

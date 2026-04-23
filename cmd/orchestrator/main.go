@@ -23,6 +23,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/observability"
+	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/observability/redact"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 	"github.com/mkhomutov/persatrix/internal/planner"
@@ -124,6 +125,25 @@ func main() {
 			defer cancel()
 			if err := obsShutdown(shutdownCtx); err != nil {
 				logger.Warn("telemetry shutdown failed", zap.Error(err))
+			}
+		}()
+	}
+
+	// RFC 0019 PR 3 — OTEL metrics.  Same OTLP endpoint as traces; separate
+	// MeterProvider so shutdown flushes metric exports independently of the
+	// trace pipeline.  Metric recording in server / scheduler is nil-safe
+	// so init failure does not crash startup.
+	metricsCfg := obsmetrics.NewConfigFromEnv(*env)
+	orchMetrics, metricsShutdown, err := obsmetrics.Init(context.Background(), metricsCfg, logger)
+	if err != nil {
+		logger.Warn("failed to initialize metrics, continuing without metric recording", zap.Error(err))
+		orchMetrics = nil
+	} else {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsShutdown(shutdownCtx); err != nil {
+				logger.Warn("metrics shutdown failed", zap.Error(err))
 			}
 		}()
 	}
@@ -235,6 +255,10 @@ func main() {
 	srvOpts = append(srvOpts, server.WithHandlerWrapper(func(h http.Handler) http.Handler {
 		return otelhttp.NewHandler(h, "persatrix-orchestrator")
 	}))
+	if orchMetrics != nil {
+		srvOpts = append(srvOpts, server.WithMetrics(orchMetrics))
+		schedOpts = append(schedOpts, scheduler.WithMetrics(orchMetrics))
+	}
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
