@@ -24,8 +24,13 @@ const (
 )
 
 type LogBatch struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Entries []*LogEntry            `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// TODO(rfc-0018-pr-5): the wire path must enforce both
+	// grpc.MaxRecvMsgSize and a per-batch entries cap (≈1024) before
+	// iterating, and validate LogEntry.attributes payload size — the
+	// ring buffer's per-execution rate limiter is a per-entry control
+	// and offers no protection against a single oversized batch.
+	Entries []*LogEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
 	// Batch-level agent_id; avoids per-entry repetition when all
 	// entries in a batch share the same agent (the common shipper
 	// case). Per-entry agent_id (LogEntry.agent_id) takes precedence
