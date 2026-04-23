@@ -323,8 +323,21 @@ Captured from the PR #163 review rounds 1–3. All round-1 and round-2 *Must Fix
 
 ##### From PR 2 review
 
-<!-- TODO: populate after PR 2 review merges -->
-*(populated during PR 2 review)*
+Captured from the PR #167 deep review. All round-1 *Must Fix* items (canonical `gen_ai.response.finish_reasons` mapping, ERROR status on episodic `remember` exceptions, `trust.new` on both relationship update paths, `provider.name` Protocol contract, NoopRedactor warn-once latch, namespace doc clarification) were addressed in-PR. The items below are the residual *Medium* / *Minor* / *Nit* findings deferred here.
+
+- **Should Fix — wrap `EpisodicMemory.recall()` in the same span-error try/except as `store_episode`.** `agents/memory/episodic.py:255` opens `agent.memory.episodic.recall` but does not record `StatusCode.ERROR` / `record_exception()` if the underlying SQLite call raises; the `remember` path was fixed in PR 2 follow-ups but `recall` is now inconsistent. Apply the same pattern (try/except → `record_exception` + set `StatusCode.ERROR` + re-raise) and add a regression test that injects a connection failure and asserts the span's status code.
+- **Should Fix — cap `_pending_tick_links` to a bounded ring buffer.** `agents/persona_runtime/__init__.py:199` stores a `Link` per dispatched event awaiting the next tick, with no upper bound. A high event rate combined with a slow or paused tick consumer accumulates links indefinitely (memory growth + every tick span eventually carries a pathological link list). Cap to ~32 entries with oldest-drop semantics and add a unit test that pushes 100 events without a tick and asserts the buffer length stays at the cap.
+- **Nice to Have — derive `tick.reason` from the link list.** `agents/persona_runtime/__init__.py:456` hardcodes `tick.reason="scheduled"` even when the tick span carries event-trigger links. Compute `"woke-on-event"` when `_pending_tick_links` is non-empty at tick start; otherwise `"scheduled"`. Prevents doc-vs-code drift while the attribute key is still being introduced.
+- **Nice to Have — skip empty-string span attributes.** `event.id` and `subagent.role` are emitted as empty strings on paths where the source value is unset, polluting backend cardinality and making attribute filters noisier. Set the attribute only when the value is a non-empty string.
+- **Nice to Have — promote `add_pending_tick_link` to a `Linkable` Protocol.** The dispatcher in `agents/persona_behavior.py` calls `getattr(agent, "add_pending_tick_link", None)` to forward the link, so the contract is enforced at runtime only. Declaring a `Linkable(Protocol)` in `agents/persona_runtime/__init__.py` (or a shared types module) and typing the dispatcher parameter as `Linkable | BaseAgent` lets mypy validate the contract end-to-end.
+- **Nice to Have — assert canonical `finish_reasons` shape in tests.** The new `STOP_REASON_TO_GEN_AI` mapping has parametrised tests; add one assertion that the LLM span's `gen_ai.response.finish_reasons` is always a list (per OTEL spec) even when only one reason is present, so a future change to a scalar string is caught.
+- **Nice to Have — document the `PERSATRIX_TRACE_TOOL_PAYLOADS=full` + NoopRedactor warning in `docs/observability.md`.** The warn-once latch was added in PR 2 follow-ups but the operator-facing doc only describes the modes; mention that operators selecting `full` without configuring a real redactor will see a one-time warning and that this is the intentional safe-default escape hatch.
+
+###### Nits
+
+- **Nit — single-source the `tick.reason` enum.** Define the allowed values (`"scheduled"`, `"woke-on-event"`) as a module-level `Final` constant referenced by both the emitter and the test, rather than as bare string literals.
+- **Nit — collapse repeated `tracer.start_as_current_span("agent.memory.…")` boilerplate.** Each memory op repeats the same span-context-manager + attributes-dict pattern; consider a small helper in `agents/observability/tracing.py` (`@traced_memory_op(name)`) once the third call site lands.
+- **Nit — add a CHANGELOG line for `gen_ai.system` provider contract.** The provider `name` Protocol is a public contract for downstream provider plugins; a one-line note under v0.2.3 unreleased ("Providers must now expose a `name` attribute …") gives plugin authors warning before the close PR ships.
 
 ##### From PR 3 review
 
