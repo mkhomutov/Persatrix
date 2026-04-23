@@ -64,6 +64,8 @@ The two plans interleave. The combined order across both RFCs is:
   ↓
 0018 PR 6 (Phase 4c — CLI rewrite + E2E)
   ↓
+0018 PR 8 + 0019 PR 6 (optional polish-pair: hot-path + tracing/spans clusters — land before closeout to be cross-referenced)
+  ↓
 0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)
 ```
 
@@ -88,10 +90,12 @@ PR 5 (LogService server + agent shipper + REST + SSE endpoints — joint order #
   ↓
 PR 6 (CLI rewrite + E2E — joint order #10)
   ↓
-PR 7 (review follow-ups + RFC close — joint order #11, opened with 0019 PR 5)
+PR 8 (optional polish: logbuffer + shipper Nice-to-Have / Nit cluster — joint #11a, lands before PR 7)
+  ↓
+PR 7 (review follow-ups + RFC close — joint order #11b, opened with 0019 PR 5)
 ```
 
-All PRs are sequential.
+All PRs sequential. PR 8 is optional: deferred items become tracked issues.
 
 ---
 
@@ -410,13 +414,13 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### Description
 
-Three buckets, nothing else; anything outside them goes to its own PR or a tracked issue:
+Closeout-only, three buckets:
 
-1. **Apply or explicitly defer the per-PR review follow-ups below** (PRs 1–6). Each item is either implemented here with a `Review-fix (PR #N)` marker, or linked to a tracked issue.
-2. **Status hygiene flip** per [development-workflow.md](../development-workflow.md#status-hygiene): RFC 0018 → `✅ Implemented`; [ROADMAP.md](../../ROADMAP.md) tracker + v0.2.3 milestone row updated (the milestone flips to `✅ Released` jointly with RFC 0019 — see [0019-pr-plan.md](0019-pr-plan.md) PR 5); merged-PR table covers PRs 1–6, this PR, and [PR #161](https://github.com/mkhomutov/Persatrix/pull/161).
-3. **Manual-test rows under `docs/manual-tests/`** for the v0.2.3 logging surface: `persatrix logs <id>` REST round-trip, `--follow` SSE reconnect, restart durability via `Buffer.Seal`, `PERSATRIX_LOG_FORMAT=pretty` toggle.
+1. **Per-PR review follow-ups** below (PRs 1–6) — each item either applied with a `Review-fix (PR #N)` marker or linked to a tracked issue.
+2. **Status hygiene flip** per [development-workflow.md](../development-workflow.md#status-hygiene): RFC 0018 → `✅ Implemented`; [ROADMAP.md](../../ROADMAP.md) tracker + v0.2.3 milestone updated (milestone flips jointly with RFC 0019); merged-PR table covers PRs 1–6 + PR 8 (if landed) + this PR + [PR #161](https://github.com/mkhomutov/Persatrix/pull/161).
+3. **Manual-test rows** under `docs/manual-tests/`: REST round-trip, `--follow` SSE reconnect, `Buffer.Seal` durability, `PERSATRIX_LOG_FORMAT=pretty` toggle.
 
-**Excludes**: new features, refactors not driven by a captured review item, v0.3 mesh / A2A code. Stay under the 500-line BRANCHING.md limit; over-sized follow-ups split to tracked issues.
+Excludes features, unrelated refactors, v0.3 mesh / A2A code. Stay under the 500-line cap.
 
 #### Scope
 
@@ -551,6 +555,14 @@ Nit:
 
 ---
 
+### PR 8: `polish/v023-logbuffer-shipper` — Optional Post-Merge Polish
+
+**Joint #11a** (before #11b). **Depends on**: PR 6. **Branch**: `polish/v023-logbuffer-shipper`. **Size**: ~250–450 lines. **Status**: **Optional** — skipped items become tracked issues that PR 7 lists as "deferred to issue #X".
+
+Implements Nice-to-Have / Nit / coverage-gap items from [PR 4 review](#from-pr-4-review) + [PR 5 review](#from-pr-5-review) (LRU fast-path, `disk.flush` short critical section, `rateWarned` lifecycle, `O_NOFOLLOW`, `evictIfOverCap` `totalMap`, `strconv.Atoi`, `Seal`/fuzz/WARN-once coverage, structlog filter, sub-second timestamps, `env.go` test). One reviewer surface ([logbuffer](../../internal/observability/logbuffer) + [log_shipper.py](../../agents/observability/log_shipper.py)); folding into PR 7 exceeds the 500-line cap. **Deferred:** CLI/SSE cluster from [PR 6 review](#from-pr-6-review); `rateWarned` Prometheus export. **Checklist:** `Polish-fix (PR #N)` markers cross-linked from PR 7, `BenchmarkBuffer_Append` baseline + delta, `make test` + `make lint` clean.
+
+---
+
 ## Risk and Mitigations
 
 | Risk | Mitigation |
@@ -569,4 +581,5 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 
 - **PR 1 opens** → flip [ROADMAP.md](../../ROADMAP.md) RFC 0018 row to `🚧 Implementing`.
 - **Each PR merges** → update the merged-PR table in ROADMAP and tick the corresponding checklist line in this plan.
+- **PR 8 (optional polish) merges** → add to merged-PR table.
 - **PR 7 merges** → flip RFC 0018 row to `✅ Implemented`; ensure v0.2.3 milestone row reflects logging-side close (full v0.2.3 close depends on RFC 0019 PR 5 also merging — see [0019-pr-plan.md](0019-pr-plan.md)).
