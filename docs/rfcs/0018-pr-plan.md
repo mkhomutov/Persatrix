@@ -357,6 +357,8 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 - [x] `LogService` registered in `cmd/orchestrator/main.go` on the existing agent gRPC server
 - [x] `// TODO(RFC-0009): authenticate` markers in place on both new HTTP handlers
 
+**Merged**: PR [#173](https://github.com/mkhomutov/Persatrix/pull/173) — 2026-04-23
+
 ---
 
 ### PR 6: `feature/v023-cli-logs-rewrite` — Phase 4c: CLI Rewrite + E2E

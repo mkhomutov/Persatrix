@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-23 (RFC 0018 PR 4 merged — #172, log_service.proto + ring buffer + disk store + rate limiter, joint order #8)  
+> **Last updated**: 2026-04-23 (RFC 0018 PR 5 merged — #173, LogService server + agent shipper + REST + SSE, joint order #9)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -98,7 +98,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172); LogService server + REST/SSE wired (0018 PR 5 — #173) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
@@ -212,7 +212,7 @@ v0.2.0 complete
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172); LogService server + REST/SSE wired (0018 PR 5 — #173) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
 
@@ -366,7 +366,7 @@ v0.2.2 complete
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 4/5 |
-| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 4/7 |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 5/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
 
@@ -387,7 +387,7 @@ v0.2.2 complete
   ↓
 0018 PR 4 (Phase 4a — proto/log_service.proto + ring buffer + disk store)  ✅ #172
   ↓
-0018 PR 5 (Phase 4b — LogService server + agent shipper + REST + SSE)
+0018 PR 5 (Phase 4b — LogService server + agent shipper + REST + SSE)  ✅ #173
   ↓
 0018 PR 6 (Phase 4c — CLI rewrite + E2E)
   ↓
@@ -405,7 +405,8 @@ v0.2.2 complete
 | Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 ✅ |
 | Structured logs (Go) | `internal/observability/zapenc/` | — | 0018 PR 2 ✅ |
 | Log↔trace correlation | `internal/observability/` | `agents/observability/` | 0018 PR 3 ✅ |
-| Log storage + shipper | `internal/observability/` | `agents/observability/` | 0018 PR 4 ✅ / PR 5 |
+| Log storage + shipper | `internal/observability/` | `agents/observability/` | 0018 PR 4 ✅ / PR 5 ✅ |
+| LogService REST + SSE endpoints | `internal/server/` | `agents/observability/log_shipper.py` | 0018 PR 5 ✅ |
 | `persatrix logs` CLI rewrite | `cli/src/commands/logs.rs` | — | 0018 PR 6 |
 
 ---
@@ -739,6 +740,7 @@ v0.5.0 complete
 | [#170](https://github.com/mkhomutov/Persatrix/pull/170) | feat(observability): RFC 0019 PR 3 — OTEL metrics (Python + Go) | 0019 (3/5) | 2026-04-23 |
 | [#171](https://github.com/mkhomutov/Persatrix/pull/171) | feat(observability): RFC 0019 PR 4 — Collector pipeline + docker-compose + E2E + schema-parity test | 0019 (4/5) | 2026-04-23 |
 | [#172](https://github.com/mkhomutov/Persatrix/pull/172) | feat(observability): RFC 0018 PR 4 — Phase 4a log_service.proto + ring buffer + disk store + rate limiter | 0018 (4/7) | 2026-04-23 |
+| [#173](https://github.com/mkhomutov/Persatrix/pull/173) | feat(observability): RFC 0018 PR 5 — LogService server + agent shipper + REST + SSE | 0018 (5/7) | 2026-04-23 |
 
 ---
 
