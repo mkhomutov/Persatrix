@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,7 +23,9 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/generated/logpb"
 	"github.com/mkhomutov/persatrix/internal/observability"
+	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/observability/redact"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
@@ -260,14 +263,55 @@ func main() {
 		schedOpts = append(schedOpts, scheduler.WithMetrics(orchMetrics))
 	}
 
+	// RFC 0018 PR 5 — orchestrator-side log buffer + LogService gRPC server.
+	// The buffer is the single sink for both the gRPC ingest path
+	// (LogServiceServer.StreamLogs) and the REST + SSE retrieval path
+	// (handleListLogs / handleStreamLogs).  Failure to construct it is
+	// non-fatal: log endpoints fall back to 501 NOT_IMPLEMENTED so the
+	// rest of the orchestrator still serves requests.
+	logBuf, err := logbuffer.New(logbuffer.ConfigFromEnv(), logger)
+	if err != nil {
+		logger.Warn("failed to initialize log buffer; log endpoints disabled",
+			zap.Error(err))
+		logBuf = nil
+	} else {
+		srvOpts = append(srvOpts, server.WithLogBuffer(logBuf))
+		defer func() {
+			if err := logBuf.Close(); err != nil {
+				logger.Warn("log buffer close failed", zap.Error(err))
+			}
+		}()
+	}
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
-	// 10. Start gRPC server (agent communication)
 
 	// Graceful shutdown on SIGTERM/SIGINT
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// 10. Start gRPC server (agent → orchestrator LogService).  Bound on
+	// the configured --port so it is reachable from the same network the
+	// agent shipper uses for ExecuteTask call-backs.  Wired only when
+	// the buffer initialised — otherwise the agent shipper will simply
+	// retry on RECONNECT and the (currently disabled) endpoints stay 501.
+	var grpcServer *grpc.Server
+	var grpcListener net.Listener
+	if logBuf != nil {
+		grpcAddr := fmt.Sprintf(":%d", *port)
+		lis, err := net.Listen("tcp", grpcAddr)
+		if err != nil {
+			logger.Fatal("failed to listen on gRPC port",
+				zap.String("addr", grpcAddr), zap.Error(err))
+		}
+		grpcListener = lis
+		grpcServer = grpc.NewServer(
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		)
+		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))
+		defer grpcServer.GracefulStop()
+	}
 
 	// 11. Start HTTP server (REST API + SSE streaming)
 	listenAddr := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
@@ -277,6 +321,22 @@ func main() {
 	}
 	// N-46: Track goroutines with WaitGroup so shutdown can drain in-flight work.
 	var wg sync.WaitGroup
+
+	// 10. Start gRPC server (agent → orchestrator LogService) once wg
+	// is declared so the goroutine can register itself for the drain.
+	// Bound on the configured --port so it is reachable from the same
+	// network the agent shipper uses for ExecuteTask call-backs.
+	if grpcServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := grpcServer.Serve(grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				logger.Error("gRPC server terminated with error", zap.Error(err))
+				cancel()
+			}
+		}()
+		logger.Info("gRPC server listening", zap.String("addr", grpcListener.Addr().String()))
+	}
 
 	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
 	wg.Add(1)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -41,6 +42,10 @@ type Server struct {
 
 	// Metrics instruments (optional — nil-safe).  Wired in RFC 0019 PR 3.
 	metrics *obsmetrics.Instruments
+
+	// Log buffer (optional — nil-safe).  Wired in RFC 0018 PR 5.
+	// When unset, the log REST + SSE endpoints return 501 NOT_IMPLEMENTED.
+	logBuffer *logbuffer.Buffer
 }
 
 // ServerOption configures optional Server dependencies.
@@ -74,6 +79,15 @@ func WithHandlerWrapper(wrapper func(http.Handler) http.Handler) ServerOption {
 func WithMetrics(inst *obsmetrics.Instruments) ServerOption {
 	return func(s *Server) {
 		s.metrics = inst
+	}
+}
+
+// WithLogBuffer injects the orchestrator log buffer.  When unset the
+// log REST + SSE endpoints return 501 NOT_IMPLEMENTED.  Wired in
+// cmd/orchestrator/main.go alongside the gRPC LogService server.
+func WithLogBuffer(buf *logbuffer.Buffer) ServerOption {
+	return func(s *Server) {
+		s.logBuffer = buf
 	}
 }
 
@@ -142,7 +156,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/v1/agents/{id}", s.handleDeleteAgent)
 
 	// Stub endpoints — deferred to future RFCs (Phase 3)
-	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleGetLogs)
+	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleListLogs)
+	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs/stream", s.handleStreamLogs)
 
 	// Cost summary endpoint (RFC 0006 PR 4b)
 	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummaryImpl)

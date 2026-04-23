@@ -1289,10 +1289,14 @@ func TestDeleteAgentInternalError(t *testing.T) {
 
 func TestGetLogsStub(t *testing.T) {
 	srv, _ := testServer(t)
+	// Without a logbuffer wired in, the endpoint reports
+	// NOT_IMPLEMENTED (RFC 0018 PR 5: the buffer is now optional
+	// via WithLogBuffer; without it the endpoint surfaces the
+	// configuration gap rather than silently returning [] ).
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/any-id/logs", nil)
 	assert.Equal(t, http.StatusNotImplemented, rec.Code)
 	assert.Contains(t, rec.Body.String(), "NOT_IMPLEMENTED")
-	assert.Contains(t, rec.Body.String(), "not implemented in v0.1")
+	assert.Contains(t, rec.Body.String(), "log buffer not configured")
 }
 
 func TestGetCostSummary_NoCostReporter(t *testing.T) {

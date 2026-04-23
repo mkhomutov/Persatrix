@@ -351,11 +351,11 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `go test ./internal/server/... -v -race` passes
-- [ ] `pytest agents/tests/test_log_shipper.py -v` passes
-- [ ] `handleGetLogs` stub removed from `internal/server/stub_handlers.go`
-- [ ] `LogService` registered in `cmd/orchestrator/main.go` on the existing agent gRPC server
-- [ ] `// TODO(RFC-0009): authenticate` markers in place on both new HTTP handlers
+- [x] `go test ./internal/server/... -v -race` passes
+- [x] `pytest agents/tests/test_log_shipper.py -v` passes
+- [x] `handleGetLogs` stub removed from `internal/server/stub_handlers.go`
+- [x] `LogService` registered in `cmd/orchestrator/main.go` on the existing agent gRPC server
+- [x] `// TODO(RFC-0009): authenticate` markers in place on both new HTTP handlers
 
 ---
 

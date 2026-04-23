@@ -228,6 +228,34 @@ def _reorder_keys(
     return ordered
 
 
+def _ship_to_orchestrator(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Enqueue the (post-reorder) record onto the active log shipper.
+
+    No-op when no shipper is installed (the common case at process
+    startup before :func:`agents.observability.log_shipper.set_active_shipper`
+    runs, and during tests).  Imported lazily so :mod:`logging` does
+    not pull in :mod:`grpc` for callers that never start the shipper
+    (e.g. unit tests).
+
+    Failures are swallowed and counted only by the shipper itself —
+    the structlog chain must never raise.
+    """
+    try:
+        from .log_shipper import get_active_shipper
+    except Exception:  # noqa: BLE001 — never block local emission.
+        return event_dict
+    shipper = get_active_shipper()
+    if shipper is None:
+        return event_dict
+    try:
+        shipper.enqueue(dict(event_dict))
+    except Exception:  # noqa: BLE001 — same reason as above.
+        pass
+    return event_dict
+
+
 def _build_processors() -> list[structlog.types.Processor]:
     """Shared processor chain — used both by ``structlog.configure()`` (for
     structlog-native callers) and by ``ProcessorFormatter.foreign_pre_chain``
@@ -248,6 +276,9 @@ def _build_processors() -> list[structlog.types.Processor]:
         _apply_redactor,
         # 5. Schema field order.
         _reorder_keys,
+        # 6. Fan out to the orchestrator log shipper (RFC 0018 PR 5).
+        #    No-op when no shipper is installed (tests, CLI).
+        _ship_to_orchestrator,
     ]
 
 
