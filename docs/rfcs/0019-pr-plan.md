@@ -298,6 +298,8 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [x] README OTEL paragraph mentions logs + traces + metrics + Collector
 - [x] CHANGELOG v0.2.3 entry mentions the new Collector + Prometheus + Loki services in `docker-compose.yaml`
 
+**Merged**: PR [#171](https://github.com/mkhomutov/Persatrix/pull/171) — 2026-04-23
+
 ---
 
 ### PR 5: `feature/v023-rfc0019-followups-close` — Review Follow-Ups + RFC Close

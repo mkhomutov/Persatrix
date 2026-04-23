@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-23 (RFC 0019 PR 4 opened — Collector + docker-compose + E2E + schema-parity test, joint order #7)  
+> **Last updated**: 2026-04-23 (RFC 0019 PR 4 merged — #171, Collector + docker-compose + E2E + schema-parity test, joint order #7)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 in review — joint order #7)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -365,7 +365,7 @@ v0.2.2 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 3/5 |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 4/5 |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 3/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
@@ -383,7 +383,7 @@ v0.2.2 complete
   ↓
 0019 PR 3 (Phase 3a — metrics)  ✅ #170
   ↓
-0019 PR 4 (Phase 3b — Collector + docker-compose + E2E + schema-parity test)
+0019 PR 4 (Phase 3b — Collector + docker-compose + E2E + schema-parity test)  ✅ #171
   ↓
 0018 PR 4 (Phase 4a — proto/log_service.proto + ring buffer + disk store)
   ↓
@@ -401,7 +401,7 @@ v0.2.2 complete
 | OTEL traces + gRPC propagation | `internal/observability/` | `agents/observability/tracing.py` | 0019 PR 1 ✅ |
 | Semantic spans + Span Links | `internal/observability/` | `agents/observability/` | 0019 PR 2 ✅ |
 | OTLP metrics | `internal/observability/metrics/` | `agents/observability/metrics.py` | 0019 PR 3 ✅ |
-| Collector pipeline | `config/observability/` | — | 0019 PR 4 |
+| Collector pipeline | `config/observability/` | — | 0019 PR 4 ✅ |
 | Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 ✅ |
 | Structured logs (Go) | `internal/observability/zapenc/` | — | 0018 PR 2 ✅ |
 | Log↔trace correlation | `internal/observability/` | `agents/observability/` | 0018 PR 3 ✅ |
@@ -737,6 +737,7 @@ v0.5.0 complete
 | [#167](https://github.com/mkhomutov/Persatrix/pull/167) | feat(observability): RFC 0019 PR 2 — semantic spans + Span Links + log↔trace coordination | 0019 (2/5) | 2026-04-23 |
 | [#168](https://github.com/mkhomutov/Persatrix/pull/168) | feat(observability): RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs | 0018 (3/7) | 2026-04-23 |
 | [#170](https://github.com/mkhomutov/Persatrix/pull/170) | feat(observability): RFC 0019 PR 3 — OTEL metrics (Python + Go) | 0019 (3/5) | 2026-04-23 |
+| [#171](https://github.com/mkhomutov/Persatrix/pull/171) | feat(observability): RFC 0019 PR 4 — Collector pipeline + docker-compose + E2E + schema-parity test | 0019 (4/5) | 2026-04-23 |
 
 ---
 
