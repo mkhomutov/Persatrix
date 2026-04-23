@@ -303,6 +303,8 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 - [ ] All six env-var knobs documented in `docs/observability.md` (operations section appended in PR 6)
 - [x] Default `PERSATRIX_LOGBUFFER_DIR=data/logs` is created with `0700` umask
 
+**Merged**: PR [#172](https://github.com/mkhomutov/Persatrix/pull/172) — 2026-04-23
+
 ---
 
 ### PR 5: `feature/v023-logbuffer-service-and-endpoints` — Phase 4b: `LogService` Server + Agent Shipper + REST + SSE
