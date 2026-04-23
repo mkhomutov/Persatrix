@@ -171,7 +171,7 @@ class RelationshipMemory:
 
         insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
 
-        attrs = {
+        attrs: dict[str, Any] = {
             "agent.id": self._agent_id,
             "participant.id": other_id,
             "delta.kind": "trust",

@@ -51,7 +51,7 @@ from agents.tools.registry import clear_registry, tool
 
 
 @pytest.fixture
-def exporter() -> InMemorySpanExporter:
+def exporter() -> Iterator[InMemorySpanExporter]:
     """Fresh InMemorySpanExporter wired into the active tracer provider.
 
     Uses the SDK ``TracerProvider`` if one is installed; otherwise installs
