@@ -297,11 +297,13 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/logbuffer/... -v -race -cover` passes
-- [ ] `make proto` regenerates Go + Python stubs without diffs left over
-- [ ] `proto/log_service.proto` matches [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming)
+- [x] `go test ./internal/observability/logbuffer/... -v -race -cover` passes
+- [x] `make proto` regenerates Go + Python stubs without diffs left over
+- [x] `proto/log_service.proto` matches [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming)
 - [ ] All six env-var knobs documented in `docs/observability.md` (operations section appended in PR 6)
-- [ ] Default `PERSATRIX_LOGBUFFER_DIR=data/logs` is created with `0700` umask
+- [x] Default `PERSATRIX_LOGBUFFER_DIR=data/logs` is created with `0700` umask
+
+**Merged**: PR [#172](https://github.com/mkhomutov/Persatrix/pull/172) — 2026-04-23
 
 ---
 
@@ -437,8 +439,31 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 ##### From PR 4 review
 
-<!-- TODO: populate after PR 4 review merges -->
-*(populated during PR 4 review)*
+- **`Buffer.Append` always takes the LRU write lock** ([`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) `Append` line 244 → [`lru.go`](../../internal/observability/logbuffer/lru.go) `getOrCreateRing` lines 6–18). Every admission mutates `b.lru` under a global write lock — a single point of contention once PR 5 wires the gRPC server (default cap 50 × 1000 admissions/sec ≈ 50k/sec). Add an RWLock fast-path: `RLock` → lookup → if found, perform LRU touch via an `atomic.Uint64` "last-touch" timestamp evaluated lazily by `evictLocked`. Land before PR 5 merges.
+- **`disk.flush` holds `d.mu` across fsync and eviction** ([`internal/observability/logbuffer/disk.go`](../../internal/observability/logbuffer/disk.go) lines 145–202). `d.mu` is held across `Sync()`, parent-dir `Sync()`, and `evictIfOverCap` (which can `os.RemoveAll` multiple directories). On a busy filesystem this serialises **all** flushes globally. Reserve the next sequence number under `d.mu` (short critical section), then perform the IO unlocked; or move to a per-execution sub-lock.
+- **`rateWarned` map grows unboundedly** ([`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) lines 165–166, `warnRateOnce` lines 374–388). The "single throttled WARN per execution" gate is a `map[string]struct{}` that is never pruned; every distinct execution ID that ever tripped the limiter is retained for the orchestrator's lifetime. Either prune entries when the corresponding ring is evicted from `b.rings`, or move the gate onto the `executionRing` itself so it dies with the ring.
+- **Add `O_NOFOLLOW` to flush open** ([`internal/observability/logbuffer/disk.go`](../../internal/observability/logbuffer/disk.go) line 165). 0700 dir mode mitigates cross-user attack, but a same-UID local actor pre-creating `<DIR>/<exec_id>/<seq>.jsonl.tmp` as a symlink to e.g. `~/.ssh/authorized_keys` would have that target truncated. Defence-in-depth costs nothing — refuse symlinked targets on POSIX.
+- **`evictIfOverCap` re-walks `os.ReadDir` instead of using `totalMap`** ([`internal/observability/logbuffer/disk.go`](../../internal/observability/logbuffer/disk.go) lines 277–319). The function re-reads the directory and re-computes mtimes on every over-cap flush even though `d.totalMap` is maintained authoritatively, with a small TOCTOU window between concurrent flushes. Use the maintained `totalMap` keys + a small in-memory mtime cache populated at `scan()` time.
+
+Nice-to-have / nits:
+
+- **Use `strconv.Atoi` instead of `fmt.Sscanf("%d", ...)`** in [`disk.go`](../../internal/observability/logbuffer/disk.go) `scan` line 81 and `read` line 244, plus an `if seq < 1 { continue }` guard, to deterministically reject externally-dropped junk filenames (whitespace, negative numbers).
+- **Make the per-execution sequence counter monotonic across evictions** ([`disk.go`](../../internal/observability/logbuffer/disk.go) `flush` line 154). After `evictIfOverCap` deletes `d.nextSeq[id]`, a re-created execution restarts at `seq=1`. Functionally fine; a strictly monotonic counter (lifetime of the buffer) makes support diagnostics clearer.
+- **Add a `TODO(rfc-0018-pr-5)` next to `Buffer.Close`** ([`buffer.go`](../../internal/observability/logbuffer/buffer.go) lines 313–319) noting the explicit teardown / final-flush path lands with the gRPC server in PR 5.
+- **Document that `tokenBucket.rate` is write-once** with a one-line comment in [`ratelimit.go`](../../internal/observability/logbuffer/ratelimit.go) at the `if t.rate == 0` fast-path (line 42), so the racy short-circuit can't be broken by a future mutator.
+- **Add a `TODO(rfc-0018-pr-5): export as ErrInvalidExecutionID`** next to `errInvalidExecutionID` in [`buffer.go`](../../internal/observability/logbuffer/buffer.go) line 24 for grep-discoverability of the planned `Err*` surface.
+
+Coverage gaps to address in PR 5 or its prep:
+
+- Test for `Seal` propagating a `disk.flush` error and **not** calling `markFlushed` (ring stays LRU-protected). Inject failure via a read-only `Dir`.
+- Direct unit test of `disk.flush("../bad", ...)` to lock in the defence-in-depth `validExecutionID` re-check.
+- Test that the rate-limit WARN is emitted **exactly once per execution** using `zaptest.NewLogger` + a `WarnLevel` observer.
+- `go test -fuzz` target on `validExecutionID` (security boundary) + `filepath.Join` round-trip.
+- Test that flush succeeds even if the parent directory `Sync()` fails (best-effort contract).
+
+Out of scope for PR 4 follow-up (deferred to their own PRs):
+
+- The disk layout deviation from RFC § E (per-execution dir + per-seq file) is now de-facto contract — capture as a one-line note in the RFC § E text when [RFC 0018](0018-structured-logging-framework.md) is updated for close.
 
 ##### From PR 5 review
 

@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package persatrix.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/mkhomutov/persatrix/internal/generated/logpb";
+
+// ─── Log Streaming (agent → orchestrator) ──────────────────
+// Agent log entries reach the orchestrator's per-execution ring
+// buffer over a long-lived bidirectional gRPC stream. See
+// docs/rfcs/0018-structured-logging-framework.md § E.
+
+service LogService {
+  // Agent → Orchestrator: stream log entries in batches.
+  // Orchestrator responds with periodic acks for backpressure
+  // and to advance the shipper's high-water mark.
+  rpc StreamLogs(stream LogBatch) returns (stream LogAck);
+}
+
+message LogBatch {
+  // TODO(rfc-0018-pr-5): the wire path must enforce both
+  // grpc.MaxRecvMsgSize and a per-batch entries cap (≈1024) before
+  // iterating, and validate LogEntry.attributes payload size — the
+  // ring buffer's per-execution rate limiter is a per-entry control
+  // and offers no protection against a single oversized batch.
+  repeated LogEntry entries = 1;
+  // Batch-level agent_id; avoids per-entry repetition when all
+  // entries in a batch share the same agent (the common shipper
+  // case). Per-entry agent_id (LogEntry.agent_id) takes precedence
+  // when both are set.
+  string agent_id = 2;
+}
+
+message LogEntry {
+  string schema_version = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string level = 3;
+  string service_kind = 4;
+  string service_instance = 5;
+  string service_role = 6;
+  string message = 7;
+  string execution_id = 8;
+  string step_id = 9;
+  string agent_id = 10;
+  string request_id = 11;
+  string trace_id = 12;
+  string span_id = 13;
+  google.protobuf.Struct attributes = 14;
+  Source source = 15;
+
+  message Source {
+    string file = 1;
+    uint32 line = 2;
+    string function = 3;
+  }
+}
+
+message LogAck {
+  // Monotonically-increasing per-stream sequence number through
+  // which the orchestrator has accepted entries. The shipper uses
+  // this to free already-acked entries from its in-memory queue.
+  uint64 received_through_seq = 1;
+}
