@@ -371,8 +371,26 @@ Captured from the PR #167 deep review. All round-1 *Must Fix* items (canonical `
 
 ##### From PR 4 review
 
-<!-- TODO: populate after PR 4 review merges -->
-*(populated during PR 4 review)*
+###### Should-Fix
+
+- **Should Fix — readiness gating for the new compose observability services.** Applied for `prometheus` (`/-/ready`) and `loki` (`/ready`) in [docker-compose.yaml](../../docker-compose.yaml). **Deferred for `otel-collector`**: the upstream `otel/opentelemetry-collector-contrib` image is distroless (no shell / `wget` / `nc` / `curl`), so a Docker `CMD` healthcheck cannot be authored without rebuilding the image or adding a probe sidecar. Without a Collector healthcheck, depending services cannot use `condition: service_healthy`, and a cold-start `docker compose up -d` may briefly race the OTLP receiver bind and drop the first batch (visible as a one-off non-zero `agent.observability.{spans,logs}.dropped` on first boot). Steady-state operation is unaffected. Follow-up options: (a) ship a thin Collector image that adds `wget`, (b) add a sidecar probe container, or (c) enable the `health_check` extension and accept the image extension cost.
+- **Should Fix — document the Jaeger OTLP host-port unpublish as a breaking dev change.** Already landed in [CHANGELOG.md](../../CHANGELOG.md) "⚠️ Operator-Visible Changes" and [docs/observability.md](../../docs/observability.md) § 11.1. No further action.
+
+###### Nice-to-Have
+
+- **Nice-to-Have — assert tail-sampling policies in the E2E.** Submit one error trace and verify Jaeger has it; submit N untagged ticks and verify ~1 % retention over the run. Current E2E would pass even if `tail_sampling` were misconfigured to keep everything.
+- **Nice-to-Have — pin a `loki-config.yaml` next to `prometheus.yaml`.** Today Loki uses the `grafana/loki:3.1.0` image default; OTLP receiver behaviour will silently shift on future image bumps that change the default config. Mounting an explicit config locks the contract.
+- **Nice-to-Have — promote `_LOG_TO_SPAN_KEY` to a production constant.** [tests/integration/test_observability_schema_parity.py](../../tests/integration/test_observability_schema_parity.py) currently keeps the log → span attribute mapping table as a test-local literal; the parity assertion only catches drift between two literals in the same file. Move to e.g. `agents/observability/_schema.py` and assert against it.
+- **Nice-to-Have — drop the `debug` exporter from steady-state pipelines.** [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml) wires `debug` into traces / metrics / logs; in long-running dev sessions it floods `docker compose logs otel-collector`. Gate behind a profile or a `--set` override once operators have alternative ways to debug a missing backend.
+- **Nice-to-Have — assert `agent.observability.{spans,logs}.dropped` stay at zero across an E2E round-trip.** Locks down the back-pressure invariant from [docs/observability.md](../../docs/observability.md) § 11.5 and would catch the cold-start race noted above.
+- **Nice-to-Have — wire `requires_compose` into a separate optional CI job** (e.g. `workflow_dispatch`) so the suite does not bit-rot.
+- **Nice-to-Have — switch `captured_stderr` to a `WriteLoggerFactory(file=buf)` rewire** in `tests/integration/test_log_trace_correlation.py` so the fixture does not depend on `agents/observability/logging.py`'s `sys` import style.
+
+###### Nits
+
+- **Nit — tighten the `CHANGELOG.md` file-size exemption comment** in [scripts/checks/file_size.py](../../scripts/checks/file_size.py) to reference `cliff.toml` / the release process so future readers know where the trim happens. Applied in this PR.
+- **Nit — note the upstream-Prometheus exemplar-storage requirement** next to the `prometheus` exporter in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml). Already enabled in compose; closes the loop for forkers. Applied in this PR.
+- **Nit — move the four backend-reachability probes out of the `requires_compose` marker** (or add an import smoke check elsewhere) so a syntax / import regression in [tests/integration/test_observability_e2e.py](../../tests/integration/test_observability_e2e.py) shows up in the default `make test-integration` run instead of bit-rotting until someone opts in.
 
 ##### RFC close
 

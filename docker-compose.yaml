@@ -105,6 +105,19 @@ services:
   # RFC 0019 § H — central tail-sampling pipeline. Traces fan out to Jaeger,
   # metrics to Prometheus, logs to Loki. Reference config under
   # config/observability/otel-collector.yaml.
+  #
+  # NOTE(review-PR171, Should-Fix #1): no `healthcheck:` is declared here.
+  # The upstream image (`otel/opentelemetry-collector-contrib`) is distroless
+  # — no shell, `wget`, `curl`, or `nc` binary is present — so a Docker
+  # CMD/CMD-SHELL probe cannot be authored without rebuilding the image or
+  # adding a sidecar. Without a healthcheck, depending services cannot use
+  # `condition: service_healthy`, which means a cold-start `docker compose
+  # up -d` may briefly race the OTLP receiver bind and drop the first batch
+  # (visible as a one-off non-zero `agent.observability.{spans,logs}.dropped`
+  # on first boot). Steady-state operation is unaffected: the OTLP exporters
+  # batch + retry, and `restart: unless-stopped` recovers from the rare
+  # post-start crash. Tracked as a follow-up in
+  # docs/rfcs/0019-pr-plan.md "From PR 4 review".
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.103.1
     restart: unless-stopped
@@ -145,6 +158,16 @@ services:
       - ./config/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
     ports:
       - "9091:9090"     # Prometheus UI (host port shifted to avoid orchestrator gRPC :9090)
+    # NOTE(review-PR171, Should-Fix #1): readiness probe lets the Prometheus
+    # exporter scrape loop quiesce before E2E tests query against /api/v1.
+    # The `/-/ready` endpoint flips to 200 once the TSDB and config have
+    # loaded; `wget` ships in the busybox-based prom/prometheus image.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       - otel-collector
 
@@ -155,6 +178,15 @@ services:
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
       - "3100:3100"     # Loki HTTP API (push + query)
+    # NOTE(review-PR171, Should-Fix #1): probe Loki's `/ready` so dependent
+    # tests / log-shippers do not race ingester startup. `wget` is bundled
+    # in the upstream `grafana/loki` image (BusyBox base).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   workspace:

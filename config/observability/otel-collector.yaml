@@ -74,6 +74,11 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:8889
     # Enable exemplars so histogram samples carry the originating trace_id.
+    # NOTE: exemplar passthrough only reaches Prometheus query results when
+    # the upstream Prometheus is started with `--enable-feature=exemplar-storage`
+    # (the dev compose stack already does — see docker-compose.yaml `prometheus`
+    # service `command:` block). Forks pointing at their own Prometheus must
+    # enable the feature flag or exemplars will be silently dropped on scrape.
     enable_open_metrics: true
 
   # Logs -> Loki via the OTLP HTTP push endpoint.
