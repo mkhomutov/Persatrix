@@ -16,7 +16,11 @@ from typing import Any, Protocol
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from .observability.spans import LLM_CALL_SPAN, gen_ai_attributes
+from .observability.spans import (
+    LLM_CALL_SPAN,
+    STOP_REASON_TO_GEN_AI,
+    gen_ai_attributes,
+)
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -83,6 +87,12 @@ class LLMResponse:
 class LLMProvider(Protocol):
     """Protocol for LLM provider implementations."""
 
+    # Stable identifier emitted as the OTEL ``gen_ai.system`` attribute
+    # (``"anthropic"``, ``"openai"``, …).  Declared here so call sites do
+    # not have to derive it from ``type().__name__`` (which silently
+    # produces wrong values for test doubles like ``AsyncMock``).
+    name: str
+
     async def create_message(
         self,
         *,
@@ -116,6 +126,8 @@ _ANTHROPIC_STOP_MAP: dict[str, StopReason] = {
 
 class AnthropicProvider:
     """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
+
+    name = "anthropic"
 
     def __init__(self, api_key: str | None = None):
         import anthropic
@@ -235,6 +247,8 @@ class OpenAIProvider:
     Also supports any OpenAI-compatible API (Ollama, vLLM, Together, Groq,
     LM Studio) via base_url override.
     """
+
+    name = "openai"
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
         import openai
@@ -384,7 +398,18 @@ class LLMClient:
         (RFC 0019 § D / § E).
         """
         model = str(kwargs.get("model", ""))
-        system_name = type(self._provider).__name__.replace("Provider", "").lower()
+        # Prefer the provider's declared ``name`` attribute (Protocol
+        # contract).  Fall back to a lower-cased class-name derivation only
+        # when the attribute is missing or not a string — this keeps test
+        # doubles (``AsyncMock``) working without surfacing them as the
+        # ``gen_ai.system`` value in production traces.
+        provider_name = getattr(self._provider, "name", None)
+        if isinstance(provider_name, str) and provider_name:
+            system_name = provider_name
+        else:
+            system_name = (
+                type(self._provider).__name__.replace("Provider", "").lower()
+            )
         with _tracer.start_as_current_span(
             LLM_CALL_SPAN,
             attributes=gen_ai_attributes(
@@ -398,14 +423,24 @@ class LLMClient:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
-            for k, v in gen_ai_attributes(
-                system=system_name,
-                request_model=model,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                finish_reasons=[response.stop_reason.value],
-            ).items():
-                span.set_attribute(k, v)
+            # Translate Persatrix-internal StopReason values to the OTEL
+            # Gen-AI canonical vocabulary so vendor backends render the
+            # ``gen_ai.response.finish_reasons`` attribute correctly.
+            # Unknown values fall through to ``"error"`` per the spec's
+            # generic bucket — this should never fire today (the enum is
+            # closed) but future StopReason additions degrade gracefully.
+            canonical_reason = STOP_REASON_TO_GEN_AI.get(
+                response.stop_reason.value, "error",
+            )
+            span.set_attributes(
+                gen_ai_attributes(
+                    system=system_name,
+                    request_model=model,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    finish_reasons=[canonical_reason],
+                ),
+            )
             return response
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:

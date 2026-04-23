@@ -393,9 +393,13 @@ class _LLMPersonaAgent(
             attributes={
                 "agent.id": self.agent_id,
                 "event.type": event.event_type.value,
-                "event.id": event.message_id or "",
             },
         ) as span:
+            # Only set ``event.id`` when the event actually carries a
+            # message_id — emitting an empty-string attribute pollutes
+            # span backends and makes filtering by id harder.
+            if event.message_id:
+                span.set_attribute("event.id", event.message_id)
             span.add_event("received")
             async with self._lock:
                 span.add_event("queued")

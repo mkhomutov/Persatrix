@@ -41,6 +41,21 @@ LLM_CALL_SPAN = "agent.llm.call"
 TOOL_EXECUTE_SPAN = "agent.tool.execute"
 SUBAGENT_SPAWN_SPAN = "agent.subagent.spawn"
 
+# ─── OTEL Gen-AI canonical finish-reason values ─────────────────────────────
+#
+# The OTEL Gen-AI semantic-conventions spec defines a closed vocabulary for
+# ``gen_ai.response.finish_reasons`` (``stop`` / ``length`` / ``tool_calls``
+# / ``content_filter`` / ``error``).  Persatrix's internal :class:`StopReason`
+# enum uses provider-flavoured names (``end_turn`` / ``max_tokens`` /
+# ``tool_use``) which would silently render as unrecognised values in vendor
+# backends.  Translation happens in :mod:`agents.llm_client` at emission time;
+# the mapping lives here so the spec coupling is in one place.
+STOP_REASON_TO_GEN_AI: dict[str, str] = {
+    "end_turn": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+}
+
 # ─── Tool-payload capture (Gen-AI tracing opt-in) ───────────────────────────
 
 _PAYLOAD_ENV = "PERSATRIX_TRACE_TOOL_PAYLOADS"
@@ -130,6 +145,7 @@ __all__ = [
     "PERSONA_TICK_SPAN",
     "RELATIONSHIP_LOOKUP_SPAN",
     "RELATIONSHIP_UPDATE_SPAN",
+    "STOP_REASON_TO_GEN_AI",
     "SUBAGENT_SPAWN_SPAN",
     "TOOL_EXECUTE_SPAN",
     "apply_redaction",

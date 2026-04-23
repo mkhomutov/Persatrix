@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
@@ -182,40 +183,49 @@ class EpisodicMemory:
                 "agent.id": self._agent_id,
                 "episode.kind": "episode",
             },
-        ):
-            db = self._ensure_db()
-            if not summary or not summary.strip():
-                raise ValueError("summary must not be empty")
-            # Clamp importance to [0.0, 1.0] — the scoring formula assumes
-            # non-negative values; negative importance would invert ranking.
-            if not 0.0 <= importance <= 1.0:
-                logger.warning(
-                    "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
+        ) as span:
+            # Mirror the LLM/tool span error contract: validation /
+            # persistence failures must mark the span ERROR before
+            # propagating the exception, otherwise operators searching
+            # traces for failed remembers see them as "successful".
+            try:
+                db = self._ensure_db()
+                if not summary or not summary.strip():
+                    raise ValueError("summary must not be empty")
+                # Clamp importance to [0.0, 1.0] — the scoring formula assumes
+                # non-negative values; negative importance would invert ranking.
+                if not 0.0 <= importance <= 1.0:
+                    logger.warning(
+                        "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
+                    )
+                    importance = max(0.0, min(1.0, importance))
+                episode_id = str(uuid.uuid4())
+                now = time.time()
+                await db.execute(
+                    """
+                    INSERT INTO episodes
+                        (id, agent_id, summary, context_json, outcome,
+                         importance, access_count, last_accessed_at,
+                         tags_json, created_at, compressed_at, compression_level)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0)
+                    """,
+                    (
+                        episode_id,
+                        self._agent_id,
+                        summary,
+                        json.dumps(context),
+                        outcome,
+                        importance,
+                        json.dumps(tags or []),
+                        now,
+                    ),
                 )
-                importance = max(0.0, min(1.0, importance))
-            episode_id = str(uuid.uuid4())
-            now = time.time()
-            await db.execute(
-                """
-                INSERT INTO episodes
-                    (id, agent_id, summary, context_json, outcome,
-                     importance, access_count, last_accessed_at,
-                     tags_json, created_at, compressed_at, compression_level)
-                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0)
-                """,
-                (
-                    episode_id,
-                    self._agent_id,
-                    summary,
-                    json.dumps(context),
-                    outcome,
-                    importance,
-                    json.dumps(tags or []),
-                    now,
-                ),
-            )
-            await db.commit()
-            return episode_id
+                await db.commit()
+                return episode_id
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
 
     async def recall(
         self,
@@ -260,9 +270,13 @@ class EpisodicMemory:
                 "agent.id": self._agent_id,
                 "query.kind": "recall",
                 "query.empty": not query,
-                "min_score": -1.0 if min_score is None else min_score,
             },
         ) as span:
+            # Emit ``min_score`` only when the caller set one — overloading
+            # the numeric range with a ``-1.0`` sentinel made the attribute
+            # ambiguous to dashboards and to operators reading raw spans.
+            if min_score is not None:
+                span.set_attribute("min_score", min_score)
             db = self._ensure_db()
 
             if query and self._fts5:

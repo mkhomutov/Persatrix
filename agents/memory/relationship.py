@@ -208,10 +208,18 @@ class RelationshipMemory:
             row = await cursor.fetchone()
             await db.commit()
 
+            # Set ``trust.new`` on every code path so the most diagnostic
+            # attribute is always present.  When ``RETURNING`` yields no
+            # row the INSERT branch fired, so the trust value is the
+            # newly-inserted ``insert_trust`` (no ``MAX``/``MIN`` clamp
+            # applies on insert because we already clamped above).
+            if row is None:
+                new_trust = insert_trust
+            else:
+                new_trust = float(row[0])
+            span.set_attribute("trust.new", new_trust)
             if row is None:
                 return insert_trust
-            new_trust: float = row[0]
-            span.set_attribute("trust.new", new_trust)
             logger.debug(
                 "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
                 self._agent_id,

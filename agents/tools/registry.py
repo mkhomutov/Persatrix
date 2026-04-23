@@ -10,6 +10,7 @@ Tools are typed functions that agents can invoke. Three tiers:
 import functools
 import inspect
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
@@ -17,14 +18,23 @@ from typing import Any, get_type_hints
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..observability.redact import NoopRedactor
 from ..observability.spans import (
     TOOL_EXECUTE_SPAN,
     apply_redaction,
+    get_redactor,
     tool_payload_capture_mode,
 )
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
+
+# Process-wide latch so the ``full``-mode-with-no-op-redactor warning fires
+# at most once.  Operators who opt in to full payload capture without first
+# wiring a real redactor risk leaking secrets into trace backends; the
+# CHANGELOG documents the hazard but a runtime warning catches the case
+# without requiring CHANGELOG comprehension.
+_warned_full_mode_noop_redactor = False
 
 
 @dataclass
@@ -169,6 +179,22 @@ def tool(
                                 type(value).__name__,
                             )
                     else:  # full
+                        global _warned_full_mode_noop_redactor
+                        if (
+                            not _warned_full_mode_noop_redactor
+                            and isinstance(get_redactor(), NoopRedactor)
+                        ):
+                            warnings.warn(
+                                "PERSATRIX_TRACE_TOOL_PAYLOADS=full is active "
+                                "but the installed redactor is NoopRedactor — "
+                                "raw tool payloads (potentially secrets) will "
+                                "be written to span attributes. Install a real "
+                                "redactor via "
+                                "agents.observability.spans.set_redactor() "
+                                "before enabling 'full' mode in production.",
+                                stacklevel=2,
+                            )
+                            _warned_full_mode_noop_redactor = True
                         redacted = apply_redaction(payload)
                         for key, value in redacted.items():
                             span.set_attribute(

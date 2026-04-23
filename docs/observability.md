@@ -235,16 +235,42 @@ the same `agents.observability.spans.set_redactor()` hook.
 
 ### 10.5 Persatrix-specific attribute namespace
 
+Persatrix uses **two** attribute conventions side-by-side, mirroring
+[RFC 0019 § E](rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-conventions):
+
+1. **Bare component-namespaced keys** — `agent.id`, `event.type`,
+   `episode.kind`, `tool.name`, `tool.success`, `participant.id`,
+   `delta.kind`, `delta.value`, `trust.new`, `subagent.role`,
+   `subagent.status`, `tick.reason`, `link.kind`, `query.kind`,
+   `query.empty`, `result.count`, `min_score`, `actions.count`,
+   `tool.arguments.<name>` / `tool.arguments.<name>.type`. These describe
+   the *local* span subject (the agent, the tool call, the relationship
+   row) and follow the OTEL convention of using a component prefix
+   (`agent.`, `tool.`, `event.`) without a vendor namespace. Collision
+   with future upstream OTEL keys is mitigated by the schema-version
+   pin (`schema_url=https://persatrix.dev/schemas/observability/1.0.0`)
+   — a future OTEL key under one of these prefixes can be migrated in
+   one schema bump rather than spreading vendor noise across every span
+   today.
+
+2. **`persatrix.*`-prefixed cross-cutting keys** — reserved for
+   workflow-context fields propagated via W3C Baggage across process
+   boundaries, where the prefix prevents collision with arbitrary
+   third-party span producers in the same trace:
+
 | Key | Type | Notes |
 |-----|------|-------|
-| `agent.id` | string | Source agent for the span |
 | `persatrix.execution_id` | string | Set on spans inside a workflow execution (via Baggage from RFC 0019 PR 1) |
 | `persatrix.step_id` | string | Set on spans inside a workflow step |
 | `persatrix.workflow_id` | string | Workflow definition ID |
 
 `gen_ai.*` attributes use the upstream OTEL Gen-AI semantic-convention
 namespace verbatim — no Persatrix-private renames — so vendor backends
-render Persatrix LLM traces correctly out of the box.
+render Persatrix LLM traces correctly out of the box. The
+`gen_ai.response.finish_reasons` attribute emits the canonical OTEL
+vocabulary (`stop` / `length` / `tool_calls` / `content_filter` /
+`error`); Persatrix's internal `StopReason` enum is translated at the
+span emission site (see `agents.observability.spans.STOP_REASON_TO_GEN_AI`).
 
 ### 10.6 Correlated debugging walkthrough
 

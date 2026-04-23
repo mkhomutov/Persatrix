@@ -27,6 +27,10 @@ connections in their own ``close()`` methods (see ``EpisodicMemory.close``,
 
 from __future__ import annotations
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 def daemonize_aiosqlite_workers() -> None:
     """Patch ``aiosqlite.core.Connection.__init__`` so its worker thread is daemon.
@@ -51,6 +55,16 @@ def daemonize_aiosqlite_workers() -> None:
         thread = getattr(self, "_thread", None)
         if thread is not None:
             thread.daemon = True
+        else:
+            # Defensive: aiosqlite refactored away the private ``_thread``
+            # attribute.  Surface a warning instead of silently no-opping
+            # so the next pytest hang gets a hint at the root cause.
+            _logger.warning(
+                "aiosqlite.Connection has no '_thread' attribute — "
+                "daemonisation patch is a no-op. The pytest-hang guard "
+                "in tests/_test_infra.py needs updating for the current "
+                "aiosqlite version.",
+            )
 
     _patched_init._persatrix_daemon_patched = True  # type: ignore[attr-defined]
     _core.Connection.__init__ = _patched_init  # type: ignore[method-assign]

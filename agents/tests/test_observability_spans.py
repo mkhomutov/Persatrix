@@ -125,6 +125,24 @@ class TestMemorySpans:
         assert span.attributes["agent.id"] == "agent-x"
         assert span.attributes["episode.kind"] == "episode"
 
+    async def test_episodic_remember_span_records_validation_error(
+        self, exporter: InMemorySpanExporter, db_path: str,
+    ) -> None:
+        # Regression: empty-summary ValueError must mark the
+        # ``agent.memory.episodic.remember`` span as ERROR so operators
+        # searching traces for failed remembers do not see them as
+        # "successful" spans (PR #167 review Must-Fix #2).
+        mem = EpisodicMemory("agent-x", db_path=db_path)
+        await mem.initialize()
+        try:
+            with pytest.raises(ValueError):
+                await mem.store_episode("", {})
+        finally:
+            await mem.close()
+
+        span = _span(exporter, EPISODIC_REMEMBER_SPAN)
+        assert span.status.status_code.name == "ERROR"
+
     async def test_episodic_recall_span(
         self, exporter: InMemorySpanExporter, db_path: str,
     ) -> None:
@@ -175,6 +193,10 @@ class TestLLMSpan:
         self, exporter: InMemorySpanExporter,
     ) -> None:
         provider = AsyncMock()
+        # Set the Protocol-declared ``name`` attribute explicitly so the
+        # span emits the canonical ``gen_ai.system`` value (real providers
+        # declare this as a class attribute).
+        provider.name = "anthropic"
         provider.create_message = AsyncMock(
             return_value=LLMResponse(
                 text="hello",
@@ -194,12 +216,51 @@ class TestLLMSpan:
         )
 
         span = _span(exporter, LLM_CALL_SPAN)
-        assert span.attributes["gen_ai.system"] == "asyncmock"
+        assert span.attributes["gen_ai.system"] == "anthropic"
         assert span.attributes["gen_ai.request.model"] == "claude-3-5-sonnet"
         assert span.attributes["gen_ai.operation.name"] == "chat"
         assert span.attributes["gen_ai.usage.input_tokens"] == 11
         assert span.attributes["gen_ai.usage.output_tokens"] == 22
-        assert tuple(span.attributes["gen_ai.response.finish_reasons"]) == ("end_turn",)
+        # OTEL Gen-AI canonical vocabulary — END_TURN translates to "stop",
+        # NOT the Persatrix-internal enum value "end_turn".
+        assert tuple(span.attributes["gen_ai.response.finish_reasons"]) == ("stop",)
+
+    @pytest.mark.parametrize(
+        ("stop_reason", "expected"),
+        [
+            (StopReason.END_TURN, "stop"),
+            (StopReason.MAX_TOKENS, "length"),
+            (StopReason.TOOL_USE, "tool_calls"),
+        ],
+    )
+    async def test_llm_call_finish_reason_canonical_values(
+        self,
+        exporter: InMemorySpanExporter,
+        stop_reason: StopReason,
+        expected: str,
+    ) -> None:
+        provider = AsyncMock()
+        provider.name = "openai"
+        provider.create_message = AsyncMock(
+            return_value=LLMResponse(
+                text="x",
+                stop_reason=stop_reason,
+                usage=Usage(input_tokens=1, output_tokens=1),
+            ),
+        )
+        client = LLMClient(provider)
+
+        await client.create_message(
+            model="gpt-4o",
+            messages=[],
+            system="",
+            tools=[],
+            max_tokens=10,
+            temperature=0.0,
+        )
+
+        span = _span(exporter, LLM_CALL_SPAN)
+        assert tuple(span.attributes["gen_ai.response.finish_reasons"]) == (expected,)
 
     async def test_llm_call_records_exception(
         self, exporter: InMemorySpanExporter,
