@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-23 (RFC 0019 PR 2 merged — PR #167 — semantic spans + Span Links; RFC 0018 PR 3 merged — PR #168 — cross-process correlation + OTEL trace IDs on logs)  
+> **Last updated**: 2026-04-23 (RFC 0019 PR 3 merged — PR #170 — OTLP metrics Python + Go)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 next — joint order #6)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 next — joint order #7)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -98,7 +98,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
@@ -212,7 +212,7 @@ v0.2.0 complete
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
 
@@ -365,7 +365,7 @@ v0.2.2 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 2/5 |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 3/5 |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 3/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
@@ -381,7 +381,7 @@ v0.2.2 complete
   ↓
 0018 PR 3 (Phase 3 — cross-process correlation + OTEL trace IDs on logs)  ✅ #168
   ↓
-0019 PR 3 (Phase 3a — metrics)
+0019 PR 3 (Phase 3a — metrics)  ✅ #170
   ↓
 0019 PR 4 (Phase 3b — Collector + docker-compose + E2E + schema-parity test)
   ↓
@@ -400,7 +400,7 @@ v0.2.2 complete
 |-----------|-----------|---------------|------------|
 | OTEL traces + gRPC propagation | `internal/observability/` | `agents/observability/tracing.py` | 0019 PR 1 ✅ |
 | Semantic spans + Span Links | `internal/observability/` | `agents/observability/` | 0019 PR 2 ✅ |
-| OTLP metrics | `internal/observability/metrics/` | `agents/observability/metrics.py` | 0019 PR 3 |
+| OTLP metrics | `internal/observability/metrics/` | `agents/observability/metrics.py` | 0019 PR 3 ✅ |
 | Collector pipeline | `config/observability/` | — | 0019 PR 4 |
 | Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 ✅ |
 | Structured logs (Go) | `internal/observability/zapenc/` | — | 0018 PR 2 ✅ |
@@ -736,6 +736,7 @@ v0.5.0 complete
 | [#165](https://github.com/mkhomutov/Persatrix/pull/165) | feat(observability): RFC 0018 PR 2 — Go zap rename + pretty + redactor wired + source | 0018 (2/7) | 2026-04-23 |
 | [#167](https://github.com/mkhomutov/Persatrix/pull/167) | feat(observability): RFC 0019 PR 2 — semantic spans + Span Links + log↔trace coordination | 0019 (2/5) | 2026-04-23 |
 | [#168](https://github.com/mkhomutov/Persatrix/pull/168) | feat(observability): RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs | 0018 (3/7) | 2026-04-23 |
+| [#170](https://github.com/mkhomutov/Persatrix/pull/170) | feat(observability): RFC 0019 PR 3 — OTEL metrics (Python + Go) | 0019 (3/5) | 2026-04-23 |
 
 ---
 

@@ -251,6 +251,8 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [x] Histogram exemplars verified in unit test (not deferred to PR 4's E2E test)
 - [x] `agents/observability/metrics.py:init_metrics()` exposes a `shutdown()` callable that flushes pending exports
 
+**Merged**: PR [#170](https://github.com/mkhomutov/Persatrix/pull/170) — 2026-04-23
+
 ---
 
 ### PR 4: `feature/v023-otel-collector-and-e2e` — Phase 3b: Collector Pipeline + docker-compose + E2E + Schema-Parity Test
