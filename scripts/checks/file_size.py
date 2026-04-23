@@ -76,6 +76,10 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
     "docs/rfcs/0006-pr-plan.md",
+    # CHANGELOG.md grows over a release cycle and is trimmed/archived at each
+    # release tag, so size temporarily exceeds the prose limit during the
+    # active Unreleased window.
+    "CHANGELOG.md",
 })
 
 

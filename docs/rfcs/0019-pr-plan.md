@@ -291,12 +291,12 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/test_observability_schema_parity.py -v` passes (no compose dep)
-- [ ] `pytest tests/integration/test_log_trace_correlation.py -v` passes (no compose dep)
+- [x] `pytest tests/integration/test_observability_schema_parity.py -v` passes (no compose dep)
+- [x] `pytest tests/integration/test_log_trace_correlation.py -v` passes (no compose dep)
 - [ ] `pytest -m requires_compose tests/integration/test_observability_e2e.py -v` passes against the local compose stack (manual gate; not in default CI)
-- [ ] `config/observability/otel-collector.yaml` documents every processor + exporter in the pipeline
-- [ ] README OTEL paragraph mentions logs + traces + metrics + Collector
-- [ ] CHANGELOG v0.2.3 entry mentions the new Collector + Prometheus + Loki services in `docker-compose.yaml`
+- [x] `config/observability/otel-collector.yaml` documents every processor + exporter in the pipeline
+- [x] README OTEL paragraph mentions logs + traces + metrics + Collector
+- [x] CHANGELOG v0.2.3 entry mentions the new Collector + Prometheus + Loki services in `docker-compose.yaml`
 
 ---
 

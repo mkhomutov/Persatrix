@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-23 (RFC 0019 PR 3 merged — PR #170 — OTLP metrics Python + Go)  
+> **Last updated**: 2026-04-23 (RFC 0019 PR 4 opened — Collector + docker-compose + E2E + schema-parity test, joint order #7)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 next — joint order #7)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 in review — joint order #7)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 

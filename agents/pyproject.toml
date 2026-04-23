@@ -105,3 +105,6 @@ asyncio_mode = "auto"
 # testpaths is not set here because test paths are specified explicitly
 # in the Makefile targets. Python tests live at tests/unit/python/ (repo root),
 # not under agents/tests/.
+markers = [
+    "requires_compose: integration tests that require the docker-compose observability stack to be running (otel-collector, jaeger, prometheus, loki). Opt-in: run with `pytest -m requires_compose`.",
+]

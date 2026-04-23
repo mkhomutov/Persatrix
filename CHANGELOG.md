@@ -132,7 +132,23 @@ All notable changes to this project will be documented in this file.
 - Tests: `agents/tests/test_observability_metrics.py` (inventory/units/exemplars/idempotency/helpers)
   and `internal/observability/metrics/metrics_test.go` (inventory, counter
   monotonicity, up/down gauge, histogram bucket sanity, env-var config,
-  endpoint helper).## [0.2.2] - 2026-04-22
+  endpoint helper).
+
+### Added (RFC 0019 PR 4 — Phase 3b Collector pipeline + e2e + schema-parity test)
+
+- [`config/observability/otel-collector.yaml`](config/observability/otel-collector.yaml)
+  + [`prometheus.yaml`](config/observability/prometheus.yaml): tail-sampling
+  pipeline per [RFC 0019 § H](docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline).
+- `docker-compose.yaml`: dev `otel-collector`, `prometheus` (`:9091`),
+  `loki` (`:3100`); orchestrator + agents OTLP → Collector.
+- Three new integration tests — schema-parity (pins log `SCHEMA_VERSION`,
+  trace+metric `_SCHEMA_URL`, gRPC metadata surface, [RFC 0018 § B](docs/rfcs/0018-structured-logging-framework.md#b-common-log-schema)
+  Optional correlation-field map), single-process log↔trace correlation,
+  and a compose-gated e2e under the new `requires_compose` marker
+  (opt in via `pytest -m requires_compose`).
+- `docs/observability.md` § 11 (operator pipeline) + README OTEL bullet.
+
+## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
 

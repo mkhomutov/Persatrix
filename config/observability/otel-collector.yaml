@@ -1,0 +1,106 @@
+# Persatrix — OpenTelemetry Collector reference configuration
+#
+# Implements the tail-sampling pipeline documented in
+# RFC 0019 § H (docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline).
+#
+# Path convention: lives under config/ alongside the rest of the operator-facing
+# configuration files (per PR #160 review). docker-compose.yaml mounts this file
+# into the otel-collector service. Production operators are expected to fork
+# this config and point their own Collector at their own backends; the version
+# checked in here is the dev/CI default that backs `docker compose up -d`.
+#
+# Signals: traces (OTLP -> tail-sampling -> Jaeger), metrics (OTLP -> Prometheus),
+# logs (OTLP -> Loki). Every signal carries the schema_url
+# https://persatrix.dev/schemas/observability/1.0.0 (RFC 0019 § B).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # RFC 0019 § H — tail sampling policies.
+  # decision_wait gives the Collector time to assemble all spans for a trace
+  # before the policy fires; num_traces caps in-memory state so a sampling
+  # storm cannot OOM the Collector.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Always keep traces with errors.
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      # Always keep slow traces (latency >= 5s end-to-end).
+      - name: slow-llm
+        type: latency
+        latency:
+          threshold_ms: 5000
+      # Always keep workflow-driven traces (anything carrying a Persatrix
+      # workflow id baggage attribute).
+      - name: workflow-traces
+        type: string_attribute
+        string_attribute:
+          key: persatrix.workflow_id
+          values: [".+"]
+          enabled_regex_matching: true
+          invert_match: false
+      # Sample 1% of remaining (healthy autonomous tick) traces. Tunable for
+      # v0.3 mesh load.
+      - name: healthy-tick-sample
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 1
+
+  # Standard batching keeps exporter pressure bounded.
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  # Traces -> Jaeger (OTLP gRPC ingest enabled in docker-compose.yaml via
+  # COLLECTOR_OTLP_ENABLED=true).
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Metrics -> Prometheus pull endpoint scraped by the Prometheus container.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Enable exemplars so histogram samples carry the originating trace_id.
+    enable_open_metrics: true
+
+  # Logs -> Loki via the OTLP HTTP push endpoint.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  # Stdout fallback — useful when a backend is down so traces are still
+  # observable in `docker compose logs otel-collector`.
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki, debug]
