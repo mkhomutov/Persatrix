@@ -133,9 +133,18 @@ func (d *diskStore) list() ([]string, error) {
 // flush writes all entries for executionID to a single new sequence
 // file, atomically. After write succeeds, the byte count is added to
 // usage and an eviction sweep is triggered if the disk cap is exceeded.
+//
+// executionID is re-validated here as defence-in-depth even though
+// Buffer.Append/Seal already gate on validExecutionID — diskStore is
+// package-private but multiple call sites construct paths from
+// executionID, and a regression in any one of them would otherwise
+// silently re-open the path-traversal hole.
 func (d *diskStore) flush(executionID string, entries []Entry) error {
 	if len(entries) == 0 {
 		return nil
+	}
+	if !validExecutionID(executionID) {
+		return fmt.Errorf("logbuffer: refusing flush with invalid execution_id %q", executionID)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -182,6 +191,20 @@ func (d *diskStore) flush(executionID string, entries []Entry) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("logbuffer: rename %q: %w", path, err)
 	}
+	// fsync the parent directory so the rename's metadata survives a
+	// crash. Without this the file contents are durable but the
+	// directory entry pointing at them can disappear on POSIX
+	// filesystems, defeating the on-disk durability claim. Errors are
+	// logged but do not fail the flush — the data is on disk; only
+	// the durability *guarantee* is weakened. Best-effort on Windows
+	// where directory fsync is a no-op.
+	if dirF, derr := os.Open(dir); derr == nil {
+		if serr := dirF.Sync(); serr != nil {
+			d.logger.Warn("logbuffer: parent dir fsync failed",
+				zap.String("dir", dir), zap.Error(serr))
+		}
+		_ = dirF.Close()
+	}
 	info, err := os.Stat(path)
 	if err == nil {
 		d.totalMap[executionID] += info.Size()
@@ -199,7 +222,15 @@ func (d *diskStore) flush(executionID string, entries []Entry) error {
 // rename on flush, but warm-load resilience matters across formats)
 // are tolerated: the well-formed prefix is returned and a single WARN
 // is logged per affected file.
+//
+// As in flush, executionID is re-validated locally so a buggy caller
+// cannot use this entry-point as a path-traversal oracle (`Snapshot`
+// already validates, but disk.read is reachable directly from
+// warmLoad and from any future internal caller).
 func (d *diskStore) read(executionID string) []Entry {
+	if !validExecutionID(executionID) {
+		return nil
+	}
 	dir := filepath.Join(d.root, executionID)
 	files, err := os.ReadDir(dir)
 	if err != nil {

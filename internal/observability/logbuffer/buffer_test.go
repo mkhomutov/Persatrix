@@ -3,6 +3,7 @@ package logbuffer
 import (
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,8 +67,52 @@ func TestAppend_DropBelowLevel(t *testing.T) {
 
 func TestAppend_EmptyExecutionIDIsDropped(t *testing.T) {
 	b := newTestBuffer(t, Config{})
-	require.Equal(t, DropBelowLevel, b.Append(mkEntry("", "INFO", "no-exec")))
+	// Updated for review fix: empty exec IDs now surface as their own
+	// reason (DropNoExecID) so the misuse is observable rather than
+	// silently bucketed as a severity drop.
+	require.Equal(t, DropNoExecID, b.Append(mkEntry("", "INFO", "no-exec")))
 	assert.Equal(t, 0, b.Stats().ActiveRings)
+	assert.Equal(t, uint64(1), b.Stats().DroppedNoExecID)
+}
+
+func TestAppend_InvalidExecutionIDIsRejected(t *testing.T) {
+	// Regression for PR-172 review Must-Fix #1 (path-traversal). The
+	// buffer must reject any execution ID that would be unsafe to use
+	// as a filesystem path component before it reaches disk.flush().
+	b := newTestBuffer(t, Config{})
+	cases := []string{
+		"../etc",
+		"..\\etc",
+		"a/b",
+		"a\\b",
+		"with space",
+		"with:colon",
+		strings.Repeat("a", 129),
+	}
+	for _, id := range cases {
+		assert.Equal(t, DropInvalidID, b.Append(mkEntry(id, "INFO", "x")), id)
+	}
+	assert.Equal(t, uint64(len(cases)), b.Stats().DroppedInvalidID)
+	assert.Equal(t, 0, b.Stats().ActiveRings)
+
+	// Seal must reject the same set instead of letting them reach disk.
+	for _, id := range cases {
+		assert.Error(t, b.Seal(id), id)
+	}
+	// Snapshot returns nil for invalid IDs (no leakage of disk state).
+	for _, id := range cases {
+		assert.Nil(t, b.Snapshot(id), id)
+	}
+}
+
+func TestAppend_ClosedBufferReturnsDropClosed(t *testing.T) {
+	// Regression for PR-172 review Should-Fix #2: post-Close appends
+	// previously aliased to DropBelowLevel; they now surface as
+	// DropClosed so shutdown races are distinguishable.
+	b := newTestBuffer(t, Config{})
+	require.NoError(t, b.Close())
+	assert.Equal(t, DropClosed, b.Append(mkEntry("exec-1", "INFO", "after close")))
+	assert.Equal(t, uint64(1), b.Stats().DroppedClosed)
 }
 
 func TestAppend_RateLimitDropsBelowWarn(t *testing.T) {
@@ -199,6 +244,39 @@ func TestWarmLoad_TolerantOfMalformedTrailingLine(t *testing.T) {
 	// Subsequent appends + seal still work.
 	require.Equal(t, DropNone, b.Append(mkEntry("exec-mal", "INFO", "after")))
 	require.NoError(t, b.Seal("exec-mal"))
+}
+
+func TestWarmLoad_BoundedByMaxExecutions(t *testing.T) {
+	// Regression for PR-172 review Should-Fix #3: a busy data/logs
+	// directory must not cause warm-load to allocate one ring per
+	// on-disk execution before evicting down to MaxExecutions. We
+	// pre-seed 8 sealed executions and confirm the buffer admits
+	// exactly MaxExecutions=3 of them at startup.
+	dir := t.TempDir()
+	logger := zaptest.NewLogger(t)
+	for i := 0; i < 8; i++ {
+		id := "exec-warm-" + strconv.Itoa(i)
+		require.NoError(t, mkdirAll(filepath.Join(dir, id)))
+		line := `{"schema_version":"1","timestamp":"2026-04-23T00:00:00Z","level":"INFO","message":"m","execution_id":"` + id + `"}` + "\n"
+		require.NoError(t, writeFile(filepath.Join(dir, id, "0000000001.jsonl"), line))
+		// Stagger mtimes so list() ordering is deterministic.
+		mt := time.Date(2026, 4, 23, 0, 0, i, 0, time.UTC)
+		require.NoError(t, chTimes(filepath.Join(dir, id), mt))
+	}
+
+	b, err := New(Config{Dir: dir, PerExecution: 4, MaxExecutions: 3, RatePerExec: 1000}, logger)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+	assert.Equal(t, 3, b.Stats().ActiveRings, "warm-load must cap at MaxExecutions")
+
+	// The freshest 3 (suffix 5, 6, 7) must be in memory; older ones
+	// remain queryable via the disk.read fallback in Snapshot.
+	for _, i := range []int{5, 6, 7} {
+		assert.NotNil(t, b.Snapshot("exec-warm-"+strconv.Itoa(i)),
+			"newest execution must be in-memory after warm-load")
+	}
+	assert.NotNil(t, b.Snapshot("exec-warm-0"),
+		"older execution must still be readable from disk fallback")
 }
 
 func TestConcurrentAppend_NoDataRaces(t *testing.T) {

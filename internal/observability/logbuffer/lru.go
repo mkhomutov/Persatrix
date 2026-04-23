@@ -71,14 +71,32 @@ func (b *Buffer) evictLocked() {
 // id (rare in practice; only happens on a restart that races a still-
 // shipping agent) admit through the normal path without re-flushing
 // the warm-loaded prefix.
+//
+// The loader is bounded by cfg.MaxExecutions: data/logs may legitimately
+// contain thousands of sealed executions on a long-running deployment,
+// and constructing rings for all of them before evicting down to the
+// LRU cap would cause a startup memory spike of (PerExecution *
+// total_on_disk) entries. Instead we walk disk.list() newest-first and
+// stop after MaxExecutions — older sealed executions remain on disk and
+// are still queryable via Snapshot's disk.read() fallback path.
 func (b *Buffer) warmLoad() error {
 	loaded, err := b.disk.list()
 	if err != nil {
 		return err
 	}
+	// disk.list() returns oldest→newest; reverse so we admit the
+	// freshest executions first and stop once we hit MaxExecutions.
+	for i, j := 0, len(loaded)-1; i < j; i, j = i+1, j-1 {
+		loaded[i], loaded[j] = loaded[j], loaded[i]
+	}
+	var emptySkipped int
 	for _, id := range loaded {
+		if len(b.rings) >= b.cfg.MaxExecutions {
+			break
+		}
 		entries := b.disk.read(id)
 		if len(entries) == 0 {
+			emptySkipped++
 			continue
 		}
 		ring := newExecutionRing(id, b.cfg.PerExecution, b.cfg.RatePerExec)
@@ -93,14 +111,23 @@ func (b *Buffer) warmLoad() error {
 		ring.flushed = true
 		ring.mu.Unlock()
 		b.rings[id] = ring
-		b.lru = append(b.lru, id)
+		// LRU is oldest→newest; we are inserting newest-first, so
+		// prepend to keep the LRU order consistent with rest-of-life
+		// access patterns.
+		b.lru = append([]string{id}, b.lru...)
 	}
-	if dropped := len(loaded) - len(b.rings); dropped > 0 {
+	if emptySkipped > 0 {
 		b.logger.Warn(
 			"log buffer warm-load skipped empty executions",
-			zap.Int("skipped", dropped),
+			zap.Int("skipped", emptySkipped),
 		)
 	}
-	b.evictLocked()
+	if len(loaded) > b.cfg.MaxExecutions {
+		b.logger.Info(
+			"log buffer warm-load capped at MaxExecutions",
+			zap.Int("on_disk", len(loaded)),
+			zap.Int("loaded", b.cfg.MaxExecutions),
+		)
+	}
 	return nil
 }

@@ -9,12 +9,21 @@
 package logbuffer
 
 import (
+	"errors"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// errInvalidExecutionID is returned by Seal when the caller-supplied
+// execution ID would be unsafe to use as a filesystem path component.
+// Exported via the package's Err* surface in PR 5; for now it is an
+// internal sentinel kept package-private to avoid widening the public
+// API in a Phase 4a-only PR.
+var errInvalidExecutionID = errors.New("logbuffer: invalid execution_id")
 
 // Entry is the orchestrator's in-memory representation of a structured
 // log line. It is intentionally decoupled from the wire proto
@@ -57,7 +66,45 @@ const (
 	DropBelowLevel
 	// DropRateLimit — per-execution token bucket exhausted.
 	DropRateLimit
+	// DropClosed — buffer has been closed; no further admits.
+	// Distinct from DropBelowLevel so callers (and the future RFC 0019
+	// metric) can tell shutdown-races apart from severity filtering.
+	DropClosed
+	// DropNoExecID — entry has empty ExecutionID. The buffer is
+	// per-execution by design; orchestrator-global logs are observable
+	// on stdout only.
+	DropNoExecID
+	// DropInvalidID — ExecutionID failed validExecutionID. Surfaced as
+	// its own reason because the value flows directly into a filesystem
+	// path (see disk.go); silently bucketing it as DropNoExecID would
+	// hide a misuse / potential path-traversal attempt from operators.
+	DropInvalidID
 )
+
+// executionIDPattern bounds the ExecutionID character set to characters
+// safe for use as a single path component on every supported OS:
+// alphanumerics plus hyphen, underscore. Length is capped to keep flush
+// paths well under the smallest filesystem NAME_MAX (255 on most ext*,
+// HFS+, NTFS) once the sequence suffix and ".jsonl" are appended.
+//
+// The pattern is intentionally stricter than the agent-ID regex from
+// schemas/agent.schema.json (which allows leading digits / hyphens at
+// the boundary): execution IDs are produced server-side by the
+// orchestrator (UUIDs, ULIDs, or hex hashes) so the loose form is
+// neither needed nor safe to widen.
+var executionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// validExecutionID guards every code path that uses ExecutionID as a
+// filesystem path component (see disk.flush / disk.read /
+// disk.evictIfOverCap). A producer that supplies "../../etc" or
+// "a/b" would otherwise escape the configured root and let RemoveAll
+// during eviction delete arbitrary directories. Phase 4b (PR 5) will
+// expose Append to network input, at which point this validator is
+// the single boundary preventing OWASP A03 (Injection) /
+// path-traversal abuse — keep it strict.
+func validExecutionID(s string) bool {
+	return executionIDPattern.MatchString(s)
+}
 
 // Config holds buffer + disk + rate-limit settings. Defaults match
 // RFC § Resolved Decisions #2.
@@ -110,6 +157,9 @@ type Buffer struct {
 	// Counters surfaced for tests and (future) metric instrumentation.
 	droppedBelowLevel atomic.Uint64
 	droppedRate       atomic.Uint64
+	droppedClosed     atomic.Uint64
+	droppedNoExecID   atomic.Uint64
+	droppedInvalidID  atomic.Uint64
 	evictedActive     atomic.Uint64 // active rings evicted by LRU
 	evictedSealed     atomic.Uint64 // sealed rings evicted (after disk flush)
 
@@ -174,15 +224,29 @@ func applyDefaults(cfg Config) Config {
 // the drop-level filter and per-execution rate limiter. Returns the
 // reason for any drop (DropNone if admitted).
 //
-// Entries with empty ExecutionID are dropped silently — the buffer is
-// only meaningful inside a workflow execution; orchestrator-global logs
-// are observable on stdout.
+// Drop-reason precedence (intentional ordering):
+//  1. DropClosed       — buffer is shut down.
+//  2. DropNoExecID     — entry has no ExecutionID (orchestrator-global
+//     log; observe via stdout).
+//  3. DropInvalidID    — ExecutionID fails validExecutionID; protects
+//     the disk path layer from traversal (see disk.go).
+//  4. DropBelowLevel   — severity below the configured drop level.
+//  5. DropRateLimit    — per-execution token bucket exhausted.
+//
+// Each branch increments its own counter so misuse (closed-buffer
+// races, malformed IDs) is observable rather than silently swallowed.
 func (b *Buffer) Append(entry Entry) DropReason {
 	if b.closed.Load() {
-		return DropBelowLevel
+		b.droppedClosed.Add(1)
+		return DropClosed
 	}
 	if entry.ExecutionID == "" {
-		return DropBelowLevel
+		b.droppedNoExecID.Add(1)
+		return DropNoExecID
+	}
+	if !validExecutionID(entry.ExecutionID) {
+		b.droppedInvalidID.Add(1)
+		return DropInvalidID
 	}
 	if !levelGE(entry.Level, b.cfg.DropLevel) {
 		b.droppedBelowLevel.Add(1)
@@ -205,7 +269,13 @@ func (b *Buffer) Append(entry Entry) DropReason {
 // flushes the ring's contents to disk in a single batch.
 //
 // Sealed rings remain queryable via Snapshot until LRU-evicted.
+//
+// Invalid execution IDs are rejected here as well: the value would
+// otherwise reach disk.flush as a path component (see validExecutionID).
 func (b *Buffer) Seal(executionID string) error {
+	if !validExecutionID(executionID) {
+		return errInvalidExecutionID
+	}
 	b.mu.RLock()
 	ring, ok := b.rings[executionID]
 	b.mu.RUnlock()
@@ -225,8 +295,13 @@ func (b *Buffer) Seal(executionID string) error {
 }
 
 // Snapshot returns a copy of the named execution's currently-buffered
-// entries (oldest first). Returns nil for unknown execution IDs.
+// entries (oldest first). Returns nil for unknown or invalid execution
+// IDs (the latter cannot exist in b.rings or on disk because they are
+// rejected at Append/Seal).
 func (b *Buffer) Snapshot(executionID string) []Entry {
+	if !validExecutionID(executionID) {
+		return nil
+	}
 	b.mu.RLock()
 	ring, ok := b.rings[executionID]
 	b.mu.RUnlock()
@@ -238,10 +313,13 @@ func (b *Buffer) Snapshot(executionID string) []Entry {
 	return ring.snapshot()
 }
 
-// Close flushes all sealed rings (idempotent) and prevents further
-// appends. Active (un-sealed) rings are intentionally not flushed —
-// they correspond to in-flight executions whose terminal hook will
-// call Seal in the normal path.
+// Close is an idempotent shutdown gate that prevents further Append
+// calls. Rings that were sealed via Seal() prior to Close remain
+// durable on disk and queryable via Snapshot; un-sealed (active)
+// rings are intentionally NOT flushed here — the orchestrator's
+// terminal hooks own per-execution sealing in the normal path, and
+// flushing partial in-flight rings would complicate restart semantics
+// (the agent shipper may still be delivering tail entries).
 func (b *Buffer) Close() error {
 	if !b.closed.CompareAndSwap(false, true) {
 		return nil
@@ -255,6 +333,9 @@ type Stats struct {
 	ActiveRings       int
 	DroppedBelowLevel uint64
 	DroppedRate       uint64
+	DroppedClosed     uint64
+	DroppedNoExecID   uint64
+	DroppedInvalidID  uint64
 	EvictedActive     uint64
 	EvictedSealed     uint64
 }
@@ -268,6 +349,9 @@ func (b *Buffer) Stats() Stats {
 		ActiveRings:       n,
 		DroppedBelowLevel: b.droppedBelowLevel.Load(),
 		DroppedRate:       b.droppedRate.Load(),
+		DroppedClosed:     b.droppedClosed.Load(),
+		DroppedNoExecID:   b.droppedNoExecID.Load(),
+		DroppedInvalidID:  b.droppedInvalidID.Load(),
 		EvictedActive:     b.evictedActive.Load(),
 		EvictedSealed:     b.evictedSealed.Load(),
 	}
