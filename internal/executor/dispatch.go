@@ -50,7 +50,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		cacheKey := cost.CacheKey(req.AgentID, req.Payload, req.Context)
 		if cached, ok := e.cache.Get(cacheKey); ok {
 			e.logger.Info("cache hit, skipping gRPC dispatch",
-				zap.String("agentID", req.AgentID),
+				zap.String("agent_id", req.AgentID),
 			)
 			return &ExecuteResult{
 				TaskID:   req.TaskID,
@@ -159,7 +159,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			remaining := stepDeadline - elapsed
 			if remaining < minBudget {
 				e.logger.Warn("retry skipped: insufficient time budget",
-					zap.String("agentID", req.AgentID),
+					zap.String("agent_id", req.AgentID),
 					zap.String("taskID", taskID),
 					zap.Int("attempt", attempt),
 					zap.Duration("remaining", remaining),
@@ -187,7 +187,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			remaining := int64(req.Limits.MaxTokens) - cumulativeTokens
 			if remaining < minTokens {
 				e.logger.Warn("retry skipped: insufficient token budget",
-					zap.String("agentID", req.AgentID),
+					zap.String("agent_id", req.AgentID),
 					zap.String("taskID", taskID),
 					zap.Int("attempt", attempt),
 					zap.Int64("tokensUsed", cumulativeTokens),
@@ -203,7 +203,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			result.RetryCount = attempt
 			result.WallTimeMs = wallTimeMs
 			e.logger.Info("step dispatched",
-				zap.String("agentID", req.AgentID),
+				zap.String("agent_id", req.AgentID),
 				zap.String("taskID", taskID),
 				zap.Int("retryCount", attempt),
 				zap.Int64("wallTimeMs", wallTimeMs),
@@ -254,7 +254,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		delay := time.Duration(float64(base) * jitter)
 
 		e.logger.Warn("transient failure, retrying",
-			zap.String("agentID", req.AgentID),
+			zap.String("agent_id", req.AgentID),
 			zap.String("taskID", taskID),
 			zap.Int("attempt", attempt+1),
 			zap.Int("maxRetries", e.maxRetries),

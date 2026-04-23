@@ -90,8 +90,8 @@ func (tc *TokenCounter) RecordUsage(record UsageRecord) {
 	tc.global.EstimatedUSD += cost
 
 	tc.logger.Debug("token usage recorded",
-		zap.String("workflowID", record.WorkflowID),
-		zap.String("agentID", record.AgentID),
+		zap.String("workflow_id", record.WorkflowID),
+		zap.String("agent_id", record.AgentID),
 		zap.String("model", record.Model),
 		zap.Int64("inputTokens", record.InputTokens),
 		zap.Int64("outputTokens", record.OutputTokens),
@@ -276,8 +276,8 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "global"),
-			zap.String("workflowID", workflowID),
-			zap.String("agentID", agentID),
+			zap.String("workflow_id", workflowID),
+			zap.String("agent_id", agentID),
 			zap.Float64("spent", globalSpent),
 			zap.Float64("estimatedCost", estimatedCost),
 			zap.Float64("limit", globalLimit),
@@ -286,8 +286,8 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 		// Log warning for pause_and_alert degradation.
 		if be.config.Budgets.Global.OnExceed == "pause_and_alert" {
 			be.logger.Warn("pause_and_alert not implemented, rejecting dispatch",
-				zap.String("workflowID", workflowID),
-				zap.String("agentID", agentID),
+				zap.String("workflow_id", workflowID),
+				zap.String("agent_id", agentID),
 			)
 		}
 
@@ -305,7 +305,7 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "per_workflow"),
-			zap.String("workflowID", workflowID),
+			zap.String("workflow_id", workflowID),
 			zap.Float64("spent", wfSpent),
 			zap.Float64("estimatedCost", estimatedCost),
 			zap.Float64("limit", wfLimit),
@@ -324,7 +324,7 @@ func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimat
 		}
 		be.logger.Warn("budget check rejected",
 			zap.String("scope", "per_agent"),
-			zap.String("agentID", agentID),
+			zap.String("agent_id", agentID),
 			zap.Float64("spent", agSpent),
 			zap.Float64("estimatedCost", estimatedCost),
 			zap.Float64("limit", agLimit),

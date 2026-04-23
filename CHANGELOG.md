@@ -17,6 +17,44 @@ All notable changes to this project will be documented in this file.
 - **Go package rename** `internal/telemetry` → `internal/observability`: this
   is an internal rename and has no impact on operators, but custom forks that
   import the package directly must update their import paths.
+- **Go zap log field keys renamed** to the RFC 0018 schema (`docs/observability.md`).
+  The **reserved correlation IDs** (`execution_id`, `agent_id`, `workflow_id`,
+  `step_id`) are renamed at every Go call site, with the encoder's
+  `legacyRenames` map as a defence-in-depth backstop for any missed site.
+  Arbitrary site-local attributes (token counts such as `inputTokens` /
+  `outputTokens`, `retryCount`, `wallTimeMs`, `estimatedCost`, `serviceName`,
+  etc.) **remain camelCase on the wire** pending a future PR that nests them
+  under the schema's `attributes` slot. Downstream consumers (log shippers,
+  `jq` queries, dashboards) that filter on the renamed correlation IDs must
+  switch to the new keys.
+
+  | Old (legacy) | New (RFC 0018 § B) |
+  |--------------|--------------------|
+  | `runID` | `execution_id` |
+  | `executionID` | `execution_id` |
+  | `agentID` | `agent_id` |
+  | `workflowID` | `workflow_id` |
+  | `stepID` | `step_id` |
+
+  In addition, every Go log line now carries the RFC 0018 required-field
+  group: `schema_version: "1"`, `service.kind: "orchestrator"`,
+  `service.instance: <hostname>`, and a `source: {file, line, function}`
+  object derived from `zap.AddCaller`.  Custom Go forks that constructed
+  their own zap logger should switch to
+  [`internal/observability/zapenc.NewEncoder`](internal/observability/zapenc/encoder.go)
+  for the same schema-conformant output.
+
+- **`PERSATRIX_LOG_FORMAT=pretty`** selects a human-readable console encoder
+  (zap's development encoder) for local debugging.  The default (unset or
+  `json`) emits the RFC 0018 wire format.  Pretty mode is a developer
+  affordance and is **not** consumed by the future `persatrix logs`
+  endpoint — production deployments must leave it unset.
+
+- **`PERSATRIX_SERVICE_INSTANCE`** overrides the orchestrator's
+  `service.instance` log field (defaults to `os.Hostname()`).  Useful in
+  containerised deployments where the hostname is an ephemeral synthetic
+  name (e.g. a Kubernetes pod ID) and operators want a stable, meaningful
+  instance identifier in the aggregated log stream.
 
 ## [0.2.2] - 2026-04-22
 

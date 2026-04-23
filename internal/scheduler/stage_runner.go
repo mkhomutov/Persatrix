@@ -99,8 +99,8 @@ func (s *WorkflowScheduler) executeStep(
 		StartedAt: startedAt,
 	}); err != nil {
 		s.logger.Error("failed to update step state to running",
-			zap.String("runID", runID),
-			zap.String("stepID", step.ID),
+			zap.String("execution_id", runID),
+			zap.String("step_id", step.ID),
 			zap.Error(err),
 		)
 	}
@@ -144,8 +144,8 @@ func (s *WorkflowScheduler) executeStep(
 			// a no-op for this step. This happens when the registry is nil or the agent
 			// is not registered. Log a warning so operators can detect misconfiguration.
 			s.logger.Warn("could not resolve model for budget check, cost estimate will be zero",
-				zap.String("agentID", step.AgentID),
-				zap.String("stepID", step.ID),
+				zap.String("agent_id", step.AgentID),
+				zap.String("step_id", step.ID),
 			)
 		}
 		budgetResult := s.budgetEnforcer.CheckBudget(workflowID, step.AgentID, registryModel, int64(limits.MaxTokens))
@@ -186,8 +186,8 @@ func (s *WorkflowScheduler) executeStep(
 	metadata := s.buildStepMetadata(result, registryModel, step.ID)
 
 	s.logger.Info("step completed",
-		zap.String("runID", runID),
-		zap.String("stepID", step.ID),
+		zap.String("execution_id", runID),
+		zap.String("step_id", step.ID),
 		zap.Int("tokensUsed", metadata.TokensUsed),
 		zap.Int("retryCount", metadata.RetryCount),
 		zap.Int64("wallTimeMs", metadata.WallTimeMs),
@@ -211,8 +211,8 @@ func (s *WorkflowScheduler) executeStep(
 		Metadata:   metadata,
 	}); err != nil {
 		s.logger.Error("failed to update step state to completed",
-			zap.String("runID", runID),
-			zap.String("stepID", step.ID),
+			zap.String("execution_id", runID),
+			zap.String("step_id", step.ID),
 			zap.Error(err),
 		)
 	}
@@ -232,8 +232,8 @@ func (s *WorkflowScheduler) markStepFailed(ctx context.Context, runID, stepID st
 		FinishedAt: time.Now(),
 	}); err != nil {
 		s.logger.Error("failed to update step state to failed",
-			zap.String("runID", runID),
-			zap.String("stepID", stepID),
+			zap.String("execution_id", runID),
+			zap.String("step_id", stepID),
 			zap.Error(err),
 		)
 	}

@@ -137,7 +137,7 @@ func (s *InMemoryStore) CreateRun(_ context.Context, run *WorkflowRun) error {
 	}
 
 	s.runs[run.ID] = stored
-	s.logger.Debug("run created", zap.String("runID", run.ID), zap.String("workflowID", run.WorkflowID))
+	s.logger.Debug("run created", zap.String("execution_id", run.ID), zap.String("workflow_id", run.WorkflowID))
 	return nil
 }
 
@@ -180,7 +180,7 @@ func (s *InMemoryStore) UpdateRunStatus(_ context.Context, runID string, status 
 	}
 
 	run.Status = status
-	s.logger.Debug("run status updated", zap.String("runID", runID), zap.Int("status", int(status)))
+	s.logger.Debug("run status updated", zap.String("execution_id", runID), zap.Int("status", int(status)))
 	return nil
 }
 
@@ -206,7 +206,7 @@ func (s *InMemoryStore) UpdateStepState(_ context.Context, runID string, step St
 	}
 
 	run.Steps[step.StepID] = step
-	s.logger.Debug("step state updated", zap.String("runID", runID), zap.String("stepID", step.StepID))
+	s.logger.Debug("step state updated", zap.String("execution_id", runID), zap.String("step_id", step.StepID))
 	return nil
 }
 
@@ -222,7 +222,7 @@ func (s *InMemoryStore) DeleteRun(_ context.Context, runID string) error {
 	}
 
 	delete(s.runs, runID)
-	s.logger.Debug("run deleted", zap.String("runID", runID))
+	s.logger.Debug("run deleted", zap.String("execution_id", runID))
 	return nil
 }
 
@@ -246,7 +246,7 @@ func (s *InMemoryStore) SetRunTimestamps(_ context.Context, runID string, starte
 		run.FinishedAt = *finishedAt
 	}
 
-	s.logger.Debug("run timestamps updated", zap.String("runID", runID))
+	s.logger.Debug("run timestamps updated", zap.String("execution_id", runID))
 	return nil
 }
 
@@ -263,7 +263,7 @@ func (s *InMemoryStore) SetRunError(_ context.Context, runID string, errMsg stri
 	}
 
 	run.Error = errMsg
-	s.logger.Debug("run error set", zap.String("runID", runID), zap.String("error", errMsg))
+	s.logger.Debug("run error set", zap.String("execution_id", runID), zap.String("error", errMsg))
 	return nil
 }
 

@@ -202,12 +202,14 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/zapenc/... -v -race` passes
-- [ ] `go test ./internal/... -v -race -cover` passes (no regressions in existing tests)
-- [ ] `golangci-lint run` clean
-- [ ] CHANGELOG v0.2.3 entry includes the full old→new field rename table
-- [ ] README quick-start mentions `PERSATRIX_LOG_FORMAT=pretty`
-- [ ] No `internal/observability/zapcore/` directory (collision-avoidance pin from PR #160 review)
+- [x] `go test ./internal/observability/zapenc/... -v -race` passes
+- [x] `go test ./internal/... -v -race -cover` passes (no regressions in existing tests)
+- [x] `golangci-lint run` clean
+- [x] CHANGELOG v0.2.3 entry includes the full old→new field rename table
+- [x] README quick-start mentions `PERSATRIX_LOG_FORMAT=pretty`
+- [x] No `internal/observability/zapcore/` directory (collision-avoidance pin from PR #160 review)
+
+**Merged**: PR [#165](https://github.com/mkhomutov/Persatrix/pull/165) — 2026-04-23
 
 ---
 
@@ -411,8 +413,14 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 ##### From PR 2 review
 
-<!-- TODO: populate after PR 2 review merges -->
-*(populated during PR 2 review)*
+- **Enforce required `Options.ServiceKind` / `ServiceInstance` at construction.** `internal/observability/zapenc.NewEncoder` documents both as required but accepts zero-value `Options`, silently emitting `"service.kind":""` / `"service.instance":""` lines that violate the schema's required-field group. Add a `Must`-style constructor (or panic) so misuse is caught at startup rather than on the first emitted line, and add a unit test covering both empty-string cases.
+- **Strengthen the last-ditch fallback envelope to carry the full required-field group.** `encoder.encodeFallbackEnvelope`'s hand-crafted JSON literal (the branch reached only when `serialiseOrdered` itself fails) emits `schema_version` / `level` / `message` only, omitting `service.kind` and `service.instance`. Include all six required fields in the literal so the "every line carries the required-field group" invariant holds even on double failure, and add a test that forces this branch.
+- **Lock in the reserved-key shadowing contract with a test.** Today the encoder injects `schema_version` / `service.*` / `source` after the inner JSON encoder runs, so a future call site emitting `zap.String("schema_version", "evil")` is silently overwritten — but the invariant is unasserted. Add an `encoder_test.go` case that emits each `fieldOrder` reserved key as a user field and asserts the wire line still carries the encoder-injected value.
+- **Document Redactor mutate-then-panic semantics in the trust contract.** `applyRedactor`'s panic-recovery path returns `out = entry`, which shares the underlying map reference. A future real `Redactor` that mutates in place and then panics will leak partial mutations to the wire. Add one sentence to the `Redactor` interface doc comment requiring all mutations to complete before any operation that may panic, or shallow-copy `entry` before invoking.
+- **Warn when `PERSATRIX_LOG_FORMAT=pretty` is combined with `--env=production`.** `cmd/orchestrator/main.go` `buildLogger` returns `zap.NewDevelopment()` for the pretty path, bypassing the encoder *and* the redactor and ignoring the production level filter. Pretty mode is documented as dev-only; emit a one-line stderr warning at startup when the combination is detected so an accidental production deployment is loud.
+- **Benchmark `EncodeEntry` before v0.2.3 release.** The doc comment promises a benchmark of the deliberate `json.Unmarshal` → mutate → `json.Marshal` round-trip per log line, with the streaming-encoder alternative as the escape valve. Add `BenchmarkEncodeEntry` (representative entry shape, 100k iterations) and capture the baseline so the streaming-encoder follow-up has a target to beat.
+- **Guard `legacyRenames` deterministic iteration with a fuzz/property test.** `TestEncoder_LegacyRenameCollisionIsDeterministic` covers the documented `executionID` > `runID` precedence over 50 runs; add a property-style test that permutes the rename map's input order and asserts the wire output is byte-identical, so a regression that re-introduces non-deterministic map iteration fails fast.
+- **Move `stderrSink` / `jsonUnmarshal` package-level mutable globals behind an atomic or `_test.go`-only override.** Today both are safe because no test in `zapenc/` uses `t.Parallel()`; the package comment makes this explicit. A future test file in the same package using `t.Parallel()` would race against production `EncodeEntry` callers. Either build-tag the test-only writes into `*_test.go` files, expose them through a `sync/atomic.Value`, or add a CI lint that fails on `t.Parallel()` inside `internal/observability/zapenc/`.
 
 ##### From PR 3 review
 
