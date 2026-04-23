@@ -256,6 +256,8 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 - [x] Interceptor registration order verified: OTEL (0019) → logging (this PR)
 - [x] `trace_id` / `span_id` are omitted (not empty) when no span is active
 
+**Merged**: PR [#168](https://github.com/mkhomutov/Persatrix/pull/168) — 2026-04-23
+
 ---
 
 ### PR 4: `feature/v023-logbuffer-proto-and-store` — Phase 4a: `proto/log_service.proto` + Ring Buffer + Disk Store
