@@ -501,25 +501,25 @@ Apply the following items captured in [PR 1 review](#from-pr-1-review), [PR 2 re
 - [x] No new public API surface beyond the `agents/llm_types.py` extraction and the `Linkable(Protocol)` declaration (polish only).
 - [x] `make test` passes; `make lint` clean; `mypy agents/` clean for any newly typed surface.
 
-#### From PR 6 review (round-2 polish on the polish PR)
+#### From PR 6 review (round-2 polish)
 
 **Applied:**
 
-- **Should-Fix #1** — switched `_pending_tick_links` to `collections.deque(maxlen=_PENDING_TICK_LINKS_CAP)` for native O(1) oldest-drop and removed manual `pop(0)` logic.
-- **Should-Fix #2** — rewrote OTLP endpoint normalisation test to monkeypatch `OTLPSpanExporter` and assert constructor kwargs (public contract), not SDK private internals.
-- **Should-Fix #3** — added `test_episodic_recall_span_records_backend_failure` asserting `Status.ERROR` + exception event when `recall_*` helpers fail.
-- **Nice-to-Have #2** — added fallback test for `gen_ai.system` when provider `name` is missing.
-- **Nice-to-Have #4** — narrowed `caplog` in `TestInitTracingRecall` to `opentelemetry` records.
-- **Nice-to-Have #5** — marked `LLMProvider` Protocol `@runtime_checkable` for consistency with `Linkable`.
-- **Nice-to-Have #6** — moved `_FakeAgent` buffer init into `__init__` to avoid class-level mutable state.
-- **Nice-to-Have #7** — added positive/negative tests for `isinstance(agent, Linkable)` guard behaviour.
-- **Nit #1** — documented `__all__` ordering convention (public exports before underscored aliases).
+- **Should-Fix #1** — `_pending_tick_links` now uses `collections.deque(maxlen=...)` for native O(1) drop.
+- **Should-Fix #2** — OTLP endpoint test monkeypatches `OTLPSpanExporter` and asserts ctor kwargs (public contract).
+- **Should-Fix #3** — added `test_episodic_recall_span_records_backend_failure` for `Status.ERROR` + exception event on backend failure.
+- **Nice-to-Have #2** — fallback test for `gen_ai.system` when provider `name` is missing.
+- **Nice-to-Have #4** — narrowed `caplog` in `TestInitTracingRecall` to `opentelemetry`.
+- **Nice-to-Have #5** — `LLMProvider` Protocol marked `@runtime_checkable`.
+- **Nice-to-Have #6** — `_FakeAgent` buffer init moved into `__init__`.
+- **Nice-to-Have #7** — added `isinstance(agent, Linkable)` guard tests.
+- **Nit #1** — documented `__all__` ordering convention.
 
-**Deferred (with rationale):**
+**Deferred:**
 
-- **Nice-to-Have #1** (hoist `Linkable` import in `dispatch.py`) — deferred: keeps lazy import and avoids eager load of `persona_runtime` deps.
-- **Nice-to-Have #3** (extract `_BoundedLinkBuffer` or use real `_LLMPersonaAgent` fixture) — deferred: deque conversion already covers required behaviour.
-- **Nit #3** (`_env.py` docstring wording) — no-op: `env_int` docstring already states non-positive→default fallback.
+- **NTH #1** (hoist `Linkable` import) — keeps lazy import; avoids eager `persona_runtime` load.
+- **NTH #3** (`_BoundedLinkBuffer` extraction) — deque conversion already covers behaviour.
+- **Nit #3** (`_env.py` docstring) — no-op: already documented.
 
 ---
 
