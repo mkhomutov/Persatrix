@@ -391,11 +391,13 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `cargo test --manifest-path cli/Cargo.toml` passes
-- [ ] `cargo clippy --manifest-path cli/Cargo.toml -- -D warnings` clean
-- [ ] `pytest tests/integration/test_logs_e2e.py -v` passes
-- [ ] `docs/observability.md` Operations section covers all six `PERSATRIX_LOGBUFFER_*` env vars and the `0700` umask
-- [ ] Manual smoke documented in PR description: `make run`, `persatrix run <wf>`, `persatrix logs <id>`, `persatrix logs --follow <id>`, `persatrix logs --since 5m _`
+- [x] `cargo test --manifest-path cli/Cargo.toml` passes
+- [x] `cargo clippy --manifest-path cli/Cargo.toml -- -D warnings` clean
+- [x] `pytest tests/integration/test_logs_e2e.py -v` passes
+- [x] `docs/observability.md` Operations section covers all six `PERSATRIX_LOGBUFFER_*` env vars and the `0700` umask
+- [x] Manual smoke documented in PR description: `make run`, `persatrix run <wf>`, `persatrix logs <id>`, `persatrix logs --follow <id>`, `persatrix logs --since 5m _`
+
+**Merged**: PR [#174](https://github.com/mkhomutov/Persatrix/pull/174) — 2026-04-23
 
 ---
 
