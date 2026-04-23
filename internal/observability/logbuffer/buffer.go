@@ -443,3 +443,14 @@ func (b *Buffer) warnRateOnce(executionID string) {
 		zap.Int("rate_per_exec", b.cfg.RatePerExec),
 	)
 }
+
+// forgetRateWarned drops the per-execution one-shot WARN gate entry
+// for executionID. Called by evictLocked when a ring is evicted from
+// the LRU so the rateWarned map cannot grow without bound for the
+// orchestrator's lifetime (PR #172 review nice-to-have). Safe to call
+// for unknown IDs.
+func (b *Buffer) forgetRateWarned(executionID string) {
+	b.rateWarnedMu.Lock()
+	delete(b.rateWarned, executionID)
+	b.rateWarnedMu.Unlock()
+}
