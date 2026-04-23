@@ -92,6 +92,7 @@ _FIELD_ORDER: tuple[str, ...] = (
     "execution_id",
     "step_id",
     "agent_id",
+    "workflow_id",
     "request_id",
     "trace_id",
     "span_id",

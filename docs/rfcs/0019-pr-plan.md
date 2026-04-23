@@ -205,6 +205,8 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 - [x] Tool-payload capture routes through `agents.observability.redact.Redactor` (the same Protocol RFC 0018 PR 1 introduced)
 - [x] TICK span wraps `_LLMPersonaAgent.on_tick()` in `agents/persona_runtime/__init__.py` (module pinned in the plan above; this checkbox just re-asserts the implementation site)
 
+**Merged**: PR [#167](https://github.com/mkhomutov/Persatrix/pull/167) — 2026-04-23
+
 ---
 
 ### PR 3: `feature/v023-otel-metrics` — Phase 3a: Metrics (Python + Go)
