@@ -370,3 +370,51 @@ The dev compose images are conveniences for local debugging and for the schema-p
 - Override the Collector's policies to match their own retention, sampling, and PII budgets.
 
 Forking `config/observability/otel-collector.yaml` is encouraged; the file is checked in as a starting point, not as a binding contract.
+
+## 12. Operations: `persatrix logs` (RFC 0018 PR 6)
+
+Thin REST/SSE client over the PR 5 endpoints; server-side filtering lives in [`internal/observability/logbuffer`](../internal/observability/logbuffer).
+
+### 12.1 Snapshot vs follow
+
+```shell
+persatrix logs <execution_id>                       # snapshot
+persatrix logs <execution_id> --follow              # stream (SSE)
+persatrix logs _ --trace <trace_id>                 # cross-execution by trace
+persatrix logs <execution_id> --since 5m --level WARN
+persatrix logs <execution_id> --workflow code-review --agent reviewer-1 --verbose
+```
+
+- `_` queries all in-buffer executions; pair with `--trace` for per-trace lookup.
+- `--follow` reconnects with exponential backoff (500 ms → 15 s) and prints `[reconnected]` on resume.
+- `--verbose` appends `execution_id=… step_id=… trace_id=… attributes={…}`; default render is `<ts> <LEVEL> [<agent>] <message>` with ANSI colour on TTYs.
+- `--level` accepts `DEBUG`/`INFO`/`WARN`/`ERROR`, validated by clap before any network call.
+
+### 12.2 Server-side env var knobs
+
+Defaults pinned in [RFC 0018 § Resolved Decisions](rfcs/0018-structured-logging-framework.md#resolved-decisions); read at orchestrator startup:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PERSATRIX_LOGBUFFER_DIR` | `data/logs` | JSONL root (created `0700`). |
+| `PERSATRIX_LOGBUFFER_DISK_MB` | `512` | On-disk cap; oldest sealed evicted first. |
+| `PERSATRIX_LOGBUFFER_PER_EXEC` | `1000` | Per-execution ring capacity. |
+| `PERSATRIX_LOGBUFFER_MAX_EXEC` | `50` | LRU cap on concurrent executions. |
+| `PERSATRIX_LOGBUFFER_DROP_LEVEL` | `DEBUG` | Min level kept when over rate. |
+| `PERSATRIX_LOGBUFFER_RATE_PER_EXEC` | `1000` | Per-execution admit rate (entries/sec). |
+
+Layout: one dir per execution, one append-only `<sequence>.jsonl` per sealed flush; dir `0o700`, file `0o600`.
+
+### 12.3 Tailing a live workflow
+
+```shell
+persatrix workflows submit code-review.yaml
+persatrix logs exec-7f2a1 --follow --level INFO
+persatrix logs _ --trace abc123 --verbose
+```
+
+Across an orchestrator restart, `--follow` prints `[reconnected]` and resumes from the warm-loaded ring; entries flushed to disk before the restart remain queryable via the snapshot path.
+
+### 12.4 End-to-end coverage
+
+Locked in by `tests/integration/test_logs_e2e.py` (opt-in via `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`): snapshot, `--trace` filter, `--follow` latency, warm-load restart, `--level` parse rejection.

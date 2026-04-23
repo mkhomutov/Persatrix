@@ -2,12 +2,12 @@ mod commands;
 mod types;
 mod validation;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
 use commands::chat::cmd_chat;
-use commands::logs::cmd_logs;
+use commands::logs::{cmd_logs, LogsOptions};
 use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
 
@@ -69,13 +69,33 @@ enum Commands {
         execution_id: Option<String>,
     },
     /// View execution logs
+    ///
+    /// Use the literal execution ID `_` for a chronological cross-execution
+    /// merge view (e.g. `persatrix logs _ --since 5m --level WARN`).
     Logs {
-        /// Execution ID
+        /// Execution ID (use `_` for the cross-execution merged view)
         execution_id: String,
-        /// Follow log output
+        /// Follow log output (Server-Sent Events stream)
         #[arg(short, long)]
         follow: bool,
-        /// Filter by agent
+        /// Show full structured payload (execution/step/trace IDs and attributes)
+        #[arg(short, long)]
+        verbose: bool,
+        /// Lower bound on entry timestamp. Accepts a Go duration ("5m",
+        /// "1h30m") or an RFC 3339 timestamp.
+        #[arg(long)]
+        since: Option<String>,
+        /// Filter by workflow ID (matches `attributes["workflow"]`)
+        #[arg(long)]
+        workflow: Option<String>,
+        /// Filter by log level
+        #[arg(long, value_enum)]
+        level: Option<LogLevel>,
+        /// Filter to entries whose `trace_id` matches (client-side filter for
+        /// log↔trace correlation; see [RFC 0019 § G](docs/rfcs/0019-opentelemetry-completion.md#g-logtrace-correlation)).
+        #[arg(long)]
+        trace: Option<String>,
+        /// Filter by agent (kept for back-compat; matches `attributes["agent_id"]`)
         #[arg(long)]
         agent: Option<String>,
     },
@@ -129,6 +149,28 @@ enum Commands {
     /// Mesh status and diagnostics (v0.3+)
     #[command(subcommand)]
     Mesh(MeshCommands),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "UPPER")]
+pub(crate) enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    /// Wire value sent to the orchestrator REST/SSE endpoints, which expect
+    /// the uppercase severity tokens enumerated by [`logsRequest`].
+    pub(crate) fn as_wire_str(self) -> &'static str {
+        match self {
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERROR",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -235,8 +277,29 @@ async fn main() {
         Commands::Logs {
             execution_id,
             follow,
+            verbose,
+            since,
+            workflow,
+            level,
+            trace,
             agent,
-        } => cmd_logs(&client, server, &execution_id, follow, agent.as_deref()).await,
+        } => {
+            cmd_logs(
+                &client,
+                server,
+                &execution_id,
+                LogsOptions {
+                    follow,
+                    verbose,
+                    since: since.as_deref(),
+                    workflow: workflow.as_deref(),
+                    level: level.map(LogLevel::as_wire_str),
+                    trace: trace.as_deref(),
+                    agent: agent.as_deref(),
+                },
+            )
+            .await
+        }
         Commands::Chat { agent_id, user } => {
             // Resolve user identity: explicit --user flag first, then OS
             // username (USERNAME on Windows, USER on POSIX), normalized to

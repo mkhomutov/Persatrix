@@ -107,4 +107,5 @@ asyncio_mode = "auto"
 # not under agents/tests/.
 markers = [
     "requires_compose: integration tests that require the docker-compose observability stack to be running (otel-collector, jaeger, prometheus, loki). Opt-in: run with `pytest -m requires_compose`.",
+    "requires_orchestrator: integration tests that spawn the built `bin/persatrix-server` and `cli/target/release/persatrix` binaries. Opt-in: run with `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`.",
 ]

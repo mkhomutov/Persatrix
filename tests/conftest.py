@@ -40,15 +40,26 @@ def pytest_configure(config):
         "observability stack (otel-collector, jaeger, prometheus, loki). "
         "Opt-in via `pytest -m requires_compose`.",
     )
+    # Register the requires_orchestrator marker for the RFC 0018 PR 6
+    # CLI/E2E suite.  Same dual-registration rationale as above.
+    config.addinivalue_line(
+        "markers",
+        "requires_orchestrator: integration tests that spawn the built "
+        "`bin/persatrix-server` and `cli/target/release/persatrix` binaries. "
+        "Opt-in via `pytest -m requires_orchestrator` after "
+        "`make build-orchestrator build-cli`.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    """Deselect ``requires_compose`` tests unless the operator opts in.
+    """Deselect ``requires_*`` opt-in tests unless the operator opts in.
 
     The default ``pytest`` invocation (``make test``, ``make test-integration``)
     must not depend on a live OTEL Collector / Jaeger / Prometheus / Loki
-    stack.  Operators opt in with ``pytest -m requires_compose``; when the
-    ``-m`` filter selects the marker, this hook is a no-op.
+    stack, nor on built CLI/orchestrator binaries.  Operators opt in with
+    ``pytest -m requires_compose`` or ``pytest -m requires_orchestrator``;
+    when the ``-m`` filter selects the marker, the corresponding skip is a
+    no-op.
 
     Review-fix (PR #171, Should-Fix #5):
     - Use the supported option name ``markexpr`` (``-m`` is the short form
@@ -63,22 +74,28 @@ def pytest_collection_modifyitems(config, items):
       which gives the right answer for ``and``/``or``/``not`` combinators.
     """
     selected_marker = config.getoption("markexpr", default="") or ""
-    if _markexpr_selects_requires_compose(selected_marker):
-        return  # operator opted in explicitly
-    skip_marker = pytest.mark.skip(reason="requires docker-compose observability stack — run with `pytest -m requires_compose`")
+    compose_opted_in = _markexpr_selects(selected_marker, "requires_compose")
+    orch_opted_in = _markexpr_selects(selected_marker, "requires_orchestrator")
+    skip_compose = pytest.mark.skip(
+        reason="requires docker-compose observability stack — run with `pytest -m requires_compose`"
+    )
+    skip_orch = pytest.mark.skip(
+        reason="requires built orchestrator + CLI binaries — run with `pytest -m requires_orchestrator`"
+    )
     for item in items:
-        if "requires_compose" in item.keywords:
-            item.add_marker(skip_marker)
+        if "requires_compose" in item.keywords and not compose_opted_in:
+            item.add_marker(skip_compose)
+        if "requires_orchestrator" in item.keywords and not orch_opted_in:
+            item.add_marker(skip_orch)
 
 
-def _markexpr_selects_requires_compose(expr: str) -> bool:
-    """Return True iff the ``-m`` expression would select ``requires_compose``.
+def _markexpr_selects(expr: str, name: str) -> bool:
+    """Return True iff the ``-m`` expression would select ``name``.
 
     Uses pytest's own expression compiler so that ``and`` / ``or`` / ``not``
     combinators are evaluated correctly (e.g. ``not requires_compose``
-    returns False, ``slow and requires_compose`` returns True when the item
-    also carries ``slow``).  Falls back to a conservative substring check
-    if pytest's private API moves.
+    returns False).  Falls back to a conservative substring check if
+    pytest's private API moves.
     """
     expr = expr.strip()
     if not expr:
@@ -87,14 +104,35 @@ def _markexpr_selects_requires_compose(expr: str) -> bool:
         from _pytest.mark.expression import Expression  # type: ignore[import-not-found]
 
         compiled = Expression.compile(expr)
-        # ``evaluate`` calls the matcher as ``matcher(name, **kwargs)``; we
-        # only care about the name so accept and discard kwargs.
-        def _matches(name: str, **_: object) -> bool:
-            return name == "requires_compose"
+
+        def _matches(candidate: str, **_: object) -> bool:
+            return candidate == name
 
         return bool(compiled.evaluate(_matches))  # type: ignore[arg-type]
     except Exception:  # noqa: BLE001 — defensive fallback if the private API moves
-        # Conservative fallback: treat bare ``requires_compose`` (no ``not``
-        # prefix) as opt-in, anything else as opt-out.
-        return expr == "requires_compose"
+        return expr == name
+
+
+# Back-compat alias retained for any external callers.
+def _markexpr_selects_requires_compose(expr: str) -> bool:
+    return _markexpr_selects(expr, "requires_compose")
+    expr = expr.strip()
+    if not expr:
+        return False
+    try:
+        from _pytest.mark.expression import Expression  # type: ignore[import-not-found]
+
+        compiled = Expression.compile(expr)
+
+        def _matches(candidate: str, **_: object) -> bool:
+            return candidate == name
+
+        return bool(compiled.evaluate(_matches))  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 — defensive fallback if the private API moves
+        return expr == name
+
+
+# Back-compat alias retained for any external callers.
+def _markexpr_selects_requires_compose(expr: str) -> bool:
+    return _markexpr_selects(expr, "requires_compose")
 
