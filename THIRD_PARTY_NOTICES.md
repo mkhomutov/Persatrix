@@ -23,17 +23,20 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (24 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (27 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
 | `github.com/cenkalti/backoff/v5` | MIT | [link](https://github.com/cenkalti/backoff/blob/v5.0.3/LICENSE) |
 | `github.com/cespare/xxhash/v2` | MIT | [link](https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt) |
+| `github.com/felixge/httpsnoop` | MIT | [link](https://github.com/felixge/httpsnoop/blob/v1.0.4/LICENSE.txt) |
 | `github.com/go-logr/logr` | Apache-2.0 | [link](https://github.com/go-logr/logr/blob/v1.4.3/LICENSE) |
 | `github.com/go-logr/stdr` | Apache-2.0 | [link](https://github.com/go-logr/stdr/blob/v1.2.2/LICENSE) |
 | `github.com/google/uuid` | BSD-3-Clause | [link](https://github.com/google/uuid/blob/v1.6.0/LICENSE) |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | [link](https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.28.0/LICENSE) |
 | `go.opentelemetry.io/auto/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE) |
+| `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.68.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |
+| `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.68.0/instrumentation/net/http/otelhttp/LICENSE) |
 | `go.opentelemetry.io/otel` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/v1.43.0/LICENSE) |
 | `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.43.0/exporters/otlp/otlptrace/LICENSE) |
 | `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.43.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE) |
@@ -47,14 +50,14 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (24 packages).
 | `golang.org/x/sys/windows` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.42.0:LICENSE) |
 | `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.35.0:LICENSE) |
 | `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/api/LICENSE) |
-| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/rpc/LICENSE) |
+| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/6f92a3bedf2d/googleapis/rpc/LICENSE) |
 | `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE) |
 | `google.golang.org/protobuf` | BSD-3-Clause | [link](https://github.com/protocolbuffers/protobuf-go/blob/v1.36.11/LICENSE) |
 | `gopkg.in/yaml.v3` | MIT | [link](https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE) |
 
 ## Python dependencies
 
-Collected via `pip-licenses --from=mixed` against the `agents` extras (63 packages).
+Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packages).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -92,6 +95,9 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (63 packag
 | `opentelemetry-api` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
 | `opentelemetry-exporter-otlp-proto-common` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
 | `opentelemetry-exporter-otlp-proto-grpc` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-grpc) |
+| `opentelemetry-exporter-otlp-proto-http` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
+| `opentelemetry-instrumentation` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
+| `opentelemetry-instrumentation-grpc` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
 | `opentelemetry-proto` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
 | `opentelemetry-sdk` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
 | `opentelemetry-semantic-conventions` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
@@ -112,19 +118,22 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (63 packag
 | `rpds-py` | 0.30.0 | MIT | [link](https://github.com/crate-py/rpds) |
 | `ruff` | 0.15.11 | MIT | [link](https://docs.astral.sh/ruff) |
 | `sniffio` | 1.3.1 | Apache Software License; MIT License | [link](https://github.com/python-trio/sniffio) |
+| `structlog` | 25.5.0 | MIT OR Apache-2.0 | [link](https://github.com/hynek/structlog/blob/main/CHANGELOG.md) |
 | `tiktoken` | 0.12.0 | MIT License | [link](https://github.com/openai/tiktoken) |
 | `tqdm` | 4.67.3 | MPL-2.0 AND MIT | [link](https://tqdm.github.io) |
+| `types-grpcio` | 1.0.0.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
 | `types-protobuf` | 7.34.1.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
 | `types-PyYAML` | 6.0.12.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
 | `typing-inspection` | 0.4.2 | MIT | [link](https://github.com/pydantic/typing-inspection) |
 | `typing_extensions` | 4.15.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |
 | `urllib3` | 2.6.3 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
+| `wrapt` | 2.1.2 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
 | `yarl` | 1.23.0 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
 | `zipp` | 3.23.1 | MIT | [link](https://github.com/jaraco/zipp) |
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (205 crates).
+Collected via `cargo license --json` inside `cli/` (203 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -176,7 +185,6 @@ Collected via `cargo license --json` inside `cli/` (205 crates).
 | `h2` | 0.4.13 | MIT | [link](https://github.com/hyperium/h2) |
 | `hashbrown` | 0.15.5 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/hashbrown) |
 | `hashbrown` | 0.16.1 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/hashbrown) |
-| `heck` | 0.4.1 | Apache-2.0 OR MIT | [link](https://github.com/withoutboats/heck) |
 | `heck` | 0.5.0 | Apache-2.0 OR MIT | [link](https://github.com/withoutboats/heck) |
 | `http` | 1.4.0 | Apache-2.0 OR MIT | [link](https://github.com/hyperium/http) |
 | `http-body` | 1.0.1 | MIT | [link](https://github.com/hyperium/http-body) |
@@ -217,18 +225,18 @@ Collected via `cargo license --json` inside `cli/` (205 crates).
 | `objc2-encode` | 4.1.0 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `once_cell` | 1.21.4 | Apache-2.0 OR MIT | [link](https://github.com/matklad/once_cell) |
 | `once_cell_polyfill` | 1.70.2 | Apache-2.0 OR MIT | [link](https://github.com/polyfill-rs/once_cell_polyfill) |
-| `openssl` | 0.10.76 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
+| `openssl` | 0.10.78 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
 | `openssl-macros` | 0.1.1 | Apache-2.0 OR MIT |  |
 | `openssl-probe` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/rustls/openssl-probe) |
-| `openssl-sys` | 0.9.112 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
-| `papergrid` | 0.12.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `openssl-sys` | 0.9.114 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
+| `papergrid` | 0.17.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `percent-encoding` | 2.3.2 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url/) |
 | `pin-project-lite` | 0.2.17 | Apache-2.0 OR MIT | [link](https://github.com/taiki-e/pin-project-lite) |
 | `pkg-config` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/pkg-config-rs) |
 | `potential_utf` | 0.1.5 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `prettyplease` | 0.2.37 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/prettyplease) |
-| `proc-macro-error` | 1.0.4 | Apache-2.0 OR MIT | [link](https://gitlab.com/CreepySkeleton/proc-macro-error) |
-| `proc-macro-error-attr` | 1.0.4 | Apache-2.0 OR MIT | [link](https://gitlab.com/CreepySkeleton/proc-macro-error) |
+| `proc-macro-error-attr2` | 2.0.0 | Apache-2.0 OR MIT | [link](https://github.com/GnomedDev/proc-macro-error-2) |
+| `proc-macro-error2` | 2.0.1 | Apache-2.0 OR MIT | [link](https://github.com/GnomedDev/proc-macro-error-2) |
 | `proc-macro2` | 1.0.106 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/proc-macro2) |
 | `quote` | 1.0.45 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/quote) |
 | `r-efi` | 6.0.0 | Apache-2.0 OR LGPL-2.1-or-later OR MIT | [link](https://github.com/r-efi/r-efi) |
@@ -237,7 +245,7 @@ Collected via `cargo license --json` inside `cli/` (205 crates).
 | `rustix` | 1.1.4 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/rustix) |
 | `rustls` | 0.23.37 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls) |
 | `rustls-pki-types` | 1.14.0 | Apache-2.0 OR MIT | [link](https://github.com/rustls/pki-types) |
-| `rustls-webpki` | 0.103.10 | ISC | [link](https://github.com/rustls/webpki) |
+| `rustls-webpki` | 0.103.12 | ISC | [link](https://github.com/rustls/webpki) |
 | `rustversion` | 1.0.22 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/rustversion) |
 | `ryu` | 1.0.23 | Apache-2.0 OR BSL-1.0 | [link](https://github.com/dtolnay/ryu) |
 | `schannel` | 0.1.29 | MIT | [link](https://github.com/steffengy/schannel-rs) |
@@ -257,15 +265,15 @@ Collected via `cargo license --json` inside `cli/` (205 crates).
 | `stable_deref_trait` | 1.2.1 | Apache-2.0 OR MIT | [link](https://github.com/storyyeller/stable_deref_trait) |
 | `strsim` | 0.11.1 | MIT | [link](https://github.com/rapidfuzz/strsim-rs) |
 | `subtle` | 2.6.1 | BSD-3-Clause | [link](https://github.com/dalek-cryptography/subtle) |
-| `syn` | 1.0.109 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/syn) |
 | `syn` | 2.0.117 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/syn) |
 | `sync_wrapper` | 1.0.2 | Apache-2.0 | [link](https://github.com/Actyx/sync_wrapper) |
 | `synstructure` | 0.13.2 | MIT | [link](https://github.com/mystor/synstructure) |
 | `system-configuration` | 0.7.0 | Apache-2.0 OR MIT | [link](https://github.com/mullvad/system-configuration-rs) |
 | `system-configuration-sys` | 0.6.0 | Apache-2.0 OR MIT | [link](https://github.com/mullvad/system-configuration-rs) |
-| `tabled` | 0.16.0 | MIT | [link](https://github.com/zhiburt/tabled) |
-| `tabled_derive` | 0.8.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `tabled` | 0.20.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `tabled_derive` | 0.11.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `tempfile` | 3.27.0 | Apache-2.0 OR MIT | [link](https://github.com/Stebalien/tempfile) |
+| `testing_table` | 0.3.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `tinystr` | 0.8.3 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `tokio` | 1.51.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-macros` | 2.7.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
@@ -280,14 +288,13 @@ Collected via `cargo license --json` inside `cli/` (205 crates).
 | `tracing-core` | 0.1.36 | MIT | [link](https://github.com/tokio-rs/tracing) |
 | `try-lock` | 0.2.5 | MIT | [link](https://github.com/seanmonstar/try-lock) |
 | `unicode-ident` | 1.0.24 | (Apache-2.0 OR MIT) AND Unicode-3.0 | [link](https://github.com/dtolnay/unicode-ident) |
-| `unicode-width` | 0.1.11 | Apache-2.0 OR MIT | [link](https://github.com/unicode-rs/unicode-width) |
+| `unicode-width` | 0.2.2 | Apache-2.0 OR MIT | [link](https://github.com/unicode-rs/unicode-width) |
 | `unicode-xid` | 0.2.6 | Apache-2.0 OR MIT | [link](https://github.com/unicode-rs/unicode-xid) |
 | `untrusted` | 0.9.0 | ISC | [link](https://github.com/briansmith/untrusted) |
 | `url` | 2.5.8 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url) |
 | `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT | [link](https://github.com/hsivonen/utf8_iter) |
 | `utf8parse` | 0.2.2 | Apache-2.0 OR MIT | [link](https://github.com/alacritty/vte) |
 | `vcpkg` | 0.2.15 | Apache-2.0 OR MIT | [link](https://github.com/mcgoo/vcpkg-rs) |
-| `version_check` | 0.9.5 | Apache-2.0 OR MIT | [link](https://github.com/SergioBenitez/version_check) |
 | `want` | 0.3.1 | MIT | [link](https://github.com/seanmonstar/want) |
 | `wasi` | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasi) |
 | `wasip2` | 1.0.2+wasi-0.2.9 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasi-rs) |
