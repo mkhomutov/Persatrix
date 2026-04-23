@@ -9,13 +9,20 @@ Provider-specific message formats are encapsulated behind the protocol boundary.
 import logging
 import os
 import time
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Protocol
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from .llm_providers import AnthropicProvider, OpenAIProvider
+from .llm_types import (
+    LLMProvider,
+    LLMResponse,
+    LLMToolResult,
+    StopReason,
+    ToolCall,
+    Usage,
+)
 from .observability.metrics import (
     current_agent_id,
     llm_call_attrs,
@@ -33,102 +40,27 @@ logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 
 
-# ─── Normalized Types ───────────────────────────────────────
+# ─── Re-exported types ──────────────────────────────────────
+#
+# The normalised dataclasses + ``StopReason`` enum + ``LLMProvider`` Protocol
+# live in :mod:`agents.llm_types` (a leaf module with no project-internal
+# imports) so this module and :mod:`agents.llm_providers` can both import
+# them without inducing a circular import.  Re-exported here to preserve
+# the historical ``from agents.llm_client import LLMResponse`` /
+# ``StopReason`` / etc. import paths used across the test suite.
 
-
-class StopReason(Enum):
-    """Provider-agnostic stop reason.
-
-    Unmapped provider-specific stop reasons (e.g. Anthropic's stop_sequence,
-    OpenAI's content_filter) are mapped to END_TURN with a warning log.
-    """
-
-    END_TURN = "end_turn"
-    TOOL_USE = "tool_use"
-    MAX_TOKENS = "max_tokens"
-
-
-@dataclass
-class ToolCall:
-    """Provider-agnostic tool call."""
-
-    id: str
-    name: str
-    input: dict[str, Any]
-
-
-@dataclass
-class Usage:
-    """Token usage from LLM response."""
-
-    input_tokens: int
-    output_tokens: int
-
-
-@dataclass
-class LLMToolResult:
-    """Provider-agnostic tool result for LLM message building.
-
-    Not to be confused with tools.registry.ToolResult which represents
-    the raw result from a tool function (success/data/error/error_type).
-    """
-
-    tool_call_id: str
-    content: str
-    is_error: bool
-
-
-@dataclass
-class LLMResponse:
-    """Normalized response from any LLM provider."""
-
-    text: str | None
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    stop_reason: StopReason = StopReason.END_TURN
-    usage: Usage = field(default_factory=lambda: Usage(0, 0))
-
-
-# ─── Provider Protocol ──────────────────────────────────────
-
-
-class LLMProvider(Protocol):
-    """Protocol for LLM provider implementations."""
-
-    # Stable identifier emitted as the OTEL ``gen_ai.system`` attribute
-    # (``"anthropic"``, ``"openai"``, …).  Declared here so call sites do
-    # not have to derive it from ``type().__name__`` (which silently
-    # produces wrong values for test doubles like ``AsyncMock``).
-    name: str
-
-    async def create_message(
-        self,
-        *,
-        model: str,
-        messages: list,
-        system: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-    ) -> LLMResponse: ...
-
-    def format_tool_definitions(self, tools: list[dict]) -> list[dict]: ...
-
-    def append_tool_round(
-        self,
-        messages: list,
-        response: LLMResponse,
-        tool_results: list[LLMToolResult],
-    ) -> list: ...
-
-
-# ─── Provider Implementations (re-exported) ────────────────
-
-
-# Provider classes live in :mod:`agents.llm_providers` so this module stays
-# under the 500-line review-friendly cap. They are re-exported here to keep
-# the historical ``from agents.llm_client import AnthropicProvider`` /
-# ``OpenAIProvider`` import paths working.
-from .llm_providers import AnthropicProvider, OpenAIProvider  # noqa: E402, I001
+__all__ = [
+    "AnthropicProvider",
+    "LLMClient",
+    "LLMProvider",
+    "LLMResponse",
+    "LLMToolResult",
+    "OpenAIProvider",
+    "StopReason",
+    "ToolCall",
+    "Usage",
+    "create_provider",
+]
 
 
 # ─── LLM error classification (PR-170 S1) ─────────────────

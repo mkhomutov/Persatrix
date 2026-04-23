@@ -496,10 +496,10 @@ Apply the following items captured in [PR 1 review](#from-pr-1-review), [PR 2 re
 
 #### PR checklist
 
-- [ ] Items above either applied (with `Polish-fix (PR #N)` marker on the diff) or downgraded to tracked issue with a link from PR 5's [From PR 1 review](#from-pr-1-review) / [From PR 2 review](#from-pr-2-review) / [From PR 3 review](#from-pr-3-review) entries.
-- [ ] `agents/llm_types.py` extraction passes the existing import-path compat tests (`from agents.llm_client import AnthropicProvider` still resolves).
-- [ ] No new public API surface beyond the `agents/llm_types.py` extraction and the `Linkable(Protocol)` declaration (polish only).
-- [ ] `make test` passes; `make lint` clean; `mypy agents/` clean for any newly typed surface.
+- [x] Items above either applied (with `Polish-fix (PR #N)` marker on the diff) or downgraded to tracked issue with a link from PR 5's [From PR 1 review](#from-pr-1-review) / [From PR 2 review](#from-pr-2-review) / [From PR 3 review](#from-pr-3-review) entries.
+- [x] `agents/llm_types.py` extraction passes the existing import-path compat tests (`from agents.llm_client import AnthropicProvider` still resolves).
+- [x] No new public API surface beyond the `agents/llm_types.py` extraction and the `Linkable(Protocol)` declaration (polish only).
+- [x] `make test` passes; `make lint` clean; `mypy agents/` clean for any newly typed surface.
 
 ---
 

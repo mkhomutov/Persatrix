@@ -234,6 +234,17 @@ A real redactor lands with the future security RFC under the RFC 0009
 umbrella; both signals will pick it up automatically because they share
 the same `agents.observability.spans.set_redactor()` hook.
 
+> **Operator warning — `full` mode + `NoopRedactor`.** Setting
+> `PERSATRIX_TRACE_TOOL_PAYLOADS=full` while the active redactor is the
+> default `NoopRedactor` causes raw tool argument values to be written
+> to span attributes. The agent runtime emits a one-time `WARNING` log
+> the first time this combination fires (`Tool-payload capture is set
+> to 'full' but the active redactor is the no-op NoopRedactor …`). This
+> is the intentional safe-default escape hatch for development; in
+> production install a real redactor via
+> `agents.observability.spans.set_redactor()` before flipping the env
+> var to `full`.
+
 ### 10.5 Persatrix-specific attribute namespace
 
 Persatrix uses **two** attribute conventions side-by-side, mirroring
@@ -272,6 +283,17 @@ render Persatrix LLM traces correctly out of the box. The
 vocabulary (`stop` / `length` / `tool_calls` / `content_filter` /
 `error`); Persatrix's internal `StopReason` enum is translated at the
 span emission site (see `agents.observability.spans.STOP_REASON_TO_GEN_AI`).
+
+> **Span-vs-metric attribute key divergence.** The same logical dimension
+> uses **different keys on spans and metrics by design**. Spans use the
+> `persatrix.workflow_id` Baggage key (so the cross-process Baggage
+> propagator round-trips it without escaping the project namespace);
+> metrics use the bare `workflow.id` key (so cardinality dimensions
+> align with OTEL semconv-style attribute names that Prometheus / OTLP
+> dashboards expect). Operators searching for a workflow id in a metric
+> backend should query `workflow.id`, not `persatrix.workflow_id`. The
+> RFC 0019 PR 4 schema-parity test enumerates the documented
+> divergences so future renames cannot silently break either signal.
 
 ### 10.6 Correlated debugging walkthrough
 

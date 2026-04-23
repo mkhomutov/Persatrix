@@ -32,8 +32,6 @@ See PR #163 review round 2 (Should Fix #5).
 
 from __future__ import annotations
 
-import os
-
 from opentelemetry import trace
 from opentelemetry.baggage.propagation import (
     W3CBaggagePropagator,  # type: ignore[import-untyped]
@@ -54,6 +52,8 @@ from opentelemetry.sdk.trace.sampling import (
     TraceIdRatioBased,
 )
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+from ._env import env_str as _env
 
 _BAGGAGE_PROPAGATOR: TextMapPropagator = W3CBaggagePropagator()
 
@@ -85,11 +85,6 @@ _provider: TracerProvider | None = None
 # the actual ``agent.observability.spans.dropped`` counter is wired.  The
 # subclass + hook will be reintroduced together in RFC 0019 PR 3 alongside the
 # real metric.  See PR #163 review round 2 (Should Fix #4).
-
-
-def _env(key: str, default: str) -> str:
-    v = os.environ.get(key, "").strip()
-    return v if v else default
 
 
 def init_tracing(
