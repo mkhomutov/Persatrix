@@ -12,6 +12,10 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
+from opentelemetry import trace
+from opentelemetry.trace import Link
+
+from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
     ActionType,
     AgentAction,
@@ -24,6 +28,7 @@ if TYPE_CHECKING:
     from .tick import TickScheduler
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 __all__ = ["ActionExecutor", "EventDispatcher"]
 
@@ -148,10 +153,25 @@ class ActionExecutor:
                 return {"action_type": "delegate", "status": "not_implemented"}
             case ActionType.SPAWN_SUB_AGENT:
                 # TODO(v0.2+): spawn ephemeral sub-agent
-                logger.info(
-                    "Agent %s requested sub-agent spawn (not yet implemented)",
-                    agent_id,
-                )
+                # The ``agent.subagent.spawn`` span ships now (RFC 0019 § D)
+                # so the span name and attribute keys are pinned before the
+                # real spawner lands in RFC 0009.  When the spawner ships, the
+                # sub-agent's root span will emit a ``Link(link.kind="spawn")``
+                # back to the SpanContext captured here.
+                with _tracer.start_as_current_span(
+                    SUBAGENT_SPAWN_SPAN,
+                    attributes={
+                        "agent.id": agent_id,
+                        "subagent.role": str(
+                            action.payload.get("role", ""),
+                        ),
+                        "subagent.status": "not_implemented",
+                    },
+                ):
+                    logger.info(
+                        "Agent %s requested sub-agent spawn (not yet implemented)",
+                        agent_id,
+                    )
                 return {"action_type": "spawn_sub_agent", "status": "not_implemented"}
             case ActionType.REQUEST_APPROVAL:
                 logger.info(
@@ -427,6 +447,18 @@ class EventDispatcher:
         scheduler = self._tick_schedulers.get(target_id)
         if scheduler is not None:
             scheduler.wake()
+            # RFC 0019 § I: record event→tick causality as a Span Link the
+            # next on_tick() consumes.  Captured here (rather than in
+            # scheduler.wake()) because the dispatcher is the only call site
+            # that runs inside the active event span; the tick loop that
+            # later invokes on_tick() runs in a separate asyncio task whose
+            # context lacks this span.
+            current_span = trace.get_current_span()
+            ctx = current_span.get_span_context()
+            if ctx.is_valid:
+                add_link = getattr(agent, "add_pending_tick_link", None)
+                if callable(add_link):
+                    add_link(Link(ctx, attributes={"link.kind": "trigger"}))
 
         # Deliver event
         actions = await agent.on_event(event)

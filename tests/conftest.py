@@ -14,6 +14,17 @@ _generated = str(Path(__file__).parent.parent / "agents" / "generated")
 if _generated not in sys.path:
     sys.path.insert(0, _generated)
 
+# Make sibling helper module ``_test_infra`` importable.
+_tests_dir = str(Path(__file__).parent)
+if _tests_dir not in sys.path:
+    sys.path.insert(0, _tests_dir)
+
+# Ensure leaked aiosqlite connections cannot hang interpreter shutdown.
+# See tests/_test_infra.py for the rationale.
+from _test_infra import daemonize_aiosqlite_workers  # noqa: E402
+
+daemonize_aiosqlite_workers()
+
 
 def pytest_configure(config):
     """Set asyncio_mode=auto so async tests don't need explicit markers."""

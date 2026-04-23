@@ -56,6 +56,41 @@ All notable changes to this project will be documented in this file.
   name (e.g. a Kubernetes pod ID) and operators want a stable, meaningful
   instance identifier in the aggregated log stream.
 
+- **`PERSATRIX_TRACE_TOOL_PAYLOADS`** controls how much detail the Python
+  agent's `agent.tool.execute` span captures about tool arguments.  Defaults
+  to `none` (only `tool.name` is recorded).  Set to `metadata` to additionally
+  emit `tool.arguments.<arg>.type`, or to `full` to emit redacted argument
+  values (routed through the same `Redactor` Protocol that RFC 0018 wires
+  for log redaction).  Use `full` only with a configured redactor — the
+  default `NoopRedactor` echoes values verbatim and may capture secrets.
+
+### Added (RFC 0019 PR 2 — Phase 2 spans + Span Links)
+
+- **Semantic OTEL spans** at every Persatrix decision boundary in the Python
+  agent runtime: `agent.persona.event`, `agent.persona.tick`,
+  `agent.memory.episodic.recall` / `.remember`,
+  `agent.memory.relationship.lookup` / `.update`, `agent.llm.call`,
+  `agent.tool.execute`, `agent.subagent.spawn`.  Span names follow
+  `<service>.<component>.<operation>`; Persatrix attributes use the
+  `persatrix.*` namespace.
+- **OTEL Gen-AI semantic conventions** on `agent.llm.call`
+  (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens` /
+  `output_tokens`, `gen_ai.response.finish_reasons`) so vendor backends
+  render Persatrix LLM traces without project-specific configuration.
+- **Span Links** carrying `link.kind` for cross-tree causality: persona
+  event → triggered tick wires today; sub-agent spawn → sub-agent root
+  ships with RFC 0009; channel/bridge and mesh links are documented and
+  reserved for their owning RFCs.
+- **Sub-millisecond event phases** (`received` / `queued` / `handled` /
+  `completed`) recorded as span events on the `agent.persona.event` span
+  rather than as nested spans, keeping trace trees navigable.
+- **Tool-payload capture** is opt-in through `PERSATRIX_TRACE_TOOL_PAYLOADS`
+  and routes through the redactor surface introduced by RFC 0018 PR 1 —
+  one secrets-policy code path serves both logs and span attributes.
+- New documentation section `docs/observability.md § 10 — Span conventions`
+  inventorying every Persatrix span, its attributes, the Span Link table,
+  payload-capture modes, and a correlated debugging walkthrough.
+
 ## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection

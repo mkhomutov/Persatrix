@@ -234,6 +234,20 @@ Attribute keys: snake_case, dot-separated for namespacing. Reserved keys mirror 
 
 The convention is documented in `docs/observability.md` (created by RFC 0018; this RFC adds a span-conventions section, a metrics section, and a Collector pipeline section).
 
+> **Convention clarification (post-PR-167 review).** The `persatrix.*` prefix
+> is reserved specifically for **cross-cutting workflow-context fields** that
+> propagate across process boundaries via W3C Baggage (`persatrix.execution_id`,
+> `persatrix.step_id`, `persatrix.workflow_id`, future `persatrix.tenant_id` /
+> `persatrix.organization_id`). Span-local attributes that describe the
+> immediate subject of a span — `agent.id`, `event.type`, `tool.name`,
+> `episode.kind`, `participant.id`, `link.kind`, etc. — use bare component
+> prefixes without the `persatrix.*` namespace, matching the OTEL convention
+> of grouping by component (`http.*`, `db.*`, `messaging.*`). Collision with
+> future upstream OTEL keys under those prefixes is bounded by the
+> schema-version pin (`schema_url=…/1.0.0`) and resolved with a single
+> schema bump rather than spreading the `persatrix.*` namespace across every
+> span today. See `docs/observability.md` § 10.5 for the full inventory.
+
 ### F. Metrics
 
 Metrics ship on the same OTLP HTTP exporter as traces. A new module `agents/observability/metrics.py` mirrors the tracing module: `init_metrics(agent_id) -> Meter`, `shutdown()`, same Resource (so traces and metrics share `service.instance.id`).

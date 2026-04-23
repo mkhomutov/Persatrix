@@ -8,13 +8,12 @@ Covers:
 - AgentServer advertise-address for Docker service discovery
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.base import TaskInput, TaskStatus
-from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
+from agents.base import TaskInput
+from agents.llm_client import LLMClient, LLMResponse
 from agents.server import AgentServer
 from agents.task_agent import TaskAgent
 from agents.tools import builtin
