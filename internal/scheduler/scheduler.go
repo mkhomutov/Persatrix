@@ -222,9 +222,19 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	// lives at the REST submit boundary (server.go); here we only bump the
 	// ``workflow.active`` gauge and record a duration timer so completion /
 	// failure paths can emit the histogram with stable attribute keys.
+	//
+	// PR-170 S2: metric attribute keys use the unprefixed dotted form
+	// (``workflow.id``, ``agent.id``) per RFC 0019 § F — the freshly-
+	// canonicalised orchestrator metric inventory.  ``persatrix.*`` is
+	// reserved for vendor-specific dimensions (e.g. ``persatrix.llm.cache.hit``
+	// on the agent side).  Span attributes intentionally retain the
+	// ``persatrix.workflow_id`` form — that is the established repo-wide
+	// span-attribute convention used by every tracer call site, and joining
+	// metrics to spans by trace_id (via exemplars) makes attribute-name
+	// alignment between the two signals unnecessary.
 	runStarted := time.Now()
 	wfAttrs := metric.WithAttributes(
-		attribute.String("persatrix.workflow_id", run.WorkflowID),
+		attribute.String("workflow.id", run.WorkflowID),
 	)
 	if s.metrics != nil {
 		s.metrics.WorkflowActive.Add(ctx, 1, wfAttrs)
@@ -361,6 +371,13 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	span.SetAttributes(attribute.String("persatrix.status", state.RunCompleted.String()))
 	span.SetStatus(codes.Ok, "completed")
 
+	// PR-170 N2: disarm the failure-emission defer *before* recording success
+	// metrics so a hypothetical panic inside ``Add`` / ``Record`` (extremely
+	// unlikely on these no-allocation hot paths, but technically possible)
+	// does not cause the defer to also classify the run as failed and
+	// double-count it on both the failed and completed counters.
+	runSucceeded = true
+
 	if s.metrics != nil {
 		s.metrics.WorkflowCompleted.Add(ctx, 1, wfAttrs)
 		s.metrics.WorkflowActive.Add(ctx, -1, wfAttrs)
@@ -370,7 +387,6 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 			wfAttrs,
 		)
 	}
-	runSucceeded = true
 }
 
 // failRun marks a workflow run as failed with the given error message and sets FinishedAt.

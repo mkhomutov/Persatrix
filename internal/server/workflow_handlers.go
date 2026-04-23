@@ -128,9 +128,11 @@ func (s *Server) handleSubmitWorkflowRun(w http.ResponseWriter, r *http.Request)
 	// boundary — one increment per accepted submission.  The active-gauge
 	// increment lives in the scheduler (executeRun) so runs that fail
 	// path-validation before reaching the scheduler do not leak gauge ticks.
+	//
+	// PR-170 S2: ``workflow.id`` attribute key matches RFC 0019 § F.
 	if s.metrics != nil {
 		s.metrics.WorkflowSubmitted.Add(r.Context(), 1, metric.WithAttributes(
-			attribute.String("persatrix.workflow_id", req.WorkflowID),
+			attribute.String("workflow.id", req.WorkflowID),
 		))
 	}
 

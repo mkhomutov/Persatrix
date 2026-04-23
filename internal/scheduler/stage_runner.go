@@ -173,10 +173,14 @@ func (s *WorkflowScheduler) executeStep(
 	// unconditionally (success + failure both represent a dispatched step);
 	// duration is recorded in milliseconds to keep the histogram bucket
 	// distribution in the same unit family as the workflow-duration instrument.
+	//
+	// PR-170 S2: metric attribute keys are unprefixed dotted form per
+	// RFC 0019 § F.  See the matching comment in scheduler.go::executeRun
+	// for the full rationale.
 	stepAttrs := metric.WithAttributes(
-		attribute.String("persatrix.workflow_id", workflowID),
-		attribute.String("persatrix.agent_id", step.AgentID),
-		attribute.Bool("persatrix.step.success", err == nil),
+		attribute.String("workflow.id", workflowID),
+		attribute.String("agent.id", step.AgentID),
+		attribute.Bool("step.success", err == nil),
 	)
 	if s.metrics != nil {
 		s.metrics.StepDispatched.Add(ctx, 1, stepAttrs)

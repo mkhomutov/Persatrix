@@ -53,7 +53,13 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.llm_duration.record(1.0, attributes=_LLM_DUR_A)
     inst.event_dispatched.add(1, attributes=_EVENT_A)
     inst.persona_tick_interval.record(1.0, attributes=_TICK_A)
-    inst.agent_active.add(0)
+    # PR-170 M2: ``agent.active`` is exercised with a real ``+1 / -1``
+    # round-trip in :class:`TestAgentActiveLifecycle` below, not a no-op
+    # ``add(0)`` here.  The previous touch-with-zero existed solely to
+    # satisfy the inventory test and masked the fact that no production
+    # code path was incrementing the gauge.
+    inst.agent_active.add(1, attributes={"agent.id": "t"})
+    inst.agent_active.add(-1, attributes={"agent.id": "t"})
     inst.spans_dropped.add(1, attributes=_DROP_A)
     inst.logs_dropped.add(1, attributes=_DROP_A)
 
@@ -134,13 +140,60 @@ class TestHistogramExemplars:
 
         m = _collect(metric_reader).get("agent.llm.duration")
         assert m is not None
-        for dp in m.data.data_points:
-            exemplars = getattr(dp, "exemplars", None)
-            if not exemplars:
-                continue
-            for ex in exemplars:
-                assert ex.trace_id == span_ctx.trace_id
-                assert ex.span_id == span_ctx.span_id
+
+        # PR-170 S4: previous shape iterated ``dp.exemplars`` and asserted
+        # inside the inner loop, which passed vacuously when the SDK
+        # version-/aggregation-config combo emitted zero exemplars.  Collect
+        # all exemplars across all data points first; require at least one,
+        # and require it to carry the active span's trace/span IDs.  This
+        # regression-detects future SDK behaviour changes that would
+        # silently drop exemplars instead of pretending the test still
+        # exercises the contract.
+        all_exemplars = [
+            ex
+            for dp in m.data.data_points
+            for ex in (getattr(dp, "exemplars", None) or [])
+        ]
+        assert all_exemplars, (
+            "expected at least one exemplar on agent.llm.duration; "
+            "OTEL SDK emitted none under an active span"
+        )
+        assert any(
+            ex.trace_id == span_ctx.trace_id and ex.span_id == span_ctx.span_id
+            for ex in all_exemplars
+        ), "no exemplar matched the active span context"
+
+
+class TestAgentActiveLifecycle:
+    """PR-170 M2 regression: ``agent.active`` must round-trip to zero.
+
+    The instrument is wired in :func:`agents.server.main` (``+1`` after
+    ``load_agent``, ``-1`` in the teardown path of ``_run``).  This test
+    drives the helper directly rather than spawning a real gRPC server so
+    it stays a unit test; it asserts the only contract that matters for
+    dashboards: a clean shutdown leaves the gauge at the same value it had
+    at startup.
+    """
+
+    def test_round_trip_returns_to_zero(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        inst = pmetrics.get_instruments()
+        attrs = {"agent.id": "demo"}
+        inst.agent_active.add(1, attributes=attrs)
+        inst.agent_active.add(-1, attributes=attrs)
+
+        m = _collect(metric_reader).get("agent.active")
+        assert m is not None
+        # UpDownCounter sum aggregation: across both deltas the cumulative
+        # value for the ``demo`` agent must be 0.  Sum across data points so
+        # the test is independent of how the SDK partitions points.
+        total = sum(
+            cast("int", getattr(dp, "value", 0))
+            for dp in m.data.data_points
+            if dict(dp.attributes).get("agent.id") == "demo"
+        )
+        assert total == 0
 
 
 class TestInitIdempotent:

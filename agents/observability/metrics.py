@@ -22,6 +22,7 @@ Environment variables (all optional; share defaults with tracing):
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import TYPE_CHECKING, Literal
 
@@ -56,6 +57,27 @@ _DEFAULT_EXPORT_TIMEOUT_MS = 10_000
 # sites can fetch instruments without re-creating them.
 _provider: MeterProvider | None = None
 _instruments: _Instruments | None = None
+
+# PR-170 S5: cache ``PERSATRIX_AGENT_ID`` once at module load so hot paths
+# (per-tool-call, per-LLM-call) do not hit ``os.environ`` every invocation.
+# Read lazily via ``current_agent_id()`` so test fixtures that mutate the env
+# var *before* importing the consumer modules still observe the override —
+# re-reads after first-call are not supported by design (agent identity is
+# set at process start).
+_AGENT_ID: str | None = None
+
+
+def current_agent_id() -> str:
+    """Return this process's agent id, defaulting to ``"unknown"``.
+
+    Cached after first call.  Recording sites should prefer this over
+    ``os.environ.get("PERSATRIX_AGENT_ID", "unknown")`` so the env-var
+    lookup is not in every tool / LLM hot path.
+    """
+    global _AGENT_ID
+    if _AGENT_ID is None:
+        _AGENT_ID = os.environ.get("PERSATRIX_AGENT_ID", "").strip() or "unknown"
+    return _AGENT_ID
 
 
 def _env(key: str, default: str) -> str:
@@ -243,13 +265,21 @@ def try_get_instruments() -> _Instruments | None:
 async def shutdown() -> None:
     """Flush pending metric exports and shut down the meter provider.
 
-    Declared ``async`` for symmetry with :func:`tracing.shutdown`; the
-    underlying ``force_flush`` / ``shutdown`` calls are synchronous.
+    Declared ``async`` for symmetry with :func:`tracing.shutdown`.  The
+    underlying ``force_flush`` / ``shutdown`` calls on
+    ``PeriodicExportingMetricReader`` are synchronous **and can block for up
+    to ``OTEL_METRIC_EXPORT_TIMEOUT_MS``** (default 10 s) when the collector
+    is slow or unreachable (PR-170 S3).  Offload to a worker thread via
+    :func:`asyncio.to_thread` so teardown does not stall the event loop —
+    the server's shutdown path awaits other async cleanup (gRPC stop,
+    tracing flush) concurrently with this, and blocking here would serialise
+    them.
     """
     global _provider, _instruments
     if _provider is not None:
-        _provider.force_flush()
-        _provider.shutdown()
+        provider = _provider
+        await asyncio.to_thread(provider.force_flush)
+        await asyncio.to_thread(provider.shutdown)
         _provider = None
         _instruments = None
 
@@ -299,9 +329,28 @@ def llm_token_attrs(
 
 
 def llm_duration_attrs(
-    *, agent_id: str, request_model: str,
-) -> dict[str, str]:
-    return {"agent.id": agent_id, "gen_ai.request.model": request_model}
+    *,
+    agent_id: str,
+    request_model: str,
+    success: bool = True,
+    error_type: str | None = None,
+) -> dict[str, str | bool]:
+    """Duration-histogram dimensions for the ``agent.llm.duration`` metric.
+
+    ``success`` partitions the histogram so failure-path latencies (often
+    dominated by provider timeouts / retry jitter) do not pollute success
+    percentiles (PR-170 S1).  Mirrors the shape of :func:`tool_attrs`.
+    ``error_type`` is a low-cardinality classifier — ``rate_limit``,
+    ``timeout``, ``provider_error`` — set only when ``success`` is ``False``.
+    """
+    attrs: dict[str, str | bool] = {
+        "agent.id": agent_id,
+        "gen_ai.request.model": request_model,
+        "llm.success": success,
+    }
+    if error_type is not None:
+        attrs["error.type"] = error_type
+    return attrs
 
 
 def event_attrs(*, agent_id: str, event_type: str) -> dict[str, str]:

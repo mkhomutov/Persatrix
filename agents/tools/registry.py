@@ -10,7 +10,6 @@ Tools are typed functions that agents can invoke. Three tiers:
 import functools
 import inspect
 import logging
-import os
 import time
 import warnings
 from collections.abc import Callable
@@ -21,6 +20,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from ..observability.metrics import (
+    current_agent_id,
     tool_attrs,
     try_get_instruments,
 )
@@ -184,7 +184,7 @@ def tool(
             # TODO: Rate limit check
             # TODO: Audit logging
             tool_started = time.monotonic()
-            agent_id = os.environ.get("PERSATRIX_AGENT_ID", "unknown")
+            agent_id = current_agent_id()
             with _tracer.start_as_current_span(
                 TOOL_EXECUTE_SPAN,
                 attributes={"tool.name": tool_name},

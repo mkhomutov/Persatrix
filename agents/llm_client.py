@@ -17,6 +17,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .observability.metrics import (
+    current_agent_id,
     llm_call_attrs,
     llm_duration_attrs,
     llm_token_attrs,
@@ -130,6 +131,27 @@ class LLMProvider(Protocol):
 from .llm_providers import AnthropicProvider, OpenAIProvider  # noqa: E402, I001
 
 
+# ─── LLM error classification (PR-170 S1) ─────────────────
+
+
+def _classify_llm_error(exc: BaseException) -> str:
+    """Classify an LLM exception into a low-cardinality ``error.type`` bucket.
+
+    Provider SDKs (anthropic, openai) raise their own error types; the
+    agent runtime deliberately avoids importing them to stay provider-
+    agnostic.  Keyword-match on the exception class name + message instead:
+    the resulting buckets are coarse but stable across provider-SDK
+    updates and remain within the metric-attribute cardinality budget.
+    """
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    if "ratelimit" in name or "rate_limit" in name or "rate limit" in msg or "429" in msg:
+        return "rate_limit"
+    if "timeout" in name or "timeout" in msg or isinstance(exc, TimeoutError):
+        return "timeout"
+    return "provider_error"
+
+
 # ─── LLM Client Facade ──────────────────────────────────────
 
 
@@ -170,7 +192,7 @@ class LLMClient:
             ),
         ) as span:
             call_started = time.monotonic()
-            agent_id = os.environ.get("PERSATRIX_AGENT_ID", "unknown")
+            agent_id = current_agent_id()
             inst = try_get_instruments()
             if inst is not None:
                 inst.llm_calls.add(
@@ -187,10 +209,21 @@ class LLMClient:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 if inst is not None:
+                    # PR-170 S1: record failure-path duration with
+                    # ``llm.success=False`` + a coarse ``error.type`` bucket
+                    # so success/failure latency distributions are
+                    # separable on dashboards.  Classification is
+                    # best-effort by exception class name — provider SDKs
+                    # raise their own error types (anthropic, openai) that
+                    # the agent runtime does not import, so we keyword-
+                    # match without a hard dependency.
                     inst.llm_duration.record(
                         (time.monotonic() - call_started) * 1000.0,
                         attributes=llm_duration_attrs(
-                            agent_id=agent_id, request_model=model,
+                            agent_id=agent_id,
+                            request_model=model,
+                            success=False,
+                            error_type=_classify_llm_error(exc),
                         ),
                     )
                 raise
@@ -217,7 +250,9 @@ class LLMClient:
                 inst.llm_duration.record(
                     duration_ms,
                     attributes=llm_duration_attrs(
-                        agent_id=agent_id, request_model=model,
+                        agent_id=agent_id,
+                        request_model=model,
+                        success=True,
                     ),
                 )
                 inst.llm_tokens.add(
