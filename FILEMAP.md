@@ -9,9 +9,9 @@
 |---------------------|-------|
 | `docs/` | 75 |
 | `internal/` | 62 |
-| `agents/` | 60 |
-| `tests/` | 39 |
-| `(root)` | 22 |
+| `agents/` | 61 |
+| `tests/` | 40 |
+| `(root)` | 20 |
 | `scripts/` | 17 |
 | `.github/` | 15 |
 | `cli/` | 11 |
@@ -26,7 +26,7 @@
 
 | Extension | Count |
 |-----------|-------|
-| `.py` | 111 |
+| `.py` | 113 |
 | `.md` | 91 |
 | `.go` | 58 |
 | `.yaml` | 23 |
@@ -35,7 +35,6 @@
 | `(no extension)` | 5 |
 | `.toml` | 4 |
 | `.json` | 4 |
-| `.txt` | 3 |
 | `.pyi` | 2 |
 | `.proto` | 2 |
 | `.example` | 1 |
@@ -44,6 +43,7 @@
 | `.lock` | 1 |
 | `.mod` | 1 |
 | `.sum` | 1 |
+| `.txt` | 1 |
 
 ## Tree
 
@@ -83,8 +83,6 @@
 ├── ROADMAP.md
 ├── SECURITY.md
 ├── THIRD_PARTY_NOTICES.md
-├── _commitmsg.txt
-├── _testout.txt
 ├── agents/
 │   ├── __init__.py
 │   ├── base.py
@@ -136,6 +134,7 @@
 │   ├── task_agent.py
 │   ├── tests/
 │   │   ├── __init__.py
+│   │   ├── conftest.py
 │   │   ├── test_inject_memory_context.py
 │   │   ├── test_inject_memory_context_gates.py
 │   │   ├── test_memory_budget.py
@@ -392,6 +391,7 @@
 │   └── sub_agents.yaml
 ├── tests/
 │   ├── __init__.py
+│   ├── _test_infra.py
 │   ├── conftest.py
 │   ├── fixtures/
 │   │   └── llm_mocks/
