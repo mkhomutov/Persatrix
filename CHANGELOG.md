@@ -8,25 +8,22 @@ All notable changes to this project will be documented in this file.
 
 ### ⚠️ Operator-Visible Changes
 
-- **Python OTLP exporter transport changed** (`grpc` → `http`): the
-  `opentelemetry-exporter-otlp-proto-grpc` dependency has been replaced with
-  `opentelemetry-exporter-otlp-proto-http`.  Any custom OTEL Collector
-  configuration that pointed the Python exporter at the gRPC port (`:4317`)
-  must be updated to the HTTP port (`:4318`).  The Go-side exporter was already
-  using HTTP; this brings both runtimes to the same endpoint.
-- **Go package rename** `internal/telemetry` → `internal/observability`: this
-  is an internal rename and has no impact on operators, but custom forks that
-  import the package directly must update their import paths.
+- **Python OTLP exporter transport changed** (`grpc` → `http`):
+  `opentelemetry-exporter-otlp-proto-grpc` is replaced with
+  `opentelemetry-exporter-otlp-proto-http`. Collector configs pointing the
+  Python exporter at `:4317` must switch to `:4318`. The Go exporter was
+  already HTTP; both runtimes now use the same endpoint.
+- **Go package rename** `internal/telemetry` → `internal/observability`:
+  internal only; forks importing it directly must update import paths.
 - **Go zap log field keys renamed** to the RFC 0018 schema (`docs/observability.md`).
   The **reserved correlation IDs** (`execution_id`, `agent_id`, `workflow_id`,
   `step_id`) are renamed at every Go call site, with the encoder's
-  `legacyRenames` map as a defence-in-depth backstop for any missed site.
-  Arbitrary site-local attributes (token counts such as `inputTokens` /
-  `outputTokens`, `retryCount`, `wallTimeMs`, `estimatedCost`, `serviceName`,
-  etc.) **remain camelCase on the wire** pending a future PR that nests them
-  under the schema's `attributes` slot. Downstream consumers (log shippers,
-  `jq` queries, dashboards) that filter on the renamed correlation IDs must
-  switch to the new keys.
+  `legacyRenames` map as a defence-in-depth backstop. Site-local attributes
+  (`inputTokens` / `outputTokens`, `retryCount`, `wallTimeMs`, `estimatedCost`,
+  `serviceName`, …) **remain camelCase on the wire** pending a future PR that
+  nests them under the schema's `attributes` slot. Downstream consumers (log
+  shippers, `jq` queries, dashboards) filtering on the renamed correlation IDs
+  must switch to the new keys.
 
   | Old (legacy) | New (RFC 0018 § B) |
   |--------------|--------------------|
@@ -36,33 +33,29 @@ All notable changes to this project will be documented in this file.
   | `workflowID` | `workflow_id` |
   | `stepID` | `step_id` |
 
-  In addition, every Go log line now carries the RFC 0018 required-field
-  group: `schema_version: "1"`, `service.kind: "orchestrator"`,
+  Every Go log line now also carries the RFC 0018 required-field group:
+  `schema_version: "1"`, `service.kind: "orchestrator"`,
   `service.instance: <hostname>`, and a `source: {file, line, function}`
-  object derived from `zap.AddCaller`.  Custom Go forks that constructed
-  their own zap logger should switch to
+  object from `zap.AddCaller`. Custom forks constructing their own zap logger
+  should switch to
   [`internal/observability/zapenc.NewEncoder`](internal/observability/zapenc/encoder.go)
-  for the same schema-conformant output.
+  for schema-conformant output.
 
 - **`PERSATRIX_LOG_FORMAT=pretty`** selects a human-readable console encoder
-  (zap's development encoder) for local debugging.  The default (unset or
-  `json`) emits the RFC 0018 wire format.  Pretty mode is a developer
-  affordance and is **not** consumed by the future `persatrix logs`
-  endpoint — production deployments must leave it unset.
+  for local debugging. Default (unset or `json`) emits the RFC 0018 wire
+  format. Pretty mode is **not** consumed by the future `persatrix logs`
+  endpoint — leave unset in production.
 
 - **`PERSATRIX_SERVICE_INSTANCE`** overrides the orchestrator's
-  `service.instance` log field (defaults to `os.Hostname()`).  Useful in
-  containerised deployments where the hostname is an ephemeral synthetic
-  name (e.g. a Kubernetes pod ID) and operators want a stable, meaningful
-  instance identifier in the aggregated log stream.
+  `service.instance` log field (defaults to `os.Hostname()`). Useful in
+  containerised deployments where the hostname is an ephemeral pod ID.
 
-- **`PERSATRIX_TRACE_TOOL_PAYLOADS`** controls how much detail the Python
-  agent's `agent.tool.execute` span captures about tool arguments.  Defaults
-  to `none` (only `tool.name` is recorded).  Set to `metadata` to additionally
-  emit `tool.arguments.<arg>.type`, or to `full` to emit redacted argument
-  values (routed through the same `Redactor` Protocol that RFC 0018 wires
-  for log redaction).  Use `full` only with a configured redactor — the
-  default `NoopRedactor` echoes values verbatim and may capture secrets.
+- **`PERSATRIX_TRACE_TOOL_PAYLOADS`** controls `agent.tool.execute` span
+  detail. Defaults to `none` (only `tool.name`). `metadata` adds
+  `tool.arguments.<arg>.type`; `full` emits redacted argument values via
+  the same `Redactor` Protocol used for log redaction. Use `full` only
+  with a configured redactor — the default `NoopRedactor` echoes values
+  verbatim and may capture secrets.
 
 ### Added (RFC 0019 PR 2 — Phase 2 spans + Span Links)
 
