@@ -67,10 +67,11 @@ func TestInstrumentInventory(t *testing.T) {
 		"orchestrator.workflow.submitted": "{workflow}",
 		"orchestrator.workflow.completed": "{workflow}",
 		"orchestrator.workflow.failed":    "{workflow}",
-		"workflow.active":                 "{workflow}",
-		"orchestrator.workflow.duration":  "ms",
-		"orchestrator.step.dispatched":    "{step}",
-		"orchestrator.step.duration":      "ms",
+		// PR-170 M1: matches the renamed instrument in NewInstruments.
+		"orchestrator.workflow.active":   "{workflow}",
+		"orchestrator.workflow.duration": "ms",
+		"orchestrator.step.dispatched":   "{step}",
+		"orchestrator.step.duration":     "ms",
 	}
 	for name, unit := range expected {
 		m := findMetric(rm, name)
@@ -102,7 +103,8 @@ func TestUpDownGauge(t *testing.T) {
 	inst.WorkflowActive.Add(ctx, 3)
 	inst.WorkflowActive.Add(ctx, -1)
 	rm := collect(t, reader)
-	m := findMetric(rm, "workflow.active")
+	// PR-170 M1: query the canonical orchestrator-prefixed name.
+	m := findMetric(rm, "orchestrator.workflow.active")
 	require.NotNil(t, m)
 	sum, ok := m.Data.(metricdata.Sum[int64])
 	require.True(t, ok)
@@ -153,4 +155,20 @@ func TestTrimScheme(t *testing.T) {
 	assert.Equal(t, "collector:4318", trimScheme("http://collector:4318"))
 	assert.Equal(t, "collector:4318", trimScheme("https://collector:4318"))
 	assert.Equal(t, "collector:4318", trimScheme("collector:4318"))
+	// PR-170 N4: trailing /v1/metrics (with or without a stray slash) must
+	// be stripped so otlpmetrichttp does not double-append the path.
+	assert.Equal(t, "collector:4318", trimScheme("http://collector:4318/v1/metrics"))
+	assert.Equal(t, "collector:4318", trimScheme("https://collector:4318/v1/metrics/"))
+	assert.Equal(t, "collector.example", trimScheme("https://collector.example/v1/metrics"))
+}
+
+// TestIsLoopbackEndpoint verifies the helper used to suppress the cleartext
+// transport warning for the documented localhost dev default (PR-170 N5).
+func TestIsLoopbackEndpoint(t *testing.T) {
+	assert.True(t, isLoopbackEndpoint("http://localhost:4318"))
+	assert.True(t, isLoopbackEndpoint("http://127.0.0.1:4318"))
+	assert.True(t, isLoopbackEndpoint("http://[::1]:4318"))
+	assert.False(t, isLoopbackEndpoint("http://collector:4318"))
+	assert.False(t, isLoopbackEndpoint("http://10.0.0.5:4318"))
+	assert.False(t, isLoopbackEndpoint("http://collector.example/v1/metrics"))
 }

@@ -44,7 +44,7 @@ type Config struct {
 
 // NewConfigFromEnv builds metrics config from OTEL_* environment variables.
 // Kept symmetrical with observability.NewConfigFromEnv so both initialisers
-// behave the same under ``OTEL_EXPORTER_OTLP_ENDPOINT`` etc.
+// behave the same under “OTEL_EXPORTER_OTLP_ENDPOINT“ etc.
 func NewConfigFromEnv(environment string) Config {
 	cfg := Config{
 		ServiceName:    envOrDefault("OTEL_SERVICE_NAME", defaultServiceName),
@@ -116,8 +116,15 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 	); err != nil {
 		return nil, fmt.Errorf("create workflow.failed: %w", err)
 	}
+	// PR-170 M1: this instrument was originally registered as the bare
+	// ``workflow.active`` name — the only Go instrument missing the
+	// ``orchestrator.`` prefix used by every other workflow / step metric.
+	// That broke the documented namespace and caused dashboards filtered on
+	// ``orchestrator.workflow.*`` to silently drop the active-workflow gauge.
+	// Renamed to ``orchestrator.workflow.active`` so the inventory is
+	// internally consistent and the RFC 0019 § F naming convention holds.
 	if i.WorkflowActive, err = m.Int64UpDownCounter(
-		"workflow.active",
+		"orchestrator.workflow.active",
 		metric.WithUnit("{workflow}"),
 		metric.WithDescription("Workflows currently executing."),
 	); err != nil {
@@ -188,6 +195,16 @@ func Init(
 		),
 	)
 	if err != nil {
+		// PR-170 S1: the OTLP exporter has already been constructed at this
+		// point and owns a background HTTP client + goroutine.  Returning
+		// without shutting it down leaks both for the lifetime of the
+		// process.  Use a fresh context (the caller's may be the one that
+		// just timed out building the resource) and ignore the shutdown
+		// error — we are already on the failure path and the wrapped
+		// resource error is what callers need to see.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ExportTimeout)
+		defer cancel()
+		_ = exporter.Shutdown(shutdownCtx)
 		return nil, nil, fmt.Errorf("build OTEL resource: %w", err)
 	}
 
@@ -217,21 +234,68 @@ func Init(
 		zap.Duration("exportInterval", cfg.ExportInterval),
 	)
 
+	// PR-170 N5: defence-in-depth log when the operator points the exporter
+	// at a non-loopback host over plain HTTP.  ``cfg.InsecureOTLP`` is
+	// auto-flipped on by NewConfigFromEnv when the endpoint scheme is
+	// ``http://`` — that is fine for the documented localhost dev default,
+	// but a remote ``http://collector:4318`` ships metrics (including agent
+	// IDs and workflow IDs) over the wire in cleartext.  We do not block
+	// startup (operator may run in a trusted L2) but we do surface it so
+	// the misconfiguration shows up in deployment logs.
+	if cfg.InsecureOTLP && !isLoopbackEndpoint(cfg.OTLPEndpoint) {
+		logger.Warn("OTLP metrics exporter using plaintext HTTP to a non-loopback host; metric attributes will travel in cleartext",
+			zap.String("otlpEndpoint", cfg.OTLPEndpoint),
+		)
+	}
+
 	return inst, mp.Shutdown, nil
+}
+
+// isLoopbackEndpoint returns true when the endpoint host is localhost or a
+// loopback IP literal.  Used by Init to suppress the cleartext-transport
+// warning for the documented dev default.  Conservative: anything we cannot
+// classify (unparseable, non-loopback) is treated as remote so the warning
+// fires.
+func isLoopbackEndpoint(endpoint string) bool {
+	host := trimScheme(endpoint)
+	// Strip any trailing path before splitting host:port.
+	if i := strings.IndexByte(host, '/'); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.TrimSpace(host)
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return true
+	}
+	return false
 }
 
 // trimScheme strips the URL scheme from an endpoint because otlpmetrichttp
 // expects a host:port (it adds the /v1/metrics path itself).  Matches the
 // tracing package's approach of accepting a full URL from the env var and
 // normalising here rather than forcing operators to think about it.
+//
+// PR-170 N4: also strips a trailing “/v1/metrics“ (and any leftover slash)
+// so an operator who sets “OTEL_EXPORTER_OTLP_ENDPOINT“ to a fully
+// path-qualified URL (a common mistake when copying the value used for the
+// HTTP traces exporter, which DOES want the full URL) does not end up with
+// the otlpmetrichttp client posting to “/v1/metrics/v1/metrics“.  Mirrors
+// the equivalent normalisation in agents/observability/metrics.py so both
+// runtimes accept the same env-var spelling.
 func trimScheme(endpoint string) string {
-	if strings.HasPrefix(endpoint, "http://") {
-		return strings.TrimPrefix(endpoint, "http://")
+	trimmed := endpoint
+	switch {
+	case strings.HasPrefix(trimmed, "http://"):
+		trimmed = strings.TrimPrefix(trimmed, "http://")
+	case strings.HasPrefix(trimmed, "https://"):
+		trimmed = strings.TrimPrefix(trimmed, "https://")
 	}
-	if strings.HasPrefix(endpoint, "https://") {
-		return strings.TrimPrefix(endpoint, "https://")
-	}
-	return endpoint
+	trimmed = strings.TrimRight(trimmed, "/")
+	trimmed = strings.TrimSuffix(trimmed, "/v1/metrics")
+	return strings.TrimRight(trimmed, "/")
 }
 
 func envOrDefault(key, fallback string) string {
