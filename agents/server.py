@@ -20,6 +20,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from .base import BaseAgent
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
+from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.logging import configure_logging
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
@@ -84,7 +85,16 @@ class AgentServer:
 
     async def start(self) -> None:
         """Start the gRPC server."""
-        self._server = grpc.aio.server()
+        # RFC 0018 Phase 3 — register the LoggingMetadataInterceptor on the
+        # gRPC server.  Order matters: GrpcAioInstrumentorServer (RFC 0019
+        # Phase 1, applied globally in main()) installs the OTEL trace
+        # context for incoming RPCs *before* per-server interceptors run, so
+        # by the time LoggingMetadataInterceptor's wrapped handler executes
+        # both the OTEL span and the structlog contextvars are bound.  This
+        # gives log records inside the handler all six correlation fields:
+        # the four IDs from the metadata interceptor and the trace_id /
+        # span_id from the OTEL processor.
+        self._server = grpc.aio.server(interceptors=[LoggingMetadataInterceptor()])
         servicer = AgentServiceServicer(self.agents, self._dispatcher)
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, self._server)
         channel_servicer = ChannelServiceServicer(self.agents, self._dispatcher)

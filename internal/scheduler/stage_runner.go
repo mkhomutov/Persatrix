@@ -159,12 +159,14 @@ func (s *WorkflowScheduler) executeStep(
 	}
 
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
-		WorkflowID: workflowID,
-		AgentID:    step.AgentID,
-		Payload:    resolved,
-		Context:    outputsCopy,
-		Limits:     limits,
-		Cacheable:  step.Cacheable,
+		ExecutionID: runID,
+		StepID:      step.ID,
+		WorkflowID:  workflowID,
+		AgentID:     step.AgentID,
+		Payload:     resolved,
+		Context:     outputsCopy,
+		Limits:      limits,
+		Cacheable:   step.Cacheable,
 	})
 	if err != nil {
 		// Record token usage from any metadata the agent returned before failing.

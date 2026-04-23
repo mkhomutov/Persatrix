@@ -22,6 +22,8 @@ import (
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
+	"github.com/mkhomutov/persatrix/internal/observability/grpcmeta"
+	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
@@ -45,11 +47,30 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	)
 	defer span.End()
 
+	// RFC 0018 Phase 3 — inject the four correlation IDs onto the outgoing
+	// gRPC metadata once for the whole retry loop.  AppendToOutgoingContext
+	// returns a new ctx; every retry's client.ExecuteTask call inherits the
+	// same metadata so log records on the agent side correlate correctly
+	// even on the second/third attempt.
+	ctx = grpcmeta.InjectIDs(ctx, grpcmeta.IDs{
+		ExecutionID: req.ExecutionID,
+		StepID:      req.StepID,
+		AgentID:     req.AgentID,
+		WorkflowID:  req.WorkflowID,
+	})
+
+	// Bind trace_id / span_id onto every log line emitted from this dispatch
+	// — the schema's Optional contract (RFC 0018 § B) covers absence when no
+	// span is active (the helper returns the original logger unchanged in
+	// that case).  Re-shadowing e.logger in this scope keeps the existing
+	// retry-loop call sites untouched.
+	logger := zapenc.LoggerWithContext(ctx, e.logger)
+
 	// Check cache for cacheable steps before any network I/O.
 	if req.Cacheable && e.cache != nil {
 		cacheKey := cost.CacheKey(req.AgentID, req.Payload, req.Context)
 		if cached, ok := e.cache.Get(cacheKey); ok {
-			e.logger.Info("cache hit, skipping gRPC dispatch",
+			logger.Info("cache hit, skipping gRPC dispatch",
 				zap.String("agent_id", req.AgentID),
 			)
 			return &ExecuteResult{
@@ -98,21 +119,21 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 	maxTokens := req.Limits.MaxTokens
 	timeoutSeconds := req.Limits.TimeoutSeconds
 	if maxLLMCalls > math.MaxInt32 {
-		e.logger.Warn("MaxLLMCalls exceeds int32 range, clamping to max",
+		logger.Warn("MaxLLMCalls exceeds int32 range, clamping to max",
 			zap.Int("original", maxLLMCalls),
 			zap.Int("clamped", math.MaxInt32),
 		)
 		maxLLMCalls = math.MaxInt32
 	}
 	if maxTokens > math.MaxInt32 {
-		e.logger.Warn("MaxTokens exceeds int32 range, clamping to max",
+		logger.Warn("MaxTokens exceeds int32 range, clamping to max",
 			zap.Int("original", maxTokens),
 			zap.Int("clamped", math.MaxInt32),
 		)
 		maxTokens = math.MaxInt32
 	}
 	if timeoutSeconds > math.MaxInt32 {
-		e.logger.Warn("TimeoutSeconds exceeds int32 range, clamping to max",
+		logger.Warn("TimeoutSeconds exceeds int32 range, clamping to max",
 			zap.Int("original", timeoutSeconds),
 			zap.Int("clamped", math.MaxInt32),
 		)
@@ -158,7 +179,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			elapsed := time.Since(start)
 			remaining := stepDeadline - elapsed
 			if remaining < minBudget {
-				e.logger.Warn("retry skipped: insufficient time budget",
+				logger.Warn("retry skipped: insufficient time budget",
 					zap.String("agent_id", req.AgentID),
 					zap.String("taskID", taskID),
 					zap.Int("attempt", attempt),
@@ -186,7 +207,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		if e.deadlineMode == DeadlineModeDerived && attempt > 0 && req.Limits.MaxTokens > 0 {
 			remaining := int64(req.Limits.MaxTokens) - cumulativeTokens
 			if remaining < minTokens {
-				e.logger.Warn("retry skipped: insufficient token budget",
+				logger.Warn("retry skipped: insufficient token budget",
 					zap.String("agent_id", req.AgentID),
 					zap.String("taskID", taskID),
 					zap.Int("attempt", attempt),
@@ -202,7 +223,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			wallTimeMs := time.Since(start).Milliseconds()
 			result.RetryCount = attempt
 			result.WallTimeMs = wallTimeMs
-			e.logger.Info("step dispatched",
+			logger.Info("step dispatched",
 				zap.String("agent_id", req.AgentID),
 				zap.String("taskID", taskID),
 				zap.Int("retryCount", attempt),
@@ -253,7 +274,7 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 		jitter := 0.75 + rand.Float64()*0.5 // [0.75, 1.25)
 		delay := time.Duration(float64(base) * jitter)
 
-		e.logger.Warn("transient failure, retrying",
+		logger.Warn("transient failure, retrying",
 			zap.String("agent_id", req.AgentID),
 			zap.String("taskID", taskID),
 			zap.Int("attempt", attempt+1),

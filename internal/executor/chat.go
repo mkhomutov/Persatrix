@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
+	"github.com/mkhomutov/persatrix/internal/observability/grpcmeta"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
@@ -94,6 +95,15 @@ func (e *GRPCChatExecutor) SendChatMessage(ctx context.Context, agentID string, 
 		span.SetStatus(otelcodes.Error, err.Error())
 		return nil, err
 	}
+
+	// RFC 0018 Phase 3 — chat dispatch lives outside the workflow scheduler,
+	// so only agent_id is propagated.  execution_id / step_id / workflow_id
+	// have no chat-side meaning today; binding them to a synthetic value
+	// would actively mislead operators filtering logs by execution.  When
+	// chat sessions grow a notion of conversation_id (RFC 0016 follow-up)
+	// it will be added as a new persatrix-conversation-id metadata key
+	// rather than reusing one of the four log-correlation slots.
+	ctx = grpcmeta.InjectIDs(ctx, grpcmeta.IDs{AgentID: agentID})
 
 	// Build dial options: base transport credentials + caller-provided options.
 	opts := make([]grpc.DialOption, 0, len(e.dialOpts)+1)

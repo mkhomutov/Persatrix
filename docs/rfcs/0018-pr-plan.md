@@ -248,13 +248,13 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_grpc_logging_interceptor.py -v` passes
-- [ ] `pytest tests/integration/test_logs_correlation.py -v` passes
-- [ ] `go test ./internal/observability/zapenc/... -v -race` passes
-- [ ] `ruff check agents/` clean; `mypy agents/` clean
-- [ ] `golangci-lint run` clean
-- [ ] Interceptor registration order verified: OTEL (0019) → logging (this PR)
-- [ ] `trace_id` / `span_id` are omitted (not empty) when no span is active
+- [x] `pytest agents/tests/test_grpc_logging_interceptor.py -v` passes
+- [x] `pytest tests/integration/test_logs_correlation.py -v` passes
+- [x] `go test ./internal/observability/zapenc/... -v -race` passes
+- [x] `ruff check agents/` clean; `mypy agents/` clean
+- [x] `golangci-lint run` clean
+- [x] Interceptor registration order verified: OTEL (0019) → logging (this PR)
+- [x] `trace_id` / `span_id` are omitted (not empty) when no span is active
 
 ---
 

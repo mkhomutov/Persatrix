@@ -43,14 +43,22 @@ type StepLimits struct {
 }
 
 // ExecuteRequest contains the parameters for a task dispatch.
+//
+// ExecutionID and StepID are the workflow run and per-step identifiers
+// (RFC 0018 § D); they are propagated to the agent process as gRPC
+// metadata so structured-log records on both sides of the boundary can
+// be correlated.  Both default to empty when omitted (chat dispatch
+// has no step concept; ad-hoc tests may not have an execution).
 type ExecuteRequest struct {
-	TaskID     string
-	WorkflowID string
-	AgentID    string
-	Payload    string
-	Context    map[string]string
-	Limits     StepLimits
-	Cacheable  bool
+	TaskID      string
+	ExecutionID string
+	StepID      string
+	WorkflowID  string
+	AgentID     string
+	Payload     string
+	Context     map[string]string
+	Limits      StepLimits
+	Cacheable   bool
 }
 
 // ExecuteResult contains the outcome of a task dispatch.

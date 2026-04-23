@@ -91,7 +91,25 @@ All notable changes to this project will be documented in this file.
   inventorying every Persatrix span, its attributes, the Span Link table,
   payload-capture modes, and a correlated debugging walkthrough.
 
-## [0.2.2] - 2026-04-22
+### Added (RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs)
+
+- **Cross-process correlation IDs** propagate from the Go orchestrator
+  to Python agents via gRPC metadata (`persatrix-execution-id`,
+  `persatrix-step-id`, `persatrix-agent-id`, `persatrix-workflow-id`).
+  New `internal/observability/grpcmeta` package owns the constants and
+  `InjectIDs` / `ExtractIDs` helpers.
+- **Python `LoggingMetadataInterceptor`** binds the four keys to
+  structlog contextvars per-RPC and cleans up on success + exception.
+  Registered after `GrpcAioInstrumentorServer` so OTEL context exists
+  before logging contextvars bind.
+- **OTEL trace IDs on Go log records** via new
+  `internal/observability/zapenc.LoggerWithContext(ctx, logger)`,
+  wired at the executor dispatch boundary. Emits `trace_id` / `span_id`
+  when a span is active, omits them otherwise. (Per-call-site binding
+  is the otelzap convention; `zapcore.Entry` has no `Context` field.)
+- `workflow_id` added to the Python structlog `_FIELD_ORDER`;
+  `ExecuteRequest` gains `ExecutionID` / `StepID` populated by the
+  scheduler.## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
 
