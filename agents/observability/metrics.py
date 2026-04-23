@@ -36,6 +36,9 @@ from opentelemetry.sdk.metrics.export import (
 )
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 
+from ._env import env_int as _int_env
+from ._env import env_str as _env
+
 if TYPE_CHECKING:
     from opentelemetry.metrics import (
         Counter,
@@ -78,22 +81,6 @@ def current_agent_id() -> str:
     if _AGENT_ID is None:
         _AGENT_ID = os.environ.get("PERSATRIX_AGENT_ID", "").strip() or "unknown"
     return _AGENT_ID
-
-
-def _env(key: str, default: str) -> str:
-    v = os.environ.get(key, "").strip()
-    return v if v else default
-
-
-def _int_env(key: str, default: int) -> int:
-    v = os.environ.get(key, "").strip()
-    if not v:
-        return default
-    try:
-        parsed = int(v)
-        return parsed if parsed > 0 else default
-    except ValueError:
-        return default
 
 
 class _Instruments:

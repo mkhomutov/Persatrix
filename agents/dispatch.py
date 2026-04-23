@@ -158,15 +158,20 @@ class ActionExecutor:
                 # real spawner lands in RFC 0009.  When the spawner ships, the
                 # sub-agent's root span will emit a ``Link(link.kind="spawn")``
                 # back to the SpanContext captured here.
+                _spawn_attrs: dict[str, str] = {
+                    "agent.id": agent_id,
+                    "subagent.status": "not_implemented",
+                }
+                # Skip the ``subagent.role`` attribute when unset — emitting
+                # an empty string pollutes span backends and makes attribute
+                # filters noisier (PR #167 review nice-to-have).
+                _role_raw = action.payload.get("role", "")
+                _role = str(_role_raw) if _role_raw else ""
+                if _role:
+                    _spawn_attrs["subagent.role"] = _role
                 with _tracer.start_as_current_span(
                     SUBAGENT_SPAWN_SPAN,
-                    attributes={
-                        "agent.id": agent_id,
-                        "subagent.role": str(
-                            action.payload.get("role", ""),
-                        ),
-                        "subagent.status": "not_implemented",
-                    },
+                    attributes=_spawn_attrs,
                 ):
                     logger.info(
                         "Agent %s requested sub-agent spawn (not yet implemented)",
@@ -456,9 +461,16 @@ class EventDispatcher:
             current_span = trace.get_current_span()
             ctx = current_span.get_span_context()
             if ctx.is_valid:
-                add_link = getattr(agent, "add_pending_tick_link", None)
-                if callable(add_link):
-                    add_link(Link(ctx, attributes={"link.kind": "trigger"}))
+                # ``Linkable`` is a runtime-checkable Protocol declared in
+                # :mod:`agents.persona_runtime`; importing lazily keeps the
+                # dispatch module free of a hard runtime dep on the persona
+                # subpackage (PR #167 review nice-to-have).
+                from .persona_runtime import Linkable
+
+                if isinstance(agent, Linkable):
+                    agent.add_pending_tick_link(
+                        Link(ctx, attributes={"link.kind": "trigger"}),
+                    )
 
         # Deliver event
         actions = await agent.on_event(event)

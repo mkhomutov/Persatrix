@@ -162,6 +162,47 @@ class TestMemorySpans:
         assert span.attributes["query.empty"] is False
         assert span.attributes["result.count"] == 1
 
+    async def test_episodic_recall_span_records_backend_failure(
+        self,
+        exporter: InMemorySpanExporter,
+        db_path: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Regression: a SQLite/backend failure inside ``recall()`` must
+        # mark the ``agent.memory.episodic.recall`` span as ERROR before
+        # propagating, mirroring the ``store_episode`` contract.  The
+        # PR plan for RFC 0019 PR 6 explicitly required this regression
+        # test alongside the code change in
+        # ``EpisodicMemory.recall()`` (PR #176 review *Should Fix #3*).
+        mem = EpisodicMemory("agent-x", db_path=db_path)
+        await mem.initialize()
+        try:
+            await mem.store_episode("first event", {})
+            exporter.clear()
+
+            # Inject a backend failure via the FTS5 helper actually used
+            # by the recall path (or its LIKE fallback).  Patch both so
+            # the test is robust to whichever branch runs in this build.
+            from agents.memory import episodic as _episodic_mod
+
+            def _boom(*_args: object, **_kwargs: object) -> Any:
+                raise RuntimeError("simulated sqlite failure")
+
+            monkeypatch.setattr(_episodic_mod, "recall_fts5", _boom)
+            monkeypatch.setattr(_episodic_mod, "recall_like", _boom)
+            monkeypatch.setattr(_episodic_mod, "recall_recency", _boom)
+
+            with pytest.raises(RuntimeError, match="simulated sqlite failure"):
+                await mem.recall("first")
+        finally:
+            await mem.close()
+
+        span = _span(exporter, EPISODIC_RECALL_SPAN)
+        assert span.status.status_code.name == "ERROR"
+        # Exception should be recorded as a span event for trace inspection.
+        event_names = [e.name for e in span.events]
+        assert "exception" in event_names
+
     async def test_relationship_lookup_and_update_spans(
         self, exporter: InMemorySpanExporter, db_path: str,
     ) -> None:

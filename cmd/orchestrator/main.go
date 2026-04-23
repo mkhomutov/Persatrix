@@ -128,7 +128,7 @@ func main() {
 	obsCfg := observability.NewConfigFromEnv(*env)
 	obsShutdown, err := observability.Init(context.Background(), obsCfg, logger)
 	if err != nil {
-		logger.Warn("failed to initialize telemetry, continuing without tracing", zap.Error(err))
+		logger.Warn("failed to initialize observability, continuing without tracing", zap.Error(err))
 	} else {
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

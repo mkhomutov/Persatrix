@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -38,11 +39,10 @@ def metric_reader() -> Iterator[InMemoryMetricReader]:
     try:
         yield reader
     finally:
-        if pmetrics._provider is not None:
-            pmetrics._provider.force_flush()
-            pmetrics._provider.shutdown()
-            pmetrics._provider = None
-            pmetrics._instruments = None
+        # Use the public ``shutdown()`` API instead of poking ``_provider``
+        # directly so the fixture stays stable across SDK upgrades that may
+        # rename the private state (PR #170 review nice-to-have).
+        asyncio.run(pmetrics.shutdown())
 
 
 def _touch_all(inst: pmetrics._Instruments) -> None:
@@ -198,12 +198,14 @@ class TestAgentActiveLifecycle:
 
 class TestInitIdempotent:
     def test_shutdown_clears_module_state(self, metric_reader: InMemoryMetricReader) -> None:
-        assert pmetrics._provider is not None
-        assert pmetrics._instruments is not None
-        pmetrics._provider.force_flush()
-        pmetrics._provider.shutdown()
-        pmetrics._provider = None
-        pmetrics._instruments = None
+        # Pre-condition: fixture already ran ``init_metrics()``.
+        assert pmetrics.try_get_instruments() is not None
+        # Use the public ``shutdown()`` instead of poking ``_provider`` /
+        # ``_instruments`` directly (PR #170 review nice-to-have).  The
+        # contract being asserted: a successful shutdown leaves
+        # ``try_get_instruments()`` returning ``None`` and
+        # ``get_instruments()`` raising.
+        asyncio.run(pmetrics.shutdown())
         with pytest.raises(RuntimeError):
             pmetrics.get_instruments()
         assert pmetrics.try_get_instruments() is None

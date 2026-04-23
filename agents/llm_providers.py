@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any
 
-from .llm_client import (
+from .llm_types import (
     LLMResponse,
     LLMToolResult,
     StopReason,

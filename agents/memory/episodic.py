@@ -272,44 +272,53 @@ class EpisodicMemory:
                 "query.empty": not query,
             },
         ) as span:
-            # Emit ``min_score`` only when the caller set one — overloading
-            # the numeric range with a ``-1.0`` sentinel made the attribute
-            # ambiguous to dashboards and to operators reading raw spans.
-            if min_score is not None:
-                span.set_attribute("min_score", min_score)
-            db = self._ensure_db()
+            # Mirror the LLM/tool/store_episode span error contract: a SQLite
+            # failure inside the recall path must mark the span ERROR before
+            # propagating, otherwise operators searching traces for failed
+            # recalls see them as "successful" (PR #167 review Should-Fix).
+            try:
+                # Emit ``min_score`` only when the caller set one — overloading
+                # the numeric range with a ``-1.0`` sentinel made the attribute
+                # ambiguous to dashboards and to operators reading raw spans.
+                if min_score is not None:
+                    span.set_attribute("min_score", min_score)
+                db = self._ensure_db()
 
-            if query and self._fts5:
-                rows = await recall_fts5(
-                    db, self._agent_id, query, limit, min_importance, min_score,
-                )
-            elif query:
-                rows = await recall_like(
-                    db, self._agent_id, query, limit, min_importance, min_score,
-                )
-            else:
-                rows = await recall_recency(db, self._agent_id, limit, min_importance)
+                if query and self._fts5:
+                    rows = await recall_fts5(
+                        db, self._agent_id, query, limit, min_importance, min_score,
+                    )
+                elif query:
+                    rows = await recall_like(
+                        db, self._agent_id, query, limit, min_importance, min_score,
+                    )
+                else:
+                    rows = await recall_recency(db, self._agent_id, limit, min_importance)
 
-            episodes = [row_to_episode(row) for row in rows]
-            span.set_attribute("result.count", len(episodes))
+                episodes = [row_to_episode(row) for row in rows]
+                span.set_attribute("result.count", len(episodes))
 
-            # Increment access_count and update last_accessed_at
-            if episodes:
-                now = time.time()
-                ids = [e.id for e in episodes]
-                placeholders = ",".join("?" for _ in ids)
-                await db.execute(
-                    f"UPDATE episodes SET access_count = access_count + 1, "
-                    f"last_accessed_at = ? WHERE id IN ({placeholders})",
-                    [now, *ids],
-                )
-                await db.commit()
-                # Update in-memory objects to reflect the increment
-                for ep in episodes:
-                    ep.access_count += 1
-                    ep.last_accessed_at = now
+                # Increment access_count and update last_accessed_at
+                if episodes:
+                    now = time.time()
+                    ids = [e.id for e in episodes]
+                    placeholders = ",".join("?" for _ in ids)
+                    await db.execute(
+                        f"UPDATE episodes SET access_count = access_count + 1, "
+                        f"last_accessed_at = ? WHERE id IN ({placeholders})",
+                        [now, *ids],
+                    )
+                    await db.commit()
+                    # Update in-memory objects to reflect the increment
+                    for ep in episodes:
+                        ep.access_count += 1
+                        ep.last_accessed_at = now
 
-            return episodes
+                return episodes
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
 
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""

@@ -158,6 +158,33 @@ All notable changes to this project will be documented in this file.
   (opt in via `pytest -m requires_compose`).
 - `docs/observability.md` § 11 (operator pipeline) + README OTEL bullet.
 
+### Changed (RFC 0019 PR 6 — observability polish)
+
+- LLM provider plugins are now expected to expose a stable `name`
+  attribute (`"anthropic"` / `"openai"` / …) used as the OTEL
+  `gen_ai.system` attribute on `agent.llm.call` spans. Plugins missing
+  the attribute fall back to a class-name-derived value with a one-time
+  warning. Declared as the `agents.llm_types.LLMProvider` Protocol.
+- `agents.llm_client` no longer hosts the `LLMResponse` /
+  `StopReason` / `Usage` / `LLMProvider` / `ToolCall` / `LLMToolResult`
+  type definitions — they live in the new leaf module
+  `agents.llm_types`. The historical `from agents.llm_client import …`
+  paths still resolve (re-exported) so no consumer code needs to
+  change; the move breaks the previous `llm_client` ↔ `llm_providers`
+  import cycle that required a deferred re-export.
+- `agent.persona.tick` spans now derive the `tick.reason` attribute
+  (`"scheduled"` / `"woke-on-event"`) from the dispatcher-queued link
+  list instead of always emitting `"scheduled"`. Pinned values exposed
+  as `agents.persona_runtime.TICK_REASON_SCHEDULED` /
+  `TICK_REASON_WOKE_ON_EVENT`.
+- The pending-tick-link buffer is now bounded at 32 entries with
+  oldest-drop semantics so a paused tick consumer cannot leak memory.
+- `EpisodicMemory.recall()` now records exceptions on its span and sets
+  `StatusCode.ERROR` before re-raising, matching `store_episode` and
+  the LLM/tool spans.
+- Empty `subagent.role` span attributes are no longer emitted (kept
+  attribute set lean).
+
 ## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection

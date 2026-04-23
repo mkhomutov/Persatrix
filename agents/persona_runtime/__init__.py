@@ -23,7 +23,12 @@ The runtime class is split across submodules for file-size hygiene:
 from __future__ import annotations
 
 __all__ = [
+    # Public surface first, then leading-underscore module-private symbols
+    # re-exported for cross-module use (PR #176 review nit).
+    "Linkable",
     "MemoryNamespace",
+    "TICK_REASON_SCHEDULED",
+    "TICK_REASON_WOKE_ON_EVENT",
     "_LLMPersonaAgent",
     "_coerce_event_timeout",
     "_truncate_with_ellipsis",
@@ -32,8 +37,9 @@ __all__ = [
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final, Protocol, runtime_checkable
 
 from opentelemetry import trace
 from opentelemetry.trace import Link, Status, StatusCode
@@ -64,6 +70,39 @@ from .state_persistence import _StatePersistenceMixin
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
+
+
+# ─── tick.reason vocabulary (single-source) ───────────────
+#
+# Pinned as ``Final`` so the emitter, the dispatcher, and the test suite all
+# reference the same string literals.  Adding a third value requires a
+# coordinated rename rather than free-form drift across modules.
+TICK_REASON_SCHEDULED: Final[str] = "scheduled"
+TICK_REASON_WOKE_ON_EVENT: Final[str] = "woke-on-event"
+
+
+# ─── Span-link forwarder Protocol ─────────────────────────
+#
+# ``EventDispatcher.dispatch()`` forwards an event→tick causality
+# :class:`opentelemetry.trace.Link` to the agent via
+# ``getattr(agent, "add_pending_tick_link", None)``.  Declaring the
+# contract as a runtime-checkable :class:`Protocol` lets mypy validate
+# the dispatcher end-to-end and lets the dispatcher feature-detect with
+# :func:`isinstance` instead of an attribute probe (PR #167 review
+# nice-to-have).
+@runtime_checkable
+class Linkable(Protocol):
+    """Agents that can absorb pending tick links from the dispatcher."""
+
+    def add_pending_tick_link(self, link: Link) -> None: ...
+
+
+# Cap on queued tick links.  PR #167 review *Should Fix*: an unbounded
+# buffer combined with a slow / paused tick consumer accumulates links
+# indefinitely (memory growth, plus every eventual tick span carries a
+# pathological link list).  Oldest-drop semantics preserve the most
+# recent causality, which is what operators usually want.
+_PENDING_TICK_LINKS_CAP: Final[int] = 32
 
 
 # ─── Helper Functions ──────────────────────────────────────
@@ -163,8 +202,15 @@ class _LLMPersonaAgent(
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record
         # "event triggered me" causality across the asyncio task boundary.
-        # Drained on every on_tick() invocation.
-        self._pending_tick_links: list[Link] = []
+        # Drained on every on_tick() invocation.  Bounded ``deque`` with
+        # native oldest-drop semantics so a paused tick consumer cannot
+        # leak memory under sustained event saturation (PR #167 review
+        # *Should Fix*; PR #176 review *Should Fix #1* swap from
+        # list+pop(0) to deque(maxlen=...) for O(1) drop and to delete
+        # the manual length-check / apologetic-O(n)-comment pair).
+        self._pending_tick_links: deque[Link] = deque(
+            maxlen=_PENDING_TICK_LINKS_CAP,
+        )
         # Wall-clock of the previous ``on_tick()`` invocation for the
         # ``agent.persona.tick.interval`` histogram (RFC 0019 § F).
         # ``None`` until the first tick; first sample is then recorded
@@ -212,14 +258,18 @@ class _LLMPersonaAgent(
         Called by ``EventDispatcher.dispatch()`` after waking the tick
         scheduler so the next tick records ``Link(link.kind="trigger")``
         back to the event that woke it (RFC 0019 § I).  Multiple wakes
-        between ticks accumulate; ``on_tick()`` drains them all.
+        between ticks accumulate up to ``_PENDING_TICK_LINKS_CAP``;
+        ``on_tick()`` drains them all.  Oldest entries are dropped once
+        the cap is reached so a paused tick consumer cannot leak memory
+        (PR #167 review *Should Fix*).  The bounded ``deque`` handles
+        the oldest-drop natively in O(1).
         """
         self._pending_tick_links.append(link)
 
     def _consume_pending_tick_links(self) -> list[Link]:
         """Drain queued tick links.  Called once per ``on_tick()``."""
-        links = self._pending_tick_links
-        self._pending_tick_links = []
+        links = list(self._pending_tick_links)
+        self._pending_tick_links.clear()
         return links
 
     def _has_active_goal_payload(self) -> bool:
@@ -330,21 +380,30 @@ class _LLMPersonaAgent(
         (Review finding F-5a-1, resolved in PR 5b.)
 
         Wrapped in an ``agent.persona.tick`` OTEL span (RFC 0019 § D).
-        ``tick.reason`` defaults to ``"scheduled"``; future autonomy work
-        will pass alternate reasons (``"woke-on-event"`` etc.) through the
-        scheduler.
+        ``tick.reason`` is derived from the pending link list at tick start:
+        ``"woke-on-event"`` when the dispatcher queued at least one trigger
+        Link since the last tick, otherwise ``"scheduled"``.  See
+        :data:`TICK_REASON_SCHEDULED` / :data:`TICK_REASON_WOKE_ON_EVENT`.
         """
         timeout = _coerce_event_timeout(
             self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
             self._DEFAULT_EVENT_TIMEOUT,
             self.agent_id,
         )
+        # Drain pending links once so both the link list and the derived
+        # ``tick.reason`` attribute see the same snapshot.
+        tick_links = self._consume_pending_tick_links()
         with _tracer.start_as_current_span(
             PERSONA_TICK_SPAN,
-            links=self._consume_pending_tick_links(),
+            links=tick_links,
             attributes={
                 "agent.id": self.agent_id,
-                "tick.reason": "scheduled",
+                # Derive ``tick.reason`` from the link list so the attribute
+                # tracks the actual cause without duplicating dispatcher
+                # state into the runtime (PR #167 review nice-to-have).
+                "tick.reason": (
+                    TICK_REASON_WOKE_ON_EVENT if tick_links else TICK_REASON_SCHEDULED
+                ),
             },
         ) as span:
             now_monotonic = time.monotonic()

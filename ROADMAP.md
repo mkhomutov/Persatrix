@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-23 (RFC 0018 PR 6 merged — #174, CLI logs rewrite + filters + SSE follow + E2E, joint order #10)  
+> **Last updated**: 2026-04-23 (RFC 0019 PR 6 merged — #176, tracing/spans polish, joint order #11a)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -391,6 +391,8 @@ v0.2.2 complete
   ↓
 0018 PR 6 (Phase 4c — CLI rewrite + E2E)  ✅ #174
   ↓
+0018 PR 8 + 0019 PR 6 (post-merge polish — logbuffer/shipper + tracing/spans cluster)  🔄 #176 (0019 PR 6 ✅; 0018 PR 8 pending)
+  ↓
 0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)
 ```
 
@@ -742,6 +744,7 @@ v0.5.0 complete
 | [#172](https://github.com/mkhomutov/Persatrix/pull/172) | feat(observability): RFC 0018 PR 4 — Phase 4a log_service.proto + ring buffer + disk store + rate limiter | 0018 (4/7) | 2026-04-23 |
 | [#173](https://github.com/mkhomutov/Persatrix/pull/173) | feat(observability): RFC 0018 PR 5 — LogService server + agent shipper + REST + SSE | 0018 (5/7) | 2026-04-23 |
 | [#174](https://github.com/mkhomutov/Persatrix/pull/174) | feat(cli): RFC 0018 PR 6 — CLI logs rewrite + filters + SSE follow + E2E | 0018 (6/7) | 2026-04-23 |
+| [#176](https://github.com/mkhomutov/Persatrix/pull/176) | refactor(observability): RFC 0019 PR 6 — tracing/spans review follow-ups (optional polish) | 0019 (PR 6, polish) | 2026-04-23 |
 
 ---
 
