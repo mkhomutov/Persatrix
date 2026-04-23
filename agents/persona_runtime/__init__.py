@@ -23,6 +23,8 @@ The runtime class is split across submodules for file-size hygiene:
 from __future__ import annotations
 
 __all__ = [
+    # Public surface first, then leading-underscore module-private symbols
+    # re-exported for cross-module use (PR #176 review nit).
     "Linkable",
     "MemoryNamespace",
     "TICK_REASON_SCHEDULED",
@@ -35,6 +37,7 @@ __all__ = [
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Final, Protocol, runtime_checkable
 
@@ -199,8 +202,15 @@ class _LLMPersonaAgent(
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record
         # "event triggered me" causality across the asyncio task boundary.
-        # Drained on every on_tick() invocation.
-        self._pending_tick_links: list[Link] = []
+        # Drained on every on_tick() invocation.  Bounded ``deque`` with
+        # native oldest-drop semantics so a paused tick consumer cannot
+        # leak memory under sustained event saturation (PR #167 review
+        # *Should Fix*; PR #176 review *Should Fix #1* swap from
+        # list+pop(0) to deque(maxlen=...) for O(1) drop and to delete
+        # the manual length-check / apologetic-O(n)-comment pair).
+        self._pending_tick_links: deque[Link] = deque(
+            maxlen=_PENDING_TICK_LINKS_CAP,
+        )
         # Wall-clock of the previous ``on_tick()`` invocation for the
         # ``agent.persona.tick.interval`` histogram (RFC 0019 § F).
         # ``None`` until the first tick; first sample is then recorded
@@ -251,19 +261,15 @@ class _LLMPersonaAgent(
         between ticks accumulate up to ``_PENDING_TICK_LINKS_CAP``;
         ``on_tick()`` drains them all.  Oldest entries are dropped once
         the cap is reached so a paused tick consumer cannot leak memory
-        (PR #167 review *Should Fix*).
+        (PR #167 review *Should Fix*).  The bounded ``deque`` handles
+        the oldest-drop natively in O(1).
         """
         self._pending_tick_links.append(link)
-        if len(self._pending_tick_links) > _PENDING_TICK_LINKS_CAP:
-            # Drop the oldest entry.  ``list.pop(0)`` is O(n) but the cap
-            # is small (32) and this branch only fires under sustained
-            # event-without-tick saturation.
-            self._pending_tick_links.pop(0)
 
     def _consume_pending_tick_links(self) -> list[Link]:
         """Drain queued tick links.  Called once per ``on_tick()``."""
-        links = self._pending_tick_links
-        self._pending_tick_links = []
+        links = list(self._pending_tick_links)
+        self._pending_tick_links.clear()
         return links
 
     def _has_active_goal_payload(self) -> bool:

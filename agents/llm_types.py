@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 class StopReason(Enum):
@@ -70,8 +70,15 @@ class LLMResponse:
     usage: Usage = field(default_factory=lambda: Usage(0, 0))
 
 
+@runtime_checkable
 class LLMProvider(Protocol):
-    """Protocol for LLM provider implementations."""
+    """Protocol for LLM provider implementations.
+
+    Decorated ``runtime_checkable`` to match the ``Linkable`` Protocol
+    idiom introduced in :mod:`agents.persona_runtime` and so that
+    pre-emptive ``isinstance(provider, LLMProvider)`` checks at call
+    sites (none today) do not raise ``TypeError`` (PR #176 review nit).
+    """
 
     # Stable identifier emitted as the OTEL ``gen_ai.system`` attribute
     # (``"anthropic"``, ``"openai"``, …).  Declared here so call sites do

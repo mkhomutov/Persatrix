@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -116,6 +117,39 @@ class TestFinishReasonsListShape:
         assert len(reasons) == 1
         assert reasons[0] == "stop"
 
+    async def test_gen_ai_system_falls_back_to_class_name_when_provider_missing_name(
+        self, in_process_exporter: InMemorySpanExporter,
+    ) -> None:
+        # CHANGELOG documents: providers without a ``name`` attribute
+        # (or whose ``name`` is not a non-empty string) get a class-name
+        # derived ``gen_ai.system`` value with the trailing ``Provider``
+        # token stripped and lower-cased.  Verify the fallback path
+        # (PR #176 review nice-to-have #2) by constructing a minimal
+        # provider class whose name attribute is explicitly ``None``.
+
+        class _AcmeStubProvider:
+            name: str | None = None
+
+            async def create_message(self, **_kwargs: Any) -> LLMResponse:
+                return LLMResponse(
+                    text="y",
+                    stop_reason=StopReason.END_TURN,
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+
+        await LLMClient(_AcmeStubProvider()).create_message(  # type: ignore[arg-type]
+            model="m", messages=[], system="", tools=[],
+            max_tokens=1, temperature=0.0,
+        )
+
+        span = next(
+            s for s in in_process_exporter.get_finished_spans()
+            if s.name == LLM_CALL_SPAN
+        )
+        attrs = span.attributes or {}
+        # ``_AcmeStubProvider`` → strip ``Provider`` → ``"_acmestub"`` lowercased.
+        assert attrs["gen_ai.system"] == "_acmestub"
+
 
 # ─── PR #163 review nice-to-have: init_tracing() re-call regression ────────
 
@@ -137,7 +171,15 @@ class TestInitTracingRecall:
         provider1 = _tracing_module._provider
 
         exporter2 = InMemorySpanExporter()
-        with caplog.at_level(logging.WARNING):
+        # Scope ``caplog`` to the OTEL ``trace`` logger so this assertion
+        # is order-independent: an earlier test in the suite that called
+        # ``init_tracing()`` would have already exhausted the global
+        # one-shot warning, but the warning is re-emitted on every
+        # ``set_tracer_provider`` invocation against the OTEL logger.
+        # Catching at the logger level (not the root) avoids picking up
+        # unrelated warnings from earlier tests in the same caplog window
+        # (PR #176 review nice-to-have #4).
+        with caplog.at_level(logging.WARNING, logger="opentelemetry.trace"):
             tracer2 = init_tracing(exporter=exporter2)
 
         # Module-level provider is replaced (so shutdown() flushes the latest).
@@ -150,7 +192,11 @@ class TestInitTracingRecall:
         # Current SDK emits "Overriding of current TracerProvider is not
         # allowed" — both anchors are stable enough to survive minor wording
         # changes.
-        messages = [r.getMessage().lower() for r in caplog.records]
+        messages = [
+            r.getMessage().lower()
+            for r in caplog.records
+            if r.name.startswith("opentelemetry")
+        ]
         assert any(
             "tracerprovider" in m or "tracer provider" in m for m in messages
         ), messages
@@ -162,43 +208,62 @@ class TestInitTracingRecall:
 class TestOTLPEndpointNormalisation:
     """The ``/v1/traces`` double-suffix guard added during PR 1 review has no
     explicit test today.  Verify both the bare-host case (suffix appended)
-    and the already-suffixed case (suffix not duplicated)."""
+    and the already-suffixed case (suffix not duplicated).
 
-    def _exporter_endpoint(self) -> str:
-        # Reach into the BSP -> SimpleSpanProcessor exporter to read the
-        # configured endpoint.  Tests use SimpleSpanProcessor (test path)
-        # whose ``span_exporter`` is the InMemoryExporter; instead probe
-        # the OTLP path by passing exporter=None and inspecting the live
-        # provider's processor chain.
-        provider = _tracing_module._provider
-        assert provider is not None
-        # Provider keeps a SynchronousMultiSpanProcessor; walk it.
-        active = provider._active_span_processor  # type: ignore[attr-defined]
-        # ``_span_processors`` is a tuple of registered processors.
-        span_processors = active._span_processors  # type: ignore[attr-defined]
-        for proc in span_processors:
-            real_exporter = getattr(proc, "span_exporter", None)
-            endpoint = getattr(real_exporter, "_endpoint", None)
-            if endpoint is not None:
-                return str(endpoint)
-        raise AssertionError("no OTLP exporter found in provider")
+    Implementation note: previous draft of this test reached three layers
+    deep into OTEL SDK private attributes (``_active_span_processor``,
+    ``_span_processors``, ``_endpoint``) to read back the resolved
+    endpoint.  PR #176 review *Should Fix #2* swapped that for an
+    ``OTLPSpanExporter`` constructor monkeypatch — we capture the
+    ``endpoint`` kwarg ``init_tracing()`` passes in, which is the actual
+    contract under test and is stable across SDK patch releases.
+    """
+
+    def _capture_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> dict[str, str | None]:
+        captured: dict[str, str | None] = {"endpoint": None}
+
+        # Build a stand-in exporter that records the constructor kwargs
+        # ``init_tracing()`` passes in.  The SDK only calls ``shutdown``
+        # / ``export`` later — the autouse fixture's ``pmetrics``-style
+        # provider reset is sufficient cleanup so a no-op is safe.
+        class _CapturingExporter:
+            def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
+                captured["endpoint"] = kwargs.get("endpoint")
+
+            def export(self, spans: object) -> object:  # pragma: no cover
+                return None
+
+            def shutdown(self) -> None:  # pragma: no cover
+                return None
+
+            def force_flush(self, timeout_millis: int = 30_000) -> bool:  # pragma: no cover
+                return True
+
+        monkeypatch.setattr(
+            _tracing_module, "OTLPSpanExporter", _CapturingExporter,
+        )
+        return captured
 
     def test_bare_endpoint_gets_v1_traces_appended(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        captured = self._capture_endpoint(monkeypatch)
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
-        init_tracing()  # exporter=None → real OTLP path
-        assert self._exporter_endpoint() == "http://collector:4318/v1/traces"
+        init_tracing()  # exporter=None → OTLP path uses the captured stub
+        assert captured["endpoint"] == "http://collector:4318/v1/traces"
 
     def test_already_suffixed_endpoint_not_doubled(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        captured = self._capture_endpoint(monkeypatch)
         monkeypatch.setenv(
             "OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/v1/traces",
         )
         init_tracing()
         # The guard MUST not produce ``…/v1/traces/v1/traces``.
-        assert self._exporter_endpoint() == "http://collector:4318/v1/traces"
+        assert captured["endpoint"] == "http://collector:4318/v1/traces"
 
 
 # ─── PR #167 review Should-Fix: bounded _pending_tick_links ────────────────
@@ -223,12 +288,19 @@ class TestPendingTickLinksBound:
             trace_flags=TraceFlags(0x01),
         )
 
-        # Bind ``add_pending_tick_link`` to a bare object holding the list.
+        # Bind ``add_pending_tick_link`` to a bare object holding the buffer.
+        # Use ``__init__`` rather than a class-level ``list`` annotation
+        # to avoid the textbook mutable-class-attribute antipattern
+        # (RUF012; PR #176 review nice-to-have #6).
+        from collections import deque
+
         class _FakeAgent:
-            _pending_tick_links: list[Link] = []
+            def __init__(self) -> None:
+                self._pending_tick_links: deque[Link] = deque(
+                    maxlen=_PENDING_TICK_LINKS_CAP,
+                )
 
         fake = _FakeAgent()
-        fake._pending_tick_links = []  # per-instance list
         bound = _LLMPersonaAgent.add_pending_tick_link.__get__(fake, _FakeAgent)
 
         # Push well over the cap with sequence-tagged attrs so we can verify
@@ -242,6 +314,35 @@ class TestPendingTickLinksBound:
         last_attrs = fake._pending_tick_links[-1].attributes or {}
         assert first_attrs["seq"] == 64
         assert last_attrs["seq"] == _PENDING_TICK_LINKS_CAP + 63
+
+
+# ─── PR #176 review nice-to-have: Linkable Protocol negative case ──────────
+
+
+class TestLinkableProtocolGuard:
+    """Verify the ``isinstance(agent, Linkable)`` dispatcher guard skips
+    agents that do not implement ``add_pending_tick_link``.  Without this
+    coverage a refactor that drops the method silently disables the
+    event→tick Span Link causality with no test failure."""
+
+    def test_agent_without_add_pending_tick_link_is_not_linkable(self) -> None:
+        from agents.persona_runtime import Linkable
+
+        class _PlainAgent:
+            """Bare BaseAgent-like stand-in with no link buffer."""
+
+            agent_id = "plain"
+
+        assert not isinstance(_PlainAgent(), Linkable)
+
+    def test_agent_with_add_pending_tick_link_is_linkable(self) -> None:
+        from agents.persona_runtime import Linkable
+
+        class _LinkableAgent:
+            def add_pending_tick_link(self, link: Link) -> None:
+                pass
+
+        assert isinstance(_LinkableAgent(), Linkable)
 
 
 # ─── Cleanup: reset module-level tracing provider between tests ────────────
