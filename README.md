@@ -191,9 +191,20 @@ make validate
 ```bash
 docker compose up -d
 
-# Orchestrator API:   http://localhost:8080
-# Jaeger UI (traces): http://localhost:16686
+# Orchestrator API:        http://localhost:8080
+# Jaeger UI (traces):      http://localhost:16686
+# Prometheus UI (metrics): http://localhost:9091
+# Loki HTTP API (logs):    http://localhost:3100
+# OTEL Collector (OTLP):   localhost:4317 (gRPC) / 4318 (HTTP)
 ```
+
+All three observability backends are dev-only; the OpenTelemetry Collector
+in front (configuration in
+[`config/observability/otel-collector.yaml`](config/observability/otel-collector.yaml))
+applies the tail-sampling pipeline from
+[RFC 0019 § H](docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline).
+Production operators run their own Collector and point it at their own
+backends — fork the reference config rather than relying on the dev images.
 
 ### Run a Workflow (v0.1 surface)
 

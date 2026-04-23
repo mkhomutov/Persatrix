@@ -291,12 +291,14 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/test_observability_schema_parity.py -v` passes (no compose dep)
-- [ ] `pytest tests/integration/test_log_trace_correlation.py -v` passes (no compose dep)
+- [x] `pytest tests/integration/test_observability_schema_parity.py -v` passes (no compose dep)
+- [x] `pytest tests/integration/test_log_trace_correlation.py -v` passes (no compose dep)
 - [ ] `pytest -m requires_compose tests/integration/test_observability_e2e.py -v` passes against the local compose stack (manual gate; not in default CI)
-- [ ] `config/observability/otel-collector.yaml` documents every processor + exporter in the pipeline
-- [ ] README OTEL paragraph mentions logs + traces + metrics + Collector
-- [ ] CHANGELOG v0.2.3 entry mentions the new Collector + Prometheus + Loki services in `docker-compose.yaml`
+- [x] `config/observability/otel-collector.yaml` documents every processor + exporter in the pipeline
+- [x] README OTEL paragraph mentions logs + traces + metrics + Collector
+- [x] CHANGELOG v0.2.3 entry mentions the new Collector + Prometheus + Loki services in `docker-compose.yaml`
+
+**Merged**: PR [#171](https://github.com/mkhomutov/Persatrix/pull/171) — 2026-04-23
 
 ---
 
@@ -371,8 +373,36 @@ Captured from the PR #167 deep review. All round-1 *Must Fix* items (canonical `
 
 ##### From PR 4 review
 
-<!-- TODO: populate after PR 4 review merges -->
-*(populated during PR 4 review)*
+Captured from the PR #171 deep re-review (round 2, against the post-fix local branch state). Round-1 *High-severity correctness bugs* (E2E request shape `workflow` vs `workflow_id`, response field `execution_id` vs `run_id`, Jaeger tag `persatrix.execution_id` vs `persatrix.run_id`) and the round-1 *Should-Fix* readiness/CHANGELOG/markexpr/file-size items were addressed in-PR with explicit `Review-fix (PR #171, …)` markers and are not re-listed below.
+
+###### Should-Fix
+
+- **Should Fix — verify and likely correct the Loki query path in the E2E.** [tests/integration/test_observability_e2e.py](../../tests/integration/test_observability_e2e.py) `_loki_has_correlated_log` queries `{trace_id="<id>"}` LogQL. With OTLP HTTP into Loki 3.x's OTLP receiver, `trace_id` is mapped to a **structured-metadata field** by default, not a stream label, so the label-selector query may return no matches even when the correlation is intact end-to-end. Either ship `config/observability/loki-config.yaml` that promotes `trace_id` to a label, or rewrite the query as `{service_name=~"persatrix-.*"} | trace_id="<id>"` with a parser stage. Highest-value follow-up because it gates whether the round-trip is actually validated.
+- **Should Fix — pin a `loki-config.yaml` next to `prometheus.yaml`.** [docker-compose.yaml](../../docker-compose.yaml) mounts no config into the `loki` service; behaviour depends entirely on the `grafana/loki:3.1.0` image default for OTLP receiver enablement. A future image bump that flips that default would silently break the logs pipeline. Pinning an explicit config also gives a natural home for the `trace_id` label-promotion fix above.
+- **Should Fix — promote `_LOG_TO_SPAN_KEY` to a production constant.** [tests/integration/test_observability_schema_parity.py](../../tests/integration/test_observability_schema_parity.py) keeps the log → span attribute mapping table as a test-local literal; the parity assertion only catches drift between two literals in the same file. Move to e.g. `agents/observability/_schema.py` and assert against it. Turns the test from "two literals in one file stay in sync" into a real contract check.
+- **Should Fix — drop the `debug` exporter from steady-state Collector pipelines.** [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml) wires `debug` into all three pipelines at `verbosity: basic`; in long-running dev sessions it floods `docker compose logs otel-collector` and dilutes signal. Either remove from steady-state pipelines, gate behind a Compose profile, or move to a stderr-only minimal exporter.
+- **Should Fix — readiness gating for the new compose observability services.** Applied for `prometheus` (`/-/ready`) and `loki` (`/ready`) in [docker-compose.yaml](../../docker-compose.yaml). **Deferred for `otel-collector`**: the upstream `otel/opentelemetry-collector-contrib` image is distroless (no shell / `wget` / `nc` / `curl`), so a Docker `CMD` healthcheck cannot be authored without rebuilding the image or adding a probe sidecar. Without a Collector healthcheck, depending services cannot use `condition: service_healthy`, and a cold-start `docker compose up -d` may briefly race the OTLP receiver bind and drop the first batch (visible as a one-off non-zero `agent.observability.{spans,logs}.dropped` on first boot). Steady-state operation is unaffected. Follow-up options: (a) ship a thin Collector image that adds `wget`, (b) add a sidecar probe container, or (c) enable the `health_check` extension and accept the image extension cost.
+- **Should Fix — document the Jaeger OTLP host-port unpublish as a breaking dev change.** Already landed in [CHANGELOG.md](../../CHANGELOG.md) "⚠️ Operator-Visible Changes" and [docs/observability.md](../../docs/observability.md) § 11.1. No further action.
+
+###### Nice-to-Have
+
+- **Nice-to-Have — assert tail-sampling policies in the E2E.** Submit one error trace and verify Jaeger has it; submit N untagged ticks and verify roughly 1 % retention over the run. Current E2E would pass even if `tail_sampling` were misconfigured to keep everything.
+- **Nice-to-Have — assert `agent.observability.{spans,logs}.dropped` stay at zero across an E2E round-trip.** Locks down the back-pressure invariant from [docs/observability.md](../../docs/observability.md) § 11.5 and would catch the cold-start race noted in the deferred Collector-healthcheck item above.
+- **Nice-to-Have — build a thin wrapper image around `otel/opentelemetry-collector-contrib`** that adds `wget`/busybox so `otel-collector` can declare a Docker healthcheck and dependent services can use `condition: service_healthy`. Closes the cold-start race without sidecar gymnastics.
+- **Nice-to-Have — wire `requires_compose` into a separate optional CI job** (e.g. `workflow_dispatch`) so the suite does not bit-rot.
+- **Nice-to-Have — switch `captured_stderr` to a `WriteLoggerFactory(file=buf)` rewire** in [tests/integration/test_log_trace_correlation.py](../../tests/integration/test_log_trace_correlation.py) so the fixture does not depend on `agents/observability/logging.py`'s `sys` import style. Today the `_SysShim` would silently no-op (and the test pass vacuously) if `logging.py` switched to `import sys as _sys` internally.
+- **Nice-to-Have — add a one-line OTLP gRPC :4317 reachability probe** to [tests/integration/test_observability_e2e.py](../../tests/integration/test_observability_e2e.py). Today only the HTTP port (4318) is probed. Matches actual production traffic but a gRPC reachability check would close the loop for operators using gRPC exporters.
+- **Nice-to-Have — switch the tail-sampling workflow-tagged policy to exact-list mode.** [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml) uses `enabled_regex_matching: true` with `values: [".+"]` against `persatrix.workflow_id`. The `string_attribute` processor also supports an `invert_match: false` exact-list mode that avoids the regex engine on the hot path. Cosmetic; current shape is clear.
+- **Nice-to-Have — note in [docs/observability.md](../../docs/observability.md) § 11.5 that `enable_open_metrics: true` causes `trace_id`/`span_id` exemplars to be persisted in Prometheus.** Trace IDs are not PII, but operators with PII-sensitive Prometheus retention should know they are now stored.
+
+###### Nits
+
+- **Nit — fix the `SS H` artifact in the ASCII topology diagram** in [docs/observability.md](../../docs/observability.md) § 11. Should read `§ H`; likely a unicode-escape artifact from the file generator.
+- **Nit — move the four backend-reachability probes out of the `requires_compose` marker** (or add an import smoke check elsewhere) so a syntax / import regression in [tests/integration/test_observability_e2e.py](../../tests/integration/test_observability_e2e.py) shows up in the default `make test-integration` run instead of bit-rotting until someone opts in. The four probes already `pytest.skip` on transport errors, so they are safe to run by default.
+- **Nit — soften the schema-parity mapping-test docstring** in [tests/integration/test_observability_schema_parity.py](../../tests/integration/test_observability_schema_parity.py) to match its actual scope (two literals in the same module) until `_LOG_TO_SPAN_KEY` is promoted out of the test module per the Should-Fix above.
+- **Nit — rename local var `trace = _poll_until(...)`** in [tests/integration/test_observability_e2e.py](../../tests/integration/test_observability_e2e.py) to `trace_data` to avoid shadowing the `opentelemetry.trace` module name imported by the sibling `test_log_trace_correlation.py`. Cosmetic.
+- **Nit — tighten the `CHANGELOG.md` file-size exemption comment** in [scripts/checks/file_size.py](../../scripts/checks/file_size.py) to reference `cliff.toml` / the release process so future readers know where the trim happens. Applied in this PR.
+- **Nit — note the upstream-Prometheus exemplar-storage requirement** next to the `prometheus` exporter in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml). Already enabled in compose; closes the loop for forkers. Applied in this PR.
 
 ##### RFC close
 

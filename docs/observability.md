@@ -165,6 +165,7 @@ discipline):
 |---------|-----------------|
 | Span semantic conventions (`persatrix.*` attribute namespace) | RFC 0019 PR 2 (✅ § 10 below) |
 | Metric inventory + dimensions | RFC 0019 PR 3 |
+| Operator pipeline (Collector + tail sampling + Jaeger / Prometheus / Loki) | RFC 0019 PR 4 (✅ § 11 below) |
 | Persisted log layout (`data/logs/<execution_id>/...`) + env knobs | RFC 0018 PR 4 |
 | `LogService` gRPC + REST + SSE endpoint shapes | RFC 0018 PR 5 |
 | `persatrix logs` CLI flags + colour scheme | RFC 0018 PR 6 |
@@ -288,3 +289,84 @@ Once RFC 0018 PR 3 lands the log↔trace enricher, the operator workflow is:
 The `agent.persona.event` → `agent.persona.tick` Link (§ 10.3) means an
 autonomous tick that produced the slow LLM call is already linked back to
 the originating user event without the operator having to follow timestamps.
+
+---
+
+## 11. Operator pipeline (RFC 0019 PR 4)
+
+The reference operator stack ships in [docker-compose.yaml](../docker-compose.yaml) and routes every signal through an OpenTelemetry Collector before fanning out to per-signal backends:
+
+```
+orchestrator + agents
+        |
+        |  OTLP HTTP (4318)
+        v
+ otel-collector  ---> Jaeger        (traces)
+       |       \ --> Prometheus    (metrics, scraped)
+       |        \-> Loki           (logs, OTLP push)
+       |
+       |  tail_sampling processor (RFC 0019 SS H):
+       |    - keep all ERROR traces
+       |    - keep traces >= 5s
+       |    - keep traces tagged persatrix.workflow_id
+       |    - sample 1% of remaining (autonomous tick) traces
+       v
+```
+
+Configuration lives at [config/observability/otel-collector.yaml](../config/observability/otel-collector.yaml). The Prometheus scrape config is at [config/observability/prometheus.yaml](../config/observability/prometheus.yaml). Loki uses its image default.
+
+### 11.1 Local ports
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Jaeger UI | http://localhost:16686 | Browse traces, follow Span Links |
+| Prometheus UI | http://localhost:9091 | Query metrics, click exemplars to jump to traces |
+| Loki HTTP API | http://localhost:3100 | LogQL queries (e.g. `{trace_id="<id>"}`) |
+| OTEL Collector | localhost:4317 (gRPC), 4318 (HTTP) | OTLP ingest |
+
+The Prometheus host port is shifted to `9091` so it does not collide with the orchestrator gRPC port (`9090`).
+
+> **Breaking dev-workflow change (v0.2.3):** Jaeger's OTLP ports
+> (`4317`/`4318`) are no longer published on the host. The Collector now
+> owns the host-facing OTLP ingress on the same port numbers and forwards
+> traces to Jaeger over the internal compose network. Local scripts (e.g.
+> under `data/`) that set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`
+> continue to work unchanged — they now talk to the Collector instead of
+> Jaeger directly. Tooling that needs to bypass the Collector must use the
+> in-network `jaeger:4317` from another compose service.
+
+### 11.2 Viewing traces in Jaeger
+
+Open http://localhost:16686, pick the `persatrix-server` or `persatrix-agent` service, and search by tag. The `persatrix.workflow_id` baggage attribute is set on every workflow-driven span (RFC 0019 SS E) so a tag query like `persatrix.workflow_id=feature-builder` returns every trace for that workflow across the full process tree.
+
+### 11.3 Querying metrics in Prometheus
+
+The orchestrator exposes `orchestrator.workflow.submitted/completed/failed` counters, `orchestrator.workflow.duration` and `orchestrator.step.duration` histograms, and `workflow.active` (an UpDownCounter). Agent-side metrics live under `agent.tool.*`, `agent.llm.*`, `agent.persona.*`, and the `agent.observability.{spans,logs}.dropped` back-pressure counters.
+
+Histogram queries surface exemplars (`--enable-feature=exemplar-storage` is on by default in the dev compose). A p99 LLM-latency spike on the `agent_llm_duration_milliseconds` histogram exposes the originating `trace_id` next to the bucket sample; clicking it opens the trace in Jaeger.
+
+### 11.4 Correlated debugging from a trace ID
+
+1. Start with a slow span in Jaeger (or an exemplar in Prometheus).
+2. Copy the `trace_id` from the span detail panel.
+3. `persatrix logs --trace <trace_id>` (RFC 0018 PR 6) returns every log record emitted under that trace, ordered by timestamp, across all participating processes.
+4. For ad-hoc queries before the CLI lands, query Loki directly: `{trace_id="<id>"}` returns the same record set.
+
+The log-trace correlation contract is locked in by the `test_log_trace_correlation.py` and `test_observability_schema_parity.py` tests; the end-to-end shape against the live compose stack is locked in by the opt-in `test_observability_e2e.py` (run via `pytest -m requires_compose`).
+
+### 11.5 Sampling and back-pressure
+
+- **Head sampling**: parent-based `TraceIdRatioBased(1.0)` on both runtimes (sample everything; tail processor decides).
+- **Tail sampling**: see the policy block in `config/observability/otel-collector.yaml`. Tune `num_traces` and `decision_wait` for production load profiles.
+- **Back-pressure**: both `BatchSpanProcessor` and `BatchLogRecordProcessor` drop on overflow rather than block. Drop counters (`agent.observability.spans.dropped`, `agent.observability.logs.dropped`) are exported as metrics so a dashboard alert fires when an exporter or collector becomes unavailable.
+
+### 11.6 Production deployment
+
+The dev compose images are conveniences for local debugging and for the schema-parity / E2E tests in CI. Production operators are expected to:
+
+- Run their own OpenTelemetry Collector (or accept Persatrix's reference config and pin the image tag).
+- Point the Collector at their own Jaeger / Tempo / Datadog / etc. trace backend, their own Prometheus, and their own Loki / Elasticsearch / etc. log store.
+- Apply auth at the OTLP exporter endpoint (Persatrix sends OTLP HTTP unauthenticated by default, consistent with how the Go orchestrator already behaves).
+- Override the Collector's policies to match their own retention, sampling, and PII budgets.
+
+Forking `config/observability/otel-collector.yaml` is encouraged; the file is checked in as a starting point, not as a binding contract.
