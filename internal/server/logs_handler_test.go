@@ -144,6 +144,15 @@ func TestLogs_InvalidSince_Returns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// PR #173 review Should-Fix #1: negative durations parse via
+// time.ParseDuration but would silently translate to a future `since`
+// and always-empty result.  Reject as 400 to surface client typos.
+func TestLogs_NegativeSince_Returns400(t *testing.T) {
+	srv, _ := testServerWithBuffer(t)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/exec-1/logs?since=-5m", nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestLogs_InvalidLevel_Returns400(t *testing.T) {
 	srv, _ := testServerWithBuffer(t)
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/exec-1/logs?level=NOTICE", nil)

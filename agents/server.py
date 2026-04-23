@@ -197,7 +197,9 @@ class AgentServer:
         set_active_shipper(self._log_shipper)
 
         # Self-register with orchestrator after gRPC server is listening.
-        await self._self_register()
+        # PR #173 review fix: a duplicate self-register call was introduced
+        # alongside the shipper-start block, causing every agent to POST
+        # /api/v1/agents/register twice on startup.
         await self._self_register()
 
     async def _self_register(self) -> None:

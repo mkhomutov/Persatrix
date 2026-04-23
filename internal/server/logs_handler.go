@@ -12,6 +12,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -148,8 +149,16 @@ func parseLogsRequest(w http.ResponseWriter, r *http.Request) (logsRequest, bool
 // parseSince accepts either a Go duration ("5m", "1h30m") interpreted
 // as "now - duration", or an RFC 3339 timestamp.  The caller passes
 // `now` so tests can pin a deterministic clock.
+//
+// Negative durations (e.g. "-5m") are rejected: time.ParseDuration
+// accepts them, but they would silently translate to a future `since`
+// timestamp and the filter would always evict everything — surfacing
+// the typo as an empty 200 instead of a 400 (PR #173 review Should-Fix #1).
 func parseSince(raw string, now time.Time) (time.Time, error) {
 	if d, err := time.ParseDuration(raw); err == nil {
+		if d < 0 {
+			return time.Time{}, errors.New("duration must be non-negative")
+		}
 		return now.Add(-d), nil
 	}
 	t, err := time.Parse(time.RFC3339, raw)

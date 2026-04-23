@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import logging as _stdlib_logging
 import os
+import threading
 from collections import deque
 from collections.abc import Iterable
 from datetime import datetime
@@ -137,11 +138,17 @@ class Shipper:
 
         # asyncio.Queue with maxsize would block put_nowait() rather
         # than evict; we want FIFO eviction so the hot path is
-        # uninterrupted.  A deque protected by a single non-blocking
-        # invariant (mutated only inside the event loop) gives us that
-        # without the synchronisation overhead.
+        # uninterrupted.  A deque guarded by a threading.Lock gives us
+        # cross-thread-safe append+popleft (structlog tail processors
+        # may emit from worker threads — gRPC executor pools, aiohttp
+        # resolver, third-party SDKs that thread off blocking I/O).
+        # The asyncio.Event is woken via call_soon_threadsafe so the
+        # cross-thread caller never touches loop-affine state directly.
+        # (PR #173 review Must-Fix #3.)
         self._queue: deque[dict[str, Any]] = deque()
+        self._queue_lock = threading.Lock()
         self._wake = asyncio.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._channel: grpc.aio.Channel | None = None
@@ -159,22 +166,45 @@ class Shipper:
 
         Non-blocking; drops the oldest queued record on overflow so the
         hot path of the structlog chain never awaits.  Safe to call
-        from any thread / coroutine: deque appends + pops are atomic
-        under the GIL and the event-loop drain is the sole consumer.
+        from any thread or coroutine: the deque is guarded by a
+        ``threading.Lock`` and the loop-affine ``asyncio.Event`` wake
+        is dispatched via ``loop.call_soon_threadsafe``.  (PR #173
+        review Must-Fix #3 — prior to this change, calling enqueue from
+        a non-loop thread mutated the deque and ``Event`` directly,
+        which is undefined and could wedge the drain task.)
         """
-        if len(self._queue) >= self.max_queue:
-            self._queue.popleft()
-            self.dropped += 1
-        self._queue.append(record)
-        self.enqueued += 1
-        # Wake the drain task; calling set() on an already-set event is
-        # cheap so we do not gate on its current state.
-        self._wake.set()
+        with self._queue_lock:
+            if len(self._queue) >= self.max_queue:
+                self._queue.popleft()
+                self.dropped += 1
+            self._queue.append(record)
+            self.enqueued += 1
+        # Wake the drain task.  When called from the loop thread the
+        # direct .set() is fine; from another thread we must hop onto
+        # the loop because asyncio.Event is not thread-safe.  start()
+        # captures the loop so this branch only runs after start().
+        loop = self._loop
+        if loop is None:
+            # enqueue() before start() — record is queued; the drain
+            # task's first iteration will see the wake set anyway.
+            self._wake.set()
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            self._wake.set()
+        else:
+            loop.call_soon_threadsafe(self._wake.set)
 
     async def start(self) -> None:
         """Open the channel + spawn the drain task.  Idempotent."""
         if self._task is not None:
             return
+        # Capture the loop so cross-thread enqueue() can route the
+        # wake through call_soon_threadsafe (PR #173 review Must-Fix #3).
+        self._loop = asyncio.get_running_loop()
         self._channel = grpc.aio.insecure_channel(self.target)
         self._task = asyncio.create_task(self._run(), name="log-shipper")
 
@@ -202,10 +232,15 @@ class Shipper:
 
     # ── Internals ───────────────────────────────────────────────────
 
+    def _queue_nonempty(self) -> bool:
+        """Lock-guarded ``len(self._queue) > 0`` for cross-thread safety."""
+        with self._queue_lock:
+            return bool(self._queue)
+
     async def _run(self) -> None:
         """Outer loop: keep a stream open, reconnect with backoff on error."""
         backoff = RECONNECT_BACKOFF_INITIAL_SEC
-        while not self._stopping.is_set() or self._queue:
+        while not self._stopping.is_set() or self._queue_nonempty():
             try:
                 await self._stream_once()
                 # Clean EOF (orchestrator closed) — reset backoff so
@@ -234,10 +269,13 @@ class Shipper:
 
         async def request_iter() -> Any:
             while True:
-                # Drain to a batch.
+                # Drain to a batch.  The lock keeps the popleft loop
+                # consistent with cross-thread enqueue() callers
+                # (PR #173 review Must-Fix #3).
                 batch_records: list[dict[str, Any]] = []
-                while self._queue and len(batch_records) < self.batch_max:
-                    batch_records.append(self._queue.popleft())
+                with self._queue_lock:
+                    while self._queue and len(batch_records) < self.batch_max:
+                        batch_records.append(self._queue.popleft())
                 if batch_records:
                     yield self._batch_proto(batch_records)
                     self.shipped += len(batch_records)

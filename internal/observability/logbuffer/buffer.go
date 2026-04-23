@@ -180,6 +180,11 @@ type Buffer struct {
 	droppedInvalidID  atomic.Uint64
 	evictedActive     atomic.Uint64 // active rings evicted by LRU
 	evictedSealed     atomic.Uint64 // sealed rings evicted (after disk flush)
+	// PR #173 review Should-Fix #2: aggregate per-subscriber drop counts
+	// across the SSE fan-out so operators have a single signal for slow
+	// subscribers (the per-subscriber atomic.Uint64 in subscriber.dropped
+	// was previously read by nothing).
+	droppedSubscribers atomic.Uint64
 
 	// Per-execution one-shot WARN gate so a noisy execution emits
 	// exactly one rate-limit warning per process lifetime, per
@@ -363,14 +368,15 @@ func (b *Buffer) Close() error {
 // Stats returns a snapshot of the buffer's internal counters. Intended
 // for tests and for the future metrics wiring referenced in RFC 0019.
 type Stats struct {
-	ActiveRings       int
-	DroppedBelowLevel uint64
-	DroppedRate       uint64
-	DroppedClosed     uint64
-	DroppedNoExecID   uint64
-	DroppedInvalidID  uint64
-	EvictedActive     uint64
-	EvictedSealed     uint64
+	ActiveRings        int
+	DroppedBelowLevel  uint64
+	DroppedRate        uint64
+	DroppedClosed      uint64
+	DroppedNoExecID    uint64
+	DroppedInvalidID   uint64
+	EvictedActive      uint64
+	EvictedSealed      uint64
+	DroppedSubscribers uint64 // SSE fan-out drops aggregated across subscribers
 }
 
 // Stats returns counter snapshots.
@@ -379,14 +385,15 @@ func (b *Buffer) Stats() Stats {
 	n := len(b.rings)
 	b.mu.RUnlock()
 	return Stats{
-		ActiveRings:       n,
-		DroppedBelowLevel: b.droppedBelowLevel.Load(),
-		DroppedRate:       b.droppedRate.Load(),
-		DroppedClosed:     b.droppedClosed.Load(),
-		DroppedNoExecID:   b.droppedNoExecID.Load(),
-		DroppedInvalidID:  b.droppedInvalidID.Load(),
-		EvictedActive:     b.evictedActive.Load(),
-		EvictedSealed:     b.evictedSealed.Load(),
+		ActiveRings:        n,
+		DroppedBelowLevel:  b.droppedBelowLevel.Load(),
+		DroppedRate:        b.droppedRate.Load(),
+		DroppedClosed:      b.droppedClosed.Load(),
+		DroppedNoExecID:    b.droppedNoExecID.Load(),
+		DroppedInvalidID:   b.droppedInvalidID.Load(),
+		EvictedActive:      b.evictedActive.Load(),
+		EvictedSealed:      b.evictedSealed.Load(),
+		DroppedSubscribers: b.droppedSubscribers.Load(),
 	}
 }
 

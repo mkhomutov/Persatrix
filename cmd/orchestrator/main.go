@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
@@ -47,10 +48,16 @@ const (
 )
 
 var (
-	configDir    = flag.String("config", "config/", "Path to configuration directory")
-	port         = flag.Int("port", 9090, "gRPC server port")
-	httpPort     = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
-	httpBind     = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
+	configDir = flag.String("config", "config/", "Path to configuration directory")
+	port      = flag.Int("port", 9090, "gRPC server port")
+	httpPort  = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
+	httpBind  = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
+	// PR #173 review (Must-Fix #2): the gRPC LogService listener previously
+	// bound on `:%d` (all interfaces) while --http-bind defaulted to
+	// loopback, silently broadening the orchestrator's public attack
+	// surface (auth is deferred to RFC 0009).  Mirror --http-bind so the
+	// security posture is consistent across both server-side surfaces.
+	grpcBind     = flag.String("grpc-bind", "127.0.0.1", "gRPC server bind address (LogService); set to 0.0.0.0 for container deployments where shippers connect across the network")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
 	deadlineMode = flag.String("deadline-mode", "", "Deadline mode: derived|static (default: inferred from --env)")
@@ -170,6 +177,7 @@ func main() {
 	log.Infow("Persatrix Server starting",
 		"config", *configDir,
 		"grpcPort", *port,
+		"grpcBind", *grpcBind,
 		"httpPort", *httpPort,
 		"httpBind", *httpBind,
 		"workflowsDir", absWorkflowsDir,
@@ -292,22 +300,43 @@ func main() {
 	defer cancel()
 
 	// 10. Start gRPC server (agent → orchestrator LogService).  Bound on
-	// the configured --port so it is reachable from the same network the
-	// agent shipper uses for ExecuteTask call-backs.  Wired only when
-	// the buffer initialised — otherwise the agent shipper will simply
-	// retry on RECONNECT and the (currently disabled) endpoints stay 501.
+	// --grpc-bind:--port; defaults to loopback to mirror --http-bind so a
+	// fresh install does not expose the unauthenticated LogService on
+	// every interface (PR #173 review Must-Fix #2; auth lands in RFC 0009).
+	// Wired only when the buffer initialised — otherwise the agent
+	// shipper will simply retry on RECONNECT and the (currently
+	// disabled) endpoints stay 501.
 	var grpcServer *grpc.Server
 	var grpcListener net.Listener
 	if logBuf != nil {
-		grpcAddr := fmt.Sprintf(":%d", *port)
+		grpcAddr := fmt.Sprintf("%s:%d", *grpcBind, *port)
 		lis, err := net.Listen("tcp", grpcAddr)
 		if err != nil {
 			logger.Fatal("failed to listen on gRPC port",
 				zap.String("addr", grpcAddr), zap.Error(err))
 		}
 		grpcListener = lis
+		// PR #173 review Should-Fix #3: bound the per-stream + per-server
+		// resource budget on the LogService listener.  Until RFC 0009
+		// auth lands, a single misbehaving (or malicious) shipper could
+		// otherwise open unlimited bidi streams or push oversized batches.
+		//   * MaxRecvMsgSize: 8 MiB caps a single LogBatch on the wire
+		//     (BATCH_MAX=256 entries × ~few-KB each leaves generous headroom).
+		//   * MaxConcurrentStreams: 256 streams per HTTP/2 connection is
+		//     well above the realistic agent fleet and well below a DoS
+		//     threshold.
+		//   * KeepaliveEnforcementPolicy: reject clients that ping more
+		//     than once every 30s without an outstanding stream
+		//     (matches gRPC defaults, made explicit so abuse is rejected
+		//     rather than absorbed).
 		grpcServer = grpc.NewServer(
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+			grpc.MaxRecvMsgSize(8*1024*1024),
+			grpc.MaxConcurrentStreams(256),
+			grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+				MinTime:             30 * time.Second,
+				PermitWithoutStream: false,
+			}),
 		)
 		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))
 		defer grpcServer.GracefulStop()
@@ -322,10 +351,9 @@ func main() {
 	// N-46: Track goroutines with WaitGroup so shutdown can drain in-flight work.
 	var wg sync.WaitGroup
 
-	// 10. Start gRPC server (agent → orchestrator LogService) once wg
-	// is declared so the goroutine can register itself for the drain.
-	// Bound on the configured --port so it is reachable from the same
-	// network the agent shipper uses for ExecuteTask call-backs.
+	// Spawn the gRPC LogService goroutine after wg is declared so it
+	// can register itself for the drain.  The listener + server were
+	// constructed above; here we only own the Serve() lifecycle.
 	if grpcServer != nil {
 		wg.Add(1)
 		go func() {

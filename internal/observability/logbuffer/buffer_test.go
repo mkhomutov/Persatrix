@@ -311,3 +311,21 @@ func TestApplyDefaults_FillsZeroFields(t *testing.T) {
 	assert.Equal(t, "DEBUG", c.DropLevel)
 	assert.Equal(t, 1000, c.RatePerExec)
 }
+
+// PR #173 review Should-Fix #2: SSE fan-out drops are now aggregated in
+// Stats().DroppedSubscribers so operators have a single signal for slow
+// subscribers without iterating live subscriber state.
+func TestStats_DroppedSubscribersIncrementsOnSlowSubscriber(t *testing.T) {
+	b := newTestBuffer(t, Config{PerExecution: 1024, MaxExecutions: 4})
+	// Subscribe but never read; the per-subscriber channel is sized
+	// at SubscribeBuffer (256) so the next entry past that drops.
+	_, cancel, err := b.Subscribe("exec-1")
+	require.NoError(t, err)
+	t.Cleanup(cancel)
+
+	for i := 0; i < SubscribeBuffer+5; i++ {
+		require.Equal(t, DropNone, b.Append(mkEntry("exec-1", "INFO", "m"+strconv.Itoa(i))))
+	}
+	assert.GreaterOrEqual(t, b.Stats().DroppedSubscribers, uint64(5),
+		"slow subscriber should have caused at least 5 fan-out drops")
+}

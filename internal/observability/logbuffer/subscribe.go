@@ -112,7 +112,12 @@ func (b *Buffer) broadcast(entry Entry) {
 		select {
 		case s.ch <- entry:
 		default:
+			// Per-subscriber counter for future per-stream metric.
+			// PR #173 review Should-Fix #2: also bump the buffer-wide
+			// aggregate so Stats()/operators see fan-out pressure
+			// without iterating live subscribers.
 			s.dropped.Add(1)
+			b.droppedSubscribers.Add(1)
 		}
 	}
 }
