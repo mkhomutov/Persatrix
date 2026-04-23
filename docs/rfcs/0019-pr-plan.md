@@ -197,13 +197,13 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_observability_spans.py -v` passes
-- [ ] `pytest tests/integration/test_span_links.py -v` passes
-- [ ] `ruff check agents/` clean; `mypy agents/` clean (pre-existing grpc stubs errors only)
-- [ ] OTEL TODO at `agents/tools/registry.py:138` removed (search the file post-merge)
-- [ ] `PERSATRIX_TRACE_TOOL_PAYLOADS` documented in `docs/observability.md` Span Conventions section
-- [ ] Tool-payload capture routes through `agents.observability.redact.Redactor` (the same Protocol RFC 0018 PR 1 introduced)
-- [ ] TICK span wraps `_LLMPersonaAgent.on_tick()` in `agents/persona_runtime/__init__.py` (module pinned in the plan above; this checkbox just re-asserts the implementation site)
+- [x] `pytest agents/tests/test_observability_spans.py -v` passes
+- [x] `pytest tests/integration/test_span_links.py -v` passes
+- [x] `ruff check agents/` clean; `mypy agents/` clean (pre-existing grpc stubs errors only)
+- [x] OTEL TODO at `agents/tools/registry.py:138` removed (search the file post-merge)
+- [x] `PERSATRIX_TRACE_TOOL_PAYLOADS` documented in `docs/observability.md` Span Conventions section
+- [x] Tool-payload capture routes through `agents.observability.redact.Redactor` (the same Protocol RFC 0018 PR 1 introduced)
+- [x] TICK span wraps `_LLMPersonaAgent.on_tick()` in `agents/persona_runtime/__init__.py` (module pinned in the plan above; this checkbox just re-asserts the implementation site)
 
 ---
 

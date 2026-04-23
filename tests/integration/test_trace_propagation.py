@@ -16,8 +16,10 @@ from __future__ import annotations
 import pytest
 import grpc
 import grpc.aio
-from opentelemetry import baggage, context, propagate
+from opentelemetry import baggage, context, propagate, trace
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agents.generated import task_pb2, task_pb2_grpc
@@ -59,12 +61,27 @@ def _task_request(agent_id: str = "trace-test-agent") -> task_pb2.TaskRequest:
 
 @pytest.fixture
 def mem_exporter() -> InMemorySpanExporter:
-    """Return a fresh ``InMemorySpanExporter``.
+    """Install a fresh ``InMemorySpanExporter`` on the active SDK provider.
 
-    Each test that needs it calls ``init_tracing(exporter=mem_exporter)`` and
-    uses the returned tracer directly — bypassing the frozen global provider.
+    OTEL's ``trace.set_tracer_provider`` is one-way per process.  If an
+    earlier test (e.g. ``agents/tests/test_observability_spans.py``) already
+    installed an SDK ``TracerProvider`` as the global, ``init_tracing()``
+    cannot replace it and the gRPC auto-instrumentor's spans would land in
+    the prior provider's processors instead of ``mem_exporter``.  To stay
+    robust, this fixture attaches a ``SimpleSpanProcessor`` to whichever
+    provider is currently global (installing one if needed) and detaches it
+    on teardown.  The test uses the returned exporter directly; it no
+    longer needs to call ``init_tracing(exporter=...)``.
     """
-    return InMemorySpanExporter()
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    exp = InMemorySpanExporter()
+    processor = SimpleSpanProcessor(exp)
+    provider.add_span_processor(processor)
+    yield exp
+    processor.shutdown()
 
 
 @pytest.fixture
@@ -106,9 +123,11 @@ class TestTracePropagation:
         Asserts that the Python agent creates a child span whose
         ``parent_id`` equals the injected span's ``span_id``.
         """
-        # Use the tracer from init_tracing (module-level provider) so spans land
-        # in mem_exporter regardless of whether the OTEL global is frozen.
-        tracer = init_tracing(exporter=mem_exporter)
+        # Use the global SDK tracer; ``mem_exporter`` is already wired into
+        # the active provider by the fixture, so spans started here — plus
+        # any spans the gRPC auto-instrumentor produces against the same
+        # global — land in ``mem_exporter``.
+        tracer = trace.get_tracer(__name__)
 
         agent = TaskAgent(
             agent_id="trace-test-agent",

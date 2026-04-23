@@ -14,7 +14,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+from ..observability.spans import (
+    TOOL_EXECUTE_SPAN,
+    apply_redaction,
+    tool_payload_capture_mode,
+)
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 @dataclass
@@ -135,24 +145,60 @@ def tool(
         async def wrapper(*args: Any, **kwargs: Any) -> ToolResult:
             # TODO: Permission check before execution
             # TODO: Rate limit check
-            # TODO: OTEL span creation
             # TODO: Audit logging
-            try:
-                if inspect.iscoroutinefunction(func):
-                    result = await func(*args, **kwargs)
-                else:
-                    result = func(*args, **kwargs)
+            with _tracer.start_as_current_span(
+                TOOL_EXECUTE_SPAN,
+                attributes={"tool.name": tool_name},
+            ) as span:
+                # Opt-in payload capture (RFC 0019 § D).  Default mode is
+                # ``none`` so no payload data leaks into traces unless the
+                # operator opts in via ``PERSATRIX_TRACE_TOOL_PAYLOADS``.
+                # ``metadata`` emits arg names + types only; ``full`` runs
+                # values through the RFC 0018 redactor (a single secrets
+                # policy code path serves both logs and span attributes).
+                mode = tool_payload_capture_mode()
+                if mode != "none":
+                    payload: dict[str, Any] = {}
+                    for i, value in enumerate(args):
+                        payload[f"arg{i}"] = value
+                    payload.update(kwargs)
+                    if mode == "metadata":
+                        for key, value in payload.items():
+                            span.set_attribute(
+                                f"tool.arguments.{key}.type",
+                                type(value).__name__,
+                            )
+                    else:  # full
+                        redacted = apply_redaction(payload)
+                        for key, value in redacted.items():
+                            span.set_attribute(
+                                f"tool.arguments.{key}", str(value),
+                            )
+                try:
+                    if inspect.iscoroutinefunction(func):
+                        result = await func(*args, **kwargs)
+                    else:
+                        result = func(*args, **kwargs)
 
-                if isinstance(result, ToolResult):
-                    return result
-                return ToolResult(success=True, data=result)
-            except Exception as e:
-                logger.exception("Tool '%s' failed", tool_name)
-                return ToolResult(
-                    success=False,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
+                    if isinstance(result, ToolResult):
+                        span.set_attribute("tool.success", result.success)
+                        if not result.success:
+                            span.set_status(
+                                Status(StatusCode.ERROR, result.error or ""),
+                            )
+                        return result
+                    span.set_attribute("tool.success", True)
+                    return ToolResult(success=True, data=result)
+                except Exception as e:
+                    logger.exception("Tool '%s' failed", tool_name)
+                    span.record_exception(e)
+                    span.set_attribute("tool.success", False)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    return ToolResult(
+                        success=False,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
 
         # PR-review MF1: Store the wrapper (not the original function) so
         # _execute_tools() goes through the decorator pipeline — permission

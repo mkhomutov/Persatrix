@@ -35,11 +35,15 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from opentelemetry import trace
+from opentelemetry.trace import Link, Status, StatusCode
+
 from ..base import TaskInput
 from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
+from ..observability.spans import PERSONA_EVENT_SPAN, PERSONA_TICK_SPAN
 from ..persona import PersonaAgent
 from ..persona_behavior import render_behavior
 from ..persona_types import (
@@ -55,6 +59,7 @@ from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa
 from .state_persistence import _StatePersistenceMixin
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 # ─── Helper Functions ──────────────────────────────────────
@@ -149,6 +154,12 @@ class _LLMPersonaAgent(
         )
         self._state = PersonaState()
         self._lock = asyncio.Lock()
+        # Pending Span Links to attach to the next on_tick() span (RFC 0019
+        # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
+        # wakes the tick scheduler so the resulting tick can record
+        # "event triggered me" causality across the asyncio task boundary.
+        # Drained on every on_tick() invocation.
+        self._pending_tick_links: list[Link] = []
 
     @property
     def memory(self) -> MemoryNamespace:
@@ -184,6 +195,22 @@ class _LLMPersonaAgent(
         (PR #55 review: TickScheduler accesses private agent._state.)
         """
         self._state.recover_energy()
+
+    def add_pending_tick_link(self, link: Link) -> None:
+        """Queue a Span Link for the next ``on_tick()`` to consume.
+
+        Called by ``EventDispatcher.dispatch()`` after waking the tick
+        scheduler so the next tick records ``Link(link.kind="trigger")``
+        back to the event that woke it (RFC 0019 § I).  Multiple wakes
+        between ticks accumulate; ``on_tick()`` drains them all.
+        """
+        self._pending_tick_links.append(link)
+
+    def _consume_pending_tick_links(self) -> list[Link]:
+        """Drain queued tick links.  Called once per ``on_tick()``."""
+        links = self._pending_tick_links
+        self._pending_tick_links = []
+        return links
 
     def _has_active_goal_payload(self) -> bool:
         """Return True if the agent has active goal progress tracked.
@@ -350,29 +377,57 @@ class _LLMPersonaAgent(
 
         Wraps ``_on_event_inner()`` in ``asyncio.wait_for()`` to bound
         wall-clock time (PR #54 review: unbounded lock hold).
+
+        Wraps the entire dispatch in an ``agent.persona.event`` OTEL span
+        per RFC 0019 § D.  Sub-millisecond phases (received → queued →
+        handled → completed) are recorded as **span events** on this single
+        span rather than nested spans, keeping the trace tree navigable.
         """
         timeout = _coerce_event_timeout(
             self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
             self._DEFAULT_EVENT_TIMEOUT,
             self.agent_id,
         )
-        async with self._lock:
-            try:
-                return await asyncio.wait_for(
-                    self._on_event_inner(event), timeout=timeout,
-                )
-            except TimeoutError:
-                logger.error(
-                    "Agent %s event processing timed out after %.0fs",
-                    self.agent_id,
-                    timeout,
-                )
-                return [AgentAction(
-                    action_type=ActionType.COMPLETE_TASK,
-                    payload={
-                        "result": f"Event processing timed out after {timeout:.0f}s",
-                    },
-                )]
+        with _tracer.start_as_current_span(
+            PERSONA_EVENT_SPAN,
+            attributes={
+                "agent.id": self.agent_id,
+                "event.type": event.event_type.value,
+                "event.id": event.message_id or "",
+            },
+        ) as span:
+            span.add_event("received")
+            async with self._lock:
+                span.add_event("queued")
+                try:
+                    actions = await asyncio.wait_for(
+                        self._on_event_inner(event), timeout=timeout,
+                    )
+                    span.add_event(
+                        "handled",
+                        attributes={"actions.count": len(actions)},
+                    )
+                    span.add_event("completed")
+                    return actions
+                except TimeoutError:
+                    logger.error(
+                        "Agent %s event processing timed out after %.0fs",
+                        self.agent_id,
+                        timeout,
+                    )
+                    span.set_status(
+                        Status(StatusCode.ERROR, "event timeout"),
+                    )
+                    span.add_event(
+                        "completed",
+                        attributes={"event.outcome": "timeout"},
+                    )
+                    return [AgentAction(
+                        action_type=ActionType.COMPLETE_TASK,
+                        payload={
+                            "result": f"Event processing timed out after {timeout:.0f}s",
+                        },
+                    )]
 
     async def on_tick(self) -> list[AgentAction]:
         """Autonomous tick — recovers energy, then decides on actions.
@@ -382,41 +437,58 @@ class _LLMPersonaAgent(
         slow LLM provider could hold the per-agent lock indefinitely,
         blocking all event processing for the agent.
         (Review finding F-5a-1, resolved in PR 5b.)
+
+        Wrapped in an ``agent.persona.tick`` OTEL span (RFC 0019 § D).
+        ``tick.reason`` defaults to ``"scheduled"``; future autonomy work
+        will pass alternate reasons (``"woke-on-event"`` etc.) through the
+        scheduler.
         """
         timeout = _coerce_event_timeout(
             self.config.get("event_timeout", self._DEFAULT_EVENT_TIMEOUT),
             self._DEFAULT_EVENT_TIMEOUT,
             self.agent_id,
         )
-        async with self._lock:
-            event = AgentEvent(event_type=EventType.TICK)
-            try:
-                actions = await asyncio.wait_for(
-                    self._on_event_inner(event), timeout=timeout,
-                )
-            except TimeoutError:
-                logger.error(
-                    "Agent %s tick timed out after %.0fs",
-                    self.agent_id,
-                    timeout,
-                )
-                # Do NOT recover energy on timeout — the tick produced no
-                # meaningful work.  Recovering before _on_event_inner()
-                # (the previous pattern) leaked +0.1 energy per timed-out
-                # tick because drain_energy() never ran for actions.
-                # (PR #55 review: energy leak on tick timeout.)
-                return [AgentAction(ActionType.DO_NOTHING, {})]
-            # Recover energy only after successful completion so timed-out
-            # ticks don't accumulate free energy.
-            # NEW-L-2 (PR #149 re-review): on a suppressed tick (RFC 0017 §F
-            # empty-context short-circuit), _on_event_inner early-returns
-            # before _persist_persona_state(), so this energy increment is
-            # in-memory only until the next state-mutating event persists.
-            # recover_energy() is idempotent, so replay across restart
-            # converges to the same value — benign, but worth noting when
-            # comparing per-tick DB write rates pre/post RFC 0017 PR 5.
-            self._state.recover_energy()
-            return actions
+        with _tracer.start_as_current_span(
+            PERSONA_TICK_SPAN,
+            links=self._consume_pending_tick_links(),
+            attributes={
+                "agent.id": self.agent_id,
+                "tick.reason": "scheduled",
+            },
+        ) as span:
+            async with self._lock:
+                event = AgentEvent(event_type=EventType.TICK)
+                try:
+                    actions = await asyncio.wait_for(
+                        self._on_event_inner(event), timeout=timeout,
+                    )
+                except TimeoutError:
+                    logger.error(
+                        "Agent %s tick timed out after %.0fs",
+                        self.agent_id,
+                        timeout,
+                    )
+                    span.set_status(
+                        Status(StatusCode.ERROR, "tick timeout"),
+                    )
+                    # Do NOT recover energy on timeout — the tick produced no
+                    # meaningful work.  Recovering before _on_event_inner()
+                    # (the previous pattern) leaked +0.1 energy per timed-out
+                    # tick because drain_energy() never ran for actions.
+                    # (PR #55 review: energy leak on tick timeout.)
+                    return [AgentAction(ActionType.DO_NOTHING, {})]
+                # Recover energy only after successful completion so timed-out
+                # ticks don't accumulate free energy.
+                # NEW-L-2 (PR #149 re-review): on a suppressed tick (RFC 0017 §F
+                # empty-context short-circuit), _on_event_inner early-returns
+                # before _persist_persona_state(), so this energy increment is
+                # in-memory only until the next state-mutating event persists.
+                # recover_energy() is idempotent, so replay across restart
+                # converges to the same value — benign, but worth noting when
+                # comparing per-tick DB write rates pre/post RFC 0017 PR 5.
+                self._state.recover_energy()
+                span.set_attribute("actions.count", len(actions))
+                return actions
 
     # handle() is inherited from PersonaAgent — no override needed.
     # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and

@@ -15,7 +15,9 @@ import uuid
 from typing import Any
 
 import aiosqlite
+from opentelemetry import trace
 
+from ..observability.spans import RELATIONSHIP_LOOKUP_SPAN, RELATIONSHIP_UPDATE_SPAN
 from .migrations import _apply_migrations
 from .relationship_types import (
     _DEFAULT_TRUST,
@@ -26,6 +28,7 @@ from .relationship_types import (
 )
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 class RelationshipMemory:
@@ -126,15 +129,17 @@ class RelationshipMemory:
 
         Returns the default (0.5) if no relationship exists.
         """
-        db = self._ensure_db()
-        async with db.execute(
-            "SELECT trust_score FROM relationships "
-            "WHERE participant_id = ? AND participant_type = ? "
-            "AND other_participant_id = ? AND other_participant_type = ?",
-            (self._agent_id, participant_type, other_id, other_participant_type),
-        ) as cursor:
-            row = await cursor.fetchone()
-        return row[0] if row is not None else _DEFAULT_TRUST
+        attrs = {"agent.id": self._agent_id, "participant.id": other_id}
+        with _tracer.start_as_current_span(RELATIONSHIP_LOOKUP_SPAN, attributes=attrs):
+            db = self._ensure_db()
+            async with db.execute(
+                "SELECT trust_score FROM relationships "
+                "WHERE participant_id = ? AND participant_type = ? "
+                "AND other_participant_id = ? AND other_participant_type = ?",
+                (self._agent_id, participant_type, other_id, other_participant_type),
+            ) as cursor:
+                row = await cursor.fetchone()
+            return row[0] if row is not None else _DEFAULT_TRUST
 
     async def update_trust(
         self,
@@ -166,48 +171,56 @@ class RelationshipMemory:
 
         insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
 
-        # SQL-level arithmetic in ON CONFLICT avoids TOCTOU race.
-        # RETURNING avoids a separate get_trust() round-trip (SQLite >= 3.35).
-        cursor = await db.execute(
-            """
-            INSERT INTO relationships
-                (participant_id, participant_type,
-                 other_participant_id, other_participant_type,
-                 trust_score, interaction_count,
-                 last_interaction_at, notes)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
-            ON CONFLICT(participant_id, participant_type,
-                        other_participant_id, other_participant_type) DO UPDATE SET
-                trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
-                notes = ?
-            RETURNING trust_score
-            """,
-            (
+        attrs = {
+            "agent.id": self._agent_id,
+            "participant.id": other_id,
+            "delta.kind": "trust",
+            "delta.value": delta,
+        }
+        with _tracer.start_as_current_span(RELATIONSHIP_UPDATE_SPAN, attributes=attrs) as span:
+            # SQL-level arithmetic in ON CONFLICT avoids TOCTOU race.
+            # RETURNING avoids a separate get_trust() round-trip (SQLite >= 3.35).
+            cursor = await db.execute(
+                """
+                INSERT INTO relationships
+                    (participant_id, participant_type,
+                     other_participant_id, other_participant_type,
+                     trust_score, interaction_count,
+                     last_interaction_at, notes)
+                VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
+                ON CONFLICT(participant_id, participant_type,
+                            other_participant_id, other_participant_type) DO UPDATE SET
+                    trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
+                    notes = ?
+                RETURNING trust_score
+                """,
+                (
+                    self._agent_id,
+                    participant_type,
+                    other_id,
+                    other_participant_type,
+                    insert_trust,
+                    reason,
+                    delta,
+                    reason,
+                ),
+            )
+            row = await cursor.fetchone()
+            await db.commit()
+
+            if row is None:
+                return insert_trust
+            new_trust: float = row[0]
+            span.set_attribute("trust.new", new_trust)
+            logger.debug(
+                "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
                 self._agent_id,
-                participant_type,
                 other_id,
-                other_participant_type,
-                insert_trust,
-                reason,
+                new_trust,
                 delta,
                 reason,
-            ),
-        )
-        row = await cursor.fetchone()
-        await db.commit()
-
-        if row is None:
-            return insert_trust
-        new_trust: float = row[0]
-        logger.debug(
-            "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
-            self._agent_id,
-            other_id,
-            new_trust,
-            delta,
-            reason,
-        )
-        return new_trust
+            )
+            return new_trust
 
     async def apply_decay(
         self,

@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+from .observability.spans import LLM_CALL_SPAN, gen_ai_attributes
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 # ─── Normalized Types ───────────────────────────────────────
@@ -368,7 +374,39 @@ class LLMClient:
         self._provider = provider
 
     async def create_message(self, **kwargs: Any) -> LLMResponse:
-        return await self._provider.create_message(**kwargs)
+        """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
+
+        Span attributes follow the OTEL Gen-AI semantic conventions
+        (``gen_ai.system``, ``gen_ai.request.model``,
+        ``gen_ai.usage.input_tokens`` / ``output_tokens``,
+        ``gen_ai.response.finish_reasons``) so vendor backends render
+        Persatrix LLM traces without project-specific configuration
+        (RFC 0019 § D / § E).
+        """
+        model = str(kwargs.get("model", ""))
+        system_name = type(self._provider).__name__.replace("Provider", "").lower()
+        with _tracer.start_as_current_span(
+            LLM_CALL_SPAN,
+            attributes=gen_ai_attributes(
+                system=system_name,
+                request_model=model,
+            ),
+        ) as span:
+            try:
+                response = await self._provider.create_message(**kwargs)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+            for k, v in gen_ai_attributes(
+                system=system_name,
+                request_model=model,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                finish_reasons=[response.stop_reason.value],
+            ).items():
+                span.set_attribute(k, v)
+            return response
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
         return self._provider.format_tool_definitions(tools)

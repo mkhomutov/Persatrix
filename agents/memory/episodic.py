@@ -19,7 +19,12 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
+from opentelemetry import trace
 
+from ..observability.spans import (
+    EPISODIC_RECALL_SPAN,
+    EPISODIC_REMEMBER_SPAN,
+)
 from .episodic_queries import (
     EPISODE_SELECT,
     MAX_RECALL_LIMIT,
@@ -47,6 +52,8 @@ from .migrations import (
     _fts5_available,
 )
 from .notes import Note, NoteStore
+
+_tracer = trace.get_tracer(__name__)
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -169,39 +176,46 @@ class EpisodicMemory:
         tags: list[str] | None = None,
     ) -> str:
         """Store a new episode. Returns the generated episode ID."""
-        db = self._ensure_db()
-        if not summary or not summary.strip():
-            raise ValueError("summary must not be empty")
-        # Clamp importance to [0.0, 1.0] — the scoring formula assumes
-        # non-negative values; negative importance would invert ranking.
-        if not 0.0 <= importance <= 1.0:
-            logger.warning(
-                "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
+        with _tracer.start_as_current_span(
+            EPISODIC_REMEMBER_SPAN,
+            attributes={
+                "agent.id": self._agent_id,
+                "episode.kind": "episode",
+            },
+        ):
+            db = self._ensure_db()
+            if not summary or not summary.strip():
+                raise ValueError("summary must not be empty")
+            # Clamp importance to [0.0, 1.0] — the scoring formula assumes
+            # non-negative values; negative importance would invert ranking.
+            if not 0.0 <= importance <= 1.0:
+                logger.warning(
+                    "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
+                )
+                importance = max(0.0, min(1.0, importance))
+            episode_id = str(uuid.uuid4())
+            now = time.time()
+            await db.execute(
+                """
+                INSERT INTO episodes
+                    (id, agent_id, summary, context_json, outcome,
+                     importance, access_count, last_accessed_at,
+                     tags_json, created_at, compressed_at, compression_level)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0)
+                """,
+                (
+                    episode_id,
+                    self._agent_id,
+                    summary,
+                    json.dumps(context),
+                    outcome,
+                    importance,
+                    json.dumps(tags or []),
+                    now,
+                ),
             )
-            importance = max(0.0, min(1.0, importance))
-        episode_id = str(uuid.uuid4())
-        now = time.time()
-        await db.execute(
-            """
-            INSERT INTO episodes
-                (id, agent_id, summary, context_json, outcome,
-                 importance, access_count, last_accessed_at,
-                 tags_json, created_at, compressed_at, compression_level)
-            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0)
-            """,
-            (
-                episode_id,
-                self._agent_id,
-                summary,
-                json.dumps(context),
-                outcome,
-                importance,
-                json.dumps(tags or []),
-                now,
-            ),
-        )
-        await db.commit()
-        return episode_id
+            await db.commit()
+            return episode_id
 
     async def recall(
         self,
@@ -240,34 +254,48 @@ class EpisodicMemory:
             raise ValueError(
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
             )
-        db = self._ensure_db()
+        with _tracer.start_as_current_span(
+            EPISODIC_RECALL_SPAN,
+            attributes={
+                "agent.id": self._agent_id,
+                "query.kind": "recall",
+                "query.empty": not query,
+                "min_score": -1.0 if min_score is None else min_score,
+            },
+        ) as span:
+            db = self._ensure_db()
 
-        if query and self._fts5:
-            rows = await recall_fts5(db, self._agent_id, query, limit, min_importance, min_score)
-        elif query:
-            rows = await recall_like(db, self._agent_id, query, limit, min_importance, min_score)
-        else:
-            rows = await recall_recency(db, self._agent_id, limit, min_importance)
+            if query and self._fts5:
+                rows = await recall_fts5(
+                    db, self._agent_id, query, limit, min_importance, min_score,
+                )
+            elif query:
+                rows = await recall_like(
+                    db, self._agent_id, query, limit, min_importance, min_score,
+                )
+            else:
+                rows = await recall_recency(db, self._agent_id, limit, min_importance)
 
-        episodes = [row_to_episode(row) for row in rows]
+            episodes = [row_to_episode(row) for row in rows]
+            span.set_attribute("result.count", len(episodes))
 
-        # Increment access_count and update last_accessed_at
-        if episodes:
-            now = time.time()
-            ids = [e.id for e in episodes]
-            placeholders = ",".join("?" for _ in ids)
-            await db.execute(
-                f"UPDATE episodes SET access_count = access_count + 1, "
-                f"last_accessed_at = ? WHERE id IN ({placeholders})",
-                [now, *ids],
-            )
-            await db.commit()
-            # Update in-memory objects to reflect the increment
-            for ep in episodes:
-                ep.access_count += 1
-                ep.last_accessed_at = now
+            # Increment access_count and update last_accessed_at
+            if episodes:
+                now = time.time()
+                ids = [e.id for e in episodes]
+                placeholders = ",".join("?" for _ in ids)
+                await db.execute(
+                    f"UPDATE episodes SET access_count = access_count + 1, "
+                    f"last_accessed_at = ? WHERE id IN ({placeholders})",
+                    [now, *ids],
+                )
+                await db.commit()
+                # Update in-memory objects to reflect the increment
+                for ep in episodes:
+                    ep.access_count += 1
+                    ep.last_accessed_at = now
 
-        return episodes
+            return episodes
 
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""
