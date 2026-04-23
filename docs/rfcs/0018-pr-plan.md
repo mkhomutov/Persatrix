@@ -391,11 +391,13 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `cargo test --manifest-path cli/Cargo.toml` passes
-- [ ] `cargo clippy --manifest-path cli/Cargo.toml -- -D warnings` clean
-- [ ] `pytest tests/integration/test_logs_e2e.py -v` passes
-- [ ] `docs/observability.md` Operations section covers all six `PERSATRIX_LOGBUFFER_*` env vars and the `0700` umask
-- [ ] Manual smoke documented in PR description: `make run`, `persatrix run <wf>`, `persatrix logs <id>`, `persatrix logs --follow <id>`, `persatrix logs --since 5m _`
+- [x] `cargo test --manifest-path cli/Cargo.toml` passes
+- [x] `cargo clippy --manifest-path cli/Cargo.toml -- -D warnings` clean
+- [x] `pytest tests/integration/test_logs_e2e.py -v` passes
+- [x] `docs/observability.md` Operations section covers all six `PERSATRIX_LOGBUFFER_*` env vars and the `0700` umask
+- [x] Manual smoke documented in PR description: `make run`, `persatrix run <wf>`, `persatrix logs <id>`, `persatrix logs --follow <id>`, `persatrix logs --since 5m _`
+
+**Merged**: PR [#174](https://github.com/mkhomutov/Persatrix/pull/174) — 2026-04-23
 
 ---
 
@@ -497,8 +499,29 @@ Nit:
 
 ##### From PR 6 review
 
-<!-- TODO: populate after PR 6 review merges -->
-*(populated during PR 6 review)*
+Captured from the deep review of PR #174 (RFC 0018 PR 6 — CLI logs rewrite + SSE follow + E2E). 0 Must-Fix · 2 Should-Fix · 7 Nice-to-Have · 3 Nit. No security or correctness blockers.
+
+Should-Fix:
+
+- **Botched-refactor leftover in [`tests/conftest.py`](../../tests/conftest.py) `_markexpr_selects_requires_compose` (around line 117).** Function returns on line 1, then 15 lines of unreachable code reference an out-of-scope `name`, plus a verbatim duplicate definition follows. Dead code that confuses future readers and risks linter / coverage noise — collapse to the single intended implementation.
+- **SSE reconnect backoff is never reset after a successful re-connect.** [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) `follow_logs` (around line 112). The `backoff` variable grows on each retry but is not reset to the initial value once a stream re-establishes, so one early hiccup permanently inflates retry intervals for the rest of the session. Reset `backoff` to its initial duration immediately after the SSE connection succeeds.
+
+Nice-to-Have:
+
+- **`find_event_end` only matches `\n\n`.** [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) (around line 196). The SSE spec also allows `\r\n\r\n` event terminators. Matches today's orchestrator output but fragile behind a CR-injecting proxy. Match both terminators.
+- **`handle_sse_frame` does not join multi-line `data:` continuations per SSE spec.** Today's server emits one entry per event so this is benign; document the assumption or implement spec-compliant continuation joining.
+- **Co-locate `LogLevel` + `as_wire_str` with `LogsOptions`.** Currently the enum lives in `cli/src/main.rs` while the option struct lives in `cli/src/commands/logs.rs`; move the enum next to its consumer for cohesion.
+- **No hermetic test for SSE reconnect (`[reconnected]` line + backoff) or for `StreamOutcome::Fatal` (4xx during follow).** Add coverage so the Should-Fix backoff-reset regression cannot recur silently.
+- **No combined E2E for `--since` / `--workflow` / `--level` / `--verbose` cross-process.** Each filter is exercised individually via REST tests; one combined CLI invocation would lock in the Rust↔Go wiring.
+- **`time.sleep(0.5)` heuristic in the `--follow` E2E may flake on slow CI.** Prefer polling the server-side subscriber count (or the buffer's `Stats()` subscriber gauge) until the CLI is actually attached before producing the test entry.
+- **Restart-durability test seeds disk JSONL directly, bypassing `Buffer.Seal`.** Acknowledged in the PR; needs a PR 7 follow-up to wire `Seal` into the workflow lifecycle so durability is exercised through the real path.
+- **Client-side `--trace` filter ships every entry over the wire.** Add a `// TODO(rfc-0018-pr-7)` for a server-side `trace` query parameter so large-volume `--trace` queries don't pay the full transfer cost.
+
+Nit:
+
+- **`entry.message` printed verbatim with potential ANSI-escape passthrough.** Low risk while the only producers are first-party Go/Python code; sanitize control bytes before printing if untrusted producers ever land.
+- **Per-frame `eprintln!("warning: skipping malformed SSE frame…")` could spam stderr from a misbehaving server.** Throttle to once per connection (mirroring the buffer's `warnRateOnce` pattern) or include a count.
+- **24 h `.timeout()` justification comment talks about proxies, but the real reason is "longer than any operator session".** Reword for accuracy.
 
 ##### RFC close
 
