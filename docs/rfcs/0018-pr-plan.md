@@ -297,11 +297,11 @@ Mechanical migration of `logging.getLogger(__name__)` → `from .observability.l
 
 #### PR checklist
 
-- [ ] `go test ./internal/observability/logbuffer/... -v -race -cover` passes
-- [ ] `make proto` regenerates Go + Python stubs without diffs left over
-- [ ] `proto/log_service.proto` matches [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming)
+- [x] `go test ./internal/observability/logbuffer/... -v -race -cover` passes
+- [x] `make proto` regenerates Go + Python stubs without diffs left over
+- [x] `proto/log_service.proto` matches [RFC § E](0018-structured-logging-framework.md#e-persatrix-logs-endpoint-storage-and-streaming)
 - [ ] All six env-var knobs documented in `docs/observability.md` (operations section appended in PR 6)
-- [ ] Default `PERSATRIX_LOGBUFFER_DIR=data/logs` is created with `0700` umask
+- [x] Default `PERSATRIX_LOGBUFFER_DIR=data/logs` is created with `0700` umask
 
 ---
 
