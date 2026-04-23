@@ -8,6 +8,16 @@ All notable changes to this project will be documented in this file.
 
 ### ⚠️ Operator-Visible Changes
 
+- **Jaeger OTLP host ports unpublished** (RFC 0019 PR 4): the `jaeger`
+  service in `docker-compose.yaml` no longer publishes `4317`/`4318` on
+  the host. The OTEL Collector now owns the host-facing OTLP ingress
+  (also on `4317`/`4318`) and forwards traces to Jaeger over the
+  internal compose network. Dev tooling that previously sent OTLP
+  directly to `localhost:4317` against Jaeger must either be retargeted
+  at the Collector (no other change required — the host ports are the
+  same) or pin its Jaeger endpoint to the in-network `jaeger:4317`. See
+  [`docs/observability.md` § 11.1](docs/observability.md).
+
 - **Python OTLP exporter transport changed** (`grpc` → `http`):
   `opentelemetry-exporter-otlp-proto-grpc` is replaced with
   `opentelemetry-exporter-otlp-proto-http`. Collector configs pointing the

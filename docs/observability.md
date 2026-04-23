@@ -326,6 +326,15 @@ Configuration lives at [config/observability/otel-collector.yaml](../config/obse
 
 The Prometheus host port is shifted to `9091` so it does not collide with the orchestrator gRPC port (`9090`).
 
+> **Breaking dev-workflow change (v0.2.3):** Jaeger's OTLP ports
+> (`4317`/`4318`) are no longer published on the host. The Collector now
+> owns the host-facing OTLP ingress on the same port numbers and forwards
+> traces to Jaeger over the internal compose network. Local scripts (e.g.
+> under `data/`) that set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`
+> continue to work unchanged — they now talk to the Collector instead of
+> Jaeger directly. Tooling that needs to bypass the Collector must use the
+> in-network `jaeger:4317` from another compose service.
+
 ### 11.2 Viewing traces in Jaeger
 
 Open http://localhost:16686, pick the `persatrix-server` or `persatrix-agent` service, and search by tag. The `persatrix.workflow_id` baggage attribute is set on every workflow-driven span (RFC 0019 SS E) so a tag query like `persatrix.workflow_id=feature-builder` returns every trace for that workflow across the full process tree.

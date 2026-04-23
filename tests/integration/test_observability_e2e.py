@@ -49,6 +49,13 @@ LOKI_BASE = os.environ.get("PERSATRIX_TEST_LOKI_URL", "http://localhost:3100")
 COLLECTOR_BASE = os.environ.get("PERSATRIX_TEST_OTLP_URL", "http://localhost:4318")
 ORCH_BASE = os.environ.get("PERSATRIX_TEST_ORCHESTRATOR_URL", "http://localhost:8080")
 
+# Workflow ID submitted by the round-trip test.  Defaults to ``budget-test``
+# because it ships in ``workflows/`` and is intentionally short-lived
+# (``max_llm_calls: 1`` / ``max_tokens: 50``), so the test does not burn
+# tokens.  Override with ``PERSATRIX_TEST_WORKFLOW_ID`` if a different
+# workflow is registered on the operator's stack.
+WORKFLOW_ID = os.environ.get("PERSATRIX_TEST_WORKFLOW_ID", "budget-test")
+
 # Default poll budget for "trace appears in Jaeger / metric in Prometheus /
 # log line in Loki".  The Collector batches every 1 s and Prometheus scrape
 # interval is 15 s, so the budget covers the worst case plus a margin.
@@ -95,9 +102,21 @@ def test_collector_otlp_http_reachable() -> None:
     ``GET /`` is not a documented OTLP endpoint, but the receiver responds
     with a 4xx (rather than connection refused), which is the cheapest
     liveness probe that does not require us to send a valid OTLP payload.
+
+    Review-fix (PR #171, Should-Fix #3): assert a specific 4xx range
+    instead of ``status >= 200``.  The previous assertion was a tautology
+    — any non-exception integer status passed it, masking the case where
+    something else (e.g. an HTTP proxy or a misrouted ingress) hijacked
+    the port and returned 200.
     """
     status, _ = _http_get(f"{COLLECTOR_BASE}/", timeout=2.0)
-    assert status >= 200, f"otel-collector unexpectedly returned {status}"
+    # OTLP receiver replies 404 (no route) or 405 (method not allowed) to a
+    # bare GET; 415 is also accepted in case a future contrib build switches
+    # to validating content-type up front.
+    assert status in {404, 405, 415}, (
+        f"otel-collector OTLP HTTP receiver returned unexpected status {status} for GET / — "
+        "expected 404/405/415 from a bare GET on an OTLP endpoint"
+    )
 
 
 def test_jaeger_ui_reachable() -> None:
@@ -120,13 +139,19 @@ def test_loki_ready() -> None:
 
 
 def _submit_workflow() -> str:
-    """Submit the simplest available workflow and return its execution id.
+    """Submit the configured workflow and return its run id.
 
     Skips if the orchestrator is not responding; the assertions below cannot
     run without an in-flight workflow producing the signals we then query.
+
+    Review-fix (PR #171, High-1/2): the orchestrator's REST contract uses
+    ``workflow_id`` (request) and ``run_id`` (response); the previous
+    ``workflow``/``execution_id`` shape produced a 400 that bubbled out as
+    an unhandled ``HTTPError`` and prevented the round-trip from ever
+    executing.  See ``internal/server/types.go`` for the canonical schema.
     """
     submit_url = f"{ORCH_BASE}/api/v1/workflows/run"
-    payload = json.dumps({"workflow": "smoke", "inputs": {}}).encode("utf-8")
+    payload = json.dumps({"workflow_id": WORKFLOW_ID, "inputs": {}}).encode("utf-8")
     req = request.Request(
         submit_url,
         data=payload,
@@ -139,15 +164,31 @@ def _submit_workflow() -> str:
     except (error.URLError, TimeoutError, ConnectionError) as exc:
         pytest.skip(f"orchestrator unreachable: {exc!r}")
     except error.HTTPError as exc:
-        # A 404 here means the operator does not have a `smoke` workflow
-        # available; treat as a configuration-only skip rather than a failure
-        # so this test is portable across local setups.
-        if exc.code == 404:
-            pytest.skip("no `smoke` workflow registered — set PERSATRIX_TEST_WORKFLOW")
+        # 404 → workflow file is not on the orchestrator's --workflows-dir.
+        # 400 → request shape rejected (e.g. workflow_id missing/invalid);
+        #       most operators will hit this when overriding
+        #       PERSATRIX_TEST_WORKFLOW_ID with a value that the validator
+        #       (^[a-z0-9][a-z0-9-]*[a-z0-9]$) rejects.
+        # Both are configuration-only situations on the operator's side, so
+        # skip with a clear message rather than fail the suite.
+        if exc.code in (400, 404):
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:200]
+            except Exception:  # noqa: BLE001 — best-effort diagnostic only
+                pass
+            pytest.skip(
+                f"orchestrator rejected submission of workflow_id={WORKFLOW_ID!r} "
+                f"with HTTP {exc.code} ({detail!r}) — set PERSATRIX_TEST_WORKFLOW_ID "
+                "to a workflow registered on this stack"
+            )
         raise
-    execution_id = body.get("execution_id") or body.get("id")
-    assert isinstance(execution_id, str) and execution_id, f"unexpected submit response: {body!r}"
-    return execution_id
+    # Review-fix (PR #171, High-2): response field is ``run_id`` per
+    # ``submitWorkflowRunResponse``.  ``execution_id`` was never part of the
+    # contract.
+    run_id = body.get("run_id")
+    assert isinstance(run_id, str) and run_id, f"unexpected submit response: {body!r}"
+    return run_id
 
 
 def test_workflow_emits_trace_metrics_and_correlated_logs() -> None:
@@ -157,14 +198,20 @@ def test_workflow_emits_trace_metrics_and_correlated_logs() -> None:
     15 s Prometheus scrape interval (DEFAULT_POLL_TIMEOUT_S = 30 s gives
     one full scrape window plus margin).
     """
-    execution_id = _submit_workflow()
+    run_id = _submit_workflow()
 
     # 1. Trace shape: Jaeger returns at least one trace tagged with the
-    #    workflow's execution id.
+    #    workflow's run id.
+    #
+    #    Review-fix (PR #171, High-3): the orchestrator span at
+    #    ``handleSubmitWorkflowRun`` sets ``persatrix.run_id`` and
+    #    ``persatrix.workflow_id`` (no ``persatrix.execution_id``).  Querying
+    #    by run_id is the most specific filter — workflow_id would also
+    #    match every prior run of the same workflow on a long-lived stack.
     def _jaeger_has_trace() -> dict[str, Any] | None:
         url = (
             f"{JAEGER_BASE}/api/traces?service=persatrix-server"
-            f"&tags=%7B%22persatrix.execution_id%22%3A%22{execution_id}%22%7D"
+            f"&tags=%7B%22persatrix.run_id%22%3A%22{run_id}%22%7D"
         )
         status, body = _http_get(url, timeout=5.0)
         if status != 200:
