@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-22 (RFC 0018 PR 1 merged — PR #164 — schema doc + Python `structlog` chain + redactor surface + tests)  
+> **Last updated**: 2026-04-23 (RFC 0018 PR 2 merged — PR #165 — Go zap rename + pretty + redactor wired + source)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged; 0018 PR 1 merged — PR #164; 0018 PR 2 next — joint order #3)
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged; 0018 PR 1 merged — PR #164; 0018 PR 2 merged — PR #165; 0019 PR 2 next — joint order #4)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -98,7 +98,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation | 🚧 In progress — Go telemetry→observability rename + otelgrpc + otelhttp wired (RFC 0019 PR 1 — #163) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
@@ -212,7 +212,7 @@ v0.2.0 complete
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation | 🚧 In progress — Go telemetry→observability rename + otelgrpc + otelhttp wired (RFC 0019 PR 1 — #163) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
 
@@ -366,7 +366,7 @@ v0.2.2 complete
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 1/5 |
-| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 1/7 |
+| [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | 🚧 Implementing | 7 | 2/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
 
@@ -375,7 +375,7 @@ v0.2.2 complete
   ↓
 0018 PR 1 (Phase 1 — Python structlog + schema doc + redactor surface)  ✅ #164
   ↓
-0018 PR 2 (Phase 2 — Go zap rename + pretty + redactor wired + source)
+0018 PR 2 (Phase 2 — Go zap rename + pretty + redactor wired + source)  ✅ #165
   ↓
 0019 PR 2 (Phase 2 — semantic spans + Span Links)
   ↓
@@ -402,8 +402,8 @@ v0.2.2 complete
 | Semantic spans + Span Links | `internal/observability/` | `agents/observability/` | 0019 PR 2 |
 | OTLP metrics | `internal/observability/metrics/` | `agents/observability/metrics.py` | 0019 PR 3 |
 | Collector pipeline | `config/observability/` | — | 0019 PR 4 |
-| Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 |
-| Structured logs (Go) | `internal/observability/` | — | 0018 PR 2 |
+| Structured logs (Python) | — | `agents/observability/logging.py` | 0018 PR 1 ✅ |
+| Structured logs (Go) | `internal/observability/zapenc/` | — | 0018 PR 2 ✅ |
 | Log↔trace correlation | `internal/observability/` | `agents/observability/` | 0018 PR 3 |
 | Log storage + shipper | `internal/observability/` | `agents/observability/` | 0018 PRs 4–5 |
 | `persatrix logs` CLI rewrite | `cli/src/commands/logs.rs` | — | 0018 PR 6 |
@@ -733,6 +733,7 @@ v0.5.0 complete
 | [#158](https://github.com/mkhomutov/Persatrix/pull/158) | docs(release): final pre-tag verification — flip README to Released, check off all gates | v0.2.2 release prep | 2026-04-22 |
 | [#163](https://github.com/mkhomutov/Persatrix/pull/163) | feat(otel): telemetry→observability rename + Python OTEL init + gRPC + Baggage (RFC 0019 PR 1/5) | 0019 (1/5) | 2026-04-22 |
 | [#164](https://github.com/mkhomutov/Persatrix/pull/164) | feat(observability): RFC 0018 PR 1 — schema doc + Python structlog chain + redactor surface | 0018 (1/7) | 2026-04-22 |
+| [#165](https://github.com/mkhomutov/Persatrix/pull/165) | feat(observability): RFC 0018 PR 2 — Go zap rename + pretty + redactor wired + source | 0018 (2/7) | 2026-04-23 |
 
 ---
 
