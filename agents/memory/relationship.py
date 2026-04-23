@@ -4,21 +4,29 @@ Relationship memory — tracks per-agent-pair trust, interaction patterns, and h
 Shares the SQLite database and migration infrastructure with episodic memory.
 Trust scores are bidirectionally decayed toward 0.5 (neutral) to prevent
 permanent grudges in long-running simulations.
+
+SQL query helpers live in :mod:`.relationship_queries`;
+write/mutation helpers live in :mod:`.relationship_mutations`.
 """
 
 from __future__ import annotations
 
 import logging
-import math
-import time
-import uuid
-from typing import Any
 
 import aiosqlite
-from opentelemetry import trace
 
-from ..observability.spans import RELATIONSHIP_LOOKUP_SPAN, RELATIONSHIP_UPDATE_SPAN
 from .migrations import _apply_migrations
+from .relationship_mutations import (
+    apply_decay as _apply_decay,
+    record_interaction as _record_interaction,
+    seed_trust as _seed_trust,
+    update_trust as _update_trust,
+)
+from .relationship_queries import (
+    get_all_relationships as _get_all_relationships,
+    get_relationship_summary as _get_relationship_summary,
+    get_trust as _get_trust,
+)
 from .relationship_types import (
     _DEFAULT_TRUST,
     _MAX_RECENT_INTERACTIONS,
@@ -28,7 +36,15 @@ from .relationship_types import (
 )
 
 logger = logging.getLogger(__name__)
-_tracer = trace.get_tracer(__name__)
+
+__all__ = [
+    "RelationshipMemory",
+    "Interaction",
+    "RelationshipSummary",
+    "_DEFAULT_TRUST",
+    "_MAX_RECENT_INTERACTIONS",
+    "_MAX_TRUST_DELTA",
+]
 
 
 class RelationshipMemory:
@@ -55,7 +71,7 @@ class RelationshipMemory:
 
     async def initialize(
         self,
-        config_relationships: list[dict[str, Any]] | None = None,
+        config_relationships: list[dict[str, object]] | None = None,
     ) -> None:
         """Open database, run migrations, seed trust from config.
 
@@ -74,7 +90,7 @@ class RelationshipMemory:
         await _apply_migrations(self._db)
 
         if config_relationships:
-            await self._seed_trust(config_relationships)
+            await _seed_trust(self._db, self._agent_id, config_relationships)
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -89,33 +105,6 @@ class RelationshipMemory:
             )
         return self._db
 
-    @staticmethod
-    def _validate_other_id(other_id: str) -> None:
-        """Reject empty other_id (F-4-1)."""
-        if not other_id or not other_id.strip():
-            raise ValueError("other_id must not be empty")
-
-    @staticmethod
-    def _validate_participant_types(
-        participant_type: str, other_participant_type: str,
-    ) -> None:
-        """Validate participant types at write boundary (OQ 3)."""
-        from ..participant import validate_participant_type
-        validate_participant_type(participant_type)
-        validate_participant_type(other_participant_type)
-
-    def _truncate_field(
-        self, value: str, other_id: str, label: str,
-    ) -> str:
-        """Cap a string field to 1024 chars to prevent unbounded storage."""
-        if len(value) > 1024:
-            logger.warning(
-                "%s truncated from %d to 1024 chars for %s→%s",
-                label, len(value), self._agent_id, other_id,
-            )
-            return value[:1021] + "..."
-        return value
-
     # ─── Trust CRUD ─────────────────────────────────────────
 
     async def get_trust(
@@ -129,17 +118,11 @@ class RelationshipMemory:
 
         Returns the default (0.5) if no relationship exists.
         """
-        attrs = {"agent.id": self._agent_id, "participant.id": other_id}
-        with _tracer.start_as_current_span(RELATIONSHIP_LOOKUP_SPAN, attributes=attrs):
-            db = self._ensure_db()
-            async with db.execute(
-                "SELECT trust_score FROM relationships "
-                "WHERE participant_id = ? AND participant_type = ? "
-                "AND other_participant_id = ? AND other_participant_type = ?",
-                (self._agent_id, participant_type, other_id, other_participant_type),
-            ) as cursor:
-                row = await cursor.fetchone()
-            return row[0] if row is not None else _DEFAULT_TRUST
+        return await _get_trust(
+            self._ensure_db(), self._agent_id, other_id,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+        )
 
     async def update_trust(
         self,
@@ -161,74 +144,11 @@ class RelationshipMemory:
            relationship row — only the most recent trust-change reason
            is retained.
         """
-        db = self._ensure_db()
-        self._validate_other_id(other_id)
-        self._validate_participant_types(participant_type, other_participant_type)
-        if math.isnan(delta) or math.isinf(delta):
-            raise ValueError(f"delta must be a finite number, got {delta}")
-        delta = max(-_MAX_TRUST_DELTA, min(_MAX_TRUST_DELTA, delta))
-        reason = self._truncate_field(reason, other_id, "reason")
-
-        insert_trust = max(0.0, min(1.0, _DEFAULT_TRUST + delta))
-
-        attrs: dict[str, Any] = {
-            "agent.id": self._agent_id,
-            "participant.id": other_id,
-            "delta.kind": "trust",
-            "delta.value": delta,
-        }
-        with _tracer.start_as_current_span(RELATIONSHIP_UPDATE_SPAN, attributes=attrs) as span:
-            # SQL-level arithmetic in ON CONFLICT avoids TOCTOU race.
-            # RETURNING avoids a separate get_trust() round-trip (SQLite >= 3.35).
-            cursor = await db.execute(
-                """
-                INSERT INTO relationships
-                    (participant_id, participant_type,
-                     other_participant_id, other_participant_type,
-                     trust_score, interaction_count,
-                     last_interaction_at, notes)
-                VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
-                ON CONFLICT(participant_id, participant_type,
-                            other_participant_id, other_participant_type) DO UPDATE SET
-                    trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
-                    notes = ?
-                RETURNING trust_score
-                """,
-                (
-                    self._agent_id,
-                    participant_type,
-                    other_id,
-                    other_participant_type,
-                    insert_trust,
-                    reason,
-                    delta,
-                    reason,
-                ),
-            )
-            row = await cursor.fetchone()
-            await db.commit()
-
-            # Set ``trust.new`` on every code path so the most diagnostic
-            # attribute is always present.  When ``RETURNING`` yields no
-            # row the INSERT branch fired, so the trust value is the
-            # newly-inserted ``insert_trust`` (no ``MAX``/``MIN`` clamp
-            # applies on insert because we already clamped above).
-            if row is None:
-                new_trust = insert_trust
-            else:
-                new_trust = float(row[0])
-            span.set_attribute("trust.new", new_trust)
-            if row is None:
-                return insert_trust
-            logger.debug(
-                "Trust %s→%s: %.3f (delta=%.3f, reason=%s)",
-                self._agent_id,
-                other_id,
-                new_trust,
-                delta,
-                reason,
-            )
-            return new_trust
+        return await _update_trust(
+            self._ensure_db(), self._agent_id, other_id, delta, reason,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+        )
 
     async def apply_decay(
         self,
@@ -244,28 +164,10 @@ class RelationshipMemory:
 
         Returns the number of relationships updated.
         """
-        if math.isnan(decay_rate) or math.isinf(decay_rate) or not 0.0 < decay_rate <= 1.0:
-            raise ValueError(f"decay_rate must be in (0.0, 1.0], got {decay_rate}")
-        db = self._ensure_db()
-        cursor = await db.execute(
-            """
-            UPDATE relationships
-            SET trust_score = trust_score + ? * (0.5 - trust_score)
-            WHERE participant_id = ? AND participant_type = ?
-              AND ABS(trust_score - 0.5) > 0.001
-            """,
-            (decay_rate, self._agent_id, participant_type),
+        return await _apply_decay(
+            self._ensure_db(), self._agent_id, decay_rate,
+            participant_type=participant_type,
         )
-        updated = cursor.rowcount
-        if updated:
-            await db.commit()
-            logger.debug(
-                "Applied trust decay (rate=%.3f) to %d relationships for %s",
-                decay_rate,
-                updated,
-                self._agent_id,
-            )
-        return updated
 
     # ─── Interaction recording ──────────────────────────────
 
@@ -287,69 +189,12 @@ class RelationshipMemory:
 
         Returns the generated interaction ID.
         """
-        db = self._ensure_db()
-
-        self._validate_other_id(other_id)
-        self._validate_participant_types(participant_type, other_participant_type)
-        if not interaction_type or not interaction_type.strip():
-            raise ValueError("interaction_type must not be empty")
-        if math.isnan(sentiment) or math.isinf(sentiment):
-            raise ValueError(f"sentiment must be a finite number, got {sentiment}")
-        sentiment = max(-1.0, min(1.0, sentiment))
-
-        if outcome:
-            outcome = self._truncate_field(outcome, other_id, "outcome")
-
-        interaction_id = str(uuid.uuid4())
-        now = time.time()
-
-        await db.execute(
-            """
-            INSERT INTO interactions
-                (id, participant_id, participant_type,
-                 other_participant_id, other_participant_type,
-                 interaction_type, outcome, sentiment, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                interaction_id,
-                self._agent_id,
-                participant_type,
-                other_id,
-                other_participant_type,
-                interaction_type,
-                outcome,
-                sentiment,
-                now,
-            ),
+        return await _record_interaction(
+            self._ensure_db(), self._agent_id, other_id, interaction_type,
+            outcome, sentiment,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
         )
-
-        # Upsert relationship row: create if missing, increment count.
-        await db.execute(
-            """
-            INSERT INTO relationships
-                (participant_id, participant_type,
-                 other_participant_id, other_participant_type,
-                 trust_score, interaction_count,
-                 last_interaction_at, notes)
-            VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
-            ON CONFLICT(participant_id, participant_type,
-                        other_participant_id, other_participant_type) DO UPDATE SET
-                interaction_count = interaction_count + 1,
-                last_interaction_at = ?
-            """,
-            (
-                self._agent_id,
-                participant_type,
-                other_id,
-                other_participant_type,
-                _DEFAULT_TRUST,
-                now,
-                now,
-            ),
-        )
-        await db.commit()
-        return interaction_id
 
     # ─── Queries ────────────────────────────────────────────
 
@@ -361,67 +206,10 @@ class RelationshipMemory:
         other_participant_type: str = "agent",
     ) -> RelationshipSummary:
         """Get full relationship context for injection into LLM prompt."""
-        db = self._ensure_db()
-
-        # Fetch relationship row.
-        async with db.execute(
-            "SELECT trust_score, interaction_count, last_interaction_at, notes "
-            "FROM relationships "
-            "WHERE participant_id = ? AND participant_type = ? "
-            "AND other_participant_id = ? AND other_participant_type = ?",
-            (self._agent_id, participant_type, other_id, other_participant_type),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-        if row is None:
-            return RelationshipSummary(
-                other_participant_id=other_id,
-                other_participant_type=other_participant_type,
-                trust_score=_DEFAULT_TRUST,
-                interaction_count=0,
-                last_interaction_at=None,
-                notes=None,
-            )
-
-        trust_score, interaction_count, last_interaction_at, notes = row
-
-        # Fetch recent interactions.
-        async with db.execute(
-            "SELECT id, participant_id, participant_type, "
-            "other_participant_id, other_participant_type, "
-            "interaction_type, outcome, sentiment, created_at "
-            "FROM interactions "
-            "WHERE participant_id = ? AND participant_type = ? "
-            "AND other_participant_id = ? AND other_participant_type = ? "
-            "ORDER BY created_at DESC LIMIT ?",
-            (self._agent_id, participant_type, other_id,
-             other_participant_type, _MAX_RECENT_INTERACTIONS),
-        ) as cursor:
-            interaction_rows = await cursor.fetchall()
-
-        recent = [
-            Interaction(
-                id=r[0],
-                participant_id=r[1],
-                participant_type=r[2],
-                other_participant_id=r[3],
-                other_participant_type=r[4],
-                interaction_type=r[5],
-                outcome=r[6],
-                sentiment=r[7],
-                created_at=r[8],
-            )
-            for r in interaction_rows
-        ]
-
-        return RelationshipSummary(
-            other_participant_id=other_id,
+        return await _get_relationship_summary(
+            self._ensure_db(), self._agent_id, other_id,
+            participant_type=participant_type,
             other_participant_type=other_participant_type,
-            trust_score=trust_score,
-            interaction_count=interaction_count,
-            last_interaction_at=last_interaction_at,
-            notes=notes,
-            recent_interactions=recent,
         )
 
     async def get_all_relationships(
@@ -438,70 +226,7 @@ class RelationshipMemory:
            ``get_relationship_summary()`` for individual relationships
            with full interaction history.
         """
-        db = self._ensure_db()
-        async with db.execute(
-            "SELECT other_participant_id, other_participant_type, "
-            "trust_score, interaction_count, "
-            "last_interaction_at, notes "
-            "FROM relationships "
-            "WHERE participant_id = ? AND participant_type = ? "
-            "ORDER BY trust_score DESC",
-            (self._agent_id, participant_type),
-        ) as cursor:
-            rows = await cursor.fetchall()
-
-        return [
-            RelationshipSummary(
-                other_participant_id=r[0],
-                other_participant_type=r[1],
-                trust_score=r[2],
-                interaction_count=r[3],
-                last_interaction_at=r[4],
-                notes=r[5],
-            )
-            for r in rows
-        ]
-
-    # ─── Trust bootstrapping ───────────────────────────────
-
-    async def _seed_trust(
-        self,
-        config_relationships: list[dict[str, Any]],
-    ) -> None:
-        """Seed trust scores from agent config. Never overwrites existing rows."""
-        db = self._ensure_db()
-        for entry in config_relationships:
-            other_id = entry.get("agent_id")
-            trust_level = entry.get("trust_level")
-            if other_id is None or trust_level is None:
-                logger.debug(
-                    "Skipping config relationship entry: "
-                    "missing agent_id or trust_level: %r",
-                    entry,
-                )
-                continue
-            try:
-                trust_level = max(0.0, min(1.0, float(trust_level)))
-            except (TypeError, ValueError):
-                logger.warning(
-                    "Invalid trust_level for %s: %r, skipping",
-                    other_id,
-                    trust_level,
-                )
-                continue
-
-            # INSERT OR IGNORE — only seeds if no row exists.
-            # Types hardcoded to 'agent': config schema only has agent_id
-            # entries (PR #120 F-6).
-            await db.execute(
-                """
-                INSERT OR IGNORE INTO relationships
-                    (participant_id, participant_type,
-                     other_participant_id, other_participant_type,
-                     trust_score, interaction_count,
-                     last_interaction_at, notes)
-                VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL)
-                """,
-                (self._agent_id, other_id, trust_level),
-            )
-        await db.commit()
+        return await _get_all_relationships(
+            self._ensure_db(), self._agent_id,
+            participant_type=participant_type,
+        )
