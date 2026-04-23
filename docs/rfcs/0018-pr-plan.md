@@ -467,8 +467,31 @@ Out of scope for PR 4 follow-up (deferred to their own PRs):
 
 ##### From PR 5 review
 
-<!-- TODO: populate after PR 5 review merges -->
-*(populated during PR 5 review)*
+Captured from the deep review of PR #173 (v2 — post-followups; v1 Must-Fixes — duplicate self-register, gRPC loopback default, thread-safe enqueue, basic gRPC limits, negative-since rejection, SSE drop stats — already addressed in-PR). 0 Must-Fix · 5 Should-Fix · 5 Nice-to-Have · 5 Nit.
+
+Should-Fix:
+
+- **Cross-execution token `_` collides with `executionIDPattern`.** [`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) `executionIDPattern` line 100 + [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) line 27. Pattern `[A-Za-z0-9_-]{1,128}` matches `_`, contradicting the in-handler doc claim. A producer can `Append` an entry with `ExecutionID="_"` and that ring becomes unreachable via REST/SSE (both intercept the token before reaching `Snapshot`/`Subscribe`). Pick a token outside the regex (e.g. `__all__`) or reject `_` in `validExecutionID`; update the doc comment either way.
+- **`_to_timestamp` silently zeroes malformed timestamps.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `_to_timestamp()` line 358. Orchestrator admits epoch-zero entries that contaminate every chronological merge in `handleListLogs` and surface as the "next" event on every SSE stream. Either drop the record (with a counter) or stamp `datetime.now(UTC)` and add `attribute["timestamp_parse_error"]`.
+- **`parseSince` accepts future-dated RFC 3339 timestamps.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `parseSince()` line 144. Mirror failure mode of the (now-fixed) negative-duration case — same always-empty-200 surprise. Add `t.After(now)` rejection for symmetry with the duration branch.
+- **No SSE per-write deadline.** [`internal/server/logs_stream_handler.go`](../../internal/server/logs_stream_handler.go) `handleStreamLogs()` lines 100–115. A stalled TCP peer (laptop lid, NAT timeout) pins a subscriber slot indefinitely; with `MaxSubscribersDefault=64`, ~64 dead clients can soft-deny the SSE endpoint. Wrap each `w.Write(...)` with `http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5*time.Second))`.
+- **No incoming-message-rate cap on the LogService stream.** [`cmd/orchestrator/main.go`](../../cmd/orchestrator/main.go) gRPC server construction lines 332–340. `MaxRecvMsgSize=8MiB` and `MaxConcurrentStreams=256` are in place, but per-execution rate limiting only kicks in *after* parse + lock acquisition. With unauthenticated ingest and unlimited fake `execution_id`s, parse-cost amplification is open. Acceptable while loopback-bound; **hard requirement before any non-loopback `--grpc-bind`** — flag in the PR 7 readiness checklist or the RFC 0009 hand-off note.
+
+Nice-to-Have:
+
+- **structlog bookkeeping keys leak into `attributes`.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `record_to_proto()` line 318 + `_RESERVED_KEYS` line 80. Consider filtering keys that begin with `_` and a small denylist (`logger`, `stack_info`, `exc_info`).
+- **Cross-merge `id=_` is unbounded by paging.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `collectAllEntries()` line 102. Worst case ~25 MB per request (50 execs × 1000 entries × ~500 B). Bounded for v0.2.3 single-node; needs cursor-based paging once v0.3 multi-node lands.
+- **`StreamLogs` discards `DropReason`.** [`internal/server/logs_service.go`](../../internal/server/logs_service.go) `StreamLogs()` line 100. A throttled per-stream WARN when any drop reason ≠ `DropNone` (mirroring the buffer's `warnRateOnce` pattern) helps operators triage shipper-side mismatches without scraping prom counters.
+- **Unused per-subscriber drop counter.** [`internal/observability/logbuffer/subscribe.go`](../../internal/observability/logbuffer/subscribe.go) `subscriber.dropped` line 49. Atomic counter is incremented but never read — aggregate `droppedSubscribers` covers `Stats()`. Either expose via `Subscribe`'s return for per-stream visibility, or delete the field.
+- **`_to_timestamp` discards sub-second precision for numeric inputs.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `_to_timestamp()` line 366. `out.FromSeconds(int(ts))` truncates floats; use `out.FromNanoseconds(int(ts * 1e9))`.
+
+Nit:
+
+- **Document worst-case path component length.** [`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) `executionIDPattern` line 96 doc. Note that the disk layer appends `<seq>.jsonl` (~12 chars), so the full path component is ~140 chars (still well under `NAME_MAX 255`).
+- **`levelMatch` is exact — not `>=`.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `levelMatch()` line 209. Consider `--level >=warn` syntax in the CLI rewrite (PR 6) without changing the server-side semantics.
+- **Plain `int` counters mutated outside the queue lock.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) lines 159–162 (`enqueued`/`dropped`/`shipped`/`last_ack_seq`). CPython's GIL makes `+=` on int atomic, but tests asserting exact values are timing-sensitive once batching is asynchronous. Convert to `itertools.count()` or guard reads under the lock for type-checker cleanliness.
+- **SSE/REST may diverge on non-JSON-encodable attributes.** [`internal/server/logs_stream_handler.go`](../../internal/server/logs_stream_handler.go) `json.Marshal` failure line 109. An entry whose `Attributes` contains a non-JSON-encodable value is logged-and-dropped silently from SSE but still queryable via REST. Consider a proactive validation hook in `Buffer.Append` so SSE and REST views never diverge.
+- **`internal/observability/logbuffer/env.go` ships without `env_test.go`.** Seven-knob mapping is mechanically correct but uncovered; one table-driven test would cost ~30 lines.
 
 ##### From PR 6 review
 
