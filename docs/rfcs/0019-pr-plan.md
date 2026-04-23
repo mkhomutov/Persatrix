@@ -65,6 +65,8 @@ The two plans interleave. The combined order across both RFCs is:
   ↓
 0018 PR 6 (Phase 4c — CLI rewrite + E2E)
   ↓
+0018 PR 8 + 0019 PR 6 (post-merge polish: logbuffer/shipper hot path + tracing/spans cluster — land before the paired closeout so the closeout can reference them as "addressed in PR #X" rather than carrying the diff)
+  ↓
 0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)
 ```
 
@@ -87,8 +89,12 @@ PR 3 (metrics — Python + Go + InMemoryMetricReader fixture — joint order #6)
   ↓
 PR 4 (Collector + docker-compose + E2E + schema-parity test — joint order #7)
   ↓
-PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
+PR 6 (post-merge polish: tracing/spans cluster — Nice-to-Have / Nit / Minor items from PRs 1+2 — joint order #11a, optional, lands before PR 5)
+  ↓
+PR 5 (review follow-ups + RFC close — joint order #11b, opened with 0018 PR 7)
 ```
+
+PR 6 is **optional**: if any of its captured Nice-to-Have items are deferred (per the closeout PR's Description block exclusions), they become tracked issues against RFC 0009 (security/auth surface — natural home for the redactor `ContextVar` and baggage-key allowlist lint) or a generic `observability-polish` issue, and PR 5 closes the RFC without them.
 
 ---
 
@@ -309,6 +315,16 @@ PR 5 (review follow-ups + RFC close — joint order #11, opened with 0018 PR 7)
 **Branch**: `feature/v023-rfc0019-followups-close`
 **Estimated size**: ~150–300 lines (fixes + RFC status flip + ROADMAP + manual-test report append)
 
+#### Description
+
+The closeout PR ships three classes of work and nothing else. Anything not in one of these buckets is out of scope and should land in its own PR (or be opened as a tracked follow-up issue under the next RFC):
+
+1. **Apply or explicitly defer the per-PR review follow-ups captured below** for PRs 1–4. Each item is either implemented in this PR with a one-line `Review-fix (PR #N)` marker on the touching diff, or moved to a tracked issue with a link from the entry; "silently dropped" is not an option.
+2. **Status hygiene flip.** Per [development-workflow.md "Status Hygiene"](../development-workflow.md#status-hygiene): RFC 0019 status → `✅ Implemented`; [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; the v0.2.3 milestone row flips to `✅ Released` jointly with RFC 0018 (see [0018-pr-plan.md](0018-pr-plan.md) PR 7 — the two close PRs are opened together as a paired closeout, joint order #11); merged-PR table contains every RFC 0019 PR (1–4 plus this PR and the [PR #161](https://github.com/mkhomutov/Persatrix/pull/161) plan PR).
+3. **Manual-test report rows for the operator-visible v0.2.3 traces / metrics surface** appended under `docs/manual-tests/`: at minimum a Jaeger trace lookup by `persatrix.workflow_id`, a Prometheus exemplar click-through to the same trace, and a Collector tail-sampling spot-check (one error-tagged trace retained, untagged ticks sampled at the configured rate).
+
+**Hard exclusions**: any new tracing / metrics feature, any structural refactor whose driver is not a captured review item, and any code touching the v0.3 mesh / A2A surface. The PR is sized to stay under the 500-line BRANCHING.md soft limit; if the follow-up workload exceeds that, split *deferred items* into a tracked issue rather than carrying them into the closeout.
+
 #### Scope
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
@@ -422,6 +438,71 @@ Captured from the PR #171 deep re-review (round 2, against the post-fix local br
 
 ---
 
+### PR 6: `polish/v023-tracing-spans` — Post-Merge Polish: Tracing + Spans Cluster
+
+**Joint order position**: #11a (lands before the paired closeout #11b so PR 5 can mark its captured items as "addressed in PR #X" rather than carrying the diff; opened together with 0018 PR 8 as the polish-pair).
+**Depends on**: PR 4 merged.
+**Branch**: `polish/v023-tracing-spans`
+**Estimated size**: ~200–400 lines (implementation + targeted regression tests + one extracted module)
+**Status**: **Optional.** If skipped, every item below converts to a tracked issue and PR 5 lists each as "deferred to issue #X with rationale".
+
+#### Why this PR exists (justification)
+
+Three forces converge to make a dedicated polish PR the lowest-friction option for this cluster, instead of either bundling into PR 5 or shipping individual one-line PRs:
+
+1. **Single-surface cohesion.** All captured items touch [`agents/observability/tracing.py`](../../agents/observability/tracing.py), [`agents/persona_runtime/`](../../agents/persona_runtime), and [`agents/llm_client.py`](../../agents/llm_client.py) / [`agents/llm_providers.py`](../../agents/llm_providers.py) — one reviewer with the OTEL spans context loaded handles them in a single pass.
+2. **One non-trivial extraction (`agents/llm_types.py`).** The `llm_client` ↔ `llm_providers` import-cycle Should-Fix (round-2 finding from [PR 2 review](#from-pr-2-review)) requires extracting `LLMRequest` / `LLMResponse` / `StopReason` / `STOP_REASON_TO_GEN_AI` into a leaf module. That is structurally meaningful enough to deserve its own commit and review pass; bundling into PR 5 buries the diff under status-flip noise.
+3. **PR 5 size budget.** [PR 5](#pr-5-feature-v023-rfc0019-followups-close---review-follow-ups--rfc-close) targets 150–300 lines under the [BRANCHING.md](../BRANCHING.md) 500-line soft cap. Folding `_pending_tick_links` cap + Linkable Protocol + `llm_types.py` extraction + `_env.py` consolidation would push past that cap.
+
+#### Scope
+
+Apply the following items captured in [PR 1 review](#from-pr-1-review), [PR 2 review](#from-pr-2-review), and [PR 3 review](#from-pr-3-review) above. Each maps to one item already enumerated in the closeout PR; this PR becomes the implementation PR for them, and PR 5 cross-references back here.
+
+**From PR 1 review (tracing init):**
+
+- Resolve unused `agents/tests/conftest.py::span_exporter` fixture.
+- Collapse duplicate [`agents/server.py`](../../agents/server.py) `init_tracing` / `tracing_shutdown` imports.
+- Go-side Baggage round-trip test in `internal/observability/telemetry_test.go`.
+- Update [`cmd/orchestrator/main.go`](../../cmd/orchestrator/main.go) line 107 startup-warning string `telemetry` → `observability`.
+- `init_tracing()` re-call regression test (warning-on-second-call).
+- `OTEL_EXPORTER_OTLP_ENDPOINT` `/v1/traces` double-suffix-guard unit test.
+
+**From PR 2 review (semantic spans):**
+
+- Bound `_pending_tick_links` to ~32 entries with oldest-drop semantics.
+- Derive `tick.reason` from link list (`woke-on-event` vs `scheduled`); single-source the enum as `Final`.
+- Skip empty-string span attributes (`event.id`, `subagent.role`).
+- Promote `add_pending_tick_link` to a `Linkable(Protocol)`.
+- Assert canonical `gen_ai.response.finish_reasons` list-shape in tests.
+- **Round-2 Should-Fix:** extract `agents/llm_types.py` to break the `llm_client` ↔ `llm_providers` import cycle; remove the `# noqa: E402` deferred re-export.
+- Coerce `tool.success` to `bool(result is not None and not isinstance(result, Exception))`.
+- Replace `min_score=-1.0` sentinel with `min_score: float | None = None`.
+- Pin `aiosqlite` in [`agents/pyproject.toml`](../../agents/pyproject.toml) with a comment pointing at the `tests/_test_infra.py` private-attribute patch (or replace with `pytest_sessionfinish` hook).
+
+**From PR 3 review (metrics):**
+
+- Extract duplicated `_env` / `_int_env` helpers from [`agents/observability/metrics.py`](../../agents/observability/metrics.py) and [`agents/observability/tracing.py`](../../agents/observability/tracing.py) into a shared `agents/observability/_env.py`.
+- Parametrised test for `_classify_llm_error()`.
+- Go `Init()` full-path test (provider creation + meter registration + shutdown).
+- Recording-site wiring tests in both languages.
+- `runSucceeded=false` failure-defer cleanup-path coverage in `executeRun`.
+- Switch Python test fixture to public `pmetrics.shutdown()` instead of `_meter_provider` poke.
+
+#### Out of scope for this PR (deferred to tracked issues)
+
+- The Collector / E2E Nice-to-Have cluster from [PR 4 review](#from-pr-4-review) (Loki query path / `loki-config.yaml`, Collector wrapper image with healthcheck, tail-sampling assertions in E2E, `_LOG_TO_SPAN_KEY` promotion, `requires_compose` CI job). Lives in `config/observability/`, [docker-compose.yaml](../../docker-compose.yaml), and [`tests/integration/test_observability_e2e.py`](../../tests/integration/test_observability_e2e.py) — ops-runbook surface that can land in v0.2.x patches without delaying v0.2.3 release. Opens as `observability-polish` tracked issue.
+- `_redactor` `ContextVar` migration and baggage-key allowlist lint — both belong in RFC 0009 (security/auth) per the existing comment in [`agents/observability/tracing.py`](../../agents/observability/tracing.py); link from the RFC 0009 tracker.
+- Provider-name fallback `warning` for non-test classes — needs a stable provider-classification taxonomy first; opens as RFC 0019 follow-up issue rather than a one-line behavioural change.
+
+#### PR checklist
+
+- [ ] Items above either applied (with `Polish-fix (PR #N)` marker on the diff) or downgraded to tracked issue with a link from PR 5's [From PR 1 review](#from-pr-1-review) / [From PR 2 review](#from-pr-2-review) / [From PR 3 review](#from-pr-3-review) entries.
+- [ ] `agents/llm_types.py` extraction passes the existing import-path compat tests (`from agents.llm_client import AnthropicProvider` still resolves).
+- [ ] No new public API surface beyond the `agents/llm_types.py` extraction and the `Linkable(Protocol)` declaration (polish only).
+- [ ] `make test` passes; `make lint` clean; `mypy agents/` clean for any newly typed surface.
+
+---
+
 ## Risk and Mitigations
 
 | Risk | Mitigation |
@@ -441,4 +522,5 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 
 - **PR 1 opens** → flip [ROADMAP.md](../../ROADMAP.md) RFC 0019 row to `🚧 Implementing`.
 - **Each PR merges** → update the merged-PR table in ROADMAP and tick the corresponding checklist line in this plan.
+- **PR 6 (optional polish) merges** → add to merged-PR table; cross-reference each addressed item from the corresponding [PR 1 review](#from-pr-1-review) / [PR 2 review](#from-pr-2-review) / [PR 3 review](#from-pr-3-review) bullet in PR 5's section.
 - **PR 5 merges** (joint with RFC 0018 PR 7) → flip RFC 0019 row to `✅ Implemented`; flip v0.2.3 milestone row to `✅ Released` jointly with RFC 0018.
