@@ -89,6 +89,59 @@ func TestSSE_StreamsAppendedEntries(t *testing.T) {
 	assert.Contains(t, dataLine, `"hello-sse"`)
 }
 
+// Compound case exercised by the README Quick Start
+// (`persatrix logs _ --follow`): subscribing to the stream endpoint with
+// the `_` wildcard must fan-out entries from *every* execution, not just
+// one. Mirrors TestLogs_CrossExecutionMerge in logs_handler_test.go but
+// exercises the SSE path that the handler's `if id == crossExecutionToken`
+// branch (logs_stream_handler.go) translates to Subscribe("").
+func TestSSE_CrossExecutionMerge_StreamsAllExecutions(t *testing.T) {
+	srv, buf := testServerWithBuffer(t)
+	hs := httptest.NewServer(srv.Handler())
+	defer hs.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		hs.URL+"/api/v1/executions/_/logs/stream", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Append entries to two *different* executions after the subscriber
+	// is attached. Both must reach the wildcard subscriber.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		now := time.Now().UTC()
+		buf.Append(mkEntry("exec-A", "INFO", "from-a", now, nil))
+		buf.Append(mkEntry("exec-B", "INFO", "from-b", now.Add(time.Millisecond), nil))
+	}()
+
+	reader := bufio.NewReader(resp.Body)
+	var sawA, sawB bool
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !(sawA && sawB) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+		if strings.Contains(payload, `"from-a"`) {
+			sawA = true
+		}
+		if strings.Contains(payload, `"from-b"`) {
+			sawB = true
+		}
+	}
+	assert.True(t, sawA, "expected entry from exec-A on the wildcard stream")
+	assert.True(t, sawB, "expected entry from exec-B on the wildcard stream")
+}
+
 // Issue #179 Should-Fix #3: sseWrite must gracefully degrade when the
 // underlying ResponseWriter doesn't support SetWriteDeadline (test
 // doubles, middleware without deadline support).  ErrNotSupported must

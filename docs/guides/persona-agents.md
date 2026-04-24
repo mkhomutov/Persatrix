@@ -523,7 +523,45 @@ rejects unknown agent IDs with `404`. Both behaviours are exercised by
 
 ---
 
-## 5. Where to go next
+## 5. Observability (v0.2.3)
+
+v0.2.3 ships [RFC 0018](../rfcs/0018-structured-logging-framework.md)
+(structured JSON logging) and
+[RFC 0019](../rfcs/0019-opentelemetry-completion.md) (OpenTelemetry
+completion) together. Persona agents emit the resulting signals without
+any per-agent configuration — the `observability.tracing` and
+`observability.logging` modules initialise on agent startup.
+
+- **Structured JSON logs** on a versioned schema (`schema_version: "1"`).
+  Every log line from the agent tick loop, event handler, and memory
+  store carries the reserved correlation IDs (`execution_id`, `agent_id`,
+  `workflow_id`, `step_id`) populated from gRPC metadata, plus
+  `trace_id` / `span_id` when a span is active. Set
+  `PERSATRIX_LOG_FORMAT=pretty` for a human-readable console renderer
+  while developing. Full schema: [docs/observability.md](../observability.md).
+- **Distributed traces** across the Go orchestrator and the Python
+  agent. Each tick fires an `agent.persona.tick` span; each inbound
+  event fires an `agent.persona.event` span; memory operations produce
+  `agent.memory.episodic.{recall,remember}` and
+  `agent.memory.relationship.{lookup,update}`; LLM calls emit
+  `agent.llm.call` with OTEL
+  [Gen-AI semantic conventions](../observability.md#10-span-conventions-rfc-0019-pr-2)
+  (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.*`). Open
+  <http://localhost:16686> and search by tag
+  `persatrix.workflow_id=<your-workflow>` to see the full trace tree.
+- **`persatrix logs <execution_id>`** snapshots or tails a specific run
+  — `--follow` for live SSE streaming, `--trace <trace_id>` to pull
+  every record emitted under a specific trace ID across processes.
+  Details in
+  [docs/observability.md § 12](../observability.md#12-operations-persatrix-logs-rfc-0018-pr-6).
+
+The signal-flow overview — log shipper, OTLP pipeline, and baggage
+propagation across the gRPC boundary — is drawn in
+[docs/diagrams/observability-stack.md](../diagrams/observability-stack.md).
+
+---
+
+## 6. Where to go next
 
 - **RFC 0005 — Persona Agent & Memory System**:
   [docs/rfcs/0005-persona-agent-memory.md](../rfcs/0005-persona-agent-memory.md).
