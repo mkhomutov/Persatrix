@@ -442,7 +442,7 @@ Persatrix/
 | **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural cost-leak fix unblocking RFC 0008 | ✅ Released |
-| **v0.2.3** | Observe your agent society end-to-end — structured JSON logs on a versioned schema, distributed OTEL traces with Gen-AI conventions, OTLP metrics with exemplars, `persatrix logs` CLI, and a tail-sampling Collector pipeline | 🚧 Release prep |
+| **v0.2.3** | Observe your agent society end-to-end — structured JSON logs on a versioned schema, distributed OTEL traces with Gen-AI conventions, OTLP metrics with exemplars, `persatrix logs` CLI, and a tail-sampling Collector pipeline | ✅ Released |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
