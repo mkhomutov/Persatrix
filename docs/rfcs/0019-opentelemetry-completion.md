@@ -530,7 +530,7 @@ Merged PRs (joint v0.2.3 Observability Foundation delivery — see also [RFC 001
 | [#171](https://github.com/mkhomutov/Persatrix/pull/171) | feat(observability): RFC 0019 PR 4 — Collector pipeline + docker-compose + E2E + schema-parity test | Phase 3b |
 | [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | Closeout prep |
 | [#176](https://github.com/mkhomutov/Persatrix/pull/176) | refactor(observability): RFC 0019 PR 6 — tracing/spans review follow-ups | Polish (joint #11a) |
-| _this PR_ | docs(rfc-0019): closeout — review follow-ups + status flip | Closeout (joint #11b) |
+| [#181](https://github.com/mkhomutov/Persatrix/pull/181) | docs(rfc-0019): closeout — review follow-ups + status flip | Closeout (joint #11b) |
 
 The v0.2.3 release is the joint Observability Foundation delivery: this RFC owns the trace + metric signals plus the enrichers that join them to log records; RFC 0018 owns the structured-log signal and the `LogService` ingest path. Both RFCs share the `internal/observability/` (Go) and `agents/observability/` (Python) namespaces, the `schema_url=https://persatrix.dev/schemas/observability/1.0.0` Resource attribute, and the `persatrix.*` baggage / span-attribute conventions documented in [Section E](#e-span-naming-and-attribute-conventions).
 

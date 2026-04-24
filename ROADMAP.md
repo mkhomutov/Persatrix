@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-24 (RFC 0019 PR 5 opened — closeout: review follow-ups + status flip; joint #11b)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing (RFC 0018 ✅; RFC 0019 closeout open)  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176; 0018 PR 8 merged — #177; 0018 PR 7 merged — #180; 0019 PR 5 closeout open)
+> **Last updated**: 2026-04-24 (RFC 0019 PR 5 merged — #181; closeout: review follow-ups + status flip; joint #11b)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing (RFC 0018 ✅; RFC 0019 ✅; release prep pending)  
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176; 0018 PR 8 merged — #177; 0018 PR 7 merged — #180; 0019 PR 5 merged — #181)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -393,7 +393,7 @@ v0.2.2 complete
   ↓
 0018 PR 8 + 0019 PR 6 (post-merge polish — logbuffer/shipper + tracing/spans cluster)  ✅ #177 (0018 PR 8) + ✅ #176 (0019 PR 6)
   ↓
-0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)  ✅ #180 (0018 PR 7) + 🔄 0019 PR 5 open
+0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)  ✅ #180 (0018 PR 7) + ✅ #181 (0019 PR 5)
 ```
 
 ### Planned Components (v0.2.3)
@@ -749,6 +749,7 @@ v0.5.0 complete
 | [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | 0018+0019 (closeout prep) | 2026-04-23 |
 | [#177](https://github.com/mkhomutov/Persatrix/pull/177) | perf(observability): RFC 0018 PR 8 — log buffer + shipper polish | 0018 (PR 8, polish) | 2026-04-24 |
 | [#180](https://github.com/mkhomutov/Persatrix/pull/180) | docs(rfc-0018): closeout — review follow-ups + status flip (RFC 0018 PR 7) | 0018 (7/7, close) | 2026-04-24 |
+| [#181](https://github.com/mkhomutov/Persatrix/pull/181) | docs(rfc-0019): closeout — review follow-ups + status flip (RFC 0019 PR 5) | 0019 (5/5, close) | 2026-04-24 |
 
 ---
 

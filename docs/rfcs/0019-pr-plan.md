@@ -436,7 +436,7 @@ Captured from the PR #171 deep re-review (round 2, against the post-fix local br
 - [x] Manual-test report appended for v0.2.3 traces/metrics coverage
 - [x] `make test` passes; `make lint` clean
 
-**Merged**: _this PR_ — 2026-04-24
+**Merged**: [#181](https://github.com/mkhomutov/Persatrix/pull/181) — 2026-04-24
 
 #### Disposition of review follow-ups
 
