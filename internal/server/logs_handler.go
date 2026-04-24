@@ -154,6 +154,10 @@ func parseLogsRequest(w http.ResponseWriter, r *http.Request) (logsRequest, bool
 // accepts them, but they would silently translate to a future `since`
 // timestamp and the filter would always evict everything — surfacing
 // the typo as an empty 200 instead of a 400 (PR #173 review Should-Fix #1).
+//
+// Future-dated RFC 3339 timestamps are rejected for the same reason
+// (PR #173 review Should-Fix #3): a typo like "2099-01-01T..." would
+// otherwise return an always-empty 200.
 func parseSince(raw string, now time.Time) (time.Time, error) {
 	if d, err := time.ParseDuration(raw); err == nil {
 		if d < 0 {
@@ -164,6 +168,9 @@ func parseSince(raw string, now time.Time) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
 		return time.Time{}, err
+	}
+	if t.After(now) {
+		return time.Time{}, errors.New("timestamp must not be in the future")
 	}
 	return t, nil
 }

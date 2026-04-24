@@ -1,7 +1,7 @@
 # RFC 0018 — Structured Logging Framework
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented
 **Author**: Maksim Khomutov
 **Date**: 2026-04-21 (rev 2026-04-22; rev 2026-04-22b — apply PR #160 review)
 **Target**: v0.2.3
@@ -487,6 +487,29 @@ The following decisions are part of the spec; they are recorded here for traceab
 1. Author `docs/rfcs/0018-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3.
 2. Status → 🚧 Implementing; ROADMAP updated.
 3. Begin Phase 1 implementation.
+
+---
+
+## Implementation
+
+**Status flipped to ✅ Implemented on 2026-04-24** (closeout PR — RFC 0018 PR 7).
+
+Merged PRs (joint v0.2.3 Observability Foundation delivery — see also [RFC 0019](0019-opentelemetry-completion.md#implementation)):
+
+| PR | Title | Phase |
+|----|-------|-------|
+| [#161](https://github.com/mkhomutov/Persatrix/pull/161) | docs(rfcs): add joint PR plans for RFC 0018 + RFC 0019 (v0.2.3) | Plan |
+| [#164](https://github.com/mkhomutov/Persatrix/pull/164) | feat(observability): RFC 0018 PR 1 — schema doc + Python structlog chain + redactor surface | Phase 1 |
+| [#165](https://github.com/mkhomutov/Persatrix/pull/165) | feat(observability): RFC 0018 PR 2 — Go zap rename + pretty + redactor wired + source | Phase 2 |
+| [#168](https://github.com/mkhomutov/Persatrix/pull/168) | feat(observability): RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs | Phase 3 |
+| [#172](https://github.com/mkhomutov/Persatrix/pull/172) | feat(observability): RFC 0018 PR 4 — Phase 4a `log_service.proto` + ring buffer + disk store + rate limiter | Phase 4a |
+| [#173](https://github.com/mkhomutov/Persatrix/pull/173) | feat(observability): RFC 0018 PR 5 — `LogService` server + agent shipper + REST + SSE | Phase 4b |
+| [#174](https://github.com/mkhomutov/Persatrix/pull/174) | feat(cli): RFC 0018 PR 6 — `persatrix logs` CLI rewrite + filters + SSE follow + E2E | Phase 4c |
+| [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | Closeout prep |
+| [#177](https://github.com/mkhomutov/Persatrix/pull/177) | perf(observability): RFC 0018 PR 8 — log buffer + shipper polish | Polish (joint #11a) |
+| _this PR_ | docs(rfc-0018): closeout — review follow-ups + status flip | Closeout (joint #11b) |
+
+The disk layout (`<DIR>/<execution_id>/<sequence>.jsonl`) shipped in PR #172 supersedes the flat single-file layout described in [Section E](#e-persatrix-logs-endpoint-storage-and-streaming) — see `docs/rfcs/0018-pr-plan.md` PR 4 implementation note. The RPC shape, env-var knobs, and security posture in Section E are unchanged.
 
 ---
 
