@@ -105,6 +105,22 @@ func TestAppend_InvalidExecutionIDIsRejected(t *testing.T) {
 	}
 }
 
+// Issue #179 Should-Fix #1: the cross-execution REST/SSE sentinel "_"
+// matches executionIDPattern, so without an explicit reserved-list
+// check a producer could Append ExecutionID="_" and that ring would
+// be unreachable (handlers early-return on "_" before Snapshot).
+// Reject it at the validator so the Append surfaces as DropInvalidID
+// instead of silently populating a shadow ring.
+func TestAppend_ReservedCrossExecutionTokenRejected(t *testing.T) {
+	b := newTestBuffer(t, Config{})
+	assert.Equal(t, DropInvalidID, b.Append(mkEntry("_", "INFO", "shadow-merge")))
+	assert.Equal(t, uint64(1), b.Stats().DroppedInvalidID)
+	assert.Equal(t, 0, b.Stats().ActiveRings)
+	assert.Error(t, b.Seal("_"))
+	assert.Nil(t, b.Snapshot("_"))
+	assert.False(t, ValidExecutionID("_"))
+}
+
 func TestAppend_ClosedBufferReturnsDropClosed(t *testing.T) {
 	// Regression for PR-172 review Should-Fix #2: post-Close appends
 	// previously aliased to DropBelowLevel; they now surface as

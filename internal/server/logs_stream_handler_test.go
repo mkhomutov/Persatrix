@@ -88,3 +88,14 @@ func TestSSE_StreamsAppendedEntries(t *testing.T) {
 	require.NotEmpty(t, dataLine, "expected at least one data: frame")
 	assert.Contains(t, dataLine, `"hello-sse"`)
 }
+
+// Issue #179 Should-Fix #3: sseWrite must gracefully degrade when the
+// underlying ResponseWriter doesn't support SetWriteDeadline (test
+// doubles, middleware without deadline support).  ErrNotSupported must
+// not surface as a write failure — the write still proceeds.
+func TestSSEWrite_DeadlineUnsupportedStillWrites(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rc := http.NewResponseController(rec)
+	require.NoError(t, sseWrite(rc, rec, []byte("data: hello\n\n")))
+	assert.Equal(t, "data: hello\n\n", rec.Body.String())
+}

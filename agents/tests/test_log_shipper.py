@@ -50,6 +50,35 @@ def test_record_to_proto_handles_datetime_timestamp() -> None:
     assert proto.timestamp.seconds == int(ts.timestamp())
 
 
+def test_record_to_proto_malformed_timestamp_stamps_now_and_flags() -> None:
+    # Issue #179 Should-Fix #2: malformed RFC 3339 timestamps must not
+    # collapse to epoch-zero (which would pull the entry to the front
+    # of every chronological merge).  The shipper stamps now() and
+    # surfaces the failure via a `timestamp_parse_error=true` attribute.
+    before = datetime.now(UTC)
+    proto = record_to_proto({
+        "timestamp": "not-a-real-timestamp",
+        "level": "INFO",
+        "message": "m",
+    })
+    after = datetime.now(UTC)
+    # Stamped with the current wall clock, not 1970.
+    stamped = proto.timestamp.ToDatetime(tzinfo=UTC)
+    assert before <= stamped <= after
+    # Flagged in attributes so downstream consumers can distinguish
+    # stamped-now entries from well-formed ones.
+    assert proto.attributes.fields["timestamp_parse_error"].bool_value is True
+
+
+def test_record_to_proto_valid_string_timestamp_no_flag() -> None:
+    ts = "2026-01-01T12:00:00+00:00"
+    proto = record_to_proto({"timestamp": ts, "level": "INFO", "message": "m"})
+    assert proto.timestamp.seconds == int(
+        datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC).timestamp(),
+    )
+    assert "timestamp_parse_error" not in proto.attributes.fields
+
+
 def test_record_to_proto_with_source() -> None:
     proto = record_to_proto({
         "level": "ERROR",
