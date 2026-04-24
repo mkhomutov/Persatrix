@@ -2,11 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — v0.2.3
+## [0.2.3] - 2026-04-24
 
 > **Codename:** Observability Foundation
 
-### ⚠️ Operator-Visible Changes
+### Highlights
+
+- Structured JSON logs on a versioned schema across the Go orchestrator, Python
+  agents, and the `persatrix` CLI — every entry carries `schema_version`,
+  `service.kind`, `service.instance`, `source`, and the four reserved correlation
+  IDs (`execution_id`, `step_id`, `agent_id`, `workflow_id`) (RFC 0018).
+- Distributed OpenTelemetry traces end-to-end from REST handler to LLM call, with
+  Gen-AI semantic conventions on every `agent.llm.call` span and Span Links for
+  cross-tree causality (RFC 0019).
+- OTLP metrics (counters + histograms) on both Go and Python runtimes, with
+  histogram exemplars that point Prometheus click-throughs back to the
+  originating Jaeger trace.
+- W3C Baggage + the four reserved correlation IDs propagate across the Go →
+  Python gRPC boundary via a dedicated `internal/observability/grpcmeta`
+  surface and a Python `LoggingMetadataInterceptor`.
+- Tail-sampling OpenTelemetry Collector pipeline
+  (`config/observability/otel-collector.yaml`), with dev-stack `otel-collector`
+  + `prometheus` + `loki` wired into `docker-compose.yaml`.
+- `persatrix logs <execution_id>` CLI with REST query, `--follow` SSE stream,
+  disk-store durability, filter flags, and `jq`-friendly JSON output.
+
+### Upgrade Notes
 
 - **Jaeger OTLP host ports unpublished** (RFC 0019 PR 4): the `jaeger`
   service in `docker-compose.yaml` no longer publishes `4317`/`4318` on
@@ -53,8 +74,8 @@ All notable changes to this project will be documented in this file.
 
 - **`PERSATRIX_LOG_FORMAT=pretty`** selects a human-readable console encoder
   for local debugging. Default (unset or `json`) emits the RFC 0018 wire
-  format. Pretty mode is **not** consumed by the future `persatrix logs`
-  endpoint — leave unset in production.
+  format. Pretty mode is **not** consumed by the `persatrix logs` endpoint —
+  leave unset in production.
 
 - **`PERSATRIX_SERVICE_INSTANCE`** overrides the orchestrator's
   `service.instance` log field (defaults to `os.Hostname()`). Useful in
@@ -67,188 +88,54 @@ All notable changes to this project will be documented in this file.
   with a configured redactor — the default `NoopRedactor` echoes values
   verbatim and may capture secrets.
 
-### Added (RFC 0019 PR 2 — Phase 2 spans + Span Links)
+### 🚀 Features
 
-- **Semantic OTEL spans** at every Persatrix decision boundary in the Python
-  agent runtime: `agent.persona.event`, `agent.persona.tick`,
-  `agent.memory.episodic.recall` / `.remember`,
-  `agent.memory.relationship.lookup` / `.update`, `agent.llm.call`,
-  `agent.tool.execute`, `agent.subagent.spawn`.  Span names follow
-  `<service>.<component>.<operation>`; Persatrix attributes use the
-  `persatrix.*` namespace.
-- **OTEL Gen-AI semantic conventions** on `agent.llm.call`
-  (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens` /
-  `output_tokens`, `gen_ai.response.finish_reasons`) so vendor backends
-  render Persatrix LLM traces without project-specific configuration.
-- **Span Links** carrying `link.kind` for cross-tree causality: persona
-  event → triggered tick wires today; sub-agent spawn → sub-agent root
-  ships with RFC 0009; channel/bridge and mesh links are documented and
-  reserved for their owning RFCs.
-- **Sub-millisecond event phases** (`received` / `queued` / `handled` /
-  `completed`) recorded as span events on the `agent.persona.event` span
-  rather than as nested spans, keeping trace trees navigable.
-- **Tool-payload capture** is opt-in through `PERSATRIX_TRACE_TOOL_PAYLOADS`
-  and routes through the redactor surface introduced by RFC 0018 PR 1 —
-  one secrets-policy code path serves both logs and span attributes.
-- New documentation section `docs/observability.md § 10 — Span conventions`
-  inventorying every Persatrix span, its attributes, the Span Link table,
-  payload-capture modes, and a correlated debugging walkthrough.
+- *(logs)* Schema doc + Python structlog chain + redactor surface (RFC 0018 PR 1/7) (#164)
+- *(logs)* Go zap rename + pretty + redactor wired + source (RFC 0018 PR 2/7) (#165)
+- *(logs)* Cross-process correlation IDs + OTEL trace IDs on logs (RFC 0018 PR 3/7) (#168)
+- *(logs)* `log_service.proto` + ring buffer + disk store + rate limiter (RFC 0018 PR 4/7) (#172)
+- *(logs)* `LogService` server + agent shipper + REST + SSE (RFC 0018 PR 5/7) (#173)
+- *(cli)* `persatrix logs` rewrite — filters + SSE follow + E2E (RFC 0018 PR 6/7) (#174)
+- *(observability)* `internal/telemetry` → `internal/observability` rename + Python OTEL init + gRPC + Baggage (RFC 0019 PR 1/5) (#163)
+- *(observability)* Semantic spans + Span Links + Gen-AI conventions (RFC 0019 PR 2/5) (#167)
+- *(observability)* OTLP metrics (Python + Go) with exemplars (RFC 0019 PR 3/5) (#170)
+- *(observability)* Collector pipeline + docker-compose + E2E + schema-parity test (RFC 0019 PR 4/5) (#171)
+- *(docker)* Wire persona agent ember-owl into compose stack (#188)
 
-### Added (RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs)
+### 🐛 Bug Fixes
 
-- **Cross-process correlation IDs** propagate from the Go orchestrator
-  to Python agents via gRPC metadata (`persatrix-execution-id`,
-  `persatrix-step-id`, `persatrix-agent-id`, `persatrix-workflow-id`).
-  New `internal/observability/grpcmeta` package owns the constants and
-  `InjectIDs` / `ExtractIDs` helpers.
-- **Python `LoggingMetadataInterceptor`** binds the four keys to
-  structlog contextvars per-RPC and cleans up on success + exception.
-  Registered after `GrpcAioInstrumentorServer` so OTEL context exists
-  before logging contextvars bind.
-- **OTEL trace IDs on Go log records** via new
-  `internal/observability/zapenc.LoggerWithContext(ctx, logger)`,
-  wired at the executor dispatch boundary. Emits `trace_id` / `span_id`
-  when a span is active, omits them otherwise. (Per-call-site binding
-  is the otelzap convention; `zapcore.Entry` has no `Context` field.)
-- `workflow_id` added to the Python structlog `_FIELD_ORDER`;
-  `ExecuteRequest` gains `ExecutionID` / `StepID` populated by the
-  scheduler.
+- *(logs)* Zap encoder correctness cluster — Must-style ctor + reserved-key shadowing (issue #178) (#183)
+- *(logs,observability)* Should-Fix correctness cluster — sentinel collision + timestamp policy + SSE write deadline (issue #179) (#182)
+- *(logs)* Tee orchestrator zap entries into log buffer — MT-LOGS-001 follow-up (#184)
+- *(observability)* MT-OTEL-001 walkthrough alignment + propagation-gap surfacing (#185)
+- *(logs)* RFC 0018 closeout — review follow-ups + status flip (PR 7/7) (#180)
+- *(observability)* RFC 0019 closeout — review follow-ups + status flip (PR 5/5) (#181)
 
-### Added (RFC 0019 PR 3 — Phase 3a OTEL metrics, Python + Go)
+### 🔧 Refactoring
 
-- **Python OTEL metrics**: new `agents/observability/metrics.py` providing
-  `init_metrics()` / `shutdown()` and the instrument inventory documented in
-  [RFC 0019 § F](docs/rfcs/0019-opentelemetry-completion.md#f-metrics):
-  counters (`agent.tool.invocations`, `agent.llm.calls`, `agent.llm.tokens`,
-  `agent.event.dispatched`, `agent.observability.spans.dropped`,
-  `agent.observability.logs.dropped`), histograms (`agent.tool.duration`,
-  `agent.llm.duration`, `agent.persona.tick.interval`), up/down counter
-  (`agent.active`). Recording call sites added in
-  [`tools/registry.py`](agents/tools/registry.py),
-  [`llm_client.py`](agents/llm_client.py), and
-  [`persona_runtime/__init__.py`](agents/persona_runtime/__init__.py);
-  provider lifecycle wired from [`server.py`](agents/server.py).
-- **Go OTEL metrics**: new `internal/observability/metrics` package providing
-  orchestrator-side `Instruments` (`orchestrator.workflow.submitted/completed/failed/active/duration`,
-  `orchestrator.step.dispatched/duration`), init/shutdown wired from
-  [`cmd/orchestrator/main.go`](cmd/orchestrator/main.go), with recording sites
-  in the scheduler (`executeRun`, stage runner) and the REST server's workflow
-  submit handler.
-- Exporter: OTLP HTTP via `otlpmetrichttp` (Go) and
-  `opentelemetry-exporter-otlp-proto-http` (Python); same endpoint as tracing
-  (`OTEL_EXPORTER_OTLP_ENDPOINT`, default `http://localhost:4318`). Histogram
-  exemplars carry the active span's `trace_id` / `span_id` so dashboards can
-  drill into the originating trace.
-- Tests: `agents/tests/test_observability_metrics.py` (inventory/units/exemplars/idempotency/helpers)
-  and `internal/observability/metrics/metrics_test.go` (inventory, counter
-  monotonicity, up/down gauge, histogram bucket sanity, env-var config,
-  endpoint helper).
+- *(logs)* Log buffer + shipper polish (RFC 0018 PR 8, optional polish) (#177)
+- *(observability)* Tracing/spans review follow-ups (RFC 0019 PR 6, optional polish) (#176)
 
-### Added (RFC 0019 PR 4 — Phase 3b Collector pipeline + e2e + schema-parity test)
+### 📚 Documentation
 
-- [`config/observability/otel-collector.yaml`](config/observability/otel-collector.yaml)
-  + [`prometheus.yaml`](config/observability/prometheus.yaml): tail-sampling
-  pipeline per [RFC 0019 § H](docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline).
-- `docker-compose.yaml`: dev `otel-collector`, `prometheus` (`:9091`),
-  `loki` (`:3100`); orchestrator + agents OTLP → Collector.
-- Three new integration tests — schema-parity (pins log `SCHEMA_VERSION`,
-  trace+metric `_SCHEMA_URL`, gRPC metadata surface, [RFC 0018 § B](docs/rfcs/0018-structured-logging-framework.md#b-common-log-schema)
-  Optional correlation-field map), single-process log↔trace correlation,
-  and a compose-gated e2e under the new `requires_compose` marker
-  (opt in via `pytest -m requires_compose`).
-- `docs/observability.md` § 11 (operator pipeline) + README OTEL bullet.
+- *(rfcs)* Joint PR plans for RFC 0018 + RFC 0019 (v0.2.3 Observability Foundation) (#161)
+- *(rfcs)* Describe closeout PR scope in plans (#175)
+- *(release)* v0.2.3 release preparation plan (#186)
+- *(release)* v0.2.3 MT execution report + release-prep fixes (#187)
+- *(release)* v0.2.3 README + ROADMAP + guide refresh + observability diagram + release checklist (#189)
 
-### Changed (RFC 0019 PR 6 — observability polish)
+### 🧪 Testing
 
-- LLM provider plugins are now expected to expose a stable `name`
-  attribute (`"anthropic"` / `"openai"` / …) used as the OTEL
-  `gen_ai.system` attribute on `agent.llm.call` spans. Plugins missing
-  the attribute fall back to a class-name-derived value with a one-time
-  warning. Declared as the `agents.llm_types.LLMProvider` Protocol.
-- `agents.llm_client` no longer hosts the `LLMResponse` /
-  `StopReason` / `Usage` / `LLMProvider` / `ToolCall` / `LLMToolResult`
-  type definitions — they live in the new leaf module
-  `agents.llm_types`. The historical `from agents.llm_client import …`
-  paths still resolve (re-exported) so no consumer code needs to
-  change; the move breaks the previous `llm_client` ↔ `llm_providers`
-  import cycle that required a deferred re-export.
-- `agent.persona.tick` spans now derive the `tick.reason` attribute
-  (`"scheduled"` / `"woke-on-event"`) from the dispatcher-queued link
-  list instead of always emitting `"scheduled"`. Pinned values exposed
-  as `agents.persona_runtime.TICK_REASON_SCHEDULED` /
-  `TICK_REASON_WOKE_ON_EVENT`.
-- The pending-tick-link buffer is now bounded at 32 entries with
-  oldest-drop semantics so a paused tick consumer cannot leak memory.
-- `EpisodicMemory.recall()` now records exceptions on its span and sets
-  `StatusCode.ERROR` before re-raising, matching `store_episode` and
-  the LLM/tool spans.
-- Empty `subagent.role` span attributes are no longer emitted (kept
-  attribute set lean).
+- *(observability)* Schema-parity, log↔trace correlation, and compose-gated E2E (RFC 0019 PR 4) (#171)
+- *(logs)* `logbuffer` ring + disk-store + rate-limiter unit tests (RFC 0018 PR 4) (#172)
+- *(logs)* `LogService` server + agent shipper + REST + SSE tests (RFC 0018 PR 5) (#173)
+- *(logs)* `persatrix logs` REST round-trip + SSE follow E2E (RFC 0018 PR 6) (#174)
 
-### Changed (RFC 0018 PR 8 — log buffer + shipper polish)
+### 📦 Miscellaneous
 
-- `Buffer.Append` no longer takes the LRU write lock on the hot path:
-  re-admitting an existing execution updates an atomic `lastTouch`
-  stamp on the ring under an `RLock`, and only the cold path
-  (first-admit + eviction sweep) takes the write lock. Eliminates a
-  global serialisation point for high-frequency multi-execution
-  ingest.
-- `diskStore.flush` now releases the disk lock before fsync / parent
-  fsync / rename / `evictIfOverCap`, so concurrent flushes for
-  different executions no longer serialise on a single fsync.
-- `evictIfOverCap` now reads candidate sizes from the maintained
-  `totalMap` snapshot under a short critical section instead of
-  re-walking `os.ReadDir` and re-stating every directory on each
-  sweep; the recursive `os.RemoveAll` runs unlocked.
-- The per-execution rate-limit `WARN`-once gate (`rateWarned`) is
-  pruned when its execution is LRU-evicted so the gate map cannot
-  grow unbounded over the orchestrator's lifetime.
-- Disk flush opens the per-sequence `.tmp` file with `O_NOFOLLOW`
-  (POSIX) as defence-in-depth against same-UID symlink-pre-creation
-  attacks.
-- `disk.scan` / `disk.read` now use `strconv.Atoi` instead of
-  `fmt.Sscanf("%d", ...)` and reject non-positive sequence numbers,
-  so externally-dropped junk filenames (whitespace-padded, signed)
-  no longer skew `nextSeq`.
-- Python log shipper's `record_to_proto` now filters bookkeeping keys
-  (structlog's `_record` / `_from_structlog`, stdlib `logger` /
-  `stack_info` / `exc_info`) plus any `_`-prefixed key from the
-  outgoing `attributes` Struct.
-- `_to_timestamp` preserves sub-second precision for numeric epoch
-  inputs (`FromNanoseconds(int(ts * 1e9))` instead of the previous
-  `FromSeconds(int(ts))`), so chronological merges across log sources
-  no longer lose ordering within the same second.
+- *(deps)* Upgrade `tabled` 0.16 → 0.20, resolve RUSTSEC-2024-0370 (#162)
 
-### Fixed (RFC 0018 PR 2 hardening — issue #178 encoder correctness cluster)
-
-- [`internal/observability/zapenc.NewEncoder`](internal/observability/zapenc/encoder.go)
-  now panics at construction when `Options.ServiceKind` or
-  `Options.ServiceInstance` is empty. Both are members of the RFC 0018
-  § B required-field group; returning a usable encoder with empty values
-  produced log lines that silently violated the required-field invariant
-  — including the `encodeFallbackEnvelope` double-failure path, which
-  re-emits the same service.* values. A panic at startup is the correct
-  failure mode: no valid zero state exists for a production logger.
-- `EncodeEntry` now re-stamps `timestamp`, `level`, `message` from the
-  `zapcore.Entry` after the inner-encoder JSON is parsed. Previously, a
-  caller that added a user field with one of those keys
-  (e.g. `zap.String("timestamp", "fake")`) could shadow the encoder's
-  value via `encoding/json`'s last-value-wins duplicate-key rule. The
-  reserved-key shadowing contract now applies uniformly to the whole
-  encoder-owned set (`schema_version`, `service.kind`, `service.instance`,
-  `service.role`, `timestamp`, `level`, `message`, `source`). The
-  re-stamped `timestamp` is now normalised to UTC (RFC 3339 Nano with a
-  `Z` suffix) to match [`docs/observability.md` § 2](docs/observability.md)
-  ("timestamp — RFC 3339 with timezone; UTC by default"); previously,
-  zap's inner `RFC3339NanoTimeEncoder` passed through whatever zone
-  `time.Now()` carried, so a non-UTC host emitted a local offset such as
-  `+02:00`. Downstream consumers that parsed the offset as informational
-  are unaffected (RFC 3339 Nano remains valid); those that string-matched
-  a specific offset must switch to `Z`.
-- `source` is now explicitly deleted from the parsed record when
-  `entry.Caller.Defined` is false, so a user field `zap.Any("source", …)`
-  cannot leak a forged provenance object onto the wire when
-  `zap.AddCaller()` was not enabled.
+[0.2.3]: https://github.com/mkhomutov/Persatrix/compare/v0.2.2...v0.2.3
 
 ## [0.2.2] - 2026-04-22
 
