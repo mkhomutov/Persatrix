@@ -192,5 +192,8 @@ orchestrator and agent appear together (proving the cross-process correlation fr
 
 - **Pass**: Steps 1–6 each meet their Verification checkboxes.
 - **Accepted-with-known-gap**: `--trace` server-side filtering is currently client-side; entries are
-  still shipped over the wire (tracked deferral). Operator behaviour is unchanged.
+  still shipped over the wire. Tracked in [#179](https://github.com/mkhomutov/Persatrix/issues/179)
+  ("CLI logs polish residuals" → "add a server-side `trace` query parameter"). Operator behaviour
+  is unchanged. (Linked per PR #180 review Should-Fix #2 — prevent the documented gap from being
+  orphaned.)
 - **Fail**: Any step's Verification fails, or restart durability loses entries.
