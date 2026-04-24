@@ -71,8 +71,15 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # NOTE(review-PR188, N3): wait for orchestrator /healthz (healthcheck at
+    # line ~54) to pass before starting. Without `service_healthy`, a cold
+    # `compose up -d` may race the orchestrator's HTTP listener and the
+    # agent's first registration dial fails, logging a spurious reconnect
+    # cycle. Only gates initial startup — a post-startup orchestrator blip
+    # does not stop already-running agents (`restart: unless-stopped`).
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50051), timeout=5); s.close()"]
       interval: 10s
@@ -94,8 +101,10 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50052), timeout=5); s.close()"]
       interval: 10s
@@ -117,8 +126,10 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50053), timeout=5); s.close()"]
       interval: 10s
@@ -139,16 +150,37 @@ services:
       - "50054:50054"
     volumes:
       - ./config:/app/config:ro
-      - workspace:/workspace
+      # NOTE(review-PR188, N1): `:ro` intentional. The ember-owl persona in
+      # config/agents.yaml declares `tools: [file_read, mcp:github]` but has
+      # NO `permissions.filesystem` block, so both PermissionGate.check
+      # ("filesystem:read") and PathValidator (empty allow_read) deny every
+      # file_read at the tool layer. The read-only mount is defense-in-depth
+      # in case a compromised MCP server bypasses the tool sandbox with raw
+      # Python I/O, and matches the code-reviewer service's pattern. If a
+      # future config grants the persona `permissions.filesystem.read`, this
+      # mount is already in place; only flip to rw if write access is also
+      # granted.
+      - workspace:/workspace:ro
       # Persona memory (SQLite) resolves `data/memory.db` relative to the
       # container WORKDIR (/app). The non-root `appuser` cannot write to
       # the baked /app/data, so mount a dedicated writable volume here.
+      #
+      # Ops note (review-PR188, N2): named-volume ownership is inherited
+      # from the image's target-dir owner ONLY on first creation. If an
+      # orphaned `persatrix_ember-owl-data` volume exists from a prior run
+      # (e.g. created before the /app/data chown in Dockerfile.agent, or
+      # hand-rolled with a different UID), Docker mounts it as-is and the
+      # SQLite init will fail with "unable to open database file" despite
+      # the Dockerfile fix. Recovery: `docker compose down && docker volume
+      # rm persatrix_ember-owl-data && docker compose up -d`.
       - ember-owl-data:/app/data
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
-      - orchestrator
+      orchestrator:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50054), timeout=5); s.close()"]
       interval: 10s
