@@ -51,13 +51,105 @@ endpoint (deferred to RFC 0009).
 ### System Requirements
 
 - Go 1.24+, Rust stable, Python 3.11+
-- `make all` completes cleanly
-- Orchestrator running locally: `make run`
+- Windows: PowerShell 7+ (commands below assume `pwsh`). Linux/macOS users substitute the
+  shell-specific equivalents noted inline.
+- An `ANTHROPIC_API_KEY` is **required for Scenario B** (full-agent path used by Steps 1
+  and 6). Without it the workflow run fails at planner registration and the steps that
+  depend on agent-side entries (`service_kind=agent`, `trace_id`) become N/A.
 
-### Test Data
+### One-time build
 
-- A workflow that produces ≥ 5 log lines across orchestrator + agent (e.g. `feature-builder` from
-  `workflows/feature-builder.yaml`).
+```pwsh
+make build-orchestrator    # → bin/persatrix-server(.exe)
+make build-cli             # → bin/persatrix(.exe)
+make build-agents          # installs Python deps into the active venv
+```
+
+`make build-agents` does an editable `pip install -e ".[dev]"` inside `agents/`. **Activate
+your venv first** (`./.venv/Scripts/Activate.ps1` on Windows / `source .venv/bin/activate`
+on Unix); otherwise the install lands in the system Python and `make run-agent` may still
+fail with `ModuleNotFoundError: No module named 'structlog'`.
+
+### Test data
+
+The procedure uses [`workflows/feature-builder.yaml`](../../workflows/feature-builder.yaml)
+which orchestrates three agents: `planner`, `code-writer`, `code-reviewer`. The workflow may
+finish with `Status: failed` (e.g. `Max LLM call iterations exceeded`) — that is **fine**
+for this test. Logs are produced and queryable regardless of the final run status.
+
+### Two execution scenarios
+
+| Scenario | Use for | Setup |
+|---------|---------|-------|
+| **A — orchestrator-only smoke** | Steps 2, 3, 4, 5 (and Step 1 fallback) | Just `make run`. The submitted run fails fast at "planner not registered"; only `service_kind=orchestrator` entries are produced. |
+| **B — full agents (REST + cross-process correlation)** | Steps 1 (full pass) and 6 (`--trace`) | Start orchestrator + the three agents below. Both `service_kind=orchestrator` and `service_kind=agent` entries are produced and share `trace_id`. |
+
+### Environment Setup — Scenario B (full agents)
+
+Run each block in its **own** terminal. The orchestrator's HTTP API listens on
+`127.0.0.1:8080`; gRPC on `127.0.0.1:9090`. Agents auto-register with the orchestrator
+on startup (look for `Registered agent <id> with orchestrator at http://127.0.0.1:8080`).
+
+> **Port collision recovery (Windows / pwsh)** — run before any `make run` /
+> `run-agent` if a previous session left a process behind:
+>
+> ```pwsh
+> Get-Process persatrix-server -ErrorAction SilentlyContinue | Stop-Process -Force
+> Get-NetTCPConnection -LocalPort 8080,9090,50051,50052,50053 -ErrorAction SilentlyContinue |
+>   ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+> ```
+
+**Terminal 0 — orchestrator:**
+
+```pwsh
+$env:ANTHROPIC_API_KEY = "<your key>"   # if not already in your shell profile
+make run                                 # or: ./bin/persatrix-server.exe --config config/
+```
+
+Verify it is live (in any other terminal):
+
+```pwsh
+(Invoke-WebRequest http://127.0.0.1:8080/api/v1/executions/_/logs -UseBasicParsing).StatusCode
+# expect: 200
+```
+
+**Terminals 1, 2, 3 — agents** (one per terminal; activate venv first):
+
+```pwsh
+./.venv/Scripts/Activate.ps1
+$env:ANTHROPIC_API_KEY = "<your key>"
+$env:PYTHONPATH        = "agents/generated"
+python -m persatrix_agents.server --agent planner       --port 50051
+# in next terminal:
+python -m persatrix_agents.server --agent code-writer   --port 50052
+# in next terminal:
+python -m persatrix_agents.server --agent code-reviewer --port 50053
+```
+
+> The `make run-agent AGENT=… PORT=…` target uses bash-style env-prefix syntax
+> (`PYTHONPATH=… python …`) which does not work in pwsh — use the explicit `python -m …`
+> commands above on Windows.
+
+> **OTLP collector warnings are harmless.** Both orchestrator and agents will print
+> `dial tcp [::1]:4318: connectex: No connection could be made…` if no OTLP collector
+> is running. Logs functionality is unaffected.
+
+### Inspecting raw log JSON
+
+The CLI (`persatrix logs`) renders human-readable text — it does **not** print the
+underlying JSON. To see the raw entry shape (e.g. to confirm `service_kind`, `trace_id`,
+or `attributes` values), call the REST endpoint directly:
+
+```pwsh
+$entries = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/executions/$runId/logs"
+$entries.Count
+$entries | Where-Object { $_.service_kind -eq 'agent' } | Select-Object -First 1 |
+  ConvertTo-Json -Depth 5
+```
+
+The response body is a **JSON array** of entries (not an object), and per-entry fields are
+underscore-cased: `service_kind`, `service_instance`, `execution_id`, `trace_id`, `span_id`,
+`attributes`. Cross-execution merge view: `…/api/v1/executions/_/logs`.
 
 ---
 
@@ -65,38 +157,53 @@ endpoint (deferred to RFC 0009).
 
 ### Step 1: REST round-trip on a completed execution
 
-`persatrix run` prints a human-readable line of the form
-`OK Workflow <id> submitted (run_id: <run_id>)` and returns immediately — there
-is no `--wait` flag. Capture the `run_id` from stdout, then poll
-`persatrix status <run_id>` until `Status` is no longer `pending`/`running`
-before querying logs.
+`persatrix run` is **fire-and-forget** — it prints `OK Workflow <id> submitted (run_id:
+<run_id>)` and returns immediately (there is no `--wait` flag). Capture the `run_id` from
+stdout, poll `persatrix status <run_id>` until `Status` is no longer `pending`/`running`,
+then query logs.
 
-**Action**:
+**Action** (Scenario B — full agents recommended; Scenario A also valid, see Expected):
 
 ```pwsh
-$out = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping endpoint"}'
+$out   = ./bin/persatrix.exe run feature-builder --input '{"user_request":"Add a ping endpoint"}'
 $runId = ([regex]'run_id:\s*([^)]+)').Match(($out -join "`n")).Groups[1].Value.Trim()
+"runId=$runId"
+
 do {
-    Start-Sleep -Seconds 1
-    $status = (./bin/persatrix status $runId) -join "`n"
+    Start-Sleep -Seconds 3
+    $status = (./bin/persatrix.exe status $runId) -join "`n"
 } while ($status -match 'Status:\s*(pending|running)')
-./bin/persatrix logs $runId --verbose | Select-Object -First 20
+$status
+
+./bin/persatrix.exe logs $runId --verbose | Select-Object -First 20
+```
+
+The CLI prints two lines per entry in `--verbose` mode (header + an indented attributes
+line). To bucket entries by `service_kind` and confirm the cross-process split, hit the
+REST endpoint directly:
+
+```pwsh
+$entries = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/executions/$runId/logs"
+"Total:        $($entries.Count)"
+"Orchestrator: $(($entries | Where-Object { $_.service_kind -eq 'orchestrator' }).Count)"
+"Agent:        $(($entries | Where-Object { $_.service_kind -eq 'agent' }).Count)"
+"With trace_id:$(($entries | Where-Object { $_.trace_id }).Count)"
 ```
 
 **Expected**:
-- Exit code 0.
-- Output contains entries from both orchestrator (`service.kind=orchestrator`) and at least one
-  agent (`service.kind=agent`), all carrying matching `execution_id` and (where a span was active)
-  matching `trace_id` / `span_id`.
-
-> **Note**: in environments without agent credentials (e.g. `ANTHROPIC_API_KEY` unset)
-> the run will fail at planner registration; in that case only `service.kind=orchestrator`
-> lines are produced, which still validates the orchestrator self-ingest path. The
-> agent-side check then requires a fully provisioned environment.
+- Exit code 0 from `persatrix logs`.
+- **Scenario B**: both `service_kind=orchestrator` (≈ 15) and `service_kind=agent` (≥ 1)
+  entries are present; all share the same `execution_id` (= `$runId`); agent-side entries
+  carry matching `trace_id`/`span_id`. (A representative live run produced 24 entries:
+  15 orchestrator + 9 agent, with 9 entries sharing one `trace_id`.)
+- **Scenario A** (no agents registered): only `service_kind=orchestrator` lines are
+  produced and the agent-side check is N/A. The orchestrator self-ingest path is still
+  validated.
 
 **Verification**:
-- [ ] At least one `orchestrator` line present (and one `agent` line when credentials available)
-- [ ] All printed lines share the same `execution_id` (matches `$runId`)
+- [ ] `Total > 0` and `Orchestrator > 0`
+- [ ] `Agent > 0` (Scenario B only — N/A under Scenario A)
+- [ ] All entries share the same `execution_id` (= `$runId`)
 
 ---
 
@@ -105,25 +212,27 @@ do {
 **Action**:
 
 ```pwsh
-./bin/persatrix logs $runId --level WARN
-./bin/persatrix logs $runId --since 5m
-./bin/persatrix logs $runId --workflow feature-builder
-./bin/persatrix logs _ --since 1h | Measure-Object -Line
+./bin/persatrix.exe logs $runId --level WARN
+./bin/persatrix.exe logs $runId --level ERROR
+./bin/persatrix.exe logs $runId --since 5m
+./bin/persatrix.exe logs $runId --workflow feature-builder
+./bin/persatrix.exe logs _ --since 1h | Measure-Object -Line
 ```
 
 **Expected**:
-- `--level WARN` returns only entries whose `level` field equals `WARN` exactly
-  (case-insensitive). The server filter is exact-match per
-  [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `levelMatch` —
-  `--level WARN` does **not** include `ERROR`, and an empty result is valid when
-  the run produced no WARN-tagged entries.
+- `--level <X>` returns only entries whose `level` equals `<X>` exactly (case-insensitive).
+  The server filter is exact-match — `--level WARN` does **not** include `ERROR`. An empty
+  result is valid when the run produced no entries at that level. Representative live run
+  (Scenario B): 3 lines for `WARN`, 1 line for `ERROR` (= run-failure entry).
 - `--since 5m` returns the same lines as Step 1 (the run completed within the window).
-- `--workflow feature-builder` returns lines whose `workflow` attribute matches.
-  Today only the `run created` / `executing run` entries carry the `workflow`
-  attribute, so the filter typically returns a small subset (not the full per-run
-  log) — see [#179](https://github.com/mkhomutov/Persatrix/issues/179) for the
-  follow-up to propagate `workflow` onto every execution-scoped entry.
-- `id=_` cross-execution view returns a non-empty merged stream.
+- `--workflow feature-builder` returns only entries whose `attributes.workflow` field
+  matches. Today **only** the orchestrator's `run created` / `executing run` entries set
+  the `workflow` attribute — agent-side entries set `workflow_id` instead, which this
+  filter does not match. Expect a small subset (≈ 2 CLI lines = 1 entry × 2 lines per
+  entry in default mode). Tracked in
+  [#179](https://github.com/mkhomutov/Persatrix/issues/179) ("propagate `workflow` onto
+  every execution-scoped entry").
+- `id=_` cross-execution view returns a non-empty merged stream from all recent runs.
 
 **Verification**:
 - [ ] Each filter narrows the output as expected (empty WARN result acceptable)
@@ -136,11 +245,13 @@ do {
 **Action** (terminal A):
 
 ```pwsh
-$out3 = ./bin/persatrix run feature-builder --input '{"user_request":"long-running"}'
+# Terminal A — submit a run, capture its id:
+$out3   = ./bin/persatrix.exe run feature-builder --input '{"user_request":"long-running"}'
 $runId3 = ([regex]'run_id:\s*([^)]+)').Match(($out3 -join "`n")).Groups[1].Value.Trim()
 "$runId3"
-# then in terminal B (substitute the run_id printed in terminal A):
-./bin/persatrix logs --follow $runId3
+
+# Terminal B — follow (substitute the run_id printed in terminal A):
+./bin/persatrix.exe logs --follow $runId3
 ```
 
 While the follow session is open, restart the orchestrator (`Ctrl-C` then `make run` again).
@@ -172,18 +283,21 @@ While the follow session is open, restart the orchestrator (`Ctrl-C` then `make 
 **Action**:
 
 ```pwsh
-$out2 = ./bin/persatrix run feature-builder --input '{"user_request":"durability"}'
+$out2   = ./bin/persatrix.exe run feature-builder --input '{"user_request":"durability"}'
 $runId2 = ([regex]'run_id:\s*([^)]+)').Match(($out2 -join "`n")).Groups[1].Value.Trim()
 do {
-    Start-Sleep -Seconds 1
-    $status = (./bin/persatrix status $runId2) -join "`n"
+    Start-Sleep -Seconds 3
+    $status = (./bin/persatrix.exe status $runId2) -join "`n"
 } while ($status -match 'Status:\s*(pending|running)')
-$beforeRestart = (./bin/persatrix logs $runId2 | Measure-Object -Line).Lines
-# stop the orchestrator (Ctrl-C in the make run terminal).
-# Do NOT delete data/logs/$runId2 — we want to verify warm-load.
-# Start it again: `make run`
-$afterRestart = (./bin/persatrix logs $runId2 | Measure-Object -Line).Lines
+$beforeRestart = (./bin/persatrix.exe logs $runId2 | Measure-Object -Line).Lines
+
+# Stop the orchestrator (Ctrl-C in the make run terminal). Do NOT delete
+# data/logs/$runId2 — the warm-load path is what we are checking.
+# Then start it again: `make run`.
+
+$afterRestart = (./bin/persatrix.exe logs $runId2 | Measure-Object -Line).Lines
 "before=$beforeRestart after=$afterRestart"
+Test-Path "data/logs/$runId2"   # expect: False (see Known gap below)
 ```
 
 **Expected**: Pre-restart entries are still queryable after the orchestrator process restart
@@ -218,14 +332,14 @@ $afterRestart = (./bin/persatrix logs $runId2 | Measure-Object -Line).Lines
 
 ```pwsh
 $env:PERSATRIX_LOG_FORMAT = "pretty"
-./bin/persatrix-server  # or `make run`
+./bin/persatrix-server.exe --config config/    # or: make run
 ```
 
 **Expected**:
 - Orchestrator stdout switches from one-JSON-per-line to the zap dev console encoder
   (coloured key/value form).
 - The `LogService` shipper still receives schema-conformant JSON entries (verify by running
-  `./bin/persatrix logs <execution_id>` from another terminal — output is unchanged).
+  `./bin/persatrix.exe logs <execution_id>` from another terminal — output is unchanged).
 
 **Verification**:
 - [ ] Orchestrator stdout is human-readable
@@ -235,25 +349,31 @@ $env:PERSATRIX_LOG_FORMAT = "pretty"
 
 ### Step 6: `--trace <trace_id>` correlation
 
-**Action**: pick any line from Step 1 with a non-empty `trace_id`, then:
+**Action** — first pick a `trace_id` from the run. The simplest way is to query REST and
+filter for non-empty `trace_id`:
 
 ```pwsh
-./bin/persatrix logs $runId --trace <trace_id>
+$entries = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/executions/$runId/logs"
+$traceId = ($entries | Where-Object { $_.trace_id } | Select-Object -First 1).trace_id
+"traceId=$traceId"
+
+./bin/persatrix.exe logs $runId --trace $traceId --verbose
 ```
 
-> **Note**: `trace_id` is populated only on log entries emitted with a logger derived via
-> `zapenc.LoggerWithContext(ctx, logger)` (e.g. inside `executor.dispatch` while an agent
-> task is running). Most scheduler / state-store entries are emitted without a span-bound
-> context and therefore have `trace_id=-`. In the no-agent fallback environment described
-> in Step 1 (planner not registered), **no entry carries a `trace_id`** and this step is
-> N/A — record it as skipped, not failed.
+> **Note**: `trace_id` is populated only on entries emitted with a span-bound logger (e.g.
+> inside `executor.dispatch` while an agent task is running). Most scheduler / state-store
+> entries are emitted without a span context and display `trace_id=-` in `--verbose` mode.
+> Under **Scenario A** (no agents registered) **no entry carries a `trace_id`** and this
+> step is N/A — record it as Skipped, not Failed.
 
 **Expected**: Output is restricted to entries whose `trace_id` matches; entries from both
-orchestrator and agent appear together (proving the cross-process correlation from RFC 0018 PR 3).
+orchestrator and agent appear together (proving the cross-process correlation from RFC 0018
+PR 3). Representative Scenario B run produced 9 entries spanning the `planner` and
+`code-writer` agents under one `trace_id`.
 
 **Verification**:
 - [ ] All printed lines carry the requested `trace_id`
-- [ ] Orchestrator + agent lines coexist in the result
+- [ ] Orchestrator + agent lines coexist in the result (Scenario B)
 
 ---
 
@@ -263,13 +383,14 @@ orchestrator and agent appear together (proving the cross-process correlation fr
   `Skipped (Accepted-with-known-gap)` per its inline note.
 - **Accepted-with-known-gap**:
   - Step 4 (restart durability) until `Buffer.Seal` is wired into the workflow lifecycle
-    (RFC 0018 PR 7 follow-up).
+    (RFC 0018 PR 7 follow-up). Verified live: `data/logs/<runId>` is **not** created even
+    after a clean shutdown of a completed full-agent run.
   - `--trace` server-side filtering is currently client-side; entries are still shipped over
     the wire. Tracked in [#179](https://github.com/mkhomutov/Persatrix/issues/179)
     ("CLI logs polish residuals" → "add a server-side `trace` query parameter"). Operator
     behaviour is unchanged. (Linked per PR #180 review Should-Fix #2 — prevent the documented
     gap from being orphaned.)
-  - Step 6 reported as `N/A (Skipped)` when run in the no-agent fallback environment
-    described in Step 1, because no entry then carries a `trace_id`.
+  - Step 1's agent-side check and Step 6 are reported as `N/A (Skipped)` when run under
+    **Scenario A** (no agents registered), because no agent-side entry then exists.
 - **Fail**: Any non-skipped step's Verification fails, or the warm-load code path itself
   regresses (covered by `TestWarmLoadAfterReopen`).
