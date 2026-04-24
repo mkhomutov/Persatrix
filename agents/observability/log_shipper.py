@@ -364,11 +364,18 @@ def record_to_proto(record: dict[str, Any]) -> logpb.LogEntry:
         and k not in _BOOKKEEPING_KEYS
         and not k.startswith("_")
     }
-    if ts_parse_error:
+    if ts_parse_error and "timestamp_parse_error" not in extras:
         # Issue #179 Should-Fix #2: surface malformed-timestamp inputs
         # rather than silently emitting an epoch-zero entry that would
         # sort to the front of every chronological merge in the
         # orchestrator's handleListLogs / SSE broadcast path.
+        #
+        # Guard: if a producer record already carries its own
+        # `timestamp_parse_error` key (unlikely but possible for
+        # pass-through / replay logs), preserve the user value rather
+        # than silently overwriting it.  The shipper's flag is a
+        # best-effort signal; an explicit producer value takes
+        # precedence.  (PR #182 review Should-Fix #1.)
         extras["timestamp_parse_error"] = True
     if extras:
         e.attributes.CopyFrom(_dict_to_struct(extras))

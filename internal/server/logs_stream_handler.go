@@ -36,6 +36,15 @@ const sseWriteTimeout = 30 * time.Second
 // (test doubles, middleware without deadline support) is treated as
 // best-effort: the write proceeds without a deadline rather than
 // failing the whole stream.
+//
+// Deadline lifetime: SetWriteDeadline persists on the underlying
+// net.Conn until reset or cleared.  We intentionally do not clear it
+// when the caller's loop exits — the connection is closed by the
+// http.Server on handler return, which releases any pending deadline
+// along with the socket.  A subsequent flusher.Flush() issued by the
+// caller runs under the most-recently-set deadline, which is the
+// desired behavior (a slow peer on Flush should still trip the
+// timeout rather than block indefinitely).  PR #182 review Low #2.
 func sseWrite(rc *http.ResponseController, w http.ResponseWriter, p []byte) error {
 	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil &&
 		!errors.Is(err, http.ErrNotSupported) {

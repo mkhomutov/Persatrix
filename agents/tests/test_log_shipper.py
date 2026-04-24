@@ -79,6 +79,44 @@ def test_record_to_proto_valid_string_timestamp_no_flag() -> None:
     assert "timestamp_parse_error" not in proto.attributes.fields
 
 
+@pytest.mark.parametrize("bad_ts", [[1, 2], {"bad": True}, object()])
+def test_record_to_proto_unknown_timestamp_type_stamps_now_and_flags(
+    bad_ts: Any,
+) -> None:
+    # Issue #179 Should-Fix #2 / PR #182 review Should-Fix #2: the
+    # `_to_timestamp` fallback branch for unknown types (anything that
+    # is not datetime | int | float | str) must also stamp-now and
+    # flag, not silently emit an epoch-zero entry.  Covers the final
+    # `# Unknown type` arm of the helper that the original PR #182
+    # tests did not exercise directly.
+    before = datetime.now(UTC)
+    proto = record_to_proto({"timestamp": bad_ts, "level": "INFO", "message": "m"})
+    after = datetime.now(UTC)
+    stamped = proto.timestamp.ToDatetime(tzinfo=UTC)
+    assert before <= stamped <= after
+    assert proto.attributes.fields["timestamp_parse_error"].bool_value is True
+
+
+def test_record_to_proto_preserves_producer_timestamp_parse_error() -> None:
+    # PR #182 review Should-Fix #1: a producer record that already
+    # carries its own `timestamp_parse_error` key must not have that
+    # value silently overwritten by the shipper's fallback flag.
+    # Unlikely in practice (structlog producers don't set this key),
+    # but the invariant should be explicit so pass-through / replay
+    # pipelines behave predictably.
+    proto = record_to_proto({
+        "timestamp": "not-a-real-timestamp",
+        "timestamp_parse_error": "producer-value",
+        "level": "INFO",
+        "message": "m",
+    })
+    # User value wins; shipper flag does not overwrite.
+    assert (
+        proto.attributes.fields["timestamp_parse_error"].string_value
+        == "producer-value"
+    )
+
+
 def test_record_to_proto_with_source() -> None:
     proto = record_to_proto({
         "level": "ERROR",
