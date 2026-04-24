@@ -23,6 +23,37 @@ import (
 // (nginx default 60s, Cloudflare 100s) without flooding the stream.
 const sseHeartbeatInterval = 15 * time.Second
 
+// sseWriteTimeout caps how long a single SSE write may block on a
+// stalled TCP peer.  Without it a dead client pins the subscriber slot
+// indefinitely; with MaxSubscribersDefault=64 that lets ~64 dead
+// clients soft-deny the SSE endpoint.  Issue #179 Should-Fix #3.
+// Sized a few heartbeat intervals wide so a transient pause on a
+// healthy client never trips the deadline.
+const sseWriteTimeout = 30 * time.Second
+
+// sseWrite applies the per-write deadline and writes a single chunk,
+// returning any error.  ErrNotSupported from the ResponseController
+// (test doubles, middleware without deadline support) is treated as
+// best-effort: the write proceeds without a deadline rather than
+// failing the whole stream.
+//
+// Deadline lifetime: SetWriteDeadline persists on the underlying
+// net.Conn until reset or cleared.  We intentionally do not clear it
+// when the caller's loop exits — the connection is closed by the
+// http.Server on handler return, which releases any pending deadline
+// along with the socket.  A subsequent flusher.Flush() issued by the
+// caller runs under the most-recently-set deadline, which is the
+// desired behavior (a slow peer on Flush should still trip the
+// timeout rather than block indefinitely).  PR #182 review Low #2.
+func sseWrite(rc *http.ResponseController, w http.ResponseWriter, p []byte) error {
+	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil &&
+		!errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	_, err := w.Write(p)
+	return err
+}
+
 // handleStreamLogs serves GET /api/v1/executions/{id}/logs/stream.
 //
 // TODO(RFC-0009): authenticate.  Same surface as the REST list
@@ -81,6 +112,7 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 	ctx := r.Context()
+	rc := http.NewResponseController(w)
 
 	for {
 		select {
@@ -91,7 +123,7 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 			// SSE comment frame; the colon prefix tells the EventSource
 			// parser to ignore the line — pure keep-alive.
-			if _, err := w.Write([]byte(": heartbeat\n\n")); err != nil {
+			if err := sseWrite(rc, w, []byte(": heartbeat\n\n")); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -105,13 +137,13 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 				s.logger.Warn("sse: marshal entry failed", zap.Error(err))
 				continue
 			}
-			if _, err := w.Write([]byte("data: ")); err != nil {
+			if err := sseWrite(rc, w, []byte("data: ")); err != nil {
 				return
 			}
-			if _, err := w.Write(data); err != nil {
+			if err := sseWrite(rc, w, data); err != nil {
 				return
 			}
-			if _, err := w.Write([]byte("\n\n")); err != nil {
+			if err := sseWrite(rc, w, []byte("\n\n")); err != nil {
 				return
 			}
 			flusher.Flush()

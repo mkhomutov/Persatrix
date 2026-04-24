@@ -100,6 +100,18 @@ const (
 // neither needed nor safe to widen.
 var executionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
+// reservedExecutionIDs are well-formed-but-reserved execution IDs that
+// the pattern would otherwise admit.  Currently contains only the
+// single-underscore sentinel the REST/SSE layer uses as the "merged
+// cross-execution view" path segment (see crossExecutionToken in
+// internal/server/logs_handler.go).  Without this guard a producer
+// could Append an entry with ExecutionID="_" and that ring would be
+// unreachable via REST/SSE (the handlers early-return on "_" and
+// never call Snapshot("_")).  Issue #179 Should-Fix #1.
+var reservedExecutionIDs = map[string]struct{}{
+	"_": {},
+}
+
 // validExecutionID guards every code path that uses ExecutionID as a
 // filesystem path component (see disk.flush / disk.read /
 // disk.evictIfOverCap). A producer that supplies "../../etc" or
@@ -108,7 +120,14 @@ var executionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 // expose Append to network input, at which point this validator is
 // the single boundary preventing OWASP A03 (Injection) /
 // path-traversal abuse — keep it strict.
+//
+// Values in reservedExecutionIDs are rejected even when the character
+// regex matches, so the REST/SSE sentinel cannot be shadowed by a
+// real ring.
 func validExecutionID(s string) bool {
+	if _, reserved := reservedExecutionIDs[s]; reserved {
+		return false
+	}
 	return executionIDPattern.MatchString(s)
 }
 

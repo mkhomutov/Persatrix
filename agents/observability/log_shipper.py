@@ -40,7 +40,7 @@ import os
 import threading
 from collections import deque
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import grpc
@@ -347,8 +347,10 @@ def record_to_proto(record: dict[str, Any]) -> logpb.LogEntry:
         trace_id=str(record.get("trace_id", "")),
         span_id=str(record.get("span_id", "")),
     )
+    ts_parse_error = False
     if (ts := record.get("timestamp")) is not None:
-        e.timestamp.CopyFrom(_to_timestamp(ts))
+        proto_ts, ts_parse_error = _to_timestamp(ts)
+        e.timestamp.CopyFrom(proto_ts)
     if (src := record.get("source")) is not None and isinstance(src, dict):
         e.source.CopyFrom(logpb.LogEntry.Source(
             file=str(src.get("file", "")),
@@ -362,29 +364,59 @@ def record_to_proto(record: dict[str, Any]) -> logpb.LogEntry:
         and k not in _BOOKKEEPING_KEYS
         and not k.startswith("_")
     }
+    if ts_parse_error and "timestamp_parse_error" not in extras:
+        # Issue #179 Should-Fix #2: surface malformed-timestamp inputs
+        # rather than silently emitting an epoch-zero entry that would
+        # sort to the front of every chronological merge in the
+        # orchestrator's handleListLogs / SSE broadcast path.
+        #
+        # Guard: if a producer record already carries its own
+        # `timestamp_parse_error` key (unlikely but possible for
+        # pass-through / replay logs), preserve the user value rather
+        # than silently overwriting it.  The shipper's flag is a
+        # best-effort signal; an explicit producer value takes
+        # precedence.  (PR #182 review Should-Fix #1.)
+        extras["timestamp_parse_error"] = True
     if extras:
         e.attributes.CopyFrom(_dict_to_struct(extras))
     return e
 
 
-def _to_timestamp(ts: Any) -> timestamp_pb2.Timestamp:
+def _to_timestamp(ts: Any) -> tuple[timestamp_pb2.Timestamp, bool]:
+    """Convert a record timestamp to a proto Timestamp.
+
+    Returns ``(timestamp, parse_error)``.  ``parse_error`` is ``True``
+    only for string inputs that failed RFC 3339 parsing; callers
+    surface this as a ``timestamp_parse_error=true`` attribute so the
+    downstream merge path can distinguish stamped-now entries from
+    well-formed ones.  Issue #179 Should-Fix #2.
+    """
     out = timestamp_pb2.Timestamp()
     if isinstance(ts, datetime):
         out.FromDatetime(ts)
-    elif isinstance(ts, (int, float)):
+        return out, False
+    if isinstance(ts, (int, float)):
         # Preserve sub-second precision for float epoch inputs; the
         # previous FromSeconds(int(ts)) silently truncated milliseconds
         # so SSE / chronological merges across log sources lost
         # ordering information for entries within the same second.
         # (PR #173 review nice-to-have #5.)
         out.FromNanoseconds(int(ts * 1_000_000_000))
-    elif isinstance(ts, str):
-        # Best-effort RFC 3339 parse.  On failure leave the Timestamp
-        # at its zero value so the orchestrator still admits the entry
-        # rather than rejecting on a malformed time.
-        with contextlib.suppress(ValueError):
+        return out, False
+    if isinstance(ts, str):
+        # Best-effort RFC 3339 parse.  On failure stamp the current
+        # wall clock and flag the entry so it still sorts into the
+        # vicinity of its siblings rather than collapsing the whole
+        # merged view onto 1970-01-01.
+        try:
             out.FromDatetime(datetime.fromisoformat(ts.replace("Z", "+00:00")))
-    return out
+            return out, False
+        except ValueError:
+            out.FromDatetime(datetime.now(UTC))
+            return out, True
+    # Unknown type: stamp now to keep the entry chronologically sane.
+    out.FromDatetime(datetime.now(UTC))
+    return out, True
 
 
 def _dict_to_struct(d: dict[str, Any]) -> struct_pb2.Struct:

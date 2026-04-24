@@ -24,8 +24,9 @@ import (
 
 // crossExecutionToken is the path-segment value used to request the
 // merged cross-execution view.  Documented as `id=_` in the RFC and
-// CLI; chosen because it is unambiguously not a valid execution ID
-// (the buffer's executionIDPattern does not match a single underscore).
+// CLI; chosen because it is reserved by the buffer's validator
+// (reservedExecutionIDs) so a producer cannot Append with
+// ExecutionID="_" and shadow the merged view.  Issue #179 Should-Fix #1.
 const crossExecutionToken = "_"
 
 // maxLogsLimit caps `limit` to keep a single response from holding the
