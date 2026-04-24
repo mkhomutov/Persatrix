@@ -6,9 +6,10 @@ Mermaid preview, or in any Mermaid-aware viewer.
 
 These diagrams describe the **current state of the whole system** (v0.1
 workflow surface + v0.2 persona, memory, and cost additions + v0.2.1
-human-agent chat surface + v0.2.3 observability stack). They are not tied
-to a specific RFC — when a phase lands, update the diagrams in place rather
-than adding phase-prefixed copies.
+human-agent chat surface + v0.2.2 bounded memory injection (no diagram
+changes) + v0.2.3 observability stack). They are not tied to a specific
+RFC — when a phase lands, update the diagrams in place rather than adding
+phase-prefixed copies.
 
 ## Index
 

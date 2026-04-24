@@ -463,7 +463,7 @@ completion.
 
 - **`persatrix logs` restart durability is gated on sealing** — the
   disk-store warm-load code path is covered by unit tests
-  (`TestWarmLoadAfterReopen` in
+  (`TestWarmLoad_ResumesFromDisk` in
   [internal/observability/logbuffer/buffer_test.go](internal/observability/logbuffer/buffer_test.go))
   but production never calls `Buffer.Seal`, so a restart mid-run leaves
   no queryable history for runs that were in flight at the moment of

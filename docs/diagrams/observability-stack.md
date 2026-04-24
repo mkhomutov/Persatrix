@@ -47,7 +47,7 @@ graph LR
     LS --> RING
     RING -->|"flush on eviction/seal"| DISK
     RING --> REST
-    DISK -. "warm-load<br/>(Buffer.Seal — RFC 0018 PR 7 follow-up)" .-> RING
+    DISK -. "warm-load<br/>(no-op today — RFC 0018 PR 7 wires Seal)" .-> RING
     REST --> CLI
     CLI -->|"--follow → SSE reconnect"| REST
     REST -. rendered .-> PLOGS
