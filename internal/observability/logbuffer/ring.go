@@ -8,6 +8,13 @@ type executionRing struct {
 	executionID string
 	cap         int
 
+	// lastTouch is the LRU stamp written atomically by the
+	// getOrCreateRing RLock fast-path. evictLocked reads it under the
+	// Buffer's write lock to pick the oldest-touched victim. Kept on
+	// the ring (not on the Buffer) so the touch never blocks an
+	// admission on another execution.
+	lastTouch uint64
+
 	mu      sync.Mutex
 	entries []Entry
 	head    int  // index of oldest entry when len(entries) == cap

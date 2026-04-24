@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,8 +78,12 @@ func (d *diskStore) scan() error {
 				continue
 			}
 			seqStr := strings.TrimSuffix(f.Name(), ".jsonl")
-			var seq int
-			if _, err := fmt.Sscanf(seqStr, "%d", &seq); err != nil {
+			// strconv.Atoi rejects whitespace and signed integers
+			// deterministically; the previous fmt.Sscanf("%d", ...)
+			// silently accepted both. Pair with seq < 1 to skip
+			// externally-dropped junk filenames (PR #172 review nit).
+			seq, err := strconv.Atoi(seqStr)
+			if err != nil || seq < 1 {
 				continue
 			}
 			if seq > maxSeq {
@@ -139,6 +144,15 @@ func (d *diskStore) list() ([]string, error) {
 // package-private but multiple call sites construct paths from
 // executionID, and a regression in any one of them would otherwise
 // silently re-open the path-traversal hole.
+//
+// Critical-section shape (PR #172 review Should-Fix #2): d.mu is held
+// only long enough to reserve the next sequence number for this
+// execution. The actual file IO (mkdir, open, write, fsync, parent
+// fsync, rename) and the post-write totalMap / usage update happen
+// without the lock so concurrent flushes for *different* executions
+// no longer serialise on a single fsync. The follow-up evictIfOverCap
+// re-acquires d.mu only for the bookkeeping snapshot; per-victim
+// RemoveAll runs unlocked.
 func (d *diskStore) flush(executionID string, entries []Entry) error {
 	if len(entries) == 0 {
 		return nil
@@ -146,21 +160,31 @@ func (d *diskStore) flush(executionID string, entries []Entry) error {
 	if !validExecutionID(executionID) {
 		return fmt.Errorf("logbuffer: refusing flush with invalid execution_id %q", executionID)
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	dir := filepath.Join(d.root, executionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("logbuffer: mkdir %q: %w", dir, err)
 	}
+
+	// Reserve the next sequence under the short critical section.
+	d.mu.Lock()
 	seq := d.nextSeq[executionID]
 	if seq == 0 {
 		seq = 1
 	}
+	d.nextSeq[executionID] = seq + 1
+	d.mu.Unlock()
+
 	path := filepath.Join(dir, fmt.Sprintf("%010d.jsonl", seq))
 	tmp := path + ".tmp"
 
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	// O_NOFOLLOW (POSIX) refuses to open a symlinked target so a
+	// same-UID local actor pre-creating <DIR>/<exec_id>/<seq>.jsonl.tmp
+	// as a symlink to e.g. ~/.ssh/authorized_keys cannot have that
+	// target truncated by the O_TRUNC below. The flag is benignly
+	// ignored on Windows (constant resolves to 0 there) and on
+	// platforms where the kernel does not support it.
+	f, err := os.OpenFile(tmp, openFlagsNoFollow, 0o600)
 	if err != nil {
 		return fmt.Errorf("logbuffer: open %q: %w", tmp, err)
 	}
@@ -205,12 +229,15 @@ func (d *diskStore) flush(executionID string, entries []Entry) error {
 		}
 		_ = dirF.Close()
 	}
-	info, err := os.Stat(path)
-	if err == nil {
-		d.totalMap[executionID] += info.Size()
-		d.usage.Add(info.Size())
+
+	var added int64
+	if info, statErr := os.Stat(path); statErr == nil {
+		added = info.Size()
 	}
-	d.nextSeq[executionID] = seq + 1
+	d.mu.Lock()
+	d.totalMap[executionID] += added
+	d.mu.Unlock()
+	d.usage.Add(added)
 
 	d.evictIfOverCap()
 	return nil
@@ -246,8 +273,8 @@ func (d *diskStore) read(executionID string) []Entry {
 			continue
 		}
 		seqStr := strings.TrimSuffix(f.Name(), ".jsonl")
-		var seq int
-		if _, err := fmt.Sscanf(seqStr, "%d", &seq); err != nil {
+		seq, err := strconv.Atoi(seqStr)
+		if err != nil || seq < 1 {
 			continue
 		}
 		sorted = append(sorted, seqFile{seq: seq, path: filepath.Join(dir, f.Name())})
@@ -284,46 +311,66 @@ func (d *diskStore) read(executionID string) []Entry {
 }
 
 // evictIfOverCap deletes oldest-first execution directories until usage
-// is back under cap. Caller holds d.mu.
+// is back under cap.
+//
+// Snapshot the candidate set under d.mu (so concurrent flush() calls
+// see a consistent totalMap), then perform os.RemoveAll outside the
+// lock so concurrent flushes for unrelated executions are not blocked
+// on a slow recursive delete (PR #172 review Should-Fix #2).
+//
+// mtimes are read from the on-disk directory once per sweep rather
+// than maintained in totalMap because the eviction order has a small
+// failure tolerance (one extra eviction is benign) and a missing
+// mtime simply demotes the candidate to "stale enough to evict".
 func (d *diskStore) evictIfOverCap() {
 	if d.cap <= 0 || d.usage.Load() <= d.cap {
 		return
 	}
-	entries, err := os.ReadDir(d.root)
-	if err != nil {
-		return
-	}
+	d.mu.Lock()
 	type item struct {
 		id   string
+		size int64
 		mtim int64
 	}
-	items := make([]item, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	candidates := make([]item, 0, len(d.totalMap))
+	for id, size := range d.totalMap {
+		var mtim int64
+		if info, err := os.Stat(filepath.Join(d.root, id)); err == nil {
+			mtim = info.ModTime().UnixNano()
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		items = append(items, item{id: e.Name(), mtim: info.ModTime().UnixNano()})
+		candidates = append(candidates, item{id: id, size: size, mtim: mtim})
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].mtim < items[j].mtim })
-	for _, it := range items {
+	d.mu.Unlock()
+
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].mtim < candidates[j].mtim })
+	for _, it := range candidates {
 		if d.usage.Load() <= d.cap {
 			return
 		}
 		dir := filepath.Join(d.root, it.id)
-		size := d.totalMap[it.id]
 		if err := os.RemoveAll(dir); err != nil {
 			d.logger.Warn("logbuffer: failed to evict",
 				zap.String("execution_id", it.id), zap.Error(err))
 			continue
 		}
-		d.usage.Add(-size)
+		// Re-read totalMap[it.id] under the lock and subtract that, not the
+		// snapshot size. A concurrent flush() between snapshot and RemoveAll
+		// may have grown totalMap[it.id] by delta bytes; RemoveAll wiped
+		// everything on disk (snapshot + delta), so subtracting only the
+		// snapshot would leak delta into d.usage permanently (it never
+		// self-heals because the map entry is then deleted). Subtracting the
+		// final map value matches what was actually removed from disk.
+		// PR #177 review Should-Fix #2.
+		d.mu.Lock()
+		finalSize, ok := d.totalMap[it.id]
+		if !ok {
+			finalSize = it.size
+		}
 		delete(d.totalMap, it.id)
 		delete(d.nextSeq, it.id)
+		d.mu.Unlock()
+		d.usage.Add(-finalSize)
 		d.logger.Info("logbuffer: evicted execution from disk",
-			zap.String("execution_id", it.id), zap.Int64("freed_bytes", size))
+			zap.String("execution_id", it.id), zap.Int64("freed_bytes", finalSize))
 	}
 }

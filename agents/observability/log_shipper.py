@@ -93,6 +93,22 @@ _RESERVED_KEYS: frozenset[str] = frozenset({
     "source",
 })
 
+#: structlog / stdlib-logging bookkeeping keys that should never reach
+#: the orchestrator's attributes Struct.  ``_record`` is structlog's
+#: stdlib LogRecord shim; ``_from_structlog`` flags records that
+#: round-tripped through the stdlib bridge; ``logger``/``stack_info``/
+#: ``exc_info`` are stdlib LogRecord internals.  Filtering by exact
+#: name keeps the contract stable; the additional ``_``-prefix sweep
+#: in ``record_to_proto`` covers ad-hoc bookkeeping keys added by
+#: third-party processors.  (PR #173 review nice-to-have #1.)
+_BOOKKEEPING_KEYS: frozenset[str] = frozenset({
+    "_record",
+    "_from_structlog",
+    "logger",
+    "stack_info",
+    "exc_info",
+})
+
 logger = _stdlib_logging.getLogger("Persatrix.agent.log_shipper")
 
 
@@ -339,7 +355,13 @@ def record_to_proto(record: dict[str, Any]) -> logpb.LogEntry:
             line=int(src.get("line", 0)),
             function=str(src.get("function", "")),
         ))
-    extras = {k: v for k, v in record.items() if k not in _RESERVED_KEYS}
+    extras = {
+        k: v
+        for k, v in record.items()
+        if k not in _RESERVED_KEYS
+        and k not in _BOOKKEEPING_KEYS
+        and not k.startswith("_")
+    }
     if extras:
         e.attributes.CopyFrom(_dict_to_struct(extras))
     return e
@@ -350,7 +372,12 @@ def _to_timestamp(ts: Any) -> timestamp_pb2.Timestamp:
     if isinstance(ts, datetime):
         out.FromDatetime(ts)
     elif isinstance(ts, (int, float)):
-        out.FromSeconds(int(ts))
+        # Preserve sub-second precision for float epoch inputs; the
+        # previous FromSeconds(int(ts)) silently truncated milliseconds
+        # so SSE / chronological merges across log sources lost
+        # ordering information for entries within the same second.
+        # (PR #173 review nice-to-have #5.)
+        out.FromNanoseconds(int(ts * 1_000_000_000))
     elif isinstance(ts, str):
         # Best-effort RFC 3339 parse.  On failure leave the Timestamp
         # at its zero value so the orchestrator still admits the entry

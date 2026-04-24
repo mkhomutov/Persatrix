@@ -37,6 +37,11 @@ func newTokenBucket(ratePerSec int) *tokenBucket {
 // allow consumes one token if available and returns true; otherwise
 // returns false without blocking.
 func (t *tokenBucket) allow() bool {
+	// Write-once contract: t.rate is set at construction time
+	// (newTokenBucket) and is never mutated, so this lock-free
+	// short-circuit is race-free. A future mutator that violates the
+	// write-once contract must add a load-acquire here. (PR #172
+	// review nice-to-have.)
 	if t.rate == 0 {
 		return true
 	}

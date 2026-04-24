@@ -185,6 +185,40 @@ All notable changes to this project will be documented in this file.
 - Empty `subagent.role` span attributes are no longer emitted (kept
   attribute set lean).
 
+### Changed (RFC 0018 PR 8 — log buffer + shipper polish)
+
+- `Buffer.Append` no longer takes the LRU write lock on the hot path:
+  re-admitting an existing execution updates an atomic `lastTouch`
+  stamp on the ring under an `RLock`, and only the cold path
+  (first-admit + eviction sweep) takes the write lock. Eliminates a
+  global serialisation point for high-frequency multi-execution
+  ingest.
+- `diskStore.flush` now releases the disk lock before fsync / parent
+  fsync / rename / `evictIfOverCap`, so concurrent flushes for
+  different executions no longer serialise on a single fsync.
+- `evictIfOverCap` now reads candidate sizes from the maintained
+  `totalMap` snapshot under a short critical section instead of
+  re-walking `os.ReadDir` and re-stating every directory on each
+  sweep; the recursive `os.RemoveAll` runs unlocked.
+- The per-execution rate-limit `WARN`-once gate (`rateWarned`) is
+  pruned when its execution is LRU-evicted so the gate map cannot
+  grow unbounded over the orchestrator's lifetime.
+- Disk flush opens the per-sequence `.tmp` file with `O_NOFOLLOW`
+  (POSIX) as defence-in-depth against same-UID symlink-pre-creation
+  attacks.
+- `disk.scan` / `disk.read` now use `strconv.Atoi` instead of
+  `fmt.Sscanf("%d", ...)` and reject non-positive sequence numbers,
+  so externally-dropped junk filenames (whitespace-padded, signed)
+  no longer skew `nextSeq`.
+- Python log shipper's `record_to_proto` now filters bookkeeping keys
+  (structlog's `_record` / `_from_structlog`, stdlib `logger` /
+  `stack_info` / `exc_info`) plus any `_`-prefixed key from the
+  outgoing `attributes` Struct.
+- `_to_timestamp` preserves sub-second precision for numeric epoch
+  inputs (`FromNanoseconds(int(ts * 1e9))` instead of the previous
+  `FromSeconds(int(ts))`), so chronological merges across log sources
+  no longer lose ordering within the same second.
+
 ## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
