@@ -154,7 +154,7 @@ class TestEventTriggersTickLink:
         assert tick.links[0].attributes["link.kind"] == "trigger"
 
         # And on_tick() must have drained the queue.
-        assert agent._pending_tick_links == []
+        assert len(agent._pending_tick_links) == 0
 
     async def test_dispatch_outside_span_queues_no_link(
         self, exporter: InMemorySpanExporter,
@@ -174,7 +174,7 @@ class TestEventTriggersTickLink:
             ),
         )
 
-        assert agent._pending_tick_links == []
+        assert len(agent._pending_tick_links) == 0
 
 
 # ─── sub-agent spawn span ─────────────────────────────────────────────────────

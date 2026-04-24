@@ -10,20 +10,44 @@ services:
     restart: unless-stopped
     # NOTE(review-F02): Docker 'command' replaces Dockerfile CMD entirely.
     # All required flags must be listed here, not just the override.
-    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development"]
+    # PR #173 review Must-Fix #2 defaulted --grpc-bind to 127.0.0.1 so a
+    # bare binary run does not expose the unauthenticated LogService on
+    # every interface. Inside the compose bridge network the agents must
+    # reach the orchestrator at orchestrator:9090, so 0.0.0.0 is required
+    # here.
+    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development"]
     ports:
-      - "9090:9090"   # gRPC
+      # NOTE(review-PR187, Should-Fix S1): the gRPC LogService is currently
+      # unauthenticated (auth deferred to RFC 0009). --grpc-bind 0.0.0.0
+      # above is required so agents on the compose bridge can dial
+      # orchestrator:9090, but the *host* publish must still be loopback-
+      # only — otherwise anyone on the same LAN as the developer can
+      # inject/read log traffic under arbitrary execution_ids. Binding the
+      # publish to 127.0.0.1 preserves PR #173 Must-Fix #2's hardening
+      # intent (the binary default) while still letting `grpcurl
+      # localhost:9090` on the host work for dev debugging.
+      - "127.0.0.1:9090:9090"   # gRPC (loopback-only; unauthenticated LogService)
       - "8080:8080"   # HTTP REST + SSE
     volumes:
       - ./config:/app/config:ro
       - ./workflows:/app/workflows:ro
       - workspace:/workspace
+      # RFC 0018 PR 5: the log buffer disk-persists sealed rings to
+      # PERSATRIX_LOGBUFFER_DIR. Mount a writable named volume so the
+      # non-root container user (appuser) can create per-execution
+      # subdirectories and survive a container restart.
+      - orchestrator-data:/var/lib/persatrix
     environment:
       # RFC 0019 PR 4: OTLP traffic flows through the Collector (tail
       # sampling + fan-out to Jaeger / Prometheus / Loki). Direct
       # orchestrator -> Jaeger wiring is replaced by the Collector hop.
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=persatrix-server
+      # RFC 0018 PR 5: pin the log buffer disk store to a path on the
+      # dedicated orchestrator-data volume. Default `data/logs` is a
+      # relative path and the non-root container has no writable CWD,
+      # so leaving it unset disables the entire log-service surface.
+      - PERSATRIX_LOGBUFFER_DIR=/var/lib/persatrix/logs
     depends_on:
       - otel-collector
     healthcheck:
@@ -190,4 +214,9 @@ services:
 
 volumes:
   workspace:
+    driver: local
+  # RFC 0018 PR 5: dedicated volume for the orchestrator log buffer's
+  # disk-persisted sealed rings (PERSATRIX_LOGBUFFER_DIR). Separated
+  # from `workspace` so it is not mounted into agent containers.
+  orchestrator-data:
     driver: local
