@@ -63,11 +63,22 @@ endpoint (deferred to RFC 0009).
 
 ### Step 1: REST round-trip on a completed execution
 
+`persatrix run` prints a human-readable line of the form
+`OK Workflow <id> submitted (run_id: <run_id>)` and returns immediately — there
+is no `--wait` flag. Capture the `run_id` from stdout, then poll
+`persatrix status <run_id>` until `Status` is no longer `pending`/`running`
+before querying logs.
+
 **Action**:
 
 ```pwsh
-$run = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping endpoint"}' --wait | ConvertFrom-Json
-./bin/persatrix logs $run.execution_id --verbose | Select-Object -First 20
+$out = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping endpoint"}'
+$runId = ([regex]'run_id:\s*([^)]+)').Match(($out -join "`n")).Groups[1].Value.Trim()
+do {
+    Start-Sleep -Seconds 1
+    $status = (./bin/persatrix status $runId) -join "`n"
+} while ($status -match 'Status:\s*(pending|running)')
+./bin/persatrix logs $runId --verbose | Select-Object -First 20
 ```
 
 **Expected**:
@@ -76,9 +87,14 @@ $run = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping 
   agent (`service.kind=agent`), all carrying matching `execution_id` and (where a span was active)
   matching `trace_id` / `span_id`.
 
+> **Note**: in environments without agent credentials (e.g. `ANTHROPIC_API_KEY` unset)
+> the run will fail at planner registration; in that case only `service.kind=orchestrator`
+> lines are produced, which still validates the orchestrator self-ingest path. The
+> agent-side check then requires a fully provisioned environment.
+
 **Verification**:
-- [ ] At least one `agent` and one `orchestrator` line present
-- [ ] All printed lines share the same `execution_id`
+- [ ] At least one `orchestrator` line present (and one `agent` line when credentials available)
+- [ ] All printed lines share the same `execution_id` (matches `$runId`)
 
 ---
 
@@ -87,9 +103,9 @@ $run = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping 
 **Action**:
 
 ```pwsh
-./bin/persatrix logs $run.execution_id --level WARN
-./bin/persatrix logs $run.execution_id --since 5m
-./bin/persatrix logs $run.execution_id --workflow feature-builder
+./bin/persatrix logs $runId --level WARN
+./bin/persatrix logs $runId --since 5m
+./bin/persatrix logs $runId --workflow feature-builder
 ./bin/persatrix logs _ --since 1h | Measure-Object -Line
 ```
 
@@ -110,9 +126,11 @@ $run = ./bin/persatrix run feature-builder --input '{"user_request":"Add a ping 
 **Action** (terminal A):
 
 ```pwsh
-./bin/persatrix run feature-builder --input '{"user_request":"long-running"}' | Out-Null
-# capture the execution id, then in terminal B:
-./bin/persatrix logs --follow <execution_id>
+$out3 = ./bin/persatrix run feature-builder --input '{"user_request":"long-running"}'
+$runId3 = ([regex]'run_id:\s*([^)]+)').Match(($out3 -join "`n")).Groups[1].Value.Trim()
+"$runId3"
+# then in terminal B (substitute the run_id printed in terminal A):
+./bin/persatrix logs --follow $runId3
 ```
 
 While the follow session is open, restart the orchestrator (`Ctrl-C` then `make run` again).
@@ -136,11 +154,18 @@ While the follow session is open, restart the orchestrator (`Ctrl-C` then `make 
 **Action**:
 
 ```pwsh
-$run2 = ./bin/persatrix run feature-builder --input '{"user_request":"durability"}' --wait | ConvertFrom-Json
-# stop the orchestrator
-# rm -r data/logs/$run2.execution_id  ← do NOT delete; we want to verify warm-load
-# start it again: `make run`
-./bin/persatrix logs $run2.execution_id | Measure-Object -Line
+$out2 = ./bin/persatrix run feature-builder --input '{"user_request":"durability"}'
+$runId2 = ([regex]'run_id:\s*([^)]+)').Match(($out2 -join "`n")).Groups[1].Value.Trim()
+do {
+    Start-Sleep -Seconds 1
+    $status = (./bin/persatrix status $runId2) -join "`n"
+} while ($status -match 'Status:\s*(pending|running)')
+$beforeRestart = (./bin/persatrix logs $runId2 | Measure-Object -Line).Lines
+# stop the orchestrator (Ctrl-C in the make run terminal).
+# Do NOT delete data/logs/$runId2 — we want to verify warm-load.
+# Start it again: `make run`
+$afterRestart = (./bin/persatrix logs $runId2 | Measure-Object -Line).Lines
+"before=$beforeRestart after=$afterRestart"
 ```
 
 **Expected**: Pre-restart entries are still queryable after the orchestrator process restart.
@@ -176,7 +201,7 @@ $env:PERSATRIX_LOG_FORMAT = "pretty"
 **Action**: pick any line from Step 1 with a non-empty `trace_id`, then:
 
 ```pwsh
-./bin/persatrix logs $run.execution_id --trace <trace_id>
+./bin/persatrix logs $runId --trace <trace_id>
 ```
 
 **Expected**: Output is restricted to entries whose `trace_id` matches; entries from both
