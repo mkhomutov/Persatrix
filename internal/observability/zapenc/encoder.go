@@ -168,17 +168,12 @@ type Options struct {
 	Redactor redact.Redactor
 }
 
-// NewEncoder returns a [zapcore.Encoder] that emits the Persatrix log schema.
-//
-// The returned encoder wraps zap's built-in JSON encoder for primitive
-// field accumulation (AddString, AddInt, etc.) and overrides EncodeEntry to
-// post-process the JSON into the schema's canonical key order, inject the
-// service.* + schema_version fields, apply the rename map, project zap's
-// entry.Caller into the source object, and call the registered Redactor.
-//
-// Construct the parent logger with zap.AddCaller() for the source field to
-// be populated; without it source is omitted (the schema marks it Optional).
+// NewEncoder returns the schema [zapcore.Encoder].  See options.go for the
+// Must-style validation contract (issue #178).
+// Use zap.AddCaller() on the parent logger to populate `source`;
+// without it, `source` is omitted and user-supplied shadows are deleted.
 func NewEncoder(opts Options) zapcore.Encoder {
+	opts.mustValidate()
 	if opts.Redactor == nil {
 		opts.Redactor = redact.NoopRedactor{}
 	}
@@ -302,16 +297,23 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 		}
 	}
 
-	// 2. Inject schema_version + service.* group.  These are authoritative
-	//    and overwrite any pre-existing keys (per RFC § B "set by the
-	//    emitter at the moment a log record is created and never rewritten
-	//    by the orchestrator on ingest" — at *creation* the encoder owns
-	//    these keys exclusively).
+	// 2. Inject schema_version + service.* group + re-stamp reserved
+	//    timestamp / level / message from entry (issue #178: without this
+	//    post-parse overwrite, user fields with the same keys win via
+	//    encoding/json's last-value-wins duplicate-key rule).  Values match
+	//    jsonEncoderConfig's encoders (RFC3339Nano, CapitalLevel).
 	record["schema_version"] = SchemaVersion
+	// Force UTC on the authoritative re-stamped wire timestamp
+	// (docs/observability.md § 2: "UTC by default").
+	record["timestamp"] = entry.Time.UTC().Format(time.RFC3339Nano)
+	record["level"] = entry.Level.CapitalString()
+	record["message"] = entry.Message
 	record["service.kind"] = e.opts.ServiceKind
 	record["service.instance"] = e.opts.ServiceInstance
 	if e.opts.ServiceRole != "" {
 		record["service.role"] = e.opts.ServiceRole
+	} else {
+		delete(record, "service.role") // strip user shadow
 	}
 
 	// 3. Project entry.Caller → source object.  zap's inner encoder emits a
@@ -329,6 +331,8 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 		// site provenance.
 		delete(record, "caller")
 		delete(record, "function")
+	} else {
+		delete(record, "source") // issue #178: drop user shadow when no caller
 	}
 
 	// 4. Apply the redactor with a panic-safe fallback.  A buggy or hostile
