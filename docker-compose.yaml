@@ -125,6 +125,36 @@ services:
       timeout: 5s
       retries: 3
 
+  # ─── Persona Agent: Ember Owl (v0.2+) ────────────
+  # Declared in config/agents.yaml as type: "persona". Shares the same
+  # Dockerfile.agent runtime as the task agents above; the persona tick
+  # loop + three-tier memory are selected by the agent's type field.
+  agent-ember-owl:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    command: ["--agent", "ember-owl", "--port", "50054", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-ember-owl:50054"]
+    ports:
+      - "50054:50054"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace
+      # Persona memory (SQLite) resolves `data/memory.db` relative to the
+      # container WORKDIR (/app). The non-root `appuser` cannot write to
+      # the baked /app/data, so mount a dedicated writable volume here.
+      - ember-owl-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50054), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # ─── Observability: OpenTelemetry Collector ──────
   # RFC 0019 § H — central tail-sampling pipeline. Traces fan out to Jaeger,
   # metrics to Prometheus, logs to Loki. Reference config under
@@ -219,4 +249,9 @@ volumes:
   # disk-persisted sealed rings (PERSATRIX_LOGBUFFER_DIR). Separated
   # from `workspace` so it is not mounted into agent containers.
   orchestrator-data:
+    driver: local
+  # Persona memory SQLite store (ember-owl) — mounted at /app/data so the
+  # relative `db_path: data/memory.db` in config/agents.yaml resolves to a
+  # writable path for the non-root container user.
+  ember-owl-data:
     driver: local
