@@ -513,3 +513,116 @@ func TestEncoder_LegacyRenameCollisionIsDeterministic(t *testing.T) {
 		assert.NotContains(t, record, "executionID", "legacy executionID must be removed")
 	}
 }
+
+// TestNewEncoder_PanicsWhenServiceKindEmpty locks in the Must-style
+// constructor contract (RFC 0018 PR 2 review, issue #178).  The schema's
+// required-field group (§ B table 1) includes service.kind; returning an
+// encoder with an empty value would produce log lines that silently violate
+// the required-field invariant and — since encodeFallbackEnvelope re-emits
+// the same service.kind — the double-failure path would violate it too.
+func TestNewEncoder_PanicsWhenServiceKindEmpty(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"zapenc: Options.ServiceKind must be non-empty (schema required-field group)",
+		func() {
+			_ = NewEncoder(Options{ServiceKind: "", ServiceInstance: "node-1"})
+		},
+	)
+}
+
+// TestNewEncoder_PanicsWhenServiceInstanceEmpty mirrors the ServiceKind
+// contract.  cmd/orchestrator/main.go's instance-resolution fallback makes
+// an empty value unreachable in practice, but a future agent-side or test
+// caller could regress it; the panic is a startup-time trip-wire.
+func TestNewEncoder_PanicsWhenServiceInstanceEmpty(t *testing.T) {
+	assert.PanicsWithValue(t,
+		"zapenc: Options.ServiceInstance must be non-empty (schema required-field group)",
+		func() {
+			_ = NewEncoder(Options{ServiceKind: "orchestrator", ServiceInstance: ""})
+		},
+	)
+}
+
+// TestEncoder_ReservedKeysShadowUserFields locks in the reserved-key
+// shadowing contract (RFC 0018 PR 2 review, issue #178).  The inner JSON
+// encoder emits timestamp / level / message at the head of the record from
+// the zapcore.Entry, and any user field with the same key is appended
+// afterwards.  encoding/json's duplicate-key rule is last-value-wins, so
+// without the post-parse authoritative overwrite a caller like
+//
+//	logger.Info("hello", zap.String("timestamp", "fake"))
+//
+// would silently poison the wire format.  The test emits one forged value
+// per encoder-owned key and asserts the encoder's value survives.
+func TestEncoder_ReservedKeysShadowUserFields(t *testing.T) {
+	opts := defaultOpts()
+	opts.ServiceRole = "coder"
+	logger, buf := newTestLogger(t, opts)
+
+	logger.Info("real-message",
+		zap.String("schema_version", "99"),
+		zap.String("service.kind", "attacker"),
+		zap.String("service.instance", "attacker-host"),
+		zap.String("service.role", "attacker-role"),
+		zap.String("timestamp", "1970-01-01T00:00:00Z"),
+		zap.String("level", "DEBUG"),
+		zap.String("message", "forged-message"),
+		zap.Any("source", map[string]any{"file": "forged.go", "line": 0, "function": "forged"}),
+	)
+
+	record := parseLine(t, buf)
+	assert.Equal(t, SchemaVersion, record["schema_version"],
+		"encoder-owned schema_version must not be shadowable by a user field")
+	assert.Equal(t, "orchestrator", record["service.kind"],
+		"encoder-owned service.kind must not be shadowable")
+	assert.Equal(t, "test-node", record["service.instance"],
+		"encoder-owned service.instance must not be shadowable")
+	assert.Equal(t, "coder", record["service.role"],
+		"encoder-owned service.role must not be shadowable when set in Options")
+	assert.Equal(t, "INFO", record["level"],
+		"level must be re-stamped from zapcore.Entry, not shadowable by user field")
+	assert.Equal(t, "real-message", record["message"],
+		"message must be re-stamped from zapcore.Entry, not shadowable by user field")
+	ts, _ := record["timestamp"].(string)
+	assert.NotEqual(t, "1970-01-01T00:00:00Z", ts,
+		"timestamp must be re-stamped from zapcore.Entry, not shadowable by user field")
+
+	src, ok := record["source"].(map[string]any)
+	require.True(t, ok, "source must remain an encoder-controlled object")
+	file, _ := src["file"].(string)
+	assert.NotEqual(t, "forged.go", file,
+		"source must be projected from entry.Caller, not shadowable by user field")
+}
+
+// TestEncoder_ServiceRoleNotShadowableWhenUnset is the complement to the
+// "_IncludedWhenSet" test: when the encoder is constructed without a
+// ServiceRole, a user field zap.String("service.role", "fake") must not be
+// able to inject a role onto the wire (the schema treats service.role as
+// Optional but encoder-owned).
+func TestEncoder_ServiceRoleNotShadowableWhenUnset(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("attempted-shadow", zap.String("service.role", "attacker-role"))
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "service.role",
+		"service.role must be absent when Options.ServiceRole is empty, regardless of user input")
+}
+
+// TestEncoder_SourceNotShadowableWithoutAddCaller locks in the encoder's
+// source projection contract: when zap.AddCaller() is not enabled,
+// entry.Caller.Defined is false and source must be omitted.  A user field
+// zap.Any("source", ...) must not leak through as a forged provenance.
+func TestEncoder_SourceNotShadowableWithoutAddCaller(t *testing.T) {
+	buf := &bytes.Buffer{}
+	enc := NewEncoder(defaultOpts())
+	core := zapcore.NewCore(enc, zapcore.AddSync(buf), zapcore.DebugLevel)
+	logger := zap.New(core) // intentionally no AddCaller()
+	t.Cleanup(func() { _ = logger.Sync() })
+
+	logger.Info("no-caller",
+		zap.Any("source", map[string]any{"file": "forged.go", "line": 1, "function": "forged"}),
+	)
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "source",
+		"source must remain omitted when entry.Caller.Defined == false, even if a user supplies one")
+}

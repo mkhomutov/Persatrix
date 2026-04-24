@@ -437,6 +437,12 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 Captured during PR #164 review and **deferred** to [#178](https://github.com/mkhomutov/Persatrix/issues/178) (Go zap encoder hardening — 8 items: `Must`-style ctor for required `ServiceKind`/`ServiceInstance`, fallback envelope required-field group, reserved-key shadowing test, Redactor mutate-then-panic doc, dev-mode-in-production warning, `BenchmarkEncodeEntry` baseline, `legacyRenames` fuzz/property test, package-global mutable globals safety).
 
+Landed so far:
+
+- **`Must`-style ctor + fallback envelope required-field group + reserved-key shadowing test** — addressed together as a correctness cluster. [`NewEncoder`](../../internal/observability/zapenc/encoder.go) now panics on empty `Options.ServiceKind` / `Options.ServiceInstance`, which transitively fixes the `encodeFallbackEnvelope` required-field group (it re-emits the same validated service.* values). `EncodeEntry` also re-stamps `timestamp` / `level` / `message` from the `zapcore.Entry` after the inner-encoder JSON parse, so the reserved-key set is no longer shadowable via `encoding/json`'s last-value-wins duplicate-key rule. Tests: `TestNewEncoder_PanicsWhenServiceKindEmpty`, `TestNewEncoder_PanicsWhenServiceInstanceEmpty`, `TestEncoder_ReservedKeysShadowUserFields`, `TestEncoder_ServiceRoleNotShadowableWhenUnset`, `TestEncoder_SourceNotShadowableWithoutAddCaller`.
+
+Still open on [#178](https://github.com/mkhomutov/Persatrix/issues/178): Redactor mutate-then-panic doc, `PERSATRIX_LOG_FORMAT=pretty` + production startup warning, `BenchmarkEncodeEntry` baseline, `legacyRenames` fuzz/property test, package-global mutable globals safety.
+
 ##### From PR 3 review
 
 Captured during PR #165 review and **deferred** to [#178](https://github.com/mkhomutov/Persatrix/issues/178) (gRPC correlation polish — 8 items: `InjectIDs` write-semantics decision, `_unbind` pre-bound contextvar restoration, fallback-handler stderr diagnostic, `LoggerWithContext(ctx, nil)` doc, `runID`/`ExecutionID` rename consistency, cross-language drift test for `_METADATA_TO_CONTEXTVAR`, `tests/integration/test_logs_correlation.py` reset helper, `_METADATA_TO_CONTEXTVAR` underscore-vs-`__all__` resolution).

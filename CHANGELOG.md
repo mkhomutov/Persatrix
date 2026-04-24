@@ -219,6 +219,29 @@ All notable changes to this project will be documented in this file.
   `FromSeconds(int(ts))`), so chronological merges across log sources
   no longer lose ordering within the same second.
 
+### Fixed (RFC 0018 PR 2 hardening — issue #178 encoder correctness cluster)
+
+- [`internal/observability/zapenc.NewEncoder`](internal/observability/zapenc/encoder.go)
+  now panics at construction when `Options.ServiceKind` or
+  `Options.ServiceInstance` is empty. Both are members of the RFC 0018
+  § B required-field group; returning a usable encoder with empty values
+  produced log lines that silently violated the required-field invariant
+  — including the `encodeFallbackEnvelope` double-failure path, which
+  re-emits the same service.* values. A panic at startup is the correct
+  failure mode: no valid zero state exists for a production logger.
+- `EncodeEntry` now re-stamps `timestamp`, `level`, `message` from the
+  `zapcore.Entry` after the inner-encoder JSON is parsed. Previously, a
+  caller that added a user field with one of those keys
+  (e.g. `zap.String("timestamp", "fake")`) could shadow the encoder's
+  value via `encoding/json`'s last-value-wins duplicate-key rule. The
+  reserved-key shadowing contract now applies uniformly to the whole
+  encoder-owned set (`schema_version`, `service.kind`, `service.instance`,
+  `service.role`, `timestamp`, `level`, `message`, `source`).
+- `source` is now explicitly deleted from the parsed record when
+  `entry.Caller.Defined` is false, so a user field `zap.Any("source", …)`
+  cannot leak a forged provenance object onto the wire when
+  `zap.AddCaller()` was not enabled.
+
 ## [0.2.2] - 2026-04-22
 
 > **Codename:** Bounded Persona Memory Injection
