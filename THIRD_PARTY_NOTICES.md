@@ -135,7 +135,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packag
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (203 crates).
+Collected via `cargo license --json` inside `cli/` (206 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -152,7 +152,7 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `bumpalo` | 3.20.2 | Apache-2.0 OR MIT | [link](https://github.com/fitzgen/bumpalo) |
 | `bytecount` | 0.6.9 | Apache-2.0 OR MIT | [link](https://github.com/llogiq/bytecount) |
 | `bytes` | 1.11.1 | MIT | [link](https://github.com/tokio-rs/bytes) |
-| `cc` | 1.2.59 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cc-rs) |
+| `cc` | 1.2.60 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cc-rs) |
 | `cfg-if` | 1.0.4 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cfg-if) |
 | `cfg_aliases` | 0.2.1 | MIT | [link](https://github.com/katharostech/cfg_aliases) |
 | `clap` | 4.6.0 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
@@ -179,6 +179,8 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `form_urlencoded` | 1.2.2 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url) |
 | `futures-channel` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
 | `futures-core` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
+| `futures-io` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
+| `futures-macro` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
 | `futures-sink` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
 | `futures-task` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
 | `futures-util` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/futures-rs) |
@@ -186,7 +188,7 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `getrandom` | 0.4.2 | Apache-2.0 OR MIT | [link](https://github.com/rust-random/getrandom) |
 | `h2` | 0.4.13 | MIT | [link](https://github.com/hyperium/h2) |
 | `hashbrown` | 0.15.5 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/hashbrown) |
-| `hashbrown` | 0.16.1 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/hashbrown) |
+| `hashbrown` | 0.17.0 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/hashbrown) |
 | `heck` | 0.5.0 | Apache-2.0 OR MIT | [link](https://github.com/withoutboats/heck) |
 | `http` | 1.4.0 | Apache-2.0 OR MIT | [link](https://github.com/hyperium/http) |
 | `http-body` | 1.0.1 | MIT | [link](https://github.com/hyperium/http-body) |
@@ -206,7 +208,7 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `id-arena` | 2.3.0 | Apache-2.0 OR MIT | [link](https://github.com/fitzgen/id-arena) |
 | `idna` | 1.1.0 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url/) |
 | `idna_adapter` | 1.2.1 | Apache-2.0 OR MIT | [link](https://github.com/hsivonen/idna_adapter) |
-| `indexmap` | 2.13.1 | Apache-2.0 OR MIT | [link](https://github.com/indexmap-rs/indexmap) |
+| `indexmap` | 2.14.0 | Apache-2.0 OR MIT | [link](https://github.com/indexmap-rs/indexmap) |
 | `ipnet` | 2.12.0 | Apache-2.0 OR MIT | [link](https://github.com/krisprice/ipnet) |
 | `iri-string` | 0.7.12 | Apache-2.0 OR MIT | [link](https://github.com/lo48576/iri-string) |
 | `is_terminal_polyfill` | 1.70.2 | Apache-2.0 OR MIT | [link](https://github.com/polyfill-rs/is_terminal_polyfill) |
@@ -277,7 +279,7 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `tempfile` | 3.27.0 | Apache-2.0 OR MIT | [link](https://github.com/Stebalien/tempfile) |
 | `testing_table` | 0.3.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `tinystr` | 0.8.3 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
-| `tokio` | 1.51.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
+| `tokio` | 1.51.1 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-macros` | 2.7.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-native-tls` | 0.3.1 | MIT | [link](https://github.com/tokio-rs/tls) |
 | `tokio-rustls` | 0.26.4 | Apache-2.0 OR MIT | [link](https://github.com/rustls/tokio-rustls) |
@@ -308,6 +310,7 @@ Collected via `cargo license --json` inside `cli/` (203 crates).
 | `wasm-bindgen-shared` | 0.2.117 | Apache-2.0 OR MIT | [link](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared) |
 | `wasm-encoder` | 0.244.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) |
 | `wasm-metadata` | 0.244.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-metadata) |
+| `wasm-streams` | 0.4.2 | Apache-2.0 OR MIT | [link](https://github.com/MattiasBuelens/wasm-streams/) |
 | `wasmparser` | 0.244.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) |
 | `web-sys` | 0.3.94 | Apache-2.0 OR MIT | [link](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys) |
 | `windows-link` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
