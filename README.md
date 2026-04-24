@@ -57,7 +57,7 @@ tasks in a workflow.
 | **Cost tracking & budgets** — token counting, per-run enforcement, `GET /api/v1/cost/summary` | [internal/cost/](internal/cost/), [internal/server/cost_handlers.go](internal/server/cost_handlers.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Execution limits** — `max_llm_calls`, derived per-call deadlines, shared retry budget | [internal/executor/](internal/executor/), [internal/scheduler/](internal/scheduler/) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
 | **Response cache** — in-memory cache keyed on prompt + config | [internal/cost/cache.go](internal/cost/cache.go) | [RFC 0006](docs/rfcs/0006-efficiency-execution-limits.md) |
-| **OTEL tracing** — spans flowing through orchestrator → agents, visible in Jaeger | [internal/](internal/) | — |
+| **OTEL tracing** — spans flowing through orchestrator → agents, visible in Jaeger | [internal/observability/](internal/observability/) | — |
 
 > **Upgrade note from v0.1 baseline:** `max_llm_calls` default changed from `10` to
 > `5`. See [CHANGELOG.md](CHANGELOG.md).
@@ -114,7 +114,7 @@ from a single `docker compose up` against the reference stack.
 | **Structured JSON logs** — versioned schema (`schema_version: "1"`) across Go (zap), Python (structlog), and CLI; cross-process correlation IDs; redactor hook; `PERSATRIX_LOG_FORMAT=pretty` for local debugging | [internal/observability/zapenc/](internal/observability/zapenc/), [agents/observability/logging.py](agents/observability/logging.py), [docs/observability.md](docs/observability.md) | [RFC 0018](docs/rfcs/0018-structured-logging-framework.md) |
 | **Distributed OTEL traces** — spans flow from REST handler through the scheduler and executor into the agent's LLM and tool calls; OTEL Gen-AI semantic conventions on `agent.llm.call`; Span Links for event→tick and sub-agent causality | [internal/observability/](internal/observability/), [agents/observability/tracing.py](agents/observability/tracing.py) | [RFC 0019 § C–E](docs/rfcs/0019-opentelemetry-completion.md) |
 | **OTLP metrics with exemplars** — Go + Python counters, histograms, and gauges; histogram exemplars carry the active span's `trace_id` so dashboards click through into the originating trace | [internal/observability/metrics/](internal/observability/metrics/), [agents/observability/metrics.py](agents/observability/metrics.py) | [RFC 0019 § F](docs/rfcs/0019-opentelemetry-completion.md#f-metrics) |
-| **W3C Baggage propagation** — `persatrix.workflow_id` plus reserved correlation IDs cross the gRPC boundary via `CompositePropagator(TraceContext + Baggage)` and are readable inside agent handlers | [internal/observability/grpcmeta/](internal/observability/grpcmeta/), [agents/observability/](agents/observability/) | [RFC 0018 § 8](docs/observability.md), [RFC 0019 § E](docs/rfcs/0019-opentelemetry-completion.md) |
+| **W3C Baggage propagation** — `persatrix.workflow_id` plus reserved correlation IDs cross the gRPC boundary via `CompositePropagator(TraceContext + Baggage)` and are readable inside agent handlers | [internal/observability/grpcmeta/](internal/observability/grpcmeta/), [agents/observability/](agents/observability/) | [RFC 0018 § D](docs/rfcs/0018-structured-logging-framework.md#d-cross-process-correlation), [RFC 0019 § E](docs/rfcs/0019-opentelemetry-completion.md) |
 | **Tail-sampling Collector pipeline** — reference `otel-collector.yaml` keeps all ERROR traces, traces ≥ 5 s, and every trace tagged `persatrix.workflow_id`; samples 1 % of the remaining (autonomous-tick) traffic; fans out to Jaeger / Prometheus / Loki | [config/observability/otel-collector.yaml](config/observability/otel-collector.yaml) | [RFC 0019 § H](docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline) |
 | **`persatrix logs` CLI** — snapshot + SSE `--follow`, server-side `--level` / `--since` / `--workflow` filters, `--trace <id>` cross-execution correlation, automatic SSE reconnect with backoff | [cli/src/commands/logs.rs](cli/src/commands/logs.rs), [internal/observability/logbuffer/](internal/observability/logbuffer/) | [RFC 0018 PR 6](docs/observability.md#12-operations-persatrix-logs-rfc-0018-pr-6) |
 
@@ -272,6 +272,34 @@ make run
 
 Pretty mode is a developer affordance and is **not** a stable wire format.
 Production deployments must leave `PERSATRIX_LOG_FORMAT` unset.
+
+### Stream Logs — `persatrix logs` (v0.2.3)
+
+With the orchestrator running, the CLI can query its in-memory log buffer or
+tail it over SSE. The first positional argument is an execution ID; `_` is the
+wildcard for the chronological cross-execution merged view. Server-side filters
+keep the terminal quiet; `--trace` correlates across orchestrator and agent.
+
+```bash
+# Snapshot — cross-execution merge, most recent lines
+persatrix logs _
+
+# Follow — live SSE stream, auto-reconnects with backoff
+persatrix logs _ --follow
+
+# Filter server-side: level, time window, workflow
+persatrix logs _ --follow --level WARN --since 5m
+persatrix logs _ --workflow 01HXY...
+
+# Correlate across orchestrator and agent by trace id (client-side filter)
+persatrix logs _ --trace 4bf92f3577b34da6a3ce929d0e0e4736
+
+# Scope to a single execution
+persatrix logs 01HXY... --follow
+```
+
+See [docs/observability.md § 12](docs/observability.md#12-operations-persatrix-logs-rfc-0018-pr-6)
+for the full flag reference and buffer sizing knobs.
 
 ### Run a Persona Agent (v0.2.0)
 
@@ -459,6 +487,16 @@ completion.
 - **No channel routing** — chat goes directly to a single agent; channels are
   RFC 0011 (v0.3.0).
 
+## Known Limitations in v0.2.2
+
+- **Per-event memory budget is a module constant** — `_MEMORY_BUDGET_TOKENS`
+  (default 1500) is not yet exposed as a per-agent or per-event config field.
+  Operators who need a different bound can patch the constant; a config-level
+  knob will be considered in a future RFC if there is demand.
+- **No new operator surface** — RFC 0017 is internal-only; there is no new
+  REST endpoint, gRPC RPC, or CLI command. Existing v0.2.1 limitations
+  (multi-user, auth, streaming, channel routing) all carry forward unchanged.
+
 ## Known Limitations in v0.2.3
 
 - **`persatrix logs` restart durability is gated on sealing** — the
@@ -491,17 +529,7 @@ completion.
   apply** — MCP bridge scaffolded only, chat still single-user and
   synchronous with no auth, chat traffic bypasses `BudgetEnforcer`,
   per-event memory budget is a module constant. See the version-specific
-  sections below.
-
-## Known Limitations in v0.2.2
-
-- **Per-event memory budget is a module constant** — `_MEMORY_BUDGET_TOKENS`
-  (default 1500) is not yet exposed as a per-agent or per-event config field.
-  Operators who need a different bound can patch the constant; a config-level
-  knob will be considered in a future RFC if there is demand.
-- **No new operator surface** — RFC 0017 is internal-only; there is no new
-  REST endpoint, gRPC RPC, or CLI command. Existing v0.2.1 limitations
-  (multi-user, auth, streaming, channel routing) all carry forward unchanged.
+  sections above.
 
 ---
 

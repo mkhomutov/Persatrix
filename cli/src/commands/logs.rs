@@ -412,14 +412,20 @@ mod tests {
         assert_eq!(url, "http://h/api/v1/executions/abc/logs/stream");
     }
 
+    // README Quick Start: `persatrix logs _` (snapshot) and the compound
+    // `persatrix logs _ --follow --level WARN --since 5m` (stream+filters).
     #[test]
     fn cross_execution_token_is_passed_through() {
+        let snap = build_logs_url("http://h", "_", &LogsOptions::default(), false);
+        assert!(snap.starts_with("http://h/api/v1/executions/_/logs"));
         let opts = LogsOptions {
-            since: Some("1h"),
+            since: Some("5m"),
+            level: Some("WARN"),
             ..LogsOptions::default()
         };
-        let url = build_logs_url("http://h", "_", &opts, false);
-        assert!(url.starts_with("http://h/api/v1/executions/_/logs?"));
+        let url = build_logs_url("http://h", "_", &opts, true);
+        assert!(url.starts_with("http://h/api/v1/executions/_/logs/stream?"));
+        assert!(url.contains("since=5m") && url.contains("level=WARN"));
     }
 
     #[test]

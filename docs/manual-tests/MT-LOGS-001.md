@@ -240,7 +240,7 @@ $entries = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/executions/$runI
 
 ---
 
-### Step 3: SSE `--follow` + reconnect marker
+### Step 3: SSE `--follow` + reconnect marker + cross-execution wildcard
 
 **Action** (terminal A):
 
@@ -250,31 +250,60 @@ $out3   = ./bin/persatrix.exe run feature-builder --input '{"user_request":"long
 $runId3 = ([regex]'run_id:\s*([^)]+)').Match(($out3 -join "`n")).Groups[1].Value.Trim()
 "$runId3"
 
-# Terminal B — follow (substitute the run_id printed in terminal A):
+# Terminal B — follow a specific execution (substitute the run_id printed in terminal A):
 ./bin/persatrix.exe logs --follow $runId3
 ```
 
 While the follow session is open, restart the orchestrator (`Ctrl-C` then `make run` again).
+
+Then verify the **cross-execution wildcard compound case** documented in the
+`persatrix logs` Quick Start (`README.md`) — `persatrix logs _ --follow`
+targets the merged feed across every live execution. Close Terminal B from
+the previous action, then from a fresh terminal:
+
+```pwsh
+# Terminal B — follow the merged cross-execution feed:
+./bin/persatrix.exe logs _ --follow
+```
+
+```pwsh
+# Terminal C — submit two fresh runs while Terminal B is following:
+./bin/persatrix.exe run feature-builder --input '{"user_request":"wildcard-A"}'
+./bin/persatrix.exe run feature-builder --input '{"user_request":"wildcard-B"}'
+```
 
 > **Note**: `persatrix run` is fire-and-forget — it submits and returns immediately; the
 > `--input` payload does **not** influence run duration. "Live entries" only appear in
 > Terminal B if execution is still in progress when `--follow` connects. In an environment
 > without registered agents the run completes in milliseconds and no new entries arrive
 > after `--follow` attaches; the reconnect-marker check below is still meaningful in that
-> case.
+> case. For the wildcard sub-step, the two-back-to-back submissions from Terminal C
+> normally produce at least a handful of entries even without agents (the orchestrator's
+> `run created` / `executing run` lines).
 
 **Expected**:
-- Terminal B prints live entries as they arrive (when an execution is still running).
+- Terminal B (specific-id follow) prints live entries as they arrive (when an execution
+  is still running).
 - On the orchestrator restart, terminal B prints a transient `warning: stream read failed: …
   (reconnecting in 500ms)` line followed by exactly one `info: [reconnected]` line, then
   resumes streaming.
 - Backoff resets after the successful reconnect (a second transient drop within the same session
   starts again from the initial backoff window, not the inflated one).
+- Terminal B (wildcard follow) shows entries tagged with **both** `execution_id` values
+  from Terminal C's two submissions — i.e. the merged feed fans entries in from every
+  execution, not just one. `--verbose` makes the `execution_id=` field visible for
+  confirmation.
 
 **Verification**:
 - [ ] Live entries observed within ~2s of being produced (skip when run already completed)
 - [ ] Single `[reconnected]` marker on restart (one preceding `warning:` line is expected)
 - [ ] No runaway backoff after a single reconnect
+- [ ] `logs _ --follow` interleaves entries from ≥ 2 distinct `execution_id` values
+  (paired with `TestSSE_CrossExecutionMerge_StreamsAllExecutions` in
+  [internal/server/logs_stream_handler_test.go](../../internal/server/logs_stream_handler_test.go)
+  and `cross_execution_token_is_passed_through` in
+  [cli/src/commands/logs.rs](../../cli/src/commands/logs.rs), which covers
+  both the snapshot `_` path and the stream + filter compound)
 
 ---
 
