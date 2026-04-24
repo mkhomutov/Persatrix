@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-24 (v0.2.3 released — Observability Foundation)  
+> **Last updated**: 2026-04-24 (v0.2.3 released — post-release document update: ROADMAP v0.2.3 section flipped to Complete, prep-plan PR 4 marked merged, release checklist finalised)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — ✅ Released (RFC 0018 ✅ 7/7; RFC 0019 ✅ 5/5; release-prep plan ✅ complete)  
-> **Current milestone**: v0.2.3 released; next milestone is v0.3.0 (shared channels + multi-user chat — RFCs 0009, 0010, 0011). Release-prep PRs tracked in [docs/v0.2.3-release-prep-plan.md](docs/v0.2.3-release-prep-plan.md)
+> **Current milestone**: v0.2.3 released; v0.3.0 planning next (shared channels + multi-user chat — RFCs 0009, 0010, 0011)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -338,7 +338,7 @@ v0.2.2 complete
 
 ---
 
-## v0.2.3 — Observability Foundation 🚧 Release Prep
+## v0.2.3 — Observability Foundation ✅ Complete
 
 **What a user can do**: Observe your agent society end-to-end — structured JSON logs on a versioned schema across Go, Python, and CLI; distributed traces from REST handler to LLM call with OTEL Gen-AI semantic conventions; OTLP metrics with histogram exemplars; W3C Baggage propagation across the gRPC boundary; a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019.
 
@@ -750,6 +750,16 @@ v0.5.0 complete
 | [#177](https://github.com/mkhomutov/Persatrix/pull/177) | perf(observability): RFC 0018 PR 8 — log buffer + shipper polish | 0018 (PR 8, polish) | 2026-04-24 |
 | [#180](https://github.com/mkhomutov/Persatrix/pull/180) | docs(rfc-0018): closeout — review follow-ups + status flip (RFC 0018 PR 7) | 0018 (7/7, close) | 2026-04-24 |
 | [#181](https://github.com/mkhomutov/Persatrix/pull/181) | docs(rfc-0019): closeout — review follow-ups + status flip (RFC 0019 PR 5) | 0019 (5/5, close) | 2026-04-24 |
+| [#182](https://github.com/mkhomutov/Persatrix/pull/182) | fix(observability): issue #179 Should-Fix correctness cluster (sentinel collision + timestamp policy + SSE write deadline) | 0018+0019 follow-up | 2026-04-24 |
+| [#183](https://github.com/mkhomutov/Persatrix/pull/183) | fix(observability): issue #178 zap encoder correctness cluster (Must-style ctor + reserved-key shadowing) | 0018 follow-up | 2026-04-24 |
+| [#184](https://github.com/mkhomutov/Persatrix/pull/184) | fix(observability): tee orchestrator zap entries into log buffer (MT-LOGS-001) | 0018 follow-up | 2026-04-24 |
+| [#185](https://github.com/mkhomutov/Persatrix/pull/185) | docs(mt-otel-001): align walkthrough with current stack + surface propagation gap | 0019 follow-up | 2026-04-24 |
+| [#186](https://github.com/mkhomutov/Persatrix/pull/186) | docs(release): add v0.2.3 release preparation plan | v0.2.3 release prep | 2026-04-24 |
+| [#187](https://github.com/mkhomutov/Persatrix/pull/187) | docs(release): v0.2.3 MT execution report + release-prep fixes (PR 1) | v0.2.3 release prep | 2026-04-24 |
+| [#188](https://github.com/mkhomutov/Persatrix/pull/188) | feat(docker): wire persona agent ember-owl into compose stack | cross-RFC docker | 2026-04-24 |
+| [#189](https://github.com/mkhomutov/Persatrix/pull/189) | docs(release): v0.2.3 docs refresh + observability diagram + release checklist (PR 2) | v0.2.3 release prep | 2026-04-24 |
+| [#190](https://github.com/mkhomutov/Persatrix/pull/190) | chore(release): bump to v0.2.3 + curate changelog (PR 3) | v0.2.3 release prep | 2026-04-24 |
+| [#191](https://github.com/mkhomutov/Persatrix/pull/191) | chore(release): v0.2.3 final pre-tag verification (PR 4) | v0.2.3 release prep | 2026-04-24 |
 
 ---
 
