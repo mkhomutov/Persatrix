@@ -1,7 +1,7 @@
 # RFC 0019 — OpenTelemetry Completion (Traces, Metrics, Correlation)
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented
 **Author**: Maksim Khomutov
 **Date**: 2026-04-21 (rev 2026-04-22 — future-focused expansion; rev 2026-04-22b — apply PR #160 review)
 **Target**: v0.2.3
@@ -41,6 +41,7 @@ ad-hoc convention that diverges from the template.
 - [Resolved Decisions](#resolved-decisions)
 - [Open Questions](#open-questions)
 - [Decision / Next Steps](#decision--next-steps)
+- [Implementation](#implementation)
 - [Related Documentation](#related-documentation)
 
 ---
@@ -511,6 +512,27 @@ These constraints should be reflected in both RFCs' joint PR plan and in the v0.
 1. Author `docs/rfcs/0019-pr-plan.md` per [development-workflow.md](../development-workflow.md) Phase 3, sequenced against the RFC 0018 PR plan so shared deliverables (OTLP transport, redaction hook, `agents/observability/` namespace, log↔trace enrichment) land once.
 2. Status → 🚧 Implementing; ROADMAP updated; both RFCs grouped as "Observability Foundation" in the v0.2.3 entry.
 3. Begin Phase 1 implementation.
+
+---
+
+## Implementation
+
+**Status flipped to ✅ Implemented on 2026-04-24** (closeout PR — RFC 0019 PR 5).
+
+Merged PRs (joint v0.2.3 Observability Foundation delivery — see also [RFC 0018](0018-structured-logging-framework.md#implementation)):
+
+| PR | Title | Phase |
+|----|-------|-------|
+| [#161](https://github.com/mkhomutov/Persatrix/pull/161) | docs(rfcs): add joint PR plans for RFC 0018 + RFC 0019 (v0.2.3) | Plan |
+| [#163](https://github.com/mkhomutov/Persatrix/pull/163) | feat(otel): RFC 0019 PR 1 — telemetry→observability rename + Python OTEL init + gRPC + Baggage | Phase 1 |
+| [#167](https://github.com/mkhomutov/Persatrix/pull/167) | feat(observability): RFC 0019 PR 2 — semantic spans + Span Links + log↔trace coordination | Phase 2 |
+| [#170](https://github.com/mkhomutov/Persatrix/pull/170) | feat(observability): RFC 0019 PR 3 — OTEL metrics (Python + Go) | Phase 3a |
+| [#171](https://github.com/mkhomutov/Persatrix/pull/171) | feat(observability): RFC 0019 PR 4 — Collector pipeline + docker-compose + E2E + schema-parity test | Phase 3b |
+| [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | Closeout prep |
+| [#176](https://github.com/mkhomutov/Persatrix/pull/176) | refactor(observability): RFC 0019 PR 6 — tracing/spans review follow-ups | Polish (joint #11a) |
+| [#181](https://github.com/mkhomutov/Persatrix/pull/181) | docs(rfc-0019): closeout — review follow-ups + status flip | Closeout (joint #11b) |
+
+The v0.2.3 release is the joint Observability Foundation delivery: this RFC owns the trace + metric signals plus the enrichers that join them to log records; RFC 0018 owns the structured-log signal and the `LogService` ingest path. Both RFCs share the `internal/observability/` (Go) and `agents/observability/` (Python) namespaces, the `schema_url=https://persatrix.dev/schemas/observability/1.0.0` Resource attribute, and the `persatrix.*` baggage / span-attribute conventions documented in [Section E](#e-span-naming-and-attribute-conventions).
 
 ---
 

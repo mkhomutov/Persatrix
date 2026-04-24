@@ -429,12 +429,26 @@ Captured from the PR #171 deep re-review (round 2, against the post-fix local br
 
 #### PR checklist
 
-- [ ] All review follow-ups from PRs 1–4 addressed or explicitly deferred (with rationale)
-- [ ] [RFC 0019 status](0019-opentelemetry-completion.md) → `✅ Implemented`
-- [ ] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects joint observability close
-- [ ] PR #161 appears in ROADMAP merged-PR table
-- [ ] Manual-test report appended for v0.2.3 traces/metrics coverage
-- [ ] `make test` passes; `make lint` clean
+- [x] All review follow-ups from PRs 1–4 addressed or explicitly deferred (with rationale)
+- [x] [RFC 0019 status](0019-opentelemetry-completion.md) → `✅ Implemented`
+- [x] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects joint observability close
+- [x] PR #161 appears in ROADMAP merged-PR table
+- [x] Manual-test report appended for v0.2.3 traces/metrics coverage
+- [x] `make test` passes; `make lint` clean
+
+**Merged**: [#181](https://github.com/mkhomutov/Persatrix/pull/181) — 2026-04-24
+
+#### Disposition of review follow-ups
+
+Every per-PR-review bullet ending in "→ **#176**" landed in polish PR [#176](https://github.com/mkhomutov/Persatrix/pull/176). The remaining items are dispositioned below.
+
+##### Applied in this closeout PR
+
+- **PR 4 review Should-Fix #4** — [`config/observability/otel-collector.yaml`](../../config/observability/otel-collector.yaml) drops the `debug` exporter from all three steady-state pipelines; the exporter definition is retained with a comment for opt-back-in during incident triage. Stops `docker compose logs otel-collector` flooding under routine traffic.
+
+##### Deferred follow-ups
+
+The remaining items from [PR 4 review](#from-pr-4-review) (Should-Fix: Loki LogQL query / `loki-config.yaml` pin, `_LOG_TO_SPAN_KEY` promotion, Collector readiness; Nice-to-Have: tail-sampling assertions, dropped-counter invariant, Collector wrapper image, optional CI job, `captured_stderr` rewire, OTLP-gRPC reachability probe, exact-list tail-sampling, exemplar PII note; Nits: ASCII-diagram artifact, backend-probe scope, schema-parity docstring, `trace`→`trace_data` rename) and the four PR 1–3 residuals not in #176 (baggage-key allowlist lint, `_redactor` ContextVar, provider-name fallback warn, `gen_ai.system` CHANGELOG note) are deferred to a single tracked issue, filed at PR open.
 
 ---
 

@@ -76,6 +76,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | ID | Title | Status |
 |----|-------|--------|
 | [MT-LOGS-001](MT-LOGS-001.md) | `persatrix logs` end-to-end (REST + SSE follow + restart durability + pretty mode) | Active |
+| [MT-OTEL-001](MT-OTEL-001.md) | OpenTelemetry traces + metrics + Collector tail-sampling | Active |
 
 ---
 
