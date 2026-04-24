@@ -79,9 +79,7 @@ func (b *Buffer) Subscribe(executionID string) (<-chan Entry, func(), error) {
 	cancel := func() {
 		once.Do(func() {
 			b.subMu.Lock()
-			if _, ok := b.subs[s]; ok {
-				delete(b.subs, s)
-			}
+			delete(b.subs, s)
 			b.subMu.Unlock()
 			close(s.ch)
 		})

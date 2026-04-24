@@ -14,6 +14,13 @@ COPY --from=builder /build/persatrix-server /usr/local/bin/
 
 # Security: run as non-root to follow container best practices.
 RUN adduser -D -H appuser
+
+# RFC 0018 PR 5: the log buffer disk-persists sealed rings under
+# PERSATRIX_LOGBUFFER_DIR. Create a writable parent owned by the
+# non-root runtime user so a mounted named volume inherits the
+# right permissions on first bind.
+RUN mkdir -p /var/lib/persatrix && chown -R appuser:appuser /var/lib/persatrix
+
 USER appuser
 
 EXPOSE 9090 8080
