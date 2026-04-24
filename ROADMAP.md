@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-24 (RFC 0019 PR 5 merged — #181; closeout: review follow-ups + status flip; joint #11b)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing (RFC 0018 ✅; RFC 0019 ✅; release prep pending)  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176; 0018 PR 8 merged — #177; 0018 PR 7 merged — #180; 0019 PR 5 merged — #181)
+> **Last updated**: 2026-04-24 (v0.2.3 release prep — docs refresh, observability-stack diagram, and release checklist)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Release prep (RFC 0018 ✅ 7/7; RFC 0019 ✅ 5/5; docs + version bump + final verification in flight)  
+> **Current milestone**: v0.2.2 released; v0.2.3 in release prep — both underlying RFCs are ✅ Implemented (plus optional-polish PRs #176 + #177); release-prep PRs tracked in [docs/v0.2.3-release-prep-plan.md](docs/v0.2.3-release-prep-plan.md)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -18,7 +18,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
-| **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | 🚧 In progress (RFCs 0018 + 0019 implemented; release prep pending) |
+| **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | 🚧 Release prep (RFCs 0018 + 0019 ✅; docs + version bump + final verification in flight) |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -338,7 +338,7 @@ v0.2.2 complete
 
 ---
 
-## v0.2.3 — Observability Foundation 🚧 In Progress
+## v0.2.3 — Observability Foundation 🚧 Release Prep
 
 **What a user can do**: Observe your agent society end-to-end — structured JSON logs on a versioned schema across Go, Python, and CLI; distributed traces from REST handler to LLM call with OTEL Gen-AI semantic conventions; OTLP metrics with histogram exemplars; W3C Baggage propagation across the gRPC boundary; a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019.
 

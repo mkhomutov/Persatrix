@@ -308,6 +308,8 @@ the originating user event without the operator having to follow timestamps.
 
 ## 11. Operator pipeline (RFC 0019 PR 4)
 
+See [diagrams/observability-stack.md](diagrams/observability-stack.md) for the full signal flow (log shipper + OTLP pipeline + gRPC-boundary propagation).
+
 The reference operator stack ships in [docker-compose.yaml](../docker-compose.yaml) and routes every signal through an OpenTelemetry Collector before fanning out to per-signal backends:
 
 ```

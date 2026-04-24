@@ -101,6 +101,42 @@ for the full upgrade notes.
 
 ---
 
+## What's added in v0.2.3
+
+v0.2.3 (Observability Foundation) ships
+[RFC 0018](docs/rfcs/0018-structured-logging-framework.md) (Structured Logging
+Framework) and [RFC 0019](docs/rfcs/0019-opentelemetry-completion.md)
+(OpenTelemetry Completion) together. Everything below is visible end-to-end
+from a single `docker compose up` against the reference stack.
+
+| Capability | Where it lives | Spec |
+|------------|----------------|------|
+| **Structured JSON logs** — versioned schema (`schema_version: "1"`) across Go (zap), Python (structlog), and CLI; cross-process correlation IDs; redactor hook; `PERSATRIX_LOG_FORMAT=pretty` for local debugging | [internal/observability/zapenc/](internal/observability/zapenc/), [agents/observability/logging.py](agents/observability/logging.py), [docs/observability.md](docs/observability.md) | [RFC 0018](docs/rfcs/0018-structured-logging-framework.md) |
+| **Distributed OTEL traces** — spans flow from REST handler through the scheduler and executor into the agent's LLM and tool calls; OTEL Gen-AI semantic conventions on `agent.llm.call`; Span Links for event→tick and sub-agent causality | [internal/observability/](internal/observability/), [agents/observability/tracing.py](agents/observability/tracing.py) | [RFC 0019 § C–E](docs/rfcs/0019-opentelemetry-completion.md) |
+| **OTLP metrics with exemplars** — Go + Python counters, histograms, and gauges; histogram exemplars carry the active span's `trace_id` so dashboards click through into the originating trace | [internal/observability/metrics/](internal/observability/metrics/), [agents/observability/metrics.py](agents/observability/metrics.py) | [RFC 0019 § F](docs/rfcs/0019-opentelemetry-completion.md#f-metrics) |
+| **W3C Baggage propagation** — `persatrix.workflow_id` plus reserved correlation IDs cross the gRPC boundary via `CompositePropagator(TraceContext + Baggage)` and are readable inside agent handlers | [internal/observability/grpcmeta/](internal/observability/grpcmeta/), [agents/observability/](agents/observability/) | [RFC 0018 § 8](docs/observability.md), [RFC 0019 § E](docs/rfcs/0019-opentelemetry-completion.md) |
+| **Tail-sampling Collector pipeline** — reference `otel-collector.yaml` keeps all ERROR traces, traces ≥ 5 s, and every trace tagged `persatrix.workflow_id`; samples 1 % of the remaining (autonomous-tick) traffic; fans out to Jaeger / Prometheus / Loki | [config/observability/otel-collector.yaml](config/observability/otel-collector.yaml) | [RFC 0019 § H](docs/rfcs/0019-opentelemetry-completion.md#h-sampling-back-pressure-and-the-collector-pipeline) |
+| **`persatrix logs` CLI** — snapshot + SSE `--follow`, server-side `--level` / `--since` / `--workflow` filters, `--trace <id>` cross-execution correlation, automatic SSE reconnect with backoff | [cli/src/commands/logs.rs](cli/src/commands/logs.rs), [internal/observability/logbuffer/](internal/observability/logbuffer/) | [RFC 0018 PR 6](docs/observability.md#12-operations-persatrix-logs-rfc-0018-pr-6) |
+
+For the operational reference — log schema, span inventory, Collector
+pipeline, `persatrix logs` usage — see
+[docs/observability.md](docs/observability.md). For a signal-flow
+overview (log shipper + OTLP pipeline + baggage propagation across the
+gRPC boundary) see
+[docs/diagrams/observability-stack.md](docs/diagrams/observability-stack.md).
+
+> **Upgrade notes (summary).** v0.2.3 unpublishes Jaeger's host-facing
+> OTLP ports (the Collector now owns `:4317`/`:4318` on the host),
+> switches the Python OTLP exporter transport from gRPC to HTTP, renames
+> the Go `internal/telemetry` package to `internal/observability`, and
+> renames reserved zap correlation-ID keys (`runID`/`executionID` →
+> `execution_id`, `agentID` → `agent_id`, etc.) to the RFC 0018 schema.
+> The [CHANGELOG.md](CHANGELOG.md) `[0.2.3]` Upgrade Notes subsection is
+> the canonical source; downstream log shippers, `jq` queries, and
+> dashboards filtering on the old keys must be updated.
+
+---
+
 ## ⚠️ Cost Warning — Read Before Running
 
 Persatrix uses commercial LLM APIs (Anthropic by default; the model is selected
@@ -378,6 +414,7 @@ Persatrix/
 | **v0.2.0** | Run persistent AI agents with personas, memory, and cost-bounded execution from a terminal | ✅ First public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural cost-leak fix unblocking RFC 0008 | ✅ Released |
+| **v0.2.3** | Observe your agent society end-to-end — structured JSON logs on a versioned schema, distributed OTEL traces with Gen-AI conventions, OTLP metrics with exemplars, `persatrix logs` CLI, and a tail-sampling Collector pipeline | 🚧 Release prep |
 | **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -421,6 +458,40 @@ completion.
   spontaneously notify users; notification infrastructure is deferred.
 - **No channel routing** — chat goes directly to a single agent; channels are
   RFC 0011 (v0.3.0).
+
+## Known Limitations in v0.2.3
+
+- **`persatrix logs` restart durability is gated on sealing** — the
+  disk-store warm-load code path is covered by unit tests
+  (`TestWarmLoadAfterReopen` in
+  [internal/observability/logbuffer/buffer_test.go](internal/observability/logbuffer/buffer_test.go))
+  but production never calls `Buffer.Seal`, so a restart mid-run leaves
+  no queryable history for runs that were in flight at the moment of
+  restart. Tracked as an RFC 0018 PR 7 follow-up; see
+  [MT-LOGS-001 Step 4](docs/manual-tests/MT-LOGS-001.md) and the
+  [v0.2.3 execution report](docs/manual-tests/v0.2.3-execution-report.md).
+- **Cross-process trace stitching is universal for `ExecuteTask`, not
+  for every gRPC path** — the executor's `otelgrpc` client handler
+  stitches orchestrator and agent spans into a single trace on the
+  workflow dispatch path. Other gRPC paths whose caller is not routed
+  through `otelgrpc.NewClientHandler()` may still land in a separate
+  root trace. Exemplar-driven and `persatrix.workflow_id`-tagged lookups
+  remain correct in either topology.
+- **No per-agent operator dashboard or alerting rules ship with
+  v0.2.3** — the reference compose stack is for local debugging.
+  Production operators fork
+  [config/observability/otel-collector.yaml](config/observability/otel-collector.yaml)
+  and build dashboards against their own Prometheus + Jaeger + Loki
+  install.
+- **`MT-COST-002` (budget-exceed workflow abort) remains
+  accepted-with-known-gap** — carried forward from v0.2 / v0.2.1 /
+  v0.2.2; no budget-enforcement changes in v0.2.3. See the
+  [v0.2.3 execution report](docs/manual-tests/v0.2.3-execution-report.md).
+- **All v0.2.0 / v0.2.1 / v0.2.2 carry-forward limitations still
+  apply** — MCP bridge scaffolded only, chat still single-user and
+  synchronous with no auth, chat traffic bypasses `BudgetEnforcer`,
+  per-event memory budget is a module constant. See the version-specific
+  sections below.
 
 ## Known Limitations in v0.2.2
 
