@@ -353,12 +353,24 @@ func (d *diskStore) evictIfOverCap() {
 				zap.String("execution_id", it.id), zap.Error(err))
 			continue
 		}
-		d.usage.Add(-it.size)
+		// Re-read totalMap[it.id] under the lock and subtract that, not the
+		// snapshot size. A concurrent flush() between snapshot and RemoveAll
+		// may have grown totalMap[it.id] by delta bytes; RemoveAll wiped
+		// everything on disk (snapshot + delta), so subtracting only the
+		// snapshot would leak delta into d.usage permanently (it never
+		// self-heals because the map entry is then deleted). Subtracting the
+		// final map value matches what was actually removed from disk.
+		// PR #177 review Should-Fix #2.
 		d.mu.Lock()
+		finalSize, ok := d.totalMap[it.id]
+		if !ok {
+			finalSize = it.size
+		}
 		delete(d.totalMap, it.id)
 		delete(d.nextSeq, it.id)
 		d.mu.Unlock()
+		d.usage.Add(-finalSize)
 		d.logger.Info("logbuffer: evicted execution from disk",
-			zap.String("execution_id", it.id), zap.Int64("freed_bytes", it.size))
+			zap.String("execution_id", it.id), zap.Int64("freed_bytes", finalSize))
 	}
 }

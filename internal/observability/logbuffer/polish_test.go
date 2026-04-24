@@ -182,5 +182,9 @@ func TestAppend_LRUFastPathBumpsLastTouch(t *testing.T) {
 	// Re-admit on the steady-state path; lastTouch must advance.
 	require.Equal(t, DropNone, b.Append(mkEntry("exec-a", "INFO", "2")))
 	second := atomic.LoadUint64(&ring.lastTouch)
-	assert.Greater(t, second, first-1, "lastTouch must be stamped on every admit")
+	// Strict greater-than: assert.Greater(second, first-1) would tolerate
+	// second == first (i.e. a silently-broken fast path that forgot to
+	// stamp lastTouch) and would also underflow if lruCounter were ever
+	// reset to zero by a future change. PR #177 review Should-Fix #1.
+	assert.Greater(t, second, first, "lastTouch must advance on every admit")
 }
