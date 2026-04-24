@@ -77,6 +77,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
     "docs/rfcs/0006-pr-plan.md",
+    # PR plan accumulates per-PR review residuals throughout the multi-PR
+    # lifecycle (one review-findings subsection per merged PR). The plan
+    # exited PR 4's review window with ~7 980 words; the closeout PR 5
+    # (RFC 0019 PR 5) tipped the file over the 8 000-word threshold while
+    # appending the standard Disposition / Applied / Deferred sections.
+    # Trim/split is more disruptive than informative on an already-merged
+    # plan; remove this entry if a future maintenance PR splits the
+    # per-PR review captures into a separate document.
+    "docs/rfcs/0019-pr-plan.md",
     # CHANGELOG.md grows over a release cycle and is trimmed/archived at
     # each release tag by the git-cliff pipeline (see `cliff.toml` and
     # the release process in `docs/development-workflow.md`), so size

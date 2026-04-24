@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-24 (RFC 0018 PR 7 opened — closeout: review follow-ups + status flip; joint #11b)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing  
-> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176; 0018 PR 8 merged — #177; 0018 PR 7 closeout open)
+> **Last updated**: 2026-04-24 (RFC 0019 PR 5 opened — closeout: review follow-ups + status flip; joint #11b)  
+> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — 🚧 Implementing (RFC 0018 ✅; RFC 0019 closeout open)  
+> **Current milestone**: v0.2.2 released; v0.2.3 in progress (0019 PR 1 merged — #163; 0018 PR 1 merged — #164; 0018 PR 2 merged — #165; 0019 PR 2 merged — #167; 0018 PR 3 merged — #168; 0019 PR 3 merged — #170; 0019 PR 4 merged — #171; 0018 PR 4 merged — #172; 0018 PR 5 merged — #173; 0018 PR 6 merged — #174; 0019 PR 6 merged — #176; 0018 PR 8 merged — #177; 0018 PR 7 merged — #180; 0019 PR 5 closeout open)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -18,7 +18,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.0** ⭐ | Run persistent AI agents with personalities, memory, and evolving relationships from a terminal | ✅ Complete — first public release |
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
-| **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | 📋 Planned |
+| **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | � In progress (RFCs 0018 + 0019 implemented; release prep pending) |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
@@ -50,7 +50,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | 🚧 Implementing |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
 
 ---
 
@@ -365,7 +365,7 @@ v0.2.2 complete
 
 | RFC | Title | Status | PRs | Merged |
 |-----|-------|--------|-----|--------|
-| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | 🚧 Implementing | 5 | 4/5 |
+| [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | ✅ Implemented | 5 | 5/5 |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | ✅ Implemented | 7 | 7/7 |
 
 ### Joint Merge Order (RFCs 0018 + 0019)
@@ -393,7 +393,7 @@ v0.2.2 complete
   ↓
 0018 PR 8 + 0019 PR 6 (post-merge polish — logbuffer/shipper + tracing/spans cluster)  ✅ #177 (0018 PR 8) + ✅ #176 (0019 PR 6)
   ↓
-0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)  🔄 0018 PR 7 open; 0019 PR 5 pending
+0018 PR 7 + 0019 PR 5 (review follow-ups + RFC close, opened together as a paired closeout)  ✅ #180 (0018 PR 7) + 🔄 0019 PR 5 open
 ```
 
 ### Planned Components (v0.2.3)
@@ -748,6 +748,7 @@ v0.5.0 complete
 | [#161](https://github.com/mkhomutov/Persatrix/pull/161) | docs(rfcs): add joint PR plans for RFC 0018 + RFC 0019 (v0.2.3 Observability Foundation) | 0018+0019 (PR plan) | 2026-04-22 |
 | [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | 0018+0019 (closeout prep) | 2026-04-23 |
 | [#177](https://github.com/mkhomutov/Persatrix/pull/177) | perf(observability): RFC 0018 PR 8 — log buffer + shipper polish | 0018 (PR 8, polish) | 2026-04-24 |
+| [#180](https://github.com/mkhomutov/Persatrix/pull/180) | docs(rfc-0018): closeout — review follow-ups + status flip (RFC 0018 PR 7) | 0018 (7/7, close) | 2026-04-24 |
 
 ---
 

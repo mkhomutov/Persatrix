@@ -87,8 +87,14 @@ exporters:
     tls:
       insecure: true
 
-  # Stdout fallback — useful when a backend is down so traces are still
-  # observable in `docker compose logs otel-collector`.
+  # Stdout fallback — opt-in only. Wired into pipelines under the
+  # `debug-exporter` Compose profile (or by adding `debug` back to the
+  # exporter lists below) when a backend is down and operators want to read
+  # traces straight out of `docker compose logs otel-collector`.
+  # Removed from steady-state pipelines per RFC 0019 PR 4 review Should-Fix
+  # #4: in long-running dev sessions a `verbosity: basic` debug exporter on
+  # all three pipelines floods the Collector log stream and dilutes signal
+  # in incident triage.
   debug:
     verbosity: basic
 
@@ -100,12 +106,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [tail_sampling, batch]
-      exporters: [otlp/jaeger, debug]
+      exporters: [otlp/jaeger]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/loki, debug]
+      exporters: [otlphttp/loki]
