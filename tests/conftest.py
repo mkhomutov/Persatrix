@@ -116,23 +116,4 @@ def _markexpr_selects(expr: str, name: str) -> bool:
 # Back-compat alias retained for any external callers.
 def _markexpr_selects_requires_compose(expr: str) -> bool:
     return _markexpr_selects(expr, "requires_compose")
-    expr = expr.strip()
-    if not expr:
-        return False
-    try:
-        from _pytest.mark.expression import Expression  # type: ignore[import-not-found]
-
-        compiled = Expression.compile(expr)
-
-        def _matches(candidate: str, **_: object) -> bool:
-            return candidate == name
-
-        return bool(compiled.evaluate(_matches))  # type: ignore[arg-type]
-    except Exception:  # noqa: BLE001 — defensive fallback if the private API moves
-        return expr == name
-
-
-# Back-compat alias retained for any external callers.
-def _markexpr_selects_requires_compose(expr: str) -> bool:
-    return _markexpr_selects(expr, "requires_compose")
 

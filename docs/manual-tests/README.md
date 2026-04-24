@@ -71,6 +71,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-INTEGRATION-001](MT-INTEGRATION-001.md) | Docker Compose full-stack smoke test end-to-end | Active |
 
+## Observability
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-LOGS-001](MT-LOGS-001.md) | `persatrix logs` end-to-end (REST + SSE follow + restart durability + pretty mode) | Active |
+
 ---
 
 ## Execution Reports

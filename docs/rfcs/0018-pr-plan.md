@@ -435,25 +435,11 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("P
 
 ##### From PR 2 review
 
-- **Enforce required `Options.ServiceKind` / `ServiceInstance` at construction.** `internal/observability/zapenc.NewEncoder` documents both as required but accepts zero-value `Options`, silently emitting `"service.kind":""` / `"service.instance":""` lines that violate the schema's required-field group. Add a `Must`-style constructor (or panic) so misuse is caught at startup rather than on the first emitted line, and add a unit test covering both empty-string cases.
-- **Strengthen the last-ditch fallback envelope to carry the full required-field group.** `encoder.encodeFallbackEnvelope`'s hand-crafted JSON literal (the branch reached only when `serialiseOrdered` itself fails) emits `schema_version` / `level` / `message` only, omitting `service.kind` and `service.instance`. Include all six required fields in the literal so the "every line carries the required-field group" invariant holds even on double failure, and add a test that forces this branch.
-- **Lock in the reserved-key shadowing contract with a test.** Today the encoder injects `schema_version` / `service.*` / `source` after the inner JSON encoder runs, so a future call site emitting `zap.String("schema_version", "evil")` is silently overwritten — but the invariant is unasserted. Add an `encoder_test.go` case that emits each `fieldOrder` reserved key as a user field and asserts the wire line still carries the encoder-injected value.
-- **Document Redactor mutate-then-panic semantics in the trust contract.** `applyRedactor`'s panic-recovery path returns `out = entry`, which shares the underlying map reference. A future real `Redactor` that mutates in place and then panics will leak partial mutations to the wire. Add one sentence to the `Redactor` interface doc comment requiring all mutations to complete before any operation that may panic, or shallow-copy `entry` before invoking.
-- **Warn when `PERSATRIX_LOG_FORMAT=pretty` is combined with `--env=production`.** `cmd/orchestrator/main.go` `buildLogger` returns `zap.NewDevelopment()` for the pretty path, bypassing the encoder *and* the redactor and ignoring the production level filter. Pretty mode is documented as dev-only; emit a one-line stderr warning at startup when the combination is detected so an accidental production deployment is loud.
-- **Benchmark `EncodeEntry` before v0.2.3 release.** The doc comment promises a benchmark of the deliberate `json.Unmarshal` → mutate → `json.Marshal` round-trip per log line, with the streaming-encoder alternative as the escape valve. Add `BenchmarkEncodeEntry` (representative entry shape, 100k iterations) and capture the baseline so the streaming-encoder follow-up has a target to beat.
-- **Guard `legacyRenames` deterministic iteration with a fuzz/property test.** `TestEncoder_LegacyRenameCollisionIsDeterministic` covers the documented `executionID` > `runID` precedence over 50 runs; add a property-style test that permutes the rename map's input order and asserts the wire output is byte-identical, so a regression that re-introduces non-deterministic map iteration fails fast.
-- **Move `stderrSink` / `jsonUnmarshal` package-level mutable globals behind an atomic or `_test.go`-only override.** Today both are safe because no test in `zapenc/` uses `t.Parallel()`; the package comment makes this explicit. A future test file in the same package using `t.Parallel()` would race against production `EncodeEntry` callers. Either build-tag the test-only writes into `*_test.go` files, expose them through a `sync/atomic.Value`, or add a CI lint that fails on `t.Parallel()` inside `internal/observability/zapenc/`.
+Captured during PR #164 review and **deferred** to [#178](https://github.com/mkhomutov/Persatrix/issues/178) (Go zap encoder hardening — 8 items: `Must`-style ctor for required `ServiceKind`/`ServiceInstance`, fallback envelope required-field group, reserved-key shadowing test, Redactor mutate-then-panic doc, dev-mode-in-production warning, `BenchmarkEncodeEntry` baseline, `legacyRenames` fuzz/property test, package-global mutable globals safety).
 
 ##### From PR 3 review
 
-- **Resolve `InjectIDs` "last-write-wins" doc vs `firstOrEmpty` first-wins behavior.** `internal/observability/grpcmeta.InjectIDs` documents that re-injection replaces prior values, but `metadata.AppendToOutgoingContext` actually appends and `ExtractIDs` → `firstOrEmpty` returns `vals[0]` (first-wins). No caller re-injects today, so the divergence is latent — but a future middleware that overrides (say) `WorkflowID` after a retry would silently see the original value win. Pick one semantic and pin it: either align the doc to "first-write-wins", or have `InjectIDs` deduplicate (filter prior keys from `metadata.FromOutgoingContextRaw` before re-appending), or have `ExtractIDs` use `vals[len-1]`. Add a regression test (`TestInjectIDs_*WriteWins`) so the choice can't drift.
-- **Tighten `_unbind` to avoid stripping pre-bound contextvars.** `agents/observability/grpc_logging._unbind` calls `structlog.contextvars.unbind_contextvars(*bound.keys())` which fully removes the key — if anything outside the RPC scope had pre-bound (say) `agent_id` (a future `configure_logging(agent_id=...)` extension or a test fixture), the interceptor would silently strip it on every RPC return. Today only `service.kind` / `service.instance` are pre-bound and they aren't in the four-key set, so the behavior is benign. Capture prior values via `structlog.contextvars.get_contextvars()` before bind and restore them in `_unbind`, or at minimum add a docstring caveat: "callers must not pre-bind any of the four `_METADATA_TO_CONTEXTVAR` values".
-- **Fix the unknown-handler-shape comment/code mismatch.** `agents/observability/grpc_logging._wrap_handler`'s fallback branch comment promises "use stderr as a last resort" but the code just `return handler` with no diagnostic. Either add the promised `print(..., file=sys.stderr)` line, or revise the comment to "we silently bypass an unrecognized shape; failure mode is missing correlation IDs, not an exception".
-- **Document `LoggerWithContext(ctx, nil)` contract.** `internal/observability/zapenc/context.LoggerWithContext` returns `nil` when logger is nil (the caller's next `.Info()` panics), while the nil-ctx branch returns the original logger by design. The asymmetric nil-handling is acceptable but undocumented — add a docstring line: "`logger` must be non-nil at production call sites; the nil return is a contract for tests only".
-- **Align `runID` local with the `ExecutionID` field name in stage_runner.** `internal/scheduler/stage_runner.go` populates `ExecutionID: runID` — pick one convention (rename the local to `executionID`, or rename the field to `RunID`).
-- **Add a cross-language drift test for `_METADATA_TO_CONTEXTVAR` ↔ `grpcmeta.MD*` keys.** Today the four metadata keys are kept in sync only by comment ("The Go side defines the same constants in `internal/observability/grpcmeta`"). A drift test (e.g. parse the Go source and assert the four keys match the Python dict) would prevent silent skew when a fifth ID is added later in the RFC. Worth a follow-up issue, not necessarily this RFC's close PR.
-- **Reduce `tests/integration/test_logs_correlation.py` coupling to module internals.** `_reset_logging_state` reaches into `logging_mod._configured` and `logging_mod._redactor` directly. Acceptable as the only practical full-reset path today; a `reset_for_tests()` public helper in `agents/observability/logging.py` would be cleaner and survive future internal renames.
-- **Clarify the `_METADATA_TO_CONTEXTVAR` underscore-vs-`__all__` contradiction.** The dict is module-private (underscore prefix) but exported in `__all__` for tests. Either rename to `METADATA_TO_CONTEXTVAR` (public) or drop from `__all__` and have the test import it through the module namespace.
+Captured during PR #165 review and **deferred** to [#178](https://github.com/mkhomutov/Persatrix/issues/178) (gRPC correlation polish — 8 items: `InjectIDs` write-semantics decision, `_unbind` pre-bound contextvar restoration, fallback-handler stderr diagnostic, `LoggerWithContext(ctx, nil)` doc, `runID`/`ExecutionID` rename consistency, cross-language drift test for `_METADATA_TO_CONTEXTVAR`, `tests/integration/test_logs_correlation.py` reset helper, `_METADATA_TO_CONTEXTVAR` underscore-vs-`__all__` resolution).
 
 ##### From PR 4 review
 
@@ -485,57 +471,11 @@ Out of scope for PR 4 follow-up (deferred to their own PRs):
 
 ##### From PR 5 review
 
-Captured from the deep review of PR #173 (v2 — post-followups; v1 Must-Fixes — duplicate self-register, gRPC loopback default, thread-safe enqueue, basic gRPC limits, negative-since rejection, SSE drop stats — already addressed in-PR). 0 Must-Fix · 5 Should-Fix · 5 Nice-to-Have · 5 Nit.
-
-Should-Fix:
-
-- **Cross-execution token `_` collides with `executionIDPattern`.** [`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) `executionIDPattern` line 100 + [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) line 27. Pattern `[A-Za-z0-9_-]{1,128}` matches `_`, contradicting the in-handler doc claim. A producer can `Append` an entry with `ExecutionID="_"` and that ring becomes unreachable via REST/SSE (both intercept the token before reaching `Snapshot`/`Subscribe`). Pick a token outside the regex (e.g. `__all__`) or reject `_` in `validExecutionID`; update the doc comment either way.
-- **`_to_timestamp` silently zeroes malformed timestamps.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `_to_timestamp()` line 358. Orchestrator admits epoch-zero entries that contaminate every chronological merge in `handleListLogs` and surface as the "next" event on every SSE stream. Either drop the record (with a counter) or stamp `datetime.now(UTC)` and add `attribute["timestamp_parse_error"]`.
-- **`parseSince` accepts future-dated RFC 3339 timestamps.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `parseSince()` line 144. Mirror failure mode of the (now-fixed) negative-duration case — same always-empty-200 surprise. Add `t.After(now)` rejection for symmetry with the duration branch.
-- **No SSE per-write deadline.** [`internal/server/logs_stream_handler.go`](../../internal/server/logs_stream_handler.go) `handleStreamLogs()` lines 100–115. A stalled TCP peer (laptop lid, NAT timeout) pins a subscriber slot indefinitely; with `MaxSubscribersDefault=64`, ~64 dead clients can soft-deny the SSE endpoint. Wrap each `w.Write(...)` with `http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5*time.Second))`.
-- **No incoming-message-rate cap on the LogService stream.** [`cmd/orchestrator/main.go`](../../cmd/orchestrator/main.go) gRPC server construction lines 332–340. `MaxRecvMsgSize=8MiB` and `MaxConcurrentStreams=256` are in place, but per-execution rate limiting only kicks in *after* parse + lock acquisition. With unauthenticated ingest and unlimited fake `execution_id`s, parse-cost amplification is open. Acceptable while loopback-bound; **hard requirement before any non-loopback `--grpc-bind`** — flag in the PR 7 readiness checklist or the RFC 0009 hand-off note.
-
-Nice-to-Have:
-
-- **structlog bookkeeping keys leak into `attributes`.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `record_to_proto()` line 318 + `_RESERVED_KEYS` line 80. Consider filtering keys that begin with `_` and a small denylist (`logger`, `stack_info`, `exc_info`).
-- **Cross-merge `id=_` is unbounded by paging.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `collectAllEntries()` line 102. Worst case ~25 MB per request (50 execs × 1000 entries × ~500 B). Bounded for v0.2.3 single-node; needs cursor-based paging once v0.3 multi-node lands.
-- **`StreamLogs` discards `DropReason`.** [`internal/server/logs_service.go`](../../internal/server/logs_service.go) `StreamLogs()` line 100. A throttled per-stream WARN when any drop reason ≠ `DropNone` (mirroring the buffer's `warnRateOnce` pattern) helps operators triage shipper-side mismatches without scraping prom counters.
-- **Unused per-subscriber drop counter.** [`internal/observability/logbuffer/subscribe.go`](../../internal/observability/logbuffer/subscribe.go) `subscriber.dropped` line 49. Atomic counter is incremented but never read — aggregate `droppedSubscribers` covers `Stats()`. Either expose via `Subscribe`'s return for per-stream visibility, or delete the field.
-- **`_to_timestamp` discards sub-second precision for numeric inputs.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) `_to_timestamp()` line 366. `out.FromSeconds(int(ts))` truncates floats; use `out.FromNanoseconds(int(ts * 1e9))`.
-
-Nit:
-
-- **Document worst-case path component length.** [`internal/observability/logbuffer/buffer.go`](../../internal/observability/logbuffer/buffer.go) `executionIDPattern` line 96 doc. Note that the disk layer appends `<seq>.jsonl` (~12 chars), so the full path component is ~140 chars (still well under `NAME_MAX 255`).
-- **`levelMatch` is exact — not `>=`.** [`internal/server/logs_handler.go`](../../internal/server/logs_handler.go) `levelMatch()` line 209. Consider `--level >=warn` syntax in the CLI rewrite (PR 6) without changing the server-side semantics.
-- **Plain `int` counters mutated outside the queue lock.** [`agents/observability/log_shipper.py`](../../agents/observability/log_shipper.py) lines 159–162 (`enqueued`/`dropped`/`shipped`/`last_ack_seq`). CPython's GIL makes `+=` on int atomic, but tests asserting exact values are timing-sensitive once batching is asynchronous. Convert to `itertools.count()` or guard reads under the lock for type-checker cleanliness.
-- **SSE/REST may diverge on non-JSON-encodable attributes.** [`internal/server/logs_stream_handler.go`](../../internal/server/logs_stream_handler.go) `json.Marshal` failure line 109. An entry whose `Attributes` contains a non-JSON-encodable value is logged-and-dropped silently from SSE but still queryable via REST. Consider a proactive validation hook in `Buffer.Append` so SSE and REST views never diverge.
-- **`internal/observability/logbuffer/env.go` ships without `env_test.go`.** Seven-knob mapping is mechanically correct but uncovered; one table-driven test would cost ~30 lines.
+Captured during PR #173 review. Bulk of items already shipped in [#177](https://github.com/mkhomutov/Persatrix/pull/177) (sub-second timestamp precision, denylist for structlog bookkeeping keys, `env_test.go` table-driven coverage). Should-Fix #3 (`parseSince` future-timestamp rejection) applied in this PR. Remaining residuals (4 Should-Fix + 5 Nice-to-Have + 5 Nit, including cross-execution `_` token collision, malformed-timestamp policy, SSE per-write deadline, gRPC ingest rate cap before non-loopback bind) **deferred** to [#179](https://github.com/mkhomutov/Persatrix/issues/179).
 
 ##### From PR 6 review
 
-Captured from the deep review of PR #174 (RFC 0018 PR 6 — CLI logs rewrite + SSE follow + E2E). 0 Must-Fix · 2 Should-Fix · 7 Nice-to-Have · 3 Nit. No security or correctness blockers.
-
-Should-Fix:
-
-- **Botched-refactor leftover in [`tests/conftest.py`](../../tests/conftest.py) `_markexpr_selects_requires_compose` (around line 117).** Function returns on line 1, then 15 lines of unreachable code reference an out-of-scope `name`, plus a verbatim duplicate definition follows. Dead code that confuses future readers and risks linter / coverage noise — collapse to the single intended implementation.
-- **SSE reconnect backoff is never reset after a successful re-connect.** [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) `follow_logs` (around line 112). The `backoff` variable grows on each retry but is not reset to the initial value once a stream re-establishes, so one early hiccup permanently inflates retry intervals for the rest of the session. Reset `backoff` to its initial duration immediately after the SSE connection succeeds.
-
-Nice-to-Have:
-
-- **`find_event_end` only matches `\n\n`.** [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) (around line 196). The SSE spec also allows `\r\n\r\n` event terminators. Matches today's orchestrator output but fragile behind a CR-injecting proxy. Match both terminators.
-- **`handle_sse_frame` does not join multi-line `data:` continuations per SSE spec.** Today's server emits one entry per event so this is benign; document the assumption or implement spec-compliant continuation joining.
-- **Co-locate `LogLevel` + `as_wire_str` with `LogsOptions`.** Currently the enum lives in `cli/src/main.rs` while the option struct lives in `cli/src/commands/logs.rs`; move the enum next to its consumer for cohesion.
-- **No hermetic test for SSE reconnect (`[reconnected]` line + backoff) or for `StreamOutcome::Fatal` (4xx during follow).** Add coverage so the Should-Fix backoff-reset regression cannot recur silently.
-- **No combined E2E for `--since` / `--workflow` / `--level` / `--verbose` cross-process.** Each filter is exercised individually via REST tests; one combined CLI invocation would lock in the Rust↔Go wiring.
-- **`time.sleep(0.5)` heuristic in the `--follow` E2E may flake on slow CI.** Prefer polling the server-side subscriber count (or the buffer's `Stats()` subscriber gauge) until the CLI is actually attached before producing the test entry.
-- **Restart-durability test seeds disk JSONL directly, bypassing `Buffer.Seal`.** Acknowledged in the PR; needs a PR 7 follow-up to wire `Seal` into the workflow lifecycle so durability is exercised through the real path.
-- **Client-side `--trace` filter ships every entry over the wire.** Add a `// TODO(rfc-0018-pr-7)` for a server-side `trace` query parameter so large-volume `--trace` queries don't pay the full transfer cost.
-
-Nit:
-
-- **`entry.message` printed verbatim with potential ANSI-escape passthrough.** Low risk while the only producers are first-party Go/Python code; sanitize control bytes before printing if untrusted producers ever land.
-- **Per-frame `eprintln!("warning: skipping malformed SSE frame…")` could spam stderr from a misbehaving server.** Throttle to once per connection (mirroring the buffer's `warnRateOnce` pattern) or include a count.
-- **24 h `.timeout()` justification comment talks about proxies, but the real reason is "longer than any operator session".** Reword for accuracy.
+Captured during PR #174 review. Should-Fix #1 (`tests/conftest.py` botched-refactor leftover) and Should-Fix #2 (SSE backoff reset) applied in this PR. Remaining items (7 Nice-to-Have + 3 Nit, including `\r\n\r\n` SSE terminator support, `LogLevel` enum co-location, hermetic SSE reconnect test, server-side `trace` query parameter, ANSI-escape sanitisation) **deferred** to [#179](https://github.com/mkhomutov/Persatrix/issues/179).
 
 ##### RFC close
 
@@ -546,12 +486,35 @@ Nit:
 
 #### PR checklist
 
-- [ ] All review follow-ups from PRs 1–6 addressed or explicitly deferred (with rationale)
-- [ ] [RFC 0018 status](0018-structured-logging-framework.md) → `✅ Implemented`
-- [ ] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects logging-side close
-- [ ] PR #161 appears in ROADMAP merged-PR table
-- [ ] Manual-test report appended for v0.2.3 logging coverage
-- [ ] `make test` passes; `make lint` clean
+- [x] All review follow-ups from PRs 1–6 addressed or explicitly deferred (with rationale)
+- [x] [RFC 0018 status](0018-structured-logging-framework.md) → `✅ Implemented`
+- [x] [ROADMAP.md](../../ROADMAP.md) RFC tracker row updated; v0.2.3 milestone row reflects logging-side close
+- [x] PR #161 appears in ROADMAP merged-PR table
+- [x] Manual-test report appended for v0.2.3 logging coverage
+- [x] `make test` passes; `make lint` clean
+
+**Merged**: _this PR_ — 2026-04-24
+
+#### Disposition of review follow-ups
+
+All items captured in the per-PR review subsections above are accounted for. Disposition is one of:
+
+- **✅ Applied** in this closeout PR (small one-liners that fit under the 500-line cap).
+- **✅ Already addressed** by polish PR [#177](https://github.com/mkhomutov/Persatrix/pull/177) (RFC 0018 PR 8) — cross-referenced inline in the per-PR sections above where applicable.
+- **📝 Deferred** to a tracked GitHub issue (see [Deferred follow-ups](#deferred-follow-ups) below) so the closeout stays focused on status hygiene rather than carrying a multi-cluster diff.
+
+##### Applied in this closeout PR
+
+- **PR 5 review Should-Fix #3** — `parseSince` now rejects future-dated RFC 3339 timestamps with HTTP 400 (mirrors the existing negative-duration guard). Test: `TestLogs_FutureSince_Returns400`.
+- **PR 6 review Should-Fix #1** — [`tests/conftest.py`](../../tests/conftest.py) `_markexpr_selects_requires_compose` botched-refactor leftover removed (15 lines of unreachable code + duplicate definition collapsed to the single intended one-liner).
+- **PR 6 review Should-Fix #2** — SSE reconnect backoff is now reset to `SSE_INITIAL_BACKOFF` once the stream is established in [`cli/src/commands/logs.rs`](../../cli/src/commands/logs.rs) `consume_stream`, so one early hiccup no longer permanently inflates retry intervals for the rest of a `--follow` session.
+
+##### Deferred follow-ups
+
+The following clusters were captured in the per-PR review subsections but are deferred to tracked issues so this closeout stays under the [BRANCHING.md](../BRANCHING.md) 500-line soft cap. Each deferred item retains its in-line bullet above; this list is the index for status hygiene.
+
+- **Go zap encoder hardening (PR 2 review) + gRPC correlation polish (PR 3 review)** — 16 items, full enumeration in [#178](https://github.com/mkhomutov/Persatrix/issues/178).
+- **logbuffer + LogService + agent shipper + CLI logs hardening (PR 4 / PR 5 / PR 6 reviews)** — Should-Fix + NTH + Nit residuals, full enumeration in [#179](https://github.com/mkhomutov/Persatrix/issues/179). Bulk of PR 4 / PR 5 items already shipped in [#177](https://github.com/mkhomutov/Persatrix/pull/177).
 
 ---
 

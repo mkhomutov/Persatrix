@@ -111,7 +111,7 @@ async fn follow_logs(
     let mut backoff = SSE_INITIAL_BACKOFF;
     let mut reconnect = false;
     loop {
-        match consume_stream(client, &url, opts, reconnect).await {
+        match consume_stream(client, &url, opts, reconnect, &mut backoff).await {
             StreamOutcome::Closed => {
                 // Server closed the stream cleanly (e.g. orchestrator shutdown).
                 // Exit without an error — the operator's `--follow` session
@@ -148,6 +148,11 @@ async fn consume_stream(
     url: &str,
     opts: &LogsOptions<'_>,
     is_reconnect: bool,
+    // Reset to `SSE_INITIAL_BACKOFF` once the stream is established so a
+    // single early hiccup does not permanently inflate the retry window
+    // for the rest of the `--follow` session (RFC 0018 PR 6 review
+    // Should-Fix #2).
+    backoff: &mut Duration,
 ) -> StreamOutcome {
     let resp = match client
         .get(url)
@@ -180,6 +185,9 @@ async fn consume_stream(
         // disconnections in their terminal scrollback.
         eprintln!("{} [reconnected]", "info:".cyan());
     }
+    // Stream is established — reset the exponential backoff window so
+    // the next disconnect starts from `SSE_INITIAL_BACKOFF` again.
+    *backoff = SSE_INITIAL_BACKOFF;
 
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::with_capacity(4096);

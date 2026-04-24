@@ -153,6 +153,16 @@ func TestLogs_NegativeSince_Returns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// PR #173 review Should-Fix #3: future-dated RFC 3339 timestamps mirror
+// the negative-duration failure mode — they would silently translate to
+// an always-empty 200.  Reject as 400 for symmetry.
+func TestLogs_FutureSince_Returns400(t *testing.T) {
+	srv, _ := testServerWithBuffer(t)
+	future := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/exec-1/logs?since="+future, nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestLogs_InvalidLevel_Returns400(t *testing.T) {
 	srv, _ := testServerWithBuffer(t)
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/executions/exec-1/logs?level=NOTICE", nil)
