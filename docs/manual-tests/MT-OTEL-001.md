@@ -153,8 +153,9 @@ $run.execution_id
   Collector → Prometheus exporter behaviour.
 - If no exemplars are visible, confirm Prometheus was started with
   `--enable-feature=exemplar-storage` (the dev compose `prometheus` service `command:` block
-  already enables it; forks pointing at their own Prometheus must enable the feature flag —
-  documented in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml)).
+  in [docker-compose.yaml](../../docker-compose.yaml) already enables it; forks pointing at
+  their own Prometheus must enable the feature flag — the requirement is also restated next
+  to the `prometheus` exporter in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml)).
 
 **Verification**:
 - [ ] At least one exemplar is visible on the histogram quantile query
