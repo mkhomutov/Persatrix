@@ -170,6 +170,8 @@ type Options struct {
 
 // NewEncoder returns the schema [zapcore.Encoder].  See options.go for the
 // Must-style validation contract (issue #178).
+// Use zap.AddCaller() on the parent logger to populate `source`;
+// without it, `source` is omitted and user-supplied shadows are deleted.
 func NewEncoder(opts Options) zapcore.Encoder {
 	opts.mustValidate()
 	if opts.Redactor == nil {
@@ -301,6 +303,8 @@ func (e *schemaEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 	//    encoding/json's last-value-wins duplicate-key rule).  Values match
 	//    jsonEncoderConfig's encoders (RFC3339Nano, CapitalLevel).
 	record["schema_version"] = SchemaVersion
+	// Force UTC on the authoritative re-stamped wire timestamp
+	// (docs/observability.md § 2: "UTC by default").
 	record["timestamp"] = entry.Time.UTC().Format(time.RFC3339Nano)
 	record["level"] = entry.Level.CapitalString()
 	record["message"] = entry.Message

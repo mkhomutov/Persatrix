@@ -558,6 +558,15 @@ func TestEncoder_ReservedKeysShadowUserFields(t *testing.T) {
 	opts.ServiceRole = "coder"
 	logger, buf := newTestLogger(t, opts)
 
+	// Capture the wall-clock instant immediately before the log call so we
+	// can positively assert the re-stamped timestamp is authoritative
+	// (PR #183 review, Should-Fix #2).  A bare NotEqual against the forged
+	// sentinel would still pass if the re-stamp produced "" or a zero time
+	// — leaving a silent regression window exactly where this test is
+	// supposed to be the trip-wire.  Subtract one second of slack to
+	// tolerate monotonic-vs-wall-clock skew on CI runners.
+	before := time.Now().UTC().Add(-time.Second)
+
 	logger.Info("real-message",
 		zap.String("schema_version", "99"),
 		zap.String("service.kind", "attacker"),
@@ -585,6 +594,22 @@ func TestEncoder_ReservedKeysShadowUserFields(t *testing.T) {
 	ts, _ := record["timestamp"].(string)
 	assert.NotEqual(t, "1970-01-01T00:00:00Z", ts,
 		"timestamp must be re-stamped from zapcore.Entry, not shadowable by user field")
+	// Positive assertion (PR #183 review, Should-Fix #2 + Nit #3): the
+	// re-stamped timestamp must parse as RFC 3339 Nano, be in UTC (the
+	// encoder forces .UTC() — see encoder.go comment at the re-stamp site),
+	// and not predate the pre-log instant.  This locks in the UTC-
+	// normalisation contract (docs/observability.md § 2) as an intentional
+	// wire-format behaviour, and closes the blind spot where a regression
+	// that emitted "" or a zero-time would still satisfy the NotEqual
+	// above.
+	parsed, err := time.Parse(time.RFC3339Nano, ts)
+	require.NoError(t, err, "re-stamped timestamp must parse as RFC 3339 Nano")
+	assert.Equal(t, time.UTC, parsed.Location(),
+		"re-stamped timestamp must be normalised to UTC regardless of host timezone")
+	assert.True(t, strings.HasSuffix(ts, "Z"),
+		"re-stamped timestamp must carry the UTC 'Z' suffix, not a numeric offset")
+	assert.False(t, parsed.Before(before),
+		"re-stamped timestamp must be no earlier than the pre-log instant; got %s (before=%s)", ts, before.Format(time.RFC3339Nano))
 
 	src, ok := record["source"].(map[string]any)
 	require.True(t, ok, "source must remain an encoder-controlled object")

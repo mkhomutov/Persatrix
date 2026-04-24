@@ -1,4 +1,11 @@
 // Options validation (issue #178 — Must-style constructor contract).
+//
+// Note: a blank line separates this comment from the `package` clause on
+// purpose.  Go treats a comment that is *immediately* adjacent to the
+// package clause as a package doc comment, which would create a second
+// package doc alongside the canonical one in encoder.go and confuse
+// `go doc` tooling.  Keep the blank line.
+
 package zapenc
 
 // mustValidate panics when required schema fields are missing.  Both

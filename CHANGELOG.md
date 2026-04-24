@@ -236,7 +236,15 @@ All notable changes to this project will be documented in this file.
   value via `encoding/json`'s last-value-wins duplicate-key rule. The
   reserved-key shadowing contract now applies uniformly to the whole
   encoder-owned set (`schema_version`, `service.kind`, `service.instance`,
-  `service.role`, `timestamp`, `level`, `message`, `source`).
+  `service.role`, `timestamp`, `level`, `message`, `source`). The
+  re-stamped `timestamp` is now normalised to UTC (RFC 3339 Nano with a
+  `Z` suffix) to match [`docs/observability.md` § 2](docs/observability.md)
+  ("timestamp — RFC 3339 with timezone; UTC by default"); previously,
+  zap's inner `RFC3339NanoTimeEncoder` passed through whatever zone
+  `time.Now()` carried, so a non-UTC host emitted a local offset such as
+  `+02:00`. Downstream consumers that parsed the offset as informational
+  are unaffected (RFC 3339 Nano remains valid); those that string-matched
+  a specific offset must switch to `Z`.
 - `source` is now explicitly deleted from the parsed record when
   `entry.Caller.Defined` is false, so a user field `zap.Any("source", …)`
   cannot leak a forged provenance object onto the wire when
