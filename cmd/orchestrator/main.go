@@ -18,7 +18,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -28,7 +27,6 @@ import (
 	"github.com/mkhomutov/persatrix/internal/observability"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
-	"github.com/mkhomutov/persatrix/internal/observability/redact"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -123,6 +121,28 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync() //nolint:errcheck
+
+	// RFC 0018 PR 5 — orchestrator-side log buffer.  Created early so the
+	// zap logger can be wrapped with a parallel BufferCore tee before
+	// any subsystem captures the *zap.Logger handle.  Without the early
+	// wrap, scheduler / executor / cost / state would log only to
+	// stderr and `persatrix logs <execution_id>` would return [] for
+	// orchestrator-emitted lines (the merged `_` view too).  Failure to
+	// construct the buffer is non-fatal — log endpoints fall back to
+	// 501 NOT_IMPLEMENTED and the logger keeps writing to stderr only.
+	logBuf, err := logbuffer.New(logbuffer.ConfigFromEnv(), logger)
+	if err != nil {
+		logger.Warn("failed to initialize log buffer; log endpoints disabled",
+			zap.Error(err))
+		logBuf = nil
+	} else {
+		logger = attachBufferTee(logger, logBuf, *env)
+		defer func() {
+			if err := logBuf.Close(); err != nil {
+				logger.Warn("log buffer close failed", zap.Error(err))
+			}
+		}()
+	}
 	log := logger.Sugar()
 
 	obsCfg := observability.NewConfigFromEnv(*env)
@@ -271,24 +291,15 @@ func main() {
 		schedOpts = append(schedOpts, scheduler.WithMetrics(orchMetrics))
 	}
 
-	// RFC 0018 PR 5 — orchestrator-side log buffer + LogService gRPC server.
-	// The buffer is the single sink for both the gRPC ingest path
-	// (LogServiceServer.StreamLogs) and the REST + SSE retrieval path
-	// (handleListLogs / handleStreamLogs).  Failure to construct it is
-	// non-fatal: log endpoints fall back to 501 NOT_IMPLEMENTED so the
-	// rest of the orchestrator still serves requests.
-	logBuf, err := logbuffer.New(logbuffer.ConfigFromEnv(), logger)
-	if err != nil {
-		logger.Warn("failed to initialize log buffer; log endpoints disabled",
-			zap.Error(err))
-		logBuf = nil
-	} else {
+	// RFC 0018 PR 5 — wire the orchestrator-side log buffer into the
+	// HTTP server so the REST + SSE retrieval surface
+	// (handleListLogs / handleStreamLogs) can read from the same ring
+	// the BufferCore tee + LogServiceServer.StreamLogs feed.  The
+	// buffer itself is constructed earlier (just after the logger) so
+	// it can also tee orchestrator-emitted entries; here we only opt
+	// the server in.
+	if logBuf != nil {
 		srvOpts = append(srvOpts, server.WithLogBuffer(logBuf))
-		defer func() {
-			if err := logBuf.Close(); err != nil {
-				logger.Warn("log buffer close failed", zap.Error(err))
-			}
-		}()
 	}
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
@@ -439,61 +450,4 @@ func resolveDeadlineMode(explicit, env string) string {
 		return "static"
 	}
 	return "derived"
-}
-
-// buildLogger constructs the orchestrator's zap logger per RFC 0018 PR 2.
-//
-// Default (logFormat == "" || "json"): the Persatrix-schema encoder writes
-// JSON conforming to docs/observability.md (schema_version: "1") to stderr,
-// with a NoopRedactor in place until a security RFC ships a real one.
-//
-// Pretty (logFormat == "pretty"): zap's development console encoder writes
-// human-readable colourised output for local debugging.  Pretty mode is
-// intentionally NOT wrapped by the schema encoder — it is a developer
-// affordance, not the wire format consumed by persatrix logs.
-//
-// service.kind is hard-coded to "orchestrator"; service.instance defaults to
-// the hostname.  Both are documented in RFC 0018 § B as set by the emitter
-// at process start and never rewritten on ingest.
-func buildLogger(env, logFormat string) (*zap.Logger, error) {
-	if logFormat == zapenc.PrettyEnvValue {
-		// Dev console encoder: colour, caller, no JSON.  Matches the
-		// previous zap.NewDevelopment() shape so make run output stays
-		// recognisable in pretty mode.
-		return zap.NewDevelopment()
-	}
-
-	// Production schema encoder.  service.instance is, in priority order:
-	//   1. PERSATRIX_SERVICE_INSTANCE env var (operator-supplied, stable
-	//      across pod restarts, useful where os.Hostname() returns an
-	//      ephemeral synthetic name) — RFC 0018 PR 2 review, Should-Fix #2.
-	//   2. os.Hostname() (best-effort).
-	//   3. literal "orchestrator" (last resort; loses cross-process
-	//      provenance when multiple nodes hit this fallback).
-	instance := os.Getenv("PERSATRIX_SERVICE_INSTANCE")
-	if instance == "" {
-		host, err := os.Hostname()
-		if err != nil || host == "" {
-			instance = "orchestrator"
-		} else {
-			instance = host
-		}
-	}
-
-	enc := zapenc.NewEncoder(zapenc.Options{
-		ServiceKind:     "orchestrator",
-		ServiceInstance: instance,
-		Redactor:        redact.NoopRedactor{},
-	})
-
-	// In production, suppress DEBUG (matches the previous
-	// zap.NewProduction() default level); in development, allow DEBUG so
-	// JSON-mode local runs still see the verbose output developers expect.
-	level := zap.InfoLevel
-	if env == "development" {
-		level = zap.DebugLevel
-	}
-
-	core := zapcore.NewCore(enc, zapcore.AddSync(os.Stderr), level)
-	return zap.New(core, zap.AddCaller()), nil
 }
