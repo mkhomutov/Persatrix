@@ -439,15 +439,14 @@ v0.2.2 complete
 
 ```
 v0.2.3 complete
-    ↓
-RFC 0008 (Memory & Context Optimization)          [prerequisite for both RFC 0007 and RFC 0011 P3]
     │
-    ├── RFC 0007 (Conditional & Looped Control Flow)   [parallel workstream; depends on RFC 0008]
+    ├── RFC 0008 (Memory & Context Optimization)             [prerequisite for both RFC 0007 and RFC 0011 P3]
+    │       │
+    │       ├── RFC 0007 (Conditional & Looped Control Flow) [parallel workstream; depends on RFC 0008]
+    │       └── RFC 0011 — internal channels only            [parallel workstream; P1–2 independent; P3 needs RFC 0008 P2]
     │
-    └── RFC 0011 — internal channels only             [parallel workstream; P1–2 independent; P3 needs RFC 0008 P2]
-    │
-RFC 0009 Phases 1–2 (Audit, Rate Limiting)        [runs throughout — no blocking dependency on 0007/0011]
-    ↓
+    └── RFC 0009 Phases 1–2 (Audit, Rate Limiting)           [runs throughout — no blocking dependency on 0007/0011]
+            ↓
 v0.3.0 complete (all four RFCs delivered)
 ```
 
