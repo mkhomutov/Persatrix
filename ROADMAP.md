@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-25 (documentation cleanup: flipped `internal/observability/` to ✅ Complete in both Component Status tables now that RFCs 0018 + 0019 have shipped; removed duplicated RFC 0015 bullet from v0.5.0 "What ships"; sorted Merged PR History rows for #161 and #175 into chronological order)  
+> **Last updated**: 2026-04-25 (documentation cleanup: flipped `internal/observability/` to ✅ Complete in both Component Status tables now that RFCs 0018 + 0019 have shipped; removed duplicated RFC 0015 bullet from v0.5.0 "What ships"; sorted Merged PR History rows for #161 and #175 into chronological order; companion changes — README "Why Persatrix" repositioned ahead of version blurbs, RFC numbering reservations documented in `docs/rfcs/README.md`)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — ✅ Released (RFC 0018 ✅ 7/7; RFC 0019 ✅ 5/5; release-prep plan ✅ complete)  
 > **Current milestone**: v0.2.3 released; v0.3.0 planning next (shared channels + multi-user chat — RFCs 0009, 0010, 0011)
 
