@@ -53,6 +53,10 @@ _EXTRA_EXCLUDES = [
     # PR review reports are local-only working artifacts and are intentionally
     # not committed; local copies should not block repo-wide size checks.
     "docs/pr-reviews/**",
+    # Git worktrees are checked out under .claude/worktrees/ and mirror the
+    # full repo tree. Scanning them would double-count every file and report
+    # false positives for files that are grandfathered under their normal paths.
+    ".claude/**",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
@@ -87,15 +91,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
-    # Python test files that exceeded the 500-line limit when the tests/**
-    # blanket exclusion was removed (v0.2 baseline). These are tracked for
-    # targeted follow-up splits. Do not add new entries — split instead.
-    "tests/unit/python/test_memory_tools.py",
-    "tests/unit/python/test_relationship_memory.py",
-    "tests/integration/test_persona_e2e.py",
-    "tests/unit/python/test_working_memory.py",
-    "tests/unit/python/test_relationship_memory_user.py",
-    "tests/unit/python/test_builtin_tools.py",
 })
 
 
