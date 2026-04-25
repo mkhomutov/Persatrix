@@ -87,15 +87,9 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
-    # Go test files that exceeded the 500-line limit when the **/*_test.go
-    # blanket exclusion was removed. These are tracked for targeted follow-up
-    # splits. Do not add new entries — split instead.
-    "internal/cost/cost_test.go",
-    "internal/observability/zapenc/encoder_test.go",
     # Python test files that exceeded the 500-line limit when the tests/**
     # blanket exclusion was removed (v0.2 baseline). These are tracked for
     # targeted follow-up splits. Do not add new entries — split instead.
-    "tests/unit/python/test_chat_servicer.py",
     "tests/unit/python/test_memory_tools.py",
     "tests/unit/python/test_relationship_memory.py",
     "tests/integration/test_persona_e2e.py",
