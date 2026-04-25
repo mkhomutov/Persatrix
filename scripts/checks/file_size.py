@@ -43,10 +43,8 @@ _EXTRA_EXCLUDES = [
     "cli/target/**",
     "agents/generated/**",
     "internal/generated/**",
-    # Tests are excluded to match the v0.2 release-prep plan baseline
-    # ("non-generated, non-test source files only"). Test files are expected
-    # to grow with coverage and are reviewed through their own code-review lens.
-    "tests/**",
+    # Go test files are co-located with source (Go convention) and excluded
+    # because their growth is bounded by the package they test.
     "**/*_test.go",
     # Local venvs (not present in CI but common during local runs).
     ".venv/**",
@@ -92,6 +90,20 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
+    # Python test files that exceeded the 500-line limit when the tests/**
+    # blanket exclusion was removed (v0.2 baseline). These are tracked for
+    # targeted follow-up splits. Do not add new entries — split instead.
+    "tests/unit/python/test_episodic_memory.py",
+    "tests/unit/python/test_event_dispatch_tick.py",
+    "tests/unit/python/test_validate.py",
+    "tests/unit/python/test_server.py",
+    "tests/unit/python/test_chat_servicer.py",
+    "tests/unit/python/test_memory_tools.py",
+    "tests/unit/python/test_relationship_memory.py",
+    "tests/integration/test_persona_e2e.py",
+    "tests/unit/python/test_working_memory.py",
+    "tests/unit/python/test_relationship_memory_user.py",
+    "tests/unit/python/test_builtin_tools.py",
 })
 
 
