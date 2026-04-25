@@ -87,6 +87,8 @@ Three channel types:
 **Channel configuration** (`config/channels.yaml`):
 
 ```yaml
+max_channels: 50   # global cap on named group channels; DMs and threads not counted
+
 channels:
   - name: planning
     description: "Strategy and planning discussions"
@@ -171,6 +173,8 @@ type ChannelStore interface {
 ```
 
 A per-channel message cap (default: 10,000 messages) prevents unbounded store growth. When the cap is reached, oldest messages are pruned on each new write, consistent with RFC 0008's episodic memory cap approach.
+
+A global channel-count cap (default: 50 named channels, configurable via `channels.max_channels` in `config/channels.yaml`) bounds the membership table size, observability label cardinality, and the operator-visible namespace. The cap applies to named group channels only — DMs and threads are addressed implicitly by participant pair or parent message ID and are not counted against this limit. Exceeding the cap at startup is a config validation error; channel creation via the REST endpoint returns 409 Conflict when the cap is reached.
 
 ### C. Message Routing and Delivery
 
@@ -344,7 +348,7 @@ persatrix channel watch <name> [--interval N]    # poll for new messages (defaul
 - **Content injection**: Channel message content is stored in episodic memory and later injected into agent context. Adversarial content in channel messages represents the same prompt injection risk as tool output. Mitigation: RFC 0009 Phase 1 input sanitization applies to channel message content before it is stored.
 - **History amplification**: A busy channel with large messages could dominate the memory injection budget. Mitigation: RFC 0008's `budget_channel_tokens` allocation cap in `MemoryBudget` prevents channel history from crowding out other memory tiers.
 - **DM privacy**: DM channels are accessible only to the two declared participants. Membership is enforced at the store layer. DM content is stored in each participant's isolated episodic memory, not in a shared channel store visible to other agents.
-- **Store growth**: Per-channel message cap (default 10,000) and the SQLite WAL checkpoint policy prevent unbounded disk growth.
+- **Store growth**: Per-channel message cap (default 10,000), global channel-count cap (default 50 named channels), and the SQLite WAL checkpoint policy prevent unbounded disk growth and bound observability cardinality.
 
 ---
 
