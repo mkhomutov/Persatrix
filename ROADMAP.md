@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
-> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011) — 📋 Planning  
-> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011)
+> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; wrote RFC 0020 — Interaction Lifecycle (dialogue boundaries + episode granularity); inserted RFC 0020 into the v0.3.0 dependency chain ahead of RFC 0008 §D; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011 + RFC 0020; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
+> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020) — 📋 Planning  
+> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011, 0020)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -51,6 +51,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
+| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 📋 Proposed |
 
 ---
 
@@ -422,6 +423,7 @@ v0.2.2 complete
 - **Internal channels** — group messages, DMs, threads; agents can address each other and reply (RFC 0011, internal part)
 - **Channel history** visible to agents via memory integration
 - **Multi-agent conversation routing** — message delivery, acknowledgement, threading
+- **Interaction lifecycle** — dialogues (not individual messages) become the unit of episodic memory and summarization; structural + idle-gap boundary detection; per-channel scoping (RFC 0020)
 - **Conditional and looped workflow control flow** — skip semantics, bounded repeat-until, for-each (RFC 0007)
 - **Agent memory and context optimization** — per-step context budget allocation, caller-prepared context packaging, delegation result merge contracts (RFC 0008)
 - **Security hardening Phases 1–2** — audit logging, rate limiting, input sanitization (RFC 0009)
@@ -433,28 +435,41 @@ v0.2.2 complete
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
-| 0011 | Channels + Bridges | Internal channels only | Not yet written |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels only (Phases 1–3) | 📋 Proposed |
+| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 📋 Proposed |
 
 ### Dependency Chain (v0.3.0)
 
 ```
 v0.2.3 complete
     │
-    ├── RFC 0008 (Memory & Context Optimization)             [prerequisite for both RFC 0007 and RFC 0011 P3]
+    ├── RFC 0020 P1 (Interaction tracker + additive schema)    [no v0.3.0 deps; starts immediately]
     │       │
-    │       ├── RFC 0007 (Conditional & Looped Control Flow) [parallel workstream; depends on RFC 0008]
-    │       └── RFC 0011 — internal channels only            [parallel workstream; P1–2 independent; P3 needs RFC 0008 P2]
+    │       └── RFC 0020 P2 (summarize-on-close + janitor)     [pairs with RFC 0008 §D — interaction-bounded summarization]
     │
-    └── RFC 0009 Phases 1–2 (Audit, Rate Limiting)           [runs throughout — no blocking dependency on 0007/0011]
+    ├── RFC 0008 (Memory & Context Optimization)               [prerequisite for RFC 0007 and RFC 0011 P3; coordinates with RFC 0020 P2]
+    │       │
+    │       ├── RFC 0007 (Conditional & Looped Control Flow)   [parallel workstream; depends on RFC 0008]
+    │       └── RFC 0011 — internal channels only              [parallel workstream; P1–2 independent; P3 needs RFC 0008 P2]
+    │              │
+    │              └── RFC 0011 P3 + RFC 0020 P3 (joint)       [channel memory becomes interaction-scoped]
+    │
+    └── RFC 0009 Phases 1–2 (Audit, Rate Limiting)             [runs throughout — no blocking dependency on 0007/0011/0020]
             ↓
-v0.3.0 complete (all four RFCs delivered)
+v0.3.0 complete (all five RFCs delivered)
 ```
+
+> **Why RFC 0020 Phase 1 starts immediately, ahead of RFC 0008 §D**: Interactions are the *unit* RFC 0008 will summarize and RFC 0011 will store as channel history. Landing the tracker + schema (Phase 1) first means every multi-turn dialogue is bounded correctly from day one — no per-message episode debt that has to be migrated later. Phase 1 is pure scaffolding (no LLM, no behavior change), so it carries minimal risk and unblocks both RFC 0008's compression pipeline and RFC 0011's memory integration.
+
+> **Why RFC 0020 P2 pairs with RFC 0008 §D**: The summarize-on-close hook calls into RFC 0008's compression pipeline. Coordinating delivery avoids an awkward window where RFC 0008 ships per-message summarization that RFC 0020 then has to displace. The interface is small (RFC 0020 emits "interaction closed" events; RFC 0008 §D consumes them as the trigger to compress).
+
+> **Why RFC 0020 P3 is jointly delivered with RFC 0011 P3**: Channels multiply the per-message-episode problem by N participants. Per-channel scoping (DM = pair, thread = thread, group = rolling per-channel-per-agent) must land *with* channel memory integration, not after — otherwise the first cut of channel history would inherit the wrong episode granularity.
 
 > **Why RFC 0008 before RFC 0007**: Context budget allocation and per-step memory packaging (RFC 0008) must land before large-scale loop patterns (RFC 0007 implementation). Each loop iteration would otherwise carry unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows.
 
 > **Why RFC 0007 is parallel to RFC 0011, not a prerequisite**: Conditional workflow branching and channel messaging are independent infrastructure. Channel routing, delivery, and history (RFC 0011 Phases 1–2) have no dependency on condition evaluation or loop constructs. Making RFC 0007 a prerequisite would serialize two workstreams that can safely develop concurrently after RFC 0008 Phase 1 lands. RFC 0011 Phase 3 (memory integration) does depend on RFC 0008 Phase 2.
 
-> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
+> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011/0020 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
 
 ### Planned Components (v0.3.0)
 
@@ -465,6 +480,7 @@ v0.3.0 complete (all four RFCs delivered)
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/`, `internal/executor/` | `agents/server_servicers.py`, `agents/dispatch.py`, `agents/persona_types.py`, `agents/memory/` | 0011 |
+| Interaction Lifecycle | — | `agents/memory/interactions.py`, `agents/memory/episodic.py`, `agents/memory/relationships.py`, `agents/persona_runtime.py`, `agents/dispatch.py` | 0020 |
 | Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |
 
 ---
