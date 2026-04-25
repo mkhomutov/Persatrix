@@ -5,7 +5,7 @@
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-25  
 **Target**: v0.3.0 (internal channels) + v0.5.0 (external bridges)  
-**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 1 input sanitization on stored channel content)
+**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 1 input sanitization on stored channel content); RFC 0020 (Phase 3 jointly delivered — channel messages route through `InteractionTracker.add_turn` rather than per-event episodic writes; see §E)
 
 ---
 
@@ -141,7 +141,7 @@ Each `members` entry is either a participant ID string (defaulting to `respond: 
 ```python
 @dataclass
 class ChannelMessage:
-    id: str                        # UUID
+    id: str                        # UUID — see ID-format note below
     channel_id: str                # canonical address: "group:planning", "dm:agent-a:agent-b", or "thread:<message_id>"
     channel_type: ChannelType      # GROUP | DM | THREAD
     sender_id: str                 # agent or user participant ID
@@ -151,6 +151,8 @@ class ChannelMessage:
     mentions: list[str]            # participant IDs explicitly @-mentioned
     metadata: dict[str, Any]       # extensible; reserved for future attachment types
 ```
+
+**ID format note.** `ChannelMessage.id` is a UUID for proto-compatibility with the existing `agent_message.proto` surface (which already uses UUIDs for message IDs). Newer tables introduced by RFC 0020 (`interaction_id`) and RFC 0021 (commitment `id`, duration record `id`) use ULIDs because they are time-sortable and cheaper to scan chronologically. The mixed scheme is intentional: messages stay UUID for backward compatibility on the wire; greenfield tables that have no wire surface adopt ULID. A future RFC that unifies the IDs would also need to re-version the proto.
 
 ### B. Channel Store
 
@@ -392,18 +394,21 @@ Channel history is integrated with agent memory via RFC 0008's `MemoryFacade`. T
 
 These are additive parameters with safe defaults: callers that don't pass `tags` or `importance` get the RFC 0008 §B behavior unchanged. RFC 0008 itself is **not** amended (it is in `👍 Accepted` status, and the parameters are forward-compatible with its specified contract). This RFC's §E is the canonical reference for the extension; future RFCs needing additional facade parameters should follow the same additive pattern.
 
-**Storing channel messages**: When a `CHANNEL_MESSAGE` event is processed, the agent stores it in episodic memory with channel-scoped tags:
+**Storing channel messages**: Channel messages are *not* written to episodic memory per event. Each `CHANNEL_MESSAGE` event is appended to the open `Interaction` for that channel via [`InteractionTracker.add_turn`](0020-interaction-lifecycle.md#g-per-channel-scoping) (RFC 0020 §G). When the interaction closes — by structural boundary or idle gap (RFC 0020 §B) — exactly one episodic entry is written per closed interaction, carrying the interaction summary and the channel-scoped tags:
 
 ```python
-# Inside on_event() for CHANNEL_MESSAGE
+# Inside InteractionTracker.close_interaction() — runs once per closed interaction,
+# not per CHANNEL_MESSAGE event. See RFC 0020 §C for the close pipeline.
 await self.memory.store_observation(
-    content=f"[#{event.channel_id}] {event.sender_id}: {event.content}",
+    content=interaction.summary,  # placeholder text in Phase 1; LLM summary in Phase 2 (RFC 0020)
     scope="channel",
-    tags=["channel", event.channel_id, event.sender_id],
-    importance=self._compute_message_importance(event),
+    tags=["channel", interaction.channel_id, *interaction.participant_ids],
+    importance=self._compute_interaction_importance(interaction),
     ttl=None,  # channel history persists until evicted by capacity policy
 )
 ```
+
+This replaces the per-event storage shape that earlier drafts of this RFC described. The change was introduced when RFC 0020 was added to the v0.3.0 chain to eliminate the duplicate-summary problem RFC 0020 §Motivation calls out (a ten-turn negotiation producing ten near-identical episode summaries). RFC 0011 Phase 3 and RFC 0020 Phase 3 land jointly per the ROADMAP dependency chain.
 
 **Retrieving channel history** during context assembly:
 
@@ -444,6 +449,18 @@ persatrix channel watch <name> [--interval N]         # poll for new messages (d
 ```
 
 `persatrix channel watch` uses polling in v0.3.0 (consistent with the existing `persatrix logs --follow` polling mode). SSE-based streaming reuses the RFC 0018 LogService SSE infrastructure as a future extension.
+
+**Output formats** for the non-`watch` subcommands (`watch` is covered by OQ #4):
+
+| Subcommand | Default (human) | `--json` |
+|------------|-----------------|----------|
+| `list` | One row per channel: `<id>  <type>  <member_count>  <last_message_at>` | Array of channel objects matching `schemas/channel.schema.json` plus `last_message_at` and `member_count`. |
+| `join` | `Joined #<channel_id> as <user_id>` on success; nonzero exit + stderr on failure | `{"channel_id": "...", "user_id": "...", "joined_at": "..."}` |
+| `send` | `Sent <message_id> to #<channel_id>` | `{"message_id": "...", "channel_id": "...", "timestamp": "..."}` |
+| `reply` | Same shape as `send`, plus `(reply to <thread_id>)` annotation | Send object with `thread_id` populated |
+| `history` | One line per message: `<timestamp>  <sender_id>: <content>` (newest-first); `--limit` defaults to 50 | Array of message objects matching the §A `ChannelMessage` schema |
+
+These conventions follow the existing `persatrix logs` and `persatrix chat` precedents (plain text for humans, structured JSON for piping into other tools). PR-plan time may refine specific field names; this table pins the *shape* so the implementation has the same discretion the existing CLI subcommands had, no more.
 
 ### G. Channel Observability
 
@@ -527,13 +544,13 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 **Summary**: Wire channel history into RFC 0008's memory injection pipeline and update relationship memory.
 
 **Deliverables**:
-1. `CHANNEL_MESSAGE` event handler stores message to episodic memory with channel scope and tags.
+1. `CHANNEL_MESSAGE` event handler routes each event to `InteractionTracker.add_turn` (RFC 0020 §G); on interaction close, exactly one episodic entry is written per interaction with `tags=[event.channel_id, sender_ids…]` (see §E). No per-event episodic writes.
 2. Persona-runtime memory-injection caller updated to query channel history (via `MemoryFacade.retrieve_relevant` with `tags=[event.channel_id]`) and feed it into the existing `MemoryBudget.try_add` loop in priority order (see §E). No change to `MemoryBudget` itself.
 3. `MemoryFacade.retrieve_relevant()` supports channel-scoped recall via tag filter.
 4. Relationship memory: channel interactions increment interaction count and influence trust score.
 5. Integration test: agent B's reply to agent A's channel message demonstrates awareness of channel history (verifiable via `persatrix logs` trace).
 
-**Dependencies**: Phase 2; RFC 0008 Phase 2 (`MemoryFacade` for task agents — provides the `store_observation` and `retrieve_relevant` API used here).
+**Dependencies**: Phase 2; RFC 0008 Phase 2 (`MemoryFacade` for task agents — provides the `store_observation` and `retrieve_relevant` API used here); RFC 0020 Phase 3 (joint delivery — `InteractionTracker.add_turn` is the entry point for deliverable 1).
 
 ### Phase 4: CLI and Human Participation
 
@@ -558,9 +575,12 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 | Go orchestrator | `internal/server/handlers.go` | Channel REST endpoints |
 | Go orchestrator | `internal/executor/dispatch.go` | `DispatchChannelMessage` |
 | Go orchestrator | `cmd/main.go` | Channel config loading, router initialization |
-| Proto | `proto/task.proto` | `ChannelMessageEvent`, `ReceiveChannelMessage` RPC |
+| Proto | `proto/task.proto` | `ChannelMessageEvent`, `ReceiveChannelMessage` RPC added to `AgentService` |
+| Proto | `proto/agent_message.proto` | Phase 2: delete the v0.2-era `ChannelService` (`SendMessage` + `Subscribe`) per the Relationship to Existing Scaffolding disposition. The new agent-side delivery path is on `AgentService.ReceiveChannelMessage` (`proto/task.proto`). |
 | Proto (generated) | `internal/generated/`, `agents/generated/` | Regenerate from updated proto |
-| Python agents | `agents/server_servicers.py` | `ReceiveChannelMessage` gRPC handler |
+| Python agents | `agents/server.py` | Phase 2: remove `ChannelServiceServicer` import (line 41) and gRPC registration (lines 133–134). The new `ReceiveChannelMessage` handler is part of the existing `AgentServiceServicer`, no separate registration needed. |
+| Python agents | `agents/server_servicers.py` | Phase 2: delete the v0.2-era `ChannelServiceServicer` class (currently at line 419) and add `ReceiveChannelMessage` handler to `AgentServiceServicer`. |
+| Python agents | `tests/unit/python/test_server_channel.py` | Phase 2: delete or rewrite — existing tests target the deleted `ChannelServiceServicer.SendMessage` / `Subscribe` surface and will not survive the proto regeneration. New coverage of `ReceiveChannelMessage` lives in the integration tests called out in the Test Strategy section. |
 | Python agents | `agents/dispatch.py` | `SEND_CHANNEL_MESSAGE` action executor |
 | Python agents | `agents/persona_types.py` | `EventType.CHANNEL_MESSAGE`, `SendChannelMessageAction` |
 | Python agents | `agents/memory/episodic.py` | Channel-scoped recall tag filter (already accepts `tags`/`importance` per RFC 0008 §B; this RFC wires them through the facade — see §E) |
@@ -609,7 +629,7 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 
    Recommendation: **defer to a v0.3.x follow-up RFC** rather than block v0.3.0 on it. v0.3.0 ships at-most-once with on-startup history fetch (last 50 messages per subscribed channel) as a best-effort recovery; the watermark and per-tick recovery can land once operational data shows whether the gap matters. Logging `channel.delivery.missed` per OQ #2 gives the signal needed to decide.
 
-9. **`channel.schema.json` $id stability across the v0.2 → v0.3.0 rewrite.** The "Relationship to Existing Scaffolding" disposition rewrites the schema in place at the same path with the same `$id`. Any external tooling that resolves the `$id` URL and validates v0.2 configs against the cached document will silently break when fed a v0.3.0 config (or vice versa) — type vocabulary changed (`direct` → `dm`, `broadcast`/`meeting` dropped) and the `schema_version` field that would have signaled the break is also removed. For an internal-only v0.3.0 the cost is zero; what is missing is a public stance on whether `channel.schema.json` is part of the project's stable public API. Recommendation: **declare it not-yet-public** in the v0.3.0 release notes (the schema is owned by the RFC and may break with each v0.x bump until v1.0). If we change our mind later and declare it public, the right path is a `$id` bump on the next breaking change, not silent in-place edits.
+9. **`channel.schema.json` $id stability across the v0.2 → v0.3.0 rewrite.** The "Relationship to Existing Scaffolding" disposition rewrites the schema in place at the same path with the same `$id`. Any external tooling that resolves the `$id` URL and validates v0.2 configs against the cached document will silently break when fed a v0.3.0 config (or vice versa) — type vocabulary changed (`direct` → `dm`, `broadcast`/`meeting` dropped) and the `schema_version` field that would have signaled the break is also removed. For an internal-only v0.3.0 the cost is zero; what is missing is a public stance on whether `channel.schema.json` is part of the project's stable public API. Recommendation: **declare it not-yet-public** in the v0.3.0 release notes (the schema is owned by the RFC and may break with each v0.x bump until v1.0). If we change our mind later and declare it public, the right path is a `$id` bump on the next breaking change, not silent in-place edits. **Implementation requirement carried into Phase 1**: when the schema is rewritten, the rewrite includes a top-level `description` field with the warning text *"Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice."* Release notes are easy to miss; embedding the warning in the schema itself means external tooling that resolves the `$id` sees the disclaimer at validation time.
 
 10. **`channel_type` proto-field redundancy with the `channel_id` prefix.** §C carries `channel_type` as a separate string on `ChannelMessageEvent` despite it already being encoded as a prefix on `channel_id` (`group:`, `dm:`, `thread:`). The duplication is justified for log/observability ergonomics (see the comment under the proto block) but is also a drift risk: a future call site that updates one without the other produces internally inconsistent events. Phase 2's `ChannelRouter` validation closes this on publish, but receiver-side defensive parsing (drop on mismatch) is recommended rather than silently trusting one source. Should we make the field redundancy a typed enum at the proto level instead of a free string? Probably not for v0.3.0 — leave it as documentation-and-validation and revisit if drift bugs surface.
 
@@ -637,4 +657,5 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 - [RFC 0016](0016-human-participant-chat-interface.md) — Human participant abstraction (reused for channel membership)
 - [RFC 0017](0017-persona-memory-injection-budget.md) — `MemoryBudget` allocator (reused as-is; channel history admitted via the existing greedy-priority pool, see §E)
 - [RFC 0019](0019-opentelemetry-completion.md) — OTEL spans and metrics pipeline (reused for channel observability)
+- [RFC 0020](0020-interaction-lifecycle.md) — Interaction lifecycle (Phase 3 jointly delivered with this RFC's Phase 3; channel messages flow through `InteractionTracker.add_turn` rather than per-event episodic writes — see §E)
 - [Roadmap](../../ROADMAP.md)

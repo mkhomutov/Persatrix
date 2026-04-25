@@ -256,13 +256,15 @@ Open commitments:
 
 This block is budgeted under RFC 0017's allocator with a fixed cap (default 300 tokens; configurable via `optimization.yaml` → `temporal.commitments_prompt_budget_tokens`). Past-due missed commitments are *not* surfaced in this block automatically — they live in episodic recall instead, where age and relevance are weighted normally.
 
+**Rendering order.** Commitments are rendered nearest-due-first (ascending `due_at`). The budget allocator fills the block until the cap is reached and drops farther-out commitments rather than truncating any single line — partial commitment lines would be confusing to the LLM and risk losing the `due_at` or `target_party`. This matters because the soft cap on open commitments (default 500 per agent, see Security Considerations) means in pathological cases the candidate list far exceeds what the budget can render; the ordering is what guarantees the soonest-due items always make it into context.
+
 ### G. Time Tool Surface
 
 Four tools, all gated by a new `time:read` permission:
 
 | Tool | Signature | Purpose |
 |------|-----------|---------|
-| `get_current_time` | `() -> {iso: str, epoch: float, weekday: str, part_of_day: str}` | Return now in machine + human form. Useful when the persona needs to reason about precise time without re-reading the prompt anchor. |
+| `get_current_time` *(tentative — see OQ #11)* | `() -> {iso: str, epoch: float, weekday: str, part_of_day: str}` | Return now in machine + human form. Useful when the persona needs to reason about precise time without re-reading the prompt anchor. **Possibly dropped from the v0.4.0 surface** — see OQ #11; the now-anchor in the system prompt may make this tool redundant. Listed here so the §G surface is complete, not because the inclusion is settled. |
 | `time_since` | `(timestamp: float \| str) -> {seconds: int, rendered: str}` | Compute elapsed time from a stored timestamp. Accepts ISO-8601 or epoch seconds. Returns both raw seconds and a bucketed string ("3 days ago"). |
 | `time_until` | `(timestamp: float \| str) -> {seconds: int, rendered: str}` | Mirror of `time_since` for future timestamps. Returns negative seconds for past targets, with `rendered` set to "passed N <unit> ago". |
 | `set_reminder` | `(description: str, due_at: float \| str, target_party: str = "", tags: str = "") -> {commitment_id: str}` | Create a commitment. Thin wrapper over the commitments store; gated by `commitments:write` rather than `time:read`. Listed here because LLMs tend to look for it in the time-tool family. |
@@ -363,7 +365,7 @@ The temporal layer adds three new sources of prompt tokens:
 | Source | Typical cost | Budget treatment |
 |--------|-------------|------------------|
 | Now-anchor | 25–35 tokens, fixed per prompt | Unmetered — too small to budget. |
-| Episode recency prefix | 5–10 tokens × N recalled episodes | Charged to the existing per-episode budget (RFC 0017). The `_MAX_EPISODE_SUMMARY_CHARS` cap is reduced by the prefix length so total cost is bounded. |
+| Episode recency prefix | 5–10 tokens × N recalled episodes | Charged to the existing per-episode budget (RFC 0017). The recency prefix is included in the per-episode token measurement *before* `MemoryBudget.try_add` is consulted, so the prefix-plus-summary token count is what the greedy-fill loop sees and admits — the existing allocator bounds the total without a separate compensation step. (Note: `_MAX_EPISODE_SUMMARY_CHARS` is a char-level safety cap on the summary itself and is not modified here; bounding by tokens at the budget gate is the load-bearing mechanism.) |
 | Relationship recency tag | 5–10 tokens per surfaced relationship | Charged to the existing relationship-summary budget. |
 | Commitments block | Up to `temporal.commitments_prompt_budget_tokens` (default 300) | New dedicated budget line. The greedy-fill loop in [memory_budget.py](../../agents/persona_runtime/memory_budget.py) admits commitments after notes, before episodes. |
 | Duration calibration line | Up to 80 tokens, when present | Charged to a new `temporal.duration_priors_budget_tokens` line. |

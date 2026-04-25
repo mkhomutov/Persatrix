@@ -133,7 +133,19 @@ The mental model: structural triggers are immediate and free; idle-gap is the wo
 
 **Restart behavior.** On orchestrator restart with an `open` interaction in memory: the in-memory tracker is lost, the stored channel/conversation history is intact, and the *next* arriving turn starts a new interaction. Pre-restart turns are recoverable from message storage but are not auto-summarized as a closed interaction. This is acceptable because (a) restarts are expected to be rare relative to interaction frequency, and (b) the alternative — durable open-interaction state — adds a transactional contract that's not worth its complexity for v0.3.0.
 
+Composed with RFC 0011's catch-up history fetch ([RFC 0011 OQ #8](0011-channels-bridges.md#open-questions)), this leaves a small sliver of episodic gap on long-lived channels that survive a restart: pre-restart turns are visible to the agent for one turn (via the on-startup history fetch) but are not attached to any interaction and therefore do not produce an episodic summary. Both RFCs accept the gap independently; the gap is bounded by the on-startup fetch cap (50 messages per subscribed channel in v0.3.0) and is observable via the `interactions.opened` counter showing no interaction-open event for the recovered turns.
+
 **Closing rows.** A row that's been in `closing` state for more than `closing_grace_sec` (default 300s) without a successful summary is treated as failed. A janitor (Phase 2) writes a fallback summary `"[interaction summary unavailable]"` and transitions the row to `closed` so it doesn't block recall. Failed-summary count is exported as a metric.
+
+**Summary text by phase.** The placeholder shape differs by lifecycle stage to keep `"[interaction summary unavailable]"` as the unique signal for "summarization broke":
+
+| Stage | Closure shape | `summary` value |
+|-------|---------------|-----------------|
+| Phase 1 | Single-turn (`turn_count=1`) — TICK or tool-only events routed through the tracker | The same per-event summary text the pre-RFC episode would have carried (behavioral parity per Phase 1 deliverable 4). No LLM call in this phase. |
+| Phase 2 onward | Multi-turn (`turn_count>1`), summary call succeeds | LLM-generated summary (`context_management.summarization.model`). |
+| Phase 2 onward | Multi-turn, summary call times out or errors | `"[interaction summary unavailable]"` written by the janitor — exclusive marker for the failure path. |
+
+Recall queries treat the Phase 1 single-turn rows as full-fidelity episodes (they carry the same content the pre-RFC per-event store did) and the failure placeholder as low-fidelity (the row is preserved for shape, not for content). The `turn_count > 1` boost in §I applies regardless of whether the summary is LLM-generated or the failure placeholder; the placeholder is the loss-of-content signal, not a recall-eligibility signal.
 
 ### D. Storage Model
 
@@ -202,7 +214,9 @@ This is a behavioral improvement: today, an agent in a busy channel hits the ref
 
 **Existing rows.** Episodes already in production agent databases stay untouched. The four new columns are NULL for them. They are recallable via FTS5 and vector search (RFC 0008) at the same priority they have today.
 
-**Recall priority for mixed legacy + new rows.** When a query returns both legacy single-turn rows and new interaction rows, the recall layer applies a small boost to interaction rows with `turn_count > 1` to reflect their higher information density. The boost is configurable (default: +10% on the relevance score) and disabled if it produces empty results. The +10% default is a placeholder pending dogfood data — see Open Question 7 for calibration.
+**Recall priority for mixed legacy + new rows.** When a query returns both legacy single-turn rows and new interaction rows, the recall layer applies a small boost to interaction rows with `turn_count > 1` to reflect their higher information density. The boost is configurable (default: +10% on the relevance score). The +10% default is a placeholder pending dogfood data — see Open Question 7 for calibration.
+
+**Boost fallback mechanism.** "Disabled if it produces empty results" is pinned to a concrete rule: if the boosted query returns fewer rows than `min(limit, baseline_count // 2)` — where `baseline_count` is the row count of the same query without the boost — the recall layer reissues the query without the boost and surfaces those rows instead. This avoids two failure shapes: (a) zero rows when the candidate set has no `turn_count > 1` rows (the boost makes them disappear under threshold), and (b) under-filling `limit` when only a tiny number of multi-turn rows clear the boosted threshold. The fallback path is exercised in the test suite alongside the boost path so both branches are kept honest.
 
 **No bulk re-clustering.** Attempting to retroactively cluster old single-turn episodes into multi-turn interactions is explicitly out of scope. The cost (an LLM clustering pass over the entire history per agent) is high, the benefit decays with episode age, and the existing rows continue to function.
 
@@ -242,7 +256,7 @@ This is a behavioral improvement: today, an agent in a busy channel hits the ref
 1. Multi-turn aggregation for human-chat sessions: turns accumulate in the open interaction; close on session end or idle.
 2. Summarization-on-close LLM call. Summary generation uses the same model selection as RFC 0005's episode summarization (`optimization.yaml` → `context_management.summarization.model`).
 3. `closing`-state janitor with `closing_grace_sec` enforcement and fallback summary text.
-4. `record_interaction` call site moved from per-event into the close path. Trust-bootstrap thresholds that assumed per-message increments are recalibrated as part of this phase: a recalibration checklist is produced (target location: the v0.3.0 release-prep doc once it exists, or this RFC's own "Migration Notes" appendix as a fallback) listing every config knob that was scaled against per-message `interaction_count` and its post-RFC equivalent.
+4. `record_interaction` call site moved from per-event into the close path. Trust-bootstrap thresholds that assumed per-message increments are recalibrated as part of this phase: a recalibration checklist is produced and lands in **this RFC's "Migration Notes" appendix** (added at Phase 2 PR-plan time), listing every config knob that was scaled against per-message `interaction_count` and its post-RFC equivalent. The earlier "or v0.3.0 release-prep doc" alternative is dropped — pinning a single owner avoids the deliverable splitting between two locations depending on doc state at PR time.
 5. `auto_reflect_after` counter switched to increment on close.
 6. Integration test: ten-turn human-chat session produces one episode, not ten, with a coherent summary.
 

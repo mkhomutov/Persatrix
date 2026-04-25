@@ -459,7 +459,7 @@ v0.2.3 complete
     │              │
     │              └── RFC 0011 P3 + RFC 0020 P3 (joint)       [channel memory becomes interaction-scoped]
     │
-    └── RFC 0009 Phases 1–2 (Audit, Rate Limiting)             [runs throughout — no blocking dependency on 0007/0011/0020]
+    └── RFC 0009 P1–2 (Audit, Rate Limiting, Input Sanitization)  [runs throughout — no blocking dependency on 0007/0011/0020]
             ↓
 v0.3.0 complete (all six RFC scopes delivered: 0007, 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1)
 ```
@@ -487,8 +487,8 @@ v0.3.0 complete (all six RFC scopes delivered: 0007, 0008, 0009 P1–2, 0011 int
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/`, `internal/executor/` | `agents/server_servicers.py`, `agents/dispatch.py`, `agents/persona_types.py`, `agents/memory/` | 0011 |
-| Interaction Lifecycle | — | `agents/memory/interactions.py`, `agents/memory/episodic.py`, `agents/memory/relationships.py`, `agents/persona_runtime.py`, `agents/dispatch.py` | 0020 |
-| Persona Temporal Awareness (P1) | — | `agents/clock.py`, `agents/temporal/`, `agents/persona_runtime/prompt_assembly.py`, `agents/persona_runtime/memory_context.py` | 0021 |
+| Interaction Lifecycle | — | `agents/memory/interactions.py`, `agents/memory/episodic.py`, `agents/memory/relationship.py`, `agents/memory/relationship_mutations.py`, `agents/persona_runtime/`, `agents/dispatch.py` | 0020 |
+| Persona Temporal Awareness (P1) | — | `agents/clock.py`, `agents/temporal/`, `agents/persona_runtime/prompt_assembly.py`, `agents/persona_runtime/memory_context.py`, `agents/memory/relationship.py` | 0021 |
 | Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |
 
 ---
