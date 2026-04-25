@@ -92,14 +92,25 @@ max_channels: 50   # global cap on named group channels; DMs and threads not cou
 channels:
   - name: planning
     description: "Strategy and planning discussions"
-    members: ["planner-agent", "code-writer", "code-reviewer"]
+    members:
+      - id: planner-agent
+        respond: when_mentioned       # default; see §D Response Gating
+      - id: code-writer
+        respond: when_mentioned
+      - code-reviewer                 # shorthand: equivalent to {id: code-reviewer, respond: when_mentioned}
 
   - name: code-review
     description: "Code review coordination"
-    members: ["code-writer", "code-reviewer"]
+    members:
+      - id: code-writer
+        respond: always               # tight-loop pair channel — every message triggers a reply cycle
+      - id: code-reviewer
+        respond: always
 ```
 
 Agents declare channel membership via configuration. An agent not listed in a channel's `members` list cannot receive messages from that channel and receives a 403 error if it attempts to publish. DMs are opened on-demand and do not require pre-declaration; both participants must be registered agents or users.
+
+Each `members` entry is either a participant ID string (defaulting to `respond: when_mentioned`) or an object with `id` and `respond` fields. The `respond` policy controls the per-membership response gate defined in §D and is the primary mechanism for preventing N²-fanout feedback loops in multi-agent channels.
 
 **Message schema**:
 
@@ -137,6 +148,7 @@ CREATE TABLE channels (
 CREATE TABLE memberships (
     channel_id     TEXT NOT NULL REFERENCES channels(id),
     participant_id TEXT NOT NULL,
+    respond_policy TEXT NOT NULL DEFAULT 'when_mentioned',  -- 'when_mentioned' | 'always' | 'never'
     joined_at      DATETIME NOT NULL,
     PRIMARY KEY (channel_id, participant_id)
 );
@@ -163,12 +175,19 @@ type ChannelStore interface {
     CreateChannel(ctx context.Context, ch Channel) error
     GetChannel(ctx context.Context, id string) (Channel, error)
     ListChannels(ctx context.Context) ([]Channel, error)
-    AddMember(ctx context.Context, channelID, participantID string) error
-    GetMembers(ctx context.Context, channelID string) ([]string, error)
+    AddMember(ctx context.Context, channelID, participantID, respondPolicy string) error
+    GetMembers(ctx context.Context, channelID string) ([]Member, error)
+    GetMember(ctx context.Context, channelID, participantID string) (Member, error)
     IsMember(ctx context.Context, channelID, participantID string) (bool, error)
     PublishMessage(ctx context.Context, msg ChannelMessage) error
     GetHistory(ctx context.Context, channelID string, limit int, before time.Time) ([]ChannelMessage, error)
     GetThread(ctx context.Context, threadID string) ([]ChannelMessage, error)
+}
+
+type Member struct {
+    ParticipantID string
+    RespondPolicy string    // "when_mentioned" | "always" | "never"
+    JoinedAt      time.Time
 }
 ```
 
@@ -275,6 +294,23 @@ class AgentEvent:
 
 **Agent behavior on channel messages**: The persona runtime's `on_event()` path handles `CHANNEL_MESSAGE` without modification to the core loop. The agent receives the event, the memory injection pipeline (RFC 0008) pulls relevant channel history and episodic memory, the LLM decides whether and how to respond, and the resulting action may be a `SEND_CHANNEL_MESSAGE` reply to the same channel or thread. Agents can also initiate channel messages autonomously during their tick loop without waiting for an incoming event.
 
+**Response gating (loop prevention)**: A naive "every `CHANNEL_MESSAGE` event invokes the LLM" model is unworkable in multi-agent channels. With N agents in a channel, every message would generate up to N inferences, each of which is itself a message that re-triggers the others — O(N²) feedback amplification per turn, with token cost and latency blowups. The persona runtime therefore applies a **pre-LLM response gate** to incoming channel events. The gate is evaluated on the agent process before any memory recall or LLM call, using the per-membership `respond` policy from §A:
+
+| Policy | Triggers a response cycle when ... |
+|--------|------------------------------------|
+| `when_mentioned` (default) | the agent's ID appears in `event.mentions`, **or** the message is a thread reply to a message this agent authored |
+| `always` | every channel message except the agent's own |
+| `never` | no message — the agent observes the channel for memory ingestion only (read-only participant) |
+
+When the gate suppresses a message, the event is still stored in episodic memory (per §E) — the agent stays aware of channel context for later retrieval — but no LLM call is made and no action is dispatched. This bounds inference cost and is the primary structural defense against runaway exchanges; RFC 0009 Phase 1 rate limiting is a second-line defense if a misconfigured `always` membership produces a tight loop.
+
+Additional invariants:
+
+- An agent never receives its own `CHANNEL_MESSAGE` event — the orchestrator filters by `sender_id != subscriber_id` during fanout. This is enforced regardless of policy.
+- The `when_mentioned` thread-reply branch fires only when *another participant* replies to a message the agent authored. An agent's own thread continuation does not retrigger itself.
+- The autonomous tick loop is unaffected: agents may initiate channel messages on their own schedule. The gate only governs *reactive* replies to incoming events.
+- Agents that publish via `SEND_CHANNEL_MESSAGE` set `mentions` explicitly. The Rust CLI offers a `--mention <id>` repeatable flag and a `--mention-all` shorthand that expands to every channel member, addressing the human-in-the-loop case where a human wants every agent in a channel to react.
+
 ### E. Memory Integration
 
 Channel history is integrated with agent memory via RFC 0008's `MemoryFacade`. This is the hard dependency that makes RFC 0008 a prerequisite for RFC 0011 Phase 3.
@@ -332,6 +368,7 @@ persatrix channel watch <name> [--interval N]    # poll for new messages (defaul
 |--------|------|--------|-------------|
 | `channel.messages.published` | counter | `channel_id`, `sender_type` | Messages published per channel |
 | `channel.messages.delivered` | counter | `channel_id`, `status` | Delivery attempts (ok / failed) |
+| `channel.messages.gated` | counter | `channel_id`, `subscriber_id`, `policy` | Events suppressed by the response gate (incremented on the agent side); the primary signal for diagnosing an under- or over-tuned `respond` policy |
 | `channel.delivery.latency_ms` | histogram | `channel_id` | Publish-to-delivery latency per subscriber |
 | `channel.members.active` | gauge | `channel_id` | Current registered subscriber count |
 | `channel.history.recall_tokens` | histogram | `channel_id` | Tokens consumed by channel history injection |
@@ -378,7 +415,8 @@ persatrix channel watch <name> [--interval N]    # poll for new messages (defaul
 3. Python servicer: handle `ReceiveChannelMessage`, construct `AgentEvent(event_type=CHANNEL_MESSAGE)`, dispatch to `on_event()`.
 4. `ActionType.SEND_CHANNEL_MESSAGE` added to `persona_types.py`.
 5. `ActionExecutor` handler: calls `POST /api/v1/channels/{id}/messages` with the agent's sender ID.
-6. Integration test: two persona agents (`ember-owl` and a second agent) exchange one message via a named channel.
+6. **Response gate** in the persona runtime: filters incoming `CHANNEL_MESSAGE` events by the per-membership `respond` policy (`when_mentioned` / `always` / `never`) before any memory recall or LLM invocation. Suppressed events are dropped at this phase and increment the `channel.messages.gated` counter; memory ingestion of suppressed events is added in Phase 3.
+7. Integration test: two persona agents (`ember-owl` and a second agent) exchange one message via a named channel; a third agent in the channel with `respond: when_mentioned` and no mention sees `channel.messages.gated` increment and produces no reply.
 
 **Dependencies**: Phase 1.
 
@@ -458,6 +496,8 @@ persatrix channel watch <name> [--interval N]    # poll for new messages (defaul
 5. **Concurrent publish ordering**: If two agents publish to the same channel within milliseconds, the SQLite serial write guarantees a consistent history, but both agents may generate a response without seeing the other's message (race window between write and delivery). This is acceptable in v0.3.0 but should be documented in the channels user guide.
 
 6. **`persatrix channel watch` SSE reuse**: The RFC 0018 LogService SSE infrastructure (`/api/v1/logs/stream`) uses the same pattern needed for channel streaming. Should Phase 4 implement a `GET /api/v1/channels/{id}/messages/stream` SSE endpoint instead of polling? The implementation would reuse the existing SSE writer. Moving this to v0.3.0 instead of "future" would give a better UX at low additional cost.
+
+7. **Human message gate-bypass**: Under the default `when_mentioned` policy, a casual human message in a multi-agent channel produces no reply unless the human explicitly @-mentions an agent. This is the right default for busy channels but feels wrong for a 1-human-1-agent channel that behaves like a DM. Options: (a) treat human-sent messages as if they implicitly mention every channel member (humans-bypass-gate); (b) leave humans subject to the same gate and document that they must @-mention; (c) per-channel `human_addresses_all: true` flag so operators choose per channel. Recommendation: **(b) for v0.3.0** with the `--mention-all` shorthand on `persatrix channel send` covering the broadcast case. Defer (a)/(c) until usage data shows the friction matters — the cost of getting this wrong now (silent agents in a DM-feeling channel) is recoverable, while a wrong-direction default that floods agents on every casual message is not.
 
 ---
 
