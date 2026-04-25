@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-25 (documentation cleanup: flipped `internal/observability/` to ✅ Complete in both Component Status tables now that RFCs 0018 + 0019 have shipped; removed duplicated RFC 0015 bullet from v0.5.0 "What ships"; sorted Merged PR History rows for #161 and #175 into chronological order; companion changes — README "Why Persatrix" repositioned ahead of version blurbs, RFC numbering reservations documented in `docs/rfcs/README.md`)  
-> **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — ✅ Released (RFC 0018 ✅ 7/7; RFC 0019 ✅ 5/5; release-prep plan ✅ complete)  
-> **Current milestone**: v0.2.3 released; v0.3.0 planning next (shared channels + multi-user chat — RFCs 0009, 0010, 0011)
+> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
+> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011) — 📋 Planning  
+> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -42,7 +42,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 📋 Proposed |
 | 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
-| 0011 | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | Not yet written |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | 📋 Proposed |
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
@@ -438,22 +438,24 @@ v0.2.2 complete
 ### Dependency Chain (v0.3.0)
 
 ```
-v0.2.0 complete
+v0.2.3 complete
     ↓
-RFC 0008 (Memory & Context Optimization)          [start alongside RFC 0007 authoring]
-    ↓
-RFC 0007 (Conditional & Looped Control Flow)      [depends on RFC 0006 + RFC 0008]
+RFC 0008 (Memory & Context Optimization)          [prerequisite for both RFC 0007 and RFC 0011 P3]
     │
-RFC 0009 Phases 1–2 (Audit, Rate Limiting)        [runs alongside 0007/0008 — no blocking dependency]
+    ├── RFC 0007 (Conditional & Looped Control Flow)   [parallel workstream; depends on RFC 0008]
+    │
+    └── RFC 0011 — internal channels only             [parallel workstream; P1–2 independent; P3 needs RFC 0008 P2]
+    │
+RFC 0009 Phases 1–2 (Audit, Rate Limiting)        [runs throughout — no blocking dependency on 0007/0011]
     ↓
-RFC 0011 — internal channels only                 [depends on 0007, 0008, 0009 P1–2]
-    ↓
-v0.3.0 complete
+v0.3.0 complete (all four RFCs delivered)
 ```
 
 > **Why RFC 0008 before RFC 0007**: Context budget allocation and per-step memory packaging (RFC 0008) must land before large-scale loop patterns (RFC 0007 implementation). Each loop iteration would otherwise carry unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows.
 
-> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0008 dependency. They can develop concurrently. Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
+> **Why RFC 0007 is parallel to RFC 0011, not a prerequisite**: Conditional workflow branching and channel messaging are independent infrastructure. Channel routing, delivery, and history (RFC 0011 Phases 1–2) have no dependency on condition evaluation or loop constructs. Making RFC 0007 a prerequisite would serialize two workstreams that can safely develop concurrently after RFC 0008 Phase 1 lands. RFC 0011 Phase 3 (memory integration) does depend on RFC 0008 Phase 2.
+
+> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
 
 ### Planned Components (v0.3.0)
 
@@ -463,7 +465,7 @@ v0.3.0 complete
 | Workflow Loops | `internal/scheduler/`, `internal/planner/` | — | 0007 |
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
-| Internal Channels | `internal/channels/` | — | 0011 |
+| Internal Channels | `internal/channels/`, `internal/executor/` | `agents/server_servicers.py`, `agents/dispatch.py`, `agents/persona_types.py`, `agents/memory/` | 0011 |
 | Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |
 
 ---
