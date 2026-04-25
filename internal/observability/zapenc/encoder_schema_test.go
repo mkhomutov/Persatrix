@@ -1,0 +1,350 @@
+package zapenc
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+// newBytesBuffer returns a new bytes.Buffer for use in tests that build
+// loggers without the newTestLogger helper (e.g. no-AddCaller tests).
+func newBytesBuffer() *bytes.Buffer { return &bytes.Buffer{} }
+
+// extractKeysInOrder returns the JSON object keys in their physical order on
+// the wire.  encoding/json's stdlib decoder does not preserve order, so the
+// test parses the raw byte sequence with a streaming decoder.
+func extractKeysInOrder(t *testing.T, jsonLine string) []string {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(jsonLine))
+	tok, err := dec.Token()
+	require.NoError(t, err)
+	require.Equal(t, json.Delim('{'), tok)
+	var keys []string
+	for dec.More() {
+		k, err := dec.Token()
+		require.NoError(t, err)
+		keys = append(keys, k.(string))
+		var v any
+		require.NoError(t, dec.Decode(&v))
+	}
+	return keys
+}
+
+func TestEncoder_EmitsRequiredSchemaFields(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("hello")
+
+	record := parseLine(t, buf)
+	for _, key := range []string{
+		"schema_version",
+		"timestamp",
+		"level",
+		"service.kind",
+		"service.instance",
+		"message",
+		"source",
+	} {
+		assert.Contains(t, record, key, "missing required schema field %q", key)
+	}
+	assert.Equal(t, SchemaVersion, record["schema_version"])
+	assert.Equal(t, "orchestrator", record["service.kind"])
+	assert.Equal(t, "test-node", record["service.instance"])
+	assert.Equal(t, "INFO", record["level"])
+	assert.Equal(t, "hello", record["message"])
+}
+
+func TestEncoder_ServiceRoleOmittedWhenEmpty(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("noop")
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "service.role", "service.role must be omitted when ServiceRole == \"\"")
+}
+
+func TestEncoder_ServiceRoleIncludedWhenSet(t *testing.T) {
+	opts := defaultOpts()
+	opts.ServiceRole = "coder"
+	logger, buf := newTestLogger(t, opts)
+	logger.Info("with role")
+
+	record := parseLine(t, buf)
+	assert.Equal(t, "coder", record["service.role"])
+}
+
+func TestEncoder_RenamesLegacyKeys(t *testing.T) {
+	cases := []struct {
+		legacy string
+		schema string
+	}{
+		{"runID", "execution_id"},
+		{"executionID", "execution_id"},
+		{"agentID", "agent_id"},
+		{"workflowID", "workflow_id"},
+		{"stepID", "step_id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.legacy+"_to_"+tc.schema, func(t *testing.T) {
+			logger, buf := newTestLogger(t, defaultOpts())
+			logger.Info("rename", zap.String(tc.legacy, "value-1"))
+
+			record := parseLine(t, buf)
+			assert.NotContains(t, record, tc.legacy, "legacy key must be removed")
+			assert.Equal(t, "value-1", record[tc.schema], "value must move to schema key")
+		})
+	}
+}
+
+func TestEncoder_RenamePreservesPreExistingSchemaKey(t *testing.T) {
+	// When both legacy + schema-name keys are present, the schema key wins;
+	// the encoder is the backstop, not an authoritative re-mapper.
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("both",
+		zap.String("agent_id", "schema-value"),
+		zap.String("agentID", "legacy-value"),
+	)
+
+	record := parseLine(t, buf)
+	assert.Equal(t, "schema-value", record["agent_id"], "pre-existing schema key takes precedence over rename")
+	assert.NotContains(t, record, "agentID", "legacy key removed even when not promoted")
+}
+
+func TestEncoder_FieldOrderMatchesSchema(t *testing.T) {
+	// Construct an entry that exercises every required field plus several
+	// optional fields, then assert byte-for-byte that the keys appear in
+	// the canonical schema order.
+	opts := defaultOpts()
+	opts.ServiceRole = "coder"
+	enc := NewEncoder(opts)
+
+	entry := zapcore.Entry{
+		Level:      zapcore.InfoLevel,
+		Time:       time.Date(2026, 4, 22, 18, 30, 0, 0, time.UTC),
+		Message:    "ordered",
+		Caller:     zapcore.EntryCaller{Defined: true, File: "test.go", Line: 1, Function: "TestFn"},
+		LoggerName: "",
+	}
+	fields := []zapcore.Field{
+		zap.String("execution_id", "exec-1"),
+		zap.String("step_id", "step-1"),
+		zap.String("agent_id", "agent-1"),
+		zap.String("workflow_id", "wf-1"),
+		zap.String("request_id", "req-1"),
+	}
+
+	buf, err := enc.EncodeEntry(entry, fields)
+	require.NoError(t, err)
+	defer buf.Free()
+
+	out := strings.TrimSpace(buf.String())
+	keys := extractKeysInOrder(t, out)
+
+	expected := []string{
+		"schema_version",
+		"timestamp",
+		"level",
+		"service.kind",
+		"service.instance",
+		"message",
+		"service.role",
+		"execution_id",
+		"step_id",
+		"agent_id",
+		"workflow_id",
+		"request_id",
+		"source",
+	}
+	assert.Equal(t, expected, keys, "key order must match schema (RFC 0018 § B)")
+}
+
+func TestEncoder_SourceFieldPopulated(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("trace-me")
+
+	record := parseLine(t, buf)
+	src, ok := record["source"].(map[string]any)
+	require.True(t, ok, "source must be a JSON object")
+	file, _ := src["file"].(string)
+	assert.True(t, strings.HasSuffix(file, "encoder_schema_test.go"), "source.file must reference the call site, got %q", file)
+	line, _ := src["line"].(float64)
+	assert.Greater(t, line, float64(0), "source.line must be a positive integer")
+	fn, _ := src["function"].(string)
+	assert.Contains(t, fn, "TestEncoder_SourceFieldPopulated", "source.function must reference the call-site function")
+}
+
+func TestEncoder_UnknownKeysAppendedAlphabetically(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("unknowns",
+		zap.String("zeta", "z"),
+		zap.String("alpha", "a"),
+		zap.String("mu", "m"),
+	)
+
+	out := buf.String()
+	keys := extractKeysInOrder(t, strings.TrimSpace(out))
+
+	var unknownKeys []string
+	for _, k := range keys {
+		if _, isKnown := fieldOrderIndex[k]; !isKnown {
+			unknownKeys = append(unknownKeys, k)
+		}
+	}
+	assert.Equal(t, []string{"alpha", "mu", "zeta"}, unknownKeys, "unknown keys must be sorted alphabetically for byte-stability")
+}
+
+func TestEncoder_NoCallerWhenAddCallerOmitted(t *testing.T) {
+	// Build a logger *without* zap.AddCaller() — source must be omitted, not
+	// emitted with zero values, per the schema's "Optional" contract.
+	buf := newBytesBuffer()
+	enc := NewEncoder(defaultOpts())
+	core := zapcore.NewCore(enc, zapcore.AddSync(buf), zapcore.DebugLevel)
+	logger := zap.New(core)
+	t.Cleanup(func() { _ = logger.Sync() })
+
+	logger.Info("no-caller")
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "source", "source must be omitted when entry.Caller.Defined == false")
+}
+
+func TestEncoder_CloneIsolatesContext(t *testing.T) {
+	// Sanity check: With(...) on a child logger must not leak fields back
+	// into the parent.  This guards against a Clone() implementation that
+	// shares the inner encoder's accumulated state across loggers.
+	opts := defaultOpts()
+	logger, buf := newTestLogger(t, opts)
+
+	child := logger.With(zap.String("agent_id", "child-only"))
+	child.Info("child")
+	logger.Info("parent")
+
+	childRec := parseLine(t, buf)
+	parentRec := parseLine(t, buf)
+
+	assert.Equal(t, "child-only", childRec["agent_id"])
+	assert.NotContains(t, parentRec, "agent_id", "parent logger must not see child's With() context")
+}
+
+// TestEncoder_ReservedKeysShadowUserFields locks in the reserved-key
+// shadowing contract (RFC 0018 PR 2 review, issue #178).  The inner JSON
+// encoder emits timestamp / level / message at the head of the record from
+// the zapcore.Entry, and any user field with the same key is appended
+// afterwards.  encoding/json's duplicate-key rule is last-value-wins, so
+// without the post-parse authoritative overwrite a caller like
+//
+//	logger.Info("hello", zap.String("timestamp", "fake"))
+//
+// would silently poison the wire format.  The test emits one forged value
+// per encoder-owned key and asserts the encoder's value survives.
+func TestEncoder_ReservedKeysShadowUserFields(t *testing.T) {
+	opts := defaultOpts()
+	opts.ServiceRole = "coder"
+	logger, buf := newTestLogger(t, opts)
+
+	// Capture the wall-clock instant immediately before the log call so we
+	// can positively assert the re-stamped timestamp is authoritative
+	// (PR #183 review, Should-Fix #2).
+	before := time.Now().UTC().Add(-time.Second)
+
+	logger.Info("real-message",
+		zap.String("schema_version", "99"),
+		zap.String("service.kind", "attacker"),
+		zap.String("service.instance", "attacker-host"),
+		zap.String("service.role", "attacker-role"),
+		zap.String("timestamp", "1970-01-01T00:00:00Z"),
+		zap.String("level", "DEBUG"),
+		zap.String("message", "forged-message"),
+		zap.Any("source", map[string]any{"file": "forged.go", "line": 0, "function": "forged"}),
+	)
+
+	record := parseLine(t, buf)
+	assert.Equal(t, SchemaVersion, record["schema_version"],
+		"encoder-owned schema_version must not be shadowable by a user field")
+	assert.Equal(t, "orchestrator", record["service.kind"],
+		"encoder-owned service.kind must not be shadowable")
+	assert.Equal(t, "test-node", record["service.instance"],
+		"encoder-owned service.instance must not be shadowable")
+	assert.Equal(t, "coder", record["service.role"],
+		"encoder-owned service.role must not be shadowable when set in Options")
+	assert.Equal(t, "INFO", record["level"],
+		"level must be re-stamped from zapcore.Entry, not shadowable by user field")
+	assert.Equal(t, "real-message", record["message"],
+		"message must be re-stamped from zapcore.Entry, not shadowable by user field")
+	ts, _ := record["timestamp"].(string)
+	assert.NotEqual(t, "1970-01-01T00:00:00Z", ts,
+		"timestamp must be re-stamped from zapcore.Entry, not shadowable by user field")
+	parsed, err := time.Parse(time.RFC3339Nano, ts)
+	require.NoError(t, err, "re-stamped timestamp must parse as RFC 3339 Nano")
+	assert.Equal(t, time.UTC, parsed.Location(),
+		"re-stamped timestamp must be normalised to UTC regardless of host timezone")
+	assert.True(t, strings.HasSuffix(ts, "Z"),
+		"re-stamped timestamp must carry the UTC 'Z' suffix, not a numeric offset")
+	assert.False(t, parsed.Before(before),
+		"re-stamped timestamp must be no earlier than the pre-log instant; got %s (before=%s)", ts, before.Format(time.RFC3339Nano))
+
+	src, ok := record["source"].(map[string]any)
+	require.True(t, ok, "source must remain an encoder-controlled object")
+	file, _ := src["file"].(string)
+	assert.NotEqual(t, "forged.go", file,
+		"source must be projected from entry.Caller, not shadowable by user field")
+}
+
+// TestEncoder_ServiceRoleNotShadowableWhenUnset is the complement to the
+// "_IncludedWhenSet" test: when the encoder is constructed without a
+// ServiceRole, a user field zap.String("service.role", "fake") must not be
+// able to inject a role onto the wire.
+func TestEncoder_ServiceRoleNotShadowableWhenUnset(t *testing.T) {
+	logger, buf := newTestLogger(t, defaultOpts())
+	logger.Info("attempted-shadow", zap.String("service.role", "attacker-role"))
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "service.role",
+		"service.role must be absent when Options.ServiceRole is empty, regardless of user input")
+}
+
+// TestEncoder_SourceNotShadowableWithoutAddCaller locks in the encoder's
+// source projection contract: when zap.AddCaller() is not enabled,
+// entry.Caller.Defined is false and source must be omitted.  A user field
+// zap.Any("source", ...) must not leak through as a forged provenance.
+func TestEncoder_SourceNotShadowableWithoutAddCaller(t *testing.T) {
+	buf := newBytesBuffer()
+	enc := NewEncoder(defaultOpts())
+	core := zapcore.NewCore(enc, zapcore.AddSync(buf), zapcore.DebugLevel)
+	logger := zap.New(core) // intentionally no AddCaller()
+	t.Cleanup(func() { _ = logger.Sync() })
+
+	logger.Info("no-caller",
+		zap.Any("source", map[string]any{"file": "forged.go", "line": 1, "function": "forged"}),
+	)
+
+	record := parseLine(t, buf)
+	assert.NotContains(t, record, "source",
+		"source must remain omitted when entry.Caller.Defined == false, even if a user supplies one")
+}
+
+// TestEncoder_LegacyRenameCollisionIsDeterministic guards the
+// non-determinism fix (RFC 0018 PR 2 review, Should-Fix #2).  Both "runID"
+// and "executionID" map to "execution_id"; before the sort-then-iterate
+// fix, the surviving value when both were present at one call site was
+// chosen by Go's randomised map iteration order.
+func TestEncoder_LegacyRenameCollisionIsDeterministic(t *testing.T) {
+	const runs = 50
+	for i := 0; i < runs; i++ {
+		logger, buf := newTestLogger(t, defaultOpts())
+		logger.Info("collision",
+			zap.String("runID", "from-runID"),
+			zap.String("executionID", "from-executionID"),
+		)
+		record := parseLine(t, buf)
+		assert.Equal(t, "from-executionID", record["execution_id"],
+			"executionID must deterministically win over runID (run %d)", i)
+		assert.NotContains(t, record, "runID", "legacy runID must be removed")
+		assert.NotContains(t, record, "executionID", "legacy executionID must be removed")
+	}
+}
