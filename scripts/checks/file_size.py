@@ -90,7 +90,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # Go test files that exceeded the 500-line limit when the **/*_test.go
     # blanket exclusion was removed. These are tracked for targeted follow-up
     # splits. Do not add new entries — split instead.
-    "internal/executor/executor_test.go",
     "internal/planner/planner_test.go",
     "internal/state/state_test.go",
     "internal/cost/cost_test.go",
