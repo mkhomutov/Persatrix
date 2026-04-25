@@ -134,6 +134,8 @@ Agents declare channel membership via configuration. An agent not listed in a ch
 
 Each `members` entry is either a participant ID string (defaulting to `respond: when_mentioned`) or an object with `id` and `respond` fields. The `respond` policy controls the per-membership response gate defined in §D and is the primary mechanism for preventing N²-fanout feedback loops in multi-agent channels.
 
+**Note — two distinct shorthands.** The disposition table above (under "Relationship to Existing Scaffolding") drops the v0.2-era *list-level* shorthand `members: "all"` (which expanded to "every registered agent"). It is unrelated to the *entry-level* shorthand introduced here, where a bare string like `code-reviewer` is sugar for `{id: code-reviewer, respond: when_mentioned}`. The list-level shorthand was dropped so membership stays explicit and auditable; the entry-level shorthand stays because it removes boilerplate without hiding membership identity.
+
 **Message schema**:
 
 ```python
@@ -162,7 +164,7 @@ class ChannelMessage:
 CREATE TABLE channels (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
-    channel_type TEXT NOT NULL,   -- 'group' | 'dm' | 'thread'
+    channel_type TEXT NOT NULL CHECK (channel_type IN ('group', 'dm', 'thread')),
     description TEXT,
     created_at  DATETIME NOT NULL
 );
@@ -170,10 +172,19 @@ CREATE TABLE channels (
 CREATE TABLE memberships (
     channel_id     TEXT NOT NULL REFERENCES channels(id),
     participant_id TEXT NOT NULL,
-    respond_policy TEXT NOT NULL DEFAULT 'when_mentioned',  -- 'when_mentioned' | 'always' | 'never'
+    respond_policy TEXT NOT NULL DEFAULT 'when_mentioned'
+        CHECK (respond_policy IN ('when_mentioned', 'always', 'never')),
     joined_at      DATETIME NOT NULL,
     PRIMARY KEY (channel_id, participant_id)
 );
+
+-- The CHECK constraints above mirror the canonical vocabularies in §A
+-- (channel types) and §D (respond policies). They are deliberately
+-- redundant with application-level validation: a typo in operator-authored
+-- config or a future migration that fails to update the enum elsewhere
+-- fails fast at write time rather than silently storing an unrecognized
+-- value the gate or router would treat as the default. RFC 0020 §F uses
+-- the same pattern on the `commitments.state` column.
 
 CREATE TABLE messages (
     id         TEXT PRIMARY KEY,
@@ -230,7 +241,7 @@ Agent A publishes to #planning
     ↓
 ActionType.SEND_CHANNEL_MESSAGE (Python persona action)
     ↓
-ActionExecutor → POST /api/v1/channels/{id}/messages
+ActionExecutor → POST /api/v1/channels/{id}/messages   (HTTP, agent → orchestrator)
     ↓
 ChannelRouter (Go): store message → look up members → filter to registered agents
     ↓
@@ -238,6 +249,8 @@ For each registered subscriber: DispatchChannelMessage → ReceiveChannelMessage
     ↓
 Agent B servicer: create AgentEvent(event_type=CHANNEL_MESSAGE) → dispatch to on_event()
 ```
+
+The publish hop crosses the agent → orchestrator boundary as **HTTP/REST**, not gRPC, even though every other agent ↔ orchestrator call (task dispatch, channel delivery, etc.) goes over gRPC. This is a deliberate asymmetry for two reasons. First, the publish surface is also the operator-facing publish surface — the same `POST /api/v1/channels/{id}/messages` endpoint backs the `persatrix channel send` CLI and `curl`-based testing. A single REST surface for both agent and human publishers avoids maintaining two code paths to the same store and simplifies rate limiting (a single middleware in front of one endpoint per RFC 0009 Phase 1). Second, the publish call is fire-and-forget from the agent's perspective — it does not need streaming, a long-lived connection, or per-call protobuf marshaling on the agent side. The downstream fanout to subscribers is gRPC because that path *is* a per-agent typed-RPC dispatch with retries and timeouts. The two halves of the flow have different ergonomics, so they use different transports.
 
 **New REST endpoints**:
 
@@ -259,13 +272,23 @@ Agent B servicer: create AgentEvent(event_type=CHANNEL_MESSAGE) → dispatch to 
 message ChannelMessageEvent {
     string message_id  = 1;
     string channel_id  = 2;
-    string channel_type = 3;   // "group" | "dm" | "thread"
+    string channel_type = 3;   // "group" | "dm" | "thread" — MUST agree with the prefix on channel_id
     string sender_id   = 4;
     string content     = 5;
     string timestamp   = 6;    // RFC 3339
     string thread_id   = 7;    // empty string if not a reply
     repeated string mentions = 8;
 }
+
+// Note: `channel_type` is redundant with the prefix already encoded in
+// `channel_id` (`group:`, `dm:`, `thread:` per §A). It is carried as a
+// separate field for log/observability ergonomics — counters and span
+// attributes use it directly without parsing — and to let receivers
+// validate the address shape without writing a parser. The orchestrator
+// MUST validate that the field agrees with the channel_id prefix on
+// publish; receivers SHOULD treat a mismatch as a malformed event and
+// drop it rather than fall back to either source. The validation step
+// is part of Phase 2's `ChannelRouter` and is exercised by a unit test.
 
 service AgentService {
     // existing RPCs ...
@@ -328,6 +351,8 @@ For `CHANNEL_MESSAGE` events, the `payload` dict contains:
 | `respond_policy` | `str` | the receiving agent's `respond_policy` for this channel, copied in by the dispatcher so the gate doesn't re-query the store |
 
 `thread_id` is promoted to a top-level field rather than stored in `payload` because the response gate's thread-reply rule reads it on every `CHANNEL_MESSAGE` and a misspelled `payload["thread_id"]` lookup would silently fail to match the rule. Top-level placement makes the contract type-checked.
+
+**Why `respond_policy` stays in `payload`.** The gate consumes `respond_policy` on the same hot path as `thread_id`, so the same misspell-resistance argument seemingly applies. The reason it does not is sourcing: `respond_policy` is *not* a property of the event — it lives on the receiving agent's `memberships` row. Promoting it to `AgentEvent` would commit to the dispatcher copying it in on every fanout, which is what we do today only as an optimization to avoid a per-event store lookup at the gate. If the dispatcher ever stops carrying it (e.g., if the gate moves into the channel store and reads memberships directly), the `AgentEvent` field would become a stale denormalization. Keeping it in `payload` flags it as transient cargo; `thread_id`, by contrast, is intrinsic to the message and stays on the event regardless of who evaluates the gate. See OQ-respond-policy-typo for the alternative if the typo risk turns out to matter in practice.
 
 **Agent behavior on channel messages**: The persona runtime's `on_event()` path handles `CHANNEL_MESSAGE` without modification to the core loop. The agent receives the event, the memory injection pipeline (RFC 0008) pulls relevant channel history and episodic memory, the LLM decides whether and how to respond, and the resulting action may be a `SEND_CHANNEL_MESSAGE` reply to the same channel or thread. Agents can also initiate channel messages autonomously during their tick loop without waiting for an incoming event.
 
@@ -393,6 +418,8 @@ channel_history = await self.memory.retrieve_relevant(
 
 `_CHANNEL_RECALL_LIMIT` (default: 20) caps how many messages the recall layer returns before the `MemoryBudget.try_add` loop runs. The actual number admitted into the prompt depends on remaining budget at call time, per RFC 0017 §B's greedy-fill semantics — the cap exists only to keep the candidate list small enough that the allocator's CPU cost stays bounded on a busy channel.
 
+The default is exposed as `optimization.yaml → channels.recall_limit` (Phase 3 deliverable). Hard-coding the constant in source would replicate the regression that motivated RFC 0017's per-event-budget tunability — operators tuning prompt shape need a config knob, not a code edit. The Python module retains `_CHANNEL_RECALL_LIMIT` as the variable name for the resolved value (loaded once at startup from config) so the rest of the recall code reads identically.
+
 **Budget allocation**: Channel history competes with episodic and relationship memory for the `budget_memory_tokens` allocation from RFC 0008, under RFC 0017's existing `MemoryBudget` contract. RFC 0017 specifies a single greedy pool with priority-ordered fill and explicitly rejects per-tier fairness (RFC 0017 §B, invariant: *"No fairness across tiers. The budget is greedy by design."*). This RFC honors that contract: channel history is admitted via the same `budget.try_add(...)` loop as episodic and relationship memory, with per-tier *priority* (not a per-tier *ceiling*) determining allocation order.
 
 The recommended priority order in the persona-runtime caller is: relationship summary → channel history (when the triggering event is a `CHANNEL_MESSAGE`) → episodic recall → notes. Placing channel history immediately after the relationship summary on channel-triggered events ensures the most recent in-channel turns are admitted before broader episodic recall consumes the remaining budget. Allocation across tiers is still greedy: if the relationship summary plus channel history fill the budget, no episodic recall is admitted for that event — the same trade-off RFC 0017 already makes between tiers, applied uniformly.
@@ -426,7 +453,7 @@ persatrix channel watch <name> [--interval N]         # poll for new messages (d
 |--------|------|--------|-------------|
 | `channel.messages.published` | counter | `channel_id`, `sender_type` | Messages published per channel |
 | `channel.messages.delivered` | counter | `channel_id`, `status` | Delivery attempts (ok / failed) |
-| `channel.messages.gated` | counter | `channel_id`, `policy` | Events suppressed by the response gate (incremented on the agent side); the primary signal for diagnosing an under- or over-tuned `respond` policy. `subscriber_id` is **not** a label — at `max_channels=50` × N agents × 3 policies the per-subscriber cardinality (~3,000 series at N=20) exceeds the budget for a single counter. Per-subscriber drill-down is available via OTEL spans (each suppressed event emits a span with `subscriber.id` as an attribute). |
+| `channel.messages.gated` | counter | `channel_id`, `policy` | Events suppressed by the response gate (incremented on the agent side); the primary signal for diagnosing an under- or over-tuned `respond` policy. `subscriber_id` is **not** a label — cardinality scales as `members × channels × policies`. The example "~3,000 series at N=20 over `max_channels=50` and 3 policies" is illustrative; at N=200 (a large org channel) the same product yields ~30,000 series and the case for excluding `subscriber_id` is even stronger; at N=2 (DMs only) it is closer to acceptable but still excluded for consistency. Per-subscriber drill-down is available via OTEL spans (each suppressed event emits a span with `subscriber.id` as an attribute). |
 | `channel.delivery.latency_ms` | histogram | `channel_id` | Publish-to-delivery latency per subscriber |
 | `channel.members.active` | gauge | `channel_id` | Current registered subscriber count |
 | `channel.history.recall_tokens` | histogram | `channel_id` | Tokens consumed by channel history injection |
@@ -440,7 +467,7 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 | Pattern | Membership policy | When to use |
 |---------|-------------------|-------------|
 | **Quiet group** | all members `when_mentioned` | Default for general-purpose channels with 3+ agents (e.g., `#planning`, `#general`). The channel acts as a shared log; messages cut through only via explicit `@`-mention. Lowest fanout cost. |
-| **Tight-loop pair** | both members `always` | Two agents in continuous collaboration (e.g., `#code-review` between a writer and reviewer). Every message triggers a reply cycle by design. Avoid extending to N > 2 — every additional `always` member multiplies fanout. |
+| **Tight-loop pair** | both members `always` | Two agents in continuous collaboration (e.g., `#code-review` between a writer and reviewer). Every message triggers a reply cycle by design. **Bounded by `cascade_depth`** (see §D Composition with `cascade_depth`): any single chain of reactive replies terminates at `max_cascade_depth` (default 5) — the dispatcher drops the next event silently with only a debug log. Longer dialogues require an external re-trigger (a tick, a human message, a non-channel event), which resets `cascade_depth` to 0. Avoid extending to N > 2 — every additional `always` member multiplies fanout. |
 | **Broadcast / announcements** | senders publish, all listeners `never` | One-way log channel (e.g., `#announcements`, `#deploy-events`). Listeners ingest into episodic memory but never reply, so the channel cannot loop regardless of write volume. |
 | **Always-respond / incident** | all members `always` | Multi-agent channel where every message genuinely warrants attention from everyone (e.g., `#incident`). Fanout cost scales as `members × messages`; reserve for situations where that cost is the point. |
 
@@ -549,6 +576,7 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 ## Test Strategy
 
 - **Unit tests**: `ChannelStore` CRUD, membership enforcement, message ordering, history pagination, per-channel cap pruning.
+- **Thread FK cascade test** (Phase 1, called out separately because it spans the cap boundary and is easy to miss): publish 10,001 messages including a thread root that straddles the per-channel cap, force the prune step, and assert `(orphaned-reply count == 0)` and that no FK constraint violation surfaces. This is the test referenced in §B's "Pruning interaction with thread FK" paragraph; listing it here so it doesn't disappear into general CRUD coverage.
 - **Routing tests**: Single subscriber delivery, multi-subscriber fanout, offline subscriber behavior (missed message, history retrieval).
 - **Memory integration tests**: Channel history stored with correct tags, budget-aware recall, channel tier in `MemoryBudget`.
 - **Relationship tests**: Channel interactions correctly increment trust score for sender.
@@ -580,6 +608,14 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
    - **Watermark vs. time-based catch-up**: The current history endpoint paginates by `before time.Time` — useful for backscroll, less useful for "give me everything since I was last seen." Adding a per-(channel, subscriber) high-watermark (last-seen `message_id`) to either the channel store or agent-local state would enable a precise `?since=<watermark>` catch-up query.
 
    Recommendation: **defer to a v0.3.x follow-up RFC** rather than block v0.3.0 on it. v0.3.0 ships at-most-once with on-startup history fetch (last 50 messages per subscribed channel) as a best-effort recovery; the watermark and per-tick recovery can land once operational data shows whether the gap matters. Logging `channel.delivery.missed` per OQ #2 gives the signal needed to decide.
+
+9. **`channel.schema.json` $id stability across the v0.2 → v0.3.0 rewrite.** The "Relationship to Existing Scaffolding" disposition rewrites the schema in place at the same path with the same `$id`. Any external tooling that resolves the `$id` URL and validates v0.2 configs against the cached document will silently break when fed a v0.3.0 config (or vice versa) — type vocabulary changed (`direct` → `dm`, `broadcast`/`meeting` dropped) and the `schema_version` field that would have signaled the break is also removed. For an internal-only v0.3.0 the cost is zero; what is missing is a public stance on whether `channel.schema.json` is part of the project's stable public API. Recommendation: **declare it not-yet-public** in the v0.3.0 release notes (the schema is owned by the RFC and may break with each v0.x bump until v1.0). If we change our mind later and declare it public, the right path is a `$id` bump on the next breaking change, not silent in-place edits.
+
+10. **`channel_type` proto-field redundancy with the `channel_id` prefix.** §C carries `channel_type` as a separate string on `ChannelMessageEvent` despite it already being encoded as a prefix on `channel_id` (`group:`, `dm:`, `thread:`). The duplication is justified for log/observability ergonomics (see the comment under the proto block) but is also a drift risk: a future call site that updates one without the other produces internally inconsistent events. Phase 2's `ChannelRouter` validation closes this on publish, but receiver-side defensive parsing (drop on mismatch) is recommended rather than silently trusting one source. Should we make the field redundancy a typed enum at the proto level instead of a free string? Probably not for v0.3.0 — leave it as documentation-and-validation and revisit if drift bugs surface.
+
+11. **Per-channel `cascade_depth` budget vs. global default.** §H notes that a tight-loop pair channel saturates `max_cascade_depth` (default 5) within five reactive turns. Operators wanting longer reactive chains have only one knob today: raising `max_cascade_depth` globally — which also raises the runaway-loop risk in misconfigured `always` channels elsewhere. A per-channel override (e.g., `channels[].cascade_depth_max: 20` for `#code-review`) would give operators the granularity to make tight-loop pair channels truly long-running without weakening the default backstop. Cost: a new schema field, plumbing the override through the dispatcher's depth check, and documenting the tradeoff. Recommendation: **defer to a v0.3.x follow-up** — collect dogfood data on whether cascade-depth saturation is actually the user-visible failure mode in tight-loop pair channels, then decide.
+
+12. **Typo-resistance on `payload["respond_policy"]`.** §D justifies promoting `thread_id` to a top-level `AgentEvent` field on misspell-resistance grounds (a typoed `payload["thread_id"]` lookup silently fails the gate's thread-reply rule). The same argument seemingly applies to `respond_policy`, but §D keeps it in `payload` because policy is denormalized cargo from `memberships`, not intrinsic to the event. Open: do we cement that distinction by giving `payload` a typed accessor (`event.policy_for(agent_id)` that consults membership directly and ignores `payload`), or do we accept the typo risk on the basis that the value is set in one place (the dispatcher) and read in one place (the gate)? Recommendation: **accept the risk for v0.3.0**; revisit if a typo bug surfaces in the gate or if the dispatcher gains a second policy-setting code path.
 
 ---
 

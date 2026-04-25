@@ -310,7 +310,9 @@ The persona's event handler treats `REMINDER` like any other inbound event — i
 
 **Why a separate event type, not inline injection.** Treating reminders as events keeps the persona's reasoning loop uniform — every input is an `AgentEvent`. The alternative (silently injecting "you have these commitments" into the next event's payload) couples the temporal layer to every event handler in dispatch and is harder to test.
 
-**Restart behavior.** Reminders are stateless: on orchestrator restart, the next tick scans the commitments table fresh and re-emits `REMINDER` events for anything still in the proximity window. We do not track "which reminders have already fired" — duplicates are accepted as the cost of statelessness.
+**Restart behavior.** Reminders are stateless across orchestrator restarts: the next tick scans the commitments table fresh and re-emits `REMINDER` events for anything still in the proximity window. We do not track "which reminders have already fired" — restart-time duplicates are accepted as the cost of statelessness.
+
+**Per-tick duplicate suppression (within a single process lifetime).** The statelessness above applies *across restarts*. Within a single process lifetime, naive scanning would re-fire `REMINDER` for the same commitment on every tick until its `due_at` passes — a commitment due in 30 minutes with a 60-second tick would generate ~30 reminders. The runtime maintains an in-memory `last_reminder_fired_at: dict[commitment_id, float]` keyed by commitment ID, populated on every successful `REMINDER` emission. The pre-tick scan suppresses re-firing for any commitment whose entry is within `temporal.reminder_min_interval_sec` (default 900s = 15 min) of `now`. This is hysteresis, not durable state: the dict is lost on restart, at which point the stateless restart behavior above takes over and one duplicate is emitted on the first post-restart tick scan. Persisting `last_reminder_fired_at` to the `commitments` table is deliberately out of scope — see Open Question 9 for the calibration tradeoff and the full per-commitment table option.
 
 ### I. Duration Calibration and Estimation
 
@@ -331,7 +333,7 @@ CREATE INDEX idx_duration_category ON duration_records(category, recorded_at);
 
 **Population.** Two sources contribute records automatically:
 
-1. **Task completion** — when [agents/persona_runtime/__init__.py:367](../../agents/persona_runtime/__init__.py#L367) emits a `COMPLETE_TASK` action, the runtime records `(category=task.category, duration=now - task.started_at, source='task', source_id=task.id)`.
+1. **Task completion** — every code path that emits `ActionType.COMPLETE_TASK` is observed at the action-execution boundary. The hook is placed in `agents/dispatch.py`'s `ActionExecutor.execute_action` (the single funnel through which all action types flow on their way out) rather than at any one of the many emission sites inside `agents/persona_runtime/` (e.g., LLM-decided completions in [persona_runtime/action_loop.py](../../agents/persona_runtime/action_loop.py) — multiple call sites; the timeout-fallback at [persona_runtime/__init__.py:367](../../agents/persona_runtime/__init__.py#L367)). Routing through the executor ensures we record durations for genuine LLM-decided completions, structured-output fallbacks, and timeout fallbacks alike, with a single piece of instrumentation. The recorded record is `(category=task.category, duration=now - task.started_at, source='task', source_id=task.id)`.
 2. **Interaction close** (RFC 0020) — on `closed` transition, the runtime records `(category='interaction:<scope_kind>', duration=closed_at-started_at, source='interaction', source_id=interaction_id)` for multi-turn interactions only (`turn_count > 1`).
 
 A third source is the explicit tool `record_duration(category, seconds)` (manual; gated by `duration:write`) — useful for personas that want to log a duration they observed externally.
@@ -437,7 +439,7 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 **Deliverables**:
 
 1. Schema migration adding `duration_records` table and the `idx_duration_category` index.
-2. Auto-population hooks in [agents/persona_runtime/__init__.py](../../agents/persona_runtime/__init__.py) (on `COMPLETE_TASK` action) and in the RFC 0020 interaction-close path (multi-turn only).
+2. Auto-population hooks in [agents/dispatch.py](../../agents/dispatch.py)'s `ActionExecutor` (observes every `COMPLETE_TASK` action regardless of which call site in `persona_runtime/` produced it — see §I "Population") and in the RFC 0020 interaction-close path (multi-turn only).
 3. New tool `recall_typical_duration` with quartile-based statistics; new tool `record_duration` for manual logging. New permission `duration:read` (default allow) and `duration:write` (default allow).
 4. Optional duration-prior injection in prompt assembly when task category matches calibration data with `n_samples >= 3`. Gated by `temporal.inject_duration_priors` (default `true`).
 5. Integration test: ten consecutive tasks of category `"code_review"` with varying durations produce a `recall_typical_duration("code_review")` result with sane median and IQR.
@@ -454,7 +456,8 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 | Python agents | `agents/persona_runtime/prompt_assembly.py` | Inject now-anchor; commitment block (P2); duration prior line (P4); commitment-tool nudge (P2) |
 | Python agents | `agents/persona_runtime/memory_context.py` | Render recency prefix on episodes; surface relationship recency; package commitments (P2) |
 | Python agents | `agents/persona_runtime/memory_budget.py` | New budget lines for commitments and duration priors |
-| Python agents | `agents/persona_runtime/__init__.py` | Pre-tick commitment scan (P3); duration auto-population on `COMPLETE_TASK` (P4) |
+| Python agents | `agents/persona_runtime/__init__.py` | Pre-tick commitment scan (P3) |
+| Python agents | `agents/dispatch.py` | `REMINDER` event routing (P3); duration auto-population hook in `ActionExecutor` on every `COMPLETE_TASK` action (P4 — see §I "Population" for why the hook lives here rather than at any one of the many emission sites in `persona_runtime/`) |
 | Python agents | `agents/memory/commitments.py` | (new, P2) Commitment dataclass, store/query/mutate |
 | Python agents | `agents/memory/duration.py` | (new, P4) Duration record store, quartile aggregation |
 | Python agents | `agents/memory/migrations.py` | New tables: `commitments` (P2), `duration_records` (P4) |
@@ -462,8 +465,7 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 | Python agents | `agents/persona_types.py` | `EventType.REMINDER` (P3) |
 | Python agents | `agents/tools/builtin.py` | New tools: `set_reminder`, `list_commitments`, `fulfill_commitment`, `cancel_commitment`, `get_current_time`, `time_since`, `time_until`, `recall_typical_duration`, `record_duration` |
 | Python agents | `agents/tools/permissions.py` | New permission strings: `time:read`, `commitments:read`, `commitments:write`, `duration:read`, `duration:write` |
-| Python agents | `agents/dispatch.py` | `REMINDER` event routing (P3) |
-| Config | `config/optimization.yaml` | New `temporal.*` block: `commitments_prompt_budget_tokens`, `duration_priors_budget_tokens`, `reminder_horizon_sec`, `missed_grace_sec`, `inject_duration_priors` |
+| Config | `config/optimization.yaml` | New `temporal.*` block: `commitments_prompt_budget_tokens`, `duration_priors_budget_tokens`, `reminder_horizon_sec`, `reminder_min_interval_sec`, `missed_grace_sec`, `inject_duration_priors` |
 | Schemas | `schemas/persona.schema.json` | Optional `timezone` field |
 | Tests | `tests/unit/`, `tests/integration/` | Rendering buckets, clock injection, commitment lifecycle, REMINDER emission, duration aggregation |
 
@@ -498,6 +500,15 @@ No proto changes. No Go orchestrator changes (the temporal layer is agent-local)
 6. **Duration category vocabulary** — should categories be free-form strings or constrained to a registered taxonomy? Free-form is flexible but sparse (n_samples stays low because everything goes into a slightly different bucket). A taxonomy gives statistical power but requires upkeep. **Lean**: free-form for v0.4.0 with no normalization; consider an embedding-based clustering layer later.
 7. **Implicit duration-prior injection** — §I commits to injecting the duration prior automatically when the task has matching calibration data. Pro: the persona acts on history without needing a tool call. Con: tokens spent on every task prompt, even when calibration is weak. **Lean**: inject when `n_samples >= 3` and the IQR is bounded relative to the median (i.e., we have enough data to be confident). Configurable via `temporal.duration_prior_min_samples` (default 3) and `temporal.duration_prior_max_iqr_ratio` (default 2.0).
 8. **Timezone display format in the now-anchor** — abbreviation (`UTC`, `PST`) is human-friendly but ambiguous (PST vs. PDT). Full IANA name (`America/Los_Angeles`) is unambiguous but token-expensive and less natural. **Lean**: render the IANA short form (e.g., `UTC`, `PT`) in the human part of the anchor; the ISO-8601 numeric offset already removes ambiguity for any consumer that needs it.
+
+9. **REMINDER duplicate-suppression policy.** §H commits to in-memory hysteresis (`reminder_min_interval_sec`, default 900s) within a process lifetime, plus stateless re-firing after restart. Three calibration / design choices remain open:
+   - **Default interval value.** 900s (15 min) is a guess. Too short and a 30-minute-out commitment fires ~2x; too long and an agent that genuinely needs a fresh reminder waits longer than it should. Calibrate after Phase 3 dogfood.
+   - **Hysteresis vs. per-commitment table.** The in-memory dict is the cheap option. The durable alternative is `last_reminder_fired_at` and `reminder_fire_count` columns on the `commitments` table, surviving restart and supporting per-commitment backoff. Cost: schema migration and the question of whether reminder-firing telemetry is something we want stored alongside the commitment itself. Recommendation: stay with in-memory for v0.4.0; revisit if restart-duplicate spam becomes an operator complaint.
+   - **First-crossing semantics.** A simpler design fires `REMINDER` exactly once per commitment, on the first tick where `due_at` enters the proximity window, with no re-fire mechanism at all. Pro: cleanest semantics, no calibration knob. Con: an agent that decided not to act on the first reminder loses the prompt. The current design (re-fire with hysteresis) is more forgiving; first-crossing-only is the alternative if dogfood shows reminders being treated as throwaways.
+
+10. **Stability of `target_party` across participant renames.** The `target_party` column on `commitments` is a free-form participant ID, not a foreign key. Renaming an agent or user orphans every commitment whose `target_party` matches the old name from the renamed identity. v0.4.0 accepts this as a known limitation (rename is exceptional today). RFC 0020's `scope` column has the same property — see [RFC 0020 Open Question 8](0020-interaction-lifecycle.md#open-questions). If renames become routine, the cleanest fix is a side table mapping historical names to current identity, applied at recall time.
+
+11. **`get_current_time` tool vs. the always-injected now-anchor.** §C unconditionally injects the now-anchor into every prompt; §G then exposes `get_current_time` as a tool. The justification "useful when the persona needs to reason about precise time without re-reading the prompt anchor" is thin — the LLM does not have separate "anchor" and "tool result" memories within a turn. The genuine value of the time-tool family is `time_since` / `time_until`, which do arithmetic the LLM cannot reliably do. `get_current_time` adds a permission, a registration entry, and a test surface for marginal benefit. Recommendation: **drop `get_current_time` from the v0.4.0 tool surface**; keep `time_since` / `time_until`. If a real call-pattern emerges where the persona benefits from a tool-call read of `now` (e.g., logging a precise timestamp in a returned value), reintroduce it then with a sharper rationale. Decision deferred to Phase 3 implementation review since it is the phase that lands the tool.
 
 ## Decision / Next Steps
 

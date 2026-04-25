@@ -202,7 +202,7 @@ This is a behavioral improvement: today, an agent in a busy channel hits the ref
 
 **Existing rows.** Episodes already in production agent databases stay untouched. The four new columns are NULL for them. They are recallable via FTS5 and vector search (RFC 0008) at the same priority they have today.
 
-**Recall priority for mixed legacy + new rows.** When a query returns both legacy single-turn rows and new interaction rows, the recall layer applies a small boost to interaction rows with `turn_count > 1` to reflect their higher information density. The boost is configurable (default: +10% on the relevance score) and disabled if it produces empty results.
+**Recall priority for mixed legacy + new rows.** When a query returns both legacy single-turn rows and new interaction rows, the recall layer applies a small boost to interaction rows with `turn_count > 1` to reflect their higher information density. The boost is configurable (default: +10% on the relevance score) and disabled if it produces empty results. The +10% default is a placeholder pending dogfood data — see Open Question 7 for calibration.
 
 **No bulk re-clustering.** Attempting to retroactively cluster old single-turn episodes into multi-turn interactions is explicitly out of scope. The cost (an LLM clustering pass over the entire history per agent) is high, the benefit decays with episode age, and the existing rows continue to function.
 
@@ -242,7 +242,7 @@ This is a behavioral improvement: today, an agent in a busy channel hits the ref
 1. Multi-turn aggregation for human-chat sessions: turns accumulate in the open interaction; close on session end or idle.
 2. Summarization-on-close LLM call. Summary generation uses the same model selection as RFC 0005's episode summarization (`optimization.yaml` → `context_management.summarization.model`).
 3. `closing`-state janitor with `closing_grace_sec` enforcement and fallback summary text.
-4. `record_interaction` call site moved from per-event into the close path. Recalibration note added to the v0.3.0 release plan for any trust-bootstrap thresholds that assumed per-message increments.
+4. `record_interaction` call site moved from per-event into the close path. Trust-bootstrap thresholds that assumed per-message increments are recalibrated as part of this phase: a recalibration checklist is produced (target location: the v0.3.0 release-prep doc once it exists, or this RFC's own "Migration Notes" appendix as a fallback) listing every config knob that was scaled against per-message `interaction_count` and its post-RFC equivalent.
 5. `auto_reflect_after` counter switched to increment on close.
 6. Integration test: ten-turn human-chat session produces one episode, not ten, with a coherent summary.
 
@@ -274,8 +274,8 @@ Not committed to v0.3.0 scope. Listed here only so Phase 1's interface choice is
 |-----------|-------|--------|
 | Python agents | `agents/memory/interactions.py` | (new) `InteractionTracker`, `BoundaryDetector` interface, `StructuralCloseDetector`, `IdleGapDetector`, `TopicShiftDetector` no-op |
 | Python agents | `agents/memory/episodic.py` | Schema migration; `store_episode` accepts `interaction_id`, `started_at`, `closed_at`, `turn_count`, `scope`; recall priority boost for multi-turn rows |
-| Python agents | `agents/memory/relationships.py` | `record_interaction` callable from close path; no signature change |
-| Python agents | `agents/persona_runtime.py` | Wire dispatch loop to `InteractionTracker` for tick / human-chat / channel events |
+| Python agents | `agents/memory/relationship_mutations.py` (`record_interaction` at line 166); façade `agents/memory/relationship.py` (`RelationshipMemory.record_interaction` at line 184) re-exports unchanged | Move call site of `record_interaction` from per-event handler to the interaction-close path; no signature change. The module is split: the function lives in `relationship_mutations.py`; callers using the `RelationshipMemory` façade keep using the façade. |
+| Python agents | `agents/persona_runtime/__init__.py` | Wire dispatch loop to `InteractionTracker` for tick / human-chat / channel events. (`persona_runtime` is a package; the dispatch entry point is in `__init__.py`. Per-feature wiring may also touch `persona_runtime/action_loop.py` and `persona_runtime/memory_context.py`.) |
 | Python agents | `agents/persona_runtime/memory_context.py` | Recall path filters to closed-only; working-memory buffer scoped to open interaction |
 | Python agents | `agents/dispatch.py` | Emit interaction lifecycle events for telemetry; respect `END_INTERACTION` action if added |
 | Config | `config/optimization.yaml` | `interaction.idle_timeout_sec`, `interaction.closing_grace_sec`, `interaction.max_turns` defaults |
@@ -308,6 +308,10 @@ No proto changes. No Go orchestrator changes (interaction lifecycle is agent-loc
 4. **Surfacing `interaction_id` in the agent's context.** Should the agent see "this is interaction X, your fifth turn"? Could enable richer in-prompt reasoning ("we've been at this for a while"). Could also be noise. Default off; revisit after Phase 2.
 5. **Reopen window on race conditions.** §C commits to "do not reopen during `closing`". This is the simpler choice but may produce visible artifacts (a slow human gets split). If artifacts are common in practice, revisit with a bounded reopen window (e.g., reopen if a turn arrives within `closing_grace_sec / 4` of close).
 6. **Outcome tagging for trust deltas.** §F mentions "outcome tags emitted during the interaction." The exact mechanism (action metadata? structured summary field? heuristic from summary text?) is not pinned in this RFC and will be specified in the Phase 2 PR plan.
+
+7. **Calibration of the multi-turn recall boost.** §I sets a default +10% relevance-score boost on `turn_count > 1` rows. The number is a placeholder — too low and legacy single-turn rows still dominate recall; too high and a single mediocre multi-turn summary outranks a highly-relevant legacy row. The boost is also expressed as a percentage of the score; a fixed addend (e.g., +0.05) might compose better with the underlying scorer (whose distribution we have not characterized). Calibrate against early dogfood: pick a value once we have a corpus of mixed legacy + interaction rows and can measure recall@k for both forms.
+
+8. **Stability of `scope` identifiers across participant renames.** §G defines scope as `dm:<a>:<b>`, `channel:<name>`, etc. — free-form strings, not foreign keys. Renaming a participant or a channel orphans every prior interaction's scope from the renamed entity. v0.3.0 accepts this as a known limitation (rename is a config-only operation today and is exceptional). If renaming becomes a routine operation, the cleanest fix is a side table mapping historical names to current identities, applied at recall time. RFC 0021's `target_party` (free-form participant ID on commitments) has the same property — see RFC 0021 §F. Out of scope for v0.3.0.
 
 ## Decision / Next Steps
 
