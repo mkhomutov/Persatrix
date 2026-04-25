@@ -489,7 +489,7 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
    contract a single line of truth.
 
 4. **Test gap: `min_score=None` and `min_score=0.0` produce identical SQL behaviour**
-   ([tests/unit/python/test_episodic_memory.py](../../tests/unit/python/test_episodic_memory.py)).
+   ([tests/unit/python/test_episodic_memory_min_score.py](../../tests/unit/python/test_episodic_memory_min_score.py)).
    No test pins the contract that the two call shapes are observationally equivalent (both return
    all FTS5-matching rows without a score floor). Add one test that runs the same corpus with
    `min_score=None` and `min_score=0.0` and asserts identical result IDs and ordering. Guards
@@ -497,7 +497,7 @@ Review findings from PRs 1–5, grouped by component. Items below are populated 
    floor inside the helper from finding 3).
 
 5. **Test gap: FTS5 query sanitises to empty + `min_score` provided**
-   ([tests/unit/python/test_episodic_memory.py](../../tests/unit/python/test_episodic_memory.py)).
+   ([tests/unit/python/test_episodic_memory_min_score.py](../../tests/unit/python/test_episodic_memory_min_score.py)).
    `TestRecallMinScore` covers the empty-query passthrough case but not the case where the query
    *sanitises* to empty (e.g., punctuation-only input) and falls through to `recall_recency` with
    `min_score` set. Expected behaviour: `min_score` is silently ignored on the recency path
