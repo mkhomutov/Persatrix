@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-24 (v0.2.3 released — post-release document update: ROADMAP v0.2.3 section flipped to Complete, prep-plan PR 4 marked merged, release checklist finalised)  
+> **Last updated**: 2026-04-25 (documentation cleanup: flipped `internal/observability/` to ✅ Complete in both Component Status tables now that RFCs 0018 + 0019 have shipped; removed duplicated RFC 0015 bullet from v0.5.0 "What ships"; sorted Merged PR History rows for #161 and #175 into chronological order; companion changes — README "Why Persatrix" repositioned ahead of version blurbs, RFC numbering reservations documented in `docs/rfcs/README.md`)  
 > **Current phase**: v0.2.3 (Observability Foundation — RFCs 0018 + 0019) — ✅ Released (RFC 0018 ✅ 7/7; RFC 0019 ✅ 5/5; release-prep plan ✅ complete)  
 > **Current milestone**: v0.2.3 released; v0.3.0 planning next (shared channels + multi-user chat — RFCs 0009, 0010, 0011)
 
@@ -98,7 +98,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
 | `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172); LogService server + REST/SSE wired (0018 PR 5 — #173); CLI rewrite wired (0018 PR 6 — #174) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder + log buffer + LogService | ✅ Complete (RFC 0018 + RFC 0019, shipped in v0.2.3) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
 #### Python Agents (`agents/`)
@@ -212,7 +212,7 @@ v0.2.0 complete
 | `internal/cost/` | `TokenCounter`, `BudgetEnforcer`, `CostReporter`, response cache | ✅ Complete (RFC 0006 PRs 3a+3b+4b) |
 | `internal/state/` | `StepExecutionMetadata` (tokens, LLM calls, retries, cache hit, cost, wall time) | ✅ Complete (RFC 0006 PR 4a) |
 | `internal/server/` | Cost summary endpoint (`GET /api/v1/cost/summary`) | ✅ Complete (RFC 0006 PR 4b) |
-| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder | 🚧 In progress — telemetry→observability rename + otelgrpc + otelhttp wired (0019 PR 1 — #163); zapenc encoder + NoopRedactor wired (0018 PR 2 — #165); grpcmeta correlation-ID injection wired (0018 PR 3 — #168); orchestrator metrics wired (0019 PR 3 — #170); logbuffer ring + disk store wired (0018 PR 4 — #172); LogService server + REST/SSE wired (0018 PR 5 — #173); CLI rewrite wired (0018 PR 6 — #174) |
+| `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder + log buffer + LogService | ✅ Complete (RFC 0018 + RFC 0019, shipped in v0.2.3) |
 
 #### Python Agents (`agents/`) — v0.2.0 additions
 
@@ -531,7 +531,6 @@ v0.4.0 complete
 
 - **External bridges** — Slack, Discord, Telegram, email connectors (RFC 0011, external part)
 - **Full compliance and privacy layer** — data classification, consent tracking, PII detection, right to erasure, ethical guardrails (RFC 0013)
-- **Process automation & pattern extraction** — deterministic skill promotion pipeline from repeated LLM reasoning patterns (RFC 0015)
 - **RFC 0012 remainder** — meeting and negotiation protocol completion, advanced organizational features
 - **Process automation & pattern extraction** — detect repeated reasoning patterns from telemetry, promote them to tested, sandboxed deterministic skills via human review (RFC 0015)
 
@@ -736,6 +735,7 @@ v0.5.0 complete
 | [#158](https://github.com/mkhomutov/Persatrix/pull/158) | docs(release): final pre-tag verification — flip README to Released, check off all gates | v0.2.2 release prep | 2026-04-22 |
 | [#163](https://github.com/mkhomutov/Persatrix/pull/163) | feat(otel): telemetry→observability rename + Python OTEL init + gRPC + Baggage (RFC 0019 PR 1/5) | 0019 (1/5) | 2026-04-22 |
 | [#164](https://github.com/mkhomutov/Persatrix/pull/164) | feat(observability): RFC 0018 PR 1 — schema doc + Python structlog chain + redactor surface | 0018 (1/7) | 2026-04-22 |
+| [#161](https://github.com/mkhomutov/Persatrix/pull/161) | docs(rfcs): add joint PR plans for RFC 0018 + RFC 0019 (v0.2.3 Observability Foundation) | 0018+0019 (PR plan) | 2026-04-22 |
 | [#165](https://github.com/mkhomutov/Persatrix/pull/165) | feat(observability): RFC 0018 PR 2 — Go zap rename + pretty + redactor wired + source | 0018 (2/7) | 2026-04-23 |
 | [#167](https://github.com/mkhomutov/Persatrix/pull/167) | feat(observability): RFC 0019 PR 2 — semantic spans + Span Links + log↔trace coordination | 0019 (2/5) | 2026-04-23 |
 | [#168](https://github.com/mkhomutov/Persatrix/pull/168) | feat(observability): RFC 0018 PR 3 — cross-process correlation IDs + OTEL trace IDs on logs | 0018 (3/7) | 2026-04-23 |
@@ -744,9 +744,8 @@ v0.5.0 complete
 | [#172](https://github.com/mkhomutov/Persatrix/pull/172) | feat(observability): RFC 0018 PR 4 — Phase 4a log_service.proto + ring buffer + disk store + rate limiter | 0018 (4/7) | 2026-04-23 |
 | [#173](https://github.com/mkhomutov/Persatrix/pull/173) | feat(observability): RFC 0018 PR 5 — LogService server + agent shipper + REST + SSE | 0018 (5/7) | 2026-04-23 |
 | [#174](https://github.com/mkhomutov/Persatrix/pull/174) | feat(cli): RFC 0018 PR 6 — CLI logs rewrite + filters + SSE follow + E2E | 0018 (6/7) | 2026-04-23 |
-| [#176](https://github.com/mkhomutov/Persatrix/pull/176) | refactor(observability): RFC 0019 PR 6 — tracing/spans review follow-ups (optional polish) | 0019 (PR 6, polish) | 2026-04-23 |
-| [#161](https://github.com/mkhomutov/Persatrix/pull/161) | docs(rfcs): add joint PR plans for RFC 0018 + RFC 0019 (v0.2.3 Observability Foundation) | 0018+0019 (PR plan) | 2026-04-22 |
 | [#175](https://github.com/mkhomutov/Persatrix/pull/175) | docs(rfc-0018,0019): describe closeout PR scope in plans | 0018+0019 (closeout prep) | 2026-04-23 |
+| [#176](https://github.com/mkhomutov/Persatrix/pull/176) | refactor(observability): RFC 0019 PR 6 — tracing/spans review follow-ups (optional polish) | 0019 (PR 6, polish) | 2026-04-23 |
 | [#177](https://github.com/mkhomutov/Persatrix/pull/177) | perf(observability): RFC 0018 PR 8 — log buffer + shipper polish | 0018 (PR 8, polish) | 2026-04-24 |
 | [#180](https://github.com/mkhomutov/Persatrix/pull/180) | docs(rfc-0018): closeout — review follow-ups + status flip (RFC 0018 PR 7) | 0018 (7/7, close) | 2026-04-24 |
 | [#181](https://github.com/mkhomutov/Persatrix/pull/181) | docs(rfc-0019): closeout — review follow-ups + status flip (RFC 0019 PR 5) | 0019 (5/5, close) | 2026-04-24 |

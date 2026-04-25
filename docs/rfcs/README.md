@@ -1,7 +1,7 @@
 # RFC Process & Format Specification
 
 > **Spec version**: 1.0  
-> **Last updated**: 2026-04-08
+> **Last updated**: 2026-04-25
 
 > **Purpose:** Define the types, lifecycle, structure, and conventions for
 > Request for Comments (RFC) documents in the Persatrix project. RFCs
@@ -142,7 +142,19 @@ docs/rfcs/NNNN-kebab-case-short-title.md
 
 - **NNNN**: Zero-padded four-digit sequence number, monotonically increasing.
 - **kebab-case-short-title**: Concise, descriptive, kebab-case slug (3–7 words).
-- Next available number: check the highest existing RFC number and increment.
+- Next available number: check the highest existing RFC number and increment, **skipping any reserved numbers** (see below).
+
+### Reserved RFC Numbers
+
+Some RFC numbers are reserved for previously scoped topics that do not yet have a written document. When picking the next available number, skip these:
+
+| RFC | Reserved for | Target version |
+|-----|--------------|----------------|
+| 0010 | Sub-Agent Spawning | v0.4.0 |
+| 0011 | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) |
+| 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) |
+
+This is why the current sequence on disk is 0001–0009 + 0013–0019 — RFC 0015 (Process Automation) was written after the 0010–0012 reservations were already in place. Source of truth for reservations is the [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index).
 
 Examples:
 - `0001-persona-agent-architecture.md`

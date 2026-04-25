@@ -10,6 +10,25 @@ A general-purpose **agent society engine** — a runtime for creating, connectin
 observing groups of AI agents that behave as individuals within organizational or
 social structures.
 
+---
+
+## Why Persatrix
+
+Existing agent frameworks treat agents as task executors in a workflow. This works
+well for structured problems — research a question, write a report, review code. It
+does not capture how real collaboration works.
+
+Real collaboration is not an assembly line. It is a society of individuals who know
+each other, trust each other differently, and act on their own initiative. A research
+team that works together for a year has shared history. A company has organizational
+structure. A classroom has social dynamics.
+
+Persatrix is the runtime for building software systems that work like this. Agents as
+persistent individuals with memory, personality, and evolving relationships — not
+tasks in a workflow.
+
+---
+
 With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 
 - Define a persona agent with a personality, a role, and explicit behaviour dimensions.
@@ -28,23 +47,6 @@ With **v0.2.0** (Persona Core — Persatrix's first public release) you can:
 - A first-class `Participant` abstraction that treats human users alongside agents.
 - Persistent user identity — the agent remembers who you are across restarts and
   builds a relationship with you over repeated conversations.
-
----
-
-## Why Persatrix
-
-Existing agent frameworks treat agents as task executors in a workflow. This works
-well for structured problems — research a question, write a report, review code. It
-does not capture how real collaboration works.
-
-Real collaboration is not an assembly line. It is a society of individuals who know
-each other, trust each other differently, and act on their own initiative. A research
-team that works together for a year has shared history. A company has organizational
-structure. A classroom has social dynamics.
-
-Persatrix is the runtime for building software systems that work like this. Agents as
-persistent individuals with memory, personality, and evolving relationships — not
-tasks in a workflow.
 
 ---
 
