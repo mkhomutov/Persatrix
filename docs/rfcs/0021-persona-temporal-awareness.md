@@ -128,11 +128,17 @@ Existing direct uses of `time.time()` outside the temporal layer (e.g., [agents/
 
 ### C. Now-Anchor in the System Prompt
 
-`_build_system_prompt` in [agents/persona_runtime/prompt_assembly.py:40](../../agents/persona_runtime/prompt_assembly.py#L40) gains a temporal block, inserted between the dynamic-state block and the user-message-boundary instruction:
+`_build_system_prompt` in [agents/persona_runtime/prompt_assembly.py:40](../../agents/persona_runtime/prompt_assembly.py#L40) gains a temporal block, inserted between the dynamic-state block and the user-message-boundary instruction. Two example renderings, one for an agent configured `timezone: UTC` and one for `timezone: America/Los_Angeles`, both observing the same wall-clock instant:
 
 ```
+# persona.timezone: UTC
 Current time: 2026-04-25T14:32:00+00:00 (Saturday afternoon, UTC).
+
+# persona.timezone: America/Los_Angeles
+Current time: 2026-04-25T07:32:00-07:00 (Saturday morning, PT).
 ```
+
+Both lines are produced from the same `Clock.now()` call by `now_iso()` (§B), which renders ISO-8601 in the agent's configured zone — the offset and the human part-of-day word follow the configured zone, not UTC. The earlier draft showed only the UTC example, which read as "always UTC" and contradicted the §B contract; pinning two examples here keeps the timezone-customization story unambiguous.
 
 The format is deliberately three pieces of information packed into one line:
 
@@ -172,7 +178,24 @@ The bucketed recency forms — chosen to be cheap and unambiguous — are:
 | 61 days – 12 months | "N months ago" |
 | > 12 months | "over a year ago" or "in <year>" |
 
-The mapping is implemented in `agents/temporal/rendering.py` as pure functions taking `(timestamp_then, timestamp_now, timezone) → str`. Pure and deterministic, so unit-testable with frozen clocks and no I/O.
+The mirror future-tense buckets — used by `time_until` (§G), the commitments block (§F), and any other forward-looking rendering — are:
+
+| Time until target | Rendered as |
+|-------------------|-------------|
+| past target | `"passed N <unit> ago"` (per §G — `time_until` returns negative seconds and falls back to past-tense rendering for elapsed targets) |
+| < 60 s | "any moment" |
+| 1–59 min | "in N min" |
+| 1–23 h | "in N hours" or "today, HH:MM" if same calendar day |
+| 24–47 h, same calendar tomorrow | "tomorrow" — optionally suffixed with the §C part-of-day word when the target's local hour is known (e.g., "tomorrow afternoon") |
+| 2–6 days | "in N days" or "next <weekday>" when within 7 days |
+| 7–13 days | "next week" |
+| 14–60 days | "in N weeks" |
+| 61 days – 12 months | "in N months" |
+| > 12 months | "over a year out" or "in <year>" |
+
+These boundaries mirror the past-tense table to keep the two surfaces symmetric — `time_since(t)` and `time_until(-t)` of the same magnitude render with the same granularity, modulo the past/future tense words. The "tomorrow" / "next \<weekday>" forms are calendar-relative in the agent's configured timezone (§B), matching past-tense `"yesterday"` / `"last <weekday>"`. Both tables are implemented in `agents/temporal/rendering.py` as pure functions taking `(timestamp_then, timestamp_now, timezone) → str`. Pure and deterministic, so unit-testable with frozen clocks and no I/O.
+
+§F's example commitment renderings (`"in 2 hours: review Alice's proposal"`, `"tomorrow afternoon: send Bob the design notes"`, `"next Tuesday: prepare quarterly summary"`) are produced by feeding `due_at` through the future-tense table above. §G's `time_until` returns the same `rendered` string so a tool-call result and an in-prompt commitment line are visually consistent.
 
 **Why pre-compute, not let the LLM compute.** LLMs are demonstrably bad at date arithmetic — they can quote a date back accurately but routinely err when subtracting. Asking the model "the episode is at 1714056720 epoch seconds, what's that relative to now?" is a worse engineering choice than computing the answer in Python and handing it to the model as text. This is a hard rule for the entire temporal layer.
 
@@ -316,6 +339,21 @@ The persona's event handler treats `REMINDER` like any other inbound event — i
 
 **Per-tick duplicate suppression (within a single process lifetime).** The statelessness above applies *across restarts*. Within a single process lifetime, naive scanning would re-fire `REMINDER` for the same commitment on every tick until its `due_at` passes — a commitment due in 30 minutes with a 60-second tick would generate ~30 reminders. The runtime maintains an in-memory `last_reminder_fired_at: dict[commitment_id, float]` keyed by commitment ID, populated on every successful `REMINDER` emission. The pre-tick scan suppresses re-firing for any commitment whose entry is within `temporal.reminder_min_interval_sec` (default 900s = 15 min) of `now`. This is hysteresis, not durable state: the dict is lost on restart, at which point the stateless restart behavior above takes over and one duplicate is emitted on the first post-restart tick scan. Persisting `last_reminder_fired_at` to the `commitments` table is deliberately out of scope — see Open Question 9 for the calibration tradeoff and the full per-commitment table option.
 
+**Worked example.** With the v0.4.0 defaults (`reminder_horizon_sec=3600`, `reminder_min_interval_sec=900`, `missed_grace_sec=3600`) and a commitment created at `t=0` with `due_at=t+30min`, the cadence is:
+
+| Tick | Δ to `due_at` | In horizon? | Hysteresis blocks? | Action |
+|------|---------------|-------------|--------------------|--------|
+| t+0 (creation tick) | 30 min | yes | no (no prior fire) | **REMINDER #1 emitted**; `last_reminder_fired_at[c] = t+0` |
+| t+5 min | 25 min | yes | yes (5 min < 15 min) | suppressed |
+| t+10 min | 20 min | yes | yes (10 min < 15 min) | suppressed |
+| t+15 min | 15 min | yes | no (15 min ≥ 15 min) | **REMINDER #2 emitted**; `last_reminder_fired_at[c] = t+15min` |
+| t+20 min | 10 min | yes | yes (5 min < 15 min) | suppressed |
+| t+30 min | 0 min (due) | yes | no (15 min elapsed) | **REMINDER #3 emitted**; `last_reminder_fired_at[c] = t+30min` |
+| t+31 min | -1 min (passed) | n/a — past `due_at` | n/a | no further reminders; commitment remains `open` until janitor sweep |
+| t+90 min | -60 min | n/a | n/a | janitor transitions `open` → `missed` (`due_at < now - missed_grace_sec`) |
+
+So a single 30-minute-out commitment fires three reminders during its window — at first sight, mid-window, and at the deadline — before the janitor takes over post-deadline. This is the intended cadence: the persona gets one early heads-up, one chance to check progress mid-window, and one final nudge as the deadline lands. Operators tuning `reminder_min_interval_sec` are trading off "fewer fires per commitment" (longer interval) against "longer gap between reminder and deadline awareness" (the persona may forget about a commitment between fires). Reducing `reminder_min_interval_sec` from 900s to 600s on the same scenario yields four fires (`t+0`, `t+10min`, `t+20min`, `t+30min`); raising it to 1800s yields two (`t+0`, `t+30min`). OQ #9 captures the open calibration question; this worked example is what operators read alongside it when choosing a value.
+
 ### I. Duration Calibration and Estimation
 
 A persona that has resolved twenty similar tasks should be able to draw on history when estimating the next one. Two storage primitives:
@@ -367,8 +405,8 @@ The temporal layer adds three new sources of prompt tokens:
 | Now-anchor | 25–35 tokens, fixed per prompt | Unmetered — too small to budget. |
 | Episode recency prefix | 5–10 tokens × N recalled episodes | Charged to the existing per-episode budget (RFC 0017). The recency prefix is included in the per-episode token measurement *before* `MemoryBudget.try_add` is consulted, so the prefix-plus-summary token count is what the greedy-fill loop sees and admits — the existing allocator bounds the total without a separate compensation step. (Note: `_MAX_EPISODE_SUMMARY_CHARS` is a char-level safety cap on the summary itself and is not modified here; bounding by tokens at the budget gate is the load-bearing mechanism.) |
 | Relationship recency tag | 5–10 tokens per surfaced relationship | Charged to the existing relationship-summary budget. |
-| Commitments block | Up to `temporal.commitments_prompt_budget_tokens` (default 300) | New dedicated budget line. The greedy-fill loop in [memory_budget.py](../../agents/persona_runtime/memory_budget.py) admits commitments after notes, before episodes. |
-| Duration calibration line | Up to 80 tokens, when present | Charged to a new `temporal.duration_priors_budget_tokens` line. |
+| Commitments block | Up to `temporal.commitments_prompt_budget_tokens` (default 300) | New dedicated budget line. Position in the greedy-fill loop is fixed by the canonical cross-RFC sequence pinned in [RFC 0011 §E](0011-channels-bridges.md#e-memory-integration): **relationship summary → open commitments → channel history (CHANNEL_MESSAGE only) → episodic recall → recent notes → duration priors**. Commitments admit immediately after the relationship summary and before channel history / episodes / notes — they are the most action-relevant forward-looking tier and earning a slot above general recall is the entire point of the dedicated budget line. (An earlier draft of this RFC said "after notes, before episodes," which was inconsistent with RFC 0011's `episodes → notes` order; the unified sequence resolves the contradiction.) |
+| Duration calibration line | Up to 80 tokens, when present | Charged to a new `temporal.duration_priors_budget_tokens` line. Sits at the tail of the canonical sequence (after recent notes) — it is task-conditional and the cheapest tier to drop when the budget tightens. |
 
 The total worst-case temporal overhead for a typical prompt is ~400–500 tokens — measurable but not dominant against the existing 80k context window ([config/optimization.yaml:21](../../config/optimization.yaml#L21)). We commit to this overhead unconditionally rather than gating on a flag; the alternative (toggleable temporal layer) creates two prompt shapes that must both be tested and reasoned about, for negligible benefit.
 

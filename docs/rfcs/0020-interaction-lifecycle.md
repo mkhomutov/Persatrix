@@ -156,7 +156,7 @@ ALTER TABLE episodes ADD COLUMN interaction_id TEXT;        -- ULID, unique per 
 ALTER TABLE episodes ADD COLUMN started_at REAL;            -- first turn timestamp
 ALTER TABLE episodes ADD COLUMN closed_at REAL;             -- boundary-trip timestamp
 ALTER TABLE episodes ADD COLUMN turn_count INTEGER;         -- number of turns aggregated
-ALTER TABLE episodes ADD COLUMN scope TEXT;                 -- 'channel:<name>', 'dm:<a>:<b>', 'thread:<id>', 'tick'
+ALTER TABLE episodes ADD COLUMN scope TEXT;                 -- 'group:<name>', 'dm:<a>:<b>', 'thread:<id>', 'tick' — prefix vocabulary matches RFC 0011 §A canonical addressing (`group | dm | thread`); a `channel:` prefix would silently miss every WHERE-clause join against channel addresses.
 CREATE INDEX IF NOT EXISTS idx_episodes_scope ON episodes(scope, closed_at);
 ```
 
@@ -164,13 +164,25 @@ The asymmetry between `ADD COLUMN` (no `IF NOT EXISTS`) and `CREATE INDEX IF NOT
 
 Existing per-event rows (pre-RFC) have NULL in all four new columns. Recall queries treat NULL `interaction_id` as "single-turn legacy episode" and surface them at lower priority than multi-turn interactions of similar age (see §I).
 
+**Lifecycle state is encoded by `(closed_at, summary)`, not by a separate column.** §C defines four states (`open`, `closing`, `closed`, `summarized`) but the migration deliberately omits a `state` TEXT column. The rule a reader (or a static analyzer) needs to know:
+
+| Lifecycle state | Row predicate |
+|-----------------|---------------|
+| `open` | not persisted as a row — lives only in the in-memory `InteractionTracker` |
+| `closing` | `closed_at IS NOT NULL AND (summary IS NULL OR summary = '')` |
+| `closed` / `summarized` | `closed_at IS NOT NULL AND summary IS NOT NULL AND summary != ''` |
+
+Recall queries that mean "only summarized episodes" therefore filter `WHERE summary IS NOT NULL AND summary != ''` (equivalent SQLite-friendly form: `WHERE COALESCE(summary, '') != ''`). The `closing`-state janitor (§C "Closing rows") is the only writer that mutates a row from `closing` to `closed`/`summarized`, by populating `summary` (either with the LLM-generated text or with the `"[interaction summary unavailable]"` fallback).
+
+A separate `state` column was considered and rejected because it would (a) double-encode information already implicit in `closed_at`/`summary`, (b) require a `CHECK` constraint that has to stay in sync with §C's vocabulary across migrations, and (c) introduce a third failure mode where the column's value disagrees with the `summary` column. The implicit encoding is load-bearing — pinning it here in the storage model is what makes it safe.
+
 Per-turn message text is **not** stored in `episodes`. Channel messages live in [RFC 0011's `messages` table](0011-channels-bridges.md). Human-chat messages are transient (RFC 0016) and only the resulting interaction summary persists. This keeps the episodic store from doubling as a message log.
 
 ### E. Memory Injection Contract
 
 The persona-runtime memory-injection caller ([agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py)) is updated as follows:
 
-- **Episodic recall** (`MemoryFacade.retrieve_relevant`) returns **only `closed` episodes**. Open-interaction context is supplied separately by working memory (next bullet).
+- **Episodic recall** (`MemoryFacade.retrieve_relevant`) returns **only `closed` episodes** — concretely, the recall query filters `WHERE summary IS NOT NULL AND summary != ''` per the storage-model encoding pinned in §D. Open-interaction context is supplied separately by working memory (next bullet).
 - **Working memory** carries the open-interaction turns up to the existing token budget. This is unchanged from today's behavior except that the buffer is now scoped to the current open interaction in the relevant scope, rather than an unstructured rolling window.
 - **Memory budget** ([RFC 0017](0017-persona-memory-injection-budget.md)) is unchanged. The greedy-fill loop still admits items in priority order against `_MEMORY_BUDGET_TOKENS`. What changes is the input distribution: fewer, denser episodic summaries instead of many shallow ones.
 
@@ -221,6 +233,20 @@ This is a behavioral improvement: today, an agent in a busy channel hits the ref
 **Boost fallback mechanism.** "Disabled if it produces empty results" is pinned to a concrete rule: if the boosted query returns fewer rows than `min(limit, baseline_count // 2)` — where `baseline_count` is the row count of the same query without the boost — the recall layer reissues the query without the boost and surfaces those rows instead. This avoids two failure shapes: (a) zero rows when the candidate set has no `turn_count > 1` rows (the boost makes them disappear under threshold), and (b) under-filling `limit` when only a tiny number of multi-turn rows clear the boosted threshold. The fallback path is exercised in the test suite alongside the boost path so both branches are kept honest.
 
 **No bulk re-clustering.** Attempting to retroactively cluster old single-turn episodes into multi-turn interactions is explicitly out of scope. The cost (an LLM clustering pass over the entire history per agent) is high, the benefit decays with episode age, and the existing rows continue to function.
+
+**Default importance policy.** [RFC 0011 §E](0011-channels-bridges.md#e-memory-integration) shows the close pipeline calling `self._compute_interaction_importance(interaction)` when writing the episode at interaction close. RFC 0011 calls into the close path that this RFC owns, so the default formula is pinned here rather than in RFC 0011:
+
+```python
+def _compute_interaction_importance(interaction) -> float:
+    # Linear in turn count, capped — a 14-turn negotiation is materially more
+    # important than a 2-turn exchange, but we don't want one mega-thread to
+    # saturate the importance distribution.
+    return min(1.0, 0.3 + 0.05 * interaction.turn_count)
+```
+
+A 1-turn interaction (TICK / tool-only) yields `importance = 0.35`, which is intentionally close to the existing `EpisodicMemory.store_episode` default of 0.5 from [RFC 0008 §C](0008-agent-memory-context-optimization.md) — single-turn rows must remain comparable to legacy per-event episodes that lacked any importance signal. A 14-turn closed interaction yields `importance = 1.0`, the cap. The choice of 0.3 baseline + 0.05 per turn is a placeholder pending dogfood data alongside the multi-turn recall boost (Open Question 7) — both knobs feed the same recall scorer. Outcome-tag inputs (e.g., `outcome=defected`) are *not* mixed into the importance signal in v0.3.0; outcome tags drive trust deltas in §F, which is a separate downstream signal. Mixing them would couple two recall behaviors that should be independently calibratable.
+
+Phase 1 implementations may hard-code the constant `0.5` if interaction-aware close paths are not yet wired (single-turn legacy rows behave identically); Phase 3 (joint with RFC 0011 P3) is the milestone at which the formula above takes effect.
 
 **Counter migration.** The `auto_reflect_after` counter is preserved as-is at the cutover. Once the new code path is live, increments come from closed interactions; pre-existing counter values are treated as legacy interaction counts. No reset.
 
@@ -327,7 +353,7 @@ No proto changes. No Go orchestrator changes (interaction lifecycle is agent-loc
 
 7. **Calibration of the multi-turn recall boost.** §I sets a default +10% relevance-score boost on `turn_count > 1` rows. The number is a placeholder — too low and legacy single-turn rows still dominate recall; too high and a single mediocre multi-turn summary outranks a highly-relevant legacy row. The boost is also expressed as a percentage of the score; a fixed addend (e.g., +0.05) might compose better with the underlying scorer (whose distribution we have not characterized). Calibrate against early dogfood: pick a value once we have a corpus of mixed legacy + interaction rows and can measure recall@k for both forms.
 
-8. **Stability of `scope` identifiers across participant renames.** §G defines scope as `dm:<a>:<b>`, `channel:<name>`, etc. — free-form strings, not foreign keys. Renaming a participant or a channel orphans every prior interaction's scope from the renamed entity. v0.3.0 accepts this as a known limitation (rename is a config-only operation today and is exceptional). If renaming becomes a routine operation, the cleanest fix is a side table mapping historical names to current identities, applied at recall time. RFC 0021's `target_party` (free-form participant ID on commitments) has the same property — see RFC 0021 §F. Out of scope for v0.3.0.
+8. **Stability of `scope` identifiers across participant renames.** §G defines scope as `dm:<a>:<b>`, `group:<name>`, etc. — free-form strings, not foreign keys. Renaming a participant or a channel orphans every prior interaction's scope from the renamed entity. v0.3.0 accepts this as a known limitation (rename is a config-only operation today and is exceptional). If renaming becomes a routine operation, the cleanest fix is a side table mapping historical names to current identities, applied at recall time. RFC 0021's `target_party` (free-form participant ID on commitments) has the same property — see RFC 0021 §F. Out of scope for v0.3.0.
 
 ## Decision / Next Steps
 

@@ -81,16 +81,16 @@ A v0.2-era design intent for inter-agent messaging left several stubs and partia
 
 | Artifact | Disposition | Notes |
 |----------|-------------|-------|
-| [proto/agent_message.proto](../../proto/agent_message.proto) — `ChannelService` (`SendMessage`, `Subscribe(stream)`), `AgentMessage`, `MessageType`, `Visibility`, `Attachment` | **Superseded.** Deleted in Phase 2. | The server-streaming `Subscribe` is a different delivery model than the orchestrator-mediated dispatch this RFC adopts (§C). The `MessageType` and `Visibility` enums were never wired to a behavioral consumer. The new `ChannelMessageEvent` proto is added to `proto/task.proto` instead, keeping all RPCs on `AgentService`. |
-| [internal/channels/channels.go](../../internal/channels/channels.go) — 7-line stub with `ChannelManager`/`MessageRouter`/`HistorySummarizer` TODO markers | **Filled in.** Existing file; not new. | "Files Touched" entries below mark this `(rewritten)` rather than `(new)`. |
-| [internal/bridges/bridges.go](../../internal/bridges/bridges.go) — stub for `BridgeManager`, per-platform bridges | **Untouched in v0.3.0.** Reserved for v0.5.0 external bridges (see Non-Goals). | Stub remains as a roadmap marker. |
-| [schemas/channel.schema.json](../../schemas/channel.schema.json) — types `group \| direct \| broadcast \| meeting`, `id`/`type`/`name` per channel, `members: "all"` shorthand, `history_visible`, `max_history_messages` | **Superseded; rewritten in place** (same path, singular `channel.schema.json` — see Files Touched). | Type vocabulary changes: `direct` → `dm`, `broadcast` and `meeting` are dropped (their use cases reduce to membership policies in §H — broadcast = listeners with `respond: never`; meeting = a transient `group` with explicit membership). `id` is removed (channel `name` is the key). `members: "all"` shorthand is dropped to keep membership explicit and auditable for v0.3.0. `history_visible` is replaced by per-channel default; `max_history_messages` is replaced by the global per-channel cap (§B). |
-| [config/channels.yaml](../../config/channels.yaml) — currently a placeholder using the old schema | **Rewritten to match the new schema.** | `schema_version` field is dropped — the schema is owned by the RFC, not the config file. |
-| [agents/persona_types.py](../../agents/persona_types.py) — `EventType.MESSAGE_RECEIVED`, `EventType.MENTION`, `ActionType.SEND_MESSAGE` | **Renamed/superseded.** `SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE`; `MESSAGE_RECEIVED` → `CHANNEL_MESSAGE`. `MENTION` is kept as a derived convenience event the response gate may also emit when a `CHANNEL_MESSAGE` mentions the agent — personas that want a separate handler for mentions can register on it. | The pre-existing types had no producer beyond a partial scaffold. Renaming is a breaking change to currently-unused code, accepted in v0.3 development. |
-| [agents/dispatch.py:212-326](../../agents/dispatch.py#L212) — `_handle_send_message` already pulls `channel_id`/`mentions` from payload, applies `_MAX_MENTIONS_PER_ACTION` cap, and logs `"channel routing not yet implemented"` for the channel-routing branch | **Completed, not duplicated.** Phase 2 finishes the channel-routing branch by routing through the new `ChannelRouter` rather than dispatching `MESSAGE_RECEIVED` events directly. | The existing mentions cap, dispatcher timeout, and `no_targets` status taxonomy are preserved as design decisions and apply to the new `SEND_CHANNEL_MESSAGE` handler. |
-| [agents/dispatch.py:332-411](../../agents/dispatch.py#L332) — `EventDispatcher` with `max_cascade_depth=5` and per-event `metadata["cascade_depth"]` | **Reused as a backstop.** | See §D's "Composition with `cascade_depth`" for how the response gate and cascade-depth limit compose. |
+| [proto/agent_message.proto](../../proto/agent_message.proto) — `ChannelService` (`SendMessage`, `Subscribe(stream)`), `AgentMessage`, `MessageType`, `Visibility`, `Attachment` | **Superseded.** Deleted in Phase 2. | Server-streaming `Subscribe` differs from the orchestrator-mediated dispatch in §C; `MessageType`/`Visibility` were never wired to a consumer. New `ChannelMessageEvent` lives on `proto/task.proto`, keeping all RPCs on `AgentService`. |
+| [internal/channels/channels.go](../../internal/channels/channels.go) — 7-line stub with `ChannelManager`/`MessageRouter`/`HistorySummarizer` TODOs | **Filled in.** Existing file; not new. | Files-Touched marks this `(rewritten)` rather than `(new)`. |
+| [internal/bridges/bridges.go](../../internal/bridges/bridges.go) — stub for `BridgeManager`, per-platform bridges | **Untouched in v0.3.0.** Reserved for v0.5.0 (see Non-Goals). | Stub remains as a roadmap marker. |
+| [schemas/channel.schema.json](../../schemas/channel.schema.json) — types `group \| direct \| broadcast \| meeting`, `id`/`type`/`name` per channel, `members: "all"`, `history_visible`, `max_history_messages` | **Superseded; rewritten in place** (same path, singular `channel.schema.json`). | Vocabulary: `direct`→`dm`; `broadcast`/`meeting` dropped (reduced to membership policies in §H — broadcast = `respond: never` listeners; meeting = transient `group` with explicit membership). `id` removed (channel `name` is the key). `members: "all"` dropped (keep membership explicit/auditable). `history_visible` → per-channel default; `max_history_messages` → global per-channel cap (§B). |
+| [config/channels.yaml](../../config/channels.yaml) — placeholder using the old schema | **Rewritten to match the new schema.** | `schema_version` dropped — schema owned by the RFC, not the config file. |
+| [agents/persona_types.py](../../agents/persona_types.py) — `EventType.MESSAGE_RECEIVED`, `EventType.MENTION`, `ActionType.SEND_MESSAGE` | **Renamed/superseded.** `SEND_MESSAGE`→`SEND_CHANNEL_MESSAGE`; `MESSAGE_RECEIVED`→`CHANNEL_MESSAGE`. `MENTION` retained as a derived convenience event the gate may also emit on self-mentions; personas wanting a separate handler can register on it. | Pre-existing types had no producer beyond partial scaffolding; renaming a breaking change to unused code, accepted in v0.3. |
+| [agents/dispatch.py:212-326](../../agents/dispatch.py#L212) — `_handle_send_message` already pulls `channel_id`/`mentions`, applies `_MAX_MENTIONS_PER_ACTION` cap, logs `"channel routing not yet implemented"` | **Completed, not duplicated.** Phase 2 finishes the channel-routing branch through the new `ChannelRouter` rather than dispatching `MESSAGE_RECEIVED` directly. | Existing mentions cap, dispatcher timeout, and `no_targets` status taxonomy are preserved and apply to the new `SEND_CHANNEL_MESSAGE` handler. |
+| [agents/dispatch.py:332-411](../../agents/dispatch.py#L332) — `EventDispatcher` with `max_cascade_depth=5` and per-event `metadata["cascade_depth"]` | **Reused as a backstop.** | See §D's "Composition with `cascade_depth`". |
 
-The single rule for an implementer reading this RFC alongside the v0.2-era scaffolding: this RFC is canonical; the scaffolding is either filled in (channels) or removed/renamed (proto, action/event types, schema). When the two disagree, the RFC wins.
+Single rule: the RFC is canonical; scaffolding is either filled in (channels) or removed/renamed (proto, action/event types, schema). RFC wins on disagreement.
 
 ### A. Channel Model
 
@@ -104,7 +104,9 @@ Three channel types. The canonical vocabulary across this RFC, the SQL schema, t
 
 User-facing surfaces (CLI prompts, log lines, the `#planning` shorthand in operator docs) may still display the friendly form `#<name>` for `group` channels — this is presentation only, not protocol.
 
-**DM channel ID canonicalization**: A DM between participants A and B has exactly one channel ID, regardless of who initiates. The orchestrator constructs DM channel IDs by **lexicographically sorting the two participant IDs** before joining with `:`. So `dm:agent-a:agent-b` and `dm:agent-b:agent-a` are both normalized to `dm:agent-a:agent-b`. Both publish and history endpoints accept either ordering on input and canonicalize internally; the stored `channel_id` is always the sorted form. This is enforced in `ChannelStore.GetOrCreateDM(a, b string)` and is the single source of truth — callers never construct DM channel IDs by string concatenation.
+**DM channel ID canonicalization**: A DM between A and B has exactly one ID regardless of initiator — the orchestrator **lexicographically sorts** the participant IDs before joining with `:`, so `dm:agent-a:agent-b` and `dm:agent-b:agent-a` both normalize to `dm:agent-a:agent-b`. Publish and history endpoints accept either ordering on input; stored `channel_id` is always sorted. Enforced in `ChannelStore.GetOrCreateDM(a, b string)` as the single source of truth — callers never concat DM IDs.
+
+**Participant-ID syntax constraint (v0.3.0).** The `:`-joined DM address shape requires `:` to never appear inside a participant ID. v0.3.0 IDs are kebab-case slugs registered in `agents.yaml` / `users.yaml` (e.g., `planner-agent`, `alice`), so the assumption holds. No schema-level CHECK constraint is added: it would have to be replicated on every table storing a participant ID (`memberships`, RFC 0021's `commitments.target_party`, RFC 0020's `scope`), and a tight regex like `[a-z0-9-]+` would foreclose future ULID identifiers. Validation lives at the registration boundary — loaders reject IDs containing `:`, whitespace, or non-ASCII at startup, and `ChannelStore.GetOrCreateDM` re-checks at runtime as a backstop. v0.5.0 external bridges will introduce externally-controlled IDs and may need an escape rule or alternative join character; deferred to the bridge RFC.
 
 **Channel configuration** (`config/channels.yaml`):
 
@@ -130,11 +132,9 @@ channels:
         respond: always
 ```
 
-Agents declare channel membership via configuration. An agent not listed in a channel's `members` list cannot receive messages from that channel and receives a 403 error if it attempts to publish. DMs are opened on-demand and do not require pre-declaration; both participants must be registered agents or users.
+Membership is config-declared. Agents not in `members` cannot receive and get 403 on publish. DMs open on demand without pre-declaration; both participants must be registered.
 
-Each `members` entry is either a participant ID string (defaulting to `respond: when_mentioned`) or an object with `id` and `respond` fields. The `respond` policy controls the per-membership response gate defined in §D and is the primary mechanism for preventing N²-fanout feedback loops in multi-agent channels.
-
-**Note — two distinct shorthands.** The disposition table above (under "Relationship to Existing Scaffolding") drops the v0.2-era *list-level* shorthand `members: "all"` (which expanded to "every registered agent"). It is unrelated to the *entry-level* shorthand introduced here, where a bare string like `code-reviewer` is sugar for `{id: code-reviewer, respond: when_mentioned}`. The list-level shorthand was dropped so membership stays explicit and auditable; the entry-level shorthand stays because it removes boilerplate without hiding membership identity.
+Each `members` entry is either a participant ID string (defaulting to `respond: when_mentioned`) or an object with `id` and `respond` fields. The `respond` policy controls the per-membership response gate defined in §D and is the primary mechanism for preventing N²-fanout feedback loops in multi-agent channels. Note that the disposition table dropped the v0.2-era *list-level* shorthand `members: "all"` (which expanded to "every registered agent") so membership stays explicit and auditable; that is unrelated to the *entry-level* shorthand introduced here (a bare string like `code-reviewer` is sugar for `{id: code-reviewer, respond: when_mentioned}`), which stays because it removes boilerplate without hiding membership identity.
 
 **Message schema**:
 
@@ -152,13 +152,13 @@ class ChannelMessage:
     metadata: dict[str, Any]       # extensible; reserved for future attachment types
 ```
 
-**ID format note.** `ChannelMessage.id` is a UUID for proto-compatibility with the existing `agent_message.proto` surface (which already uses UUIDs for message IDs). Newer tables introduced by RFC 0020 (`interaction_id`) and RFC 0021 (commitment `id`, duration record `id`) use ULIDs because they are time-sortable and cheaper to scan chronologically. The mixed scheme is intentional: messages stay UUID for backward compatibility on the wire; greenfield tables that have no wire surface adopt ULID. A future RFC that unifies the IDs would also need to re-version the proto.
+**ID format note.** `ChannelMessage.id` is a UUID for wire compatibility with the existing `agent_message.proto` surface. Newer greenfield tables introduced by RFC 0020 (`interaction_id`) and RFC 0021 (commitment `id`, duration record `id`) use ULIDs (time-sortable, cheaper to scan chronologically). The mixed scheme is intentional — messages stay UUID for proto compatibility, greenfield tables adopt ULID. Unifying would require re-versioning the proto.
 
 ### B. Channel Store
 
 `internal/channels/` — Go-side channel storage.
 
-**Storage**: SQLite database at a configurable path (default: `data/channels.db`), separate from agent memory databases to avoid coupling agent state with channel state. WAL mode, consistent with all other SQLite usage in the project.
+**Storage**: SQLite at `data/channels.db` (configurable), separate from agent-memory DBs to avoid coupling agent state with channel state. WAL mode, consistent with all other SQLite usage.
 
 **Schema**:
 
@@ -180,13 +180,11 @@ CREATE TABLE memberships (
     PRIMARY KEY (channel_id, participant_id)
 );
 
--- The CHECK constraints above mirror the canonical vocabularies in §A
--- (channel types) and §D (respond policies). They are deliberately
--- redundant with application-level validation: a typo in operator-authored
--- config or a future migration that fails to update the enum elsewhere
--- fails fast at write time rather than silently storing an unrecognized
--- value the gate or router would treat as the default. RFC 0020 §F uses
--- the same pattern on the `commitments.state` column.
+-- CHECK constraints mirror the canonical vocabularies in §A (channel types)
+-- and §D (respond policies). Deliberately redundant with app-level validation:
+-- a config typo or a future migration that misses an enum site fails fast at
+-- write time rather than silently storing an unrecognized value the gate/router
+-- would treat as default. RFC 0021 §F uses the same pattern on commitments.state.
 
 CREATE TABLE messages (
     id         TEXT PRIMARY KEY,
@@ -202,6 +200,8 @@ CREATE TABLE messages (
 CREATE INDEX idx_messages_channel_ts ON messages(channel_id, timestamp DESC);
 CREATE INDEX idx_messages_thread ON messages(thread_id) WHERE thread_id IS NOT NULL;
 ```
+
+**Timestamp type.** `DATETIME` here vs. `REAL` (epoch seconds) on RFC 0020 §D's `episodes` columns is an ownership split, not a missed unification: this table is Go-owned (`time.Time` + `database/sql/driver` map cleanly to `DATETIME`); `episodes` is Python-owned and already uses `time.time()` epoch seconds throughout ([agents/memory/episodic.py:203](../../agents/memory/episodic.py#L203)) — switching would impose a converter cost on every read. SQLite stores both as the same underlying value, so the only visible difference is `sqlite3` rendering (ISO-8601 text vs. `1714056720.123`). Unifying would require refactoring Python's existing timestamp call sites; v0.3.0 keeps each side native.
 
 **`ChannelStore` interface** (Go):
 
@@ -226,15 +226,27 @@ type Member struct {
 }
 ```
 
-A per-channel message cap (default: 10,000 messages) prevents unbounded store growth. When the cap is reached, oldest messages are pruned on each new write, consistent with RFC 0008's episodic memory cap approach.
+A per-channel message cap (default: 10,000) prevents unbounded growth — oldest messages are pruned on each new write past the cap, consistent with RFC 0008's episodic memory cap approach.
 
-**Pruning interaction with thread FK.** The `thread_id` self-reference creates a parent-child relationship between a thread root and its replies. Naive oldest-first pruning would hit FK constraint violations whenever the message being pruned is the root of a thread that still has live replies. The chosen behavior is `ON DELETE CASCADE` on `messages.thread_id`: pruning a thread root prunes all of its replies in the same transaction. This is preferred over `ON DELETE SET NULL` (which would orphan replies into top-level messages, polluting channel history) and over a thread-aware retention policy (which would complicate the cap accounting and let a long-lived thread indefinitely block pruning of older messages). The cascade behavior is exercised by a migration test in Phase 1; the test publishes 10,001 messages including a thread that straddles the cap boundary and asserts that the orphaned-reply count after pruning is zero. SQLite enforces `ON DELETE CASCADE` only when `PRAGMA foreign_keys = ON`, which the channel store opens explicitly at connection time (consistent with the existing project SQLite conventions).
+**Pruning interaction with thread FK.** The `thread_id` self-reference makes naive oldest-first pruning fail with FK violations whenever a pruned message still has live replies. `ON DELETE CASCADE` is chosen: pruning a thread root prunes its replies in the same transaction. Preferred over `ON DELETE SET NULL` (would orphan replies as top-level messages, polluting history) and over a thread-aware retention policy (would let a long-lived thread block pruning indefinitely). Phase 1's migration test exercises the cap-boundary case (publishes 10,001 messages including a straddling thread, asserts zero orphans). SQLite requires `PRAGMA foreign_keys = ON` for cascade enforcement; the channel store sets it at connection time per existing project convention.
 
-A global channel-count cap (default: 50 named channels, configurable via `channels.max_channels` in `config/channels.yaml`) bounds the membership table size, observability label cardinality, and the operator-visible namespace. The cap applies to named group channels only — DMs and threads are addressed implicitly by participant pair or parent message ID and are not counted against this limit. Exceeding the cap at startup is a config validation error; channel creation via the REST endpoint returns 409 Conflict when the cap is reached.
+A global channel-count cap (default: 50, `channels.max_channels` in `config/channels.yaml`) bounds membership-table size, observability cardinality, and operator-visible namespace. Applies to named group channels only; DMs and threads are addressed implicitly and not counted. Startup overflow is a config validation error; REST creation past the cap returns 409.
+
+**Config + REST coexistence rules.** Both `config/channels.yaml` (startup) and `POST /api/v1/channels` (runtime) write the same `channels`/`memberships` tables. Without an explicit policy three failure modes surface: (a) REST-created channel name-collides with a config-declared one on restart, (b) operator removes a config channel that has REST-added members and history, (c) a REST-added participant isn't in the config `members` block. v0.3.0 policy:
+
+| Case | Behavior |
+|------|----------|
+| Channel in config, not in store | Inserted at startup with config-declared memberships. |
+| Channel in store but not in config (REST-created earlier) | Preserved as-is. Removal requires `DELETE /api/v1/channels/{id}` (Phase 2) or DB surgery. Config is *not* the source of truth for REST-created channels. |
+| Channel in both, memberships disagree | **Startup fails loudly**, listing divergent participant IDs. Operator edits `channels.yaml` to match live state or removes the channel from config. "Config wins" was rejected (silently deletes REST-added members and their interaction summaries); "REST wins" was rejected (renders `channels.yaml` non-authoritative). Loud failure is the only option preserving both sources without surprise data loss. |
+| Channel in store, name removed from `channels.yaml` between restarts | Treated as "in store but not in config": channel and history persist; logged at `INFO` with channel ID and last-message timestamp. Removing a config name does not imply intent to drop history. |
+| REST `POST /api/v1/channels/{id}/members` against a config-declared channel | Allowed; merged into `memberships`. Next restart triggers the loud-failure case above — runtime additions are valid for this process but need a `channels.yaml` edit for durability. Intentional: declared channels deserve a stable membership story, ad-hoc additions should surface rather than be silently consumed. |
+
+Silent merging was rejected because every silent-merge policy hides one source from the operator and we have no telemetry to surface the drift. If dogfood shows conflicts trigger too easily, a follow-up RFC may add `channels.merge_policy` with `strict | config_wins | rest_wins`; v0.3.0 does not pre-commit.
 
 ### C. Message Routing and Delivery
 
-**Architecture**: The orchestrator owns message routing. Agents publish to channels as actions; the orchestrator stores the message and dispatches it to subscribers.
+**Architecture**: The orchestrator owns message routing — agents publish as actions, the orchestrator stores and dispatches.
 
 **Publish flow**:
 
@@ -252,7 +264,7 @@ For each registered subscriber: DispatchChannelMessage → ReceiveChannelMessage
 Agent B servicer: create AgentEvent(event_type=CHANNEL_MESSAGE) → dispatch to on_event()
 ```
 
-The publish hop crosses the agent → orchestrator boundary as **HTTP/REST**, not gRPC, even though every other agent ↔ orchestrator call (task dispatch, channel delivery, etc.) goes over gRPC. This is a deliberate asymmetry for two reasons. First, the publish surface is also the operator-facing publish surface — the same `POST /api/v1/channels/{id}/messages` endpoint backs the `persatrix channel send` CLI and `curl`-based testing. A single REST surface for both agent and human publishers avoids maintaining two code paths to the same store and simplifies rate limiting (a single middleware in front of one endpoint per RFC 0009 Phase 1). Second, the publish call is fire-and-forget from the agent's perspective — it does not need streaming, a long-lived connection, or per-call protobuf marshaling on the agent side. The downstream fanout to subscribers is gRPC because that path *is* a per-agent typed-RPC dispatch with retries and timeouts. The two halves of the flow have different ergonomics, so they use different transports.
+The publish hop crosses agent → orchestrator as **HTTP/REST**, not gRPC, even though every other agent ↔ orchestrator call uses gRPC. Two reasons: (1) the same `POST /api/v1/channels/{id}/messages` backs `persatrix channel send` and `curl` testing — one REST surface for both agent and human publishers avoids two code paths to the same store and lets a single RFC 0009 rate-limit middleware cover everything; (2) publish is fire-and-forget — no streaming, no long-lived connection, no per-call protobuf marshaling needed agent-side. Downstream fanout to subscribers stays gRPC because that path *is* per-agent typed RPC with retries and timeouts. Different ergonomics, different transports.
 
 **New REST endpoints**:
 
@@ -265,6 +277,17 @@ The publish hop crosses the agent → orchestrator boundary as **HTTP/REST**, no
 | `GET` | `/api/v1/channels/{id}/messages` | Channel history (paginated, newest-first) |
 | `GET` | `/api/v1/channels/{id}/messages/{msg_id}/thread` | Thread replies |
 | `POST` | `/api/v1/channels/{id}/members` | Add a participant to a channel |
+
+**Query parameters** (the GET endpoints above accept the following query parameters; absent or unrecognized parameters apply the listed default):
+
+| Endpoint | Parameter | Type | Default | Notes |
+|----------|-----------|------|---------|-------|
+| `GET /api/v1/channels` | `limit` | int | 100 | Caps the response page size; bounded above by the global cap (`max_channels`, default 50). |
+| `GET /api/v1/channels/{id}/messages` | `limit` | int | 50 | Caps the page size; the on-startup catch-up fetch in OQ #8 also defaults to this value. |
+| `GET /api/v1/channels/{id}/messages` | `before` | RFC 3339 timestamp | now | Cursor for backscroll. Returns messages strictly older than the supplied time, newest-first. Mirrors the `before time.Time` argument on `ChannelStore.GetHistory` so the REST surface and the Go interface have a 1:1 mapping. |
+| `GET /api/v1/channels/{id}/messages/{msg_id}/thread` | `limit` | int | 100 | Caps thread depth surfaced in one response; threading is single-level in v0.3.0 (OQ #3) so this is the full reply count for typical use. |
+
+A future `?since=<message_id>` watermark parameter (OQ #8) is intentionally omitted — adding it now would commit to the watermark protocol before the OQ is resolved. The `before` shape covers the v0.3.0 user stories (CLI backscroll, on-startup last-N fetch).
 
 **New proto definitions**:
 
@@ -282,15 +305,11 @@ message ChannelMessageEvent {
     repeated string mentions = 8;
 }
 
-// Note: `channel_type` is redundant with the prefix already encoded in
-// `channel_id` (`group:`, `dm:`, `thread:` per §A). It is carried as a
-// separate field for log/observability ergonomics — counters and span
-// attributes use it directly without parsing — and to let receivers
-// validate the address shape without writing a parser. The orchestrator
-// MUST validate that the field agrees with the channel_id prefix on
-// publish; receivers SHOULD treat a mismatch as a malformed event and
-// drop it rather than fall back to either source. The validation step
-// is part of Phase 2's `ChannelRouter` and is exercised by a unit test.
+// `channel_type` duplicates the `channel_id` prefix (§A). Carried separately
+// for log/observability ergonomics — counters and span attributes use it
+// without parsing. Orchestrator MUST validate agreement with the prefix on
+// publish (Phase 2 `ChannelRouter`, unit-tested); receivers SHOULD drop on
+// mismatch as malformed rather than pick one source.
 
 service AgentService {
     // existing RPCs ...
@@ -298,7 +317,7 @@ service AgentService {
 }
 ```
 
-**Delivery guarantees**: At-most-once delivery in v0.3.0. The orchestrator dispatches to each registered subscriber in a best-effort manner. Agents offline at delivery time miss the message but can retrieve missed messages via the history endpoint. Exactly-once delivery with durable queuing is deferred to a future RFC.
+**Delivery guarantees**: At-most-once in v0.3.0 — best-effort dispatch to each subscriber. Agents offline at delivery time miss the message and recover via the history endpoint. Exactly-once with durable queuing is deferred.
 
 **Agent-initiated publish** — Python action type:
 
@@ -312,7 +331,7 @@ class SendChannelMessageAction:
     mentions: list[str]       # participant IDs to @-mention
 ```
 
-`ActionExecutor` handles `SEND_CHANNEL_MESSAGE` by calling the REST endpoint. The sender_id is the publishing agent's registered ID, injected by the framework — agents cannot spoof another sender's identity.
+`ActionExecutor` handles `SEND_CHANNEL_MESSAGE` by calling the REST endpoint. The framework injects `sender_id` from the agent's registered ID — agents cannot spoof another sender.
 
 ### D. Agent Integration
 
@@ -325,9 +344,9 @@ class EventType(Enum):
     CHANNEL_MESSAGE = "channel_message"  # supersedes MESSAGE_RECEIVED for channel-routed events
 ```
 
-When a `ReceiveChannelMessage` gRPC call arrives, the agent servicer creates an `AgentEvent` and dispatches it to `on_event()`. The persona runtime handles it via the existing event loop — no special casing required.
+When `ReceiveChannelMessage` arrives, the agent servicer creates an `AgentEvent` and dispatches to `on_event()`. The persona runtime handles it through the existing event loop — no special casing.
 
-**`AgentEvent` extension (additive only).** The existing [`AgentEvent`](../../agents/persona_types.py#L44) already carries `event_type`, `payload: dict`, `channel_id`, `sender_id`, `message_id`, `timestamp: float`, and `metadata: dict`. This RFC adds a single optional field for the threading branch and reuses the existing `payload` dict for channel-message-specific fields rather than promoting them to top-level dataclass fields. This preserves backward compatibility, keeps `timestamp` as a `float` (Unix epoch seconds — the existing convention), and avoids the cost of a breaking rename of `payload`/`metadata`:
+**`AgentEvent` extension (additive only).** Existing [`AgentEvent`](../../agents/persona_types.py#L44) already carries `event_type`, `payload: dict`, `channel_id`, `sender_id`, `message_id`, `timestamp: float`, `metadata: dict`. This RFC adds one optional field for threading and reuses `payload` for channel-message-specific fields rather than promoting them — preserves backward compatibility, keeps `timestamp` as `float` (existing Unix-epoch-seconds convention), avoids a breaking rename:
 
 ```python
 # Diff against existing AgentEvent (agents/persona_types.py):
@@ -352,13 +371,13 @@ For `CHANNEL_MESSAGE` events, the `payload` dict contains:
 | `mentions` | `list[str]` | participant IDs explicitly @-mentioned |
 | `respond_policy` | `str` | the receiving agent's `respond_policy` for this channel, copied in by the dispatcher so the gate doesn't re-query the store |
 
-`thread_id` is promoted to a top-level field rather than stored in `payload` because the response gate's thread-reply rule reads it on every `CHANNEL_MESSAGE` and a misspelled `payload["thread_id"]` lookup would silently fail to match the rule. Top-level placement makes the contract type-checked.
+`thread_id` is promoted because the gate's thread-reply rule reads it on every `CHANNEL_MESSAGE` — a misspelled `payload["thread_id"]` lookup would silently fail the rule. Top-level placement makes the contract type-checked.
 
-**Why `respond_policy` stays in `payload`.** The gate consumes `respond_policy` on the same hot path as `thread_id`, so the same misspell-resistance argument seemingly applies. The reason it does not is sourcing: `respond_policy` is *not* a property of the event — it lives on the receiving agent's `memberships` row. Promoting it to `AgentEvent` would commit to the dispatcher copying it in on every fanout, which is what we do today only as an optimization to avoid a per-event store lookup at the gate. If the dispatcher ever stops carrying it (e.g., if the gate moves into the channel store and reads memberships directly), the `AgentEvent` field would become a stale denormalization. Keeping it in `payload` flags it as transient cargo; `thread_id`, by contrast, is intrinsic to the message and stays on the event regardless of who evaluates the gate. See OQ-respond-policy-typo for the alternative if the typo risk turns out to matter in practice.
+**Why `respond_policy` stays in `payload`.** Same hot path as `thread_id`, but different sourcing: `respond_policy` is not a property of the event — it lives on the receiving agent's `memberships` row, copied into `payload` today only as an optimization to skip a per-event store lookup at the gate. Promoting it to `AgentEvent` would commit the dispatcher to that copy forever; if the gate ever reads memberships directly (e.g., moves into the channel store), the field becomes stale denormalization. Keeping it in `payload` flags it as transient cargo. `thread_id`, by contrast, is intrinsic to the message. See OQ #12 for the typo-resistance alternative if it matters in practice.
 
-**Agent behavior on channel messages**: The persona runtime's `on_event()` path handles `CHANNEL_MESSAGE` without modification to the core loop. The agent receives the event, the memory injection pipeline (RFC 0008) pulls relevant channel history and episodic memory, the LLM decides whether and how to respond, and the resulting action may be a `SEND_CHANNEL_MESSAGE` reply to the same channel or thread. Agents can also initiate channel messages autonomously during their tick loop without waiting for an incoming event.
+**Agent behavior on channel messages**: `on_event()` handles `CHANNEL_MESSAGE` without core-loop changes — RFC 0008 memory injection pulls relevant channel history and episodic memory, the LLM decides whether and how to respond, and the resulting action may be a `SEND_CHANNEL_MESSAGE` reply to the same channel or thread. Agents may also initiate channel messages autonomously during their tick loop.
 
-**Response gating (loop prevention)**: A naive "every `CHANNEL_MESSAGE` event invokes the LLM" model is unworkable in multi-agent channels. With N agents in a channel, every message would generate up to N inferences, each of which is itself a message that re-triggers the others — O(N²) feedback amplification per turn, with token cost and latency blowups. The persona runtime therefore applies a **pre-LLM response gate** to incoming channel events. The gate is evaluated on the agent process before any memory recall or LLM call, using the per-membership `respond` policy from §A:
+**Response gating (loop prevention)**: A naive "every `CHANNEL_MESSAGE` invokes the LLM" model produces O(N²) feedback amplification per turn in multi-agent channels — every message generates up to N inferences, each of which is itself a message that re-triggers the others. The persona runtime applies a **pre-LLM response gate** evaluated on the agent process before memory recall or LLM call, using the per-membership `respond` policy from §A:
 
 | Policy | Triggers a response cycle when ... |
 |--------|------------------------------------|
@@ -366,15 +385,15 @@ For `CHANNEL_MESSAGE` events, the `payload` dict contains:
 | `always` | every channel message except the agent's own |
 | `never` | no message — the agent observes the channel for memory ingestion only (read-only participant) |
 
-When the gate suppresses a message, the event is still stored in episodic memory (per §E) — the agent stays aware of channel context for later retrieval — but no LLM call is made and no action is dispatched. This bounds inference cost and is the primary structural defense against runaway exchanges.
+Suppressed events are still stored in episodic memory (per §E) so the agent retains channel context for later recall, but no LLM call or action is dispatched. This bounds inference cost and is the primary structural defense against runaway exchanges.
 
-**Composition with `cascade_depth` and rate limiting.** The runtime already implements a `cascade_depth` limit in the [`EventDispatcher`](../../agents/dispatch.py#L332) (default `max_cascade_depth=5`): every dispatched event carries a `metadata["cascade_depth"]` counter, and events past the limit are dropped at the dispatcher. The response gate and `cascade_depth` are complementary, not redundant, and form a defense-in-depth ordering:
+**Composition with `cascade_depth` and rate limiting.** [`EventDispatcher`](../../agents/dispatch.py#L332) already enforces `max_cascade_depth=5` via `metadata["cascade_depth"]`. Defense-in-depth ordering (gate is primary, cascade is backstop, rate limiter is last line):
 
-1. **Response gate (this RFC, agent-side, pre-LLM)** — the *primary* structural defense. Suppresses uninteresting messages by membership policy before any inference cost is paid. A correctly-tuned channel rarely reaches the cascade limit because the gate stops most fanout at depth 1.
-2. **`cascade_depth` (existing, dispatcher-side)** — the *runtime backstop*. Catches misconfigured `always` memberships, accidental loops introduced by future feature work, and any path the gate did not anticipate. Always applied regardless of `respond` policy: an `always`-policy member at `cascade_depth=5` does **not** receive the message — the dispatcher drop occurs upstream of the gate.
-3. **RFC 0009 Phase 1 rate limiting (concurrent RFC, REST-side)** — the *third line*. Caps publish-call rate per agent per window; a runaway loop that somehow defeated both the gate and the cascade limit (e.g., agents publishing on a tick rather than in response to events) still hits the rate limiter at the REST endpoint.
+1. **Response gate (this RFC, agent-side, pre-LLM)** — primary structural defense. Suppresses by membership policy before inference cost. A correctly-tuned channel stops most fanout at depth 1.
+2. **`cascade_depth` (existing, dispatcher-side)** — runtime backstop for misconfigured `always` memberships, accidental loops from future feature work, or any path the gate misses. Applied regardless of `respond` policy: an `always` member at `cascade_depth=5` does **not** receive the message; the drop is upstream of the gate.
+3. **RFC 0009 Phase 1 rate limiting (REST-side)** — caps per-agent publish rate. Catches loops that somehow defeat both the gate and cascade limit (e.g., agents publishing on tick rather than in reaction to events).
 
-The `cascade_depth` value carried on outbound `SEND_CHANNEL_MESSAGE` actions is the incoming event's `cascade_depth + 1`, exactly as the existing dispatcher already does for `MESSAGE_RECEIVED`. No change to the cascade-depth mechanism itself is required by this RFC.
+Outbound `SEND_CHANNEL_MESSAGE` actions carry `cascade_depth + 1`, exactly as the dispatcher already does for `MESSAGE_RECEIVED`. No change to the cascade mechanism is required.
 
 Additional invariants:
 
@@ -385,16 +404,16 @@ Additional invariants:
 
 ### E. Memory Integration
 
-Channel history is integrated with agent memory via RFC 0008's `MemoryFacade`. This is the hard dependency that makes RFC 0008 a prerequisite for RFC 0011 Phase 3.
+Channel history is integrated with agent memory via RFC 0008's `MemoryFacade` — the hard dependency that makes RFC 0008 a prerequisite for Phase 3.
 
-**`MemoryFacade` API extension (additive).** RFC 0008 §B specifies the facade methods as `retrieve_relevant(query, limit, scope)` and `store_observation(entry, scope, ttl)`. This RFC extends both signatures additively to support channel-scoped recall and importance-weighted storage:
+**`MemoryFacade` API extension (additive).** RFC 0008 §B specifies `retrieve_relevant(query, limit, scope)` and `store_observation(entry, scope, ttl)`. This RFC extends both additively:
 
-- `store_observation(content, *, scope, tags=None, importance=None, ttl=None)` — adds optional `tags: list[str]` and `importance: float | None` keyword parameters. Both are forwarded to the underlying `EpisodicMemory.store_episode`, which already accepts them ([agents/memory/episodic.py:171](../../agents/memory/episodic.py#L171)).
-- `retrieve_relevant(query, *, scope, tags=None, limit)` — adds optional `tags: list[str]` filter. When supplied, recall is restricted to entries that include all listed tags (intersection semantics).
+- `store_observation(content, *, scope, tags=None, importance=None, ttl=None)` — adds optional `tags: list[str]` and `importance: float | None`. Both are forwarded to `EpisodicMemory.store_episode`, which already accepts them ([agents/memory/episodic.py:171](../../agents/memory/episodic.py#L171)).
+- `retrieve_relevant(query, *, scope, tags=None, limit)` — adds optional `tags: list[str]` filter, intersection semantics (entry must include all listed tags).
 
-These are additive parameters with safe defaults: callers that don't pass `tags` or `importance` get the RFC 0008 §B behavior unchanged. RFC 0008 itself is **not** amended (it is in `👍 Accepted` status, and the parameters are forward-compatible with its specified contract). This RFC's §E is the canonical reference for the extension; future RFCs needing additional facade parameters should follow the same additive pattern.
+Safe defaults preserve RFC 0008 §B behavior for callers that don't pass `tags`/`importance`. RFC 0008 itself is **not** amended (Accepted status, additive parameters are forward-compatible with its specified contract). This §E is the canonical reference for the extension; future facade extensions should follow the same additive pattern.
 
-**Storing channel messages**: Channel messages are *not* written to episodic memory per event. Each `CHANNEL_MESSAGE` event is appended to the open `Interaction` for that channel via [`InteractionTracker.add_turn`](0020-interaction-lifecycle.md#g-per-channel-scoping) (RFC 0020 §G). When the interaction closes — by structural boundary or idle gap (RFC 0020 §B) — exactly one episodic entry is written per closed interaction, carrying the interaction summary and the channel-scoped tags:
+**Storing channel messages**: Not per-event. Each `CHANNEL_MESSAGE` is appended to the open `Interaction` for the channel via [`InteractionTracker.add_turn`](0020-interaction-lifecycle.md#g-per-channel-scoping) (RFC 0020 §G). On interaction close (structural boundary or idle gap, RFC 0020 §B) exactly one episodic entry is written, carrying the summary and channel-scoped tags:
 
 ```python
 # Inside InteractionTracker.close_interaction() — runs once per closed interaction,
@@ -408,7 +427,7 @@ await self.memory.store_observation(
 )
 ```
 
-This replaces the per-event storage shape that earlier drafts of this RFC described. The change was introduced when RFC 0020 was added to the v0.3.0 chain to eliminate the duplicate-summary problem RFC 0020 §Motivation calls out (a ten-turn negotiation producing ten near-identical episode summaries). RFC 0011 Phase 3 and RFC 0020 Phase 3 land jointly per the ROADMAP dependency chain.
+This replaces earlier drafts' per-event storage shape; the change was introduced when RFC 0020 joined the v0.3.0 chain to eliminate the duplicate-summary problem (a ten-turn negotiation producing ten near-identical episodes — RFC 0020 §Motivation). RFC 0011 Phase 3 and RFC 0020 Phase 3 land jointly per ROADMAP.
 
 **Retrieving channel history** during context assembly:
 
@@ -421,21 +440,28 @@ channel_history = await self.memory.retrieve_relevant(
 )
 ```
 
-`_CHANNEL_RECALL_LIMIT` (default: 20) caps how many messages the recall layer returns before the `MemoryBudget.try_add` loop runs. The actual number admitted into the prompt depends on remaining budget at call time, per RFC 0017 §B's greedy-fill semantics — the cap exists only to keep the candidate list small enough that the allocator's CPU cost stays bounded on a busy channel.
+`_CHANNEL_RECALL_LIMIT` (default: 20) caps the recall layer output before `MemoryBudget.try_add` runs. Actual admission depends on remaining budget per RFC 0017 §B greedy-fill — the cap only bounds allocator CPU cost on busy channels. Exposed as `optimization.yaml → channels.recall_limit` (Phase 3); hard-coding would replicate the regression that motivated RFC 0017's per-event-budget tunability. The Python module keeps the `_CHANNEL_RECALL_LIMIT` variable name (resolved once at startup) so call sites read identically.
 
-The default is exposed as `optimization.yaml → channels.recall_limit` (Phase 3 deliverable). Hard-coding the constant in source would replicate the regression that motivated RFC 0017's per-event-budget tunability — operators tuning prompt shape need a config knob, not a code edit. The Python module retains `_CHANNEL_RECALL_LIMIT` as the variable name for the resolved value (loaded once at startup from config) so the rest of the recall code reads identically.
+**Budget allocation**: Channel history competes with episodic and relationship memory for `budget_memory_tokens` (RFC 0008) under RFC 0017's `MemoryBudget` contract — single greedy pool with priority-ordered fill, no per-tier fairness (RFC 0017 §B: *"No fairness across tiers. The budget is greedy by design."*). Admitted via the same `budget.try_add(...)` loop, with per-tier *priority* (not *ceiling*) determining order.
 
-**Budget allocation**: Channel history competes with episodic and relationship memory for the `budget_memory_tokens` allocation from RFC 0008, under RFC 0017's existing `MemoryBudget` contract. RFC 0017 specifies a single greedy pool with priority-ordered fill and explicitly rejects per-tier fairness (RFC 0017 §B, invariant: *"No fairness across tiers. The budget is greedy by design."*). This RFC honors that contract: channel history is admitted via the same `budget.try_add(...)` loop as episodic and relationship memory, with per-tier *priority* (not a per-tier *ceiling*) determining allocation order.
+The recommended priority order in the persona-runtime caller — the **canonical cross-RFC sequence**, also referenced from RFC 0021 §J — is:
 
-The recommended priority order in the persona-runtime caller is: relationship summary → channel history (when the triggering event is a `CHANNEL_MESSAGE`) → episodic recall → notes. Placing channel history immediately after the relationship summary on channel-triggered events ensures the most recent in-channel turns are admitted before broader episodic recall consumes the remaining budget. Allocation across tiers is still greedy: if the relationship summary plus channel history fill the budget, no episodic recall is admitted for that event — the same trade-off RFC 0017 already makes between tiers, applied uniformly.
+1. **relationship summary** (always)
+2. **open commitments** (RFC 0021 §F, when present and within the proximity horizon)
+3. **channel history** (this RFC, only when the triggering event is a `CHANNEL_MESSAGE`)
+4. **episodic recall** (RFC 0008 / RFC 0020)
+5. **recent notes**
+6. **duration priors** (RFC 0021 §I, only when the task category has calibration data)
 
-This is a deliberate departure from an earlier draft of this RFC that proposed a 25/50/25 per-tier ceiling. The ceiling design was rejected during review because it would have changed RFC 0017's allocator from greedy-single-pool to bounded-tier-with-ceiling — a redesign disguised as an extension. The greedy-with-priority approach reaches the same operational goal (channel-triggered events surface recent channel context) without amending RFC 0017.
+Pinned here so RFC 0011 and RFC 0021 cannot drift on whether notes come before or after episodes (an earlier RFC 0011 draft said `episodes → notes`; an earlier RFC 0021 §J said commitments admit `after notes, before episodes` — mutually inconsistent). The order above resolves it as `episodes → notes` (episodes are load-bearing; notes are reflective and tolerate truncation) and slots RFC 0021's tiers in by action-relevance. Channel history sits right after open commitments on channel-triggered events so recent in-channel turns are admitted before broader episodic recall fills the budget. Greedy allocation is preserved: if relationship + commitments + channel history fill the budget, no episodic recall is admitted — the same trade-off RFC 0017 already makes. RFC 0017 itself is unchanged (allocator only, not per-tier order); this RFC and RFC 0021 are the two sources for the order, kept in lockstep here.
 
-**Relationship updates**: Receiving a channel message from another agent updates the relationship trust score for that agent, consistent with RFC 0005. Channel interaction frequency feeds into the trust decay/growth algorithm alongside direct chat interactions from RFC 0016.
+An earlier RFC 0011 draft proposed a 25/50/25 per-tier ceiling; rejected during review because it would have changed RFC 0017's allocator from greedy-single-pool to bounded-tier-with-ceiling — a redesign disguised as an extension. Greedy-with-priority reaches the same operational goal without amending RFC 0017.
+
+**Relationship updates**: Receiving a channel message updates the sender's trust score per RFC 0005; channel-interaction frequency feeds the trust decay/growth algorithm alongside RFC 0016 direct-chat interactions.
 
 ### F. Human Participant Channels
 
-Humans can join channels via the RFC 0016 `Participant` abstraction. No new infrastructure is required — `UserParticipant` is already a `Participant` type compatible with the membership model.
+Humans join channels via the RFC 0016 `Participant` abstraction. No new infrastructure — `UserParticipant` already conforms to the membership model.
 
 **CLI integration** — new Rust CLI subcommand group:
 
@@ -448,7 +474,7 @@ persatrix channel history <name> [--limit N]          # display recent history (
 persatrix channel watch <name> [--interval N]         # poll for new messages (default: 5s interval)
 ```
 
-`persatrix channel watch` uses polling in v0.3.0 (consistent with the existing `persatrix logs --follow` polling mode). SSE-based streaming reuses the RFC 0018 LogService SSE infrastructure as a future extension.
+`persatrix channel watch` uses polling in v0.3.0 (consistent with `persatrix logs --follow`); SSE streaming via RFC 0018's LogService infrastructure is a future extension.
 
 **Output formats** for the non-`watch` subcommands (`watch` is covered by OQ #4):
 
@@ -460,7 +486,7 @@ persatrix channel watch <name> [--interval N]         # poll for new messages (d
 | `reply` | Same shape as `send`, plus `(reply to <thread_id>)` annotation | Send object with `thread_id` populated |
 | `history` | One line per message: `<timestamp>  <sender_id>: <content>` (newest-first); `--limit` defaults to 50 | Array of message objects matching the §A `ChannelMessage` schema |
 
-These conventions follow the existing `persatrix logs` and `persatrix chat` precedents (plain text for humans, structured JSON for piping into other tools). PR-plan time may refine specific field names; this table pins the *shape* so the implementation has the same discretion the existing CLI subcommands had, no more.
+Conventions follow `persatrix logs` and `persatrix chat` precedents (plain text for humans, structured JSON for piping). PR-plan time may refine field names; this table pins the *shape*.
 
 ### G. Channel Observability
 
@@ -470,16 +496,16 @@ These conventions follow the existing `persatrix logs` and `persatrix chat` prec
 |--------|------|--------|-------------|
 | `channel.messages.published` | counter | `channel_id`, `sender_type` | Messages published per channel |
 | `channel.messages.delivered` | counter | `channel_id`, `status` | Delivery attempts (ok / failed) |
-| `channel.messages.gated` | counter | `channel_id`, `policy` | Events suppressed by the response gate (incremented on the agent side); the primary signal for diagnosing an under- or over-tuned `respond` policy. `subscriber_id` is **not** a label — cardinality scales as `members × channels × policies`. The example "~3,000 series at N=20 over `max_channels=50` and 3 policies" is illustrative; at N=200 (a large org channel) the same product yields ~30,000 series and the case for excluding `subscriber_id` is even stronger; at N=2 (DMs only) it is closer to acceptable but still excluded for consistency. Per-subscriber drill-down is available via OTEL spans (each suppressed event emits a span with `subscriber.id` as an attribute). |
+| `channel.messages.gated` | counter | `channel_id`, `policy` | Events suppressed by the response gate (agent-side); primary signal for an under-/over-tuned `respond` policy. `subscriber_id` is deliberately **not** a label — cardinality scales as `members × channels × policies` (~3,000 series at N=20 over 50 channels × 3 policies; ~30,000 at N=200; excluded at N=2 for consistency). Per-subscriber drill-down lives in OTEL spans (`subscriber.id` attribute). |
 | `channel.delivery.latency_ms` | histogram | `channel_id` | Publish-to-delivery latency per subscriber |
 | `channel.members.active` | gauge | `channel_id` | Current registered subscriber count |
 | `channel.history.recall_tokens` | histogram | `channel_id` | Tokens consumed by channel history injection |
 
-**Spans**: Each message publish and per-subscriber delivery is wrapped in an OTEL span with `channel.id`, `message.id`, and `sender.id` attributes. Delivery spans link to the publishing span via Span Link, consistent with RFC 0019's A2A causality model.
+**Spans**: Publish and per-subscriber delivery each emit an OTEL span with `channel.id`, `message.id`, `sender.id` attributes; delivery spans link to publish via Span Link per RFC 0019's A2A causality model.
 
 ### H. Channel Patterns (non-normative)
 
-This subsection is guidance, not protocol. The three `respond` policies (`when_mentioned`, `always`, `never`) compose into a small set of channel-level patterns that cover the urgency and attention scenarios that come up in practice. They are documented here so operators reach for the right configuration before reaching for new schema — message-level priority, urgency tags, and "circular" delivery modes are deliberately out of scope for v0.3.0; the channel itself is the unit of urgency.
+Guidance, not protocol. The three `respond` policies compose into channel-level patterns covering common urgency and attention scenarios — documented so operators reach for the right config before reaching for new schema. Message-level priority, urgency tags, and "circular" delivery modes are out of scope for v0.3.0; the channel itself is the unit of urgency.
 
 | Pattern | Membership policy | When to use |
 |---------|-------------------|-------------|
@@ -488,11 +514,11 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 | **Broadcast / announcements** | senders publish, all listeners `never` | One-way log channel (e.g., `#announcements`, `#deploy-events`). Listeners ingest into episodic memory but never reply, so the channel cannot loop regardless of write volume. |
 | **Always-respond / incident** | all members `always` | Multi-agent channel where every message genuinely warrants attention from everyone (e.g., `#incident`). Fanout cost scales as `members × messages`; reserve for situations where that cost is the point. |
 
-**Mixed-policy channels**: a channel may legitimately mix policies — e.g., `#planning` with two collaborators on `always` and a domain-expert advisor on `when_mentioned`. The advisor stays quiet until pulled in by a mention but still ingests history into episodic memory. Avoid mixing more than two `always` members in one channel unless the multiplicative reply traffic is deliberate.
+**Mixed-policy channels** are legitimate — e.g., `#planning` with two `always` collaborators plus a `when_mentioned` advisor (stays quiet until mentioned, still ingests history). Avoid more than two `always` members in one channel unless the multiplicative reply traffic is deliberate.
 
-**Expressing urgency through destination, not content**: a persona that needs an immediate cross-team response publishes to a tight-loop or always-respond channel; a persona broadcasting a status update publishes to an announcements channel. The same message text carries different urgency depending on which channel receives it. This keeps the message schema small and avoids the well-known failure mode where every sender marks every message "high priority".
+**Express urgency through destination, not content**: route urgent messages to tight-loop or always-respond channels, status updates to announcements channels. Same text, different channel = different urgency. Keeps the message schema small and avoids the failure mode where every sender flags every message "high priority".
 
-**When to revisit**: if operational experience shows a recurring need for selective urgency *within* a single channel (e.g., a `#planning` channel where 90% of traffic is FYI but 10% is blocking), the cleanest extension is a free-form `labels` array on `ChannelMessage` that the response gate can key off of in addition to mentions. This is intentionally deferred until usage data justifies it; locking in a fixed urgency enum now would foreclose better options.
+**When to revisit**: if operational experience shows recurring need for selective urgency *within* a channel (e.g., `#planning` is 90% FYI, 10% blocking), the cleanest extension is a free-form `labels` array on `ChannelMessage` that the gate keys off in addition to mentions. Deferred until usage data justifies it; a fixed urgency enum now would foreclose better options.
 
 ---
 
@@ -522,7 +548,7 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 5. `schemas/channel.schema.json` rewritten in place for config validation against the new schema (see Relationship to Existing Scaffolding for vocabulary changes).
 6. Unit tests: channel store CRUD, membership enforcement, history pagination, message cap pruning.
 
-**Dependencies**: RFC 0009 Phase 1 (rate-limit middleware) for the new `POST /api/v1/channels/{id}/messages` endpoint. This is a soft dependency: if the rate-limit middleware is not yet available when channel REST endpoints land, the endpoints can ship initially without it, but rate limiting must be applied before Phase 2 wires agent-driven publish. RFC 0008 is not required at this phase — the channel store is standalone and the memory-injection pipeline is only wired in Phase 3.
+**Dependencies**: RFC 0009 Phase 1 (rate-limit middleware) for `POST /api/v1/channels/{id}/messages`. **Hard dependency for any production deployment** — the publish endpoint is reachable by any client on the orchestrator network well before agents are wired up, so an unrate-limited publish surface is a DoS vector (curl loop fills the `messages` table and exhausts the per-channel pruning loop) regardless of Phase 2 agent shipping. Demo/dev builds may run without the middleware, but the orchestrator MUST log `WARN` at startup ("channel publish endpoints running without rate limiting; not safe for production") gated by explicit `--unsafe-no-rate-limit` rather than implicit absence. Earlier "soft dependency, defer to Phase 2" language was rejected during review — it conflated "Phase 2 is the only callable client" (false: REST is open at Phase 1) with "Phase 2 is when rate limiting matters" (false: DoS protection matters whenever a public surface exists). RFC 0008 is not required here — the channel store is standalone; memory injection is wired in Phase 3.
 
 ### Phase 2: Proto and Agent Delivery
 
@@ -578,9 +604,9 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 | Proto | `proto/task.proto` | `ChannelMessageEvent`, `ReceiveChannelMessage` RPC added to `AgentService` |
 | Proto | `proto/agent_message.proto` | Phase 2: delete the v0.2-era `ChannelService` (`SendMessage` + `Subscribe`) per the Relationship to Existing Scaffolding disposition. The new agent-side delivery path is on `AgentService.ReceiveChannelMessage` (`proto/task.proto`). |
 | Proto (generated) | `internal/generated/`, `agents/generated/` | Regenerate from updated proto |
-| Python agents | `agents/server.py` | Phase 2: remove `ChannelServiceServicer` import (line 41) and gRPC registration (lines 133–134). The new `ReceiveChannelMessage` handler is part of the existing `AgentServiceServicer`, no separate registration needed. |
-| Python agents | `agents/server_servicers.py` | Phase 2: delete the v0.2-era `ChannelServiceServicer` class (currently at line 419) and add `ReceiveChannelMessage` handler to `AgentServiceServicer`. |
-| Python agents | `tests/unit/python/test_server_channel.py` | Phase 2: delete or rewrite — existing tests target the deleted `ChannelServiceServicer.SendMessage` / `Subscribe` surface and will not survive the proto regeneration. New coverage of `ReceiveChannelMessage` lives in the integration tests called out in the Test Strategy section. |
+| Python agents | `agents/server.py` | Phase 2: remove `ChannelServiceServicer` import (L41) and gRPC registration (L133–134). New `ReceiveChannelMessage` handler joins the existing `AgentServiceServicer`. |
+| Python agents | `agents/server_servicers.py` | Phase 2: delete v0.2 `ChannelServiceServicer` (L419); add `ReceiveChannelMessage` to `AgentServiceServicer`. |
+| Python agents | `tests/unit/python/test_server_channel.py` | Phase 2: delete/rewrite — targets the deleted `ChannelServiceServicer.SendMessage`/`Subscribe` surface, will not survive proto regen. New coverage in Test Strategy integration tests. |
 | Python agents | `agents/dispatch.py` | `SEND_CHANNEL_MESSAGE` action executor |
 | Python agents | `agents/persona_types.py` | `EventType.CHANNEL_MESSAGE`, `SendChannelMessageAction` |
 | Python agents | `agents/memory/episodic.py` | Channel-scoped recall tag filter (already accepts `tags`/`importance` per RFC 0008 §B; this RFC wires them through the facade — see §E) |
@@ -618,24 +644,19 @@ This subsection is guidance, not protocol. The three `respond` policies (`when_m
 
 5. **Concurrent publish ordering**: If two agents publish to the same channel within milliseconds, the SQLite serial write guarantees a consistent history, but both agents may generate a response without seeing the other's message (race window between write and delivery). This is acceptable in v0.3.0 but should be documented in the channels user guide.
 
-6. **`persatrix channel watch` SSE reuse**: The RFC 0018 LogService SSE infrastructure (`/api/v1/logs/stream`) uses the same pattern needed for channel streaming. Should Phase 4 implement a `GET /api/v1/channels/{id}/messages/stream` SSE endpoint instead of polling? The implementation would reuse the existing SSE writer. Moving this to v0.3.0 instead of "future" would give a better UX at low additional cost. Recommendation: **defer to a v0.3.x follow-up** unless Phase 4 implementation reveals the SSE port is genuinely a one-day task. Polling at 5s is acceptable for the v0.3.0 user story (a human spectator on a low-volume channel) and keeps the Phase 4 scope tight; SSE adds connection-lifetime handling and a new test surface that competes with the higher-priority memory-integration work in Phase 3.
+6. **`persatrix channel watch` SSE reuse**: The RFC 0018 LogService SSE infrastructure (`/api/v1/logs/stream`) uses the same pattern. Should Phase 4 implement `GET /api/v1/channels/{id}/messages/stream` instead of polling? Recommendation: **defer to v0.3.x** unless Phase 4 reveals the port is a one-day task. 5s polling is fine for the v0.3.0 user story (human spectator on a low-volume channel); SSE adds connection-lifetime handling and a new test surface competing with the higher-priority Phase 3 memory work.
 
-7. **Human message gate-bypass**: Under the default `when_mentioned` policy, a casual human message in a multi-agent channel produces no reply unless the human explicitly @-mentions an agent. This is the right default for busy channels but feels wrong for a 1-human-1-agent channel that behaves like a DM. Options: (a) treat human-sent messages as if they implicitly mention every channel member (humans-bypass-gate); (b) leave humans subject to the same gate and document that they must @-mention; (c) per-channel `human_addresses_all: true` flag so operators choose per channel. Recommendation: **(b) for v0.3.0** with the `--mention-all` shorthand on `persatrix channel send` covering the broadcast case. Defer (a)/(c) until usage data shows the friction matters — the cost of getting this wrong now (silent agents in a DM-feeling channel) is recoverable, while a wrong-direction default that floods agents on every casual message is not.
+7. **Human message gate-bypass**: Under default `when_mentioned`, a casual human message in a multi-agent channel produces no reply unless explicitly @-mentioned. Right default for busy channels, feels wrong in a 1-human-1-agent DM-like channel. Options: (a) human messages implicitly mention every member; (b) humans subject to the same gate, must @-mention; (c) per-channel `human_addresses_all: true`. Recommendation: **(b) for v0.3.0** with `--mention-all` on `persatrix channel send` covering broadcast. Defer (a)/(c) until usage data justifies it — silent agents in a DM-like channel is recoverable; flooding every agent on every casual message is not.
 
-8. **Missed-message recovery protocol**: At-most-once delivery (a Non-Goal-by-design tradeoff) means agents offline at delivery time miss messages. The history endpoint exposes the data needed for catch-up, but the RFC does not specify *who* calls it or *how* an agent identifies "messages I missed". Two sub-questions:
+8. **Missed-message recovery protocol**: At-most-once delivery means offline agents miss messages. The history endpoint exposes the catch-up data, but the RFC does not specify *who* calls it or *how* an agent identifies "messages I missed". Sub-questions: (a) recovery trigger — startup, every tick, or first `CHANNEL_MESSAGE` after coming back? (per-tick is expensive at scale; on-startup misses mid-session gaps); (b) watermark vs. time — `before time.Time` is good for backscroll, weak for "since I was last seen"; a per-(channel, subscriber) high-watermark (last-seen `message_id`) would enable `?since=<watermark>`. Recommendation: **defer to v0.3.x**. v0.3.0 ships at-most-once with on-startup history fetch (last 50 per channel) as best-effort recovery; watermark and per-tick land once operational data justifies. `channel.delivery.missed` per OQ #2 provides the signal.
 
-   - **Recovery trigger**: Does the agent fetch history on startup, on every tick, or on first `CHANNEL_MESSAGE` after coming back online? Polling on every tick is expensive at scale; on-startup is simple but misses gaps from mid-session disconnects.
-   - **Watermark vs. time-based catch-up**: The current history endpoint paginates by `before time.Time` — useful for backscroll, less useful for "give me everything since I was last seen." Adding a per-(channel, subscriber) high-watermark (last-seen `message_id`) to either the channel store or agent-local state would enable a precise `?since=<watermark>` catch-up query.
+9. **`channel.schema.json` $id stability across the v0.2 → v0.3.0 rewrite.** The disposition rewrites the schema in place at the same path with the same `$id`. External tooling caching the document will silently break against v0.3.0 configs — vocabulary changed (`direct`→`dm`; `broadcast`/`meeting` dropped) and the `schema_version` field that would have signaled the break is also removed. For an internal-only v0.3.0 the cost is zero; missing is a public stance on whether `channel.schema.json` is stable public API. Recommendation: **declare it not-yet-public** in v0.3.0 release notes (RFC-owned, may break each v0.x bump until v1.0). If we change our mind, the right path is an `$id` bump on the next breaking change, not silent edits. **Implementation requirement carried into Phase 1**: the rewrite includes a top-level `description` *"Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice."* — release notes are easy to miss; embedding the disclaimer in the schema itself surfaces it at validation time.
 
-   Recommendation: **defer to a v0.3.x follow-up RFC** rather than block v0.3.0 on it. v0.3.0 ships at-most-once with on-startup history fetch (last 50 messages per subscribed channel) as a best-effort recovery; the watermark and per-tick recovery can land once operational data shows whether the gap matters. Logging `channel.delivery.missed` per OQ #2 gives the signal needed to decide.
+10. **`channel_type` proto-field redundancy with the `channel_id` prefix.** §C carries `channel_type` as a separate string on `ChannelMessageEvent` despite the prefix on `channel_id` already encoding it. Justified for log/observability ergonomics (see proto-block comment); also a drift risk if a call site updates one without the other. Phase 2's `ChannelRouter` validates on publish; receivers should drop on mismatch rather than trust one source. Should we typed-enum it at the proto level? Probably not for v0.3.0 — documentation-and-validation, revisit if drift bugs surface.
 
-9. **`channel.schema.json` $id stability across the v0.2 → v0.3.0 rewrite.** The "Relationship to Existing Scaffolding" disposition rewrites the schema in place at the same path with the same `$id`. Any external tooling that resolves the `$id` URL and validates v0.2 configs against the cached document will silently break when fed a v0.3.0 config (or vice versa) — type vocabulary changed (`direct` → `dm`, `broadcast`/`meeting` dropped) and the `schema_version` field that would have signaled the break is also removed. For an internal-only v0.3.0 the cost is zero; what is missing is a public stance on whether `channel.schema.json` is part of the project's stable public API. Recommendation: **declare it not-yet-public** in the v0.3.0 release notes (the schema is owned by the RFC and may break with each v0.x bump until v1.0). If we change our mind later and declare it public, the right path is a `$id` bump on the next breaking change, not silent in-place edits. **Implementation requirement carried into Phase 1**: when the schema is rewritten, the rewrite includes a top-level `description` field with the warning text *"Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice."* Release notes are easy to miss; embedding the warning in the schema itself means external tooling that resolves the `$id` sees the disclaimer at validation time.
+11. **Per-channel `cascade_depth` budget vs. global default.** §H notes a tight-loop pair channel saturates `max_cascade_depth=5` within five reactive turns. Operators wanting longer chains have only the global knob today, which also raises runaway-loop risk in misconfigured `always` channels. A per-channel override (e.g., `channels[].cascade_depth_max: 20`) would give granularity without weakening the default backstop. Cost: schema field + dispatcher plumbing + docs. Recommendation: **defer to v0.3.x** — collect dogfood data on whether cascade saturation is actually the user-visible failure mode, then decide.
 
-10. **`channel_type` proto-field redundancy with the `channel_id` prefix.** §C carries `channel_type` as a separate string on `ChannelMessageEvent` despite it already being encoded as a prefix on `channel_id` (`group:`, `dm:`, `thread:`). The duplication is justified for log/observability ergonomics (see the comment under the proto block) but is also a drift risk: a future call site that updates one without the other produces internally inconsistent events. Phase 2's `ChannelRouter` validation closes this on publish, but receiver-side defensive parsing (drop on mismatch) is recommended rather than silently trusting one source. Should we make the field redundancy a typed enum at the proto level instead of a free string? Probably not for v0.3.0 — leave it as documentation-and-validation and revisit if drift bugs surface.
-
-11. **Per-channel `cascade_depth` budget vs. global default.** §H notes that a tight-loop pair channel saturates `max_cascade_depth` (default 5) within five reactive turns. Operators wanting longer reactive chains have only one knob today: raising `max_cascade_depth` globally — which also raises the runaway-loop risk in misconfigured `always` channels elsewhere. A per-channel override (e.g., `channels[].cascade_depth_max: 20` for `#code-review`) would give operators the granularity to make tight-loop pair channels truly long-running without weakening the default backstop. Cost: a new schema field, plumbing the override through the dispatcher's depth check, and documenting the tradeoff. Recommendation: **defer to a v0.3.x follow-up** — collect dogfood data on whether cascade-depth saturation is actually the user-visible failure mode in tight-loop pair channels, then decide.
-
-12. **Typo-resistance on `payload["respond_policy"]`.** §D justifies promoting `thread_id` to a top-level `AgentEvent` field on misspell-resistance grounds (a typoed `payload["thread_id"]` lookup silently fails the gate's thread-reply rule). The same argument seemingly applies to `respond_policy`, but §D keeps it in `payload` because policy is denormalized cargo from `memberships`, not intrinsic to the event. Open: do we cement that distinction by giving `payload` a typed accessor (`event.policy_for(agent_id)` that consults membership directly and ignores `payload`), or do we accept the typo risk on the basis that the value is set in one place (the dispatcher) and read in one place (the gate)? Recommendation: **accept the risk for v0.3.0**; revisit if a typo bug surfaces in the gate or if the dispatcher gains a second policy-setting code path.
+12. **Typo-resistance on `payload["respond_policy"]`.** §D promotes `thread_id` to top-level on misspell-resistance grounds; the same argument seemingly applies to `respond_policy`, but §D keeps it in `payload` because policy is denormalized cargo from `memberships`, not intrinsic to the event. Open: cement that distinction with a typed accessor (`event.policy_for(agent_id)` that reads memberships directly and ignores `payload`), or accept the typo risk on grounds that the value is set in one place and read in one place? Recommendation: **accept the risk for v0.3.0**; revisit if a typo bug surfaces or the dispatcher gains a second policy-setting code path.
 
 ---
 
