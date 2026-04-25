@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; wrote RFC 0020 — Interaction Lifecycle (dialogue boundaries + episode granularity); inserted RFC 0020 into the v0.3.0 dependency chain ahead of RFC 0008 §D; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011 + RFC 0020; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
-> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020) — 📋 Planning  
-> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011, 0020)
+> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; wrote RFC 0020 — Interaction Lifecycle (dialogue boundaries + episode granularity); wrote RFC 0021 — Persona Temporal Awareness (now-anchor + recency rendering for v0.3.0; commitments + REMINDER + duration calibration deferred to v0.4.0); inserted RFC 0020 into the v0.3.0 dependency chain ahead of RFC 0008 §D; threaded RFC 0021 Phase 1 off RFC 0020 P1 in the v0.3.0 dependency chain; added RFC 0021 Phases 2–4 to v0.4.0; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011 + RFC 0020 + RFC 0021; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
+> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 📋 Planning  
+> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1)
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -52,6 +52,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 📋 Proposed |
+| [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 📋 Proposed |
 
 ---
 
@@ -424,6 +425,7 @@ v0.2.2 complete
 - **Channel history** visible to agents via memory integration
 - **Multi-agent conversation routing** — message delivery, acknowledgement, threading
 - **Interaction lifecycle** — dialogues (not individual messages) become the unit of episodic memory and summarization; structural + idle-gap boundary detection; per-channel scoping (RFC 0020)
+- **Persona temporal awareness — Phase 1** — now-anchor in every prompt, recency-rendered episode recall, last-seen rendering on relationships (RFC 0021 Phase 1)
 - **Conditional and looped workflow control flow** — skip semantics, bounded repeat-until, for-each (RFC 0007)
 - **Agent memory and context optimization** — per-step context budget allocation, caller-prepared context packaging, delegation result merge contracts (RFC 0008)
 - **Security hardening Phases 1–2** — audit logging, rate limiting, input sanitization (RFC 0009)
@@ -437,6 +439,7 @@ v0.2.2 complete
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels only (Phases 1–3) | 📋 Proposed |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 📋 Proposed |
+| [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | 📋 Proposed |
 
 ### Dependency Chain (v0.3.0)
 
@@ -444,6 +447,8 @@ v0.2.2 complete
 v0.2.3 complete
     │
     ├── RFC 0020 P1 (Interaction tracker + additive schema)    [no v0.3.0 deps; starts immediately]
+    │       │
+    │       ├── RFC 0021 P1 (now-anchor + recency rendering)   [consumes 0020 P1's started_at/closed_at; independent of 0008/0011]
     │       │
     │       └── RFC 0020 P2 (summarize-on-close + janitor)     [pairs with RFC 0008 §D — interaction-bounded summarization]
     │
@@ -456,7 +461,7 @@ v0.2.3 complete
     │
     └── RFC 0009 Phases 1–2 (Audit, Rate Limiting)             [runs throughout — no blocking dependency on 0007/0011/0020]
             ↓
-v0.3.0 complete (all five RFCs delivered)
+v0.3.0 complete (all six RFC scopes delivered: 0007, 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1)
 ```
 
 > **Why RFC 0020 Phase 1 starts immediately, ahead of RFC 0008 §D**: Interactions are the *unit* RFC 0008 will summarize and RFC 0011 will store as channel history. Landing the tracker + schema (Phase 1) first means every multi-turn dialogue is bounded correctly from day one — no per-message episode debt that has to be migrated later. Phase 1 is pure scaffolding (no LLM, no behavior change), so it carries minimal risk and unblocks both RFC 0008's compression pipeline and RFC 0011's memory integration.
@@ -471,6 +476,8 @@ v0.3.0 complete (all five RFCs delivered)
 
 > **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011/0020 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
 
+> **Why RFC 0021 Phase 1 lands in v0.3.0, with Phases 2–4 deferred to v0.4.0**: Phase 1 is small, self-contained, and high-leverage — a now-anchor in the system prompt and recency-rendered recall make every channel conversation under RFC 0011 carry temporal annotation from day one. Without it, RFC 0011 ships a channel-history experience where agents cannot tell whether a recalled exchange happened minutes or weeks ago. Phase 1 depends only on RFC 0020 Phase 1's `started_at` / `closed_at` columns; no other v0.3.0 RFC blocks or is blocked by it. Phases 2–4 (commitments, REMINDER event, duration calibration) are a coherent forward-memory + estimation surface that pairs naturally with v0.4.0's organizational and skill-registry work — agents that can plan are also agents that can hold roles.
+
 ### Planned Components (v0.3.0)
 
 | Component | Go Package | Python Module | Target RFC |
@@ -481,6 +488,7 @@ v0.3.0 complete (all five RFCs delivered)
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/`, `internal/executor/` | `agents/server_servicers.py`, `agents/dispatch.py`, `agents/persona_types.py`, `agents/memory/` | 0011 |
 | Interaction Lifecycle | — | `agents/memory/interactions.py`, `agents/memory/episodic.py`, `agents/memory/relationships.py`, `agents/persona_runtime.py`, `agents/dispatch.py` | 0020 |
+| Persona Temporal Awareness (P1) | — | `agents/clock.py`, `agents/temporal/`, `agents/persona_runtime/prompt_assembly.py`, `agents/persona_runtime/memory_context.py` | 0021 |
 | Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |
 
 ---
@@ -496,6 +504,7 @@ v0.3.0 complete (all five RFCs delivered)
 - **Security Phases 3–4** — tool validation, agent identity tokens, HITL gates (RFC 0009)
 - **Skill Registry** — `SkillSpec` model, `SkillCatalogue`, skill validation, failure modes, fallback chains (RFC 0014)
 - **Meeting and negotiation protocol scaffolding** (RFC 0012 partial)
+- **Persona temporal awareness — Phases 2–4** — commitments memory class with `due_at` lifecycle, `REMINDER` tick-loop event, time-tool surface (`get_current_time`, `time_since`, `time_until`, `set_reminder`), duration calibration store with `recall_typical_duration` (RFC 0021 Phases 2–4)
 
 ### RFC Scope
 
@@ -505,6 +514,7 @@ v0.3.0 complete (all five RFCs delivered)
 | 0010 | Sub-Agent Spawning | Full RFC | Not yet written |
 | 0012 | Protocols + Organizations | Partial: org topologies, authority, spawning | Not yet written |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | Full RFC | 📋 Proposed |
+| [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phases 2–4 (commitments, REMINDER event, duration calibration) | 📋 Proposed |
 
 ### Dependency Chain (v0.4.0)
 
@@ -537,6 +547,7 @@ v0.4.0 complete
 | Sub-agents | — | `agents/sub_agents/` | 0010 |
 | MCP Tools | `internal/mcp/` | `agents/tools/mcp_bridge.py` | 0010 |
 | Organizations (partial) | `internal/protocols/` | — | 0012 |
+| Persona Temporal Awareness (P2–4) | — | `agents/memory/commitments.py`, `agents/memory/duration.py`, `agents/persona_runtime/__init__.py`, `agents/persona_types.py`, `agents/tools/builtin.py` | 0021 |
 
 ---
 
