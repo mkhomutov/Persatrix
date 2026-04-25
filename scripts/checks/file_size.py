@@ -93,7 +93,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # Python test files that exceeded the 500-line limit when the tests/**
     # blanket exclusion was removed (v0.2 baseline). These are tracked for
     # targeted follow-up splits. Do not add new entries — split instead.
-    "tests/unit/python/test_event_dispatch_tick.py",
     "tests/unit/python/test_validate.py",
     "tests/unit/python/test_server.py",
     "tests/unit/python/test_chat_servicer.py",
