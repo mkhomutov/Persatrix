@@ -23,6 +23,7 @@
   - [E. Memory Integration](#e-memory-integration)
   - [F. Human Participant Channels](#f-human-participant-channels)
   - [G. Channel Observability](#g-channel-observability)
+  - [H. Channel Patterns (non-normative)](#h-channel-patterns-non-normative)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -374,6 +375,23 @@ persatrix channel watch <name> [--interval N]    # poll for new messages (defaul
 | `channel.history.recall_tokens` | histogram | `channel_id` | Tokens consumed by channel history injection |
 
 **Spans**: Each message publish and per-subscriber delivery is wrapped in an OTEL span with `channel.id`, `message.id`, and `sender.id` attributes. Delivery spans link to the publishing span via Span Link, consistent with RFC 0019's A2A causality model.
+
+### H. Channel Patterns (non-normative)
+
+This subsection is guidance, not protocol. The three `respond` policies (`when_mentioned`, `always`, `never`) compose into a small set of channel-level patterns that cover the urgency and attention scenarios that come up in practice. They are documented here so operators reach for the right configuration before reaching for new schema — message-level priority, urgency tags, and "circular" delivery modes are deliberately out of scope for v0.3.0; the channel itself is the unit of urgency.
+
+| Pattern | Membership policy | When to use |
+|---------|-------------------|-------------|
+| **Quiet group** | all members `when_mentioned` | Default for general-purpose channels with 3+ agents (e.g., `#planning`, `#general`). The channel acts as a shared log; messages cut through only via explicit `@`-mention. Lowest fanout cost. |
+| **Tight-loop pair** | both members `always` | Two agents in continuous collaboration (e.g., `#code-review` between a writer and reviewer). Every message triggers a reply cycle by design. Avoid extending to N > 2 — every additional `always` member multiplies fanout. |
+| **Broadcast / announcements** | senders publish, all listeners `never` | One-way log channel (e.g., `#announcements`, `#deploy-events`). Listeners ingest into episodic memory but never reply, so the channel cannot loop regardless of write volume. |
+| **Always-respond / incident** | all members `always` | Multi-agent channel where every message genuinely warrants attention from everyone (e.g., `#incident`). Fanout cost scales as `members × messages`; reserve for situations where that cost is the point. |
+
+**Mixed-policy channels**: a channel may legitimately mix policies — e.g., `#planning` with two collaborators on `always` and a domain-expert advisor on `when_mentioned`. The advisor stays quiet until pulled in by a mention but still ingests history into episodic memory. Avoid mixing more than two `always` members in one channel unless the multiplicative reply traffic is deliberate.
+
+**Expressing urgency through destination, not content**: a persona that needs an immediate cross-team response publishes to a tight-loop or always-respond channel; a persona broadcasting a status update publishes to an announcements channel. The same message text carries different urgency depending on which channel receives it. This keeps the message schema small and avoids the well-known failure mode where every sender marks every message "high priority".
+
+**When to revisit**: if operational experience shows a recurring need for selective urgency *within* a single channel (e.g., a `#planning` channel where 90% of traffic is FYI but 10% is blocking), the cleanest extension is a free-form `labels` array on `ChannelMessage` that the response gate can key off of in addition to mentions. This is intentionally deferred until usage data justifies it; locking in a fixed urgency enum now would foreclose better options.
 
 ---
 
