@@ -427,7 +427,7 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 1. `EventType.REMINDER` added to [agents/persona_types.py:32](../../agents/persona_types.py#L32).
 2. Persona-runtime tick handler gains the pre-tick commitment scan, with `temporal.reminder_horizon_sec` config (default 3600).
 3. Missed-commitment janitor: periodic sweep transitioning `open` rows with `due_at < now - missed_grace_sec` to `missed`. Same cadence as tick.
-4. Time-tool surface added: `get_current_time`, `time_since`, `time_until`. New `time:read` permission.
+4. Time-tool surface added: `time_since`, `time_until`, and `get_current_time` *(tentative — see OQ #11; final inclusion decided at Phase 3 implementation review)*. New `time:read` permission.
 5. Telemetry counters: `temporal.reminders_emitted`, `temporal.commitments_missed`, `temporal.commitments_fulfilled`.
 6. Integration test: commitment with `due_at` 30 min in the future fires a `REMINDER` event on the next tick within the horizon; commitment 2 days out does not.
 7. Soft cap of 500 open commitments per agent enforced at `set_reminder` time with a clear error message.

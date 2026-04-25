@@ -424,6 +424,7 @@ v0.2.2 complete
 - **Internal channels** — group messages, DMs, threads; agents can address each other and reply (RFC 0011, internal part)
 - **Channel history** visible to agents via memory integration
 - **Multi-agent conversation routing** — message delivery, acknowledgement, threading
+- **Channels CLI + human participation** — `persatrix channel list/join/send/reply/history/watch`; human operators can join channels and observe agent traffic (RFC 0011 Phase 4)
 - **Interaction lifecycle** — dialogues (not individual messages) become the unit of episodic memory and summarization; structural + idle-gap boundary detection; per-channel scoping (RFC 0020)
 - **Persona temporal awareness — Phase 1** — now-anchor in every prompt, recency-rendered episode recall, last-seen rendering on relationships (RFC 0021 Phase 1)
 - **Conditional and looped workflow control flow** — skip semantics, bounded repeat-until, for-each (RFC 0007)
@@ -437,7 +438,7 @@ v0.2.2 complete
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 👍 Accepted |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
-| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels only (Phases 1–3) | 📋 Proposed |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | 📋 Proposed |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 📋 Proposed |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | 📋 Proposed |
 
@@ -487,6 +488,7 @@ v0.3.0 complete (all six RFC scopes delivered: 0007, 0008, 0009 P1–2, 0011 int
 | Agent Memory & Context Optimization | `internal/scheduler/`, `internal/executor/` | `agents/memory/`, `agents/task_agent.py` | 0008 |
 | Security & Sandboxing (P1–2) | `internal/security/` | `agents/security.py` | 0009 |
 | Internal Channels | `internal/channels/`, `internal/executor/` | `agents/server_servicers.py`, `agents/dispatch.py`, `agents/persona_types.py`, `agents/memory/` | 0011 |
+| Channels CLI (Rust) | `cli/src/commands/channel.rs`, `cli/src/main.rs` | — | 0011 |
 | Interaction Lifecycle | — | `agents/memory/interactions.py`, `agents/memory/episodic.py`, `agents/memory/relationship.py`, `agents/memory/relationship_mutations.py`, `agents/persona_runtime/`, `agents/dispatch.py` | 0020 |
 | Persona Temporal Awareness (P1) | — | `agents/clock.py`, `agents/temporal/`, `agents/persona_runtime/prompt_assembly.py`, `agents/persona_runtime/memory_context.py`, `agents/memory/relationship.py` | 0021 |
 | Observability (spans + metrics) | `internal/observability/` | `agents/observability/` | 0019 |

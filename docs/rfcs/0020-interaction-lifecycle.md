@@ -116,11 +116,11 @@ The mental model: structural triggers are immediate and free; idle-gap is the wo
 ```
    first turn arrives          boundary tripped         summary persisted
    ───────────────────►  open  ──────────────►  closing  ──────────────► closed/summarized
-                          ▲                        │
-                          │ next turn arrives      │ (summarization in flight)
-                          └────── reopens ─────────┘
-                          (only valid pre-summary;
-                           see "reopen window" below)
+                                                   │
+                                                   │ a new turn during closing
+                                                   │ does not reopen — it starts
+                                                   │ a fresh `open` interaction
+                                                   ▼ (see "reopen window" below)
 ```
 
 | State | Meaning | Storage |
@@ -159,6 +159,8 @@ ALTER TABLE episodes ADD COLUMN turn_count INTEGER;         -- number of turns a
 ALTER TABLE episodes ADD COLUMN scope TEXT;                 -- 'channel:<name>', 'dm:<a>:<b>', 'thread:<id>', 'tick'
 CREATE INDEX IF NOT EXISTS idx_episodes_scope ON episodes(scope, closed_at);
 ```
+
+The asymmetry between `ADD COLUMN` (no `IF NOT EXISTS`) and `CREATE INDEX IF NOT EXISTS` is intentional. SQLite gained `ADD COLUMN IF NOT EXISTS` in 3.35 (March 2021); we don't yet require that minimum so the column DDL is non-idempotent. Migration safety is provided by the versioned migration runner in [agents/memory/migrations.py](../../agents/memory/migrations.py), which records applied migrations and skips re-runs. The `IF NOT EXISTS` on the index is belt-and-suspenders for any out-of-band re-execution; it stays because the index is the cheaper of the two to verify defensively.
 
 Existing per-event rows (pre-RFC) have NULL in all four new columns. Recall queries treat NULL `interaction_id` as "single-turn legacy episode" and surface them at lower priority than multi-turn interactions of similar age (see §I).
 
