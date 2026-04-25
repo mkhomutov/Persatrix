@@ -43,9 +43,6 @@ _EXTRA_EXCLUDES = [
     "cli/target/**",
     "agents/generated/**",
     "internal/generated/**",
-    # Go test files are co-located with source (Go convention) and excluded
-    # because their growth is bounded by the package they test.
-    "**/*_test.go",
     # Local venvs (not present in CI but common during local runs).
     ".venv/**",
     "venv/**",
@@ -90,6 +87,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
+    # Go test files that exceeded the 500-line limit when the **/*_test.go
+    # blanket exclusion was removed. These are tracked for targeted follow-up
+    # splits. Do not add new entries — split instead.
+    "internal/server/server_test.go",
+    "internal/executor/executor_test.go",
+    "internal/planner/planner_test.go",
+    "internal/state/state_test.go",
+    "internal/cost/cost_test.go",
+    "internal/observability/zapenc/encoder_test.go",
     # Python test files that exceeded the 500-line limit when the tests/**
     # blanket exclusion was removed (v0.2 baseline). These are tracked for
     # targeted follow-up splits. Do not add new entries — split instead.
