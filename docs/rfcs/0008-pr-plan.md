@@ -19,11 +19,12 @@ This plan splits the work into **6 PRs**.
 
 > **Estimate calibration**: 1.7× factor per [RFC 0017 PR plan precedent](0017-pr-plan.md#overview).
 
-**Prerequisite**: [RFC 0020 PR plan](0020-pr-plan.md) PR 1 merged (the `MemoryFacade.compress` hook in PR 2 of this plan pairs with RFC 0020 PR 4's summarize-on-close path). RFC 0006 Phase 1 already shipped in v0.2.0.
+**Prerequisite**: RFC 0006 Phase 1 already shipped in v0.2.0. No v0.3.0 RFC merge dependency — RFC 0008 sits at the top of the v0.3.0 dep chain alongside RFC 0020.
 
-**Cross-RFC sequencing**:
+**Cross-RFC sequencing** (downstream consumers — this plan must merge ahead of them):
 - PR 1 of this plan must merge before [RFC 0007 PR plan](0007-pr-plan.md) PR 3 opens — `repeat_until` loop budget integration requires per-step context-budget allocation.
-- PR 2 (`MemoryFacade` for task agents) must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (Phase 3) opens.
+- PR 2 (`MemoryFacade` for task agents) must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (Phase 3) opens — channel-scoped recall calls `MemoryFacade.retrieve_relevant`.
+- PR 2 must also merge before [RFC 0020 PR plan](0020-pr-plan.md) PR 4 opens — RFC 0020 PR 4's summarize-on-close path calls into the `MemoryFacade.compress` hook introduced here. (RFC 0020 PR 4's depends-on row already pins this direction.)
 
 ---
 

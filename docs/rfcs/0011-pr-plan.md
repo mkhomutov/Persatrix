@@ -23,7 +23,7 @@ RFC 0011 spans four phases for v0.3.0 (internal channels). External bridges are 
 - [RFC 0009 PR plan](0009-pr-plan.md) PR 2 merged (rate-limit middleware) — required by PR 2 of this plan (REST publish endpoint).
 
 **Cross-RFC sequencing**:
-- **PR 2** (REST publish) gates on RFC 0009 PR 2 (rate-limit middleware) — see [RFC 0011 §"Phase 1 Dependencies"](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). If RFC 0009 slips, this PR ships the startup-WARN path with an opt-out gate.
+- **PR 2** (REST publish) gates on RFC 0009 PR 2 (rate-limit middleware) — see [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). If RFC 0009 slips, this PR ships the startup-WARN path with an opt-out gate.
 - **PR 5** is the **joint-delivery PR with [RFC 0020 PR plan](0020-pr-plan.md) PR 5** — both RFCs reference each other's PR number.
 
 ---
@@ -212,7 +212,7 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 | Risk | Mitigation |
 |------|------------|
-| PR 2 publish endpoint ships without rate-limit middleware (RFC 0009 PR 2 slips) | Startup-WARN path with explicit opt-out gate; documented in [RFC 0011 §Phase 1 Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). Production deployments cannot accidentally enable without flipping the opt-out. |
+| PR 2 publish endpoint ships without rate-limit middleware (RFC 0009 PR 2 slips) | Startup-WARN path with explicit opt-out gate; documented in [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). Production deployments cannot accidentally enable without flipping the opt-out. |
 | PR 5 joint delivery with RFC 0020 PR 5 slips | Documented divergence path (per-event episodic writes, backfilled in v0.3.x). Both PRs reference each other's PR number to make slippage visible. |
 | Schema rewrite (`channel.schema.json`) breaks external tooling | Schema declared "not-yet-public" in v0.3.0 release notes per [OQ #9 resolution](0011-channels-bridges.md#open-questions); top-level description embeds the disclaimer. |
 | Cascade depth saturation in tight-loop pair channels | Existing global `cascade_depth=5` backstop holds; per-channel override deferred per [OQ #11](0011-channels-bridges.md#open-questions). |

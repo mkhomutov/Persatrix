@@ -22,7 +22,7 @@ This plan splits Phases 1–2 into **4 PRs**.
 **Prerequisite**: none (fills existing `internal/security/security.go` TODO stubs).
 
 **Cross-RFC sequencing**: independent workstream — runs throughout v0.3.0 with no blocking dep on other v0.3.0 RFCs. Two integration points:
-- **PR 2 (RateLimiter middleware)** must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 2 (REST channel publish endpoint) — see [RFC 0011 §"Phase 1 Dependencies"](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing) for the rate-limit-as-DoS-vector rationale.
+- **PR 2 (RateLimiter middleware)** must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 2 (REST channel publish endpoint) — see [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing) for the rate-limit-as-DoS-vector rationale.
 - **PR 3 (InputSanitizer wired into channel message storage)** integrates at [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (Phase 3).
 
 ---
@@ -76,7 +76,7 @@ PR 4 (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 - HTTP middleware adapter for REST endpoint enforcement.
 - Wire into executor: check on every tool dispatch call.
 - Config field `security.rate_limit_enforced` (default `true`); CLI mirror.
-- Startup `WARN` when disabled — per [RFC 0011 §Phase 1 Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing).
+- Startup `WARN` when disabled — per [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing).
 
 #### Key implementation details *(TBD)*
 #### Tests *(TBD)*

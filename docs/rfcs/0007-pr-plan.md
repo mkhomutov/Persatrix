@@ -87,7 +87,7 @@ PR 5 (Review follow-ups + RFC close)
 
 ### PR 3: `feature/v030-rfc0007-repeat-until-runtime` — Phase 2b: repeat_until Runtime
 
-**Depends on**: PR 2 + [RFC 0008 PR plan](0008-pr-plan.md) PR 1 (per-step budget allocator).
+**Depends on**: PR 2 + [RFC 0008 PR plan](0008-pr-plan.md) PR 1 (per-step context budget).
 **Estimated size**: ~400–500 lines.
 
 #### Scope (high-level)
