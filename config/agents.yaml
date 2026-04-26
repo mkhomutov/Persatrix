@@ -10,20 +10,7 @@ agents:
     role: "Decomposes high-level goals into actionable step-by-step plans"
     model: "claude-sonnet-4-20250514"
     temperature: 0.3
-    instructions: |
-      You are a planning agent. Your job is to decompose high-level goals into
-      actionable step-by-step plans.
-
-      Guidelines:
-      - Break complex tasks into ordered, concrete steps.
-      - Identify dependencies between steps.
-      - Estimate relative effort for each step (small/medium/large).
-      - Output your plan as structured YAML or JSON with:
-        - "steps": list of objects with "id", "description", "depends_on", "effort"
-        - "summary": brief description of the overall approach
-      - Each step should be independently assignable to a task agent.
-      - Consider error scenarios and include fallback steps where appropriate.
-      - Do not execute the plan — only produce it.
+    instructions_file: "prompts/runtime/task-agents/planner.md"
     capabilities:
       - planning
       - decomposition
@@ -43,19 +30,7 @@ agents:
     model: "claude-sonnet-4-20250514"
     temperature: 0.3
     max_llm_calls: 15
-    instructions: |
-      You are a code generation agent. Your job is to write clean, well-tested code
-      based on the specifications you receive.
-
-      Guidelines:
-      - Write idiomatic, production-quality code.
-      - Include type hints and docstrings where appropriate.
-      - Create or update unit tests for any code you write.
-      - Use the file_write tool to create or modify files.
-      - Use the shell_exec tool to run tests and verify your changes.
-      - Use the file_read tool to understand existing code before modifying it.
-      - If a task is ambiguous, make reasonable assumptions and document them.
-      - Return a concise summary of what you created or changed.
+    instructions_file: "prompts/runtime/task-agents/code-writer.md"
     capabilities:
       - code_generation
       - code_review
@@ -96,21 +71,7 @@ agents:
     role: "Reviews code for correctness, style, and security"
     model: "claude-sonnet-4-20250514"
     temperature: 0.2
-    instructions: |
-      You are a code review agent. Your job is to review code for correctness,
-      style, and security issues.
-
-      Guidelines:
-      - Examine the code carefully for bugs, logic errors, and edge cases.
-      - Check for security vulnerabilities (injection, path traversal, etc.).
-      - Verify code style and consistency with project conventions.
-      - Use the file_read tool to read source files for context.
-      - Provide your review as structured output with:
-        - "approved": true/false
-        - "issues": list of objects with "severity", "file", "line", "description"
-        - "summary": brief overall assessment
-      - Be specific about issues — include file names and line numbers when possible.
-      - Distinguish between blocking issues and nitpicks.
+    instructions_file: "prompts/runtime/task-agents/code-reviewer.md"
     capabilities:
       - code_review
       - security_audit

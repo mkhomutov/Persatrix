@@ -160,6 +160,10 @@ class TestValidTaskAgent:
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
+    # instructions_file schema constraints (positive and negative) are
+    # covered in test_validate_agent_schema_instructions_file.py (split
+    # for the 500-line policy).
+
     def test_v01_agent_without_type_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:

@@ -337,6 +337,8 @@ class TestPermissionWiring:
 
 
 # ─── Duplicate Agent ID Tests ─────────────────────────────────
+# instructions_file load tests live in
+# test_server_load_agent_instructions_file.py (split for the 500-line policy).
 
 
 class TestDuplicateAgentId:
