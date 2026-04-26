@@ -16,7 +16,7 @@
 #
 # Edits to the strings here are user-visible LLM behavior changes;
 # review accordingly. A bytes-identical regression guard pins each
-# string in tests/unit/python/test_prompt_loader.py.
+# string in tests/unit/python/test_dimension_descriptions_loader.py.
 
 directness:
   indirect: "Diplomatic and tactful. Softens criticism, asks questions instead of stating objections directly."

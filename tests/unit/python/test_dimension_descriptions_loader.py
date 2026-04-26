@@ -58,8 +58,8 @@ class TestLoadDimensionDescriptionsSuccess:
     def test_caches_repeated_reads(self, dimensions_repo_root: Path) -> None:
         # Pin the cache contract: a second read after deleting the file
         # still succeeds because the value is cached.  This matches the
-        # semantics of ``load_snippet`` and keeps render_behavior off the
-        # filesystem on every persona prompt assembly.
+        # semantics of ``load_snippet`` and lets direct callers re-invoke
+        # cheaply without re-parsing the YAML.
         _write_dimensions(
             dimensions_repo_root,
             "directness:\n  indirect: \"soft\"\n",
@@ -109,7 +109,30 @@ class TestLoadDimensionDescriptionsErrors:
             dimensions_repo_root,
             "directness:\n  indirect: 42\n",
         )
-        with pytest.raises(PromptLoadError, match="must be a string"):
+        with pytest.raises(PromptLoadError, match="must be a non-empty string"):
+            load_dimension_descriptions(repo_root=dimensions_repo_root)
+
+    def test_inner_leaf_empty_string_rejected(
+        self, dimensions_repo_root: Path
+    ) -> None:
+        # An empty (or whitespace-only) description would render as a bare
+        # "- " bullet in render_behavior; reject it at load time so a
+        # truncated YAML edit cannot silently produce a degraded prompt.
+        _write_dimensions(
+            dimensions_repo_root,
+            'directness:\n  indirect: ""\n',
+        )
+        with pytest.raises(PromptLoadError, match="must be a non-empty string"):
+            load_dimension_descriptions(repo_root=dimensions_repo_root)
+
+    def test_inner_leaf_whitespace_only_rejected(
+        self, dimensions_repo_root: Path
+    ) -> None:
+        _write_dimensions(
+            dimensions_repo_root,
+            'directness:\n  indirect: "   "\n',
+        )
+        with pytest.raises(PromptLoadError, match="must be a non-empty string"):
             load_dimension_descriptions(repo_root=dimensions_repo_root)
 
 

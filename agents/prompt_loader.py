@@ -191,10 +191,14 @@ def load_snippet(name: str, repo_root: Path | None = None) -> str:
 def _read_dimension_descriptions(path: Path) -> dict[str, dict[str, str]]:
     """Read and shape-check the behavior-dimensions YAML at ``path``.
 
-    Cached because ``render_behavior`` is called for every persona
-    system-prompt assembly.  Cache key is the resolved path, so test
-    fixtures with distinct ``tmp_path`` roots don't collide with
-    each other or with the production root.
+    Cached so direct callers don't re-parse the YAML on repeat
+    invocations.  ``render_behavior`` itself reads the module-level
+    ``DIMENSION_DESCRIPTIONS`` constant populated once at import,
+    so the cache primarily benefits tests (which call this with
+    distinct ``tmp_path`` roots) and any future direct callers.
+    Cache key is the resolved path, so test fixtures with distinct
+    ``tmp_path`` roots don't collide with each other or with the
+    production root.
 
     The YAML must be an outer dict keyed by dimension, each value
     itself a dict keyed by value, with all leaves being strings.
@@ -237,10 +241,13 @@ def _read_dimension_descriptions(path: Path) -> dict[str, dict[str, str]]:
                     f"Value key {value!r} under dimension {dimension!r} at "
                     f"{path} must be a string, got {type(value).__name__}"
                 )
-            if not isinstance(desc, str):
+            if not isinstance(desc, str) or not desc.strip():
+                # Reject empty/whitespace descriptions: ``render_behavior``
+                # would otherwise emit a bare "- " bullet, which the LLM
+                # cannot interpret as a meaningful behavioral instruction.
                 raise PromptLoadError(
                     f"Description for {dimension!r}/{value!r} at {path} must "
-                    f"be a string, got {type(desc).__name__}"
+                    f"be a non-empty string, got {desc!r}"
                 )
 
     return raw

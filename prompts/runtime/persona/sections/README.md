@@ -30,6 +30,6 @@ for the migration rules.
   Drift is caught at import time so a malformed asset fails loudly
   rather than silently producing an incomplete behavioral prompt.
 - A bytes-identical regression guard pins each description in
-  [`tests/unit/python/test_prompt_loader.py`](../../../../tests/unit/python/test_prompt_loader.py)
+  [`tests/unit/python/test_dimension_descriptions_loader.py`](../../../../tests/unit/python/test_dimension_descriptions_loader.py)
   under `TestShippedDimensionDescriptionsByteIdentity` — editing a
   string here is a user-visible LLM behavior change, review accordingly.

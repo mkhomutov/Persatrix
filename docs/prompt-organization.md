@@ -143,10 +143,29 @@ defaults so a renamed/added dimension or value cannot silently produce
 a degraded persona prompt.
 
 A bytes-identical regression guard in
-[`tests/unit/python/test_prompt_loader.py`](../tests/unit/python/test_prompt_loader.py)
+[`tests/unit/python/test_dimension_descriptions_loader.py`](../tests/unit/python/test_dimension_descriptions_loader.py)
 (`TestShippedDimensionDescriptionsByteIdentity`) pins every shipped
 description so edits go through review rather than slipping in via a
 stray YAML change.
+
+### Import-time loading note
+
+Unlike `load_snippet`, which is lazy, `load_dimension_descriptions`
+is invoked at module import time from
+[`agents/persona_behavior.py`](../agents/persona_behavior.py) so the
+defaults-vs-YAML drift guard can run as part of the import-time
+invariant check. Two consequences for downstream consumers:
+
+- **Test isolation.** Any test that imports `agents.*` touches the
+  YAML on disk. The result is cached after the first read, so cost is
+  one-time per test process, but `import agents` cannot succeed
+  without the `prompts/runtime/persona/sections/` subtree present.
+- **Bundled / packaged deployments.** A wheel, PyInstaller bundle,
+  or similar artifact that omits `prompts/runtime/persona/sections/`
+  fails at import rather than at first persona render. This is by
+  design — loud failure beats silent degradation — but downstream
+  packaging configs (`MANIFEST.in`, `package_data`, etc.) must
+  include the prompts subtree.
 
 ## Reserved persona sections (templated)
 
