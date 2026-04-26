@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0021p1-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 2](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 ---
 
@@ -72,7 +72,7 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 - [ ] `mypy agents/` clean
 - [ ] No persona-runtime files touched
 - [ ] ROADMAP.md row for RFC 0021 → `🚧 Implementing` on this PR opening
-- [ ] Master Progress Overview row 8 → 🔄 In progress
+- [ ] Master Progress Overview row 3 → 🔄 In progress
 
 ---
 
@@ -124,7 +124,7 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 | `docs/rfcs/0021-persona-temporal-awareness.md` | Phase 1 status → `⚠️ Partially Implemented` (Phases 2–4 remain for v0.4.0). |
 | `ROADMAP.md` | RFC 0021 row → `⚠️ Partially Implemented (Phase 1)`; merged-PR rows. |
 | `docs/rfcs/0021-pr-plan.md` | Checklists complete; merged PR numbers + dates. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 8 → ✅ Merged. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 3 → ✅ Merged. |
 | Code | Apply review follow-ups from PRs 1–2; out-of-scope items file as v0.4.0 follow-up issues. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
@@ -150,6 +150,6 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → ROADMAP RFC 0021 row → `🚧 Implementing`; Master Progress Overview row 8 → 🔄.
+- **PR 1 opens** → ROADMAP RFC 0021 row → `🚧 Implementing`; Master Progress Overview row 3 → 🔄.
 - **Each PR merges** → tick checklist; update merged-PR table.
-- **PR 3 merges** → ROADMAP RFC 0021 row → `⚠️ Partially Implemented`; Master Progress Overview row 8 → ✅.
+- **PR 3 merges** → ROADMAP RFC 0021 row → `⚠️ Partially Implemented`; Master Progress Overview row 3 → ✅.

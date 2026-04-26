@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0020-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 1](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 ---
 
@@ -86,7 +86,7 @@ PR 7 (RFC close)
 - [ ] `mypy agents/` clean
 - [ ] Schema migration shipped behind the existing `EpisodicMemory.initialize()` path
 - [ ] ROADMAP.md row for RFC 0020 → `🚧 Implementing` on this PR opening
-- [ ] Master Progress Overview row 7 → 🔄 In progress
+- [ ] Master Progress Overview row 2 → 🔄 In progress
 
 ---
 
@@ -156,7 +156,7 @@ PR 7 (RFC close)
 
 ### PR 4: `feature/v030-rfc0020-summarize-on-close` — Summarization Hook + Janitor + record_interaction Move
 
-**Depends on**: PR 3, RFC 0008 PR 1 (context-budget foundation — `MemoryFacade.compress` surface).
+**Depends on**: PR 3, RFC 0008 PR 2 (`MemoryFacade.compress` surface; PR 2 transitively brings in PR 1's context-budget foundation).
 **Estimated size**: ~400–500 lines.
 
 #### Scope
@@ -248,7 +248,7 @@ Apply review findings from PRs 1–5 (the "From PR N review" pattern from [RFC 0
 | `docs/rfcs/0020-interaction-lifecycle.md` | Status → `✅ Implemented` |
 | `ROADMAP.md` | RFC 0020 status → `✅ Implemented`; merged-PR rows for PRs 6 and 7. |
 | `docs/rfcs/0020-pr-plan.md` | All checklists complete; merged-PR numbers and dates filled in for every PR. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 7 → ✅ Merged. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 2 → ✅ Merged. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3) — no per-RFC changelog edit.
 
@@ -258,7 +258,7 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3) — no per-RF
 
 | Risk | Mitigation |
 |------|------------|
-| PR 1 schema disagrees with RFC 0008 §D once implementation begins | Cross-link the RFC 0008 PR 1 plan; surface the contract gap during Phase 1 PR review, not at PR 4 land time. Migration is additive — patches do not need a downtime window. |
+| PR 1 schema disagrees with RFC 0008 §D once implementation begins | Cross-link the RFC 0008 plan PR 2 (compression contract owner); surface the contract gap during Phase 1 PR review, not at PR 4 land time. Migration is additive — patches do not need a downtime window. |
 | PR 4 trust-bootstrap recalibration causes silent persona-behavior drift | Migration Notes appendix lists every config knob with before/after values; release notes call out the recalibration explicitly. |
 | PR 5 joint delivery with RFC 0011 P3 slips | Documented divergence path (per-event episodic writes, backfilled in v0.3.x). Both PRs reference each other's PR number to make slippage visible. |
 | Summarization LLM failure rate higher than expected | `interactions.summary.failed` counter + fallback summary text. Operators can monitor; v0.3.x can swap the model selection without touching schema. |
@@ -267,6 +267,6 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3) — no per-RF
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → flip [ROADMAP.md](../../ROADMAP.md) RFC 0020 row to `🚧 Implementing`; flip Master Progress Overview row 7 to 🔄.
+- **PR 1 opens** → flip [ROADMAP.md](../../ROADMAP.md) RFC 0020 row to `🚧 Implementing`; flip Master Progress Overview row 2 to 🔄.
 - **Each PR merges** → tick the corresponding checklist line in this plan; update the merged-PR table in ROADMAP.
-- **PR 7 merges** → flip RFC 0020 row to `✅ Implemented`; flip Master Progress Overview row 7 to ✅.
+- **PR 7 merges** → flip RFC 0020 row to `✅ Implemented`; flip Master Progress Overview row 2 to ✅.

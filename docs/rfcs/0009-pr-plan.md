@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 4](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 > **Status**: 🔨 Scaffold — PR rows have branch names, scopes, and dependency links pinned, but per-PR key-implementation-detail and tests sections are placeholders. Flesh out before the first implementation PR opens.
 
@@ -61,7 +61,7 @@ PR 4 (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 #### PR checklist
 
 - [ ] ROADMAP.md row for RFC 0009 → `🚧 Implementing`
-- [ ] Master Progress Overview row 10 → 🔄 In progress
+- [ ] Master Progress Overview row 5 → 🔄 In progress
 
 ---
 
@@ -120,7 +120,7 @@ PR 4 (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 |------|--------|
 | `docs/rfcs/0009-security-sandboxing.md` | Phases 1–2 status → `⚠️ Partially Implemented` (Phases 3–4 remain for v0.4.0). |
 | `ROADMAP.md` | RFC 0009 row → `⚠️ Partially Implemented (Phases 1–2)`. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 10 → ✅. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 5 → ✅. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
@@ -144,8 +144,8 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → ROADMAP RFC 0009 → `🚧 Implementing`; Master Progress Overview row 10 → 🔄.
-- **PR 4 merges** → ROADMAP RFC 0009 → `⚠️ Partially Implemented`; row 10 → ✅.
+- **PR 1 opens** → ROADMAP RFC 0009 → `🚧 Implementing`; Master Progress Overview row 5 → 🔄.
+- **PR 4 merges** → ROADMAP RFC 0009 → `⚠️ Partially Implemented`; row 5 → ✅.
 
 ---
 

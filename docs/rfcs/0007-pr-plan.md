@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0007-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 6](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 > **Status**: 🔨 Scaffold — PR rows have branch names, scopes, and dependency links pinned, but per-PR key-implementation-detail and tests sections are placeholders. Flesh out before the first implementation PR opens.
 
@@ -65,7 +65,7 @@ PR 5 (Review follow-ups + RFC close)
 #### PR checklist
 
 - [ ] ROADMAP.md row for RFC 0007 → `🚧 Implementing`
-- [ ] Master Progress Overview row 12 → 🔄 In progress
+- [ ] Master Progress Overview row 7 → 🔄 In progress
 
 ---
 
@@ -135,7 +135,7 @@ PR 5 (Review follow-ups + RFC close)
 |------|--------|
 | `docs/rfcs/0007-conditional-looped-workflow-control-flow.md` | Status → `✅ Implemented`. |
 | `ROADMAP.md` | RFC 0007 row → `✅ Implemented`. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 12 → ✅. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 7 → ✅. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
@@ -159,8 +159,8 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → ROADMAP RFC 0007 → `🚧 Implementing`; Master Progress Overview row 12 → 🔄.
-- **PR 5 merges** → ROADMAP RFC 0007 → `✅ Implemented`; row 12 → ✅.
+- **PR 1 opens** → ROADMAP RFC 0007 → `🚧 Implementing`; Master Progress Overview row 7 → 🔄.
+- **PR 5 merges** → ROADMAP RFC 0007 → `✅ Implemented`; row 7 → ✅.
 
 ---
 

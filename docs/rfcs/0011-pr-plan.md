@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0011-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 5](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 > **Status**: 🔨 Scaffold — PR rows have branch names, scopes, and dependency links pinned, but per-PR key-implementation-detail and tests sections are placeholders. Flesh out before the first implementation PR opens.
 
@@ -70,7 +70,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 #### PR checklist
 
 - [ ] ROADMAP.md row for RFC 0011 → `🚧 Implementing`
-- [ ] Master Progress Overview row 11 → 🔄 In progress
+- [ ] Master Progress Overview row 6 → 🔄 In progress
 - [ ] Schema `description` carries the "internal-only until v1.0" disclaimer per [OQ #9 resolution](0011-channels-bridges.md#open-questions)
 
 ---
@@ -197,7 +197,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 |------|--------|
 | `docs/rfcs/0011-channels-bridges.md` | Status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0). |
 | `ROADMAP.md` | RFC 0011 row → `⚠️ Partially Implemented (internal channels)`. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 11 → ✅. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 6 → ✅. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
@@ -221,8 +221,8 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → ROADMAP RFC 0011 → `🚧 Implementing`; Master Progress Overview row 11 → 🔄.
-- **PR 8 merges** → ROADMAP RFC 0011 → `⚠️ Partially Implemented` (external bridges deferred); row 11 → ✅.
+- **PR 1 opens** → ROADMAP RFC 0011 → `🚧 Implementing`; Master Progress Overview row 6 → 🔄.
+- **PR 8 merges** → ROADMAP RFC 0011 → `⚠️ Partially Implemented` (external bridges deferred); row 6 → ✅.
 
 ---
 

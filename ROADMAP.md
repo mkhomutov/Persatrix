@@ -465,19 +465,33 @@ v0.2.3 complete
 v0.3.0 complete (all six RFC scopes delivered: 0007, 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1)
 ```
 
-> **Why RFC 0020 Phase 1 starts immediately, ahead of RFC 0008 §D**: Interactions are the *unit* RFC 0008 will summarize and RFC 0011 will store as channel history. Landing the tracker + schema (Phase 1) first means every multi-turn dialogue is bounded correctly from day one — no per-message episode debt that has to be migrated later. Phase 1 is pure scaffolding (no LLM, no behavior change), so it carries minimal risk and unblocks both RFC 0008's compression pipeline and RFC 0011's memory integration.
+#### Why RFC 0020 Phase 1 starts immediately, ahead of RFC 0008 §D
 
-> **Why RFC 0020 P2 pairs with RFC 0008 §D**: The summarize-on-close hook calls into RFC 0008's compression pipeline. Coordinating delivery avoids an awkward window where RFC 0008 ships per-message summarization that RFC 0020 then has to displace. The interface is small (RFC 0020 emits "interaction closed" events; RFC 0008 §D consumes them as the trigger to compress).
+Interactions are the *unit* RFC 0008 will summarize and RFC 0011 will store as channel history. Landing the tracker + schema (Phase 1) first means every multi-turn dialogue is bounded correctly from day one — no per-message episode debt that has to be migrated later. Phase 1 is pure scaffolding (no LLM, no behavior change), so it carries minimal risk and unblocks both RFC 0008's compression pipeline and RFC 0011's memory integration.
 
-> **Why RFC 0020 P3 is jointly delivered with RFC 0011 P3**: Channels multiply the per-message-episode problem by N participants. Per-channel scoping (DM = pair, thread = thread, group = rolling per-channel-per-agent) must land *with* channel memory integration, not after — otherwise the first cut of channel history would inherit the wrong episode granularity.
+#### Why RFC 0020 P2 pairs with RFC 0008 §D
 
-> **Why RFC 0008 before RFC 0007**: Context budget allocation and per-step memory packaging (RFC 0008) must land before large-scale loop patterns (RFC 0007 implementation). Each loop iteration would otherwise carry unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows.
+The summarize-on-close hook calls into RFC 0008's compression pipeline. Coordinating delivery avoids an awkward window where RFC 0008 ships per-message summarization that RFC 0020 then has to displace. The interface is small (RFC 0020 emits "interaction closed" events; RFC 0008 §D consumes them as the trigger to compress).
 
-> **Why RFC 0007 is parallel to RFC 0011, not a prerequisite**: Conditional workflow branching and channel messaging are independent infrastructure. Channel routing, delivery, and history (RFC 0011 Phases 1–2) have no dependency on condition evaluation or loop constructs. Making RFC 0007 a prerequisite would serialize two workstreams that can safely develop concurrently after RFC 0008 Phase 1 lands. RFC 0011 Phase 3 (memory integration) does depend on RFC 0008 Phase 2.
+#### Why RFC 0020 P3 is jointly delivered with RFC 0011 P3
 
-> **Why RFC 0009 Phases 1–2 run alongside, not before**: Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011/0020 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
+Channels multiply the per-message-episode problem by N participants. Per-channel scoping (DM = pair, thread = thread, group = rolling per-channel-per-agent) must land *with* channel memory integration, not after — otherwise the first cut of channel history would inherit the wrong episode granularity.
 
-> **Why RFC 0021 Phase 1 lands in v0.3.0, with Phases 2–4 deferred to v0.4.0**: Phase 1 is small, self-contained, and high-leverage — a now-anchor in the system prompt and recency-rendered recall make every channel conversation under RFC 0011 carry temporal annotation from day one. Without it, RFC 0011 ships a channel-history experience where agents cannot tell whether a recalled exchange happened minutes or weeks ago. Phase 1 depends only on RFC 0020 Phase 1's `started_at` / `closed_at` columns; no other v0.3.0 RFC blocks or is blocked by it. Phases 2–4 (commitments, REMINDER event, duration calibration) are a coherent forward-memory + estimation surface that pairs naturally with v0.4.0's organizational and skill-registry work — agents that can plan are also agents that can hold roles.
+#### Why RFC 0008 before RFC 0007
+
+Context budget allocation and per-step memory packaging (RFC 0008) must land before large-scale loop patterns (RFC 0007 implementation). Each loop iteration would otherwise carry unbounded prior-step context — the root cause of hallucination risk and token waste in iterative workflows.
+
+#### Why RFC 0007 is parallel to RFC 0011, not a prerequisite
+
+Conditional workflow branching and channel messaging are independent infrastructure. Channel routing, delivery, and history (RFC 0011 Phases 1–2) have no dependency on condition evaluation or loop constructs. Making RFC 0007 a prerequisite would serialize two workstreams that can safely develop concurrently after RFC 0008 Phase 1 lands. RFC 0011 Phase 3 (memory integration) does depend on RFC 0008 Phase 2.
+
+#### Why RFC 0009 Phases 1–2 run alongside, not before
+
+Audit logging and rate limiting are foundational safety infrastructure with no RFC 0007/0011/0020 dependency. They can develop concurrently and are integrated progressively (rate limiting into channel REST endpoints in RFC 0011 Phase 1; input sanitization into channel message storage in Phase 3). Phases 3–4 (identity tokens, HITL gates) are prerequisites for sub-agent spawning and are deferred to v0.4.0.
+
+#### Why RFC 0021 Phase 1 lands in v0.3.0, with Phases 2–4 deferred to v0.4.0
+
+Phase 1 is small, self-contained, and high-leverage — a now-anchor in the system prompt and recency-rendered recall make every channel conversation under RFC 0011 carry temporal annotation from day one. Without it, RFC 0011 ships a channel-history experience where agents cannot tell whether a recalled exchange happened minutes or weeks ago. Phase 1 depends only on RFC 0020 Phase 1's `started_at` / `closed_at` columns; no other v0.3.0 RFC blocks or is blocked by it. Phases 2–4 (commitments, REMINDER event, duration calibration) are a coherent forward-memory + estimation surface that pairs naturally with v0.4.0's organizational and skill-registry work — agents that can plan are also agents that can hold roles.
 
 ### Planned Components (v0.3.0)
 

@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v030-rfc0008-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.0-plan.md Phase 1 step 3](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
+**Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 > **Status**: 🔨 Scaffold — PR rows have branch names, scopes, and dependency links pinned, but per-PR key-implementation-detail and tests sections are placeholders. Flesh out before the first implementation PR opens.
 
@@ -19,10 +19,10 @@ This plan splits the work into **6 PRs**.
 
 > **Estimate calibration**: 1.7× factor per [RFC 0017 PR plan precedent](0017-pr-plan.md#overview).
 
-**Prerequisite**: [RFC 0020 PR plan](0020-pr-plan.md) PR 1 merged (the `MemoryFacade.compress` hook in PR 4 of this plan pairs with RFC 0020 PR 4's summarize-on-close path). RFC 0006 Phase 1 already shipped in v0.2.0.
+**Prerequisite**: [RFC 0020 PR plan](0020-pr-plan.md) PR 1 merged (the `MemoryFacade.compress` hook in PR 2 of this plan pairs with RFC 0020 PR 4's summarize-on-close path). RFC 0006 Phase 1 already shipped in v0.2.0.
 
 **Cross-RFC sequencing**:
-- PR 1 of this plan must merge before [RFC 0007 PR plan](0007-pr-plan.md) PR 1 opens — control-flow loops require per-step context-budget allocation.
+- PR 1 of this plan must merge before [RFC 0007 PR plan](0007-pr-plan.md) PR 3 opens — `repeat_until` loop budget integration requires per-step context-budget allocation.
 - PR 2 (`MemoryFacade` for task agents) must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (Phase 3) opens.
 
 ---
@@ -67,7 +67,7 @@ PR 6 (Review follow-ups + RFC close)
 #### PR checklist
 
 - [ ] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
-- [ ] Master Progress Overview row 9 → 🔄 In progress
+- [ ] Master Progress Overview row 4 → 🔄 In progress
 
 ---
 
@@ -148,7 +148,7 @@ PR 6 (Review follow-ups + RFC close)
 |------|--------|
 | `docs/rfcs/0008-agent-memory-context-optimization.md` | Status → `✅ Implemented`. |
 | `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 9 → ✅. |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
 
 ---
 
@@ -164,8 +164,8 @@ PR 6 (Review follow-ups + RFC close)
 
 ## ROADMAP Hygiene
 
-- **PR 1 opens** → ROADMAP RFC 0008 → `🚧 Implementing`; Master Progress Overview row 9 → 🔄.
-- **PR 6 merges** → ROADMAP RFC 0008 → `✅ Implemented`; row 9 → ✅.
+- **PR 1 opens** → ROADMAP RFC 0008 → `🚧 Implementing`; Master Progress Overview row 4 → 🔄.
+- **PR 6 merges** → ROADMAP RFC 0008 → `✅ Implemented`; row 4 → ✅.
 
 ---
 
