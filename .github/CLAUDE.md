@@ -1,41 +1,37 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
+
+## Response Style
+
+Be brief by default. Expand only when asked.
+
+- **Answer first**, background second.
+- Routine answers: ≤8 lines. Code explanations: ≤3 bullets + 1 example.
+- Reviews: list findings; skip long recap.
+- Do not restate the prompt, repeat unchanged context, or add preambles.
+- Ask at most one clarifying question; prefer acting on the most reasonable interpretation.
+- Status updates: 1–2 sentences.
+- Never add `Co-Authored-By: Claude` trailers or Claude attribution in PRs/commits.
 
 ## What is Persatrix
 
-An agent society engine — a runtime for creating, connecting, and observing groups of AI agents via organizational structures. Polyglot: **Go** orchestrator, **Python** agent runtime, **Rust** CLI, connected by **protobuf/gRPC**.
+Polyglot AI agent orchestration: **Go** orchestrator, **Python** agent runtime, **Rust** CLI, connected by protobuf/gRPC. DAG-based YAML workflows with Jinja2-like templating.
 
-## Build & Test Commands
+## Build & Test
 
-All commands are in the Makefile. Prefer Make targets over raw commands.
-
-```bash
-make all                    # proto + build (orchestrator + CLI)
-make build-agents           # pip install -e ".[dev]" in agents/
-make test                   # all suites (Go + Python + integration)
-make lint                   # all linters (golangci-lint, ruff + mypy, clippy)
-make validate               # YAML configs against JSON schemas
-make run                    # build + run orchestrator
-make run-agent AGENT=coder  # run a specific Python agent
-```
-
-### Running individual tests
+All commands are in the Makefile. Prefer Make targets.
 
 ```bash
-# Single Go test
-go test ./internal/planner -v -run TestPlannerParseWorkflow
-
-# Single Python test
-python3 -m pytest tests/unit/python/test_agents.py::test_agent_init -v
-
-# Integration tests
-python3 -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
+make all            # proto + full build
+make build-agents   # pip install -e ".[dev]"
+make test           # all suites (Go + Python + integration)
+make lint           # golangci-lint + ruff + mypy + clippy
+make validate       # YAML configs against JSON schemas
+make proto          # regenerate gRPC stubs after proto changes
 ```
 
-### Protobuf regeneration
-
-After modifying `proto/*.proto`, run `make proto` to regenerate stubs into `internal/generated/` (Go) and `agents/generated/` (Python). Never edit generated files directly.
+Detailed test invocations: `go test ./internal/planner -v -run TestName`, `python3 -m pytest tests/unit/python/test_agents.py::test_name -v`.
 
 ## Architecture
 
@@ -47,76 +43,42 @@ CLI (Rust)  <--REST-->  Orchestrator (Go)  <--gRPC-->  Agents (Python)
                                                           tools/
 ```
 
-**Component boundaries are strict:**
-- **Go orchestrator** (`internal/`): workflow planning, scheduling, agent registry, state, cost, telemetry, security. No LLM logic.
-- **Python agents** (`agents/`): LLM interaction, tool execution, persona behavior, memory, sub-agent spawning. Each agent is a gRPC service.
-- **Rust CLI** (`cli/`): thin REST client to orchestrator. All business logic is server-side.
-- **Protobuf** (`proto/`): cross-language gRPC contract. Changes require RFC review.
+Component boundaries:
+- **Go orchestrator** (`internal/`): scheduling, registry, security, cost, telemetry. No LLM logic.
+- **Python agents** (`agents/`): LLM calls, tools, persona behavior, memory, sub-agent spawning.
+- **Rust CLI** (`cli/`): thin REST client; all business logic is server-side.
+- **Protos** (`proto/`): cross-language gRPC contract — changes require RFC review.
 
-### Workflow execution flow
+Phased stubs: many `internal/` packages are intentional TODO stubs. Do not remove them.
 
-YAML workflow -> `YAMLPlanner` parses DAG + validates (cycle detection) -> topological sort into stages -> `Scheduler` drives parallel stage execution -> `Executor` dispatches to agents via gRPC -> agents call LLMs/tools -> results flow back. Step outputs use `{{ steps.step_id.output }}` Jinja2-like templating.
-
-### Key Go packages
-
-`internal/planner/` (YAML parsing, DAG validation), `internal/scheduler/` (run driver), `internal/executor/` (gRPC dispatch + retry), `internal/registry/` (agent lookup), `internal/state/` (workflow run tracking), `internal/server/` (REST API + SSE).
-
-### Key Python modules
-
-`agents/base.py` (BaseAgent ABC), `agents/persona.py` + `agents/persona_runtime.py` (persona agents with event-driven LLM execution), `agents/llm_client.py` (Anthropic + OpenAI), `agents/server.py` (gRPC servicer), `agents/memory/` (episodic/relationship/working), `agents/tools/` (registry, builtin, permissions, sandbox).
-
-### Python package mapping
-
-The `agents/` directory maps to `persatrix_agents` import path (configured in `agents/pyproject.toml` via `tool.setuptools.package-dir`). Run Python agents with `python -m persatrix_agents.server`.
-
-## Phased Development
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| v0.1 | Core engine: workflows, task agents, tools, MCP | Complete |
-| v0.2 | Agent societies: personas, memory, channels, bridges | In progress |
-| v0.3 | Distributed mesh: multi-node, A2A protocol | Planned |
-
-Many `internal/` packages are **intentional TODO stubs** for their target phase. Do not remove TODO placeholders — implement them when the phase is active.
+Key Go packages: `internal/planner/`, `internal/scheduler/`, `internal/executor/`, `internal/registry/`, `internal/state/`, `internal/server/`.  
+Key Python modules: `agents/base.py`, `agents/persona.py`, `agents/llm_client.py`, `agents/server.py`, `agents/memory/`, `agents/tools/`.  
+Python import path: `persatrix_agents` (via `agents/pyproject.toml`). Run with `python -m persatrix_agents.server`.
 
 ## Code Conventions
 
-### Go
-- Structured logging: `go.uber.org/zap` with structured fields, never `fmt.Sprintf` for logs
-- Testing: `github.com/stretchr/testify`, always run with `-race`
-- Error wrapping: `fmt.Errorf("context: %w", err)`
+Language-specific rules are in `.github/instructions/`. Cross-cutting:
 
-### Python
-- Type hints required (mypy enforced). Use `X | None` not `Optional[X]`, `dict[str, Any]` not `Dict[str, Any]`
-- Async-first: all agent methods are `async def`
-- Ruff linter: line-length 100, excludes `generated/`. Server methods use PascalCase per proto contract (N802 suppressed)
-- pytest with `asyncio_mode = "auto"` (configured in `agents/pyproject.toml`)
-- Platform: check `sys.platform != "win32"` before `loop.add_signal_handler()`
+- **Agent IDs:** `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
+- **Persona names:** nickname-style, not human-like (e.g. `ember-owl`). Use `make generate-persona-nickname COUNT=5`.
+- **Permissions:** deny-by-default. Whitelist in `config/agents.yaml`.
+- **Config YAML:** always run `make validate` after editing. Schemas in `schemas/`.
+- **Commits:** Conventional Commits (`feat:`, `fix:`, `refactor:`, …). PRs < 500 lines, squash-merge to `main`.
 
-### Rust
-- `clap` v4 derive macros. Exhaustive `match` on command enums — no catch-all `_`
-- `tokio` async runtime
-
-### Cross-cutting
-- Agent IDs: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
-- Persona names/IDs should be nickname-style, not human-like names (avoid first-name + last-name examples)
-- Use `make generate-persona-nickname COUNT=5` (or `python scripts/persona_nickname_generator.py`) to generate persona examples/test fixtures
-- Permissions are deny-by-default. Whitelist in `config/agents.yaml`
-- Always run `make validate` after editing YAML configs
-- Commit messages: Conventional Commits (`feat:`, `fix:`, `refactor:`, etc.)
-- PRs < 500 lines, squash merge to `main`, trunk-based branching
-- Never add Claude as author or co-author to any commit or PR (no `Co-Authored-By: Claude` trailers, no Claude attribution in PR descriptions)
+Go: `go.uber.org/zap` structured logging; `testify` with `-race`; `fmt.Errorf("ctx: %w", err)`.  
+Python: `X | None` types; `async def`; ruff line-length 100; `asyncio_mode = "auto"`; guard `loop.add_signal_handler()` on `sys.platform != "win32"`.  
+Rust: `clap` v4 derive; exhaustive `match` (no `_`); `tokio`.
 
 ## Status Hygiene
 
-When completing work, update ROADMAP.md (merged PR table, component status, RFC status). Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene) — verify consistency across RFC files, PR plans, and ROADMAP before and after every task.
+Before and after every task, verify consistency across RFC files, PR plans, and ROADMAP.md. Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene).
 
-## Documentation Pointers
+PR review reports (`docs/pr-reviews/`) are local-only — never reference them in committed documents.
 
-- Architecture details: `.github/copilot-instructions.md`
+## Documentation
+
+- Architecture: `.github/copilot-instructions.md`
 - Development lifecycle: `docs/development-workflow.md`
 - Branching: `docs/BRANCHING.md`
 - RFC process: `docs/rfcs/README.md`
 - Specs: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`
-
-PR review reports (`docs/pr-reviews/`) are local-only artifacts — never reference them in committed documents.
