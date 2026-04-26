@@ -36,12 +36,12 @@ the runtime.
 
 ## Ownership boundaries
 
-| Location                          | Loaded by                                      | Owner              |
-| --------------------------------- | ---------------------------------------------- | ------------------ |
-| `prompts/runtime/task-agents/`    | `agents.prompt_loader` via `load_agent`        | Agent runtime team |
-| `prompts/runtime/persona/sections/` | (reserved — see migration rules)             | Agent runtime team |
-| `prompts/runtime/safety/`         | (reserved — see migration rules)               | Security team      |
-| `.github/prompts/`                | Copilot / human authors                        | Docs team          |
+| Location                          | Loaded by                                              | Owner              |
+| --------------------------------- | ------------------------------------------------------ | ------------------ |
+| `prompts/runtime/task-agents/`    | `agents.prompt_loader.resolve_instructions` via `load_agent` | Agent runtime team |
+| `prompts/runtime/persona/sections/` | `agents.prompt_loader.load_dimension_descriptions` (currently); future templated sections (RFC pending) | Agent runtime team |
+| `prompts/runtime/safety/`         | `agents.prompt_loader.load_snippet`                    | Security team      |
+| `.github/prompts/`                | Copilot / human authors                                | Docs team          |
 
 ## Task-agent instructions
 
@@ -125,12 +125,39 @@ When adding a new safety snippet:
    [`tests/unit/python/test_prompt_loader.py`](../tests/unit/python/test_prompt_loader.py)
    under `TestShippedSnippetsByteIdentity`.
 
-When adding a persona section, **do not** wire it into the runtime as
-part of the same PR — `agents/persona_runtime/prompt_assembly.py` still
-assembles the bulk of the persona system prompt inline. File new
-section files under `prompts/runtime/persona/sections/` and propose an
-RFC for the templating syntax (see PR C in the prompt-externalization
-follow-up plan).
+## Persona behavioral-dimension descriptions
+
+`prompts/runtime/persona/sections/behavior-dimensions.yaml` holds the
+natural-language descriptions for each persona behavioral dimension /
+value pair. It loads via
+[`agents.prompt_loader.load_dimension_descriptions`](../agents/prompt_loader.py),
+which structurally checks the YAML (outer dict keyed by dimension,
+inner dict keyed by value, all leaves strings) and caches the parse so
+`render_behavior` stays off the filesystem on hot paths.
+
+The set of dimensions and per-dimension defaults remain in code in
+[`agents/persona_behavior.py`](../agents/persona_behavior.py)
+(`_DIMENSION_DEFAULTS`) because they encode invariants the runtime
+relies on. An import-time check catches drift between the YAML and the
+defaults so a renamed/added dimension or value cannot silently produce
+a degraded persona prompt.
+
+A bytes-identical regression guard in
+[`tests/unit/python/test_prompt_loader.py`](../tests/unit/python/test_prompt_loader.py)
+(`TestShippedDimensionDescriptionsByteIdentity`) pins every shipped
+description so edits go through review rather than slipping in via a
+stray YAML change.
+
+## Reserved persona sections (templated)
+
+The remainder of the persona system prompt (identity, background,
+goals, current-state) is still assembled inline in
+[`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py).
+When adding a templated persona section, **do not** wire it into the
+runtime as part of the same PR. File new section files under
+`prompts/runtime/persona/sections/` and propose an RFC for the
+templating syntax (see PR C in the prompt-externalization follow-up
+plan).
 
 ## Backward compatibility
 

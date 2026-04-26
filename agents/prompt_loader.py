@@ -1,6 +1,6 @@
 """Resolve task-agent instructions and safety snippets from prompt files.
 
-Two related surfaces live here:
+Three related surfaces live here:
 
 * ``resolve_instructions`` — task-agent ``instructions_file`` resolution.
   Loads markdown referenced from ``config/agents.yaml`` before agent
@@ -8,16 +8,23 @@ Two related surfaces live here:
 * ``load_snippet`` — short safety/behavior fragments loaded by the
   runtime itself (persona system prompt, episodic summarizer system
   prompt, auto-reflection nudge).  Cached so hot paths read once.
+* ``load_dimension_descriptions`` — structured persona behavioral-
+  dimension descriptions loaded from
+  ``prompts/runtime/persona/sections/behavior-dimensions.yaml``.
+  Cached and shape-checked.
 
 Security
 --------
-Both functions enforce the same deny-by-default rule: candidate paths
-must resolve under ``<repo_root>/prompts/``.  Anything outside —
+All three functions enforce the same deny-by-default rule: candidate
+paths must resolve under ``<repo_root>/prompts/``.  Anything outside —
 including ``..`` traversals, absolute paths, and symlink targets — is
 rejected.  ``load_snippet`` further restricts resolution to the
 ``prompts/runtime/safety/`` subtree and forbids path separators in the
 snippet name so a caller cannot reach sibling subtrees by passing
-``"../task-agents/planner"``.
+``"../task-agents/planner"``.  ``load_dimension_descriptions`` reads a
+single fixed file inside ``prompts/runtime/persona/sections/`` and
+takes no caller-controlled name, so the path-traversal surface is
+empty by construction.
 """
 
 from __future__ import annotations
@@ -26,6 +33,8 @@ import functools
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 # Subtree under which prompt files may live.  Paths in ``instructions_file``
 # resolve relative to ``<repo_root>`` and must stay inside this subtree.
 _PROMPTS_SUBDIR = "prompts"
@@ -33,6 +42,13 @@ _PROMPTS_SUBDIR = "prompts"
 # Subtree confined to safety/behavior snippets.  ``load_snippet`` resolves
 # names relative to ``<repo_root>/<_SAFETY_SUBDIR>``.
 _SAFETY_SUBDIR = Path("prompts") / "runtime" / "safety"
+
+# Fixed path to the behavioral-dimension descriptions YAML.  Hard-coded
+# (not caller-supplied) because there is exactly one such file and the
+# loader's structural shape check is tied to it.
+_BEHAVIOR_DIMENSIONS_PATH = (
+    Path("prompts") / "runtime" / "persona" / "sections" / "behavior-dimensions.yaml"
+)
 
 
 class PromptLoadError(Exception):
@@ -166,3 +182,88 @@ def load_snippet(name: str, repo_root: Path | None = None) -> str:
     root = Path(repo_root) if repo_root is not None else _default_repo_root()
     safety_root = (root / _SAFETY_SUBDIR).resolve()
     return _read_snippet(name, safety_root)
+
+
+# ─── Persona behavioral-dimension descriptions ───────────────
+
+
+@functools.lru_cache(maxsize=8)
+def _read_dimension_descriptions(path: Path) -> dict[str, dict[str, str]]:
+    """Read and shape-check the behavior-dimensions YAML at ``path``.
+
+    Cached because ``render_behavior`` is called for every persona
+    system-prompt assembly.  Cache key is the resolved path, so test
+    fixtures with distinct ``tmp_path`` roots don't collide with
+    each other or with the production root.
+
+    The YAML must be an outer dict keyed by dimension, each value
+    itself a dict keyed by value, with all leaves being strings.
+    Any deviation raises :class:`PromptLoadError` so a malformed
+    file fails loudly at import time rather than silently producing
+    a degraded persona prompt.
+    """
+    if not path.is_file():
+        raise PromptLoadError(
+            f"Behavior-dimension descriptions not found at {path}"
+        )
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise PromptLoadError(
+            f"Behavior-dimension descriptions at {path} are not valid YAML: {exc}"
+        ) from exc
+
+    if not isinstance(raw, dict):
+        raise PromptLoadError(
+            f"Behavior-dimension descriptions at {path} must be a mapping, "
+            f"got {type(raw).__name__}"
+        )
+
+    for dimension, values in raw.items():
+        if not isinstance(dimension, str):
+            raise PromptLoadError(
+                f"Behavior-dimension key {dimension!r} at {path} must be a "
+                f"string, got {type(dimension).__name__}"
+            )
+        if not isinstance(values, dict):
+            raise PromptLoadError(
+                f"Behavior-dimension {dimension!r} at {path} must map to a "
+                f"dict of value→description, got {type(values).__name__}"
+            )
+        for value, desc in values.items():
+            if not isinstance(value, str):
+                raise PromptLoadError(
+                    f"Value key {value!r} under dimension {dimension!r} at "
+                    f"{path} must be a string, got {type(value).__name__}"
+                )
+            if not isinstance(desc, str):
+                raise PromptLoadError(
+                    f"Description for {dimension!r}/{value!r} at {path} must "
+                    f"be a string, got {type(desc).__name__}"
+                )
+
+    return raw
+
+
+def load_dimension_descriptions(
+    repo_root: Path | None = None,
+) -> dict[str, dict[str, str]]:
+    """Load persona behavioral-dimension descriptions.
+
+    Reads
+    ``<repo_root>/prompts/runtime/persona/sections/behavior-dimensions.yaml``
+    and returns the parsed structure: an outer dict keyed by dimension
+    name, mapping to an inner dict keyed by value, with string
+    descriptions as leaves.
+
+    The path is fixed (not caller-supplied) so there is no traversal
+    surface — tests vary the layout via ``repo_root`` only.
+
+    Raises :class:`PromptLoadError` if the file is missing, not valid
+    YAML, or does not match the expected ``dict[str, dict[str, str]]``
+    shape.
+    """
+    root = Path(repo_root) if repo_root is not None else _default_repo_root()
+    path = (root / _BEHAVIOR_DIMENSIONS_PATH).resolve()
+    return _read_dimension_descriptions(path)

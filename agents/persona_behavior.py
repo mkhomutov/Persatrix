@@ -3,90 +3,33 @@ Persatrix Persona Behavioral Dimensions.
 
 Structured behavior dimension descriptions and rendering for LLM prompts.
 Extracted from ``persona.py`` for modularity — no logic changes.
+
+The ``DIMENSION_DESCRIPTIONS`` content is sourced from
+``prompts/runtime/persona/sections/behavior-dimensions.yaml`` via
+``agents.prompt_loader.load_dimension_descriptions``.  The Python
+module retains the ``_DIMENSION_DEFAULTS`` table and the import-time
+consistency check because those encode invariants (which dimensions
+the persona system supports, and what the middle value of each is),
+not content.
 """
 
 from __future__ import annotations
 
 import logging
 
+from .prompt_loader import load_dimension_descriptions
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["DIMENSION_DESCRIPTIONS", "render_behavior"]
 
 
-DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = {
-    "directness": {
-        "indirect": (
-            "Diplomatic and tactful. Softens criticism, asks questions"
-            " instead of stating objections directly."
-        ),
-        "balanced": (
-            "Balances directness with tact. States positions clearly"
-            " but frames feedback constructively."
-        ),
-        "direct": (
-            "Says exactly what they think."
-            " Doesn't sugarcoat feedback or hedge opinions."
-        ),
-    },
-    "detail_focus": {
-        "big-picture": (
-            "Focuses on high-level patterns and architecture."
-            " Skips minutiae to keep discussions strategic."
-        ),
-        "balanced": (
-            "Addresses both high-level concerns and"
-            " specific details as needed."
-        ),
-        "detail-focused": (
-            "Thorough and meticulous. Flags edge cases,"
-            " checks specifics, prefers exhaustive analysis."
-        ),
-    },
-    "formality": {
-        "casual": (
-            "Informal and approachable. Uses humor,"
-            " contractions, and conversational language."
-        ),
-        "professional": (
-            "Clear and structured. Uses professional"
-            " language without being stiff."
-        ),
-        "formal": (
-            "Precise and formal. Uses structured reports,"
-            " proper titles, and measured language."
-        ),
-    },
-    "risk_tolerance": {
-        "cautious": (
-            "Wants thorough analysis before decisions."
-            " Asks for more data. Flags risks others might overlook."
-        ),
-        "moderate": (
-            "Balances speed with diligence."
-            " Comfortable with reasonable assumptions."
-        ),
-        "bold": (
-            "Willing to make calls with incomplete information"
-            " and course-correct. Bias toward action."
-        ),
-    },
-    "expressiveness": {
-        "reserved": (
-            "Keeps emotions out of professional communication."
-            " Focuses on facts and logic."
-        ),
-        "moderate": (
-            "Acknowledges emotions when relevant"
-            " but keeps focus on substance."
-        ),
-        "expressive": (
-            "Openly shares reactions and feelings. Communication"
-            " is warm, enthusiastic, or frustrated as the"
-            " situation warrants."
-        ),
-    },
-}
+# Loaded once at import time from
+# ``prompts/runtime/persona/sections/behavior-dimensions.yaml``.  The
+# loader caches the parse, so re-reading via ``load_dimension_descriptions``
+# from other call sites is cheap.  Re-exposed as a module-level name to
+# preserve the public API previously offered by this module.
+DIMENSION_DESCRIPTIONS: dict[str, dict[str, str]] = load_dimension_descriptions()
 
 # Default middle value for each dimension when not specified.
 _DIMENSION_DEFAULTS: dict[str, str] = {
@@ -100,9 +43,11 @@ _DIMENSION_DEFAULTS: dict[str, str] = {
 # Invariant: every key in _DIMENSION_DEFAULTS must also appear in
 # DIMENSION_DESCRIPTIONS (so render_behavior() can look up descriptions),
 # and vice versa (so defaults are available for every documented dimension).
-# Caught at import time: if a future dimension is added to one dict and not
-# the other, the mismatch surfaces immediately rather than silently producing
-# incomplete behavioral prompts.
+# Caught at import time: if a future dimension is added to one source and
+# not the other, the mismatch surfaces immediately rather than silently
+# producing incomplete behavioral prompts.  Now that DIMENSION_DESCRIPTIONS
+# lives in YAML, this also catches a YAML edit that adds/removes a
+# dimension without the matching code update.
 # Uses if/raise instead of assert because assert is stripped by python -O,
 # which would silently disable this guard in optimized production deployments.
 # (PR review: no guard against _DIMENSION_DEFAULTS/DIMENSION_DESCRIPTIONS key drift.)
@@ -112,6 +57,19 @@ if set(_DIMENSION_DEFAULTS) != set(DIMENSION_DESCRIPTIONS):
         f"_DIMENSION_DEFAULTS keys {set(_DIMENSION_DEFAULTS)} do not match "
         f"DIMENSION_DESCRIPTIONS keys {set(DIMENSION_DESCRIPTIONS)}"
     )
+
+# Invariant: every default value must be a valid value for its dimension.
+# Catches a YAML edit that renames the middle value of a dimension (e.g.
+# "balanced" → "neutral") without the matching ``_DIMENSION_DEFAULTS``
+# update — otherwise ``render_behavior({})`` would silently produce no
+# line for that dimension.
+for _dim, _default_value in _DIMENSION_DEFAULTS.items():
+    if _default_value not in DIMENSION_DESCRIPTIONS[_dim]:
+        raise RuntimeError(
+            f"Default value {_default_value!r} for dimension {_dim!r} is not "
+            f"a known value (valid: "
+            f"{sorted(DIMENSION_DESCRIPTIONS[_dim])})"
+        )
 
 
 def render_behavior(behavior: dict[str, str]) -> str:

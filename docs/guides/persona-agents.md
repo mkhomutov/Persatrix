@@ -126,7 +126,9 @@ make run-agent AGENT=ember-owl
 structured prompt fragments at event time
 ([agents/persona_behavior.py](../../agents/persona_behavior.py)). Valid
 values for each dimension are enumerated in
-[schemas/agent.schema.json:142–203](../../schemas/agent.schema.json#L142-L203).
+[schemas/agent.schema.json:142–203](../../schemas/agent.schema.json#L142-L203);
+the natural-language descriptions rendered into the prompt live in
+[prompts/runtime/persona/sections/behavior-dimensions.yaml](../../prompts/runtime/persona/sections/behavior-dimensions.yaml).
 
 **`autonomy`** controls the tick loop. Only three of the five enum levels are
 wired today — `passive`, `reactive`, and `semi-autonomous`. `autonomous` and
