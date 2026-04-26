@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from ..prompt_loader import load_snippet
 from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, get_tool, tool
 from .sandbox import PathValidator
@@ -462,9 +463,5 @@ async def check_auto_reflect(
     count = await memory.increment_interaction_count()
     if count >= auto_reflect_after:
         await memory.reset_interaction_count()
-        return (
-            "You have processed several interactions since your last reflection. "
-            "Consider using store_note to record any new insights, patterns, or "
-            "important context you've observed."
-        )
+        return load_snippet("reflection-nudge")
     return None

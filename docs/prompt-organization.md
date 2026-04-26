@@ -79,6 +79,29 @@ directory (`Path(__file__).parent.parent` from
 of where `--config` points; operators with non-default layouts can
 pass an explicit `repo_root` through `load_agent`.
 
+## Safety / behavior snippets
+
+Short fragments loaded by the runtime itself (not via `agents.yaml`) live
+under `prompts/runtime/safety/` and load through
+[`agents.prompt_loader.load_snippet`](../agents/prompt_loader.py).
+Currently shipped:
+
+| File                          | Loaded by                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `user-message-delimiters.md`  | [`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py)       |
+| `memory-tool-usage.md`        | [`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py)       |
+| `reflection-nudge.md`         | [`agents/tools/builtin.py`](../agents/tools/builtin.py)                                           |
+| `episode-summarizer.md`       | [`agents/memory/episodic_retention.py`](../agents/memory/episodic_retention.py)                   |
+
+`load_snippet(name)` enforces the same deny-by-default posture as
+`resolve_instructions`: paths must resolve under
+`prompts/runtime/safety/`, path separators in `name` are rejected so a
+caller cannot escape into sibling subtrees, and a single trailing
+newline is stripped on load so the editor's final-newline convention
+doesn't drift the bytes the runtime sees from what was previously
+inlined in source. Reads are cached because every persona system-prompt
+assembly, auto-reflect tick, and episodic summarization hits the loader.
+
 ## Migration rules
 
 When adding or moving a task-agent prompt:
@@ -93,11 +116,21 @@ When adding or moving a task-agent prompt:
    tests/unit/python/test_server_load_agent.py
    tests/unit/python/test_validate_agent_schema.py -v`.
 
-When adding a persona section or safety snippet, **do not** wire it into the
-runtime as part of the same PR — those subsystems still assemble their
-prompts inline (see [`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py)).
-File new directories under `prompts/runtime/persona/sections/` or
-`prompts/runtime/safety/` and propose an RFC for the externalization.
+When adding a new safety snippet:
+
+1. Place the markdown file under `prompts/runtime/safety/<name>.md`.
+2. Call `load_snippet("<name>")` from the runtime call site that
+   previously held the inlined string.
+3. Add a bytes-identical regression test in
+   [`tests/unit/python/test_prompt_loader.py`](../tests/unit/python/test_prompt_loader.py)
+   under `TestShippedSnippetsByteIdentity`.
+
+When adding a persona section, **do not** wire it into the runtime as
+part of the same PR — `agents/persona_runtime/prompt_assembly.py` still
+assembles the bulk of the persona system prompt inline. File new
+section files under `prompts/runtime/persona/sections/` and propose an
+RFC for the templating syntax (see PR C in the prompt-externalization
+follow-up plan).
 
 ## Backward compatibility
 
