@@ -133,6 +133,8 @@ notices-check: ## Fail if THIRD_PARTY_NOTICES.md is stale relative to current de
 validate: ## Validate all YAML configs against JSON schemas
 	@echo "→ Validating configuration..."
 	$(PYTHON) agents/validate.py config/
+	@echo "→ Checking instructions_file references resolve..."
+	$(PYTHON) scripts/checks/prompt_refs.py
 	@echo "✓ All configs valid"
 
 # ─── Docker ─────────────────────────────────────────────

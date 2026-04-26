@@ -160,28 +160,9 @@ class TestValidTaskAgent:
             str(config_dir), str(schemas_dir), str(workflow_dir)
         )
 
-    def test_task_agent_with_instructions_file_passes(
-        self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
-    ) -> None:
-        """A task agent that uses ``instructions_file`` instead of ``instructions``
-        must pass schema validation — the schema accepts either field."""
-        data = {
-            "schema_version": "0.2",
-            "agents": [
-                {
-                    "id": "planner",
-                    "type": "task",
-                    "name": "Planner",
-                    "role": "Plans things",
-                    "model": "claude-sonnet-4-20250514",
-                    "instructions_file": "prompts/runtime/task-agents/planner.md",
-                }
-            ],
-        }
-        _write_agents_yaml(config_dir, data)
-        assert _validate_passes(
-            str(config_dir), str(schemas_dir), str(workflow_dir)
-        )
+    # instructions_file schema constraints (positive and negative) are
+    # covered in test_validate_agent_schema_instructions_file.py (split
+    # for the 500-line policy).
 
     def test_v01_agent_without_type_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path

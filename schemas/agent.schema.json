@@ -40,7 +40,8 @@
         },
         "instructions_file": {
           "type": "string",
-          "description": "Repo-root-relative path to a markdown file containing system prompt instructions. Must live under prompts/. Mutually exclusive with 'instructions'."
+          "pattern": "^prompts/",
+          "description": "Repo-root-relative path to a markdown file containing system prompt instructions. Must live under prompts/. Mutually exclusive with 'instructions'. The pattern enforces the prompts/ subtree at validate time as defense-in-depth; the runtime loader (agents.prompt_loader) is the authoritative deny-by-default control."
         },
         "temperature": {
           "type": "number", "minimum": 0, "maximum": 2, "default": 0.3
@@ -85,16 +86,24 @@
             "required": ["persona"],
             "properties": {
               "persona": { "$ref": "#/definitions/persona" }
+            },
+            "$comment": "Persona agents must not declare task-agent prompt fields. Both 'instructions' and 'instructions_file' are silently ignored by create_persona_agent, which makes them an operator footgun; rejecting at validate time surfaces the misconfiguration before runtime.",
+            "not": {
+              "anyOf": [
+                { "required": ["instructions"] },
+                { "required": ["instructions_file"] }
+              ]
             }
           }
         },
         {
+          "$comment": "Task agents must declare exactly one of 'instructions' or 'instructions_file'. 'oneOf' (rather than 'anyOf') catches the both-fields-set conflict at validate time; the runtime loader still enforces the same rule as defense-in-depth.",
           "if": {
             "properties": { "type": { "const": "task" } },
             "required": ["type"]
           },
           "then": {
-            "anyOf": [
+            "oneOf": [
               { "required": ["instructions"] },
               { "required": ["instructions_file"] }
             ]

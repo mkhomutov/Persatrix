@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -109,4 +110,31 @@ class TestPathSafety:
     def test_directory_ref_rejected(self, repo_root: Path) -> None:
         cfg = {"id": "x", "instructions_file": "prompts/runtime/task-agents"}
         with pytest.raises(PromptLoadError, match="not found"):
+            resolve_instructions(cfg, repo_root)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation requires admin/dev-mode on Windows",
+    )
+    def test_symlink_pointing_outside_prompts_rejected(
+        self, repo_root: Path, tmp_path: Path
+    ) -> None:
+        """A symlink inside prompts/ that targets a file outside the subtree
+        must be rejected.
+
+        The deny-by-default check uses ``Path.resolve()``, which collapses
+        symlinks before the ``relative_to(prompts_root)`` check.  A regression
+        that swapped to ``os.path.abspath`` (which does not follow symlinks)
+        would silently allow this path through.  Pinned here so the resolver
+        choice is locked.
+        """
+        target = tmp_path / "outside.md"
+        target.write_text("nope", encoding="utf-8")
+        link = repo_root / "prompts" / "runtime" / "task-agents" / "x.md"
+        link.symlink_to(target)
+        cfg = {
+            "id": "x",
+            "instructions_file": "prompts/runtime/task-agents/x.md",
+        }
+        with pytest.raises(PromptLoadError, match="outside"):
             resolve_instructions(cfg, repo_root)

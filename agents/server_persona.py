@@ -72,11 +72,24 @@ def _resolve_agent_type(agent_config: dict[str, Any]) -> str:
 # ─── Agent loading ───────────────────────────────────────────
 
 
-def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
+def load_agent(
+    agent_id: str,
+    config_path: str,
+    workspace: str,
+    repo_root: str | Path | None = None,
+) -> BaseAgent:
     """Load an agent by ID from YAML config.
 
     Returns a fully-initialized BaseAgent with LLM client, tools, and
     permission configuration wired.
+
+    ``repo_root`` is the anchor used to resolve ``instructions_file``
+    references against the ``prompts/`` subtree.  When omitted, it
+    defaults to this package's parent directory (``Path(__file__).parent.parent``),
+    which matches the source-tree convention used by sibling tooling
+    (e.g. ``scripts/checks/doc_links.py``).  Operators can override
+    explicitly when running from a non-default layout, and tests inject
+    a fixtured root.
     """
     if not _AGENT_ID_PATTERN.match(agent_id):
         raise SystemExit(
@@ -136,9 +149,18 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
     # field before constructing the agent.  This keeps TaskAgent runtime
     # purely data-driven — it never touches the filesystem.
     if agent_type == "task" and "instructions_file" in agent_config:
-        repo_root = Path(config_path).resolve().parent.parent
+        # Default the anchor to this package's parent (the repo root in the
+        # source tree) rather than deriving it from ``config_path``.  The
+        # config-path-relative derivation silently mis-resolved the prompts/
+        # subtree whenever an operator pointed --config at a non-default
+        # layout (e.g. /etc/persatrix/agents.yaml).  The kwarg above allows
+        # an explicit override for tests and unusual layouts.
+        resolved_root: Path = (
+            Path(repo_root) if repo_root is not None
+            else Path(__file__).resolve().parent.parent
+        )
         try:
-            resolved = resolve_instructions(agent_config, repo_root)
+            resolved = resolve_instructions(agent_config, resolved_root)
         except PromptLoadError as exc:
             raise SystemExit(str(exc))
         # Replace the file reference with the resolved text on a copy so
