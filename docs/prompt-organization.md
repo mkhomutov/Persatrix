@@ -39,7 +39,7 @@ the runtime.
 | Location                          | Loaded by                                              | Owner              |
 | --------------------------------- | ------------------------------------------------------ | ------------------ |
 | `prompts/runtime/task-agents/`    | `agents.prompt_loader.resolve_instructions` via `load_agent` | Agent runtime team |
-| `prompts/runtime/persona/sections/` | `agents.prompt_loader.load_dimension_descriptions` (currently); future templated sections (RFC pending) | Agent runtime team |
+| `prompts/runtime/persona/sections/` | `agents.prompt_loader.load_persona_section` (section templates) and `load_dimension_descriptions` (behavioral-dimension YAML) | Agent runtime team |
 | `prompts/runtime/safety/`         | `agents.prompt_loader.load_snippet`                    | Security team      |
 | `.github/prompts/`                | Copilot / human authors                                | Docs team          |
 
@@ -167,16 +167,54 @@ invariant check. Two consequences for downstream consumers:
   packaging configs (`MANIFEST.in`, `package_data`, etc.) must
   include the prompts subtree.
 
-## Reserved persona sections (templated)
+## Persona section templates
 
-The remainder of the persona system prompt (identity, background,
-goals, current-state) is still assembled inline in
-[`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py).
-When adding a templated persona section, **do not** wire it into the
-runtime as part of the same PR. File new section files under
-`prompts/runtime/persona/sections/` and propose an RFC for the
-templating syntax (see PR C in the prompt-externalization follow-up
-plan).
+The persona system prompt is composed from six section templates under
+`prompts/runtime/persona/sections/`:
+
+| File                | Always rendered? | Placeholders                         |
+| ------------------- | :--------------: | ------------------------------------ |
+| `identity.md`       | Yes              | `{name}`, `{title_line}`, `{role}`   |
+| `background.md`     | When set         | `{background}`                       |
+| `behavior.md`       | When non-empty   | `{behavior}`                         |
+| `quirks.md`         | When non-empty   | `{quirks}`                           |
+| `goals.md`          | When populated   | `{goals}`                            |
+| `current-state.md`  | When non-empty   | `{state}`                            |
+
+Templates use Python's `str.format_map` with named `{name}` placeholders.
+There is no template-side logic — conditional inclusion lives in the
+composer in [`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py),
+which evaluates a predicate per section and skips the template when it
+returns `False`. Intra-section conditionals (e.g. the optional `Title:`
+line in `identity.md`) are pre-rendered into placeholders by the
+composer, including any trailing newline needed for layout.
+
+[`agents.prompt_loader.load_persona_section`](../agents/prompt_loader.py)
+loads each template with the same deny-by-default posture as
+`load_snippet`: paths must resolve under
+`prompts/runtime/persona/sections/`, path separators in the name are
+rejected, leading dots are rejected, and a single trailing newline is
+stripped on load.
+
+The contract is pinned by tests: a fully-populated persona produces a
+byte-identical golden in `TestSystemPromptByteIdentity`
+([`tests/unit/python/test_persona_section_composer.py`](../tests/unit/python/test_persona_section_composer.py)).
+Each shipped template is also pinned bytes-identically in
+`TestShippedPersonaSectionsByteIdentity`
+([`tests/unit/python/test_prompt_loader.py`](../tests/unit/python/test_prompt_loader.py)).
+
+When adding a new section:
+
+1. Place the markdown template at `prompts/runtime/persona/sections/<name>.md`.
+2. Add a `_Section` entry to `_SECTIONS` in
+   [`agents/persona_runtime/prompt_assembly.py`](../agents/persona_runtime/prompt_assembly.py)
+   with the predicate and context builder for the new section.
+3. Add a byte-identity test under `TestShippedPersonaSectionsByteIdentity`.
+4. Update the golden in `TestSystemPromptByteIdentity` if the new section
+   appears for the canonical test persona.
+
+See [RFC 0022](rfcs/0022-persona-prompt-section-templating.md) for the
+full templating contract.
 
 ## Backward compatibility
 

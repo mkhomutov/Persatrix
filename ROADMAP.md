@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-25 (v0.3.0 planning kickoff: wrote RFC 0011 — Channels & Internal Agent Messaging; wrote RFC 0020 — Interaction Lifecycle (dialogue boundaries + episode granularity); wrote RFC 0021 — Persona Temporal Awareness (now-anchor + recency rendering for v0.3.0; commitments + REMINDER + duration calibration deferred to v0.4.0); inserted RFC 0020 into the v0.3.0 dependency chain ahead of RFC 0008 §D; threaded RFC 0021 Phase 1 off RFC 0020 P1 in the v0.3.0 dependency chain; added RFC 0021 Phases 2–4 to v0.4.0; fixed stale milestone header referencing RFC 0010; updated RFC Master Index for RFC 0011 + RFC 0020 + RFC 0021; revised v0.3.0 dependency chain to run RFC 0007 and RFC 0011 as parallel workstreams after RFC 0008, removing RFC 0007 as a blocker for channels)  
+> **Last updated**: 2026-04-26 (added RFC 0022 — Persona Prompt Section Templating to the Master Index; targets v0.3.0 alongside the externalization of the persona system-prompt composer)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 📋 Planning  
 > **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1)
 
@@ -53,6 +53,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 📋 Proposed |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 📋 Proposed |
+| [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | 📋 Proposed |
 
 ---
 

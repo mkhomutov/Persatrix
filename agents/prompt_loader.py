@@ -1,6 +1,7 @@
-"""Resolve task-agent instructions and safety snippets from prompt files.
+"""Resolve task-agent instructions, safety snippets, and persona section
+templates from prompt files.
 
-Three related surfaces live here:
+Four related surfaces live here:
 
 * ``resolve_instructions`` — task-agent ``instructions_file`` resolution.
   Loads markdown referenced from ``config/agents.yaml`` before agent
@@ -12,19 +13,24 @@ Three related surfaces live here:
   dimension descriptions loaded from
   ``prompts/runtime/persona/sections/behavior-dimensions.yaml``.
   Cached and shape-checked.
+* ``load_persona_section`` — markdown templates for the persona system-
+  prompt section composer (identity, background, behavior, quirks,
+  goals, current-state).  Cached, ``str.format_map``-rendered upstream.
+  See RFC 0022 for the templating contract.
 
 Security
 --------
-All three functions enforce the same deny-by-default rule: candidate
+All four functions enforce the same deny-by-default rule: candidate
 paths must resolve under ``<repo_root>/prompts/``.  Anything outside —
 including ``..`` traversals, absolute paths, and symlink targets — is
 rejected.  ``load_snippet`` further restricts resolution to the
 ``prompts/runtime/safety/`` subtree and forbids path separators in the
 snippet name so a caller cannot reach sibling subtrees by passing
-``"../task-agents/planner"``.  ``load_dimension_descriptions`` reads a
-single fixed file inside ``prompts/runtime/persona/sections/`` and
-takes no caller-controlled name, so the path-traversal surface is
-empty by construction.
+``"../task-agents/planner"``.  ``load_persona_section`` applies the same
+basename-only rule scoped to ``prompts/runtime/persona/sections/``.
+``load_dimension_descriptions`` reads a single fixed file inside
+``prompts/runtime/persona/sections/`` and takes no caller-controlled
+name, so the path-traversal surface is empty by construction.
 """
 
 from __future__ import annotations
@@ -42,6 +48,10 @@ _PROMPTS_SUBDIR = "prompts"
 # Subtree confined to safety/behavior snippets.  ``load_snippet`` resolves
 # names relative to ``<repo_root>/<_SAFETY_SUBDIR>``.
 _SAFETY_SUBDIR = Path("prompts") / "runtime" / "safety"
+
+# Subtree confined to persona section templates.  ``load_persona_section``
+# resolves names relative to ``<repo_root>/<_PERSONA_SECTIONS_SUBDIR>``.
+_PERSONA_SECTIONS_SUBDIR = Path("prompts") / "runtime" / "persona" / "sections"
 
 # Fixed path to the behavioral-dimension descriptions YAML.  Hard-coded
 # (not caller-supplied) because there is exactly one such file and the
@@ -182,6 +192,69 @@ def load_snippet(name: str, repo_root: Path | None = None) -> str:
     root = Path(repo_root) if repo_root is not None else _default_repo_root()
     safety_root = (root / _SAFETY_SUBDIR).resolve()
     return _read_snippet(name, safety_root)
+
+
+# ─── Persona section templates ───────────────────────────────
+
+
+@functools.lru_cache(maxsize=64)
+def _read_persona_section(name: str, sections_root: Path) -> str:
+    """Read and validate a persona section template under ``sections_root``.
+
+    Sibling of ``_read_snippet`` — same basename rules, same trailing-
+    newline strip, same deny-by-default subtree confinement, separate
+    cache so safety snippets and persona sections cannot collide on a
+    name.  Cache key includes ``sections_root`` so test fixtures with
+    distinct ``tmp_path`` roots don't poison the production cache.
+    """
+    if not name or any(sep in name for sep in ("/", "\\")) or name.startswith("."):
+        raise PromptLoadError(
+            f"Persona section name {name!r} must be a simple basename "
+            f"(no path separators, no leading dot)"
+        )
+
+    candidate = (sections_root / f"{name}.md").resolve()
+    try:
+        candidate.relative_to(sections_root)
+    except ValueError as exc:
+        raise PromptLoadError(
+            f"Persona section {name!r} resolves outside {sections_root} "
+            f"(deny-by-default)"
+        ) from exc
+
+    if not candidate.is_file():
+        raise PromptLoadError(
+            f"Persona section {name!r} not found at {candidate}"
+        )
+
+    text = candidate.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        text = text[:-1]
+    return text
+
+
+def load_persona_section(name: str, repo_root: Path | None = None) -> str:
+    """Load a persona section template from
+    ``prompts/runtime/persona/sections/<name>.md``.
+
+    Templates use ``str.format_map``-style ``{name}`` placeholders; the
+    composer in ``agents/persona_runtime/prompt_assembly.py`` renders
+    them.  See RFC 0022 for the templating contract.
+
+    ``name`` is a basename without the ``.md`` suffix (e.g.
+    ``"identity"``).  Path separators in ``name`` are rejected so a
+    caller cannot escape the sections subtree.
+
+    ``repo_root`` defaults to ``Path(__file__).parent.parent`` to match
+    the production source-tree layout; tests pass a fixtured root.
+
+    Returns the file contents with a single trailing newline stripped.
+    Raises :class:`PromptLoadError` for missing files, malformed names,
+    or paths that resolve outside the sections subtree.
+    """
+    root = Path(repo_root) if repo_root is not None else _default_repo_root()
+    sections_root = (root / _PERSONA_SECTIONS_SUBDIR).resolve()
+    return _read_persona_section(name, sections_root)
 
 
 # ─── Persona behavioral-dimension descriptions ───────────────
