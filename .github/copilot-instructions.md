@@ -71,6 +71,19 @@ Key patterns: `@tool(name=..., permissions=[...])` auto-generates schemas; sub-a
 
 Full details: [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md), [persatrix-extension-spec.md](../docs/persatrix-extension-spec.md).
 
+## Terminology
+
+Use the canonical terms in [ai-glossary.md](../docs/ai-glossary.md) by default
+in outputs, edits, plans, and reviews.
+
+- Glossary terms are mandatory; prefer canonical wording over ad-hoc phrasing.
+- Avoid synonyms unless clarity requires one — then map back to the canonical
+  term once and continue with the canonical term.
+- If a user message uses a non-canonical synonym, acknowledge it once and switch
+  to the canonical term in the response.
+- Do not introduce new project terms without updating `docs/ai-glossary.md` in
+  the same change.
+
 ## Status Hygiene
 
 Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene). In brief:

@@ -69,6 +69,19 @@ Go: `go.uber.org/zap` structured logging; `testify` with `-race`; `fmt.Errorf("c
 Python: `X | None` types; `async def`; ruff line-length 100; `asyncio_mode = "auto"`; guard `loop.add_signal_handler()` on `sys.platform != "win32"`.  
 Rust: `clap` v4 derive; exhaustive `match` (no `_`); `tokio`.
 
+## Terminology
+
+Use the canonical terms in [`docs/ai-glossary.md`](../docs/ai-glossary.md) by
+default in outputs, edits, plans, and reviews.
+
+- Glossary terms are mandatory; prefer canonical wording over ad-hoc phrasing.
+- Avoid synonyms unless clarity requires one — then map back to the canonical
+  term once and continue with the canonical term.
+- If a user message uses a non-canonical synonym, acknowledge it once and switch
+  to the canonical term in the response.
+- Do not introduce new project terms without updating `docs/ai-glossary.md` in
+  the same change.
+
 ## Status Hygiene
 
 Before and after every task, verify consistency across RFC files, PR plans, and ROADMAP.md. Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene).
@@ -78,6 +91,7 @@ PR review reports (`docs/pr-reviews/`) are local-only — never reference them i
 ## Documentation
 
 - Architecture: `.github/copilot-instructions.md`
+- Glossary: `docs/ai-glossary.md`
 - Development lifecycle: `docs/development-workflow.md`
 - Branching: `docs/BRANCHING.md`
 - RFC process: `docs/rfcs/README.md`
