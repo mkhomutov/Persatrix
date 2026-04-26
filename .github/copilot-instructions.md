@@ -73,8 +73,8 @@ Full details: [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-
 
 ## Terminology
 
-Use the canonical terms in [ai-glossary.md](../docs/ai-glossary.md) by default
-in outputs, edits, plans, and reviews.
+Use the canonical terms in [`docs/ai-glossary.md`](../docs/ai-glossary.md) by
+default in outputs, edits, plans, and reviews.
 
 - Glossary terms are mandatory; prefer canonical wording over ad-hoc phrasing.
 - Avoid synonyms unless clarity requires one — then map back to the canonical

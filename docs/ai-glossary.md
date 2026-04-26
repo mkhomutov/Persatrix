@@ -14,8 +14,11 @@ This file is referenced by both `.github/CLAUDE.md` and
 
 1. **Canonical first.** Use the canonical term on first mention and in headings;
    do not silently alternate with synonyms.
-2. **Expand acronyms once.** First occurrence in a document spells out the
-   acronym (e.g. "directed acyclic graph (DAG)"); subsequent uses may be short.
+2. **Expand acronyms once.** First occurrence in a document spells out
+   project-specific or non-standard acronyms (e.g. "directed acyclic graph
+   (DAG)"); subsequent uses may be short. Industry-standard acronyms used
+   throughout this glossary — LLM, REST, gRPC, YAML, MCP, JSON, SQL — do
+   not need expansion.
 3. **No duplicate synonyms.** Within one response, PR description, or doc
    section, pick one term and stick with it.
 4. **Keep definitions brief.** Glossary entries are reference, not tutorials —
@@ -71,9 +74,13 @@ This file is referenced by both `.github/CLAUDE.md` and
 
 ### Workflow
 - **Aliases:** —
-- **Disallowed:** "pipeline", "job", "DAG" (when meaning workflow), "flow"
+- **Disallowed:** "pipeline", "job", "flow", "DAG" — all when meaning workflow.
+  ("DAG" is fine for the *structure*; "pipeline" is fine when describing the
+  planner→scheduler→executor orchestration pipeline as in RFC 0001 — just not
+  as a synonym for a workflow definition.)
 - **Definition:** A directed acyclic graph (DAG) of tasks defined in YAML under
   `workflows/`, supporting sequential, parallel, conditional, and looped steps.
+  ("DAG" describes the structure of a workflow, not a synonym for the workflow itself.)
 - **Example:** "The workflow fans out three review tasks before aggregation."
 
 ### Task
@@ -85,11 +92,24 @@ This file is referenced by both `.github/CLAUDE.md` and
 
 ### Tool
 - **Aliases:** —
-- **Disallowed:** "function", "skill" (RFC 0014 reserves "skill" for a different
-  concept), "plugin"
+- **Disallowed:** "function", "skill" (see the **Skill** entry below — RFC 0014
+  reserves "skill" for a higher-level concept), "plugin"
 - **Definition:** A typed callable an agent can invoke, declared with the
   `@tool(name=..., permissions=[...])` decorator in `agents/tools/`.
 - **Example:** "The `file_read` tool requires the `fs.read` permission."
+
+### Skill
+- **Aliases:** —
+- **Disallowed:** "tool" (when meaning a skill); "capability" (when meaning a
+  registered skill)
+- **Definition:** A first-class agent capability above the atomic tool layer:
+  reasoning patterns, domain knowledge, procedural workflows, and
+  meta-cognitive behaviors. Versioned and tracked in the Skill Registry.
+  Reserved term — see [RFC 0014](rfcs/0014-agent-skill-registry-lifecycle.md);
+  📋 Proposed for v0.4.0, not yet implemented. Do not use "skill" to mean
+  "tool" in v0.3.0 code or docs.
+- **Example:** "RFC 0014 introduces the `code-review` skill, composed from the
+  `file_read` and `lint` tools."
 
 ### Permission
 - **Aliases:** —
@@ -105,12 +125,26 @@ This file is referenced by both `.github/CLAUDE.md` and
   messages (RFC 0011). v0.3.0 channels are internal only.
 - **Example:** "Agents subscribed to the `#planning` channel receive the message."
 
-### Bridge
+### Channel Bridge
 - **Aliases:** —
-- **Disallowed:** "connector", "adapter" (when meaning bridge), "integration"
+- **Disallowed:** "bridge" (when ambiguous with **MCP Bridge**), "connector",
+  "adapter" (when meaning channel bridge), "integration"
 - **Definition:** A v0.5.0 component that connects an internal channel to an
-  external service (Slack, Discord, email, Telegram).
-- **Example:** "The Slack bridge mirrors `#ops` into a Slack workspace."
+  external service (Slack, Discord, email, Telegram). Always qualified as
+  "channel bridge" to disambiguate from **MCP Bridge** (a separate, existing
+  concept — see below).
+- **Example:** "The Slack channel bridge mirrors `#ops` into a Slack workspace."
+
+### MCP Bridge
+- **Aliases:** —
+- **Disallowed:** "bridge" (unqualified, when meaning the MCP integration);
+  "MCP connector"
+- **Definition:** The Python component in
+  [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py) that connects to
+  external Model Context Protocol (MCP) servers and exposes their tools to
+  agents over stdio or SSE. Distinct from **Channel Bridge** above. Configured
+  via `config/mcp-servers.yaml`.
+- **Example:** "The MCP bridge surfaces filesystem tools from a stdio MCP server."
 
 ### Message Bus
 - **Aliases:** —
@@ -125,7 +159,29 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Definition:** Persona-agent state with three tiers: **episodic**
   (interaction events), **relationship** (per-agent trust and history), and
   **working** (in-context scratch memory). See RFC 0008.
-- **Example:** "Channel turns are written to episodic memory via `InteractionTracker`."
+- **Example:** "Conversation summaries are written to episodic memory via
+  `EpisodicMemory.store_episode` in `agents/memory/episodic.py`."
+
+### Episode
+- **Aliases:** —
+- **Disallowed:** "memory entry", "log entry", "history record"
+- **Definition:** A persisted record of a past interaction, stored in the
+  agent's SQLite episodic memory database (`agents/memory/episodic.py`) with
+  summary, participants, importance, and timestamps. Today, one episode is
+  written per event-handler invocation; [RFC 0020](rfcs/0020-interaction-lifecycle.md)
+  (📋 Proposed for v0.3.0) refines this to one episode per closed interaction.
+- **Example:** "The agent recalls three relevant episodes when a similar
+  question recurs."
+
+### Trust Level
+- **Aliases:** "trust score"
+- **Disallowed:** "rapport", "affinity", "reputation"
+- **Definition:** A `[0.0, 1.0]` floating-point value on a relationship row in
+  an agent's relationship-memory store, seeded from the `relationships` block
+  in `config/agents.yaml` and updated as interactions accumulate. Persisted
+  in `agents/memory/relationship.py`.
+- **Example:** "`iron-fox` is seeded with `trust_level: 0.9` toward
+  `ember-owl`."
 
 ### Persona
 - **Aliases:** —
@@ -178,7 +234,8 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Example:** "The cost tracker halts the workflow when the daily budget is exceeded."
 
 ### Telemetry
-- **Aliases:** "observability" (when speaking broadly)
+- **Aliases:** "observability" (when speaking broadly), "structured logging"
+  (when scoped to RFC 0018 — the Structured Logging Framework)
 - **Disallowed:** "metrics" (when meaning the full pipeline), "logging"
   (when meaning the full pipeline)
 - **Definition:** Structured logs, metrics, and traces emitted via OpenTelemetry
