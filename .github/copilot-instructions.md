@@ -39,7 +39,7 @@ All commands are in the [Makefile](../Makefile). Prefer Make targets.
 ```shell
 make all            # proto + full build
 make test           # all suites (Go + Python + integration)
-make lint           # golangci-lint + ruff + clippy
+make lint           # golangci-lint + ruff + mypy + clippy
 make validate       # YAML configs against JSON schemas
 make docker-up      # docker compose up -d
 ```
