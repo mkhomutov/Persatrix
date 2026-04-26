@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from ..prompt_loader import load_snippet
 from .episodic_queries import EPISODE_SELECT, row_to_episode
 
 if TYPE_CHECKING:
@@ -109,10 +110,7 @@ async def summarize_old_episodes(
             response = await llm_client.create_message(
                 model=compression_model,
                 messages=[{"role": "user", "content": prompt}],
-                system=(
-                    "You are a concise summarizer. "
-                    "Distill the episode into a brief summary."
-                ),
+                system=load_snippet("episode-summarizer"),
                 tools=[],
                 max_tokens=256,
                 temperature=0.2,
