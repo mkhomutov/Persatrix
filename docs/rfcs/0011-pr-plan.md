@@ -17,10 +17,13 @@ RFC 0011 spans four phases for v0.3.0 (internal channels). External bridges are 
 
 > **Estimate calibration**: 1.7× factor.
 
-**Prerequisites**:
-- [RFC 0008 PR plan](0008-pr-plan.md) PR 2 merged (`MemoryFacade` for task agents) — required by PR 5 (Phase 3 memory integration).
-- [RFC 0020 PR plan](0020-pr-plan.md) PR 4 merged (summarize-on-close) — paired joint-delivery with PR 5 of this plan.
-- [RFC 0009 PR plan](0009-pr-plan.md) PR 2 merged (rate-limit middleware) — required by PR 2 of this plan (REST publish endpoint).
+**Workstream prerequisite**: none — PR 1 has no upstream RFC dep (the channels store, schema, and SQLite migration are self-contained).
+
+**Per-PR cross-RFC dependencies** (also pinned in each PR's Depends-on row):
+- PR 2 → [RFC 0009 PR plan](0009-pr-plan.md) PR 2 (rate-limit middleware on the publish endpoint).
+- PR 5 → [RFC 0008 PR plan](0008-pr-plan.md) PR 2 (`MemoryFacade` for channel-scoped recall).
+- PR 5 → [RFC 0020 PR plan](0020-pr-plan.md) PR 4 (summarize-on-close — paired joint-delivery with this plan's PR 5).
+- PR 5 → [RFC 0009 PR plan](0009-pr-plan.md) PR 3 (`InputSanitizer` on the channel-ingest path).
 
 **Cross-RFC sequencing**:
 - **PR 2** (REST publish) gates on RFC 0009 PR 2 (rate-limit middleware) — see [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). If RFC 0009 slips, this PR ships the startup-WARN path with an opt-out gate.
@@ -39,7 +42,7 @@ PR 3 (Phase 2a — proto regen: ChannelMessageEvent + ReceiveChannelMessage RPC;
   ↓
 PR 4 (Phase 2b — SEND_CHANNEL_MESSAGE action + Python servicer + response gate + DELETE endpoints)
   ↓
-PR 5 (Phase 3 — joint with RFC 0020 PR 5: interaction-scoped channel memory; depends on RFC 0008 PR 2)
+PR 5 (Phase 3 — joint with RFC 0020 PR 5: interaction-scoped channel memory; depends on RFC 0008 PR 2 + RFC 0009 PR 3)
   ↓
 PR 6 (Phase 4a — Rust CLI subcommands: list/join/send/reply/history/watch)
   ↓
@@ -135,7 +138,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 ### PR 5: `feature/v030-rfc0011-memory-integration` — Phase 3 (joint with RFC 0020 PR 5)
 
-**Depends on**: PR 4 + [RFC 0008 PR plan](0008-pr-plan.md) PR 2 + [RFC 0020 PR plan](0020-pr-plan.md) PR 4.
+**Depends on**: PR 4 + [RFC 0008 PR plan](0008-pr-plan.md) PR 2 + [RFC 0020 PR plan](0020-pr-plan.md) PR 4 + [RFC 0009 PR plan](0009-pr-plan.md) PR 3.
 **Estimated size**: ~300–500 lines.
 
 #### Scope (high-level)
@@ -144,6 +147,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - `MemoryFacade.retrieve_relevant` supports channel-scoped recall via `tags=[channel_id]`.
 - Channel-history tier added to the `MemoryBudget` greedy fill (no change to `MemoryBudget` itself).
 - Relationship memory: channel interactions increment count + influence trust score (per-interaction, not per-message — RFC 0020 contract).
+- `InputSanitizer.Sanitize()` applied to inbound channel message content on the ingest path before it reaches `InteractionTracker.add_turn` and before storage — closes the integration anticipated by [RFC 0009 PR plan](0009-pr-plan.md) PR 3 and the [RFC 0011 §Security Considerations](0011-channels-bridges.md#security-considerations) mitigation.
 
 #### Key implementation details *(TBD)*
 #### Tests *(TBD)*
@@ -152,6 +156,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 - [ ] **Joint delivery** with [RFC 0020 PR plan](0020-pr-plan.md) PR 5 — both PRs reference each other's PR number
 - [ ] Integration test: agent B reply demonstrates channel-history awareness
+- [ ] Channel-ingest path applies `InputSanitizer.Sanitize()` per [RFC 0009 PR plan](0009-pr-plan.md) PR 3; sanitization audit event fires on every inbound message
 
 ---
 
@@ -230,5 +235,5 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 Before opening PR 1:
 - [ ] Fill in "Key implementation details" + "Tests" for each PR.
-- [ ] Pin estimated sizes against the RFC's Files Touched table.
+- [ ] Pin estimated sizes against the RFC's Files Touched table; if the 1.7× calibration factor would push the upper bound past the [BRANCHING.md](../BRANCHING.md) 500-line soft cap, split the PR before opening.
 - [ ] Confirm the "joint delivery" PR pairing with [RFC 0020 PR plan](0020-pr-plan.md) PR 5 is reflected in both plans' PR 5 sections.

@@ -39,7 +39,7 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 
 ### PR 1: `feature/v030-rfc0021p1-clock-rendering` — Clock + Rendering Module
 
-**Depends on**: Nothing (RFC 0020 PR 1 is a soft dep — used for fallback rendering on missing `closed_at`; if 0020 PR 1 has not yet merged, fallback to `created_at` is the no-op path).
+**Depends on**: Nothing. (PR 1's surface — `Clock` + the pure rendering functions in `agents/temporal/rendering.py` — does not reference `closed_at` or any RFC 0020 column. The RFC 0020 PR 1 dependency surfaces in PR 2, where the now-anchor and recency-prefix wiring actually consume the schema.)
 **Estimated size**: ~250–400 lines (two new modules + exhaustive unit tests).
 
 #### Scope

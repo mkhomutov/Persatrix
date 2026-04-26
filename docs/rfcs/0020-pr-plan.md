@@ -156,7 +156,7 @@ PR 7 (RFC close)
 
 ### PR 4: `feature/v030-rfc0020-summarize-on-close` — Summarization Hook + Janitor + record_interaction Move
 
-**Depends on**: PR 3, RFC 0008 PR 2 (`MemoryFacade.compress` surface; PR 2 transitively brings in PR 1's context-budget foundation).
+**Depends on**: PR 3, RFC 0008 PR 2 (`MemoryFacade.compress` surface — this PR consumes the compression contract, not the per-step context-budget contract).
 **Estimated size**: ~400–500 lines.
 
 #### Scope

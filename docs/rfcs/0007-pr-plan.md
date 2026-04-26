@@ -168,5 +168,5 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 Before opening PR 1:
 - [ ] Fill in "Key implementation details" + "Tests" for each PR.
-- [ ] Pin estimated sizes against the RFC's Files Touched table.
+- [ ] Pin estimated sizes against the RFC's Files Touched table; if the 1.7× calibration factor would push the upper bound past the [BRANCHING.md](../BRANCHING.md) 500-line soft cap, split the PR before opening.
 - [ ] Decide `pause` mode disposition (ship behind flag vs. defer to v0.3.x).

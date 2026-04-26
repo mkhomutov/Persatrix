@@ -174,5 +174,5 @@ PR 6 (Review follow-ups + RFC close)
 
 Before opening PR 1:
 - [ ] Fill in "Key implementation details" + "Tests" sections for each PR.
-- [ ] Pin estimated sizes against the RFC's Files Touched table.
+- [ ] Pin estimated sizes against the RFC's Files Touched table; if the 1.7× calibration factor would push the upper bound past the [BRANCHING.md](../BRANCHING.md) 500-line soft cap, split the PR before opening.
 - [ ] Add PR checklist items per the [RFC 0017 PR plan](0017-pr-plan.md) precedent.
