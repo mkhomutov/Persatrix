@@ -36,7 +36,11 @@
         "model": { "type": "string" },
         "instructions": {
           "type": "string",
-          "description": "System prompt instructions for task agents (required when type=task)"
+          "description": "Inline system prompt instructions for task agents. Mutually exclusive with 'instructions_file'. Either field is required when type=task."
+        },
+        "instructions_file": {
+          "type": "string",
+          "description": "Repo-root-relative path to a markdown file containing system prompt instructions. Must live under prompts/. Mutually exclusive with 'instructions'."
         },
         "temperature": {
           "type": "number", "minimum": 0, "maximum": 2, "default": 0.3
@@ -90,7 +94,10 @@
             "required": ["type"]
           },
           "then": {
-            "required": ["instructions"]
+            "anyOf": [
+              { "required": ["instructions"] },
+              { "required": ["instructions_file"] }
+            ]
           }
         },
         {

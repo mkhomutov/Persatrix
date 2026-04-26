@@ -20,6 +20,7 @@ from .base import BaseAgent
 from .llm_client import LLMClient, create_provider
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
+from .prompt_loader import PromptLoadError, resolve_instructions
 from .task_agent import TaskAgent
 from .tick import TickScheduler
 from .tools import builtin
@@ -130,6 +131,24 @@ def load_agent(agent_id: str, config_path: str, workspace: str) -> BaseAgent:
         raise SystemExit(
             f"Agent {agent_id!r} missing required 'model' field in config"
         )
+
+    # Resolve instructions_file (if present) into the inline instructions
+    # field before constructing the agent.  This keeps TaskAgent runtime
+    # purely data-driven — it never touches the filesystem.
+    if agent_type == "task" and "instructions_file" in agent_config:
+        repo_root = Path(config_path).resolve().parent.parent
+        try:
+            resolved = resolve_instructions(agent_config, repo_root)
+        except PromptLoadError as exc:
+            raise SystemExit(str(exc))
+        # Replace the file reference with the resolved text on a copy so
+        # the original config dict (potentially shared across agents) is
+        # not mutated.
+        agent_config = {
+            k: v for k, v in agent_config.items() if k != "instructions_file"
+        }
+        if resolved is not None:
+            agent_config["instructions"] = resolved
 
     # Create LLM client
     provider = create_provider(agent_config)
