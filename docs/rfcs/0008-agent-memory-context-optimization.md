@@ -1,7 +1,7 @@
 # RFC 0008 — Agent Memory and Context Optimization
 
 **Type**: architecture  
-**Status**: � Accepted  
+**Status**: 🚧 Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-15  
 **Target**: v0.3.0  

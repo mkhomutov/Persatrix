@@ -29,6 +29,7 @@ func (s *WorkflowScheduler) executeStage(
 	outputs map[string]string,
 	vars map[string]string,
 	mu *sync.Mutex,
+	contextBudgets map[string]int,
 ) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(steps))
@@ -38,7 +39,7 @@ func (s *WorkflowScheduler) executeStage(
 		go func(step planner.Step) {
 			defer wg.Done()
 
-			output, err := s.executeStep(ctx, runID, workflowID, step, outputs, vars, mu)
+			output, err := s.executeStep(ctx, runID, workflowID, step, outputs, vars, mu, contextBudgets)
 			if err != nil {
 				errCh <- fmt.Errorf("step %q: %w", step.ID, err)
 				return
@@ -78,6 +79,7 @@ func (s *WorkflowScheduler) executeStep(
 	outputs map[string]string,
 	vars map[string]string,
 	mu *sync.Mutex,
+	contextBudgets map[string]int,
 ) (string, error) {
 	ctx, span := schedulerTracer.Start(ctx, "workflow.step",
 		trace.WithAttributes(
@@ -156,6 +158,34 @@ func (s *WorkflowScheduler) executeStep(
 			span.SetStatus(codes.Error, err.Error())
 			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 			return "", err
+		}
+	}
+
+	// RFC 0008 Phase 1: when the workflow opts in (context_budget_total > 0),
+	// build a context package and serialize it under TaskRequest.context's
+	// reserved `_context_package` key (Open Question 2 — additive; no proto
+	// changes). Agents that don't recognise the key continue to use the raw
+	// outputs map verbatim.
+	//
+	// Review (M5): packaging failure is treated as a hard step failure rather
+	// than silently degrading to legacy passthrough. The contract for an
+	// opted-in workflow is that every step receives a `_context_package` (the
+	// integration test asserts both s1 and s2 do); silent degradation would
+	// break that invariant invisibly. attachContextPackage's only failure mode
+	// today is json.Marshal of a pure-Go struct — effectively a programming
+	// bug, so failing loudly is appropriate and surfaces it in CI/staging.
+	if budget, ok := contextBudgets[step.ID]; ok && budget > 0 {
+		if err := s.attachContextPackage(outputsCopy, runID, step, resolved, budget); err != nil {
+			wrapped := fmt.Errorf("context packaging failed: %w", err)
+			s.logger.Error("context packaging failed; failing step",
+				zap.String("execution_id", runID),
+				zap.String("step_id", step.ID),
+				zap.Error(err),
+			)
+			span.RecordError(wrapped)
+			span.SetStatus(codes.Error, wrapped.Error())
+			s.markStepFailed(ctx, runID, step.ID, startedAt, wrapped.Error())
+			return "", wrapped
 		}
 	}
 

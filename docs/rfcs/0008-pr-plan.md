@@ -109,21 +109,24 @@ Integration (Go + Python):
 
 #### PR checklist
 
-- [ ] `make test` passes (Go + Python + integration)
-- [ ] `make lint` clean
-- [ ] `make validate` passes (workflow schema additions)
-- [ ] `_context_package` JSON shape (`version`, `pinned_sections`, `step_outputs`, `metrics`, `budget_memory_tokens`) frozen — any new top-level field after merge requires a version bump and a separate RFC amendment
-- [ ] `RelevanceScorer` protocol exported with a default heuristic backend; embedding-backend extension point documented in package GoDoc
-- [ ] Pinned-section overflow path emits `pinned_overflow` metric and proceeds (correctness over budget)
-- [ ] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
-- [ ] Master Progress Overview row 4 → 🔄 In progress
+- [x] `make test` passes (Go + Python + integration)
+- [x] `make lint` clean
+- [x] `make validate` passes (workflow schema additions)
+- [x] `_context_package` JSON shape (`version`, `pinned_sections`, `step_outputs`, `metrics`, `budget_memory_tokens`) frozen — any new top-level field after merge requires a version bump and a separate RFC amendment
+- [x] `RelevanceScorer` protocol exported with a default heuristic backend; embedding-backend extension point documented in package GoDoc
+- [x] Pinned-section overflow path emits `pinned_overflow` metric and proceeds (correctness over budget)
+- [x] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
+- [x] Master Progress Overview row 4 → 🔄 In progress
 - [ ] [RFC 0007 PR plan](0007-pr-plan.md) PR 3 reviewer pinged: `repeat_until` loop budget integration is now unblocked
+- [x] **Sizing-risk split triggered**: cost-metrics + state-persistence rows deferred to follow-on PR `feature/v030-rfc0008-context-metrics` (PR 1b — see note below). Packaging Phase 1 ships with structured-log-only observability via `Metrics.Warnings`; full `cost.ContextPackageMetrics` emission and `remaining_context_budget` step-state persistence land in PR 1b without changing the `_context_package` v1 shape.
+
+> **Sizing-risk follow-up (PR 1b)** — `feature/v030-rfc0008-context-metrics`: wires `internal/cost/` `ContextPackageMetrics` (`tokens_before`, `tokens_after`, `compression_ratio`, `candidates_admitted`, `candidates_dropped`) to per-step cost records, and adds `remaining_context_budget` persistence to `internal/state/` step rows so retries consume from the persisted remainder rather than the original allocation. PR 2 (`MemoryFacade`) `Depends on` is updated to reference both PR 1 and PR 1b. This split is contingent (per [PR plan §Sizing risk](#key-implementation-details)) and does not change the canonical 6-PR count for the milestone burndown — PR 1b is bookkeeping under the PR 1 row.
 
 ---
 
 ### PR 2: `feature/v030-rfc0008-memory-facade` — Phase 2: MemoryFacade for Task Agents
 
-**Depends on**: PR 1.
+**Depends on**: PR 1 and PR 1b (`feature/v030-rfc0008-context-metrics` — cost-metrics + state-persistence follow-on, sizing-risk split triggered at PR 1 merge).
 **Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
 #### Scope
@@ -399,6 +402,25 @@ Integration:
 | `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
 | `docs/rfcs/0008-calibration-review.md` | Replace the PR 5 placeholder with the 30-day eviction-parameter review summary required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). Cite the actual `evictions_count`, `average_confidence_at_eviction`, `memory_utilization_ratio` ranges observed; record any default retunes (one-line config changes) or confirm the shipped defaults stood up. |
 | `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection. (Note: this plan combines the followups + close steps that other RFC PR plans sometimes split into two terminal PRs — e.g. [RFC 0020 PR plan](0020-pr-plan.md) splits them across PR 6 (followups) + PR 7 (close) — into a single PR 6 to preserve the 6-PR count this plan's downstream consumers pin.) |
+
+##### From PR 1 review
+
+Carry-over findings from the PR 1 (`feature/v030-rfc0008-context-budget`, merged as #218) deep review that were not blocking and were deferred here. Each is self-contained so the merged history needs no external report.
+
+- M6 — Sort candidate IDs in `attachContextPackage` (`internal/scheduler/context_package.go`) before constructing the candidate slice. Today it ranges over a `map[string]string` so iteration order is randomised per process; that defeats the `Packager.Build` "emit admitted in original input order" determinism contract once a packaging-aware agent (PR 2) starts comparing packages across retries. Fix: `keys := slices.Sorted(maps.Keys(outputsCopy))` then range `keys`. Add a determinism guard test with ≥ 5 outputs of equal density asserting `pkg.StepOutputs` ordering is stable across two `attachContextPackage` calls (covers L8 too).
+- M7 — Decide planner-tighten vs. scheduler-soften for the `Σ overrides == total` zero-budget case. Today the allocator returns `0` for every non-overridden step when overrides exhaust the total, and `stage_runner.executeStep` skips packaging because of its `budget > 0` gate, so a forgotten step gets legacy passthrough even though the workflow opted into packaging. Pick one: (a) reject the workflow at parse time when `Σ overrides + nonOverriddenCount > total` (require ≥ 1 token per non-overridden step); or (b) drop the `budget > 0` gate and always attach a package when `contextBudgets != nil`, emitting a `zero_budget` warning. Add a planner test (`TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected`) or an allocator test asserting the chosen semantics.
+- M8 — Document v1 advisory-only budget semantics. The dispatch carries both raw upstream outputs (under `out1`, `out2`, …) AND the same content embedded inside `_context_package.step_outputs[].content`, so a packaging-unaware agent reads raw outputs and bypasses the budget entirely. This is acceptable for PR 1 — PR 2's `MemoryFacade` is the natural enforcement point — but the contract must be explicit. Add a sentence to `Package` GoDoc and to RFC 0008 §D documenting that v1 packaging is *advisory ordering*; actual budget enforcement requires the agent to consume `step_outputs` in lieu of raw outputs, deferred to PR 2. Optionally add a packaging-on test asserting the raw keys remain in `Context` so the contract is locked in code.
+- M9 — Decouple the `RelevanceScorer` interface from the heuristic backend's dep boost. `importanceForCandidate` returns `0.9` for IDs in `step.DependsOn` and `0.5` otherwise; `HeuristicScorer.Score` then adds both `importanceWeight * importance` AND `depWeight * 1{ID ∈ DependsOn}`, double-counting the dependency signal. A future embedding scorer would receive `Importance = 0.9` calibrated for the heuristic's dep boost. Pick: (a) make the scheduler emit a uniform `Importance` (e.g. always 0.5) and let the scorer own dep-proximity entirely (preferred — cleaner cross-package decoupling); or (b) tighten the `Candidate.Importance` GoDoc to say the slot may encode dep-proximity hints and embedding-backed scorers must renormalise.
+- L7 — Replace `len(s)/4` with `utf8.RuneCountInString(s)/4` in `estimateTokens` (`internal/scheduler/context_package.go`). `len()` returns byte count and inflates estimates 2–4× for multibyte UTF-8 (CJK, emoji, accented Latin). Acceptable since estimates only order candidates by relative density, but the bias should be removed or documented.
+- L9 — Add a `Packager.Build` test asserting the `remaining < 0 → 0` clamp covers a negative `budgetTokens` argument. The allocator never emits negatives so the contract is theoretical today, but PR 2's `MemoryFacade` may compute `B_step − B_memory_reservation` and could plausibly underflow.
+- L10 — Add an explicit assertion in `tests/unit/python/test_context_package_wire_shape.py` that decoded `metrics.get("warnings", [])` returns `[]` when absent (since `Metrics.Warnings` uses `omitempty`). Locks the v1 wire-shape contract so a future tag change to non-omitempty surfaces.
+- L11 — Add a per-(step, warning) sampler around the `zap.Warn` fan-out in `attachContextPackage`. A workflow with 50 steps each tripping `high_compression_ratio` produces 50 log lines per run today. Land alongside the cost-metrics emission in PR 1b.
+- L12 — Extract the RFC 0008 validation block from `internal/planner/planner.go` into a sibling `planner_context_budget.go` to give headroom under the 500-line soft cap. Land in PR 1b before the next planner edit.
+- N5 — Add a one-line comment to the `_context_package`-collision skip in `attachContextPackage` referencing the `outputKeyRegex` (`^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$`) that prohibits leading underscore — explains why the defence-in-depth guard cannot fire today.
+- N6 — Reword the `context_budget` schema description in `schemas/workflow.schema.json`. Current text says `0 means inherit (equal-split)`; "inherit" suggests RFC 0006 agent-default semantics. Replace with: "0 (or omitted) participates in the equal-split allocation; > 0 sets a hard per-step override".
+- N7 — Drop the diagnostic-loop deadline in `TestContextPackage_DisabledByDefault` from 3 s to 1 s (or short-circuit on terminal status) before the real `waitForRunStatus` (5 s) fires. Saves CI time on green runs.
+- N8 — Update `Packager` GoDoc: replace "stateless and safe for concurrent use" with "Concurrency-safety depends on the injected `RelevanceScorer`; the default `HeuristicScorer` is safe."
+- Wire-shape contract follow-up — promote the Python wire-shape test to read a Go-produced fixture (e.g. a Go test writes `json.Marshal(pkg)` to `tests/fixtures/context_package_v1.json` and the Python test reads it). Catches unilateral tag renames on either side.
 
 #### Key implementation details
 

@@ -295,3 +295,89 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Disallowed:** "the assistant" (when ambiguous), "AI pair"
 - **Definition:** GitHub's assistant. Configured via `.github/copilot-instructions.md`.
 - **Example:** "Copilot reads the same project guidelines as Claude Code."
+
+## RFC 0008 — Context Budget & Packaging
+
+Terms introduced by [RFC 0008](rfcs/0008-agent-memory-context-optimization.md)
+PR 1 (orchestrator-side context-budget allocator + per-step packaging
+foundation).
+
+### Context Budget Total
+- **Aliases:** "workflow context budget"
+- **Disallowed:** "context cap", "global token budget"
+- **Definition:** Workflow-level token ceiling (`workflow.context_budget_total`
+  in YAML; `WorkflowDefinition.ContextBudgetTotal` in Go) that opts the
+  workflow into per-step context packaging. When `0` (the default), packaging
+  is disabled and steps receive the raw outputs map verbatim (legacy
+  passthrough). Required whenever any step sets `context_budget`.
+- **Example:** "The workflow declares `context_budget_total: 6000`, so each
+  step receives a `_context_package` payload."
+
+### Context Package
+- **Aliases:** —
+- **Disallowed:** "context bundle", "prompt package"
+- **Definition:** The per-step JSON payload (versioned, frozen at `version: 1`)
+  attached to `TaskRequest.context` under the reserved key
+  `_context_package`. Carries the admitted step outputs, pinned sections,
+  budget allocation, and packager metrics. Produced by the
+  `internal/executor/packaging.Packager`.
+- **Example:** "The agent reads `_context_package.step_outputs` to hydrate
+  prompt context."
+
+### Packager
+- **Aliases:** —
+- **Disallowed:** "context builder", "context assembler"
+- **Definition:** The `internal/executor/packaging.Packager` component that
+  assembles a `Package` from candidates under a token budget using a greedy
+  knapsack over `RelevanceScorer` density.
+- **Example:** "The packager admits the highest-density candidates first."
+
+### Relevance Scorer
+- **Aliases:** —
+- **Disallowed:** "ranker", "relevance ranker"
+- **Definition:** The `RelevanceScorer` interface in
+  `internal/executor/packaging` that returns a `[0.0, 1.0]` relevance score
+  for a `Candidate` given a `QueryContext`. Default implementation is
+  `HeuristicScorer` (importance + dependency proximity + token-overlap).
+- **Example:** "A future embedding-backed relevance scorer will replace the
+  heuristic default."
+
+### Pinned Section
+- **Aliases:** —
+- **Disallowed:** "must-include section", "anchor section"
+- **Definition:** A `Candidate` with `Pinned: true` that is admitted to the
+  package even when its tokens exceed the remaining budget; over-budget
+  pinned admission surfaces the `pinned_overflow` warning in
+  `Package.Metrics.Warnings`.
+- **Example:** "System-instruction sections are marked as pinned sections."
+
+### Extractive Truncation
+- **Aliases:** —
+- **Disallowed:** "summarisation", "compression" (when meaning the v0.3
+  Phase-1 mechanism)
+- **Definition:** RFC 0008 Phase 1's truncation mode: candidates are admitted
+  whole or dropped whole — no per-section summarisation. Compression is
+  expressed as the ratio of total non-pinned tokens to admitted tokens.
+- **Example:** "Phase 1 ships extractive truncation; semantic summarisation
+  arrives in Phase 2."
+
+### High Compression Ratio
+- **Aliases:** —
+- **Disallowed:** "high compression"
+- **Definition:** A `Package.Metrics.CompressionRatio` at or above
+  `HighCompressionRatioThreshold` (4.0). Surfaces the
+  `high_compression_ratio` warning so operators can detect workloads that
+  are dropping a large share of their candidates.
+- **Example:** "The dispatch logged `high_compression_ratio` because 80% of
+  outputs were dropped."
+
+### Extreme Compression Cap
+- **Aliases:** —
+- **Disallowed:** "compression ceiling"
+- **Definition:** The `ExtremeCompressionCap` constant (10.0) that caps
+  `Package.Metrics.CompressionRatio` and doubles as the sentinel emitted
+  with the `extreme_compression_capped` warning when all non-pinned
+  candidates are dropped or the raw ratio would exceed the cap.
+- **Example:** "When every non-pinned candidate is dropped the package
+  emits the extreme compression cap."
+

@@ -11,11 +11,16 @@ import (
 // --- Step execution limit tests (RFC 0006 PR 1a) ---
 
 func TestParse_StepLimits_Present(t *testing.T) {
+	// Note (RFC 0008 PR 1 review H3): per-step context_budget is only valid
+	// when the workflow opts into packaging via context_budget_total. The
+	// workflow total is set to the per-step value here so this test continues
+	// to assert step-level field parsing without tripping the new guard.
 	yaml := `
 schema_version: "0.1"
 workflow:
   id: "test-wf"
   name: "Limits test"
+  context_budget_total: 16000
   steps:
     - id: "s1"
       agent: "planner"
@@ -190,11 +195,15 @@ workflow:
 }
 
 func TestParse_StepLimits_MinimumValidValues(t *testing.T) {
+	// Note (RFC 0008 PR 1 review H3): per-step context_budget requires a
+	// matching workflow.context_budget_total; set it to 1 here to keep the
+	// minimum-valid-value coverage intact.
 	yaml := `
 schema_version: "0.1"
 workflow:
   id: "test-wf"
   name: "Minimum boundary"
+  context_budget_total: 1
   steps:
     - id: "s1"
       agent: "planner"

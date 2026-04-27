@@ -17,6 +17,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/executor/packaging"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -55,6 +56,12 @@ type WorkflowScheduler struct {
 
 	// Metrics instruments (optional — nil-safe).  Wired in RFC 0019 PR 3.
 	metrics *obsmetrics.Instruments
+
+	// packager assembles per-step context packages when the workflow opts in
+	// via context_budget_total > 0 (RFC 0008 Phase 1). Always non-nil — a
+	// scheduler constructed without an explicit packager uses the default
+	// HeuristicScorer-backed packager.
+	packager *packaging.Packager
 }
 
 // Option configures a WorkflowScheduler.
@@ -120,6 +127,7 @@ func NewWorkflowScheduler(
 		workflowsDir:  workflowsDir,
 		pollInterval:  1 * time.Second,
 		maxConcurrent: 10,
+		packager:      packaging.NewPackager(nil),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -296,6 +304,10 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 		return
 	}
 
+	// RFC 0008: compute per-step context budgets once after planning. Returns
+	// nil when context_budget_total is 0 (packaging disabled — legacy passthrough).
+	contextBudgets := allocateContextBudgets(wf.ContextBudgetTotal, wf.Steps)
+
 	// Transition to Running and set StartedAt.
 	// NOTE: if UpdateRunStatus fails (e.g., run deleted between poll and execution),
 	// the run remains in-flight until the goroutine exits and inFlight.Delete() fires
@@ -342,7 +354,7 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 			zap.Int("steps", len(stage)),
 		)
 
-		if err := s.executeStage(ctx, runID, run.WorkflowID, stage, outputs, vars, &mu); err != nil {
+		if err := s.executeStage(ctx, runID, run.WorkflowID, stage, outputs, vars, &mu, contextBudgets); err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			s.failRun(ctx, runID, fmt.Sprintf("stage %d: %v", stageIdx, err))
