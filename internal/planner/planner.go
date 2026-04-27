@@ -52,7 +52,12 @@ type Workflow struct {
 	ID      string `yaml:"id"`
 	Name    string `yaml:"name"`
 	Trigger string `yaml:"trigger"`
-	Steps   []Step `yaml:"steps"`
+	// ContextBudgetTotal is the workflow-level total context window budget in tokens (RFC 0008).
+	// When > 0 the scheduler equal-splits the remainder across non-overridden steps after
+	// subtracting any per-step `context_budget` overrides. When 0 (default) packaging is
+	// disabled and dispatch falls through to legacy behaviour. Negative values rejected at parse.
+	ContextBudgetTotal int    `yaml:"context_budget_total"`
+	Steps              []Step `yaml:"steps"`
 }
 
 // Step represents a single step in a workflow DAG.
@@ -250,6 +255,22 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 		}
 	}
 
+	// RFC 0008: workflow-level context budget validation.
+	if w.ContextBudgetTotal < 0 {
+		return fmt.Errorf("workflow %q: context_budget_total must not be negative", w.ID)
+	}
+	if w.ContextBudgetTotal > 0 {
+		var overrideSum int
+		for _, step := range w.Steps {
+			if step.ContextBudget > 0 {
+				overrideSum += step.ContextBudget
+			}
+		}
+		if overrideSum > w.ContextBudgetTotal {
+			return fmt.Errorf("workflow %q: sum of per-step context_budget overrides (%d) exceeds context_budget_total (%d)",
+				w.ID, overrideSum, w.ContextBudgetTotal)
+		}
+	}
 	return nil
 }
 

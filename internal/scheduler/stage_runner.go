@@ -29,6 +29,7 @@ func (s *WorkflowScheduler) executeStage(
 	outputs map[string]string,
 	vars map[string]string,
 	mu *sync.Mutex,
+	contextBudgets map[string]int,
 ) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(steps))
@@ -38,7 +39,7 @@ func (s *WorkflowScheduler) executeStage(
 		go func(step planner.Step) {
 			defer wg.Done()
 
-			output, err := s.executeStep(ctx, runID, workflowID, step, outputs, vars, mu)
+			output, err := s.executeStep(ctx, runID, workflowID, step, outputs, vars, mu, contextBudgets)
 			if err != nil {
 				errCh <- fmt.Errorf("step %q: %w", step.ID, err)
 				return
@@ -78,6 +79,7 @@ func (s *WorkflowScheduler) executeStep(
 	outputs map[string]string,
 	vars map[string]string,
 	mu *sync.Mutex,
+	contextBudgets map[string]int,
 ) (string, error) {
 	ctx, span := schedulerTracer.Start(ctx, "workflow.step",
 		trace.WithAttributes(
@@ -156,6 +158,21 @@ func (s *WorkflowScheduler) executeStep(
 			span.SetStatus(codes.Error, err.Error())
 			s.markStepFailed(ctx, runID, step.ID, startedAt, err.Error())
 			return "", err
+		}
+	}
+
+	// RFC 0008 Phase 1: when the workflow opts in (context_budget_total > 0),
+	// build a context package and serialize it under TaskRequest.context's
+	// reserved `_context_package` key (Open Question 2 — additive; no proto
+	// changes). Agents that don't recognise the key continue to use the raw
+	// outputs map verbatim.
+	if budget, ok := contextBudgets[step.ID]; ok && budget > 0 {
+		if err := s.attachContextPackage(outputsCopy, step, resolved, budget); err != nil {
+			s.logger.Warn("context packaging failed; dispatching without package",
+				zap.String("execution_id", runID),
+				zap.String("step_id", step.ID),
+				zap.Error(err),
+			)
 		}
 	}
 

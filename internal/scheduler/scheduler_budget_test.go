@@ -169,7 +169,7 @@ func TestBudgetCheck_ErrorWrapping(t *testing.T) {
 	outputs := map[string]string{}
 	vars := map[string]string{}
 
-	_, err := sched.executeStep(context.Background(), "sentinel-run", "test-wf", step, outputs, vars, &mu)
+	_, err := sched.executeStep(context.Background(), "sentinel-run", "test-wf", step, outputs, vars, &mu, nil)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrBudgetExceeded), "error should wrap ErrBudgetExceeded sentinel")
 	assert.Contains(t, err.Error(), "budget exceeded")
