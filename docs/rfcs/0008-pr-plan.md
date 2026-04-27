@@ -83,11 +83,12 @@ PR 6 (Review follow-ups + RFC close)
     "budget_memory_tokens": 0
   }
   ```
-  `version: 1` is the wire contract for v0.3.0. The optional `budget_memory_tokens` field is admitted into v1 up-front (zero-cost — orchestrator emits 0 in PR 1, PR 2 gives it a non-zero meaning) so PR 2 does not need to evolve the shape mid-RFC. Agents that don't recognise a higher version downgrade gracefully (ignore unknown fields). Any *new* top-level field added after PR 1 merges requires a version bump and a separate RFC amendment.
+  `version: 1` is the wire contract for v0.3.0. The optional `budget_memory_tokens` field is admitted into v1 up-front (zero-cost — orchestrator emits 0 in PR 1, PR 2 gives it a non-zero meaning) so PR 2 does not need to evolve the shape mid-RFC. Agents that don't recognise a higher version downgrade gracefully (ignore unknown fields). Any *new* top-level field added after PR 1 merges requires a version bump and a separate RFC amendment. **`candidates_admitted` is intentionally cost-record-only** — the wire `metrics` block exposes only `candidates_dropped` because consumers can compute the admitted count from `step_outputs` length (admitted == `len(step_outputs)`). Keeping the wire shape minimal is preferred over duplicating derivable values.
 - **`RelevanceScorer` protocol** (Go): `type RelevanceScorer interface { Score(candidate Candidate, query QueryContext) float64 }`. The default heuristic implementation lives in `executor/packaging/scorer_heuristic.go`. RFC 0008's [Open Question 1](0008-agent-memory-context-optimization.md#1-relevance-scoring-approach--heuristic-only-in-phase-1-pluggable-scoring-interface) commits this surface so a future embedding backend (RFC 0005 follow-on) can swap in.
 - **Pinned-section contract**: orchestrator-side parallel of `ContextSection.compressible = False` from `agents/memory/working.py` (see [RFC §F](0008-agent-memory-context-optimization.md#f-persona-context-sanity-and-helper-agents)). Pinned sections are excluded from compression-ratio denominator (per [Open Question 3](0008-agent-memory-context-optimization.md#3-compression-warning-threshold--warn-at-41-hard-cap-at-101)) and always admitted; if their token sum alone exceeds `B_step`, packaging logs `pinned_overflow` and admits anyway (correctness over budget — operator alert via metric).
 - **Compression overhead budget**: not implemented in Phase 1 (no abstractive calls yet). The struct + metrics are wired so Phase 1b can plug in the abstractive call without schema churn.
-- **Sizing risk**: the calibrated upper bound (~500 lines) brushes the [BRANCHING.md](../BRANCHING.md) cap. If implementation exceeds 450 lines pre-tests, split off the abstractive-compression piece (currently *not* in Phase 1's deliverables — RFC §D pipeline step 3b) into a follow-on PR `feature/v030-rfc0008-context-abstractive` between PR 1 and PR 2, and update PR 2's `Depends on` to reference both. This split is contingent and does not change the canonical 6-PR count unless triggered.
+- **Sizing risk**: the calibrated upper bound (~500 lines) brushes the [BRANCHING.md](../BRANCHING.md) cap. If implementation exceeds 450 lines pre-tests, split off the cost-metrics + state-persistence rows (`internal/cost/` + `internal/state/`) into a follow-on PR `feature/v030-rfc0008-context-metrics` between PR 1 and PR 2. The packaging pipeline can ship with structured-log-only observability and metrics back-fill in the follow-on without changing the `_context_package` v1 shape. Update PR 2's `Depends on` to reference both. This split is contingent and does not change the canonical 6-PR count unless triggered. (The previously-named `feature/v030-rfc0008-context-abstractive` split is not viable because abstractive compression is already deferred to Phase 1b — there is no Phase-1 abstractive code to split out.)
+- **Phase 1b prep note**: when the deferred abstractive-compression PR opens, it must implement [RFC §Security item #6](0008-agent-memory-context-optimization.md#security-considerations) (compression-LLM prompt-injection mitigation): a system instruction that directs the compression model to summarize untrusted input rather than execute it, plus `source: "compressed"` tagging on every emitted section so downstream consumers know to apply reduced trust.
 
 #### Tests
 
@@ -250,7 +251,7 @@ Integration:
 - [ ] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
 - [ ] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
 - [ ] `max_memory_writes` cap (default `20`, security item #7) is enforced
-- [ ] [RFC 0008 PR 4](0008-pr-plan.md) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
+- [ ] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
 
 ---
 
@@ -290,6 +291,7 @@ Integration:
 - **Sensitive-pool isolation**: when `sensitive: true`, `MemoryFacade.publish_to_pool` rejects the call regardless of writer ACL, with reason `sensitive_pool_isolation`. This implements [RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3 ("Sensitive memory classes stay isolated regardless of pool settings").
 - **`min_confidence` filter** (consumer-side trust): default `None` admits all entries; explicit `0.0` is identical (semantically explicit); `0.7` filters to high-confidence entries only.
 - **Upgrade path to RFC 0009**: documented in code comments — when capability tokens land, the ACL check extends to verify a token in addition to (not instead of) the config list. The `SharedMemoryPool` interface stays stable.
+- **Shared-pool eviction is FIFO, not §G hybrid score**: shared pools use `created_at` ascending eviction rather than the [RFC §G](0008-agent-memory-context-optimization.md#g-memory-eviction-decay-and-validation) hybrid formula `importance × 0.6 + recency_norm × 0.3 + access_freq_norm × 0.1` because shared-pool entries lack the per-agent `access_count` series required to compute `access_freq_norm` (each pool entry is read by N agents whose individual access counts the pool does not retain — RFC 0009 capability tokens would be required to attribute reads). FIFO is the simplest deterministic policy that preserves provenance ordering. PR 5's procedural-decay work does not apply to shared pools either: pool entries carry caller-supplied `confidence` but no `last_validated_at`, so decay would have no anchor.
 
 #### Tests
 
@@ -303,7 +305,7 @@ Unit:
 - `confidence > 1.0` or `< 0.0` → rejected.
 - `min_confidence=0.7` filters out entries with `confidence=0.5`.
 - Sensitive pool: writer in ACL but `sensitive: true` → `publish_to_pool` rejected with `sensitive_pool_isolation`.
-- `max_entries=10`: 11th write triggers same-pool eviction (oldest first) before insert; metric `shared_pool_evictions` records.
+- `max_entries=10`: 11th write triggers same-pool FIFO eviction (`created_at` ascending) before insert; metric `shared_pool_evictions` records.
 
 Integration:
 - Three agents (writer A, reader B, denied C); A writes 3 entries; B retrieves all 3; C is denied on both read and write.
@@ -319,7 +321,7 @@ Integration:
 - [ ] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
 - [ ] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in)
 - [ ] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
-- [ ] [RFC 0008 PR 5](0008-pr-plan.md) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+- [ ] [RFC 0008 PR 5](#pr-5-feature-v030-rfc0008-procedural-revalidation---phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
 
 ---
 
@@ -337,10 +339,11 @@ Integration:
 | `agents/memory/episodic.py` | `recall_procedures(query, *, c_min=0.1)` — applies decay at read time using `created_at`/`last_validated_at`; filters out entries below `c_min`. |
 | `agents/memory/episodic.py` | `refresh_confidence(key)` — sets `confidence = 1.0` and `last_validated_at = now()` on successful procedural reuse. Called by `MemoryFacade.store_procedure` when an existing key is re-stored. |
 | `agents/memory/eviction.py` | Extend the eviction pass to evict procedural entries whose decayed confidence falls below `c_min` (default `0.1`). |
-| `agents/memory/facade.py` | `MemoryFacade.retrieve_relevant` for procedural-tier queries surfaces a `stale_memory_injection` warning metric when an admitted entry's decayed confidence is between `c_min` and `stale_confidence_alert_threshold` (default `0.3` per [Open Question 5](0008-agent-memory-context-optimization.md#5-stale-procedural-memory--downgrade-confidence-and-continue-do-not-block)). Execution is **not** blocked. |
+| `agents/memory/facade.py` | `MemoryFacade.retrieve_relevant` for procedural-tier queries emits a structured log `stale_memory_injection` (carrying `decayed_confidence`, `key`, `agent_id`) when an admitted entry's decayed confidence is between `c_min` and `stale_confidence_alert_threshold` (default `0.3` per [Open Question 5](0008-agent-memory-context-optimization.md#5-stale-procedural-memory--downgrade-confidence-and-continue-do-not-block)). The orchestrator-side observability layer (see `internal/observability/` row below) registers and counts the metric on log receipt. Execution is **not** blocked. |
 | `config/agents.yaml` | New `procedural_memory` block: `lambda_per_day` (default `0.01`), `c_min` (default `0.1`), `stale_confidence_alert_threshold` (default `0.3`). |
 | `schemas/agent.schema.json` | Schema additions; `make validate` enforces. |
-| `internal/observability/` (Go) | New metrics required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection): `evictions_count`, `average_confidence_at_eviction`, `average_importance_at_eviction`, `memory_utilization_ratio`, `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`, `stale_memory_injection`. |
+| `internal/observability/` (Go) | New metrics required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection): `evictions_count`, `average_confidence_at_eviction`, `average_importance_at_eviction`, `memory_utilization_ratio`, `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`, `stale_memory_injection`. The `stale_memory_injection` counter is registered exactly once on the orchestrator side (incremented from agent log ingestion); agents emit the structured log only — they do not register the metric, to avoid duplicate emission across the gRPC boundary. |
+| `docs/rfcs/0008-calibration-review.md` | **New** — placeholder file scheduling the 30-day post-merge review of eviction parameters per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). PR 6 (close) replaces the placeholder with the actual review summary before flipping the RFC to `✅ Implemented`. |
 | `tests/unit/python/test_memory_decay.py` | **New** — decay math, refresh, eviction integration. |
 
 #### Key implementation details
@@ -375,8 +378,9 @@ Integration:
 - [ ] `confidence` column migration is non-destructive (`DEFAULT 1.0`); a fixture v0.2.x DB opens cleanly under v0.3.0
 - [ ] Decay is computed at read time using `last_validated_at` (or `created_at` if never validated); no periodic rewrite pass
 - [ ] `MemoryFacade.store_procedure` on an existing key calls `refresh_confidence(key)` (does not blindly overwrite)
-- [ ] `stale_memory_injection` is registered exactly once, orchestrator-side (not per-agent), to avoid duplicate emission across the gRPC boundary
+- [ ] `stale_memory_injection` is registered exactly once, orchestrator-side (incremented from agent structured-log ingestion); agents emit the log but do not register the counter, to avoid duplicate emission across the gRPC boundary
 - [ ] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
+- [ ] 30-day calibration review (PR 6) must validate or retune `avg_entry_tokens = 100` (the PR 2 advisory-budget translation constant) against the observed `episodic_entry_token_count` distribution; record outcome in the calibration review summary
 - [ ] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
 
 ---
@@ -394,7 +398,7 @@ Integration:
 | `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows for PRs 1–5 added to history. |
 | `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
 | `docs/rfcs/0008-calibration-review.md` | Replace the PR 5 placeholder with the 30-day eviction-parameter review summary required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). Cite the actual `evictions_count`, `average_confidence_at_eviction`, `memory_utilization_ratio` ranges observed; record any default retunes (one-line config changes) or confirm the shipped defaults stood up. |
-| `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection. (Note: this plan combines RFC 0020's PR 6 (followups) + PR 7 (close) into a single PR 6 to preserve the 6-PR count this plan's downstream consumers pin; [RFC 0020 PR plan](0020-pr-plan.md) splits them.) |
+| `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection. (Note: this plan combines the followups + close steps that other RFC PR plans sometimes split into two terminal PRs — e.g. [RFC 0020 PR plan](0020-pr-plan.md) splits them across PR 6 (followups) + PR 7 (close) — into a single PR 6 to preserve the 6-PR count this plan's downstream consumers pin.) |
 
 #### Key implementation details
 
