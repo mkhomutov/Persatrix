@@ -93,7 +93,9 @@ class TestInteractionTracker:
 
     def test_close_unknown_scope_is_noop(self):
         tracker = InteractionTracker()
-        assert tracker.close("never-opened") is None
+        # ``reason`` is keyword-required (PR-214 review fix Should-Fix #1);
+        # the no-op path still expects callers to spell it.
+        assert tracker.close("never-opened", reason=REASON_STRUCTURAL) is None
 
     def test_reopen_rule_starts_fresh_interaction(self):
         # RFC 0020 §C: once closed, a new turn in the same scope starts a
@@ -263,11 +265,26 @@ class TestMetricEmission:
     def test_no_metric_emission_when_uninitialised(self):
         # Before init_metrics(), tracker calls must not raise — the
         # try_get_instruments() call returns None and emission no-ops.
+        #
+        # PR-214 review fix (Should-Fix #2): the previous implementation
+        # cleared module-private globals (``metrics_mod._provider`` /
+        # ``metrics_mod._instruments``) directly to undo the side-effects
+        # of sibling tests in this class.  That pattern was explicitly
+        # called out as fragile in the PR #170 review (see
+        # ``agents/tests/test_observability_metrics.py::
+        # TestInitIdempotent.test_shutdown_clears_module_state``) — pytest
+        # does not guarantee in-class test order, and a future SDK upgrade
+        # could rename the private state under us.  Use the public
+        # :func:`agents.observability.metrics.shutdown` API instead, which
+        # is the documented contract for returning the module to the
+        # uninitialised state.
+        import asyncio
+
         from agents.observability import metrics as metrics_mod
 
-        # Reset module state so this assertion is independent of test order.
-        metrics_mod._provider = None
-        metrics_mod._instruments = None
+        asyncio.run(metrics_mod.shutdown())
+        assert metrics_mod.try_get_instruments() is None
+
         tracker = InteractionTracker()
         tracker.add_turn("tick", now=100.0)
         tracker.close("tick", reason=REASON_STRUCTURAL, now=200.0)

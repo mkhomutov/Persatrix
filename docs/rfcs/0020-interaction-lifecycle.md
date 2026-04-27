@@ -1,7 +1,7 @@
 # RFC 0020 — Interaction Lifecycle: Dialogue Boundaries and Episode Granularity
 
 **Type**: architecture
-**Status**: � Implementing
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-04-25
 **Target**: v0.3.0

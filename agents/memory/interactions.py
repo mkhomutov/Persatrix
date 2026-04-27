@@ -27,7 +27,6 @@ but only emitted in PR 4 once the LLM summary path lands.
 
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -45,7 +44,11 @@ from .boundary_detectors import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-logger = logging.getLogger(__name__)
+# PR-214 review fix (Should-Fix #3): the previous module-level
+# ``logger = logging.getLogger(__name__)`` was unused in PR 1 and
+# carried only an aspirational note about PR 4 wiring.  Removed to
+# keep imports honest; PR 4 (janitor / summary failure path) will
+# reintroduce the logger at the point of first use.
 
 
 # ─── Scope vocabulary (RFC 0020 §G + §D scope-prefix table) ─────
@@ -220,7 +223,7 @@ class InteractionTracker:
         self,
         scope: str,
         *,
-        reason: str = REASON_STRUCTURAL,
+        reason: str,
         now: float | None = None,
     ) -> Interaction | None:
         """Close the interaction in ``scope`` (no-op if none open).
@@ -229,6 +232,15 @@ class InteractionTracker:
         ``close_reason`` populated) so callers — Phase 1 single-turn
         paths in PR 2, the structural-trigger hooks in PR 5 — can hand
         it to the persistence layer in one step.
+
+        ``reason`` is keyword-required by design (PR-214 review fix,
+        Should-Fix #1).  An earlier draft defaulted to
+        :data:`REASON_STRUCTURAL`, which would silently mislabel the
+        ``agent.interactions.closed.by_structural`` counter if a future
+        caller (PR 4 janitor / PR 5 channel hook) forgot to pass the
+        kwarg.  Telemetry correctness outranks one-character ergonomics;
+        callers must spell the reason explicitly using one of the
+        ``REASON_*`` constants in :mod:`.boundary_detectors`.
         """
         interaction = self._open.pop(scope, None)
         if interaction is None:
