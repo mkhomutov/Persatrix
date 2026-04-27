@@ -245,33 +245,10 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 		}
 	}
 
-	// RFC 0008: workflow-level context budget validation.
-	if w.ContextBudgetTotal < 0 {
-		return fmt.Errorf("workflow %q: context_budget_total must not be negative", w.ID)
-	}
-	if w.ContextBudgetTotal > 0 {
-		var overrideSum int
-		for _, step := range w.Steps {
-			if step.ContextBudget > 0 {
-				overrideSum += step.ContextBudget
-			}
-		}
-		if overrideSum > w.ContextBudgetTotal {
-			return fmt.Errorf("workflow %q: sum of per-step context_budget overrides (%d) exceeds context_budget_total (%d)",
-				w.ID, overrideSum, w.ContextBudgetTotal)
-		}
-	} else {
-		// RFC 0008 PR-1 (H3): reject per-step context_budget when context_budget_total
-		// is unset — silent drop would be a deny-by-default footgun (author intends
-		// packaging on but gets legacy passthrough).
-		for _, step := range w.Steps {
-			if step.ContextBudget > 0 {
-				return fmt.Errorf("step %q: context_budget set (%d) but workflow.context_budget_total is unset; either set the workflow total or remove the per-step override",
-					step.ID, step.ContextBudget)
-			}
-		}
-	}
-	return nil
+	// RFC 0008: workflow-level + cross-step context-budget validation.
+	// The body lives in planner_context_budget.go (extracted in PR 1b — review
+	// finding L12) so this function stays focused on per-step structural checks.
+	return validateContextBudget(w)
 }
 
 // rejectAliases walks the yaml.Node tree and rejects any alias nodes.

@@ -181,3 +181,35 @@ func TestUpdateStepState_WriteIsolation(t *testing.T) {
 	assert.InDelta(t, 0.05, got.Steps["step-1"].Metadata.EstimatedCostUSD, 0.001,
 		"store metadata should not be affected by caller mutation")
 }
+
+// TestUpdateStepState_RemainingContextBudgetRoundTrip asserts that the
+// RemainingContextBudget field added in RFC 0008 PR 1b survives the
+// store's full-replacement merge + deep-copy read path. This is the data
+// path the future scheduler-level retry will use to honor the persisted
+// budget remainder rather than re-allocating the original per-step amount.
+func TestUpdateStepState_RemainingContextBudgetRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	require.NoError(t, store.CreateRun(ctx, &WorkflowRun{ID: "rcb-1", WorkflowID: "wf-1"}))
+	require.NoError(t, store.UpdateStepState(ctx, "rcb-1", StepState{
+		StepID:                 "step-1",
+		Status:                 RunCompleted,
+		RemainingContextBudget: 750,
+	}))
+
+	got, err := store.GetRun(ctx, "rcb-1")
+	require.NoError(t, err)
+	assert.Equal(t, 750, got.Steps["step-1"].RemainingContextBudget)
+
+	// Default zero is preserved on subsequent updates that don't set the
+	// field — full-replacement merge semantics, matching how Metadata behaves.
+	require.NoError(t, store.UpdateStepState(ctx, "rcb-1", StepState{
+		StepID: "step-2",
+		Status: RunCompleted,
+	}))
+	got, err = store.GetRun(ctx, "rcb-1")
+	require.NoError(t, err)
+	assert.Equal(t, 0, got.Steps["step-2"].RemainingContextBudget,
+		"steps that don't set RemainingContextBudget keep the zero default")
+}

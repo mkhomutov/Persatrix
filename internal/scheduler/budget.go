@@ -11,6 +11,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/defaults"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/executor/packaging"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
@@ -98,7 +99,14 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 // It is used as a fallback when the executor response metadata does not include
 // a "model" key. This avoids a redundant registry lookup post-dispatch.
 // (PR #86 review: reduce double resolveAgentModel call)
-func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult, registryModel string) {
+//
+// pkg is the per-step context package built before dispatch (RFC 0008 PR 1b).
+// When non-nil its Metrics block is attached to the StepCostEntry as
+// ContextPackageMetrics so cost dashboards can correlate compression pressure
+// with model spend without scraping logs. nil for steps in workflows that
+// don't opt into context packaging — the cost record then keeps its pre-PR-1b
+// shape (omitempty drops the field).
+func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step, result *executor.ExecuteResult, registryModel string, pkg *packaging.Package) {
 	if s.tokenCounter == nil || result == nil {
 		return
 	}
@@ -148,12 +156,13 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 			)
 		}
 		s.costReporter.RecordStepCost(workflowID, cost.StepCostEntry{
-			StepID:       step.ID,
-			AgentID:      step.AgentID,
-			Model:        data.model,
-			InputTokens:  data.inputTokens,
-			OutputTokens: data.outputTokens,
-			EstimatedUSD: data.estimatedCostUSD,
+			StepID:         step.ID,
+			AgentID:        step.AgentID,
+			Model:          data.model,
+			InputTokens:    data.inputTokens,
+			OutputTokens:   data.outputTokens,
+			EstimatedUSD:   data.estimatedCostUSD,
+			ContextPackage: contextPackageMetricsFromPackage(pkg),
 		})
 	}
 }

@@ -62,6 +62,13 @@ type WorkflowScheduler struct {
 	// scheduler constructed without an explicit packager uses the default
 	// HeuristicScorer-backed packager.
 	packager *packaging.Packager
+
+	// warningSampler bounds how many times each (execution_id, step_id,
+	// warning) tuple emits a structured zap warning from the context-package
+	// pipeline (RFC 0008 PR 1b — finding L11). The cost record on
+	// StepCostEntry.ContextPackage carries the unsampled metric for every
+	// step, so capping log noise here loses no telemetry.
+	warningSampler warningSampler
 }
 
 // Option configures a WorkflowScheduler.
