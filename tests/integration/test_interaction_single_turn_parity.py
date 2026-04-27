@@ -17,7 +17,10 @@ What "parity" means here:
   multi-turn interactions; single-turn rows keep the cheap deterministic
   text per RFC 0020 §C summary-text-by-phase table.
 * **Interaction columns** — ``interaction_id`` / ``started_at`` /
-  ``closed_at`` are populated, ``turn_count == 1``, ``scope == "tick"``.
+  ``closed_at`` are populated, ``turn_count == 1``, and ``scope`` is
+  the event-type label (``"tick"`` for ``EventType.TICK``,
+  ``"task_assigned"`` for ``EventType.TASK_ASSIGNED``, etc., per
+  PR-215 review Should-Fix #1).
   Multi-turn paths (``MESSAGE_RECEIVED`` / ``MENTION``) are deferred to
   PR 3 and continue to land with NULL interaction columns; that legacy
   shape is asserted here to keep the PR 3 boundary explicit.
@@ -186,6 +189,12 @@ class TestSingleTurnParity:
         share the TICK boundary policy — single-turn, structural close.
         ``TASK_ASSIGNED`` is the canonical tool-only event in v0.3.0:
         no ``sender_id``, no chat continuation expected.
+
+        PR-215 review (Should-Fix #1): the persisted ``scope`` carries
+        the event-type label (``"task_assigned"``) rather than the bare
+        ``"tick"`` string.  ``SCOPE_TICK`` is reserved for actual
+        ``EventType.TICK`` events so the column preserves provenance for
+        analytics.
         """
         agent = await _make_agent()
         event = AgentEvent(
@@ -199,36 +208,44 @@ class TestSingleTurnParity:
         ep = episodes[0]
         assert ep["interaction_id"]
         assert ep["turn_count"] == 1
-        assert ep["scope"] == "tick"
+        assert ep["scope"] == "task_assigned"
         assert ep["closed_at"] is not None
         assert ep["summary"].startswith("Event: task_assigned → Actions:")
 
-    async def test_message_received_keeps_legacy_shape(self):
+    async def test_multi_turn_events_keep_legacy_shape(self):
         """Multi-turn paths land with NULL interaction columns until PR 3.
 
         This pins the PR 2/PR 3 boundary: ``MESSAGE_RECEIVED`` and
         ``MENTION`` continue to write pre-RFC-shaped rows (no
         ``interaction_id``), so the PR 3 multi-turn aggregation has a
         clean before/after to compare against.
-        """
-        agent = await _make_agent()
-        event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
-            payload={"content": "Quick question about the sprint."},
-            sender_id="iron-fox",
-        )
-        await agent.on_event(event)
 
-        episodes = await _all_episodes(agent)
-        assert len(episodes) == 1
-        ep = episodes[0]
-        assert ep["interaction_id"] is None, (
-            "MESSAGE_RECEIVED must keep the pre-RFC episode shape until "
-            "PR 3 wires multi-turn aggregation (RFC 0020 PR plan §PR 2)"
-        )
-        assert ep["turn_count"] is None
-        assert ep["scope"] is None
-        assert ep["summary"].startswith("Event: message_received → Actions:")
+        PR-215 review nice-to-have #4: ``MENTION`` is exercised here
+        alongside ``MESSAGE_RECEIVED`` so the symmetry of the
+        ``_MULTI_TURN_EVENT_TYPES`` deny-list is enforced explicitly
+        rather than implied by the membership check.
+        """
+        for event_type, payload, sender in (
+            (EventType.MESSAGE_RECEIVED, {"content": "Quick question."}, "iron-fox"),
+            (EventType.MENTION, {"content": "@parity-persona ping"}, "iron-fox"),
+        ):
+            agent = await _make_agent()
+            await agent.on_event(AgentEvent(
+                event_type=event_type,
+                payload=payload,
+                sender_id=sender,
+            ))
+
+            episodes = await _all_episodes(agent)
+            assert len(episodes) == 1
+            ep = episodes[0]
+            assert ep["interaction_id"] is None, (
+                f"{event_type.value} must keep the pre-RFC episode shape "
+                "until PR 3 wires multi-turn aggregation (RFC 0020 PR plan §PR 2)"
+            )
+            assert ep["turn_count"] is None
+            assert ep["scope"] is None
+            assert ep["summary"].startswith(f"Event: {event_type.value} → Actions:")
 
     async def test_mixed_event_stream_preserves_per_event_count(self):
         """A mixed stream (TICK + TASK_ASSIGNED + MESSAGE_RECEIVED) yields
@@ -260,3 +277,50 @@ class TestSingleTurnParity:
         assert len(single_turn) == 3
         assert len(legacy) == 1
         assert all(e["turn_count"] == 1 for e in single_turn)
+
+    async def test_store_episode_failure_is_swallowed_and_logged(self, caplog):
+        """Persistence failure must not bubble; tracker must not leak.
+
+        PR-215 review (Should-Fix #3) — the only meaningful coverage gap
+        in the original parity suite was the exception path in
+        ``_store_event_episode``.  PR 1 introduced
+        ``interactions.closed.by_structural`` counter increments inside
+        ``InteractionTracker.close``; if ``store_episode`` then fails,
+        the counter has already fired and the scope has already been
+        popped from the open map.  This test pins three contracts:
+
+        1. The exception is swallowed (parity with pre-RFC behavior).
+        2. The tracker has no dangling open scope after failure
+           (``close`` ran before ``store_episode`` raised, so the scope
+           must not appear in ``open_scopes``).
+        3. A warning is emitted carrying the ``event_type`` so an
+           operator can correlate the metric increment to the missing
+           row (PR-215 review nice-to-have #3).
+        """
+        import logging
+
+        agent = await _make_agent()
+
+        async def _boom(**_kwargs):
+            raise RuntimeError("simulated SQLite I/O failure")
+
+        agent._episodic_memory.store_episode = _boom  # type: ignore[assignment]
+
+        with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.state_persistence"):
+            # Must not raise.
+            await agent.on_event(AgentEvent(
+                event_type=EventType.TASK_ASSIGNED,
+                payload={"task": "will fail to persist"},
+            ))
+
+        # Tracker contract: ``close`` ran before ``store_episode`` raised,
+        # so the scope was popped — no dangling open interaction.
+        assert agent._interaction_tracker.open_scopes() == []
+
+        # Warning was emitted with the event_type for correlation.
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("task_assigned" in r.getMessage() for r in warnings), (
+            "warning must include event_type so operators can correlate "
+            "the interactions.closed.by_structural counter increment with "
+            "the missing episode row"
+        )
