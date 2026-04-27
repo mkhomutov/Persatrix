@@ -1,0 +1,2 @@
+Current state:
+{state}

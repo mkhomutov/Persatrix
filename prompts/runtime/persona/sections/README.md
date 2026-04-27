@@ -1,23 +1,47 @@
 # Persona Prompt Sections
 
-Externalized assets for the persona system prompt.
+Externalized assets for the persona system prompt. See
+[RFC 0022](../../../../docs/rfcs/0022-persona-prompt-section-templating.md)
+for the templating contract.
 
-## Current files
+## Section templates
+
+Each section is rendered by the composer in
+[`agents/persona_runtime/prompt_assembly.py`](../../../../agents/persona_runtime/prompt_assembly.py)
+through Python `str.format_map`. Templates carry no logic — conditional
+inclusion is decided by the composer's per-section predicate.
+
+| File                | Always rendered? | Placeholders                         |
+| ------------------- | :--------------: | ------------------------------------ |
+| `identity.md`       | Yes              | `{name}`, `{title_line}`, `{role}`   |
+| `background.md`     | When set         | `{background}`                       |
+| `behavior.md`       | When non-empty   | `{behavior}`                         |
+| `quirks.md`         | When non-empty   | `{quirks}`                           |
+| `goals.md`          | When populated   | `{goals}`                            |
+| `current-state.md`  | When non-empty   | `{state}`                            |
+
+`{title_line}` carries its own trailing newline (`"Title: <title>\n"`
+or `""`) so the template can keep the placeholder on its own line
+without producing a stray blank line when the title is absent.
+
+## Behavioral-dimension descriptions
 
 | File                          | Loaded by                                                           | Purpose                                                                |
 | ----------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `behavior-dimensions.yaml`    | [`agents/prompt_loader.py`](../../../../agents/prompt_loader.py) (`load_dimension_descriptions`) — re-exposed via [`agents/persona_behavior.py`](../../../../agents/persona_behavior.py) | Natural-language descriptions of each persona behavioral dimension/value pair, rendered into the persona system prompt. |
+| `behavior-dimensions.yaml`    | [`agents/prompt_loader.py`](../../../../agents/prompt_loader.py) (`load_dimension_descriptions`) — re-exposed via [`agents/persona_behavior.py`](../../../../agents/persona_behavior.py) | Natural-language descriptions of each persona behavioral dimension/value pair, rendered into the `behavior.md` placeholder. |
 
-## Reserved for follow-up
+## Adding a new section
 
-The bulk of the persona system prompt (identity / background / goals /
-current-state) is still assembled inline in
-[`agents/persona_runtime/prompt_assembly.py`](../../../../agents/persona_runtime/prompt_assembly.py).
-Templated section files (`identity.md`, `background.md`, `goals.md`,
-`current-state.md`) live behind PR C of the prompt-externalization
-follow-up plan, which needs an RFC for the templating syntax. See
-[`docs/prompt-organization.md`](../../../../docs/prompt-organization.md)
-for the migration rules.
+1. Place the markdown template at `<name>.md` in this directory.
+2. Add a `_Section` entry to `_SECTIONS` in
+   [`agents/persona_runtime/prompt_assembly.py`](../../../../agents/persona_runtime/prompt_assembly.py)
+   with the predicate and context builder.
+3. Pin the template body in
+   `TestShippedPersonaSectionsByteIdentity`
+   ([`tests/unit/python/test_prompt_loader.py`](../../../../tests/unit/python/test_prompt_loader.py)).
+4. Update the golden in `TestSystemPromptByteIdentity`
+   ([`tests/unit/python/test_persona_section_composer.py`](../../../../tests/unit/python/test_persona_section_composer.py))
+   if the new section appears for the canonical test persona.
 
 ## Contract for `behavior-dimensions.yaml`
 
