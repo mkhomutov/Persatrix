@@ -1,13 +1,14 @@
-# RFC 0008 — PR Implementation Plan (scaffold)
+# RFC 0008 — PR Implementation Plan
 
 **RFC**: [0008-agent-memory-context-optimization.md](0008-agent-memory-context-optimization.md)
 **Created**: 2026-04-25
+**Fleshed out**: 2026-04-27
 **Branch prefix**: `feature/v030-rfc0008-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
-> **Status**: 🔨 Scaffold — PR rows have branch names, scopes, and dependency links pinned, but per-PR key-implementation-detail and tests sections are placeholders. Flesh out before the first implementation PR opens.
+> **Status**: ✅ Ready — every PR row has a fleshed-out scope table, key-implementation-detail block, tests block, and PR checklist. Cross-RFC sequencing pins (PR 1 → RFC 0007 PR 3; PR 2 → RFC 0011 PR 5 + RFC 0020 PR 4) are unchanged and the 6-PR count is preserved so downstream PR plans stay valid.
 
 ---
 
@@ -51,92 +52,294 @@ PR 6 (Review follow-ups + RFC close)
 ### PR 1: `feature/v030-rfc0008-context-budget` — Phase 1: Context Budget + Packaging
 
 **Depends on**: Nothing (RFC 0006 Phase 1 already shipped).
-**Estimated size**: ~400–500 lines.
+**Estimated size**: ~400–500 lines (calibrated; close to the [BRANCHING.md](../BRANCHING.md) 500-line soft cap — see *Sizing risk* below).
 
-#### Scope (high-level)
+#### Scope
 
-- `internal/scheduler/` — context budget allocation per step.
-- `internal/executor/` — dispatch contract extensions for context package + budget.
-- `internal/cost/` — extend budget accounting with context-package metrics.
-- New candidate-selection + relevance-scoring module.
-- Extractive compression + deterministic truncation order.
-- Context-assembly metrics in step metadata.
+| File | Change |
+|------|--------|
+| `schemas/workflow.schema.json` | Add optional per-step `context_budget` (integer, ≥ 0) and optional workflow-level `context_budget_total` (integer, ≥ 0). Both default to unset; unset workflow-level total disables packaging (legacy passthrough preserved). |
+| `internal/planner/` | Parse + validate the new fields onto `planner.Step` and the workflow root. Reject negative values at parse time. |
+| `internal/scheduler/scheduler.go` | Equal-split allocator per [RFC §C](0008-agent-memory-context-optimization.md#c-context-budget-as-a-scheduler-primitive) and [Open Question 8](0008-agent-memory-context-optimization.md#8-context-budget-derivation-algorithm--equal-split-with-per-step-override): subtract per-step overrides from `context_budget_total`, divide remainder among non-overridden steps. Persist remaining budget in step state across retries (rule 4). |
+| `internal/executor/dispatch.go` | New `ContextPackage` struct (Go) with `pinned_sections`, `step_outputs`, `metrics` fields. Serialize as JSON under reserved key `_context_package` in the existing `TaskRequest.context` map per [Open Question 2](0008-agent-memory-context-optimization.md#2-proto-context-fields--defer-typed-fields-to-phase-3-use-existing-context-map-in-phases-12). No proto changes. |
+| `internal/executor/packaging/` | **New package**. Candidate-selection (depends-on outputs + workflow constants), `RelevanceScorer` interface with default heuristic backend (dependency proximity + lexical overlap + recency + importance — [Open Question 1](0008-agent-memory-context-optimization.md#1-relevance-scoring-approach--heuristic-only-in-phase-1-pluggable-scoring-interface)), greedy knapsack by `relevance / tokens` density per [RFC §D](0008-agent-memory-context-optimization.md#d-context-packaging-and-compression-pipeline), extractive truncation (deterministic order: lowest density first), pinned-section passthrough. **Phase 1 is extractive-only.** Abstractive compression is deferred to Phase 1b (see *Sizing risk*). |
+| `internal/cost/` | Add `ContextPackageMetrics` (`tokens_before`, `tokens_after`, `compression_ratio`, `candidates_admitted`, `candidates_dropped`) to per-step cost record. Emit `high_compression_ratio` warning at ≥ 4.0 and `extreme_compression_capped` event at the 10:1 hard cap per [Open Question 3](0008-agent-memory-context-optimization.md#3-compression-warning-threshold--warn-at-41-hard-cap-at-101). |
+| `internal/state/` | Persist `remaining_context_budget` and `ContextPackageMetrics` in step state. |
+| `tests/unit/go/scheduler/` | Equal-split allocator: N steps with no overrides; mixed override + non-override; override sum ≥ total → reject at validate time; retry preserves remaining budget. |
+| `tests/unit/go/executor/packaging/` | Greedy knapsack picks highest-density candidates; pinned sections always admitted (even if over budget); deterministic truncation order under tied densities; warning fires at 4:1; cap at 10:1. |
+| `tests/integration/go/` | End-to-end: 3-step workflow with `context_budget_total: 6000` → step 2 receives a `_context_package` payload whose `step_outputs` honor its allocated budget; step metadata records compression ratio. |
 
-#### Key implementation details *(TBD before PR opens)*
-#### Tests *(TBD)*
+#### Key implementation details
+
+- **Equal-split formulas** (verbatim from [Open Question 8](0008-agent-memory-context-optimization.md#8-context-budget-derivation-algorithm--equal-split-with-per-step-override)): $B_{remaining} = B_{total} - \sum_{i \in \text{overridden}} B_{i,\text{override}}$ then $B_{step,\text{non-overridden}} = B_{remaining} / (N_{steps} - |\text{overridden}|)$. If `B_remaining < 0` the planner rejects the workflow with a precise error citing the offending overrides.
+- **Retry budget persistence**: after each dispatch attempt the executor writes `remaining_context_budget = remaining_before - actual_consumed_input_tokens` back to step state. The next retry's packaging pass reads this value, not the original allocation. This is the contract RFC 0006's `BudgetEnforcer` already established for execution budgets — the context budget piggybacks on the same step-state row.
+- **`_context_package` JSON shape** (pinned to enable downstream consumers to parse without proto changes):
+  ```json
+  {
+    "version": 1,
+    "pinned_sections": [{"name": "...", "content": "...", "tokens": 0}],
+    "step_outputs": [{"step_id": "...", "content": "...", "tokens": 0, "relevance": 0.0, "compressed": false}],
+    "metrics": {"tokens_before": 0, "tokens_after": 0, "compression_ratio": 0.0, "candidates_dropped": 0}
+  }
+  ```
+  `version: 1` allows additive evolution; agents that don't recognise a higher version downgrade gracefully (ignore unknown fields).
+- **`RelevanceScorer` protocol** (Go): `type RelevanceScorer interface { Score(candidate Candidate, query QueryContext) float64 }`. The default heuristic implementation lives in `executor/packaging/scorer_heuristic.go`. RFC 0008's [Open Question 1](0008-agent-memory-context-optimization.md#1-relevance-scoring-approach--heuristic-only-in-phase-1-pluggable-scoring-interface) commits this surface so a future embedding backend (RFC 0005 follow-on) can swap in.
+- **Pinned-section contract**: orchestrator-side parallel of `ContextSection.compressible = False` from `agents/memory/working.py` (see [RFC §F](0008-agent-memory-context-optimization.md#f-persona-context-sanity-and-helper-agents)). Pinned sections are excluded from compression-ratio denominator (per [Open Question 3](0008-agent-memory-context-optimization.md#3-compression-warning-threshold--warn-at-41-hard-cap-at-101)) and always admitted; if their token sum alone exceeds `B_step`, packaging logs `pinned_overflow` and admits anyway (correctness over budget — operator alert via metric).
+- **Compression overhead budget**: not implemented in Phase 1 (no abstractive calls yet). The struct + metrics are wired so Phase 1b can plug in the abstractive call without schema churn.
+- **Sizing risk**: the calibrated upper bound (~500 lines) brushes the [BRANCHING.md](../BRANCHING.md) cap. If implementation exceeds 450 lines pre-tests, split off the abstractive-compression piece (currently *not* in Phase 1's deliverables — RFC §D pipeline step 3b) into a follow-on PR `feature/v030-rfc0008-context-abstractive` between PR 1 and PR 2, and update PR 2's `Depends on` to reference both. This split is contingent and does not change the canonical 6-PR count unless triggered.
+
+#### Tests
+
+Unit (Go):
+- Allocator: equal-split with N ∈ {1, 3, 10}; no overrides; mixed overrides; all overrides; override sum equals total (zero remainder); override sum exceeds total (planner rejects).
+- Allocator: retry consumes from persisted remaining budget, not original allocation.
+- Packaging: greedy knapsack admits highest density first; ties broken by candidate ID (deterministic); pinned section always present.
+- Packaging: extractive truncation drops lowest-density candidates first; resulting `tokens_after ≤ B_step` (or pinned-overflow path triggered).
+- Metrics: `compression_ratio = tokens_before / tokens_after`; ratio is 1.0 when nothing dropped; ratio cap at 10:1 emits `extreme_compression_capped`; ratio ≥ 4.0 emits `high_compression_ratio`.
+- Schema: workflow with negative `context_budget` rejected at parse time.
+- `_context_package` JSON round-trip: serialize → deserialize → equal struct.
+
+Integration (Go + Python):
+- 3-step workflow, `context_budget_total: 6000`, no overrides → each step's `_context_package.metrics.tokens_after ≤ 2000`.
+- Same workflow with `step[1].context_budget: 4000` → step 1 gets 4000, step 0 + step 2 split remaining 2000 → 1000 each.
+- Step retry path: a step that fails after consuming 800 of 2000 budgeted input tokens has `remaining_context_budget = 1200` on its second attempt's package.
+- Agent-side: a Python agent receiving `_context_package` parses it without errors and surfaces `version` in its trace metadata. Agents without packaging-awareness ignore the key (regression test).
 
 #### PR checklist
 
+- [ ] `make test` passes (Go + Python + integration)
+- [ ] `make lint` clean
+- [ ] `make validate` passes (workflow schema additions)
+- [ ] `_context_package` JSON shape (`version`, `pinned_sections`, `step_outputs`, `metrics`) frozen — any change after merge requires a separate RFC amendment
+- [ ] `RelevanceScorer` protocol exported with a default heuristic backend; embedding-backend extension point documented in package GoDoc
+- [ ] Pinned-section overflow path emits `pinned_overflow` metric and proceeds (correctness over budget)
 - [ ] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
 - [ ] Master Progress Overview row 4 → 🔄 In progress
+- [ ] [RFC 0007 PR plan](0007-pr-plan.md) PR 3 reviewer pinged: `repeat_until` loop budget integration is now unblocked
 
 ---
 
 ### PR 2: `feature/v030-rfc0008-memory-facade` — Phase 2: MemoryFacade for Task Agents
 
 **Depends on**: PR 1.
-**Estimated size**: ~350–500 lines.
+**Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
-#### Scope (high-level)
+#### Scope
 
-- `agents/memory/facade.py` — `MemoryFacade` with `store_observation`, `retrieve_relevant`, `compress`.
-- Task-agent integration via `agents/task_agent.py`.
-- Config + schema updates for task memory policies.
-- Basic eviction + TTL policy.
+| File | Change |
+|------|--------|
+| `agents/memory/facade.py` | **New** — `MemoryFacade` class per [RFC §B](0008-agent-memory-context-optimization.md#b-memory-for-all-agent-types). Methods: `retrieve_relevant(query, *, limit, scope=None, tags=None, min_score=None) -> list[MemoryEntry]`; `store_observation(entry, *, scope, ttl_seconds=None, tags=()) -> str`; `store_procedure(key, content, *, confidence, expires_at=None) -> None`; `list_candidates(task_context) -> list[Candidate]`; `compress(entries, *, target_tokens) -> CompressedView`. Per-process lifecycle with `initialize()` / `close()` matching the existing `MemoryLifecycle` protocol per [Open Question 7](0008-agent-memory-context-optimization.md#7-memoryfacade-lifecycle-for-task-agents--per-process-with-serialized-access). |
+| `agents/memory/facade.py` | `tags` filter parameter on `retrieve_relevant` (required by [RFC 0011 PR plan](0011-pr-plan.md) PR 5). `compress` hook (required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4). Both are pinned-API surfaces — additive evolution only. |
+| `agents/task_agent.py` | Wire `MemoryFacade` into `_run_llm_loop`. Read advisory `budget_memory_tokens` from `_context_package` payload (per [Open Question 10](0008-agent-memory-context-optimization.md#10-orchestrator-vs-agent-context-assembly-boundary--split-ownership-option-3)) and translate into `retrieve_relevant(limit=...)` via `estimate_tokens()` from `agents/memory/working.py`. Memory injection is gated on `agent.memory.enabled` config flag (default `false` to preserve existing stateless behaviour). |
+| `agents/server.py` | Extend `start()` / `stop()` to instantiate / close `MemoryFacade` for memory-enabled task agents (mirrors the existing persona-agent lifecycle path). |
+| `config/agents.yaml` | New optional `memory` block per task agent: `enabled` (bool, default `false`), `episodic_cap` (int, default `1000`), `ttl_low_importance_days` (int, default `30`), `min_score` (float \| null, default `null`). |
+| `schemas/agent.schema.json` | Schema for the new `memory` block; `make validate` enforces. |
+| `agents/memory/eviction.py` | **New** — basic eviction policy: hard TTL for entries with `importance < 0.3` after `ttl_low_importance_days`; size-cap pruning at `episodic_cap` using the [RFC §G](0008-agent-memory-context-optimization.md#g-memory-eviction-decay-and-validation) hybrid score `importance × 0.6 + recency_norm × 0.3 + access_freq_norm × 0.1`. **Confidence decay is deferred to PR 5** (Phase 4b). |
+| `agents/memory/eviction.py` | Single `EvictionPass.run()` entry point invoked on a periodic background task scheduled by `MemoryFacade.initialize()`. Default cadence: every 1 hour; configurable. |
+| `tests/unit/python/test_memory_facade.py` | **New** — facade contract tests, lifecycle tests, advisory-budget translation tests. |
+| `tests/unit/python/test_memory_eviction.py` | **New** — TTL eviction; size-cap eviction by hybrid score; deterministic ordering under tied scores. |
+| `tests/integration/python/test_task_agent_memory.py` | **New** — task agent with `memory.enabled: true` stores an observation, retrieves it on a subsequent call, respects `min_score` filter. |
 
-#### Key implementation details *(TBD)*
-#### Tests *(TBD)*
+#### Key implementation details
+
+- **Per-process lifecycle** ([Open Question 7](0008-agent-memory-context-optimization.md#7-memoryfacade-lifecycle-for-task-agents--per-process-with-serialized-access)): a single `EpisodicMemory` instance per task-agent process, shared across concurrent gRPC calls. Serialization relies on aiosqlite's WAL-mode single-connection internal queue. No new `asyncio.Lock` is introduced unless parallel tool execution lands later (it doesn't in v0.3.0). Per-task instantiation is rejected because `EpisodicMemory.initialize()` runs `PRAGMA journal_mode=WAL` + FTS5 + migration check on every call.
+- **Advisory budget translation**: the agent reads `_context_package.metrics.tokens_after` and `budget_memory_tokens` (from a new top-level field added to the v1 JSON shape). Translation: `limit = max(1, int(budget_memory_tokens / avg_entry_tokens))` where `avg_entry_tokens = 100` is a Phase 2 constant (calibrated against existing episodic data in PR 5's metrics rollout). Enforcement is advisory — the agent is trusted; future PR 3 of this plan can audit usage in `DelegationResult`.
+- **`MemoryFacade.compress(entries, *, target_tokens) -> CompressedView`** — the API hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4's summarize-on-close path. Phase 2 implementation is extractive-only (highest-importance entries first up to `target_tokens`); abstractive compression is the same `WorkingMemory.compress_if_needed()` path the persona stack already uses, exposed here behind the facade. `CompressedView` is a frozen dataclass with `summary: str`, `entries_dropped: int`, `tokens_before: int`, `tokens_after: int`.
+- **`tags` filter semantics**: `retrieve_relevant(tags=("channel:slack-#dev",))` returns entries whose `tags` set is a superset of the requested tags (AND, not OR). [RFC 0011 PR plan](0011-pr-plan.md) PR 5's channel-scoped recall depends on this AND semantics.
+- **Eviction scheduling**: `MemoryFacade.initialize()` starts `asyncio.create_task(_eviction_loop())`; `close()` cancels it. Eviction is best-effort — failures log a warning and the loop continues (mirrors RFC 0005 working-memory async-flush pattern).
+- **Sizing risk**: facade + eviction + tests + integration is wide. If implementation pushes over the cap during PR review, split eviction (`agents/memory/eviction.py` + its tests) into a follow-on `feature/v030-rfc0008-eviction` PR. Cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) only require the facade surface, not eviction, so the split is safe.
+
+#### Tests
+
+Unit (Python):
+- `MemoryFacade.retrieve_relevant`: `limit` honored; `tags=()` is no-op; `tags=("a", "b")` requires both; `min_score` filters per `EpisodicMemory.recall` contract.
+- `MemoryFacade.store_observation`: returns a stable key; persists across `close()` + new instance with same DB path.
+- `MemoryFacade.compress`: reduces token count to `≤ target_tokens`; preserves highest-importance entries; idempotent on already-compressed view.
+- Lifecycle: `initialize()` is safe to call twice (second call is no-op + warning); `close()` after `initialize()` cancels the eviction loop within 1s.
+- Eviction TTL: entry with `importance=0.2`, `created_at` 31 days ago → evicted on next pass; same entry with `importance=0.5` → retained.
+- Eviction size cap: 1500 entries with `episodic_cap=1000` → 500 lowest-scoring entries evicted; deterministic tie-break by `created_at ASC`.
+- Eviction failure: simulated DB error in one pass logs a warning, the loop survives, the next pass succeeds.
+
+Integration (Python):
+- Task agent with `memory.enabled: true` calls `store_observation` in tool A, then `retrieve_relevant` in tool B → returns the entry.
+- Same agent with `memory.enabled: false` (default) → `MemoryFacade` is `None`; tool calls that would write memory raise `MemoryDisabledError` (no silent no-op).
+- Concurrent gRPC calls (10 parallel) on a memory-enabled task agent → no FTS5 corruption; all stores readable post-flush.
+- `_context_package.budget_memory_tokens=500` → `retrieve_relevant` is called with `limit=5` (using `avg_entry_tokens=100`).
 
 #### PR checklist
 
-- [ ] `MemoryFacade.retrieve_relevant` exposes the `tags` filter required by RFC 0011 P3
-- [ ] `MemoryFacade.compress` exposes the hook required by RFC 0020 PR 4
+- [ ] `make test` passes
+- [ ] `make lint` clean
+- [ ] `make validate` passes (`schemas/agent.schema.json` additions)
+- [ ] `MemoryFacade.retrieve_relevant` exposes the `tags` filter required by [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (AND semantics confirmed in test `test_facade_tags_intersection`)
+- [ ] `MemoryFacade.compress` exposes the `(entries, target_tokens) -> CompressedView` hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4
+- [ ] Per-process lifecycle: a single `EpisodicMemory` instance per agent process; no per-task instantiation
+- [ ] `memory.enabled: false` is the default in the schema (deny-by-default; preserves existing stateless task-agent behaviour)
+- [ ] [RFC 0011 PR plan](0011-pr-plan.md) PR 5 reviewer pinged: `MemoryFacade` is now available
+- [ ] [RFC 0020 PR plan](0020-pr-plan.md) PR 4 reviewer pinged: `compress` hook is now available
 
 ---
 
 ### PR 3: `feature/v030-rfc0008-delegation-merge` — Phase 3: Delegation Contract + Merge Engine
 
-**Depends on**: PR 1.
-**Estimated size**: ~400–500 lines.
+**Depends on**: PR 1 (uses the `_context_package` JSON shape) and PR 2 (`MemoryFacade.store_observation` is the merge sink for `memory_writes`).
+**Estimated size**: ~400–500 lines (calibrated; near the cap — see *Sizing risk*).
 
-#### Scope (high-level)
+#### Scope
 
-- `DelegationRequest` + `DelegationResult` data contracts.
-- Merge strategy implementation + conflict handling.
-- Observability for merge outcomes + dropped fields.
+| File | Change |
+|------|--------|
+| `agents/sub_agents/delegation.py` | **New** — `DelegationRequest` and `DelegationResult` dataclasses per [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics). `MemoryWriteEntry` schema with `tier`, `key`, `content`, `importance`, `ttl_seconds`, `tags`. `source_agent` is framework-injected (rejected if caller-set). |
+| `agents/sub_agents/merge.py` | **New** — `MergeEngine` with strategies `replace`, `append`, `patch`, `reject_on_conflict` per [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics). `patch` uses JSON Merge Patch (RFC 7396) for structured fields and acts as `replace` for strings per [Open Question 11](0008-agent-memory-context-optimization.md#11-merge-strategy-patch-semantics--json-merge-patch-for-structured-fields-replace-for-strings). `tags` lists merge as union under `patch`. |
+| `agents/sub_agents/merge.py` | Schema validation (mandatory before merge); reject entries missing required fields, with `tier` outside `{episodic, notes}`, or with caller-set `source_agent`. Importance downscaled to caller-configured trust ceiling (default `0.8` for unverified sub-agents). `max_memory_writes` cap at 20 per result (security item #7). |
+| `agents/sub_agents/spawner.py` | Replace existing TODO stub with a contract-aware spawner that builds `DelegationRequest` (objective + context package + sub-budget + allowed tools + output schema) and invokes the sub-agent through the existing dispatch path. |
+| `agents/task_agent.py` | When acting as a sub-agent, validate output conforms to `DelegationResult` schema before returning. |
+| `internal/observability/` (Go) | New metrics: `delegation_merge_outcome{strategy, status}`, `delegation_dropped_fields_count`, `delegation_memory_writes_admitted`, `delegation_memory_writes_rejected{reason}`. Reasons: `schema_invalid`, `trust_ceiling`, `cap_exceeded`, `source_agent_set`. |
+| `tests/unit/python/test_delegation_contract.py` | **New** — request/result schema validation, framework-injected `source_agent`, importance downscaling. |
+| `tests/unit/python/test_merge_engine.py` | **New** — all four strategies + JSON Merge Patch corner cases. |
+| `tests/integration/python/test_delegation_end_to_end.py` | **New** — caller dispatches `DelegationRequest`, sub-agent returns `DelegationResult`, merge applies, `memory_writes` land in caller memory under the trust ceiling. |
 
-#### Key implementation details *(TBD)*
-#### Tests *(TBD)*
+#### Key implementation details
+
+- **`DelegationRequest` shape** (frozen dataclass):
+  ```python
+  @dataclass(frozen=True)
+  class DelegationRequest:
+      objective: str
+      acceptance_criteria: list[str]
+      context_package: dict          # the same v1 shape PR 1 froze
+      budget: BudgetEnvelope         # tokens, timeout, max_llm_calls
+      allowed_tools: frozenset[str]
+      output_schema: dict            # JSON Schema fragment
+      trust_ceiling: float = 0.8     # default per [RFC §E](#e-delegation-contract-and-merge-semantics)
+      max_memory_writes: int = 20    # default per security item #7
+  ```
+- **`DelegationResult` shape** (matches [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim): `summary`, `artifacts`, `decisions`, `memory_writes`, `risks`, `status`. `status ∈ {"completed", "partial", "failed"}`.
+- **Merge order** (deterministic): (1) schema validation; (2) framework-inject `source_agent`; (3) cap `memory_writes` at `max_memory_writes` (extras → `cap_exceeded` reason); (4) downscale `importance` to `trust_ceiling`; (5) apply per-entry merge strategy against existing memory; (6) emit metrics. Failure at step (1) rejects the whole result with `status=failed` recorded in metrics; later steps reject only the offending entries and continue.
+- **JSON Merge Patch on `artifacts`**: `null` values delete keys, present values overwrite. Implementation uses Python's `json` module; no new dependency. The Go side does not need to implement Merge Patch in this PR — merge happens in the Python caller process.
+- **`tags` list under `patch`**: union semantics (additive). Removing a tag requires `replace` strategy on the whole entry.
+- **`source_agent` injection**: the spawner records the originating agent ID; the merge engine rejects any `MemoryWriteEntry` whose `source_agent` field is non-`None` on receipt (it must be `None` from the wire and is set by the framework). Test `test_source_agent_spoof_rejected` covers this.
+- **Sizing risk**: contract + merge engine + spawner + observability is wide. If the implementation pushes over the cap, split observability metrics (`internal/observability/`) into a follow-on `feature/v030-rfc0008-delegation-metrics` PR; the merge engine can ship with structured-log-only observability and metrics back-fill in the follow-on without changing any agent-facing API.
+
+#### Tests
+
+Unit (Python):
+- `DelegationRequest`: required fields enforced; default `trust_ceiling=0.8`; default `max_memory_writes=20`; budgets non-negative.
+- `DelegationResult`: `status` validates against the closed set; `memory_writes` schema validates per entry.
+- `MergeEngine.replace`: existing entry overwritten.
+- `MergeEngine.append`: list-typed artifacts concatenated; non-list artifact under `append` → schema_invalid.
+- `MergeEngine.patch`: JSON Merge Patch applied to `artifacts.code_review` (object); `null` deletes nested key; `tags` list unioned; string `content` field replaced.
+- `MergeEngine.reject_on_conflict`: existing key + incoming entry → entry rejected with reason logged.
+- Trust ceiling: incoming `importance=0.95` with `trust_ceiling=0.8` → stored at `0.8`; metric `trust_ceiling` increments.
+- Cap: 25 incoming `memory_writes` with `max_memory_writes=20` → first 20 admitted (deterministic order: input order), 5 rejected with `cap_exceeded`.
+- Spoofing: `MemoryWriteEntry(source_agent="impostor")` → rejected with `source_agent_set`.
+
+Integration:
+- Caller dispatches sub-agent with `DelegationRequest`; sub-agent returns `DelegationResult` with 3 memory writes; caller's `MemoryFacade.retrieve_relevant` finds them post-merge.
+- Sub-agent returns malformed JSON → caller logs `schema_invalid` metric and surfaces a `DelegationFailure` to the workflow step (no partial merge).
 
 ---
 
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
 
 **Depends on**: PR 2 + PR 3.
-**Estimated size**: ~300–450 lines.
+**Estimated size**: ~300–450 lines (calibrated).
 
-#### Scope (high-level)
+#### Scope
 
-- Shared pool ACL + provenance policy.
-- Curated publish workflow from isolated to shared memory.
+| File | Change |
+|------|--------|
+| `agents/memory/shared_pool.py` | **New** — `SharedMemoryPool` class wrapping `EpisodicMemory` with config-based ACL enforcement per [Open Question 13](0008-agent-memory-context-optimization.md#13-shared-memory-acl-without-rfc-0009--config-based-acl-with-python-layer-enforcement). Methods: `read(agent_id, query, ...)`, `write(agent_id, entry)`. Deny-by-default — agents not in the pool's `readers`/`writers` list raise `SharedMemoryPermissionError`. |
+| `agents/memory/shared_pool.py` | Provenance enforcement: every write requires `source_agent` (framework-injected from `agent_id`), `created_at` (set by pool), `confidence` (caller-supplied, validated `0.0 ≤ c ≤ 1.0`). Reads support `min_confidence` filter. |
+| `agents/memory/facade.py` | Add `MemoryFacade.publish_to_pool(pool_name, entry)` — the curated publish path from isolated memory to shared pool ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) hybrid model). Validates the agent has writer permission on the named pool. |
+| `agents/memory/facade.py` | Add `MemoryFacade.read_from_pool(pool_name, query, *, min_confidence=None, limit, tags=None)`. |
+| `config/agents.yaml` | New `shared_memory_pools` top-level section: named pools with `readers`, `writers`, `max_entries`, `required_confidence`, `sensitive` (bool — when `true`, isolated memory classes can never publish to this pool, enforcing [RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3). |
+| `schemas/agent.schema.json` | Schema for `shared_memory_pools` including ACL list validation (no duplicates, agent IDs match the canonical pattern). |
+| `internal/observability/` (Go) | Metrics `shared_pool_reads{pool,agent}`, `shared_pool_writes{pool,agent}`, `shared_pool_denied{pool,agent,operation}`. |
+| `tests/unit/python/test_shared_memory_pool.py` | **New** — ACL enforcement, provenance fields, `min_confidence` filter, sensitive-pool isolation. |
+| `tests/integration/python/test_shared_pool_publish.py` | **New** — agent A publishes to `team-knowledge`; agent B (reader) retrieves; agent C (not in ACL) is denied. |
 
-#### Key implementation details *(TBD)*
-#### Tests *(TBD)*
+#### Key implementation details
+
+- **Config example** (Phase 4 default shape, copied verbatim from [Open Question 13](0008-agent-memory-context-optimization.md#13-shared-memory-acl-without-rfc-0009--config-based-acl-with-python-layer-enforcement)):
+  ```yaml
+  shared_memory_pools:
+    team-knowledge:
+      readers: ["code-writer", "code-reviewer", "planner"]
+      writers: ["code-reviewer", "planner"]
+      max_entries: 2000
+      required_confidence: 0.5
+      sensitive: false
+  ```
+- **Enforcement point**: ACL check happens in the Python `SharedMemoryPool` layer, not in the orchestrator. This matches the existing `agents/tools/permissions.py` pattern (Python-layer, deny-by-default). The orchestrator does not need to know about pools.
+- **Provenance injection**: `source_agent` is set from the `agent_id` parameter passed by `MemoryFacade.publish_to_pool` — the caller cannot spoof it (any `entry.source_agent` value on input is rejected with `provenance_set` log).
+- **Sensitive-pool isolation**: when `sensitive: true`, `MemoryFacade.publish_to_pool` rejects the call regardless of writer ACL, with reason `sensitive_pool_isolation`. This implements [RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3 ("Sensitive memory classes stay isolated regardless of pool settings").
+- **`min_confidence` filter** (consumer-side trust): default `None` admits all entries; explicit `0.0` is identical (semantically explicit); `0.7` filters to high-confidence entries only.
+- **Upgrade path to RFC 0009**: documented in code comments — when capability tokens land, the ACL check extends to verify a token in addition to (not instead of) the config list. The `SharedMemoryPool` interface stays stable.
+
+#### Tests
+
+Unit:
+- Reader in ACL → `read` succeeds.
+- Reader not in ACL → `read` raises `SharedMemoryPermissionError`; `shared_pool_denied{operation=read}` increments.
+- Writer in ACL with valid entry → `write` succeeds; `source_agent` matches the calling agent.
+- Writer not in ACL → `write` raises; metric increments.
+- Caller-set `source_agent` on input → rejected with `provenance_set`.
+- Missing `confidence` on write → schema validation rejects.
+- `confidence > 1.0` or `< 0.0` → rejected.
+- `min_confidence=0.7` filters out entries with `confidence=0.5`.
+- Sensitive pool: writer in ACL but `sensitive: true` → `publish_to_pool` rejected with `sensitive_pool_isolation`.
+- `max_entries=10`: 11th write triggers same-pool eviction (oldest first) before insert; metric `shared_pool_evictions` records.
+
+Integration:
+- Three agents (writer A, reader B, denied C); A writes 3 entries; B retrieves all 3; C is denied on both read and write.
+- A publishes from isolated memory via `publish_to_pool`; the original isolated entry remains; the shared copy carries `source_agent=A` and the framework `created_at`.
 
 ---
 
 ### PR 5: `feature/v030-rfc0008-procedural-revalidation` — Phase 4b: Confidence Decay + Revalidation
 
 **Depends on**: PR 4.
-**Estimated size**: ~250–400 lines.
+**Estimated size**: ~250–400 lines (calibrated).
 
-#### Scope (high-level)
+#### Scope
 
-- Confidence decay function over time.
-- Stale-procedural-memory revalidation pipeline.
+| File | Change |
+|------|--------|
+| `agents/memory/decay.py` | **New** — `compute_decayed_confidence(c0, age_seconds, lambda_per_day)` implementing $c_t = c_0 \cdot e^{-\lambda t}$ per [RFC §G](0008-agent-memory-context-optimization.md#g-memory-eviction-decay-and-validation). Default `lambda = 0.01/day` (half-life ≈ 69 days). |
+| `agents/memory/episodic.py` | Add `confidence` column to procedural-memory records (notes tier already has `importance`; add `confidence REAL NOT NULL DEFAULT 1.0` via a non-destructive migration). Schema migration version bump documented in the RFC 0005 migration log. |
+| `agents/memory/episodic.py` | `recall_procedures(query, *, c_min=0.1)` — applies decay at read time using `created_at`/`last_validated_at`; filters out entries below `c_min`. |
+| `agents/memory/episodic.py` | `refresh_confidence(key)` — sets `confidence = 1.0` and `last_validated_at = now()` on successful procedural reuse. Called by `MemoryFacade.store_procedure` when an existing key is re-stored. |
+| `agents/memory/eviction.py` | Extend the eviction pass to evict procedural entries whose decayed confidence falls below `c_min` (default `0.1`). |
+| `agents/memory/facade.py` | `MemoryFacade.retrieve_relevant` for procedural-tier queries surfaces a `stale_memory_injection` warning metric when an admitted entry's decayed confidence is between `c_min` and `stale_confidence_alert_threshold` (default `0.3` per [Open Question 5](0008-agent-memory-context-optimization.md#5-stale-procedural-memory--downgrade-confidence-and-continue-do-not-block)). Execution is **not** blocked. |
+| `config/agents.yaml` | New `procedural_memory` block: `lambda_per_day` (default `0.01`), `c_min` (default `0.1`), `stale_confidence_alert_threshold` (default `0.3`). |
+| `schemas/agent.schema.json` | Schema additions; `make validate` enforces. |
+| `internal/observability/` (Go) | New metrics required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection): `evictions_count`, `average_confidence_at_eviction`, `average_importance_at_eviction`, `memory_utilization_ratio`, `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`, `stale_memory_injection`. |
+| `tests/unit/python/test_memory_decay.py` | **New** — decay math, refresh, eviction integration. |
 
-#### Key implementation details *(TBD)*
-#### Tests *(TBD)*
+#### Key implementation details
+
+- **Decay computation** is a pure function — no DB access. The episodic-memory query path computes decayed confidence at read time using the entry's `last_validated_at` (or `created_at` if never validated) and the configured `lambda_per_day`. Storing decayed confidence at rest would require a periodic rewrite pass — the read-time approach is simpler and the formula is cheap.
+- **Migration safety**: the new `confidence` column has `DEFAULT 1.0` so existing notes/procedures upgrade cleanly without backfill. A migration test confirms a v0.2.x DB opens cleanly under v0.3.0.
+- **Refresh contract**: `MemoryFacade.store_procedure(key, ...)` with an existing `key` does not blindly overwrite — it calls `refresh_confidence(key)` and updates `content` only if provided. This implements the RFC's "Confidence refresh on successful reuse".
+- **Stale alert threshold**: when an admitted entry's decayed confidence is in `[c_min, stale_confidence_alert_threshold)`, the facade logs `stale_memory_injection` with the decayed value, key, and agent_id. Operators can set alerting rules on this metric per [Open Question 5](0008-agent-memory-context-optimization.md#5-stale-procedural-memory--downgrade-confidence-and-continue-do-not-block).
+- **30-day calibration commitment**: per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection), this PR includes a `docs/rfcs/0008-calibration-review.md` placeholder file scheduling the 30-day post-merge review of eviction parameters. PR 6 (close) updates the placeholder with actual review findings before flipping the RFC to `✅ Implemented`.
+
+#### Tests
+
+Unit:
+- `compute_decayed_confidence(1.0, 0, 0.01) == 1.0`.
+- After 69 days at `lambda=0.01/day`: `≈ 0.5` (within 1e-3).
+- After 230 days: `≈ 0.1` (boundary on default `c_min`).
+- `recall_procedures` filters out entries with decayed confidence `< c_min`.
+- `refresh_confidence(key)`: subsequent decay computation uses the new `last_validated_at`; confidence resets to `1.0`.
+- Eviction pass evicts procedural entries below `c_min`.
+- `stale_memory_injection` fires for admitted entries with decayed confidence in `[0.1, 0.3)`; does not fire for entries `≥ 0.3` or those filtered below `0.1`.
+- Migration: a fixture v0.2.x DB without the `confidence` column opens; missing column populated with `1.0` defaults.
+
+Integration:
+- Agent stores a procedure today; mock-clock-advance 100 days; `retrieve_relevant` returns it at decayed confidence ≈ 0.37; `stale_memory_injection` metric fires.
+- Agent re-stores the same procedure key after 100 days; subsequent retrieval returns confidence ≈ 1.0 with no stale warning.
 
 ---
 
@@ -145,11 +348,34 @@ PR 6 (Review follow-ups + RFC close)
 **Depends on**: PR 5.
 **Estimated size**: ~150–300 lines.
 
+#### Scope
+
 | File | Change |
 |------|--------|
 | `docs/rfcs/0008-agent-memory-context-optimization.md` | Status → `✅ Implemented`. |
-| `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows. |
+| `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows for PRs 1–5 added to history. |
 | `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
+| `docs/rfcs/0008-calibration-review.md` | Replace the PR 5 placeholder with the 30-day eviction-parameter review summary required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). Cite the actual `evictions_count`, `average_confidence_at_eviction`, `memory_utilization_ratio` ranges observed; record any default retunes (one-line config changes) or confirm the shipped defaults stood up. |
+| `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection (mirrors the [RFC 0020 PR plan](0020-pr-plan.md) close-PR convention). |
+
+#### Key implementation details
+
+- The 30-day calibration review is the **gate** for flipping RFC 0008 to `✅ Implemented`. If the metrics indicate the shipped defaults need adjustment (e.g. `memory_utilization_ratio` consistently > 0.95 → `episodic_cap` too low; consistently < 0.2 → too high), the retune ships in this PR as a `config/agents.yaml` default change. The retune is a one-line change per parameter; no code changes expected.
+- Review-follow-up findings from PR 1–5 deep reviews are aggregated here per the project convention. Each finding cites the source PR's deep-review report (local-only — never linked from this committed plan per [Status Hygiene rules](../development-workflow.md#status-hygiene)).
+
+#### Tests
+
+- `make test` passes after any retuned defaults.
+- `make validate` passes after `agents.yaml` changes.
+- Doc-status pre-commit hook accepts the new `✅ Implemented` markers.
+
+#### PR checklist
+
+- [ ] 30-day calibration review summary recorded in `docs/rfcs/0008-calibration-review.md`
+- [ ] All PR 1–5 deep-review follow-ups either resolved or explicitly deferred with a tracking issue
+- [ ] ROADMAP.md RFC 0008 row → `✅ Implemented`
+- [ ] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
+- [ ] No reference to `docs/pr-reviews/` files in this committed plan
 
 ---
 
@@ -167,12 +393,3 @@ PR 6 (Review follow-ups + RFC close)
 
 - **PR 1 opens** → ROADMAP RFC 0008 → `🚧 Implementing`; Master Progress Overview row 4 → 🔄.
 - **PR 6 merges** → ROADMAP RFC 0008 → `✅ Implemented`; row 4 → ✅.
-
----
-
-## Scaffold TODOs
-
-Before opening PR 1:
-- [ ] Fill in "Key implementation details" + "Tests" sections for each PR.
-- [ ] Pin estimated sizes against the RFC's Files Touched table; if the 1.7× calibration factor would push the upper bound past the [BRANCHING.md](../BRANCHING.md) 500-line soft cap, split the PR before opening.
-- [ ] Add PR checklist items per the [RFC 0017 PR plan](0017-pr-plan.md) precedent.
