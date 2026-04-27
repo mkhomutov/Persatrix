@@ -55,7 +55,6 @@ _MAX_SUB_AGENT_LLM_CALLS: int = 50
 _PERSONA_DEFAULT_MAX_LLM_CALLS: int = 10
 _PERSONA_DEFAULT_MAX_TOKENS: int = 4096
 
-
 # ─── Mixin ─────────────────────────────────────────────────
 
 
