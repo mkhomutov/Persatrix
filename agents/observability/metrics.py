@@ -130,6 +130,39 @@ class _Instruments:
             ),
         )
 
+        # ─── Interaction lifecycle (RFC 0020 Phase 1) ────────────────
+        # Names follow RFC 0020 Phase 1 §5; emitted by InteractionTracker.
+        # Per-tracker call sites land in PRs 2–4 — counters are registered
+        # in PR 1 so dashboards can be wired ahead of the routing rollout.
+        self.interactions_opened: Counter = meter.create_counter(
+            name="agent.interactions.opened",
+            unit="{interaction}",
+            description="Interactions opened by the InteractionTracker (RFC 0020).",
+        )
+        self.interactions_closed: Counter = meter.create_counter(
+            name="agent.interactions.closed",
+            unit="{interaction}",
+            description="Interactions closed (any reason) by the InteractionTracker.",
+        )
+        self.interactions_closed_by_idle_gap: Counter = meter.create_counter(
+            name="agent.interactions.closed.by_idle_gap",
+            unit="{interaction}",
+            description="Interactions closed by the idle-gap timer (RFC 0020 §B).",
+        )
+        self.interactions_closed_by_structural: Counter = meter.create_counter(
+            name="agent.interactions.closed.by_structural",
+            unit="{interaction}",
+            description="Interactions closed by structural triggers (RFC 0020 §B).",
+        )
+        self.interactions_summary_failed: Counter = meter.create_counter(
+            name="agent.interactions.summary.failed",
+            unit="{interaction}",
+            description=(
+                "Interactions whose close-time summary call failed and "
+                "were filled with the fallback placeholder (RFC 0020 §C)."
+            ),
+        )
+
         # ─── Histograms ──────────────────────────────────────────────
         self.tool_duration: Histogram = meter.create_histogram(
             name="agent.tool.duration",

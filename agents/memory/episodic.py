@@ -175,8 +175,21 @@ class EpisodicMemory:
         outcome: str | None = None,
         importance: float = 0.5,
         tags: list[str] | None = None,
+        *,
+        interaction_id: str | None = None,
+        started_at: float | None = None,
+        closed_at: float | None = None,
+        turn_count: int | None = None,
+        scope: str | None = None,
     ) -> str:
-        """Store a new episode. Returns the generated episode ID."""
+        """Store a new episode. Returns the generated episode ID.
+
+        The keyword-only ``interaction_id`` / ``started_at`` / ``closed_at`` /
+        ``turn_count`` / ``scope`` fields populate the RFC 0020 §D columns
+        added in migration v5.  Pre-RFC callers omit them and the row keeps
+        ``NULL`` in those columns — recall code treats the NULLs as legacy
+        single-turn episodes per RFC 0020 §I.
+        """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
             attributes={
@@ -206,8 +219,10 @@ class EpisodicMemory:
                     INSERT INTO episodes
                         (id, agent_id, summary, context_json, outcome,
                          importance, access_count, last_accessed_at,
-                         tags_json, created_at, compressed_at, compression_level)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0)
+                         tags_json, created_at, compressed_at, compression_level,
+                         interaction_id, started_at, closed_at, turn_count, scope)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
+                            ?, ?, ?, ?, ?)
                     """,
                     (
                         episode_id,
@@ -218,6 +233,11 @@ class EpisodicMemory:
                         importance,
                         json.dumps(tags or []),
                         now,
+                        interaction_id,
+                        started_at,
+                        closed_at,
+                        turn_count,
+                        scope,
                     ),
                 )
                 await db.commit()

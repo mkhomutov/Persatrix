@@ -81,12 +81,12 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] Schema migration shipped behind the existing `EpisodicMemory.initialize()` path
-- [ ] ROADMAP.md row for RFC 0020 → `🚧 Implementing` on this PR opening
-- [ ] Master Progress Overview row 2 → 🔄 In progress
+- [x] `pytest agents/tests/ tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] Schema migration shipped behind the existing `EpisodicMemory.initialize()` path
+- [x] ROADMAP.md row for RFC 0020 → `🚧 Implementing` on this PR opening
+- [x] Master Progress Overview row 2 → 🔄 In progress
 
 ---
 
