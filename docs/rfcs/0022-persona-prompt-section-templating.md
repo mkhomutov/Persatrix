@@ -248,7 +248,14 @@ differs: `safety/` vs. `persona/sections/`.
 ### F. Byte-Identical Output Contract
 
 The new composer must produce byte-identical system prompts for every
-shipped persona configuration. To make that achievable:
+**well-formed** shipped persona configuration. Degenerate shapes that
+the old f-string composer rendered as orphan section headers (e.g.
+`goals: {"primary": ""}` produced a `Goals:` line with no bullets) or
+crashed on (e.g. non-dict `goals`) are now collapsed to section
+omission by the new predicates. These are intentional improvements,
+not regressions; they are pinned by negative tests in
+`test_persona_section_composer.py`. To make the byte-identical
+contract achievable:
 
 - Each template's content is the section body **without** leading or
   trailing newlines. e.g. `background.md` reads:

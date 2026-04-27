@@ -49,7 +49,16 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _Section:
-    """One persona-prompt section: a template name + when to render it + how."""
+    """One persona-prompt section: a template name + when to render it + how.
+
+    ``predicate`` and ``context`` both accept ``state`` even though most
+    current sections only consult ``cfg``.  The signature is uniform on
+    purpose: future state-dependent sections (e.g. an RFC 0021 now-anchor
+    section whose visibility flips with ``state``) plug in without
+    widening the protocol.  Reviewers seeing an unused ``state`` in a
+    predicate lambda should read it as forward-compatibility, not dead
+    code.
+    """
 
     name: str
     predicate: Callable[[dict[str, Any], PersonaState], bool]
@@ -127,7 +136,22 @@ def _state_context(
 
 
 def _goals_present(persona_cfg: dict[str, Any]) -> bool:
-    """Goals section renders when at least one populated key is present."""
+    """Goals section renders when at least one populated key is present.
+
+    This predicate is intentionally **stricter** than the pre-refactor
+    ``if goals:`` truthiness check.  The byte-identical contract
+    (RFC 0022 §F) holds for every well-formed shipped persona config;
+    for degenerate shapes the new composer is more conservative:
+
+    - ``goals: {"primary": ""}`` — old composer rendered an orphan
+      ``Goals:`` header with no bullets; new composer omits the section.
+    - ``goals: ["a", "b"]`` (non-dict) — old composer crashed with
+      ``AttributeError`` on ``goals.get("primary")``; new composer
+      omits the section.
+
+    Both deltas are improvements over the previous behavior and are
+    pinned by tests in ``test_persona_section_composer.py``.
+    """
     goals = persona_cfg.get("goals", {})
     if not isinstance(goals, dict):
         return False

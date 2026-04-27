@@ -224,6 +224,51 @@ class TestPredicateBoundaries:
         finally:
             await agent.close_memory()
 
+    async def test_goals_with_only_empty_string_values_omits_section(self) -> None:
+        # Pins the "stricter than old truthiness" behavior of
+        # ``_goals_present``: an old f-string composer rendered an
+        # orphan ``Goals:`` header for ``{"primary": ""}``; the new
+        # composer omits the section entirely (RFC 0022 §F clarification).
+        cfg = deepcopy(_PERSONA_CONFIG)
+        cfg["persona"]["goals"] = {"primary": "", "secondary": [], "hidden": ""}
+        agent = await self._make_agent(cfg)
+        try:
+            prompt = agent._build_system_prompt()
+            assert "Goals:" not in prompt
+            assert "\n\n\n" not in prompt
+        finally:
+            await agent.close_memory()
+
+    async def test_non_dict_goals_omits_section(self) -> None:
+        # The old composer would have crashed with ``AttributeError`` on
+        # ``goals.get("primary")``; the new composer's ``isinstance``
+        # guard treats a non-dict ``goals`` as "no goals" and omits the
+        # section without raising.  Pinning this prevents a future
+        # refactor from re-introducing the crash.
+        cfg = deepcopy(_PERSONA_CONFIG)
+        cfg["persona"]["goals"] = ["ship v2", "reduce debt"]  # type: ignore[assignment]
+        agent = await self._make_agent(cfg)
+        try:
+            prompt = agent._build_system_prompt()
+            assert "Goals:" not in prompt
+        finally:
+            await agent.close_memory()
+
+    async def test_background_with_literal_braces_survives(self) -> None:
+        # Locks in the format-injection-safety property of
+        # ``str.format_map``: persona-config values that happen to
+        # contain ``{...}`` are treated as literal text, not as nested
+        # template syntax.  ``format_map`` substitutes once and does not
+        # recurse into substituted values.
+        cfg = deepcopy(_PERSONA_CONFIG)
+        cfg["persona"]["background"] = "Runs at {hostname} for the {team} team."
+        agent = await self._make_agent(cfg)
+        try:
+            prompt = agent._build_system_prompt()
+            assert "Runs at {hostname} for the {team} team." in prompt
+        finally:
+            await agent.close_memory()
+
 
 # ─── Minimal persona ────────────────────────────────────────
 
