@@ -155,8 +155,8 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] Multi-turn integration test green
-- [ ] No regression on PR 2's single-turn parity test
+- [x] Multi-turn integration test green
+- [x] No regression on PR 2's single-turn parity test
 
 ---
 
