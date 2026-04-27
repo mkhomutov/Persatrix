@@ -99,9 +99,10 @@ PR 7 (RFC close)
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime/__init__.py` (or `action_loop.py`) | Wire single-turn event paths (TICK, tool-only) through `InteractionTracker`. Each emits one closed interaction with `turn_count=1`. |
-| `agents/dispatch.py` | Tracker hook in the dispatch loop — single-turn events open + close in one call. |
-| `tests/integration/test_interaction_single_turn_parity.py` | **New** — behavioral parity vs. pre-RFC episode shape for TICK and tool-only events. |
+| `agents/persona_runtime/__init__.py` | Per-agent `InteractionTracker` instantiation; no shared state across agents. |
+| `agents/persona_runtime/state_persistence.py` | `_StatePersistenceMixin._store_event_episode()` — positive allowlist routes single-turn events (TICK + 6 tool-only types) through `InteractionTracker.add_turn` + `close(reason="structural")`; multi-turn events (`MESSAGE_RECEIVED`, `MENTION`) retain the legacy NULL-interaction shape until PR 3; unknown event types warn and fall back to legacy shape. `scope` column carries `event_type.value` (or `SCOPE_TICK` for ticks). |
+| `agents/persona_runtime/action_loop.py` | `_on_event_inner()` step 6 delegates to `_store_event_episode`; preserves log-and-continue semantics on persistence failure. |
+| `tests/integration/test_interaction_single_turn_parity.py` | **New** — behavioral parity vs. pre-RFC episode shape for TICK and tool-only events; pins the PR 2/PR 3 boundary by parametrizing the multi-turn legacy-shape case over `MESSAGE_RECEIVED` + `MENTION`; covers the `store_episode` failure-swallowed-and-logged contract. |
 
 #### Key implementation details
 
@@ -116,9 +117,9 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/ -v` passes
-- [ ] Parity test green
-- [ ] No change to working-memory token bound (RFC 0017 invariant preserved)
+- [x] `pytest tests/integration/ -v` passes
+- [x] Parity test green
+- [x] No change to working-memory token bound (RFC 0017 invariant preserved)
 
 ---
 
@@ -265,6 +266,50 @@ Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../
    tests are order-coupled with anything else that touches metrics in the same pytest session. Add a
    class-scoped autouse fixture that snapshots and restores the relevant counters (or the whole
    registry) around each test method.
+
+##### From PR 2 review
+
+6. **Exception-handler comment in `_store_event_episode` is misleading** (`agents/persona_runtime/state_persistence.py`).
+   The single `try` block wraps both `InteractionTracker.close` and `EpisodicMemory.store_episode`,
+   but the surrounding comment reads as if the open scope is always cleaned before the `except` runs.
+   Either split the `try` so only `store_episode` is guarded (and `close` runs unconditionally), or
+   tighten the comment to state that the handler covers `store_episode` failure after a successful
+   `close`. Pair with finding #7.
+
+7. **`closed = self._interaction_tracker.close(...) or interaction` masks future contract changes**
+   (`agents/persona_runtime/state_persistence.py`). The `or interaction` fallback is currently
+   unreachable (the scope was just opened under the agent's `asyncio.Lock`), so it exists only to
+   placate the type checker. If `InteractionTracker.close()`'s return contract ever changes (PR 4
+   may return `None` for already-closed scopes), this fallback will silently mask the bug. Replace
+   with an `assert closed is not None` (or `typing.cast`) so the invariant is testable and breakage
+   surfaces at runtime.
+
+8. **`InteractionTracker()` constructed with default `idle_timeout_sec`**
+   (`agents/persona_runtime/__init__.py`). PR 2 instantiates the tracker with the library default;
+   no `idle_timeout_sec` is plumbed from `optimization.yaml` / `agents.yaml`. Acceptable for PR 2
+   (the idle-gap janitor lands in PR 4) but the silent default is now reachable from production
+   code. Plumb the config knob in PR 4 alongside the janitor wiring; this PR 6 entry is a tracking
+   note so the default doesn't get inherited indefinitely.
+
+9. **Parity test lacks a telemetry probe**
+   (`tests/integration/test_interaction_single_turn_parity.py`). PR 2 is the first runtime site that
+   fires `interactions.opened` and `interactions.closed.by_structural`, but no test asserts the
+   counters increment. Add a `try_get_instruments`-shaped probe (or use the same metrics-snapshot
+   fixture introduced by PR 6 finding #5) to lock the contract.
+
+10. **Single-turn coverage is uneven across `EventType` members**
+    (`tests/integration/test_interaction_single_turn_parity.py`). The parity test exercises `TICK`
+    and `TASK_ASSIGNED` but not the other five single-turn members (`SUB_AGENT_COMPLETED`,
+    `APPROVAL_REQUESTED`, `APPROVAL_RESPONSE`, `AGENT_JOINED`, `AGENT_LEFT`). Add a single
+    `pytest.mark.parametrize` case over the full set asserting `scope == event_type.value` and
+    `turn_count == 1`. Also add a test for the unknown-event fallback branch (monkey-patch a
+    synthetic `EventType` or spoof the membership check) to prove the warn-and-fallback path.
+
+11. **`AgentAction` import is type-only after the routing refactor**
+    (`agents/persona_runtime/state_persistence.py`). With `from __future__ import annotations`
+    already in effect, `AgentAction` is referenced only inside `_store_event_episode`'s annotation.
+    Move the import under `if TYPE_CHECKING:` to shave one import cycle. Negligible impact;
+    bundle with whichever PR 6 cleanup touches the file.
 
 ---
 

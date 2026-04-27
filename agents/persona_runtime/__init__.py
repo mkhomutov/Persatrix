@@ -46,6 +46,7 @@ from opentelemetry.trace import Link, Status, StatusCode
 
 from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
+from ..memory.interactions import InteractionTracker
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from ..observability.metrics import (
@@ -198,6 +199,12 @@ class _LLMPersonaAgent(
         )
         self._state = PersonaState()
         self._lock = asyncio.Lock()
+        # RFC 0020 Phase 2 (PR 2): per-agent in-memory InteractionTracker.
+        # Single-turn paths (TICK + tool-only events) call ``add_turn`` and
+        # ``close`` in one shot from ``_on_event_inner`` so each emits a
+        # closed-interaction episode with ``turn_count=1``.  Multi-turn
+        # aggregation (MESSAGE_RECEIVED, MENTION) is wired in PR 3.
+        self._interaction_tracker = InteractionTracker()
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record

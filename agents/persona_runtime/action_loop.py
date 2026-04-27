@@ -81,6 +81,9 @@ class _ActionLoopMixin:
         ) -> MemoryInjectionResult: ...
         def _build_system_prompt(self) -> str: ...
         async def _persist_persona_state(self) -> None: ...
+        async def _store_event_episode(
+            self, event: AgentEvent, actions: list[AgentAction],
+        ) -> None: ...
         def _has_active_goal_payload(self) -> bool: ...
         def _has_pending_turn(self) -> bool: ...
 
@@ -482,17 +485,9 @@ class _ActionLoopMixin:
             if action.action_type != ActionType.DO_NOTHING:
                 self._state.drain_energy()
 
-        # 6. Store episode
-        try:
-            await self._episodic_memory.store_episode(
-                summary=(
-                    f"Event: {event.event_type.value} → "
-                    f"Actions: {[a.action_type.value for a in actions]}"
-                ),
-                context={"event": event.payload, "sender": event.sender_id},
-            )
-        except Exception:
-            logger.warning("Failed to store episode for agent %s", self.agent_id, exc_info=True)
+        # 6. Store episode (RFC 0020 PR 2 routing in
+        # :meth:`_StatePersistenceMixin._store_event_episode`).
+        await self._store_event_episode(event, actions)
 
         # 7. Persist state
         await self._persist_persona_state()
