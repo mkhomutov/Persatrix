@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import asyncio
 
+from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.episodic import EpisodicMemory
+from ..memory.interactions import SCOPE_TICK, InteractionTracker
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
-from ..persona_types import PersonaState
+from ..persona_types import AgentAction, AgentEvent, EventType, PersonaState
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,65 @@ class _StatePersistenceMixin:
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
     _lock: asyncio.Lock
+    _interaction_tracker: InteractionTracker
+
+    # RFC 0020 §G — multi-turn paths handled by PR 3; everything else is
+    # routed through the InteractionTracker as a single-turn interaction.
+    _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset({
+        EventType.MESSAGE_RECEIVED,
+        EventType.MENTION,
+    })
+
+    async def _store_event_episode(
+        self, event: AgentEvent, actions: list[AgentAction],
+    ) -> None:
+        """Persist the episode for a completed event (RFC 0020 PR 2).
+
+        Single-turn paths (TICK, tool-only) route through
+        :class:`InteractionTracker` so the row carries the new
+        ``interaction_id`` / ``started_at`` / ``closed_at`` /
+        ``turn_count`` / ``scope`` columns added in PR 1's schema
+        migration.  Multi-turn paths (``MESSAGE_RECEIVED`` / ``MENTION``)
+        keep the legacy NULL-interaction shape until PR 3 wires
+        aggregation; the parity test in
+        ``test_interaction_single_turn_parity.py`` pins this boundary.
+        """
+        try:
+            summary = (
+                f"Event: {event.event_type.value} → "
+                f"Actions: {[a.action_type.value for a in actions]}"
+            )
+            ctx = {"event": event.payload, "sender": event.sender_id}
+            if event.event_type in self._MULTI_TURN_EVENT_TYPES:
+                await self._episodic_memory.store_episode(summary=summary, context=ctx)
+                return
+            interaction = self._interaction_tracker.add_turn(
+                SCOPE_TICK,
+                payload={
+                    "event_type": event.event_type.value,
+                    "actions": [a.action_type.value for a in actions],
+                },
+            )
+            # ``close`` returns ``None`` only if the scope is empty; we
+            # just opened it, so the fallback keeps the type checker
+            # honest without changing runtime behavior.
+            closed = self._interaction_tracker.close(
+                SCOPE_TICK, reason=REASON_STRUCTURAL,
+            ) or interaction
+            await self._episodic_memory.store_episode(
+                summary=summary,
+                context=ctx,
+                interaction_id=closed.interaction_id,
+                started_at=closed.started_at,
+                closed_at=closed.closed_at,
+                turn_count=closed.turn_count,
+                scope=closed.scope,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to store episode for agent %s",
+                self.agent_id, exc_info=True,
+            )
 
     # ─── State persistence ─────────────────────────────
 

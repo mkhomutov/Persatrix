@@ -116,9 +116,9 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/ -v` passes
-- [ ] Parity test green
-- [ ] No change to working-memory token bound (RFC 0017 invariant preserved)
+- [x] `pytest tests/integration/ -v` passes
+- [x] Parity test green
+- [x] No change to working-memory token bound (RFC 0017 invariant preserved)
 
 ---
 
