@@ -199,12 +199,41 @@ class _LLMPersonaAgent(
         )
         self._state = PersonaState()
         self._lock = asyncio.Lock()
-        # RFC 0020 Phase 2 (PR 2): per-agent in-memory InteractionTracker.
-        # Single-turn paths (TICK + tool-only events) call ``add_turn`` and
-        # ``close`` in one shot from ``_on_event_inner`` so each emits a
-        # closed-interaction episode with ``turn_count=1``.  Multi-turn
-        # aggregation (MESSAGE_RECEIVED, MENTION) is wired in PR 3.
-        self._interaction_tracker = InteractionTracker()
+        # RFC 0020 Phase 2 (PR 2 + PR 3): per-agent in-memory
+        # InteractionTracker.  Single-turn paths (TICK + tool-only) call
+        # ``add_turn`` and ``close`` in one shot from
+        # ``_on_event_inner`` so each emits a closed-interaction episode
+        # with ``turn_count=1``.  Multi-turn paths
+        # (``MESSAGE_RECEIVED`` / ``MENTION``) accumulate turns under a
+        # DM- or thread-keyed scope and persist a single episode on
+        # close (PR 3); close fires either via session-end metadata
+        # (``chat_end`` / ``session_end``) or via the
+        # :class:`IdleGapDetector` once the per-agent idle timeout
+        # elapses.  The per-channel override path lands in PR 5.
+        memory_cfg = config.get("memory") or {}
+        # PR-216 review (Should-Fix #3): coerce + validate the
+        # idle-timeout knob.  A non-numeric / non-positive value would
+        # silently degrade multi-turn aggregation to PR-2 single-turn
+        # semantics (every event closes immediately on the next
+        # ``idle_check``).  Mirror ``_coerce_event_timeout``: log and
+        # fall back to the 600s default on bad input, and additionally
+        # reject ``<= 0`` (which ``float()`` would happily accept) so
+        # the default :class:`IdleGapDetector` window stays meaningful.
+        idle_timeout_sec = _coerce_event_timeout(
+            memory_cfg.get("interaction_idle_timeout_sec", 600.0),
+            default=600.0,
+            agent_id=agent_id,
+        )
+        if idle_timeout_sec <= 0:
+            logger.warning(
+                "Agent %s: interaction_idle_timeout_sec=%r is non-positive; "
+                "using default 600s",
+                agent_id, idle_timeout_sec,
+            )
+            idle_timeout_sec = 600.0
+        self._interaction_tracker = InteractionTracker(
+            idle_timeout_sec=idle_timeout_sec,
+        )
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record

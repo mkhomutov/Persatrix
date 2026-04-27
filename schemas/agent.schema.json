@@ -271,6 +271,12 @@
           "default": "data/memory.db",
           "description": "Path to the shared SQLite memory database"
         },
+        "interaction_idle_timeout_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 600,
+          "description": "Idle window (seconds) after which an open multi-turn interaction is closed by IdleGapDetector (RFC 0020 §B). Threaded into InteractionTracker at runtime startup."
+        },
         "notes": {
           "type": "object",
           "additionalProperties": false,

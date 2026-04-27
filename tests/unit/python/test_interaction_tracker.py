@@ -24,6 +24,7 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
     IdleGapDetector,
     StructuralCloseDetector,
+    MaxTurnsDetector,
     TopicShiftDetector,
     default_detectors,
 )
@@ -190,9 +191,15 @@ class TestBoundaryDetectors:
 
     def test_default_detector_chain_priority(self):
         chain = default_detectors(idle_timeout_sec=600.0)
+        # Ordering pinned per RFC 0020 §B: structural pre-empts idle,
+        # idle pre-empts the max-turns safety net, topic-shift (no-op
+        # in v0.3.0) is last.  PR-216 review (Should-Fix #1) inserted
+        # MaxTurnsDetector at slot [2] to enforce
+        # DEFAULT_MAX_INTERACTION_TURNS — see boundary_detectors.py.
         assert isinstance(chain[0], StructuralCloseDetector)
         assert isinstance(chain[1], IdleGapDetector)
-        assert isinstance(chain[2], TopicShiftDetector)
+        assert isinstance(chain[2], MaxTurnsDetector)
+        assert isinstance(chain[3], TopicShiftDetector)
         # The supplied timeout flows into the IdleGapDetector instance.
         assert chain[1].idle_timeout_sec == 600.0
 

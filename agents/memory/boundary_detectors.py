@@ -156,23 +156,68 @@ class TopicShiftDetector:
         return False, ""
 
 
+@dataclass(frozen=True)
+class MaxTurnsDetector:
+    """Hard cap on turns per interaction (RFC 0020 §Security).
+
+    PR 3 wires multi-turn aggregation: turns accumulate in
+    :class:`~agents.memory.interactions.Interaction.turns` until the
+    next structural close or idle gap.  Without a cap, a peer that
+    streams messages within the idle window can grow the per-scope
+    turn list (and the eventual ``context_json`` blob) without bound
+    — the exact "Resource amplification via long interactions" surface
+    that RFC 0020 §Security Considerations names.
+
+    Detector closes with :data:`REASON_MAX_TURNS` when an interaction
+    has reached or exceeded :data:`DEFAULT_MAX_INTERACTION_TURNS` (or a
+    caller-supplied override).  Wired into :func:`default_detectors`
+    after structural / idle so explicit closes still take precedence
+    and the cap acts as the safety net.
+
+    Added per PR-216 review (Should-Fix #1).  ``REASON_MAX_TURNS`` is
+    not currently broken out into its own counter — ``_emit_closed``
+    still increments only the generic ``agent.interactions.closed``
+    plus the structural / idle-gap subtotals; PR 4's metrics pass
+    will add the per-reason breakout.
+    """
+
+    max_turns: int = DEFAULT_MAX_INTERACTION_TURNS
+
+    def evaluate(
+        self, interaction: Interaction, *, now: float,
+    ) -> tuple[bool, str]:
+        if interaction.turn_count >= self.max_turns:
+            return True, REASON_MAX_TURNS
+        return False, ""
+
+
 # ─── Detector registry ──────────────────────────────────────
 
 
 def default_detectors(
     *,
     idle_timeout_sec: float = DEFAULT_IDLE_TIMEOUT_SEC,
+    max_turns: int = DEFAULT_MAX_INTERACTION_TURNS,
 ) -> tuple[BoundaryDetector, ...]:
     """Return the v0.3.0 default detector chain in priority order.
 
     Tracker code evaluates the chain left-to-right and closes on the
     first ``(True, reason)`` result.  Structural triggers therefore
-    pre-empt idle-gap; topic-shift is last (and a no-op in v0.3.0) so
-    Phase 4's swap-in is a one-line registry change.
+    pre-empt idle-gap; the max-turns safety net runs after idle so an
+    idle-then-overflow case is still labelled by the proximate cause
+    (idle); topic-shift is last (and a no-op in v0.3.0) so Phase 4's
+    swap-in is a one-line registry change.
+
+    PR-216 review (Should-Fix #1) added :class:`MaxTurnsDetector` to
+    the default chain so :data:`DEFAULT_MAX_INTERACTION_TURNS` is
+    actually enforced — previously the constant was exported but never
+    consulted, leaving the RFC 0020 §Security amplification surface
+    open.
     """
     return (
         StructuralCloseDetector(),
         IdleGapDetector(idle_timeout_sec=idle_timeout_sec),
+        MaxTurnsDetector(max_turns=max_turns),
         TopicShiftDetector(),
     )
 
@@ -183,6 +228,7 @@ __all__ = [
     "DEFAULT_IDLE_TIMEOUT_SEC",
     "DEFAULT_MAX_INTERACTION_TURNS",
     "IdleGapDetector",
+    "MaxTurnsDetector",
     "REASON_IDLE_GAP",
     "REASON_MAX_TURNS",
     "REASON_SHUTDOWN",

@@ -132,15 +132,20 @@ PR 7 (RFC close)
 
 | File | Change |
 |------|--------|
-| `agents/persona_runtime/__init__.py` | Multi-turn aggregation for human-chat sessions: turns accumulate in the open interaction; close on session end or idle. |
-| `agents/memory/interactions.py` | `IdleGapDetector` runtime wiring — uses `Clock` (introduced by RFC 0021 P1 if landed; else direct `time.time()` with a `Clock`-shaped seam to swap in). |
-| `tests/integration/test_interaction_multi_turn.py` | **New** — ten-turn human-chat session produces exactly one open interaction, closed on session end. |
+| `agents/persona_runtime/state_persistence.py` | Multi-turn aggregation handler `_handle_multi_turn_event` for `MESSAGE_RECEIVED` / `MENTION`; turns accumulate in the open interaction; close on session-end metadata or idle gap. Cross-scope idle flush at the top of `_store_event_episode`. Strict-truthy session-end metadata parsing; structural-envelope-only turn payload (no message body). |
+| `agents/persona_runtime/__init__.py` | Plumb `interaction_idle_timeout_sec` from `config["memory"]` into `InteractionTracker(idle_timeout_sec=…)` with `<= 0` reject + default fallback. |
+| `agents/memory/interactions.py` | `Clock` Protocol seam (`_DEFAULT_CLOCK: Clock = time.time`; per-instance `self._clock`) replacing scattered `time.time()` defaults. RFC 0021 P1 will alias `Clock` to its canonical type. |
+| `agents/memory/boundary_detectors.py` | `MaxTurnsDetector` wired into `default_detectors()` after `IdleGapDetector`. |
+| `schemas/agent.schema.json` | Additive entry for `interaction_idle_timeout_sec` in `memory` block (`exclusiveMinimum: 0`, default 600). |
+| `tests/integration/test_interaction_multi_turn.py` | **New** — ten-turn collapse, idle-gap closure, DM scope symmetry, single-turn parity sentinel, parametrised session-end truthiness matrix, message-body-not-persisted assertion. |
+| `tests/integration/test_interaction_single_turn_parity.py` | Inverted multi-turn assertions from PR-2 "legacy NULL shape" to PR-3 "open scope, no episode" contract. |
+| `tests/unit/python/test_interaction_tracker.py` | `Clock` seam coverage (per-instance clock injection). |
 
 #### Key implementation details
 
-- "Session end" = explicit RFC 0016 `chat_end` event or idle timeout (`idle_timeout` default 600s, configurable per channel).
-- DM scope keying: `(local_agent_id, peer_id)` — symmetric so the agent's own outbound messages count toward the same interaction.
-- If RFC 0021 P1 has landed, depend on its `Clock`; otherwise use `time.time()` and add a TODO marker for the P1 swap (one-line change, low risk).
+- "Session end" = `metadata.chat_end` / `metadata.session_end` strict-truthy values (RFC 0016 emits these post-PR-3) or `IdleGapDetector` close on `idle_check`.
+- DM scope keying: `(local_agent_id, peer_id)` — symmetric so the agent's own outbound messages count toward the same interaction. `channel_id` takes precedence over `sender_id` when both are set; PR 5 will reconcile per-channel routing.
+- `Clock` seam at the tracker level today; `_LLMPersonaAgent` does not yet forward a `clock=` kwarg (deferred — see PR 6 finding #16). RFC 0021 P1 will swap the alias.
 
 #### Tests
 
@@ -150,8 +155,8 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] Multi-turn integration test green
-- [ ] No regression on PR 2's single-turn parity test
+- [x] Multi-turn integration test green
+- [x] No regression on PR 2's single-turn parity test
 
 ---
 
@@ -310,6 +315,67 @@ Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../
     already in effect, `AgentAction` is referenced only inside `_store_event_episode`'s annotation.
     Move the import under `if TYPE_CHECKING:` to shave one import cycle. Negligible impact;
     bundle with whichever PR 6 cleanup touches the file.
+
+##### From PR 3 review
+
+12. **`MaxTurnsDetector` enforced one event late** (`agents/memory/boundary_detectors.py`,
+    `agents/memory/interactions.py`). PR 3 wires `MaxTurnsDetector` into `default_detectors()`,
+    but the cap fires only via `idle_check`, which the runtime calls at the *top* of the next
+    event — *before* the current event's `add_turn`. Turn `max_turns + 1` is admitted; the close
+    fires only on the subsequent event. Tighten enforcement to `add_turn` (check the cap inline
+    after appending; close-and-reopen on overflow) so the runtime invariant matches the documented
+    "hard cap on turns per interaction". Closes the off-by-one window on the resource-amplification
+    surface RFC 0020 §Security names.
+
+13. **Cross-scope idle-flush failure logs the wrong `event_type`**
+    (`agents/persona_runtime/state_persistence.py`). The `for closed in idle_check(): await
+    _persist_closed_interaction(closed)` loop sits inside the outer `try/except` of
+    `_store_event_episode`. If `_persist_closed_interaction` raises past its own inner
+    try (e.g. `asyncio.CancelledError` or a programming error in ctx-construction), the outer
+    handler logs `event_type=<current event>` — which is *not* the event that owned the failed
+    flush scope. Either lift the inner try around the entire `_persist_closed_interaction` body,
+    or pull the flush loop out from under the outer `except`.
+
+14. **End-to-end test for cross-scope idle flush via `on_event`**
+    (`tests/integration/test_interaction_multi_turn.py`). The PR-3 idle-gap test exercises
+    `idle_check(now=future)` and `_persist_closed_interaction` separately but never asserts that
+    an event arriving in scope-B flushes a stale scope-A through `_store_event_episode`. The PR
+    description markets this as "the production hot path". Add a test that opens scope A, advances
+    time past the idle window (inject a fake clock via the new seam — pairs with finding #16),
+    fires an event in scope B, and asserts A persisted with `REASON_IDLE_GAP` and B opened
+    independently.
+
+15. **Mirror PR-2's failure-swallow test for `_persist_closed_interaction`**
+    (`tests/integration/test_interaction_multi_turn.py`). PR 2 has
+    `test_store_episode_failure_is_swallowed_and_logged` for `_store_event_episode`; PR 3's
+    multi-turn close path has the same inner `try/except` around `store_episode` but no test
+    pins the contract. Patch `agent._episodic_memory.store_episode = _boom` inside an idle-gap
+    or session-end test; assert the warning is emitted and tracker state is consistent.
+
+16. **Wire the `Clock` seam through to `_LLMPersonaAgent`** (`agents/persona_runtime/__init__.py`,
+    `agents/memory/interactions.py`). Today `_LLMPersonaAgent` constructs `InteractionTracker`
+    without forwarding a `clock=`; production code is locked to `time.time()` and tests inject via
+    per-call `now=` overrides. Accept `clock=None` on the agent constructor and forward to the
+    tracker so tests can construct an agent with a fake clock instead of patching per call. Reduces
+    the eventual RFC 0021 P1 swap diff to one site.
+
+17. **Add coverage for `MENTION` aggregation, two concurrent open scopes, `channel_id` vs.
+    `sender_id` precedence, and scope=`None` fallback** (`tests/integration/test_interaction_multi_turn.py`).
+    Multi-turn aggregation is asserted only for `MESSAGE_RECEIVED`; `MENTION` is covered only at
+    the "no episode persisted yet" parity level. No test pins that DM-A and thread-B accumulating
+    in parallel on the same agent stay independent until each closes; no test pins the
+    `channel_id`-precedence so PR 5's reshuffle will be hard to read; no test fires a
+    `MESSAGE_RECEIVED` with neither `channel_id` nor `sender_id` to assert the legacy NULL-interaction
+    fallback + warning. Five lines each; bundle as one parametrised expansion.
+
+18. **Type drift between `payload: dict[str, object]` and `ctx: dict[str, Any]`**
+    (`agents/persona_runtime/state_persistence.py`, `_handle_multi_turn_event`). Both end up in
+    the same persisted JSON. Pick `dict[str, Any]` to match the rest of the file.
+
+19. **Fold `_coerce_event_timeout` + `<= 0` reject into one helper**
+    (`agents/persona_runtime/__init__.py`). The two-step "coerce then validate `<= 0`" pair
+    around `interaction_idle_timeout_sec` could be one call by adding a `min_value=` kwarg to
+    `_coerce_event_timeout` (or a small `_coerce_positive_float` helper). Cosmetic.
 
 ---
 

@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-27 (RFC 0020 PR 2 merged via PR #215: single-turn routing — TICK + tool-only events through `InteractionTracker`; parity test)  
+> **Last updated**: 2026-04-27 (RFC 0020 PR 3 merged via PR #216: multi-turn aggregation for human-chat + DM; idle-gap + session-end close; `Clock` seam; `MaxTurnsDetector`)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (2/7 PRs merged); other v0.3.0 RFC workstreams unblocked
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); other v0.3.0 RFC workstreams unblocked
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -806,6 +806,7 @@ v0.5.0 complete
 | [#191](https://github.com/mkhomutov/Persatrix/pull/191) | chore(release): v0.2.3 final pre-tag verification (PR 4) | v0.2.3 release prep | 2026-04-24 |
 | [#214](https://github.com/mkhomutov/Persatrix/pull/214) | feat(memory): RFC 0020 PR 1 — InteractionTracker + episodes schema v5 | 0020 (1/7) | 2026-04-27 |
 | [#215](https://github.com/mkhomutov/Persatrix/pull/215) | feat(memory): RFC 0020 PR 2 — route TICK + tool-only events through InteractionTracker | 0020 (2/7) | 2026-04-27 |
+| [#216](https://github.com/mkhomutov/Persatrix/pull/216) | feat(memory): RFC 0020 PR 3 — multi-turn aggregation for human-chat + DM | 0020 (3/7) | 2026-04-27 |
 
 ---
 
