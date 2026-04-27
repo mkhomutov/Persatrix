@@ -30,7 +30,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .boundary_detectors import (
@@ -61,7 +61,12 @@ if TYPE_CHECKING:
 # clock once it lands; one-line import + alias change.
 
 
-@runtime_checkable
+# Not ``@runtime_checkable``: the Protocol is a single-method callable
+# shape, ``time.time`` (and any zero-arg callable) would satisfy a
+# bare ``isinstance`` check trivially, and no call site uses one.
+# Dropped per PR-216 review (Nice-to-have #1) to keep the dependency
+# surface honest; reintroduce only if a future caller actually needs
+# a structural check.
 class Clock(Protocol):
     """Zero-arg callable returning a wall-clock float (seconds)."""
 

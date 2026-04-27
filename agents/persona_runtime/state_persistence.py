@@ -266,14 +266,19 @@ class _StatePersistenceMixin:
             return
         first_payload = interaction.turns[0].payload
         last_payload = interaction.turns[-1].payload
+        # PR-216 review (Nice-to-have #2): apply the ``<no-summary>``
+        # fallback symmetrically.  Earlier draft only guarded ``first``,
+        # so an empty-summary closing turn rendered ``... last[]`` while
+        # the analogous opener rendered ``... first[<no-summary>]``.
         first_summary = str(first_payload.get("summary", "")) or "<no-summary>"
+        last_summary = str(last_payload.get("summary", "")) or "<no-summary>"
         # Placeholder summary: turn count + first/last per-turn summary.
         # Stable, deterministic, easy to assert in tests.  PR 4 swaps
         # this for an LLM call.
         summary = (
             f"Multi-turn interaction (scope={interaction.scope}, "
             f"turns={interaction.turn_count}, reason={interaction.close_reason}): "
-            f"first[{first_summary}] last[{last_payload.get('summary', '')}]"
+            f"first[{first_summary}] last[{last_summary}]"
         )
         ctx: dict[str, Any] = {
             "scope": interaction.scope,

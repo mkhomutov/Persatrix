@@ -211,9 +211,26 @@ class _LLMPersonaAgent(
         # :class:`IdleGapDetector` once the per-agent idle timeout
         # elapses.  The per-channel override path lands in PR 5.
         memory_cfg = config.get("memory") or {}
-        idle_timeout_sec = float(
+        # PR-216 review (Should-Fix #3): coerce + validate the
+        # idle-timeout knob.  A non-numeric / non-positive value would
+        # silently degrade multi-turn aggregation to PR-2 single-turn
+        # semantics (every event closes immediately on the next
+        # ``idle_check``).  Mirror ``_coerce_event_timeout``: log and
+        # fall back to the 600s default on bad input, and additionally
+        # reject ``<= 0`` (which ``float()`` would happily accept) so
+        # the default :class:`IdleGapDetector` window stays meaningful.
+        idle_timeout_sec = _coerce_event_timeout(
             memory_cfg.get("interaction_idle_timeout_sec", 600.0),
+            default=600.0,
+            agent_id=agent_id,
         )
+        if idle_timeout_sec <= 0:
+            logger.warning(
+                "Agent %s: interaction_idle_timeout_sec=%r is non-positive; "
+                "using default 600s",
+                agent_id, idle_timeout_sec,
+            )
+            idle_timeout_sec = 600.0
         self._interaction_tracker = InteractionTracker(
             idle_timeout_sec=idle_timeout_sec,
         )
