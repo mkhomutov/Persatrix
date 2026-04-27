@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-27 (RFC 0022 — Persona Prompt Section Templating implemented via PR #213: persona section composer externalized to `prompts/runtime/persona/sections/` with byte-identical parity)  
-> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 📋 Planning  
-> **Current milestone**: v0.3.0 planning in progress (shared channels — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1)
+> **Last updated**: 2026-04-27 (RFC 0020 PR 1 merged via PR #214: `InteractionTracker`, episodes schema v5 with `interaction_id`/`started_at`/`closed_at`/`turn_count`/`scope`, and boundary-detector interfaces)  
+> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
+> **Current milestone**: RFC 0020 implementation in progress (1/7 PRs merged); other v0.3.0 RFC workstreams unblocked
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -51,7 +51,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
-| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 📋 Proposed |
+| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 🚧 Implementing |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 📋 Proposed |
 | [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | ✅ Implemented |
 
@@ -804,6 +804,7 @@ v0.5.0 complete
 | [#189](https://github.com/mkhomutov/Persatrix/pull/189) | docs(release): v0.2.3 docs refresh + observability diagram + release checklist (PR 2) | v0.2.3 release prep | 2026-04-24 |
 | [#190](https://github.com/mkhomutov/Persatrix/pull/190) | chore(release): bump to v0.2.3 + curate changelog (PR 3) | v0.2.3 release prep | 2026-04-24 |
 | [#191](https://github.com/mkhomutov/Persatrix/pull/191) | chore(release): v0.2.3 final pre-tag verification (PR 4) | v0.2.3 release prep | 2026-04-24 |
+| [#214](https://github.com/mkhomutov/Persatrix/pull/214) | feat(memory): RFC 0020 PR 1 — InteractionTracker + episodes schema v5 | 0020 (1/7) | 2026-04-27 |
 
 ---
 

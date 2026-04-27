@@ -81,12 +81,12 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/ tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] Schema migration shipped behind the existing `EpisodicMemory.initialize()` path
-- [ ] ROADMAP.md row for RFC 0020 → `🚧 Implementing` on this PR opening
-- [ ] Master Progress Overview row 2 → 🔄 In progress
+- [x] `pytest agents/tests/ tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] Schema migration shipped behind the existing `EpisodicMemory.initialize()` path
+- [x] ROADMAP.md row for RFC 0020 → `🚧 Implementing` on this PR opening
+- [x] Master Progress Overview row 2 → 🔄 In progress
 
 ---
 
@@ -231,10 +231,40 @@ PR 7 (RFC close)
 
 Apply review findings from PRs 1–5 (the "From PR N review" pattern from [RFC 0017 PR plan](0017-pr-plan.md#status-by-finding-pr-6-implementation)). Out-of-scope items downgrade to tracked issues with rationale.
 
-#### PR checklist
+#### Scope
 
-- [ ] All deferred review findings addressed or downgraded to tracked issues
-- [ ] `make test` passes; `make lint` clean
+Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry paraphrases the finding and **must not** reference or link any `docs/pr-reviews/*.md` file.
+
+##### From PR 1 review
+
+1. **`_apply_migration_5` issues `await db.commit()` on the missing-`episodes` early return** (`agents/memory/episodic.py`).
+   When the legacy DB has no `episodes` table, the v5 migration logs and returns — but still calls
+   `await db.commit()` on the empty transaction. Harmless but a wasted round-trip and asymmetric with
+   `_apply_migration_4`'s early-return shape. Drop the `commit()` on the no-op path and add a brief
+   comment matching `_apply_migration_4`'s "version-record happens after this returns" note for parity.
+
+2. **`InteractionTracker.close(reason: str)` accepts arbitrary strings** (`agents/memory/interactions.py`).
+   A typo at any caller silently bypasses the per-reason counter dispatch in `_emit_closed()` and only
+   the generic `interactions.closed` counter increments. Tighten the signature to
+   `Literal["structural", "idle_gap", "topic_shift", "shutdown"]` (or a `CloseReason` enum / `Final`
+   constants set) so mypy catches the typo at the call site. Pair this with finding #3.
+
+3. **`_emit_closed()` per-reason dispatch is hand-coded `if/elif`** (`agents/memory/interactions.py`).
+   Won't scale cleanly when PR 4 adds `interactions.closed.by_shutdown` and PR 5 (or post-v0.3.0
+   Phase 4) adds `interactions.closed.by_topic_shift`. Refactor to a `dict[CloseReason, str]`
+   counter-name table iterated once. Keeps `close()` logic focused on lifecycle, not metric naming.
+
+4. **No regression test for the `_apply_migration_5` empty-`episodes` guard**
+   (`tests/unit/python/test_episodic_schema_migration.py`). The early-return branch fires only on a DB
+   that has the migrations table but lacks `episodes` — an unusual but real shape during partial
+   restores. Add a fixture that constructs that DB shape and asserts the migration is a no-op (no
+   exception, no rows added, version row written by the outer harness as expected).
+
+5. **`TestMetricEmission` lacks an autouse cleanup fixture** (`tests/unit/python/test_interaction_tracker.py`).
+   The class mutates the module-global metrics registry; without an autouse `reset_metrics` fixture the
+   tests are order-coupled with anything else that touches metrics in the same pytest session. Add a
+   class-scoped autouse fixture that snapshots and restores the relevant counters (or the whole
+   registry) around each test method.
 
 ---
 

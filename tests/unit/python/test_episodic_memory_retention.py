@@ -165,31 +165,37 @@ class TestDeleteOldEpisodes:
 
 class TestFutureMigration:
     async def test_hypothetical_v5_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v5 entry, verify v1–v5 applied."""
+        """Patch MIGRATIONS with a hypothetical v6 entry, verify v1–v6 applied.
+
+        Original test asserted v1–v5; v5 is now occupied by RFC 0020's
+        episodes-interaction migration, so the forward-compat probe is
+        bumped to v6.  Behaviour under test (forward-compat for new
+        migration tail entries) is unchanged.
+        """
         from agents.memory.migrations import MIGRATIONS
 
-        v5 = (
-            5,
+        v6 = (
+            6,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v5 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v6 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v5)
+            MIGRATIONS.append(v6)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All five versions should be recorded
+            # All six versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4, 5]
+            assert versions == [1, 2, 3, 4, 5, 6]
 
-            # v5 table should exist
+            # v6 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v5'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v6'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 
