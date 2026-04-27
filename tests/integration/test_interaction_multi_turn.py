@@ -296,3 +296,150 @@ async def test_pr2_single_turn_parity_unchanged():
     assert ep["closed_at"] is not None
     # No multi-turn scope leaked into the tracker.
     assert agent._interaction_tracker.open_scopes() == []
+
+
+
+# ─── Session-end metadata truthiness (PR-216 review High #3) ─────
+
+
+@pytest.mark.asyncio
+class TestSessionEndMetadataTruthiness:
+    """Pin the strict-truthy contract for ``chat_end`` / ``session_end``.
+
+    A bare ``bool(meta.get(k))`` accepted any non-empty string — so a
+    channel adapter that stringifies booleans (``"false"``, ``"0"``,
+    ``"no"``) would have closed every multi-turn interaction
+    unexpectedly.  This suite locks the allowlist behaviour from
+    PR-216 review High #3.
+    """
+
+    @pytest.mark.parametrize("flag_value", [
+        True,
+        "true",
+        "True",
+        "TRUE",
+        "  yes  ",
+        "1",
+        "on",
+        1,
+        2.5,
+    ])
+    async def test_truthy_values_close_interaction(self, flag_value):
+        agent = await _make_agent()
+        peer = "iron-fox"
+        scope = scope_for_dm(agent.agent_id, peer)
+
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hi"},
+            sender_id=peer,
+        ))
+        assert agent._interaction_tracker.open_scopes() == [scope]
+
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "bye"},
+            sender_id=peer,
+            metadata={"chat_end": flag_value},
+        ))
+        episodes = await _all_episodes(agent)
+        assert len(episodes) == 1
+        assert episodes[0]["turn_count"] == 2
+        assert agent._interaction_tracker.open_scopes() == []
+
+    @pytest.mark.parametrize("flag_value", [
+        False,
+        "false",
+        "False",
+        "0",
+        "no",
+        "",
+        0,
+        0.0,
+        None,
+    ])
+    async def test_falsy_values_keep_interaction_open(self, flag_value):
+        agent = await _make_agent()
+        peer = "iron-fox"
+        scope = scope_for_dm(agent.agent_id, peer)
+
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hi"},
+            sender_id=peer,
+        ))
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "still here"},
+            sender_id=peer,
+            metadata={"chat_end": flag_value},
+        ))
+        assert await _all_episodes(agent) == []
+        interaction = agent._interaction_tracker.get(scope)
+        assert interaction is not None
+        assert interaction.turn_count == 2
+
+    async def test_session_end_alias_also_honoured(self):
+        """Both ``chat_end`` and ``session_end`` keys must trigger close."""
+        agent = await _make_agent()
+        peer = "iron-fox"
+
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "hi"},
+            sender_id=peer,
+        ))
+        await agent.on_event(AgentEvent(
+            event_type=EventType.MESSAGE_RECEIVED,
+            payload={"content": "bye"},
+            sender_id=peer,
+            metadata={"session_end": True},
+        ))
+        episodes = await _all_episodes(agent)
+        assert len(episodes) == 1
+        assert episodes[0]["turn_count"] == 2
+
+
+# ─── Per-turn payload data minimisation (PR-216 review High #1) ──
+
+
+@pytest.mark.asyncio
+async def test_closed_interaction_context_does_not_embed_message_body():
+    """RFC 0020 §D — per-turn message text is not stored in episodes.
+
+    The runtime stashes only the structural envelope per turn
+    (``event_type`` / ``sender`` / ``channel_id`` / ``timestamp`` /
+    ``summary``).  Embedding ``event.payload`` (which carries the
+    inbound message body) on the turn would (a) violate §D and (b)
+    grow ``context_json`` linearly with conversation length.  This
+    test reads the persisted ``context_json`` after a structural close
+    and asserts no message body leaks through.
+    """
+    agent = await _make_agent()
+    peer = "iron-fox"
+    secret_body = "super-secret-message-body-xyzzy"
+
+    await agent.on_event(AgentEvent(
+        event_type=EventType.MESSAGE_RECEIVED,
+        payload={"content": secret_body},
+        sender_id=peer,
+    ))
+    await agent.on_event(AgentEvent(
+        event_type=EventType.MESSAGE_RECEIVED,
+        payload={"content": "bye"},
+        sender_id=peer,
+        metadata={"chat_end": True},
+    ))
+
+    db = agent._episodic_memory._ensure_db()
+    async with db.execute(
+        "SELECT context_json FROM episodes WHERE agent_id = ?",
+        (agent.agent_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    assert len(rows) == 1
+    context_blob = rows[0][0]
+    assert secret_body not in context_blob, (
+        "Per-turn message body leaked into context_json; "
+        "violates RFC 0020 §D."
+    )

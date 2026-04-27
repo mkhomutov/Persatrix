@@ -194,6 +194,18 @@ class _StatePersistenceMixin:
         "session_end",
     })
 
+    # Strings accepted as ``True`` for session-end metadata flags.
+    # PR-216 review (High #3): a bare ``bool(meta.get(k))`` truthiness
+    # check would close on any non-empty string, including ``"false"``
+    # / ``"0"`` / ``"no"`` — a footgun for any channel adapter that
+    # JSON-stringifies booleans (a common interop pattern).  Restrict
+    # the accepted truthy strings to a small canonical allowlist so
+    # ``metadata={"chat_end": "false"}`` no longer closes the
+    # interaction.
+    _SESSION_END_TRUTHY_STRINGS: frozenset[str] = frozenset({
+        "true", "1", "yes", "y", "on",
+    })
+
     def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
         """Compute the InteractionTracker scope for a multi-turn event.
 
@@ -214,8 +226,39 @@ class _StatePersistenceMixin:
         return None
 
     def _is_session_end_event(self, event: AgentEvent) -> bool:
+        """Strict-truthy check for session-end metadata flags.
+
+        PR-216 review (High #3): ``bool("false")`` is ``True``, so the
+        prior ``bool(meta.get(k))`` accepted any non-empty string — a
+        channel adapter that stringifies booleans would have closed
+        every multi-turn interaction unexpectedly.  Accept only:
+
+        * the ``bool`` value ``True`` (and only ``True`` — not any
+          truthy non-bool such as a list/object),
+        * a non-zero numeric value,
+        * a string whose lowercase form is in
+          :attr:`_SESSION_END_TRUTHY_STRINGS`.
+
+        Anything else (``False``, ``0``, ``None``, ``"false"``,
+        ``"0"``, empty string, missing key) is treated as not-end.
+        """
         meta = event.metadata or {}
-        return any(bool(meta.get(k)) for k in self._SESSION_END_METADATA_KEYS)
+        for key in self._SESSION_END_METADATA_KEYS:
+            if key not in meta:
+                continue
+            val = meta[key]
+            if val is True:
+                return True
+            if isinstance(val, str):
+                if val.strip().lower() in self._SESSION_END_TRUTHY_STRINGS:
+                    return True
+                continue
+            # ``bool`` is a subclass of ``int``; ``True`` is handled
+            # above and ``False`` falls through to the int branch as
+            # ``0`` (correctly evaluating not-end).
+            if isinstance(val, (int, float)) and val != 0:
+                return True
+        return False
 
     async def _handle_multi_turn_event(
         self,
@@ -233,12 +276,42 @@ class _StatePersistenceMixin:
         """
         scope = self._scope_for_multi_turn_event(event)
         if scope is None:
+            # PR-216 review (Low / Should-Fix #4): an under-populated
+            # multi-turn event (no ``channel_id`` and no ``sender_id``)
+            # silently falls back to the legacy NULL-interaction shape.
+            # Surface it as a warning so operators can spot malformed
+            # ingress before it manifests as a downstream episode-shape
+            # regression.  Kept as a log line rather than a new
+            # counter to avoid expanding the metrics surface mid-RFC;
+            # PR 5 (channel-aware routing) is the right place for a
+            # dedicated ``agent.interactions.scope_unresolved`` counter
+            # if production data warrants one.
+            logger.warning(
+                "Agent %s: multi-turn event %s has neither channel_id nor "
+                "sender_id; storing as legacy NULL-interaction episode",
+                self.agent_id, event.event_type.value,
+            )
             await self._episodic_memory.store_episode(summary=summary, context=ctx)
             return
+        # PR-216 review (High #1): RFC 0020 §D pins
+        # *"Per-turn message text is not stored in episodes"*, and PR 1's
+        # ``Turn`` dataclass docstring repeats the constraint.  An
+        # earlier draft stashed the full ``ctx`` (which carries
+        # ``event.payload`` — i.e. the message body for
+        # ``MESSAGE_RECEIVED`` / ``MENTION``) on the turn, so the
+        # closed-interaction ``context_json`` ended up embedding every
+        # message body for the lifetime of the row.  PR 4's LLM
+        # summariser only needs the per-turn structural envelope plus
+        # the deterministic ``summary`` text — it does not need the
+        # raw body.  Keep only the structural fields here so the
+        # spec-vs-code drift is closed; if a future PR genuinely needs
+        # the body, RFC 0020 §D must be amended in the same change.
         payload: dict[str, object] = {
             "summary": summary,
-            "context": ctx,
             "event_type": event.event_type.value,
+            "sender": event.sender_id,
+            "channel_id": event.channel_id,
+            "timestamp": event.timestamp,
         }
         self._interaction_tracker.add_turn(scope, payload=payload)
         if self._is_session_end_event(event):
