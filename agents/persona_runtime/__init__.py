@@ -199,12 +199,24 @@ class _LLMPersonaAgent(
         )
         self._state = PersonaState()
         self._lock = asyncio.Lock()
-        # RFC 0020 Phase 2 (PR 2): per-agent in-memory InteractionTracker.
-        # Single-turn paths (TICK + tool-only events) call ``add_turn`` and
-        # ``close`` in one shot from ``_on_event_inner`` so each emits a
-        # closed-interaction episode with ``turn_count=1``.  Multi-turn
-        # aggregation (MESSAGE_RECEIVED, MENTION) is wired in PR 3.
-        self._interaction_tracker = InteractionTracker()
+        # RFC 0020 Phase 2 (PR 2 + PR 3): per-agent in-memory
+        # InteractionTracker.  Single-turn paths (TICK + tool-only) call
+        # ``add_turn`` and ``close`` in one shot from
+        # ``_on_event_inner`` so each emits a closed-interaction episode
+        # with ``turn_count=1``.  Multi-turn paths
+        # (``MESSAGE_RECEIVED`` / ``MENTION``) accumulate turns under a
+        # DM- or thread-keyed scope and persist a single episode on
+        # close (PR 3); close fires either via session-end metadata
+        # (``chat_end`` / ``session_end``) or via the
+        # :class:`IdleGapDetector` once the per-agent idle timeout
+        # elapses.  The per-channel override path lands in PR 5.
+        memory_cfg = config.get("memory") or {}
+        idle_timeout_sec = float(
+            memory_cfg.get("interaction_idle_timeout_sec", 600.0),
+        )
+        self._interaction_tracker = InteractionTracker(
+            idle_timeout_sec=idle_timeout_sec,
+        )
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record

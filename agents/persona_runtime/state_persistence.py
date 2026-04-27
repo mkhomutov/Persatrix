@@ -15,7 +15,13 @@ if TYPE_CHECKING:
 
 from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.episodic import EpisodicMemory
-from ..memory.interactions import SCOPE_TICK, InteractionTracker
+from ..memory.interactions import (
+    SCOPE_TICK,
+    Interaction,
+    InteractionTracker,
+    scope_for_dm,
+    scope_for_thread,
+)
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from ..persona_types import AgentAction, AgentEvent, EventType, PersonaState
@@ -76,16 +82,25 @@ class _StatePersistenceMixin:
     async def _store_event_episode(
         self, event: AgentEvent, actions: list[AgentAction],
     ) -> None:
-        """Persist the episode for a completed event (RFC 0020 PR 2).
+        """Persist the episode for a completed event (RFC 0020 PR 2/PR 3).
 
         Single-turn paths (TICK, tool-only) route through
         :class:`InteractionTracker` so the row carries the new
         ``interaction_id`` / ``started_at`` / ``closed_at`` /
         ``turn_count`` / ``scope`` columns added in PR 1's schema
         migration.  Multi-turn paths (``MESSAGE_RECEIVED`` / ``MENTION``)
-        keep the legacy NULL-interaction shape until PR 3 wires
-        aggregation; the parity test in
-        ``test_interaction_single_turn_parity.py`` pins this boundary.
+        accumulate turns in the open interaction and persist a single
+        episode only when the interaction closes (PR 3); the close is
+        triggered either by an explicit session-end marker on the event
+        metadata (``chat_end`` / ``session_end`` truthy — the RFC 0016
+        ``chat_end`` event surface lands in a follow-up) or by the
+        :class:`~agents.memory.boundary_detectors.IdleGapDetector` once
+        the per-channel idle timeout elapses.
+
+        Idle-gap evaluation runs at the top of every event so a stale
+        interaction is flushed the moment the next event arrives in any
+        scope.  PR 4 will additionally drive ``idle_check`` from a
+        periodic janitor so closure does not depend on event traffic.
 
         Scope labelling for single-turn rows preserves event-type
         provenance per PR-215 review (Should-Fix #1): only actual
@@ -94,7 +109,8 @@ class _StatePersistenceMixin:
         ``WHERE scope = 'task_assigned'`` analytics work without
         having to re-parse ``summary``.  RFC 0020 §G's "share the TICK
         boundary policy" wording refers to *close timing*, not scope
-        labels.
+        labels.  Multi-turn rows carry the channel-typed scope built by
+        :func:`scope_for_dm` / :func:`scope_for_thread`.
         """
         summary = (
             f"Event: {event.event_type.value} → "
@@ -102,8 +118,15 @@ class _StatePersistenceMixin:
         )
         ctx = {"event": event.payload, "sender": event.sender_id}
         try:
+            # Step 1: flush any interaction whose idle window expired
+            # since the last event.  Runs unconditionally so single-turn
+            # paths also drive the cross-scope janitor without waiting
+            # for PR 4.
+            for closed in self._interaction_tracker.idle_check():
+                await self._persist_closed_interaction(closed)
+
             if event.event_type in self._MULTI_TURN_EVENT_TYPES:
-                await self._episodic_memory.store_episode(summary=summary, context=ctx)
+                await self._handle_multi_turn_event(event, summary, ctx)
                 return
             if event.event_type not in self._SINGLE_TURN_EVENT_TYPES:
                 # Defensive fallback: a new EventType was introduced
@@ -157,6 +180,125 @@ class _StatePersistenceMixin:
                 "Failed to store episode for agent %s (event_type=%s)",
                 self.agent_id,
                 event.event_type.value,
+                exc_info=True,
+            )
+
+    # ─── Multi-turn aggregation (RFC 0020 PR 3) ───────────────
+
+    # Metadata keys that signal an explicit session end on a multi-turn
+    # event.  Either spelling is accepted so RFC 0016 ("chat_end") and
+    # RFC 0011 ("session_end") emit a structural close without a
+    # second adapter layer.
+    _SESSION_END_METADATA_KEYS: frozenset[str] = frozenset({
+        "chat_end",
+        "session_end",
+    })
+
+    def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
+        """Compute the InteractionTracker scope for a multi-turn event.
+
+        Returns ``None`` when the event carries neither a ``channel_id``
+        nor a ``sender_id`` — callers fall back to the legacy NULL-
+        interaction shape so an under-populated event does not leak
+        into a half-keyed scope.
+
+        Channel-aware routing (group / thread distinction) lands jointly
+        with RFC 0011 P3 in PR 5; for PR 3 the runtime treats every
+        ``channel_id`` as a thread scope so existing chat traffic
+        aggregates correctly.
+        """
+        if event.channel_id:
+            return scope_for_thread(event.channel_id)
+        if event.sender_id:
+            return scope_for_dm(self.agent_id, event.sender_id)
+        return None
+
+    def _is_session_end_event(self, event: AgentEvent) -> bool:
+        meta = event.metadata or {}
+        return any(bool(meta.get(k)) for k in self._SESSION_END_METADATA_KEYS)
+
+    async def _handle_multi_turn_event(
+        self,
+        event: AgentEvent,
+        summary: str,
+        ctx: dict[str, Any],
+    ) -> None:
+        """Append a turn to the open interaction; close on session end.
+
+        The per-turn ``summary`` / ``ctx`` are stashed on the turn
+        payload so the PR 4 summariser has the same fields it would
+        have written to a legacy single-row episode — PR 4 swaps the
+        placeholder summary for an LLM-generated one without changing
+        this call site.
+        """
+        scope = self._scope_for_multi_turn_event(event)
+        if scope is None:
+            await self._episodic_memory.store_episode(summary=summary, context=ctx)
+            return
+        payload: dict[str, object] = {
+            "summary": summary,
+            "context": ctx,
+            "event_type": event.event_type.value,
+        }
+        self._interaction_tracker.add_turn(scope, payload=payload)
+        if self._is_session_end_event(event):
+            closed = self._interaction_tracker.close(
+                scope, reason=REASON_STRUCTURAL,
+            )
+            if closed is not None:
+                await self._persist_closed_interaction(closed)
+
+    async def _persist_closed_interaction(self, interaction: Interaction) -> None:
+        """Write a single episode row for a just-closed multi-turn interaction.
+
+        PR 3 ships a deterministic placeholder summary that mirrors the
+        single-row legacy text the per-event store would have written;
+        PR 4 replaces it with the LLM-generated summary plumbed through
+        ``MemoryFacade.compress``.  The interaction's accumulated turn
+        payloads ride on ``context_json`` so PR 4 can read them back
+        without a schema change.
+        """
+        if interaction.turn_count == 0:
+            # Defensive: an interaction can only close after at least
+            # one ``add_turn``, but ``idle_check`` running on a freshly
+            # ``start``-ed (no-turn) scope would still hit this path.
+            # Skip the row rather than write a contentless episode.
+            return
+        first_payload = interaction.turns[0].payload
+        last_payload = interaction.turns[-1].payload
+        first_summary = str(first_payload.get("summary", "")) or "<no-summary>"
+        # Placeholder summary: turn count + first/last per-turn summary.
+        # Stable, deterministic, easy to assert in tests.  PR 4 swaps
+        # this for an LLM call.
+        summary = (
+            f"Multi-turn interaction (scope={interaction.scope}, "
+            f"turns={interaction.turn_count}, reason={interaction.close_reason}): "
+            f"first[{first_summary}] last[{last_payload.get('summary', '')}]"
+        )
+        ctx: dict[str, Any] = {
+            "scope": interaction.scope,
+            "close_reason": interaction.close_reason,
+            "turn_count": interaction.turn_count,
+            "turns": [
+                {"at": t.at, "payload": t.payload}
+                for t in interaction.turns
+            ],
+        }
+        try:
+            await self._episodic_memory.store_episode(
+                summary=summary,
+                context=ctx,
+                interaction_id=interaction.interaction_id,
+                started_at=interaction.started_at,
+                closed_at=interaction.closed_at,
+                turn_count=interaction.turn_count,
+                scope=interaction.scope,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to persist closed interaction for agent %s (scope=%s)",
+                self.agent_id,
+                interaction.scope,
                 exc_info=True,
             )
 

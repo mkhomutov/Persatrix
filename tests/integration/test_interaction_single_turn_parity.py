@@ -212,18 +212,22 @@ class TestSingleTurnParity:
         assert ep["closed_at"] is not None
         assert ep["summary"].startswith("Event: task_assigned → Actions:")
 
-    async def test_multi_turn_events_keep_legacy_shape(self):
-        """Multi-turn paths land with NULL interaction columns until PR 3.
+    async def test_multi_turn_events_aggregate_into_open_interaction(self):
+        """Multi-turn paths (PR 3) accumulate in the open interaction.
 
-        This pins the PR 2/PR 3 boundary: ``MESSAGE_RECEIVED`` and
-        ``MENTION`` continue to write pre-RFC-shaped rows (no
-        ``interaction_id``), so the PR 3 multi-turn aggregation has a
-        clean before/after to compare against.
+        After PR 3 wires multi-turn aggregation, ``MESSAGE_RECEIVED``
+        and ``MENTION`` no longer write a per-event row — they call
+        ``InteractionTracker.add_turn`` and stay open until session end
+        or idle-gap closes the interaction.  This test pins that
+        contract: a single multi-turn event leaves zero persisted
+        episodes and one open scope on the tracker.  Single-turn parity
+        (TICK + tool-only) is unchanged and lives in the other test
+        methods on this class — the "no regression on PR 2's single-turn
+        parity test" gate from the RFC 0020 PR plan.
 
         PR-215 review nice-to-have #4: ``MENTION`` is exercised here
         alongside ``MESSAGE_RECEIVED`` so the symmetry of the
-        ``_MULTI_TURN_EVENT_TYPES`` deny-list is enforced explicitly
-        rather than implied by the membership check.
+        ``_MULTI_TURN_EVENT_TYPES`` deny-list is enforced explicitly.
         """
         for event_type, payload, sender in (
             (EventType.MESSAGE_RECEIVED, {"content": "Quick question."}, "iron-fox"),
@@ -237,20 +241,26 @@ class TestSingleTurnParity:
             ))
 
             episodes = await _all_episodes(agent)
-            assert len(episodes) == 1
-            ep = episodes[0]
-            assert ep["interaction_id"] is None, (
-                f"{event_type.value} must keep the pre-RFC episode shape "
-                "until PR 3 wires multi-turn aggregation (RFC 0020 PR plan §PR 2)"
+            assert episodes == [], (
+                f"{event_type.value} must aggregate into the open interaction "
+                "and persist nothing until close (RFC 0020 PR 3)"
             )
-            assert ep["turn_count"] is None
-            assert ep["scope"] is None
-            assert ep["summary"].startswith(f"Event: {event_type.value} → Actions:")
+            open_scopes = agent._interaction_tracker.open_scopes()
+            assert len(open_scopes) == 1
+            assert open_scopes[0].startswith("dm:")
 
     async def test_mixed_event_stream_preserves_per_event_count(self):
         """A mixed stream (TICK + TASK_ASSIGNED + MESSAGE_RECEIVED) yields
-        one episode per event — the parity invariant the PR 2 plan
-        commits to (§PR 2 "Episode count after N TICKs equals N")."""
+        three episodes — one per single-turn event — with the
+        ``MESSAGE_RECEIVED`` turn aggregated into an open interaction
+        that persists no episode until close (RFC 0020 PR 3).
+
+        Pre-PR-3 behaviour produced four episodes (the multi-turn event
+        wrote an immediate legacy-shaped row).  PR 3 aggregates the
+        multi-turn turn instead; the assertion is updated accordingly.
+        Single-turn parity (§PR 2 "Episode count after N TICKs equals
+        N") is unchanged — covered by the other tests on this class.
+        """
         agent = await _make_agent()
         # See ``test_n_ticks_produce_n_closed_episodes`` for the
         # rationale on bypassing the empty-context TICK short-circuit.
@@ -268,15 +278,18 @@ class TestSingleTurnParity:
         await agent.on_tick()
 
         episodes = await _all_episodes(agent)
-        assert len(episodes) == 4
+        assert len(episodes) == 3
 
-        # TICK + TASK_ASSIGNED + TICK route through the tracker; the
-        # MESSAGE_RECEIVED row stays legacy (NULL interaction_id).
+        # Every persisted row must be a closed single-turn interaction;
+        # the multi-turn ``MESSAGE_RECEIVED`` turn is held in the open
+        # interaction and would only land on close.
         single_turn = [e for e in episodes if e["interaction_id"] is not None]
-        legacy = [e for e in episodes if e["interaction_id"] is None]
         assert len(single_turn) == 3
-        assert len(legacy) == 1
         assert all(e["turn_count"] == 1 for e in single_turn)
+        # The multi-turn scope is still open on the tracker.
+        open_scopes = agent._interaction_tracker.open_scopes()
+        assert len(open_scopes) == 1
+        assert open_scopes[0].startswith("dm:")
 
     async def test_store_episode_failure_is_swallowed_and_logged(self, caplog):
         """Persistence failure must not bubble; tracker must not leak.

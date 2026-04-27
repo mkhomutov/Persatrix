@@ -30,7 +30,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .boundary_detectors import (
@@ -43,6 +43,32 @@ from .boundary_detectors import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+# ─── Clock seam (RFC 0020 PR 3) ────────────────────────────
+
+# PR 3 wires :class:`IdleGapDetector` into the runtime path.  The
+# tracker has always taken ``now`` as a keyword on every lifecycle
+# method, but the *default* came from a bare ``time.time()`` call at
+# the call site.  PR 3 introduces a ``Clock`` Protocol so a single
+# ``InteractionTracker(clock=...)`` injection point covers every
+# default-now codepath.  This is the seam RFC 0021 P1 swaps when its
+# ``Clock`` lands — at that point this module's ``Clock`` Protocol gets
+# replaced by an alias to the canonical one and the runtime keeps
+# working unchanged.  Until then the default clock is ``time.time``.
+#
+# TODO(rfc-0021-p1): replace ``Clock`` with the RFC 0021 P1 canonical
+# clock once it lands; one-line import + alias change.
+
+
+@runtime_checkable
+class Clock(Protocol):
+    """Zero-arg callable returning a wall-clock float (seconds)."""
+
+    def __call__(self) -> float: ...
+
+
+_DEFAULT_CLOCK: Clock = time.time
 
 # PR-214 review fix (Should-Fix #3): the previous module-level
 # ``logger = logging.getLogger(__name__)`` was unused in PR 1 and
@@ -160,6 +186,7 @@ class InteractionTracker:
         *,
         detectors: Iterable[BoundaryDetector] | None = None,
         idle_timeout_sec: float = DEFAULT_IDLE_TIMEOUT_SEC,
+        clock: Clock | None = None,
     ) -> None:
         self._open: dict[str, Interaction] = {}
         # Detector chain is evaluated in order; first ``(True, reason)``
@@ -169,6 +196,11 @@ class InteractionTracker:
             if detectors is not None
             else default_detectors(idle_timeout_sec=idle_timeout_sec)
         )
+        # Clock seam (PR 3).  Replaces the prior ``time.time()`` defaults
+        # at every lifecycle method's ``now`` argument so tests inject a
+        # deterministic clock once at construction time instead of
+        # threading ``now=`` through every call.
+        self._clock: Clock = clock if clock is not None else _DEFAULT_CLOCK
 
     # ── Read-only accessors (used by tests + janitor wiring in PR 4) ──
 
@@ -190,7 +222,7 @@ class InteractionTracker:
         existing = self._open.get(scope)
         if existing is not None and existing.is_open:
             return existing
-        ts = now if now is not None else time.time()
+        ts = now if now is not None else self._clock()
         interaction = Interaction(
             interaction_id=str(uuid.uuid4()),
             scope=scope,
@@ -212,7 +244,7 @@ class InteractionTracker:
         Returns the open interaction so callers can read its
         ``interaction_id`` for downstream tagging (e.g. trace spans).
         """
-        ts = now if now is not None else time.time()
+        ts = now if now is not None else self._clock()
         interaction = self._open.get(scope)
         if interaction is None or not interaction.is_open:
             interaction = self.start(scope, now=ts)
@@ -245,7 +277,7 @@ class InteractionTracker:
         interaction = self._open.pop(scope, None)
         if interaction is None:
             return None
-        ts = now if now is not None else time.time()
+        ts = now if now is not None else self._clock()
         interaction.closed_at = ts
         interaction.close_reason = reason
         _emit_closed(reason)
@@ -257,10 +289,13 @@ class InteractionTracker:
         """Evaluate every open interaction against the detector chain.
 
         Returns the list of newly-closed interactions in evaluation
-        order.  Wired into the periodic janitor by PR 4; PR 1 exercises
-        this method only via unit tests.
+        order.  PR 3 wires this into the per-event hot path of
+        :class:`~agents.persona_runtime.state_persistence._StatePersistenceMixin`
+        so an idle multi-turn interaction is closed the moment the next
+        event arrives in *any* scope; PR 4 will additionally drive it
+        from a periodic janitor independent of event traffic.
         """
-        ts = now if now is not None else time.time()
+        ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
         # Copy the scope list because :meth:`close` mutates ``self._open``.
         for scope in list(self._open):
@@ -298,6 +333,7 @@ def _emit_closed(reason: str) -> None:
 
 
 __all__ = [
+    "Clock",
     "Interaction",
     "InteractionTracker",
     "SCOPE_TICK",
