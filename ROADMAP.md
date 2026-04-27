@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-27 (RFC 0008 PR 1 merged via PR #218: context budget allocator + packaging foundation; `_context_package` v1 shape frozen; `RelevanceScorer` heuristic backend; sizing-risk split triggered — PR 1b deferred to `feature/v030-rfc0008-context-metrics`)  
+> **Last updated**: 2026-04-27 (RFC 0008 PR 1b merged via PR #219: context metrics emission + remaining-budget persistence; `ContextPackageMetrics` wired to per-step cost records; `remaining_context_budget` persisted in step state across retries)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 merged (#218) — context budget + packaging foundation; sizing-risk PR 1b next
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b merged (#218, #219) — context budget + packaging foundation + metrics; PR 2 (MemoryFacade) next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -808,6 +808,7 @@ v0.5.0 complete
 | [#215](https://github.com/mkhomutov/Persatrix/pull/215) | feat(memory): RFC 0020 PR 2 — route TICK + tool-only events through InteractionTracker | 0020 (2/7) | 2026-04-27 |
 | [#216](https://github.com/mkhomutov/Persatrix/pull/216) | feat(memory): RFC 0020 PR 3 — multi-turn aggregation for human-chat + DM | 0020 (3/7) | 2026-04-27 |
 | [#218](https://github.com/mkhomutov/Persatrix/pull/218) | feat(rfc0008): PR 1 — context budget allocator + packaging foundation | 0008 (1/6) | 2026-04-27 |
+| [#219](https://github.com/mkhomutov/Persatrix/pull/219) | feat(rfc0008): PR 1b — context metrics emission + remaining-budget persistence | 0008 (1b/6) | 2026-04-27 |
 
 ---
 
