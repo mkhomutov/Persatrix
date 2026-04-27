@@ -79,10 +79,11 @@ PR 6 (Review follow-ups + RFC close)
     "version": 1,
     "pinned_sections": [{"name": "...", "content": "...", "tokens": 0}],
     "step_outputs": [{"step_id": "...", "content": "...", "tokens": 0, "relevance": 0.0, "compressed": false}],
-    "metrics": {"tokens_before": 0, "tokens_after": 0, "compression_ratio": 0.0, "candidates_dropped": 0}
+    "metrics": {"tokens_before": 0, "tokens_after": 0, "compression_ratio": 0.0, "candidates_dropped": 0},
+    "budget_memory_tokens": 0
   }
   ```
-  `version: 1` allows additive evolution; agents that don't recognise a higher version downgrade gracefully (ignore unknown fields).
+  `version: 1` is the wire contract for v0.3.0. The optional `budget_memory_tokens` field is admitted into v1 up-front (zero-cost — orchestrator emits 0 in PR 1, PR 2 gives it a non-zero meaning) so PR 2 does not need to evolve the shape mid-RFC. Agents that don't recognise a higher version downgrade gracefully (ignore unknown fields). Any *new* top-level field added after PR 1 merges requires a version bump and a separate RFC amendment.
 - **`RelevanceScorer` protocol** (Go): `type RelevanceScorer interface { Score(candidate Candidate, query QueryContext) float64 }`. The default heuristic implementation lives in `executor/packaging/scorer_heuristic.go`. RFC 0008's [Open Question 1](0008-agent-memory-context-optimization.md#1-relevance-scoring-approach--heuristic-only-in-phase-1-pluggable-scoring-interface) commits this surface so a future embedding backend (RFC 0005 follow-on) can swap in.
 - **Pinned-section contract**: orchestrator-side parallel of `ContextSection.compressible = False` from `agents/memory/working.py` (see [RFC §F](0008-agent-memory-context-optimization.md#f-persona-context-sanity-and-helper-agents)). Pinned sections are excluded from compression-ratio denominator (per [Open Question 3](0008-agent-memory-context-optimization.md#3-compression-warning-threshold--warn-at-41-hard-cap-at-101)) and always admitted; if their token sum alone exceeds `B_step`, packaging logs `pinned_overflow` and admits anyway (correctness over budget — operator alert via metric).
 - **Compression overhead budget**: not implemented in Phase 1 (no abstractive calls yet). The struct + metrics are wired so Phase 1b can plug in the abstractive call without schema churn.
@@ -110,7 +111,7 @@ Integration (Go + Python):
 - [ ] `make test` passes (Go + Python + integration)
 - [ ] `make lint` clean
 - [ ] `make validate` passes (workflow schema additions)
-- [ ] `_context_package` JSON shape (`version`, `pinned_sections`, `step_outputs`, `metrics`) frozen — any change after merge requires a separate RFC amendment
+- [ ] `_context_package` JSON shape (`version`, `pinned_sections`, `step_outputs`, `metrics`, `budget_memory_tokens`) frozen — any new top-level field after merge requires a version bump and a separate RFC amendment
 - [ ] `RelevanceScorer` protocol exported with a default heuristic backend; embedding-backend extension point documented in package GoDoc
 - [ ] Pinned-section overflow path emits `pinned_overflow` metric and proceeds (correctness over budget)
 - [ ] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
@@ -132,10 +133,10 @@ Integration (Go + Python):
 | `agents/memory/facade.py` | `tags` filter parameter on `retrieve_relevant` (required by [RFC 0011 PR plan](0011-pr-plan.md) PR 5). `compress` hook (required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4). Both are pinned-API surfaces — additive evolution only. |
 | `agents/task_agent.py` | Wire `MemoryFacade` into `_run_llm_loop`. Read advisory `budget_memory_tokens` from `_context_package` payload (per [Open Question 10](0008-agent-memory-context-optimization.md#10-orchestrator-vs-agent-context-assembly-boundary--split-ownership-option-3)) and translate into `retrieve_relevant(limit=...)` via `estimate_tokens()` from `agents/memory/working.py`. Memory injection is gated on `agent.memory.enabled` config flag (default `false` to preserve existing stateless behaviour). |
 | `agents/server.py` | Extend `start()` / `stop()` to instantiate / close `MemoryFacade` for memory-enabled task agents (mirrors the existing persona-agent lifecycle path). |
-| `config/agents.yaml` | New optional `memory` block per task agent: `enabled` (bool, default `false`), `episodic_cap` (int, default `1000`), `ttl_low_importance_days` (int, default `30`), `min_score` (float \| null, default `null`). |
+| `config/agents.yaml` | New optional `memory` block per task agent: `enabled` (bool, default `false`), `episodic_cap` (int, default `1000`), `ttl_low_importance_days` (int, default `30`), `min_score` (float \| null, default `null`), `eviction_cadence_seconds` (int, default `3600`). |
 | `schemas/agent.schema.json` | Schema for the new `memory` block; `make validate` enforces. |
 | `agents/memory/eviction.py` | **New** — basic eviction policy: hard TTL for entries with `importance < 0.3` after `ttl_low_importance_days`; size-cap pruning at `episodic_cap` using the [RFC §G](0008-agent-memory-context-optimization.md#g-memory-eviction-decay-and-validation) hybrid score `importance × 0.6 + recency_norm × 0.3 + access_freq_norm × 0.1`. **Confidence decay is deferred to PR 5** (Phase 4b). |
-| `agents/memory/eviction.py` | Single `EvictionPass.run()` entry point invoked on a periodic background task scheduled by `MemoryFacade.initialize()`. Default cadence: every 1 hour; configurable. |
+| `agents/memory/eviction.py` | Single `EvictionPass.run()` entry point invoked on a periodic background task scheduled by `MemoryFacade.initialize()`. Default cadence: every 1 hour, configurable via `memory.eviction_cadence_seconds` in `config/agents.yaml` (default `3600`). |
 | `tests/unit/python/test_memory_facade.py` | **New** — facade contract tests, lifecycle tests, advisory-budget translation tests. |
 | `tests/unit/python/test_memory_eviction.py` | **New** — TTL eviction; size-cap eviction by hybrid score; deterministic ordering under tied scores. |
 | `tests/integration/python/test_task_agent_memory.py` | **New** — task agent with `memory.enabled: true` stores an observation, retrieves it on a subsequent call, respects `min_score` filter. |
@@ -143,8 +144,8 @@ Integration (Go + Python):
 #### Key implementation details
 
 - **Per-process lifecycle** ([Open Question 7](0008-agent-memory-context-optimization.md#7-memoryfacade-lifecycle-for-task-agents--per-process-with-serialized-access)): a single `EpisodicMemory` instance per task-agent process, shared across concurrent gRPC calls. Serialization relies on aiosqlite's WAL-mode single-connection internal queue. No new `asyncio.Lock` is introduced unless parallel tool execution lands later (it doesn't in v0.3.0). Per-task instantiation is rejected because `EpisodicMemory.initialize()` runs `PRAGMA journal_mode=WAL` + FTS5 + migration check on every call.
-- **Advisory budget translation**: the agent reads `_context_package.metrics.tokens_after` and `budget_memory_tokens` (from a new top-level field added to the v1 JSON shape). Translation: `limit = max(1, int(budget_memory_tokens / avg_entry_tokens))` where `avg_entry_tokens = 100` is a Phase 2 constant (calibrated against existing episodic data in PR 5's metrics rollout). Enforcement is advisory — the agent is trusted; future PR 3 of this plan can audit usage in `DelegationResult`.
-- **`MemoryFacade.compress(entries, *, target_tokens) -> CompressedView`** — the API hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4's summarize-on-close path. Phase 2 implementation is extractive-only (highest-importance entries first up to `target_tokens`); abstractive compression is the same `WorkingMemory.compress_if_needed()` path the persona stack already uses, exposed here behind the facade. `CompressedView` is a frozen dataclass with `summary: str`, `entries_dropped: int`, `tokens_before: int`, `tokens_after: int`.
+- **Advisory budget translation**: the agent reads `_context_package.metrics.tokens_after` and the top-level `budget_memory_tokens` field (admitted into the v1 shape in PR 1; PR 1 emits 0, PR 2 starts emitting non-zero values from the orchestrator-side budget allocator). Translation: `limit = max(1, int(budget_memory_tokens / avg_entry_tokens))` where `avg_entry_tokens = 100` is a Phase 2 constant (calibrated against existing episodic data in PR 5's metrics rollout). Enforcement is advisory — the agent is trusted; future PR 3 of this plan can audit usage in `DelegationResult`.
+- **`MemoryFacade.compress(entries, *, target_tokens) -> CompressedView`** — the API hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4's summarize-on-close path. Phase 2 implementation is extractive-only (highest-importance entries first up to `target_tokens`). The abstractive path delegates to `WorkingMemory.compress_if_needed()` from `agents/memory/working.py`; since that method takes no `target_tokens` argument and triggers off its own internal threshold, the facade adapter (a) sets the working-memory token ceiling to `target_tokens` before the call and (b) reads the post-compression sections back out — i.e. `target_tokens` is enforced facade-side, not pushed into `WorkingMemory`'s signature. `CompressedView` is a frozen dataclass with `summary: str`, `entries_dropped: int`, `tokens_before: int`, `tokens_after: int`.
 - **`tags` filter semantics**: `retrieve_relevant(tags=("channel:slack-#dev",))` returns entries whose `tags` set is a superset of the requested tags (AND, not OR). [RFC 0011 PR plan](0011-pr-plan.md) PR 5's channel-scoped recall depends on this AND semantics.
 - **Eviction scheduling**: `MemoryFacade.initialize()` starts `asyncio.create_task(_eviction_loop())`; `close()` cancels it. Eviction is best-effort — failures log a warning and the loop continues (mirrors RFC 0005 working-memory async-flush pattern).
 - **Sizing risk**: facade + eviction + tests + integration is wide. If implementation pushes over the cap during PR review, split eviction (`agents/memory/eviction.py` + its tests) into a follow-on `feature/v030-rfc0008-eviction` PR. Cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) only require the facade surface, not eviction, so the split is safe.
@@ -152,7 +153,7 @@ Integration (Go + Python):
 #### Tests
 
 Unit (Python):
-- `MemoryFacade.retrieve_relevant`: `limit` honored; `tags=()` is no-op; `tags=("a", "b")` requires both; `min_score` filters per `EpisodicMemory.recall` contract.
+- `MemoryFacade.retrieve_relevant`: `limit` honored; `tags=()` is no-op; `test_facade_tags_intersection` — `tags=("a", "b")` returns only entries whose tag set is a superset of `{a, b}` (AND semantics, the contract [RFC 0011 PR plan](0011-pr-plan.md) PR 5 pins); `min_score` filters per `EpisodicMemory.recall` contract.
 - `MemoryFacade.store_observation`: returns a stable key; persists across `close()` + new instance with same DB path.
 - `MemoryFacade.compress`: reduces token count to `≤ target_tokens`; preserves highest-importance entries; idempotent on already-compressed view.
 - Lifecycle: `initialize()` is safe to call twice (second call is no-op + warning); `close()` after `initialize()` cancels the eviction loop within 1s.
@@ -219,6 +220,7 @@ Integration (Python):
 - **JSON Merge Patch on `artifacts`**: `null` values delete keys, present values overwrite. Implementation uses Python's `json` module; no new dependency. The Go side does not need to implement Merge Patch in this PR — merge happens in the Python caller process.
 - **`tags` list under `patch`**: union semantics (additive). Removing a tag requires `replace` strategy on the whole entry.
 - **`source_agent` injection**: the spawner records the originating agent ID; the merge engine rejects any `MemoryWriteEntry` whose `source_agent` field is non-`None` on receipt (it must be `None` from the wire and is set by the framework). Test `test_source_agent_spoof_rejected` covers this.
+- **Procedural-tier exclusion is intentional**: `MemoryWriteEntry.tier` is restricted to `{episodic, notes}`; sub-agent delegation cannot write the procedural tier even though PR 2 introduces `MemoryFacade.store_procedure` and PR 5 introduces `recall_procedures`. Procedural memory carries the `confidence` decay contract (PR 5) and the trust ceiling for unverified sub-agents (default `0.8`) is below the procedural `c_min` operating range — admitting sub-agent procedures would either bypass decay (bad) or auto-evict on the next pass (pointless). Procedure storage stays task-agent-only via the direct `MemoryFacade.store_procedure` path. Schema validation surface `procedural_tier_rejected` is logged when an entry attempts it (separate from `schema_invalid` so operators can spot trust-model probing).
 - **Sizing risk**: contract + merge engine + spawner + observability is wide. If the implementation pushes over the cap, split observability metrics (`internal/observability/`) into a follow-on `feature/v030-rfc0008-delegation-metrics` PR; the merge engine can ship with structured-log-only observability and metrics back-fill in the follow-on without changing any agent-facing API.
 
 #### Tests
@@ -237,6 +239,18 @@ Unit (Python):
 Integration:
 - Caller dispatches sub-agent with `DelegationRequest`; sub-agent returns `DelegationResult` with 3 memory writes; caller's `MemoryFacade.retrieve_relevant` finds them post-merge.
 - Sub-agent returns malformed JSON → caller logs `schema_invalid` metric and surfaces a `DelegationFailure` to the workflow step (no partial merge).
+
+#### PR checklist
+
+- [ ] `make test` passes
+- [ ] `make lint` clean
+- [ ] `make validate` passes (no schema additions in this PR; validates the existing `_context_package` shape from PR 1 round-trips)
+- [ ] `DelegationRequest` / `DelegationResult` dataclasses are frozen and validated against [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim
+- [ ] `MergeEngine` rejects entries with `tier` outside `{episodic, notes}` and emits `procedural_tier_rejected` metric (procedural exclusion is intentional — see Key implementation details)
+- [ ] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
+- [ ] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
+- [ ] `max_memory_writes` cap (default `20`, security item #7) is enforced
+- [ ] [RFC 0008 PR 4](0008-pr-plan.md) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
 
 ---
 
@@ -295,6 +309,18 @@ Integration:
 - Three agents (writer A, reader B, denied C); A writes 3 entries; B retrieves all 3; C is denied on both read and write.
 - A publishes from isolated memory via `publish_to_pool`; the original isolated entry remains; the shared copy carries `source_agent=A` and the framework `created_at`.
 
+#### PR checklist
+
+- [ ] `make test` passes
+- [ ] `make lint` clean
+- [ ] `make validate` passes (`schemas/agent.schema.json` `shared_memory_pools` additions)
+- [ ] Deny-by-default: agents not in a pool's `readers` / `writers` raise `SharedMemoryPermissionError` (no silent fallthrough)
+- [ ] Provenance: `source_agent` is framework-injected from the calling `agent_id`; caller-set values rejected with `provenance_set`
+- [ ] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
+- [ ] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in)
+- [ ] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
+- [ ] [RFC 0008 PR 5](0008-pr-plan.md) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+
 ---
 
 ### PR 5: `feature/v030-rfc0008-procedural-revalidation` — Phase 4b: Confidence Decay + Revalidation
@@ -341,6 +367,18 @@ Integration:
 - Agent stores a procedure today; mock-clock-advance 100 days; `retrieve_relevant` returns it at decayed confidence ≈ 0.37; `stale_memory_injection` metric fires.
 - Agent re-stores the same procedure key after 100 days; subsequent retrieval returns confidence ≈ 1.0 with no stale warning.
 
+#### PR checklist
+
+- [ ] `make test` passes
+- [ ] `make lint` clean
+- [ ] `make validate` passes (`schemas/agent.schema.json` `procedural_memory` additions)
+- [ ] `confidence` column migration is non-destructive (`DEFAULT 1.0`); a fixture v0.2.x DB opens cleanly under v0.3.0
+- [ ] Decay is computed at read time using `last_validated_at` (or `created_at` if never validated); no periodic rewrite pass
+- [ ] `MemoryFacade.store_procedure` on an existing key calls `refresh_confidence(key)` (does not blindly overwrite)
+- [ ] `stale_memory_injection` is registered exactly once, orchestrator-side (not per-agent), to avoid duplicate emission across the gRPC boundary
+- [ ] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
+- [ ] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
+
 ---
 
 ### PR 6: `feature/v030-rfc0008-close` — Review Follow-Ups + RFC Close
@@ -356,12 +394,12 @@ Integration:
 | `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows for PRs 1–5 added to history. |
 | `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
 | `docs/rfcs/0008-calibration-review.md` | Replace the PR 5 placeholder with the 30-day eviction-parameter review summary required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). Cite the actual `evictions_count`, `average_confidence_at_eviction`, `memory_utilization_ratio` ranges observed; record any default retunes (one-line config changes) or confirm the shipped defaults stood up. |
-| `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection (mirrors the [RFC 0020 PR plan](0020-pr-plan.md) close-PR convention). |
+| `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection. (Note: this plan combines RFC 0020's PR 6 (followups) + PR 7 (close) into a single PR 6 to preserve the 6-PR count this plan's downstream consumers pin; [RFC 0020 PR plan](0020-pr-plan.md) splits them.) |
 
 #### Key implementation details
 
 - The 30-day calibration review is the **gate** for flipping RFC 0008 to `✅ Implemented`. If the metrics indicate the shipped defaults need adjustment (e.g. `memory_utilization_ratio` consistently > 0.95 → `episodic_cap` too low; consistently < 0.2 → too high), the retune ships in this PR as a `config/agents.yaml` default change. The retune is a one-line change per parameter; no code changes expected.
-- Review-follow-up findings from PR 1–5 deep reviews are aggregated here per the project convention. Each finding cites the source PR's deep-review report (local-only — never linked from this committed plan per [Status Hygiene rules](../development-workflow.md#status-hygiene)).
+- Review-follow-up findings from PR 1–5 deep reviews are summarized inline here per the project convention. The committed text must not contain any `docs/pr-reviews/` path (those reports are local-only per [Status Hygiene rules](../development-workflow.md#status-hygiene)); each finding is restated in full so the merged history is self-contained.
 
 #### Tests
 
@@ -376,6 +414,7 @@ Integration:
 - [ ] ROADMAP.md RFC 0008 row → `✅ Implemented`
 - [ ] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
 - [ ] No reference to `docs/pr-reviews/` files in this committed plan
+- [ ] Plan-self-review: every cross-RFC pin in this plan ([RFC 0007 PR plan](0007-pr-plan.md) PR 3, [RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) still resolves and is reciprocated by the counterpart plan before the RFC flips to `✅ Implemented`
 
 ---
 
@@ -383,7 +422,7 @@ Integration:
 
 | Risk | Mitigation |
 |------|------------|
-| PR 1 budget contract disagrees with RFC 0007 loop budget contract | RFC 0007 PR plan must be authored after this one (Phase 1 master-plan ordering); review surfaces gaps early. |
+| PR 1 budget contract disagrees with RFC 0007 loop budget contract | Both RFC PR plans were fleshed out in the combined Phase 1 PR per [v0.3.0-plan.md](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans); contract gaps surface during deep-review of either flesh-out PR (this PR cross-checked [RFC 0007 PR plan](0007-pr-plan.md) PR 3 reciprocally). |
 | `MemoryFacade.compress` shape disagrees with RFC 0020 summarize-on-close call site | Cross-reference RFC 0020 PR 4 in this plan's PR 2 review checklist. |
 | Phase 4 (shared pools) scope creeps into authentication territory belonging to RFC 0009 | ACL is policy-only; auth tokens are RFC 0009 P3–4 (deferred to v0.4.0). |
 
