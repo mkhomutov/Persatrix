@@ -36,7 +36,7 @@ func TestAttachContextPackage_EmitsWarnings(t *testing.T) {
 	}
 	step := planner.Step{ID: "s1"}
 
-	err := s.attachContextPackage(outputs, "run-warn-1", step, "input", 10)
+	_, err := s.attachContextPackage(outputs, "run-warn-1", step, "input", 10)
 	require.NoError(t, err)
 
 	entries := recorded.FilterMessage("context_package warning").All()
@@ -72,7 +72,7 @@ func TestAttachContextPackage_NoWarningsWhenClean(t *testing.T) {
 	}
 	step := planner.Step{ID: "s1"}
 
-	err := s.attachContextPackage(outputs, "run-clean", step, "input", 1000)
+	_, err := s.attachContextPackage(outputs, "run-clean", step, "input", 1000)
 	require.NoError(t, err)
 
 	assert.Empty(t, recorded.FilterMessage("context_package warning").All())

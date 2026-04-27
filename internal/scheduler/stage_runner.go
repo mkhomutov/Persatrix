@@ -16,6 +16,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
+	"github.com/mkhomutov/persatrix/internal/executor/packaging"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
@@ -174,8 +175,19 @@ func (s *WorkflowScheduler) executeStep(
 	// break that invariant invisibly. attachContextPackage's only failure mode
 	// today is json.Marshal of a pure-Go struct — effectively a programming
 	// bug, so failing loudly is appropriate and surfaces it in CI/staging.
+	// PR 1b: capture the built package so its Metrics can flow to the cost
+	// record (StepCostEntry.ContextPackage) and so RemainingContextBudget can
+	// be persisted on the post-dispatch StepState update. Retries (when
+	// scheduler-level retry lands post-v0.3) read RemainingContextBudget from
+	// the prior step state via remainingContextBudgetForStep so the second
+	// attempt consumes from the persisted remainder rather than the original
+	// per-step allocation.
+	var pkg *packaging.Package
+	var effectiveBudget int
 	if budget, ok := contextBudgets[step.ID]; ok && budget > 0 {
-		if err := s.attachContextPackage(outputsCopy, runID, step, resolved, budget); err != nil {
+		effectiveBudget = s.remainingContextBudgetForStep(ctx, runID, step.ID, budget)
+		built, err := s.attachContextPackage(outputsCopy, runID, step, resolved, effectiveBudget)
+		if err != nil {
 			wrapped := fmt.Errorf("context packaging failed: %w", err)
 			s.logger.Error("context packaging failed; failing step",
 				zap.String("execution_id", runID),
@@ -187,6 +199,7 @@ func (s *WorkflowScheduler) executeStep(
 			s.markStepFailed(ctx, runID, step.ID, startedAt, wrapped.Error())
 			return "", wrapped
 		}
+		pkg = built
 	}
 
 	result, err := s.executor.ExecuteTask(ctx, executor.ExecuteRequest{
@@ -225,7 +238,7 @@ func (s *WorkflowScheduler) executeStep(
 		// This preserves cost tracking for runs aborted by LLM truncation or other
 		// agent-side errors where the LLM call completed but the step did not.
 		if result != nil {
-			s.recordStepUsage(workflowID, step, result, registryModel)
+			s.recordStepUsage(workflowID, step, result, registryModel, pkg)
 		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -233,8 +246,9 @@ func (s *WorkflowScheduler) executeStep(
 		return "", err
 	}
 
-	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b).
-	s.recordStepUsage(workflowID, step, result, registryModel)
+	// Post-dispatch: record token usage and step cost (RFC 0006 PR 3b;
+	// RFC 0008 PR 1b plumbs pkg.Metrics into the cost record).
+	s.recordStepUsage(workflowID, step, result, registryModel, pkg)
 
 	// Build execution metadata for observability (RFC 0006 PR 4a).
 	metadata := s.buildStepMetadata(result, registryModel, step.ID)
@@ -256,13 +270,23 @@ func (s *WorkflowScheduler) executeStep(
 	span.SetStatus(codes.Ok, "completed")
 
 	// Mark step as completed.
+	//
+	// RFC 0008 PR 1b: persist RemainingContextBudget so a future scheduler-level
+	// retry can resume from the leftover budget rather than re-allocating the
+	// full per-step amount. Computed from pkg.Metrics.TokensAfter (== bytes the
+	// packager admitted) against the effective budget the packager was given.
+	// Clamped to zero so a packager that admits more than the budget (the
+	// pinned-overflow path is the only known site today) cannot persist a
+	// negative value.
+	remainingBudget := remainingFromPackage(effectiveBudget, pkg)
 	if err := s.store.UpdateStepState(ctx, runID, state.StepState{
-		StepID:     step.ID,
-		Status:     state.RunCompleted,
-		Output:     result.Output,
-		StartedAt:  startedAt,
-		FinishedAt: time.Now(),
-		Metadata:   metadata,
+		StepID:                 step.ID,
+		Status:                 state.RunCompleted,
+		Output:                 result.Output,
+		StartedAt:              startedAt,
+		FinishedAt:             time.Now(),
+		Metadata:               metadata,
+		RemainingContextBudget: remainingBudget,
 	}); err != nil {
 		s.logger.Error("failed to update step state to completed",
 			zap.String("execution_id", runID),

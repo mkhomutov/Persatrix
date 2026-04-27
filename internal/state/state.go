@@ -57,14 +57,23 @@ type StepExecutionMetadata struct {
 }
 
 // StepState tracks the state of a single step within a workflow run.
+//
+// `RemainingContextBudget` is the number of tokens left from this step's
+// RFC 0008 context-budget allocation after the most recent dispatch attempt.
+// It is zero for steps that never ran or for workflows that don't opt into
+// context packaging (`context_budget_total > 0`). The scheduler reads it on
+// step retries (when scheduler-level retry lands post-v0.3) so the second
+// attempt consumes from the persisted remainder rather than re-allocating
+// the full per-step budget. Wired in RFC 0008 PR 1b.
 type StepState struct {
-	StepID     string
-	Status     RunStatus
-	Output     string
-	Error      string
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Metadata   *StepExecutionMetadata
+	StepID                 string
+	Status                 RunStatus
+	Output                 string
+	Error                  string
+	StartedAt              time.Time
+	FinishedAt             time.Time
+	Metadata               *StepExecutionMetadata
+	RemainingContextBudget int
 }
 
 // Store defines the interface for workflow run state persistence.

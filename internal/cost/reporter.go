@@ -9,13 +9,20 @@ import (
 )
 
 // StepCostEntry captures cost data for a single workflow step.
+//
+// `ContextPackage` is populated only when the workflow opts into RFC 0008
+// context packaging (`context_budget_total > 0`). It stays nil for legacy
+// passthrough steps so existing JSON consumers see the same shape they did
+// before PR 1b. The pointer (vs inline struct) keeps the JSON output free of
+// a zero-valued block on every step in workflows that don't use packaging.
 type StepCostEntry struct {
-	StepID       string  `json:"step_id"`
-	AgentID      string  `json:"agent_id"`
-	Model        string  `json:"model"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	EstimatedUSD float64 `json:"estimated_usd"`
+	StepID         string                 `json:"step_id"`
+	AgentID        string                 `json:"agent_id"`
+	Model          string                 `json:"model"`
+	InputTokens    int64                  `json:"input_tokens"`
+	OutputTokens   int64                  `json:"output_tokens"`
+	EstimatedUSD   float64                `json:"estimated_usd"`
+	ContextPackage *ContextPackageMetrics `json:"context_package,omitempty"`
 }
 
 // WorkflowCostSummary aggregates cost data for a single workflow run.
