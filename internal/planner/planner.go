@@ -25,23 +25,13 @@ const stepIDPattern = `[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?`
 const maxYAMLSize = 1 << 20
 
 // ResourceIDRegex validates external-facing resource identifiers (workflow IDs, agent IDs).
-// Requires minimum 2 characters, lowercase alphanumeric with hyphens, no leading/trailing hyphens.`n// Pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$ -- matches the spec in copilot-instructions.md.
-// Exported for reuse by the server package (review finding F-04: eliminates regex
-// duplication across security-relevant validation boundaries).
-// Renamed from WorkflowIDRegex (PR #16 F-04) since it validates both workflow and agent IDs.
-//
-// agentIDRegex is kept as a separate compiled pattern for clearer error messages in
-// planner-internal validation, even though the pattern is identical.
-//
-// stepIDRegex intentionally allows underscores and single-character IDs (e.g. "a",
-// "step_1") because step IDs are workflow-internal identifiers, not externally
-// visible names.
+// Pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$ — min 2 chars, lowercase, no leading/trailing hyphens.
+// Exported for reuse by the server package (review F-04: no regex duplication across
+// security-relevant validation boundaries). Renamed from WorkflowIDRegex (PR #16 F-04).
 var (
 	ResourceIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
-	// PR #18 F-02: share the compiled regex instance since the pattern is
-	// identical. Separate variable names are retained for clearer error
-	// messages in validation call sites; separate compilation is unnecessary
-	// and risks future divergence if one pattern is updated but not the other.
+	// PR #18 F-02: share the compiled regex; separate variable names retained for clearer
+	// error messages. Separate compilation is unnecessary and risks future divergence.
 	agentIDRegex   = ResourceIDRegex
 	stepIDRegex    = regexp.MustCompile(`^` + stepIDPattern + `$`)
 	outputKeyRegex = regexp.MustCompile(`^` + stepIDPattern + `$`)
@@ -269,6 +259,16 @@ func (p *YAMLPlanner) validate(wf *WorkflowFile) error {
 		if overrideSum > w.ContextBudgetTotal {
 			return fmt.Errorf("workflow %q: sum of per-step context_budget overrides (%d) exceeds context_budget_total (%d)",
 				w.ID, overrideSum, w.ContextBudgetTotal)
+		}
+	} else {
+		// RFC 0008 PR-1 (H3): reject per-step context_budget when context_budget_total
+		// is unset — silent drop would be a deny-by-default footgun (author intends
+		// packaging on but gets legacy passthrough).
+		for _, step := range w.Steps {
+			if step.ContextBudget > 0 {
+				return fmt.Errorf("step %q: context_budget set (%d) but workflow.context_budget_total is unset; either set the workflow total or remove the per-step override",
+					step.ID, step.ContextBudget)
+			}
 		}
 	}
 	return nil

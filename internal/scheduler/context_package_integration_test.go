@@ -125,9 +125,11 @@ workflow:
 	defer cancel()
 	go func() { _ = sched.Run(ctx) }()
 	// Diagnostic: surface the actual failure error if the run doesn't complete.
+	// (Review M2: previously polled the wrong run ID — "ctxpkg-run" — which was
+	// the prior test's run and never matched, so the diagnostic never fired.)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		run, _ := store.GetRun(context.Background(), "ctxpkg-run")
+		run, _ := store.GetRun(context.Background(), "legacy-run")
 		if run != nil && (run.Status == state.RunFailed || run.Status == state.RunCompleted) {
 			t.Logf("terminal status=%s error=%q", run.Status, run.Error)
 			break

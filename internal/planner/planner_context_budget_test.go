@@ -109,3 +109,27 @@ workflow:
 	require.NoError(t, err, "override sum equal to total is valid (zero remainder)")
 	assert.Equal(t, 1000, wf.ContextBudgetTotal)
 }
+
+// RFC 0008 PR-1 review (H3): a per-step context_budget override only takes
+// effect when the workflow opts into packaging via context_budget_total.
+// Setting a per-step override with no workflow total is a footgun — the
+// author intends packaging on, but the allocator returns nil and the agent
+// gets legacy passthrough. Reject loudly instead of silently dropping.
+func TestParse_StepContextBudgetWithoutWorkflowTotal_Rejected(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Per-step only"
+  steps:
+    - id: "s1"
+      agent: "planner"
+      input: "a"
+      context_budget: 16000
+`
+	p := newTestPlanner()
+	_, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `step "s1": context_budget set`)
+	assert.Contains(t, err.Error(), "context_budget_total is unset")
+}

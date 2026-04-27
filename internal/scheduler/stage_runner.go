@@ -166,13 +166,26 @@ func (s *WorkflowScheduler) executeStep(
 	// reserved `_context_package` key (Open Question 2 — additive; no proto
 	// changes). Agents that don't recognise the key continue to use the raw
 	// outputs map verbatim.
+	//
+	// Review (M5): packaging failure is treated as a hard step failure rather
+	// than silently degrading to legacy passthrough. The contract for an
+	// opted-in workflow is that every step receives a `_context_package` (the
+	// integration test asserts both s1 and s2 do); silent degradation would
+	// break that invariant invisibly. attachContextPackage's only failure mode
+	// today is json.Marshal of a pure-Go struct — effectively a programming
+	// bug, so failing loudly is appropriate and surfaces it in CI/staging.
 	if budget, ok := contextBudgets[step.ID]; ok && budget > 0 {
-		if err := s.attachContextPackage(outputsCopy, step, resolved, budget); err != nil {
-			s.logger.Warn("context packaging failed; dispatching without package",
+		if err := s.attachContextPackage(outputsCopy, runID, step, resolved, budget); err != nil {
+			wrapped := fmt.Errorf("context packaging failed: %w", err)
+			s.logger.Error("context packaging failed; failing step",
 				zap.String("execution_id", runID),
 				zap.String("step_id", step.ID),
 				zap.Error(err),
 			)
+			span.RecordError(wrapped)
+			span.SetStatus(codes.Error, wrapped.Error())
+			s.markStepFailed(ctx, runID, step.ID, startedAt, wrapped.Error())
+			return "", wrapped
 		}
 	}
 

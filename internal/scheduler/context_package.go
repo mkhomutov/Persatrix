@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/mkhomutov/persatrix/internal/executor/packaging"
 	"github.com/mkhomutov/persatrix/internal/planner"
 )
@@ -23,8 +25,15 @@ const ContextPackageKey = "_context_package"
 // chars/4 approximation — the orchestrator does not own a tokenizer and a
 // rough estimate is sufficient for greedy admission ordering. The agent-side
 // cost recorder remains the source of truth for actual consumed tokens.
+//
+// Review (M3): every entry in pkg.Metrics.Warnings (high_compression_ratio,
+// extreme_compression_capped, pinned_overflow) is emitted as a structured zap
+// warning so operators have visibility into compression-pressure regressions.
+// The PR plan's sizing-risk note designates structured logs as Phase-1's
+// substitute for cost-metrics emission; this satisfies that contract.
 func (s *WorkflowScheduler) attachContextPackage(
 	outputsCopy map[string]string,
+	runID string,
 	step planner.Step,
 	resolvedInput string,
 	budgetTokens int,
@@ -56,6 +65,22 @@ func (s *WorkflowScheduler) attachContextPackage(
 		return fmt.Errorf("marshal context package: %w", err)
 	}
 	outputsCopy[ContextPackageKey] = string(encoded)
+
+	// Surface packager warnings via structured logs (review M3). One log line
+	// per warning keeps each event independently filterable in log aggregators;
+	// the shared dimensions (compression_ratio, candidates_dropped) make it
+	// trivial to correlate the warnings with the workload that produced them.
+	for _, w := range pkg.Metrics.Warnings {
+		s.logger.Warn("context_package warning",
+			zap.String("warning", w),
+			zap.String("execution_id", runID),
+			zap.String("step_id", step.ID),
+			zap.Float64("compression_ratio", pkg.Metrics.CompressionRatio),
+			zap.Int("candidates_dropped", pkg.Metrics.CandidatesDropped),
+			zap.Int("tokens_before", pkg.Metrics.TokensBefore),
+			zap.Int("tokens_after", pkg.Metrics.TokensAfter),
+		)
+	}
 	return nil
 }
 
