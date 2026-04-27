@@ -118,7 +118,7 @@ Integration (Go + Python):
 - [x] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
 - [x] Master Progress Overview row 4 → 🔄 In progress
 - [ ] [RFC 0007 PR plan](0007-pr-plan.md) PR 3 reviewer pinged: `repeat_until` loop budget integration is now unblocked
-- [ ] **Sizing-risk split triggered**: cost-metrics + state-persistence rows deferred to follow-on PR `feature/v030-rfc0008-context-metrics` (PR 1b — see note below). Packaging Phase 1 ships with structured-log-only observability via `Metrics.Warnings`; full `cost.ContextPackageMetrics` emission and `remaining_context_budget` step-state persistence land in PR 1b without changing the `_context_package` v1 shape.
+- [x] **Sizing-risk split triggered**: cost-metrics + state-persistence rows deferred to follow-on PR `feature/v030-rfc0008-context-metrics` (PR 1b — see note below). Packaging Phase 1 ships with structured-log-only observability via `Metrics.Warnings`; full `cost.ContextPackageMetrics` emission and `remaining_context_budget` step-state persistence land in PR 1b without changing the `_context_package` v1 shape.
 
 > **Sizing-risk follow-up (PR 1b)** — `feature/v030-rfc0008-context-metrics`: wires `internal/cost/` `ContextPackageMetrics` (`tokens_before`, `tokens_after`, `compression_ratio`, `candidates_admitted`, `candidates_dropped`) to per-step cost records, and adds `remaining_context_budget` persistence to `internal/state/` step rows so retries consume from the persisted remainder rather than the original allocation. PR 2 (`MemoryFacade`) `Depends on` is updated to reference both PR 1 and PR 1b. This split is contingent (per [PR plan §Sizing risk](#key-implementation-details)) and does not change the canonical 6-PR count for the milestone burndown — PR 1b is bookkeeping under the PR 1 row.
 
@@ -126,7 +126,7 @@ Integration (Go + Python):
 
 ### PR 2: `feature/v030-rfc0008-memory-facade` — Phase 2: MemoryFacade for Task Agents
 
-**Depends on**: PR 1.
+**Depends on**: PR 1 and PR 1b (`feature/v030-rfc0008-context-metrics` — cost-metrics + state-persistence follow-on, sizing-risk split triggered at PR 1 merge).
 **Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
 #### Scope

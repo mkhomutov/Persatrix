@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-27 (RFC 0020 PR 3 merged via PR #216: multi-turn aggregation for human-chat + DM; idle-gap + session-end close; `Clock` seam; `MaxTurnsDetector`)  
+> **Last updated**: 2026-04-27 (RFC 0008 PR 1 merged via PR #218: context budget allocator + packaging foundation; `_context_package` v1 shape frozen; `RelevanceScorer` heuristic backend; sizing-risk split triggered — PR 1b deferred to `feature/v030-rfc0008-context-metrics`)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); other v0.3.0 RFC workstreams unblocked
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 merged (#218) — context budget + packaging foundation; sizing-risk PR 1b next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -437,7 +437,7 @@ v0.2.2 complete
 | RFC | Title | Target scope | Status |
 |-----|-------|--------------|--------|
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
-| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 👍 Accepted |
+| [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | � Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | 📋 Proposed |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | � Implementing |
@@ -807,6 +807,7 @@ v0.5.0 complete
 | [#214](https://github.com/mkhomutov/Persatrix/pull/214) | feat(memory): RFC 0020 PR 1 — InteractionTracker + episodes schema v5 | 0020 (1/7) | 2026-04-27 |
 | [#215](https://github.com/mkhomutov/Persatrix/pull/215) | feat(memory): RFC 0020 PR 2 — route TICK + tool-only events through InteractionTracker | 0020 (2/7) | 2026-04-27 |
 | [#216](https://github.com/mkhomutov/Persatrix/pull/216) | feat(memory): RFC 0020 PR 3 — multi-turn aggregation for human-chat + DM | 0020 (3/7) | 2026-04-27 |
+| [#218](https://github.com/mkhomutov/Persatrix/pull/218) | feat(rfc0008): PR 1 — context budget allocator + packaging foundation | 0008 (1/6) | 2026-04-27 |
 
 ---
 
