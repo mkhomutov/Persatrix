@@ -1,10 +1,11 @@
 # RFC 0022 — Persona Prompt Section Templating
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: ✅ Implemented  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-26  
 **Target**: v0.3.0  
+**Implemented in**: PR #213 (2026-04-27)  
 **Depends on**: RFC 0005 (persona substrate); PR #210, #211, #212 (predecessor prompt-externalization PRs)
 
 ---
