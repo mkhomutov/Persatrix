@@ -408,6 +408,18 @@ Pass-1 review applied in-PR (no fix-up PR triggered). Code-side items resolved i
 | Info-1 | Info | PR 4 checklist: 8 items still `[ ]` — flip on merge. | Pending — merge time |
 | Info-2 | Info | ROADMAP last-updated header + PR-count → "4 of 6"; PR 4 row → merged. | Pending — merge time |
 
+#### Follow-up findings (from PR #223 deep review — pass 2)
+
+Second-pass companion review ([docs/pr-reviews/pr-223-review.md](../pr-reviews/pr-223-review.md)) re-walked the diff after pass-1 fixes landed and surfaced three additional items not covered by the pass-1 follow-up table above. Code-side items applied in-PR; status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S3-tag | Should | `read_via_facade` AND-tag filter runs *after* `pool.read` trims to `limit` — same trim-after-limit class as pass-1 S3 (min_confidence). Over-fetch by `_TAG_FILTER_OVERFETCH_FACTOR` (= `_MIN_CONFIDENCE_OVERFETCH_FACTOR`) and trim back to `limit` after the filter. New test `test_tag_filter_overfetches_under_limit` pins the contract. | ✅ Applied in PR |
+| S3-schema | Should | `schemas/agent.schema.json` agent `id` did not reserve the `pool-` prefix used by synthetic `SharedMemoryPool` agent IDs — an operator declaring `id: pool-foo` would silently namespace-collide in the shared episodic SQLite store. Added `not: { pattern: "^pool-" }` with description noting the reservation. `make validate` passes (4/4 configs). | ✅ Applied in PR |
+| N-persona | Nice | `_StatePersistenceMixin.initialize_memory(*, shared_pools=None)` accepts the kwarg as a no-op until persona wiring lands — risk of an accidental wiring landing silently. Added `test_persona_runtime_initialize_memory_accepts_shared_pools_kwarg` (signature-shape contract assertion: kwarg present, keyword-only, default `None`). Replace with behavioural assertion when persona wiring lands. | ✅ Applied in PR |
+| N-doc-episodic | Nice | Pass-2 review suggested documenting the `pool-` reservation inside `agents/memory/episodic.py`. Skipped — the reservation is already documented at the use site (`agents/memory/shared_pool.py` `_POOL_AGENT_PREFIX` + the new schema description). Adding a comment in `episodic.py` that does not reference pools elsewhere would be incidental coupling. | Deferred — design choice |
+| N-metrics-test | Nice | Metric-emission assertion test (recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema). Pass-1 N4 already deferred to PR 6. | Deferred — PR 6 (matches pass-1 N4) |
+
 ---
 
 ### PR 5: `feature/v030-rfc0008-procedural-revalidation` — Phase 4b: Confidence Decay + Revalidation

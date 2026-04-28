@@ -28,7 +28,8 @@
         "id": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-          "description": "Unique agent identifier (lowercase, hyphens allowed)"
+          "not": { "pattern": "^pool-" },
+          "description": "Unique agent identifier (lowercase, hyphens allowed). The 'pool-' prefix is reserved for synthetic SharedMemoryPool agent IDs (RFC 0008 §H, PR plan PR 4) — declaring a real agent with this prefix would silently namespace-collide with a hypothetical pool of the same suffix in the shared episodic SQLite store. Validate-time rejection prevents the operator footgun (PR #223 pass-2 review S3-schema)."
         },
         "type": {
           "type": "string",

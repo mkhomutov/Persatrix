@@ -11,11 +11,24 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from .shared_pool import (
+    _MIN_CONFIDENCE_OVERFETCH_FACTOR,
     SharedMemoryPermissionError,
     SharedPoolEntry,
     SharedPoolRegistry,
     _record_denied,
 )
+
+# PR #223 deep-review (pass 2) S3-tag: ``read_via_facade`` applies the
+# AND-tag filter *after* ``pool.read`` has trimmed to ``limit``.  Without
+# an over-fetch, a caller asking for ``limit=N`` with a tag set could
+# receive fewer than N entries even when N matches exist deeper in the
+# ranking — the same trim-after-limit class as PR-220 review M3 (tags)
+# and PR-223 pass-1 S3 (min_confidence).  Reuse the pool-side factor so
+# both trust filters share one knob; multiplied with the pool's own
+# over-fetch when ``min_confidence`` is also set, which is acceptable
+# (the FTS5 recall bound is the only ceiling and the result is trimmed
+# back to ``limit`` below).
+_TAG_FILTER_OVERFETCH_FACTOR = _MIN_CONFIDENCE_OVERFETCH_FACTOR
 
 
 async def publish_via_facade(
@@ -72,12 +85,18 @@ async def read_via_facade(
             reason="unknown_pool",
         )
     pool = registry.get(pool_name)
+    # Over-fetch when an AND-tag filter is active so the post-filter
+    # result honours ``limit`` (PR #223 pass-2 review S3-tag).  The
+    # pool's own ``min_confidence`` over-fetch composes with this one
+    # (the recall ceiling is bounded by the FTS5 LIMIT only); we trim
+    # back to ``limit`` after the AND-tag filter below.
+    recall_limit = limit * _TAG_FILTER_OVERFETCH_FACTOR if tags else limit
     entries = await pool.read(
-        agent_id, query, limit=limit, min_confidence=min_confidence,
+        agent_id, query, limit=recall_limit, min_confidence=min_confidence,
     )
     if tags:
         required = frozenset(tags)
-        entries = [e for e in entries if required.issubset(e.tags)]
+        entries = [e for e in entries if required.issubset(e.tags)][:limit]
     return entries
 
 

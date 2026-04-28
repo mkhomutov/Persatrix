@@ -478,3 +478,9 @@ async def test_start_shared_pools_drops_failed_pool(tmp_path: Any) -> None:
         assert exc.value.reason == "unknown_pool"
     finally:
         await healthy.close()
+
+
+# Pass-2 deep-review regression tests (S3-tag, N-persona) live in
+# ``test_shared_memory_pool_pass2.py`` to keep this file under the
+# project's 500-line per-file size limit (pre-commit ``file size``
+# check).
