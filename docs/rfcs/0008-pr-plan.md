@@ -376,6 +376,36 @@ Go:
 - [ ] Go counter inventory: four new instruments registered with documented names + units
 - [ ] PR 4 reviewer pinged: PR 4 (`feature/v030-rfc0008-shared-pools-acl`) `Depends on` line was added during the PR 3 follow-up work; the dependency is now satisfied
 
+#### Follow-up findings (from PR #224 deep review)
+
+Round-1 review surfaced two Must-fix and four Should-fix items (docstring drift, metric-name comment / PR-plan claim, `TODO(PR 5)` at rollback site, two N5 coverage gaps, jsonschema message log-injection bound). All applied in-PR via the `fix(rfc0008): apply PR #224 deep-review findings` commit; the new edge-case tests live in `tests/integration/test_delegation_rollback_edges.py` (split out to stay under the 500-line `scripts/checks/file_size.py` cap). Status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| Must-1 | Must | `_persist_admitted` docstring referenced a non-existent `facade.forget` API; rollback actually calls `episodic.delete_episode`. Docstring + AttributeError-degrade clause corrected to point at the `episodic` accessor. | ✅ Applied in PR |
+| Must-2 | Must | Comment + PR-plan row claimed the Python merge-engine metric strings map "one-to-one" to Go counters. Python emits `metric=delegation_merge_outcome` (no namespace); Go counters carry the `orchestrator.delegation.` prefix per RFC 0019. Comment + PR 3a row corrected; bridge needs fixed-prefix translation. Counter names unchanged. | ✅ Applied in PR |
+| Should-1 | Should | `_enforce_output_schema` docstring claimed Draft-7 meta-validation "only on first use", implying caching. No cache exists — meta-validation runs every dispatch. Docstring corrected. | ✅ Applied in PR (spawner side only — see round-2 S1 below for sibling) |
+| Should-2 | Should | `_rollback_persisted` `delete_episode` is sufficient today only because both episodic and notes-tier writes route through `store_observation`. Added `TODO(RFC 0008 PR 5)` flagging that PR 5's tier split must dispatch by `entry.tier`. | ✅ Applied in PR |
+| Should-3 | Should | Two N5 rollback branches uncovered: rollback-during-rollback failure mode; missing `episodic` accessor degrade path. New file `tests/integration/test_delegation_rollback_edges.py` with `test_rollback_failure_does_not_mask_original_cause` + `test_rollback_skipped_when_facade_lacks_episodic_accessor`. Suite: 13 passed. | ✅ Applied in PR |
+| Should-4 | Should | `jsonschema.ValidationError.message` embeds `repr()` of the offending instance fragment — unbounded `DelegationFailure` message echoed sub-agent `artifacts` content into orchestrator logs (LLM01 / OWASP A09). `_enforce_output_schema` now surfaces structural fields (`validator`, `validator_value`) plus a 200-char-bounded message tail. | ✅ Applied in PR (single site — see round-2 S2 for sibling raise sites) |
+| Info | Info | Status-hygiene: PR 3a checklist + ROADMAP `PR 3a still pending` line + the merge-order warning at the bottom of the PR #223 follow-up section to be flipped/removed at merge time. | Pending — merge-time |
+
+#### Follow-up findings (from PR #224 deep review — round 2)
+
+Second-pass companion review re-walked the diff after the round-1 fixes landed. Two doc/security mirror items (S1, S2) extend round-1 fixes to sibling sites; one test-robustness item (S3) tightens the new edge-case test. Low-priority items are deferred per review report.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S1-mirror | Should | `DelegationRequest.output_schema` field docstring in `agents/sub_agents/delegation.py` (~line 204) still says "validated … on first use" — round-1 Should-1 fix corrected only the spawner-side docstring. Mirror the "every dispatch" wording on the contract side so maintainers reading the contract first form the right mental model. | Pending — apply in PR 3a |
+| S2-mirror | Should | Round-1 Should-4 bound the schema-violation message to 200 chars at `_enforce_output_schema`, but the four other `DelegationFailure` raises in `_extract_result` (lines ~248, ~273) still echo unbounded sub-agent `output.result` and wrapped `DelegationContractError` text. Same LLM01 / OWASP A09 surface. Factor a `_bounded(s, *, cap=200)` helper at module scope (or a `_DELEGATION_FAILURE_MESSAGE_CAP` constant) and apply at all four sites; add a focused test pinning the `… (truncated)` marker. | Pending — apply in PR 3a |
+| S3-caplog | Should | `test_rollback_skipped_when_facade_lacks_episodic_accessor` asserts only that the original `RuntimeError` re-raises; it does **not** pin the documented warning log. A regression silently dropping the warning would still pass. Add `caplog` at WARNING on `agents.sub_agents.spawner` and assert `"does not expose episodic accessor" in caplog.text`. | Pending — apply in PR 3a |
+| L1-task-log | Low | `agents/task_agent.py` `_parse_or_synthesise` debug log `"agent %s output is not a DelegationResult payload (%s); …"` interpolates `exc` (carrying offending JSON fragment) unbounded. Debug-only, but same CWE-117 / log-injection class as Should-4. Bound `str(exc)` to ~200 chars and/or strip control chars. | Deferred — PR 6 (low-severity batch) |
+| L2-helper | Low | `_ScriptedSubAgent` duplicated across `tests/integration/test_delegation_end_to_end.py` and `test_delegation_rollback_edges.py`. Lift to `tests/integration/_delegation_helpers.py` or a `conftest.py` fixture to avoid copy-paste rot when the helper changes. | Deferred — PR 6 |
+| L3-stub-sig | Low | `boom_delete(_entry_id: str)` accepts exactly one positional arg. Future signature evolution of `delete_episode` (e.g. adding `*, force=False`) would fail with `TypeError` rather than reaching the rollback's `except Exception:`, masking the real assertion. Use `async def boom_delete(*_args, **_kwargs)` for forward-compat. | Deferred — PR 6 |
+| L4-dedup | Info | Comment block in `_persist_admitted` ("Phase 2 memory facade routes both…") near-duplicates the new `TODO(RFC 0008 PR 5)` block in `_rollback_persisted`. Both are correct; consolidate when PR 5's tier split actually lands. | Deferred — PR 5 |
+| Info-1 | Info | Path drift: `tests/integration/test_delegation_rollback_edges.py` lives at `tests/integration/` not `tests/integration/python/` — same N8 path drift the plan already defers to PR 6. | Deferred — PR 6 (matches existing N8) |
+| Info-2 | Info | Status-hygiene: same as round-1 Info — flip PR 3a checklist (9 items), ROADMAP "PR 3a still pending" line, and remove the merge-order warning at the bottom of the PR #223 follow-up section, all in the merge-time hygiene commit. | Pending — merge-time |
+
 ---
 
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
