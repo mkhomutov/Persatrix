@@ -182,20 +182,63 @@ async def test_size_cap_tie_break_by_created_at(
 async def test_eviction_loop_survives_pass_failure(
     episodic: EpisodicMemory, caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Loop logs a warning on a failed pass and resumes on the next tick.
+
+    PR #221 deep-review L-7: the previous version of this test only
+    cancelled the loop and never injected a failure, so the survives-
+    failure contract documented in [docs/rfcs/0008-pr-plan.md] was not
+    actually exercised.  We monkeypatch :meth:`EvictionPass.run` to raise
+    on the first invocation and succeed on the second, then assert the
+    warning landed in ``caplog`` *and* that a follow-up pass executed.
+    """
     db = episodic._ensure_db()  # noqa: SLF001
-    # Cancel the loop after one short tick so the test does not hang.
-    task = asyncio.create_task(
-        eviction_loop(
-            "evict-test", db,
-            episodic_cap=1000,
-            ttl_low_importance_days=30,
-            cadence_seconds=0.05,
-        ),
+
+    call_count = 0
+    original_run = EvictionPass.run
+
+    async def flaky_run(
+        self: EvictionPass, conn: "object",
+    ) -> EvictionStats:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("injected eviction failure")
+        return await original_run(self, conn)  # type: ignore[arg-type]
+
+    caplog.set_level("WARNING", logger="agents.memory.eviction")
+    monkeypatched = EvictionPass.run
+    EvictionPass.run = flaky_run  # type: ignore[method-assign]
+    try:
+        task = asyncio.create_task(
+            eviction_loop(
+                "evict-test", db,
+                episodic_cap=1000,
+                ttl_low_importance_days=30,
+                cadence_seconds=0.02,
+            ),
+        )
+        # Allow at least two ticks: one that raises, one that succeeds.
+        for _ in range(50):
+            if call_count >= 2:
+                break
+            await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        EvictionPass.run = monkeypatched  # type: ignore[method-assign]
+
+    assert call_count >= 2, (
+        "loop did not run a second pass after the first one raised"
     )
-    await asyncio.sleep(0.15)  # allow ≥ 1 pass
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    failure_warnings = [
+        rec for rec in caplog.records
+        if rec.levelname == "WARNING"
+        and "Eviction pass failed" in rec.getMessage()
+    ]
+    assert failure_warnings, (
+        "expected a warning log when the eviction pass raised"
+    )
 
 
 async def test_eviction_loop_rejects_non_positive_cadence(
@@ -256,3 +299,88 @@ def test_eviction_stats_is_frozen() -> None:
     stats = EvictionStats(ttl_evicted=0, cap_evicted=0, total_after=0)
     with pytest.raises(Exception):  # noqa: BLE001 — frozen-dataclass error
         stats.ttl_evicted = 1  # type: ignore[misc]
+
+
+# ─── Procedural-tier separation (PR #221 review M-1) ─────────────────
+
+
+async def test_ttl_skips_procedure_rows(episodic: EpisodicMemory) -> None:
+    """Low-confidence procedure rows are NOT TTL-evicted.
+
+    RFC 0008 §G separates episodic eviction from procedural confidence
+    decay (the latter lands in PR 5).  ``MemoryFacade.store_procedure``
+    persists procedures as episode rows tagged ``procedure:{key}`` with
+    ``confidence`` mapped onto ``importance``; without the procedure
+    guard in :mod:`agents.memory.eviction`, a stale low-confidence
+    procedure would be silently TTL-evicted by the episodic policy.
+    """
+    db = episodic._ensure_db()  # noqa: SLF001
+    old_ts = time.time() - 31 * 86400.0
+    # An old, low-importance procedure (would otherwise satisfy the TTL
+    # predicate).  Tag format mirrors ``MemoryFacade.store_procedure``.
+    await db.execute(
+        "INSERT INTO episodes (id, agent_id, summary, importance, "
+        "tags_json, created_at, compression_level) "
+        "VALUES (?, ?, ?, ?, ?, ?, 0)",
+        (
+            "proc-old", "evict-test", "how to deploy",
+            0.2, '["procedure:deploy"]', old_ts,
+        ),
+    )
+    await db.commit()
+
+    runner = EvictionPass(
+        "evict-test", episodic_cap=1000, ttl_low_importance_days=30,
+    )
+    stats = await runner.run(db)
+    assert stats.ttl_evicted == 0
+    async with db.execute(
+        "SELECT id FROM episodes WHERE agent_id = ?", ("evict-test",),
+    ) as cur:
+        rows = await cur.fetchall()
+    assert {r[0] for r in rows} == {"proc-old"}
+
+
+async def test_size_cap_skips_procedure_rows(
+    episodic: EpisodicMemory,
+) -> None:
+    """Procedure rows are excluded from both the size-cap budget and
+    the candidate set.
+
+    Setup: 3 procedures + 3 episodic entries, ``episodic_cap=2``.  The
+    cap governs only the 3 episodic rows so exactly 1 episodic entry is
+    evicted; the 3 procedures survive untouched and ``total_after``
+    reports the evictable (episodic) count = 2.
+    """
+    db = episodic._ensure_db()  # noqa: SLF001
+    for i in range(3):
+        await db.execute(
+            "INSERT INTO episodes (id, agent_id, summary, importance, "
+            "tags_json, created_at, compression_level) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0)",
+            (
+                f"proc-{i}", "evict-test", f"procedure-{i}",
+                0.1, f'["procedure:k{i}"]', time.time(),
+            ),
+        )
+    await db.commit()
+    for i in range(3):
+        await episodic.store_episode(
+            summary=f"ep-{i}", context={}, importance=0.1 * i,
+        )
+
+    runner = EvictionPass(
+        "evict-test", episodic_cap=2, ttl_low_importance_days=365,
+    )
+    stats = await runner.run(db)
+    assert stats.cap_evicted == 1
+    assert stats.total_after == 2  # episodic-only count
+    async with db.execute(
+        "SELECT id FROM episodes WHERE agent_id = ? ORDER BY id",
+        ("evict-test",),
+    ) as cur:
+        rows = await cur.fetchall()
+    surviving = {r[0] for r in rows}
+    # All 3 procedure rows survive; 2 of the 3 episodic rows survive.
+    assert {"proc-0", "proc-1", "proc-2"}.issubset(surviving)
+    assert sum(1 for r in surviving if not r.startswith("proc-")) == 2

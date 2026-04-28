@@ -16,13 +16,19 @@ Phase 2 implements two policies (RFC 0008 §G):
    deterministically by ``created_at ASC`` so test fixtures are stable.
 
 Confidence decay for the procedural tier is **out of scope** for this PR
-and lands in PR 5 (RFC 0008 PR plan Phase 4b).
+and lands in PR 5 (RFC 0008 PR plan Phase 4b).  To keep the two policies
+cleanly separated, every query in this module excludes rows whose
+``tags_json`` carries the ``procedure:`` prefix written by
+:meth:`MemoryFacade.store_procedure` — see ``_NOT_PROCEDURE_PREDICATE``
+below and PR #221 deep-review finding M-1.
 
 The :class:`EvictionPass` class is intentionally stateless across runs —
 :meth:`EvictionPass.run` opens fresh queries against the agent's database
 and returns an :class:`EvictionStats` report so the caller (the
 :class:`~agents.memory.facade.MemoryFacade` background loop) can log /
-trace each pass.
+trace each pass.  ``EvictionStats.total_after`` therefore reports the
+*evictable* (episodic) row count — procedure rows are intentionally
+excluded so the figure matches what the size-cap budget enforces.
 """
 
 from __future__ import annotations
@@ -45,6 +51,21 @@ TTL_IMPORTANCE_THRESHOLD: float = 0.3
 _W_IMPORTANCE: float = 0.6
 _W_RECENCY: float = 0.3
 _W_ACCESS: float = 0.1
+
+# RFC 0008 §G separates episodic eviction from procedural confidence
+# decay (the latter lands in PR 5).  ``MemoryFacade.store_procedure``
+# persists procedures as episode rows tagged ``procedure:{key}`` with
+# ``confidence`` mapped onto ``importance``; without this guard a
+# low-confidence procedure would be silently TTL- or cap-evicted by the
+# episodic policy.  ``tags_json`` is JSON-serialised by
+# ``EpisodicMemory.store_episode`` (``json.dumps(tags or [])``) so the
+# tag appears verbatim as ``"procedure:..."`` in the column and the
+# ``LIKE`` pattern is collation-safe.  Legacy rows with
+# ``tags_json IS NULL`` are evictable as before.  See PR #221 deep-review
+# finding M-1.
+_NOT_PROCEDURE_PREDICATE: str = (
+    "(tags_json IS NULL OR tags_json NOT LIKE '%\"procedure:%')"
+)
 
 
 @dataclass(frozen=True)
@@ -98,11 +119,15 @@ class EvictionPass:
     # ─── TTL eviction ───────────────────────────────────────────
 
     async def _evict_ttl(self, db: aiosqlite.Connection) -> int:
-        """Delete low-importance entries past the TTL window."""
+        """Delete low-importance entries past the TTL window.
+
+        Procedure rows are excluded — see ``_NOT_PROCEDURE_PREDICATE``.
+        """
         cutoff = time.time() - self._ttl_seconds
         cursor = await db.execute(
             "DELETE FROM episodes "
-            "WHERE agent_id = ? AND importance < ? AND created_at < ?",
+            "WHERE agent_id = ? AND importance < ? AND created_at < ? "
+            f"AND {_NOT_PROCEDURE_PREDICATE}",
             (self._agent_id, TTL_IMPORTANCE_THRESHOLD, cutoff),
         )
         deleted = cursor.rowcount or 0
@@ -112,7 +137,11 @@ class EvictionPass:
     # ─── Size-cap eviction ──────────────────────────────────────
 
     async def _evict_size_cap(self, db: aiosqlite.Connection) -> int:
-        """Delete the lowest-scoring excess entries above ``episodic_cap``."""
+        """Delete the lowest-scoring excess entries above ``episodic_cap``.
+
+        Procedure rows are excluded from both the budget count and the
+        candidate set — see ``_NOT_PROCEDURE_PREDICATE``.
+        """
         total = await self._count(db)
         excess = total - self._episodic_cap
         if excess <= 0:
@@ -122,7 +151,7 @@ class EvictionPass:
         # set so ranking is consistent within a single pass.
         async with db.execute(
             "SELECT id, importance, created_at, access_count "
-            "FROM episodes WHERE agent_id = ?",
+            f"FROM episodes WHERE agent_id = ? AND {_NOT_PROCEDURE_PREDICATE}",
             (self._agent_id,),
         ) as cur:
             rows = list(await cur.fetchall())
@@ -152,8 +181,15 @@ class EvictionPass:
     # ─── Helpers ────────────────────────────────────────────────
 
     async def _count(self, db: aiosqlite.Connection) -> int:
+        """Count *evictable* (non-procedure) rows for this agent.
+
+        Procedure rows are excluded so the size-cap budget and the
+        ``EvictionStats.total_after`` telemetry both reflect the
+        episodic working set the cap actually governs.
+        """
         async with db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE agent_id = ?",
+            "SELECT COUNT(*) FROM episodes WHERE agent_id = ? "
+            f"AND {_NOT_PROCEDURE_PREDICATE}",
             (self._agent_id,),
         ) as cur:
             row = await cur.fetchone()

@@ -98,13 +98,14 @@ class MemoryFacade:
 
     Per-process lifecycle (RFC 0008 Open Question 7): a single
     ``EpisodicMemory`` instance per task-agent process, shared across
-    concurrent gRPC calls.  Serialisation relies on aiosqlite's WAL-mode
-    single-connection internal queue — no extra ``asyncio.Lock`` is
-    introduced because Phase 2 task agents do not execute tools in
-    parallel.  ``initialize()`` opens the DB and starts the periodic
-    eviction loop; ``close()`` cancels the loop and closes the DB.
-    The lifecycle satisfies :class:`~agents.memory.MemoryLifecycle`
-    structurally.
+    concurrent gRPC calls **and** the periodic eviction loop scheduled
+    by :meth:`initialize`.  Both callers share one ``aiosqlite``
+    connection; serialisation is provided by aiosqlite's worker-thread
+    queue (no extra ``asyncio.Lock`` is introduced — the queue handles
+    the dispatch/eviction interleave correctly).  ``initialize()`` opens
+    the DB and starts the eviction loop; ``close()`` cancels the loop
+    and closes the DB.  The lifecycle satisfies
+    :class:`~agents.memory.MemoryLifecycle` structurally.
     """
 
     def __init__(
