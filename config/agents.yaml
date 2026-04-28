@@ -154,3 +154,14 @@ agents:
       - agent_id: "iron-fox"
         type: "reports_to_me"
         trust_level: 0.9
+
+# ─── Shared Memory Pools (RFC 0008 Phase 4a) ──────────────
+# Named cross-agent memory pools with ACL + provenance enforcement.
+# Schema: schemas/agent.schema.json#shared_memory_pool
+shared_memory_pools:
+  team-knowledge:
+    readers: ["planner", "code-writer", "code-reviewer"]
+    writers: ["code-reviewer", "planner"]
+    max_entries: 2000
+    required_confidence: 0.5
+    sensitive: false

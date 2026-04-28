@@ -23,6 +23,8 @@ from typing import Any
 
 from .episodic import EpisodicMemory
 from .eviction import eviction_loop
+from .shared_pool import SharedPoolRegistry
+from .shared_pool_facade import SharedPoolFacadeMixin
 from .working import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -94,7 +96,7 @@ class MemoryDisabledError(RuntimeError):
 # ─── MemoryFacade ────────────────────────────────────────────────
 
 
-class MemoryFacade:
+class MemoryFacade(SharedPoolFacadeMixin):
     """Unified memory access for task agents (RFC 0008 §B).
 
     Per-process lifecycle (RFC 0008 Open Question 7): a single
@@ -118,6 +120,7 @@ class MemoryFacade:
         episodic_cap: int = 1000,
         ttl_low_importance_days: int = 30,
         eviction_cadence_seconds: int = 3600,
+        shared_pools: SharedPoolRegistry | None = None,
     ) -> None:
         if episodic_cap < 1:
             raise ValueError(f"episodic_cap must be >= 1, got {episodic_cap}")
@@ -136,6 +139,7 @@ class MemoryFacade:
         self._episodic = EpisodicMemory(agent_id=agent_id, db_path=db_path)
         self._initialized = False
         self._eviction_task: asyncio.Task[None] | None = None
+        self._shared_pools = shared_pools
 
     @property
     def agent_id(self) -> str:

@@ -12,6 +12,11 @@
     "agents": {
       "type": "array",
       "items": { "$ref": "#/definitions/agent" }
+    },
+    "shared_memory_pools": {
+      "type": "object",
+      "description": "RFC 0008 PR plan PR 4: named cross-agent memory pools with config-based ACL enforcement (RFC 0008 §H, Open Question 13). Deny-by-default — agents not in a pool's `readers` / `writers` lists raise SharedMemoryPermissionError. Sensitive pools (`sensitive: true`) cannot be published into via `MemoryFacade.publish_to_pool` regardless of writer ACL — RFC 0008 §H safety constraint #3.",
+      "additionalProperties": { "$ref": "#/definitions/shared_memory_pool" }
     }
   },
   "definitions": {
@@ -374,6 +379,51 @@
         "type": { "type": "string" },
         "trust_level": { "type": "number", "minimum": 0, "maximum": 1 },
         "notes": { "type": "string" }
+      }
+    },
+    "shared_memory_pool": {
+      "type": "object",
+      "description": "RFC 0008 PR plan PR 4: ACL + retention settings for one named shared pool. Reader and writer ACLs are deny-by-default.",
+      "additionalProperties": false,
+      "properties": {
+        "readers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+          },
+          "default": [],
+          "description": "Agent IDs allowed to read from this pool. Deny-by-default — agents not listed raise SharedMemoryPermissionError."
+        },
+        "writers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+          },
+          "default": [],
+          "description": "Agent IDs allowed to write into this pool. Deny-by-default."
+        },
+        "max_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2000,
+          "description": "Maximum entries retained in the pool. FIFO eviction on `created_at` ascending when exceeded — RFC 0008 PR plan PR 4 documents why §G hybrid scoring does not apply to shared pools."
+        },
+        "required_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.0,
+          "description": "Writers must supply `confidence >= required_confidence`; lower values are rejected at write time."
+        },
+        "sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, `MemoryFacade.publish_to_pool` rejects all writes regardless of writer ACL — RFC 0008 §H safety constraint #3."
+        }
       }
     }
   }

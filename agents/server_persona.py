@@ -205,6 +205,74 @@ def load_agent(
     return agent
 
 
+# ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────
+
+
+def load_shared_pools(
+    config_path: str,
+    *,
+    db_path: str = "data/memory.db",
+):  # type: ignore[no-untyped-def]
+    """Build a :class:`SharedPoolRegistry` from the top-level ``shared_memory_pools``.
+
+    Returns an empty registry when the section is absent or empty —
+    deny-by-default for processes that do not declare any pools.  Errors
+    in the YAML structure raise :class:`SystemExit` (mirrors
+    :func:`load_agent`'s startup-failure contract).
+    """
+    from .memory.shared_pool import build_registry_from_config
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        raise SystemExit(f"Agent config not found: {config_path}")
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"Invalid YAML in {config_path}: {exc}")
+    raw = (config or {}).get("shared_memory_pools") or {}
+    if not isinstance(raw, dict):
+        raise SystemExit(
+            f"'shared_memory_pools' in {config_path} must be a mapping, "
+            f"got {type(raw).__name__}",
+        )
+    try:
+        return build_registry_from_config(raw, db_path=db_path)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(
+            f"Invalid shared_memory_pools entry in {config_path}: {exc}",
+        )
+
+
+async def start_shared_pools(registry) -> None:  # type: ignore[no-untyped-def]
+    """Initialize each pool in *registry*; per-pool failures are logged
+    but do not block startup (callers see ``unknown_pool`` until restart).
+    """
+    if registry is None:
+        return
+    for pool_name in registry.names():
+        try:
+            await registry.get(pool_name).initialize()
+        except Exception:
+            logger.exception(
+                "Failed to initialise shared pool %s", pool_name,
+            )
+
+
+async def stop_shared_pools(registry) -> None:  # type: ignore[no-untyped-def]
+    """Close every pool in *registry*; safe when *registry* is ``None``."""
+    if registry is not None:
+        await registry.close_all()
+
+
+def setup_shared_pools(server, config_path: str, agent: BaseAgent) -> None:
+    """Load the shared-pool registry and assign it to ``server._shared_pools``.
+
+    RFC 0008 PR 4 wiring helper used by :func:`agents.server.main`.
+    """
+    db_path = ((agent.config or {}).get("memory") or {}).get("db_path", "data/memory.db")
+    server._shared_pools = load_shared_pools(config_path, db_path=db_path)
+
+
 # ─── Persona lifecycle ───────────────────────────────────────
 
 
@@ -212,6 +280,8 @@ async def initialize_persona_agents(
     agents: dict[str, BaseAgent],
     dispatcher: EventDispatcher,
     tick_schedulers: dict[str, TickScheduler],
+    *,
+    shared_pools=None,  # type: ignore[no-untyped-def]
 ) -> None:
     """Initialize memory, dispatcher, and tick schedulers for persona agents.
 
@@ -223,14 +293,18 @@ async def initialize_persona_agents(
 
     ``tick_schedulers`` is mutated in-place: started TickScheduler instances
     are inserted under their agent ID.  Non-persona agents are left untouched.
+
+    ``shared_pools`` (RFC 0008 PR plan PR 4) is started here (idempotent)
+    and forwarded to :meth:`BaseAgent.initialize_memory`.
     """
+    await start_shared_pools(shared_pools)
     for agent_id, agent in agents.items():
         if not isinstance(agent, _LLMPersonaAgent):
             continue
 
         # Memory initialization — must succeed before dispatch/tick.
         try:
-            await agent.initialize_memory()
+            await agent.initialize_memory(shared_pools=shared_pools)
             logger.info("Initialized memory for persona agent %s", agent_id)
         except Exception:
             logger.exception(

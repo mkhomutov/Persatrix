@@ -20,6 +20,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from .base import BaseAgent
 from .dispatch import EventDispatcher
 from .generated import agent_message_pb2_grpc, task_pb2_grpc
+from .memory import SharedPoolRegistry
 from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.log_shipper import (
     Shipper,
@@ -35,6 +36,8 @@ from .persona_runtime import _LLMPersonaAgent
 from .server_persona import (
     initialize_persona_agents,
     load_agent,
+    setup_shared_pools,
+    stop_shared_pools,
 )
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
@@ -63,11 +66,9 @@ def _default_grpc_target(orchestrator_url: str) -> str:
     return f"{host}:9090"
 
 
-# ─── AgentServer ─────────────────────────────────────────────
-
-
 class AgentServer:
     """gRPC server hosting one or more agents."""
+    _shared_pools: SharedPoolRegistry | None = None  # RFC 0008 PR 4; set by main()
 
     def __init__(
         self,
@@ -173,17 +174,15 @@ class AgentServer:
         # schedulers for persona agents in a single pass.
         # (F-5b-9: consolidated three separate agent-iteration loops.)
         await initialize_persona_agents(
-            self.agents, self._dispatcher, self._tick_schedulers,
+            self.agents, self._dispatcher, self._tick_schedulers, shared_pools=self._shared_pools,
         )
 
-        # RFC 0008 PR plan PR 2 — open MemoryFacade for non-persona task
-        # agents that opt into `memory.enabled`.  Per-agent try/except so a
-        # memory outage on one agent cannot block server startup.
+        # RFC 0008 PR 2: open MemoryFacade for opt-in non-persona task agents.
         for agent_id, agent in self.agents.items():
             if isinstance(agent, _LLMPersonaAgent):
                 continue
             try:
-                await agent.initialize_memory()
+                await agent.initialize_memory(shared_pools=self._shared_pools)
             except Exception:
                 logger.exception(
                     "Failed to init memory for task agent %s", agent_id,
@@ -327,6 +326,7 @@ class AgentServer:
                 await agent.shutdown()
             except Exception:
                 logger.exception("Error shutting down agent %s", agent_id)
+        await stop_shared_pools(self._shared_pools)  # RFC 0008 PR 4
         # Deep-review D4: close shared session after all agents are stopped.
         if self._session:
             await self._session.close()
@@ -338,9 +338,6 @@ class AgentServer:
             await self._log_shipper.stop()
             self._log_shipper = None
         logger.info("Agent server stopped.")
-
-
-# ─── CLI + main ──────────────────────────────────────────────
 
 
 def main() -> None:
@@ -449,6 +446,7 @@ def main() -> None:
         orchestrator_grpc=args.orchestrator_grpc,
     )
     server.register_agent(agent)
+    setup_shared_pools(server, args.config, agent)  # RFC 0008 PR 4
 
     # PR-170 M2: bump the ``agent.active`` UpDownCounter so dashboards built on
     # the metric reflect the actual live agent population.  Paired with the

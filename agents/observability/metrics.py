@@ -163,6 +163,44 @@ class _Instruments:
             ),
         )
 
+        # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────
+        # Recorded by ``agents.memory.shared_pool`` ACL gates.  ``denied``
+        # carries an ``operation`` attribute (read|write|publish) so
+        # operators can distinguish trust-boundary breaches from misrouted
+        # writers without joining traces.
+        self.shared_pool_reads: Counter = meter.create_counter(
+            name="agent.shared_pool.reads",
+            unit="{call}",
+            description=(
+                "Reads served by a SharedMemoryPool (post-ACL).  Attributes: "
+                "pool, agent.id, result.count."
+            ),
+        )
+        self.shared_pool_writes: Counter = meter.create_counter(
+            name="agent.shared_pool.writes",
+            unit="{entry}",
+            description=(
+                "Entries written to a SharedMemoryPool (post-ACL + provenance "
+                "injection).  Attributes: pool, agent.id."
+            ),
+        )
+        self.shared_pool_denied: Counter = meter.create_counter(
+            name="agent.shared_pool.denied",
+            unit="{call}",
+            description=(
+                "ACL or sensitivity denials raised by SharedMemoryPool.  "
+                "Attributes: pool, agent.id, operation."
+            ),
+        )
+        self.shared_pool_evictions: Counter = meter.create_counter(
+            name="agent.shared_pool.evictions",
+            unit="{entry}",
+            description=(
+                "Entries evicted by the FIFO ``max_entries`` cap on a "
+                "SharedMemoryPool.  Attributes: pool."
+            ),
+        )
+
         # ─── Histograms ──────────────────────────────────────────────
         self.tool_duration: Histogram = meter.create_histogram(
             name="agent.tool.duration",
