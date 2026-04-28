@@ -236,6 +236,11 @@ async def test_store_procedure_refreshes_existing_key(
     assert rows[0][1] == "v1"
 
 
+# PR #225 review S1 / S2 / S4 regression pins live in
+# ``test_memory_decay_review_pins.py`` so this file stays under the
+# 500-line review soft-cap (``scripts/checks/file_size.py --strict``).
+
+
 # ─── retrieve_procedures stale alert ──────────────────────────
 
 
@@ -310,6 +315,10 @@ async def test_eviction_pass_evicts_below_c_min() -> None:
         assert not any('"procedure:kill"' in r for r in remaining)
     finally:
         await fac.close()
+
+
+# Eviction-side legacy-shim agreement test (PR #225 review S2)
+# lives in ``test_memory_decay_review_pins.py``.
 
 
 # ─── Facade construction validation ──────────────────────────

@@ -46,6 +46,12 @@ from .decay import (
     compute_decayed_confidence,
 )
 
+# PR #225 review S2: share the legacy-row base-confidence shim with the
+# recall path so a row's eviction disposition cannot disagree with its
+# recall disposition (a legacy row whose ``importance`` is the real
+# authored confidence must decay from that value in *both* paths).
+from .episodic_procedural import _resolve_base_confidence
+
 logger = logging.getLogger(__name__)
 
 
@@ -211,7 +217,17 @@ class EvictionPass:
         clock at 1.0 — see ``episodic_procedural.refresh_confidence``).
         """
         async with db.execute(
-            "SELECT id, confidence, last_validated_at, created_at "
+            # PR #225 review S2: select ``importance`` alongside
+            # ``confidence`` so the legacy-row shim
+            # (``_resolve_base_confidence``) can prefer ``importance``
+            # whenever a pre-PR-5 row carries the v6 migration default
+            # (``confidence = 1.0``) but a non-default ``importance``.
+            # Without this join the eviction pass would decay legacy
+            # rows from a fresh ``1.0`` baseline while recall decays
+            # them from the authored ``importance`` — and the same row
+            # could be admitted by recall yet survive eviction (or vice
+            # versa once the shim is removed in PR 6).
+            "SELECT id, confidence, last_validated_at, created_at, importance "
             "FROM episodes "
             "WHERE agent_id = ? AND tags_json LIKE '%\"procedure:%'",
             (self._agent_id,),
@@ -222,7 +238,7 @@ class EvictionPass:
         now = time.time()
         victims: list[str] = []
         for r in rows:
-            base = float(r[1] if r[1] is not None else 1.0)
+            base = _resolve_base_confidence(r[1], r[4])
             anchor = r[2] if r[2] is not None else r[3]
             age_seconds = max(0.0, now - float(anchor))
             decayed = compute_decayed_confidence(

@@ -37,6 +37,29 @@ __all__ = [
 ]
 
 
+# PR #225 review S1: LIKE wildcards (``%`` ``_``) inside caller-supplied
+# ``key`` / ``query`` would otherwise widen the match.  SQL injection is
+# already closed via ``?``-binding, but a key like ``"50% off"`` (LLM
+# generated) would otherwise mass-refresh / mass-recall sibling
+# procedures.  We backslash-escape the three LIKE meta-characters and
+# pair every affected LIKE clause with ``ESCAPE '\\'``.
+_LIKE_META_CHARS = ("\\", "%", "_")
+
+
+def _escape_like(s: str) -> str:
+    """Backslash-escape SQLite LIKE meta-characters in *s*.
+
+    Caller is responsible for pairing the resulting pattern with an
+    ``ESCAPE '\\'`` clause in the SQL — without that clause SQLite
+    treats backslash as a literal character (no escape semantics).
+    The backslash itself is escaped first so the subsequent ``%`` /
+    ``_`` substitutions do not double-escape it.
+    """
+    for ch in _LIKE_META_CHARS:
+        s = s.replace(ch, "\\" + ch)
+    return s
+
+
 @dataclass(frozen=True)
 class ProcedureRecallEntry:
     """A single procedural row returned by :func:`recall_procedures`.
@@ -115,8 +138,13 @@ async def recall_procedures(
         "AND tags_json LIKE '%\"procedure:%' "
     )
     if query:
-        sql = sql_base + "AND summary LIKE ? ORDER BY created_at DESC"
-        params: tuple[Any, ...] = (agent_id, f"%{query}%")
+        # PR #225 review S1: escape LIKE meta-chars in ``query`` so a
+        # ``%`` / ``_`` in caller-supplied search text does not widen
+        # the match.  Pair with ``ESCAPE '\\'``.
+        sql = (
+            sql_base + "AND summary LIKE ? ESCAPE '\\' ORDER BY created_at DESC"
+        )
+        params: tuple[Any, ...] = (agent_id, f"%{_escape_like(query)}%")
     else:
         sql = sql_base + "ORDER BY created_at DESC"
         params = (agent_id,)
@@ -169,14 +197,17 @@ async def refresh_confidence(
     """
     if not key or not key.strip():
         raise ValueError("key must not be empty")
-    # Quote the key inside the LIKE pattern so a key with embedded
-    # ``%`` cannot widen the match.  ``%"procedure:KEY"%`` matches the
-    # JSON-array element exactly because ``json.dumps`` always emits
-    # the value with surrounding double quotes.
-    pattern = f'%"procedure:{key}"%'
+    # PR #225 review S1: ``key`` flows from callers (and ultimately from
+    # LLM-generated procedure names).  A literal ``%`` or ``_`` would
+    # otherwise widen the LIKE match and silently refresh sibling
+    # procedures.  Escape the LIKE meta-chars and pair with
+    # ``ESCAPE '\\'``.  The surrounding ``"…"`` quotes (always present
+    # because ``json.dumps`` quotes every list element) still anchor the
+    # match to a single tag-array element.
+    pattern = f'%"procedure:{_escape_like(key)}"%'
     cursor = await db.execute(
         "UPDATE episodes SET confidence = 1.0, last_validated_at = ? "
-        "WHERE agent_id = ? AND tags_json LIKE ?",
+        "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\'",
         (time.time(), agent_id, pattern),
     )
     await db.commit()

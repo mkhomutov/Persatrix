@@ -107,9 +107,22 @@ class ProceduralFacadeMixin:
         ``episodic_procedural.refresh_confidence`` to reset
         ``confidence = 1.0`` and stamp ``last_validated_at = now`` on
         the existing rows — implementing the RFC 0008 §G "Confidence
-        refresh on successful reuse" contract.  ``content`` is currently
-        a no-op when the key already exists; rewriting the body lands
-        when the procedural tier gains an UPDATE path (PR 6+).
+        refresh on successful reuse" contract.
+
+        Refresh-path discards (PR #225 review S4): on the refresh path
+        **both** the supplied ``content`` *and* the supplied
+        ``confidence`` arguments are silently discarded — the existing
+        row's body is preserved and confidence is unconditionally
+        reset to ``1.0``.  This is intentional for PR 5: the procedural
+        tier does not yet have an UPDATE path, and "successful reuse"
+        per RFC 0008 §G is defined as a full revalidation
+        (``c_t = 1.0``).  Callers who need to *downgrade* an existing
+        procedure's confidence (e.g. failure-driven decay) must call
+        ``refresh_confidence`` directly, or wait for the procedural
+        UPDATE path landing in PR 6+.  The signature still accepts
+        ``confidence`` because it is required on the insert path.
+        ``expires_at`` is similarly only honoured on insert (PR #225
+        review L1: no consumer reads it yet — vestige of PR 2 stub).
         """
         self._require_initialised()
         if not key or not key.strip():
