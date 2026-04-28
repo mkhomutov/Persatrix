@@ -33,6 +33,7 @@ from ..base import CONTEXT_PACKAGE_KEY, TaskInput, TaskInputConfig, TaskOutput, 
 from .delegation import (
     DELEGATION_REQUEST_KEY,
     DELEGATION_RESULT_KEY,
+    MAX_CONTEXT_PACKAGE_BYTES,
     DelegationContractError,
     DelegationFailure,
     DelegationRequest,
@@ -108,9 +109,39 @@ class SubAgentSpawner:
             DELEGATION_REQUEST_KEY: request.to_json(),
         }
         if request.context_package:
-            context[CONTEXT_PACKAGE_KEY] = _json.dumps(
+            serialised_pkg = _json.dumps(
                 request.context_package, sort_keys=True,
             )
+            # PR #222 deep review S5: bound untrusted-shape input at the
+            # spawner trust boundary (OWASP A05).  ``context_package``
+            # and ``output_schema`` are typed ``dict[str, Any]`` with no
+            # depth or size limit — a hostile or buggy caller could
+            # otherwise push an arbitrarily large blob into
+            # ``task.context`` (which is ``dict[str, str]``) and the
+            # sub-agent's memory.  We fail fast in the *caller* stack
+            # rather than letting the sub-agent OOM.  PR 1 already
+            # established bounded-shape discipline for the existing
+            # ``_context_package`` reservation; PR 3 should not undo it.
+            if len(serialised_pkg) > MAX_CONTEXT_PACKAGE_BYTES:
+                raise DelegationContractError(
+                    f"DelegationRequest.context_package exceeds size cap: "
+                    f"{len(serialised_pkg)} > {MAX_CONTEXT_PACKAGE_BYTES} bytes",
+                )
+            context[CONTEXT_PACKAGE_KEY] = serialised_pkg
+        if request.output_schema:
+            # Same trust-boundary rationale as ``context_package`` above.
+            # ``output_schema`` is *not* placed on the wire here — it is
+            # carried inside ``DelegationRequest.to_json()`` already —
+            # but bounding it at dispatch keeps the cap centralised.
+            serialised_schema = _json.dumps(
+                request.output_schema, sort_keys=True,
+            )
+            if len(serialised_schema) > MAX_CONTEXT_PACKAGE_BYTES:
+                raise DelegationContractError(
+                    f"DelegationRequest.output_schema exceeds size cap: "
+                    f"{len(serialised_schema)} > {MAX_CONTEXT_PACKAGE_BYTES} "
+                    "bytes",
+                )
 
         task = TaskInput(
             task_id=task_id,
@@ -179,6 +210,16 @@ class SubAgentSpawner:
         callers can read :attr:`SpawnResult.outcome` and persist
         directly.  See :class:`FacadeBoundSpawner` for the bound-facade
         variant used in the integration tests.
+
+        .. note::
+           PR #222 deep review N4: the ``persist_to_memory`` flag on
+           :meth:`SubAgentSpawner.dispatch` defaults to ``True`` for
+           contract-symmetry with :class:`FacadeBoundSpawner` (where the
+           default *does* persist).  On the base class the flag only
+           controls whether this hook is invoked at all — and this
+           hook is a no-op — so the default has no observable effect.
+           Subclasses that perform real persistence inherit the
+           caller-friendly ``True`` default.
         """
         return [entry.key for entry in outcome.admitted]
 

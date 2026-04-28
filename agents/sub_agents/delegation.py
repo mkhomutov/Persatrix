@@ -88,6 +88,15 @@ DEFAULT_MAX_MEMORY_WRITES: Final[int] = 20
 :class:`DelegationResult`.  Excess entries are dropped with the
 ``cap_exceeded`` rejection reason."""
 
+MAX_CONTEXT_PACKAGE_BYTES: Final[int] = 256 * 1024
+"""PR #222 deep review S5: hard cap on the JSON-serialised size of
+:attr:`DelegationRequest.context_package` and
+:attr:`DelegationRequest.output_schema` enforced by the spawner before
+dispatch.  Bounds the untrusted-shape input the orchestrator forwards
+to a sub-agent (OWASP A05).  256 KiB is a deliberate initial cap; if
+operators need to lift it the value should move to ``config/agents.yaml``
+in a follow-on rather than be hand-tuned at call sites."""
+
 
 # ─── Dataclasses ────────────────────────────────────────────────
 
@@ -186,6 +195,18 @@ class DelegationRequest:
     budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
     allowed_tools: frozenset[str] = field(default_factory=frozenset)
     output_schema: dict[str, Any] = field(default_factory=dict)
+    """JSON-Schema-like description of the expected
+    :attr:`DelegationResult.artifacts` shape.
+
+    .. todo::
+       PR #222 deep review S1: this field is round-tripped on the wire
+       and bounded by :data:`MAX_CONTEXT_PACKAGE_BYTES`, but the merge
+       engine does **not** validate :class:`DelegationResult.artifacts`
+       against it yet.  Enforcement (jsonschema-based) is a fast-follow
+       to PR 3 — callers populating ``output_schema`` today should treat
+       it as advisory.  Adding enforcement is mechanical once the
+       optional ``jsonschema`` dependency is on the agent runtime.
+    """
     trust_ceiling: float = DEFAULT_TRUST_CEILING
     max_memory_writes: int = DEFAULT_MAX_MEMORY_WRITES
 
@@ -258,7 +279,7 @@ class DelegationRequest:
             timeout_seconds=float(budget_raw.get("timeout_seconds", 0.0)),
             max_llm_calls=int(budget_raw.get("max_llm_calls", 0)),
         )
-        return cls(
+        req = cls(
             objective=data.get("objective", ""),
             acceptance_criteria=tuple(data.get("acceptance_criteria") or ()),
             context_package=dict(data.get("context_package") or {}),
@@ -270,6 +291,15 @@ class DelegationRequest:
                 data.get("max_memory_writes", DEFAULT_MAX_MEMORY_WRITES),
             ),
         )
+        # PR #222 deep review S4: re-validate on deserialisation.
+        # Symmetric with :meth:`DelegationResult.from_metadata_value`,
+        # which validates closed-set enums on receipt.  Sub-agent
+        # processes are a trust boundary (literal process boundary
+        # post-RFC 0009) — a request constructed directly from
+        # ``task.context[DELEGATION_REQUEST_KEY]`` must pass the same
+        # contract checks the spawner enforces caller-side.
+        req.validate()
+        return req
 
 
 @dataclass(frozen=True)
@@ -379,6 +409,7 @@ __all__ = [
     "DELEGATION_RESULT_KEY",
     "DEFAULT_MAX_MEMORY_WRITES",
     "DEFAULT_TRUST_CEILING",
+    "MAX_CONTEXT_PACKAGE_BYTES",
     "BudgetEnvelope",
     "DelegationContractError",
     "DelegationFailure",

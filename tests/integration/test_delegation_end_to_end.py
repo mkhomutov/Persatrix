@@ -33,6 +33,10 @@ from agents.sub_agents import (
     FacadeBoundSpawner,
     MemoryWriteEntry,
 )
+from agents.sub_agents.delegation import (
+    MAX_CONTEXT_PACKAGE_BYTES,
+    DelegationContractError,
+)
 
 
 class _ScriptedSubAgent(BaseAgent):
@@ -129,6 +133,20 @@ async def test_dispatch_round_trip_persists_admitted_entries(
     hits2 = await parent_facade.retrieve_relevant(query="perf", limit=10)
     assert "Schedule perf test next sprint." in {h.content for h in hits2}
 
+    # PR #222 deep review N3: lock the cross-PR contract that PR 5
+    # (tier-discriminated persistence path) will replace.  Today both
+    # ``episodic`` and ``notes`` writes route through ``store_observation``
+    # tagged with ``tier:<name>``; PR 5 must preserve the per-tier label
+    # so downstream tag-prefix consumers (RFC 0011 channel-scoped recall,
+    # tier-based ACLs) keep working when the storage path changes.
+    by_content = {h.content: h for h in [*hits, *hits2]}
+    episodic_hit = by_content["Module X looks good; ship it."]
+    notes_hit = by_content["Schedule perf test next sprint."]
+    assert "tier:episodic" in episodic_hit.tags
+    assert "tier:notes" in notes_hit.tags
+    assert "source:reviewer-1" in episodic_hit.tags
+    assert "source:reviewer-1" in notes_hit.tags
+
 
 # ─── Trust ceiling enforced end-to-end ──────────────────────────
 
@@ -216,3 +234,51 @@ async def test_failed_sub_agent_raises_delegation_failure(
     )
     with pytest.raises(DelegationFailure, match="FAILED"):
         await spawner.dispatch(_Failing(), DelegationRequest(objective="x"))
+
+
+# ─── PR #222 deep review S5 — context_package size cap ─────────
+
+
+@pytest.mark.asyncio
+async def test_oversize_context_package_rejected_at_dispatch(
+    parent_facade: MemoryFacade,
+) -> None:
+    """A hostile or buggy caller cannot push an arbitrarily large
+    ``context_package`` into the sub-agent's ``task.context``: the
+    spawner enforces :data:`MAX_CONTEXT_PACKAGE_BYTES` *before* the
+    sub-agent is invoked so failure surfaces in the caller stack
+    (OWASP A05). Mirrors PR 1's bounded-shape discipline on the
+    existing ``_context_package`` reservation."""
+    canned = DelegationResult(summary="never reached", status="completed")
+    child = _ScriptedSubAgent("noop", canned)
+    spawner = FacadeBoundSpawner(
+        parent_agent_id="coordinator", memory_facade=parent_facade,
+    )
+    # Build a payload comfortably above the 256 KiB cap.
+    huge = "x" * (MAX_CONTEXT_PACKAGE_BYTES + 1024)
+    req = DelegationRequest(
+        objective="huge package",
+        context_package={"blob": huge},
+    )
+    with pytest.raises(DelegationContractError, match="context_package"):
+        await spawner.dispatch(child, req)
+
+
+@pytest.mark.asyncio
+async def test_oversize_output_schema_rejected_at_dispatch(
+    parent_facade: MemoryFacade,
+) -> None:
+    """Same trust-boundary rationale as ``context_package`` \u2014 see the
+    S5 finding in the PR #222 deep review."""
+    canned = DelegationResult(summary="never reached", status="completed")
+    child = _ScriptedSubAgent("noop2", canned)
+    spawner = FacadeBoundSpawner(
+        parent_agent_id="coordinator", memory_facade=parent_facade,
+    )
+    huge = "x" * (MAX_CONTEXT_PACKAGE_BYTES + 1024)
+    req = DelegationRequest(
+        objective="huge schema",
+        output_schema={"description": huge},
+    )
+    with pytest.raises(DelegationContractError, match="output_schema"):
+        await spawner.dispatch(child, req)

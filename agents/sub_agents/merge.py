@@ -7,22 +7,30 @@ PR 3 of the [RFC 0008 PR plan](../../docs/rfcs/0008-pr-plan.md).  See
 Merge order (deterministic, RFC 0008 §E)::
 
     1. schema validation (whole result)
-    2. framework-inject ``source_agent``
-    3. cap ``memory_writes`` at ``max_memory_writes``           → cap_exceeded
-    4. downscale ``importance`` to ``trust_ceiling``           → trust_ceiling
-    5. apply per-entry merge strategy against existing memory
-    6. emit metrics
+    2. cap ``memory_writes`` at ``max_memory_writes``           → cap_exceeded
+    3. per-entry pipeline:
+         a. validate entry schema (tier / key / content / etc.) → schema_invalid /
+            procedural_tier_rejected / source_agent_set / reserved_tag_prefix
+         b. framework-inject ``source_agent``
+         c. downscale ``importance`` to ``trust_ceiling``       → trust_ceiling
+         d. apply per-entry merge strategy against existing memory
+    4. emit metrics
+
+Why cap is run before per-entry validation: cap_exceeded entries are not
+double-counted under schema_invalid (and per-entry validation is not
+wasted work on entries that the cap will discard anyway).  See the
+in-code comment on the cap step.
 
 Failure at step 1 raises :class:`DelegationFailure` (no partial merge).
-Steps 3–5 reject only the offending entries; the surviving entries
-continue through the merge.
+The per-entry steps reject only the offending entries; the surviving
+entries continue through the merge.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .delegation import (
@@ -42,10 +50,31 @@ logger = logging.getLogger(__name__)
 
 REASON_SCHEMA_INVALID = "schema_invalid"
 REASON_TRUST_CEILING = "trust_ceiling"
+"""Reason label for the ``delegation_memory_writes_downscaled`` metric.
+
+See PR #222 deep review S2: the per-entry trust-ceiling event is a
+*modifier* on an admitted entry, not a separate admission bucket.  It
+is emitted under its own metric so operators summing
+``delegation_memory_writes_admitted`` across ``reason`` labels do not
+double-count the admission."""
 REASON_CAP_EXCEEDED = "cap_exceeded"
 REASON_SOURCE_AGENT_SET = "source_agent_set"
 REASON_PROCEDURAL_TIER_REJECTED = "procedural_tier_rejected"
+REASON_RESERVED_TAG_PREFIX = "reserved_tag_prefix"
+"""Reason label for sub-agent-supplied tags whose prefix collides with
+framework-prefixed provenance carriers (``tier:``, ``key:``, ``source:``,
+``channel:``).  See PR #222 deep review S3 — same trust-boundary
+semantics as :data:`REASON_SOURCE_AGENT_SET`, just for tags rather than
+the ``source_agent`` field."""
 REASON_CONFLICT = "conflict"
+
+# Tag prefixes the framework reserves for its own provenance carriers.
+# Sub-agents that emit tags with these prefixes are rejected so they
+# cannot spoof tier / key / source / channel metadata that downstream
+# tag-prefix consumers (e.g. RFC 0011 channel-scoped recall) trust.
+RESERVED_TAG_PREFIXES: frozenset[str] = frozenset({
+    "tier:", "key:", "source:", "channel:",
+})
 
 
 @dataclass(frozen=True)
@@ -223,21 +252,23 @@ class MergeEngine:
             entry = entry.with_source_agent(source_agent)
 
             # Step 4: trust-ceiling downscale.
+            #
+            # PR #222 deep review S2: emit a *separate* metric
+            # (``delegation_memory_writes_downscaled``) rather than
+            # re-using the admitted metric with a different ``reason``
+            # label — the entry is still admitted (counted once at
+            # step 6 under reason=ok), the downscale is a modifier on
+            # that admission, not a parallel admission bucket.
+            #
+            # PR #222 deep review N1: rebuild via ``dataclasses.replace``
+            # so future fields on :class:`MemoryWriteEntry` are not
+            # silently dropped on downscale.
             if entry.importance > request.trust_ceiling:
                 self._emit(
-                    "delegation_memory_writes_admitted",
+                    "delegation_memory_writes_downscaled",
                     {"reason": REASON_TRUST_CEILING},
                 )
-                entry = type(entry)(
-                    tier=entry.tier,
-                    key=entry.key,
-                    content=entry.content,
-                    importance=request.trust_ceiling,
-                    ttl_seconds=entry.ttl_seconds,
-                    tags=entry.tags,
-                    merge_strategy=entry.merge_strategy,
-                    source_agent=entry.source_agent,
-                )
+                entry = replace(entry, importance=request.trust_ceiling)
 
             # Step 5: per-entry merge strategy against existing memory.
             applied = self._apply_strategy(idx, entry, known_keys)
@@ -325,6 +356,26 @@ class MergeEngine:
                 reason=REASON_SOURCE_AGENT_SET,
                 detail=f"caller-set source_agent={entry.source_agent!r}",
             )
+        # PR #222 deep review S3: reject sub-agent-supplied tags whose
+        # prefix collides with framework provenance carriers.  Without
+        # this check a sub-agent can emit ``tags=("source:legitimate",)``
+        # that, after _persist_admitted concatenates the framework
+        # ``source:<agent_id>`` tag, leaves the stored entry with two
+        # ``source:*`` tags \u2014 spoofing provenance to any downstream
+        # consumer that parses tag prefixes (RFC 0011 channel-scoped
+        # recall, ACL filters, etc.).  Same trust-boundary rationale as
+        # the existing ``source_agent`` field check immediately above.
+        for tag in entry.tags:
+            for prefix in RESERVED_TAG_PREFIXES:
+                if tag.startswith(prefix):
+                    return RejectedEntry(
+                        index=idx,
+                        reason=REASON_RESERVED_TAG_PREFIX,
+                        detail=(
+                            f"tag {tag!r} uses reserved prefix {prefix!r} "
+                            f"(reserved: {sorted(RESERVED_TAG_PREFIXES)!r})"
+                        ),
+                    )
         if entry.tier == "procedural":
             # Distinct reason so operators can spot trust-model probing.
             return RejectedEntry(
@@ -420,9 +471,11 @@ __all__ = [
     "REASON_CAP_EXCEEDED",
     "REASON_CONFLICT",
     "REASON_PROCEDURAL_TIER_REJECTED",
+    "REASON_RESERVED_TAG_PREFIX",
     "REASON_SCHEMA_INVALID",
     "REASON_SOURCE_AGENT_SET",
     "REASON_TRUST_CEILING",
+    "RESERVED_TAG_PREFIXES",
     "MergeEngine",
     "MergeOutcome",
     "RejectedEntry",

@@ -111,6 +111,33 @@ def test_request_from_context_rejects_array_payload() -> None:
         DelegationRequest.from_context_value("[1, 2, 3]")
 
 
+def test_request_from_context_revalidates_on_deserialise() -> None:
+    """PR #222 deep review S4: ``from_context_value`` must re-run
+    :meth:`DelegationRequest.validate` so a payload that bypasses the
+    spawner (e.g. constructed directly in the sub-agent process from
+    ``task.context[DELEGATION_REQUEST_KEY]``) cannot smuggle an empty
+    ``objective`` or out-of-range ``trust_ceiling`` past the contract.
+    Symmetric with :meth:`DelegationResult.from_metadata_value`, which
+    already validates closed-set enums on receipt."""
+    bad = (
+        '{"version":1,"objective":"  ","acceptance_criteria":[],'
+        '"context_package":{},"budget":{"tokens":0,"timeout_seconds":0.0,'
+        '"max_llm_calls":0},"allowed_tools":[],"output_schema":{},'
+        '"trust_ceiling":0.5,"max_memory_writes":1}'
+    )
+    with pytest.raises(DelegationContractError, match="objective"):
+        DelegationRequest.from_context_value(bad)
+
+    over_ceiling = (
+        '{"version":1,"objective":"x","acceptance_criteria":[],'
+        '"context_package":{},"budget":{"tokens":0,"timeout_seconds":0.0,'
+        '"max_llm_calls":0},"allowed_tools":[],"output_schema":{},'
+        '"trust_ceiling":1.5,"max_memory_writes":1}'
+    )
+    with pytest.raises(DelegationContractError, match="trust_ceiling"):
+        DelegationRequest.from_context_value(over_ceiling)
+
+
 # ─── DelegationResult ───────────────────────────────────────────
 
 

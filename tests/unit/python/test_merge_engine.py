@@ -20,6 +20,7 @@ from agents.sub_agents.merge import (
     REASON_CAP_EXCEEDED,
     REASON_CONFLICT,
     REASON_PROCEDURAL_TIER_REJECTED,
+    REASON_RESERVED_TAG_PREFIX,
     REASON_SCHEMA_INVALID,
     REASON_SOURCE_AGENT_SET,
     REASON_TRUST_CEILING,
@@ -282,12 +283,24 @@ def test_metric_callback_invoked_with_labels() -> None:
     metric_names = [m for m, _, _ in captured]
     assert "delegation_merge_outcome" in metric_names
     assert "delegation_memory_writes_admitted" in metric_names
-    # Trust-ceiling downscale emitted under admitted with reason label.
+    # PR #222 deep review S2: the trust-ceiling downscale is emitted
+    # under its own metric (``delegation_memory_writes_downscaled``)
+    # rather than as a second ``delegation_memory_writes_admitted``
+    # event with a different ``reason`` label, so operators summing
+    # admissions across reasons do not double-count.
+    assert "delegation_memory_writes_downscaled" in metric_names
     trust = [
         labels for m, labels, _ in captured
-        if m == "delegation_memory_writes_admitted" and labels.get("reason") == REASON_TRUST_CEILING
+        if m == "delegation_memory_writes_downscaled"
+        and labels.get("reason") == REASON_TRUST_CEILING
     ]
     assert trust
+    # The admitted entry must be counted exactly once under reason=ok.
+    admitted_ok = [
+        value for m, labels, value in captured
+        if m == "delegation_memory_writes_admitted" and labels.get("reason") == "ok"
+    ]
+    assert admitted_ok == [1]
 
 
 def test_artifacts_merged_via_json_merge_patch_when_existing_supplied() -> None:
@@ -300,3 +313,41 @@ def test_artifacts_merged_via_json_merge_patch_when_existing_supplied() -> None:
         res, _request(), source_agent="c", existing_artifacts={"a": 0, "b": 5, "c": 3},
     )
     assert out.artifacts == {"a": 1, "c": 3}
+
+
+# ─── PR #222 deep review S3 — reserved tag-prefix spoofing ──────
+
+
+@pytest.mark.parametrize(
+    "spoof_tag",
+    ["source:legitimate", "tier:procedural", "key:override", "channel:admin"],
+)
+def test_reserved_tag_prefix_rejected(spoof_tag: str) -> None:
+    """Sub-agent-supplied tags must not collide with framework
+    provenance prefixes. Without this check, ``_persist_admitted``
+    would emit two same-prefix tags for the stored entry, letting
+    downstream tag-prefix consumers (RFC 0011 channel-scoped recall,
+    ACL filters) trust the spoofed value. Mirrors the existing
+    ``source_agent`` field guard."""
+    res = DelegationResult(
+        summary="s",
+        status="completed",
+        memory_writes=(_entry(tags=(spoof_tag,)),),
+    )
+    out = _engine().merge_result(res, _request(), source_agent="c")
+    assert out.admitted == []
+    assert len(out.rejected) == 1
+    assert out.rejected[0].reason == REASON_RESERVED_TAG_PREFIX
+
+
+def test_reserved_tag_prefix_does_not_block_unrelated_prefixes() -> None:
+    """Tags whose prefix is *not* reserved (e.g. ``review:``, ``risk:``)
+    must continue to be admitted; the reserved set is closed."""
+    res = DelegationResult(
+        summary="s",
+        status="completed",
+        memory_writes=(_entry(tags=("review:passed", "risk:low")),),
+    )
+    out = _engine().merge_result(res, _request(), source_agent="c")
+    assert len(out.admitted) == 1
+    assert out.rejected == []
