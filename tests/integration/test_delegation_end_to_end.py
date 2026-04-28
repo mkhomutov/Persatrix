@@ -425,3 +425,10 @@ async def test_partial_persist_failure_rolls_back_admitted(
     assert all("c0" not in h.content for h in hits), (
         "rollback should have removed partially-persisted entries"
     )
+
+
+# PR #224 review (Should #3): the two N5 coverage gaps (rollback-
+# during-rollback and missing-episodic-accessor) live in
+# ``test_delegation_rollback_edges.py``.  Split out so this end-to-end
+# file stays under the 500-line review-friendliness limit enforced by
+# ``scripts/checks/file_size.py``.

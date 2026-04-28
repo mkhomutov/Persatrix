@@ -206,9 +206,16 @@ class SubAgentSpawner:
         retry / human-review queue without having to re-serialise the
         artifacts.
 
-        The schema itself is validated (Draft-7 meta-schema) only on
-        first use — a malformed ``output_schema`` is a caller bug and
-        surfaces the same way as a contract violation.
+        The schema itself is re-validated (Draft-7 meta-schema) on
+        every dispatch — caller-supplied ``output_schema`` payloads in
+        v0.3 are tiny (sub-agent reply contracts), so the cost is
+        negligible and avoiding a cache keeps the spawner stateless.
+        A malformed ``output_schema`` is a caller bug and surfaces the
+        same way as a contract violation.
+
+        PR #224 review (Should #1): the prior "validated only on first
+        use" wording implied caching that the implementation does not
+        provide — corrected to match behaviour.
         """
         if not request.output_schema:
             return
@@ -228,9 +235,20 @@ class SubAgentSpawner:
             return
         first = errors[0]
         path = "/".join(str(p) for p in first.absolute_path) or "<root>"
+        # PR #224 review (Should #4): ``jsonschema``'s ``ValidationError.message``
+        # embeds a ``repr()`` of the offending instance fragment, so an
+        # unbounded message can echo sub-agent ``artifacts`` content into
+        # logs (LLM01 / OWASP A09).  Surface the structural fields
+        # (validator name + expected value) plus a length-bounded message
+        # tail so operators retain enough signal for triage without leaking
+        # full payloads.
+        message_excerpt = first.message
+        if len(message_excerpt) > 200:
+            message_excerpt = message_excerpt[:200] + "… (truncated)"
         raise DelegationFailure(
             f"DelegationResult.artifacts violates output_schema at "
-            f"{path}: {first.message}",
+            f"{path}: validator={first.validator!r} "
+            f"expected={first.validator_value!r}: {message_excerpt}",
         )
 
     def _extract_result(self, output: TaskOutput) -> DelegationResult:
@@ -304,17 +322,23 @@ class FacadeBoundSpawner(SubAgentSpawner):
         We now compensate as follows:
 
         1. Persist each admitted entry, accumulating the returned IDs.
-        2. On the first ``store_observation`` failure, attempt to
-           ``forget(id)`` every successfully-persisted entry from this
-           batch in reverse order.  Each rollback is best-effort: we
-           swallow individual exceptions so the original error remains
-           the surfaced cause, and we log any rollback failures so the
-           operator can reconcile.
+        2. On the first ``store_observation`` failure, delegate to
+           :meth:`_rollback_persisted`, which calls
+           ``self._facade.episodic.delete_episode(id)`` on every
+           successfully-persisted entry from this batch in reverse
+           order.  Each rollback is best-effort: we swallow individual
+           exceptions so the original error remains the surfaced cause,
+           and we log any rollback failures so the operator can reconcile.
         3. Re-raise the original exception with the original traceback.
 
-        The facade exposes ``forget`` from PR 2; if a future facade
-        variant lacks it (``AttributeError``) we degrade to a warning
-        and skip rollback rather than masking the real error.
+        The facade's ``episodic`` accessor exposes ``delete_episode``
+        (added in PR 3a alongside this rollback path); if a future
+        facade variant lacks the accessor we degrade to a warning and
+        skip rollback rather than masking the real error.
+
+        PR #224 review (Must #1): prior wording referenced a non-existent
+        ``facade.forget`` API — corrected to point at the actual
+        ``episodic.delete_episode`` call site below.
         """
         ids: list[str] = []
         try:
@@ -349,6 +373,15 @@ class FacadeBoundSpawner(SubAgentSpawner):
                 type(self._facade).__name__, len(ids),
             )
             return
+        # TODO(RFC 0008 PR 5): ``_persist_admitted`` currently routes
+        # both ``episodic`` and ``notes`` tier writes through
+        # ``store_observation`` (which lands them in episodic storage),
+        # so a single ``delete_episode`` rollback is sufficient.  When
+        # PR 5 splits the notes tier to a separate persistence path,
+        # this rollback must dispatch by ``entry.tier`` rather than
+        # calling ``delete_episode`` unconditionally — otherwise notes-
+        # tier rollbacks will silently no-op.  Flagged by PR #224 review
+        # (Should #2) as a forward-compat hazard.
         for entry_id in reversed(ids):
             try:
                 await episodic.delete_episode(entry_id)

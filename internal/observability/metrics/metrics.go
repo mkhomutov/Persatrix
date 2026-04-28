@@ -168,10 +168,20 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 		return nil, fmt.Errorf("create step.duration: %w", err)
 	}
 
-	// RFC 0008 PR 3a — delegation merge counters.  Names mirror the
-	// metric strings emitted by the Python merge engine
-	// (agents/sub_agents/merge.py) so the log → counter bridge can do a
-	// one-to-one lookup by the ``metric`` field on the structured log.
+	// RFC 0008 PR 3a — delegation merge counters.  The Go counter
+	// names mirror the metric strings emitted by the Python merge
+	// engine (agents/sub_agents/merge.py) under the
+	// ``orchestrator.delegation.`` namespace prefix — e.g. the Python
+	// log ``metric=delegation_merge_outcome`` maps to the Go counter
+	// ``orchestrator.delegation.merge_outcome``.  The future log →
+	// counter bridge therefore needs a fixed-prefix translation, not
+	// an opaque lookup table.  Stripping the prefix from the Go names
+	// would break the existing OTEL ``orchestrator.<area>.<noun>``
+	// naming convention (RFC 0019 § F), so the prefix stays.
+	//
+	// PR #224 review (Must #2): prior wording claimed a "one-to-one
+	// lookup" — corrected because the Python strings carry no
+	// namespace and the bridge must prepend ``orchestrator.``.
 	if i.DelegationMergeOutcome, err = m.Int64Counter(
 		"orchestrator.delegation.merge_outcome",
 		metric.WithUnit("{result}"),
