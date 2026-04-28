@@ -274,8 +274,8 @@
           "type": ["number", "null"],
           "minimum": 0.0,
           "maximum": 1.0,
-          "default": null,
-          "description": "RFC 0008 PR plan PR 2: default relevance floor passed to MemoryFacade.retrieve_relevant. null disables filtering (current EpisodicMemory behaviour)."
+          "default": 0.20,
+          "description": "RFC 0008 PR plan PR 2: default relevance floor passed to MemoryFacade.retrieve_relevant. PR 2a raises the default from null to 0.20 (matches DEFAULT_EPISODIC_MIN_SCORE) so low-score entries do not cross the system-prompt trust boundary (OWASP LLM01). Set to null to disable filtering — only safe when downstream consumers re-rank or sandbox the entries."
         },
         "episodic_cap": {
           "type": "integer",

@@ -3,24 +3,26 @@ MemoryFacade — unified memory access surface for task agents (RFC 0008 §B).
 
 Provides a stable API over the underlying memory tiers (episodic, notes,
 working) so task agents can store observations, retrieve relevant context,
-and compress entry sets without coupling to tier-specific schemas.
-
-This module is the Phase 2 facade-only delivery (RFC 0008 PR plan PR 2;
-sizing-risk eviction split per §Sizing risk).  Eviction (TTL + size-cap)
-ships in the follow-on ``feature/v030-rfc0008-eviction`` PR.  The pinned
-API surface (``retrieve_relevant`` with ``tags`` filter, ``compress`` hook)
-is finalised here so [RFC 0011 PR plan](../../docs/rfcs/0011-pr-plan.md) PR 5
-and [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4 can pin against it.
+and compress entry sets without coupling to tier-specific schemas.  PR 2
+shipped the facade-only delivery; PR 2a (this file's current revision)
+adds the periodic episodic-tier eviction loop per RFC 0008 §G.  The
+pinned API surface (``retrieve_relevant`` with ``tags`` filter, ``compress``
+hook) is finalised here so [RFC 0011 PR plan](../../docs/rfcs/0011-pr-plan.md)
+PR 5 and [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4 can pin
+against it.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from .episodic import EpisodicMemory
+from .eviction import eviction_loop
 from .working import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -65,12 +67,7 @@ class CompressedView:
 
 @dataclass(frozen=True)
 class Candidate:
-    """A facade-level candidate for context-package admission.
-
-    Phase 2 stub: ``list_candidates`` returns ``[]``.  Populated in PR 5
-    when the agent-side candidate-listing API integrates with the
-    orchestrator-side packaging pipeline.
-    """
+    """Phase 2 stub: ``list_candidates`` returns ``[]``.  Populated in PR 5."""
 
     id: str
     content: str
@@ -86,17 +83,11 @@ class MemoryDisabledError(RuntimeError):
 
     Per RFC 0008 PR plan PR 2 integration test: tool calls that would write
     memory must raise instead of silently no-op'ing, so the misconfiguration
-    surfaces during agent startup integration testing.
-
-    Subclasses :class:`RuntimeError` for backward compatibility with the
-    pre-PR-220 facade error type and with tests that match on
-    ``RuntimeError`` (see ``tests/unit/python/test_memory_facade.py``).
-    Phase 2 raises this from :meth:`MemoryFacade._require_initialised` so
-    write-side callers can catch a memory-specific error type, satisfying
-    the contract advertised in [RFC 0008 PR plan](../../docs/rfcs/0008-pr-plan.md)
-    PR 2.  PR 2a / PR 5 may extend it to the disabled-config path once
-    write-side callers are wired through the facade rather than through
-    ``BaseAgent.memory is None`` checks.
+    surfaces during agent startup integration testing.  Subclasses
+    :class:`RuntimeError` for backward compatibility with the pre-PR-220
+    facade error type.  PR 2a raises this from both write-side
+    :meth:`MemoryFacade._require_initialised` and the read-side
+    ``episodic`` property.
     """
 
 
@@ -108,22 +99,14 @@ class MemoryFacade:
 
     Per-process lifecycle (RFC 0008 Open Question 7): a single
     ``EpisodicMemory`` instance per task-agent process, shared across
-    concurrent gRPC calls.  Serialisation relies on aiosqlite's WAL-mode
-    single-connection internal queue — no extra ``asyncio.Lock`` is
-    introduced because Phase 2 task agents do not execute tools in
-    parallel.
-
-    Lifecycle::
-
-        facade = MemoryFacade(agent_id, db_path="data/memory.db")
-        await facade.initialize()  # opens the SQLite connection
-        ...                         # store / retrieve calls
-        await facade.close()        # cancels eviction loop, closes DB
-
-    The lifecycle satisfies the
-    :class:`~agents.memory.MemoryLifecycle` protocol structurally so the
-    agent server can manage it via the same call sites as the persona
-    runtime's tier-managers.
+    concurrent gRPC calls **and** the periodic eviction loop scheduled
+    by :meth:`initialize`.  Both callers share one ``aiosqlite``
+    connection; serialisation is provided by aiosqlite's worker-thread
+    queue (no extra ``asyncio.Lock`` is introduced — the queue handles
+    the dispatch/eviction interleave correctly).  ``initialize()`` opens
+    the DB and starts the eviction loop; ``close()`` cancels the loop
+    and closes the DB.  The lifecycle satisfies
+    :class:`~agents.memory.MemoryLifecycle` structurally.
     """
 
     def __init__(
@@ -132,12 +115,27 @@ class MemoryFacade:
         *,
         db_path: str = "data/memory.db",
         default_min_score: float | None = None,
+        episodic_cap: int = 1000,
+        ttl_low_importance_days: int = 30,
+        eviction_cadence_seconds: int = 3600,
     ) -> None:
+        if episodic_cap < 1:
+            raise ValueError(f"episodic_cap must be >= 1, got {episodic_cap}")
+        if ttl_low_importance_days < 1:
+            raise ValueError(f"ttl_low_importance_days must be >= 1, got {ttl_low_importance_days}")
+        if eviction_cadence_seconds <= 0:
+            raise ValueError(
+                f"eviction_cadence_seconds must be positive, got {eviction_cadence_seconds}"
+            )
         self._agent_id = agent_id
         self._db_path = db_path
         self._default_min_score = default_min_score
+        self._episodic_cap = episodic_cap
+        self._ttl_low_importance_days = ttl_low_importance_days
+        self._eviction_cadence_seconds = eviction_cadence_seconds
         self._episodic = EpisodicMemory(agent_id=agent_id, db_path=db_path)
         self._initialized = False
+        self._eviction_task: asyncio.Task[None] | None = None
 
     @property
     def agent_id(self) -> str:
@@ -148,13 +146,10 @@ class MemoryFacade:
         """Read-only access to the underlying episodic tier.
 
         Exposed so RFC 0020's ``InteractionTracker`` can keep its current
-        direct-write code path in PR 2 of this RFC; the facade gains
-        full ownership in PR 5 (procedural tier).
+        direct-write code path; the facade gains full ownership in PR 5.
+        Raises :class:`MemoryDisabledError` if not initialised.
         """
-        if not self._initialized:
-            raise RuntimeError(
-                "MemoryFacade not initialised — call initialize() first",
-            )
+        self._require_initialised()
         return self._episodic
 
     # ─── Lifecycle ───────────────────────────────────────────────
@@ -174,10 +169,16 @@ class MemoryFacade:
             return
         await self._episodic.initialize()
         self._initialized = True
-        logger.info(
-            "MemoryFacade initialised for agent %s (db=%s)",
-            self._agent_id, self._db_path,
+        db = self._episodic._ensure_db()  # noqa: SLF001 — PR 2a: schedule eviction loop
+        self._eviction_task = asyncio.create_task(
+            eviction_loop(
+                self._agent_id, db, episodic_cap=self._episodic_cap,
+                ttl_low_importance_days=self._ttl_low_importance_days,
+                cadence_seconds=self._eviction_cadence_seconds,
+            ),
+            name=f"memory-eviction-{self._agent_id}",
         )
+        logger.info("MemoryFacade initialised for agent %s (db=%s)", self._agent_id, self._db_path)
 
     async def close(self) -> None:
         """Close the underlying SQLite connection.
@@ -186,6 +187,11 @@ class MemoryFacade:
         """
         if not self._initialized:
             return
+        if self._eviction_task is not None:
+            self._eviction_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._eviction_task
+            self._eviction_task = None
         await self._episodic.close()
         self._initialized = False
 
@@ -252,10 +258,14 @@ class MemoryFacade:
             # AND semantics — required tags must all appear on the entry.
             if required_tags and not required_tags.issubset(ep_tags):
                 continue
-            # Phase 2 in-Python scope filter — context["scope"] is set by
-            # store_observation; pre-RFC episodes carry no scope and pass
-            # only when no filter is requested.
-            entry_scope = ep.context.get("scope") if isinstance(ep.context, dict) else None
+            # PR 2a follow-up M1: prefer the column-level ``scope`` (set
+            # by RFC 0020's ``InteractionTracker`` and the facade's own
+            # ``store_observation``); fall back to ``context["scope"]``
+            # only when the column is NULL so legacy pre-PR-220 rows
+            # written by the facade still match.
+            entry_scope = ep.scope
+            if entry_scope is None and isinstance(ep.context, dict):
+                entry_scope = ep.context.get("scope")
             if scope is not None and entry_scope != scope:
                 continue
             out.append(
@@ -323,6 +333,9 @@ class MemoryFacade:
             Caller-supplied tag set.  Mutable types accepted for
             ergonomic callers; the facade normalises to ``list[str]``
             before persistence.
+        outcome:
+            Optional caller-supplied outcome string persisted on the
+            underlying episode (RFC 0008 §B); not ranked separately.
         """
         self._require_initialised()
         if not content or not content.strip():
@@ -333,9 +346,7 @@ class MemoryFacade:
             context["scope"] = scope
         if ttl_seconds is not None:
             if ttl_seconds <= 0:
-                raise ValueError(
-                    f"ttl_seconds must be positive, got {ttl_seconds}",
-                )
+                raise ValueError(f"ttl_seconds must be positive, got {ttl_seconds}")
             context["ttl_seconds"] = ttl_seconds
         return await self._episodic.store_episode(
             summary=content,
@@ -367,9 +378,7 @@ class MemoryFacade:
         if not key or not key.strip():
             raise ValueError("key must not be empty")
         if not 0.0 <= confidence <= 1.0:
-            raise ValueError(
-                f"confidence must be in [0.0, 1.0], got {confidence}",
-            )
+            raise ValueError(f"confidence must be in [0.0, 1.0], got {confidence}")
         context: dict[str, Any] = {"procedure_key": key}
         if expires_at is not None:
             context["expires_at"] = expires_at
@@ -391,18 +400,15 @@ class MemoryFacade:
         """Extractively compress *entries* into a single view of ≤ ``target_tokens``.
 
         Phase 2 implementation: highest-importance first, in-order until the
-        running token count would exceed ``target_tokens``.  Idempotent —
-        a view that already fits the budget is returned with
-        ``entries_dropped=0``.
-
-        The abstractive path (LLM-summarised) lands in PR 5; this hook is
-        already pinned by [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md)
-        PR 4's summarize-on-close path so the signature is frozen.
+        running token count would exceed ``target_tokens``.  Idempotent.
+        Entries individually larger than ``target_tokens`` are silently
+        skipped (knapsack-suboptimal but acceptable for Phase 2 — the
+        extractive path is a stop-gap until PR 5's abstractive path) and
+        count toward ``entries_dropped``.  The signature is pinned by
+        [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4.
         """
         if target_tokens < 0:
-            raise ValueError(
-                f"target_tokens must be >= 0, got {target_tokens}",
-            )
+            raise ValueError(f"target_tokens must be >= 0, got {target_tokens}")
         entry_list = list(entries)
         # Stable-sort by importance descending so equal-importance entries
         # retain their input order (deterministic for tests).
@@ -475,9 +481,7 @@ def budget_to_limit(
     if budget_memory_tokens <= 0:
         return max(1, fallback_limit)
     if avg_entry_tokens <= 0:
-        raise ValueError(
-            f"avg_entry_tokens must be positive, got {avg_entry_tokens}",
-        )
+        raise ValueError(f"avg_entry_tokens must be positive, got {avg_entry_tokens}")
     return max(1, budget_memory_tokens // avg_entry_tokens)
 
 

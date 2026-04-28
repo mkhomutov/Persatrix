@@ -20,6 +20,7 @@ import pytest
 from agents.memory.facade import (
     DEFAULT_AVG_ENTRY_TOKENS,
     CompressedView,
+    MemoryDisabledError,
     MemoryEntry,
     MemoryFacade,
     budget_to_limit,
@@ -56,7 +57,9 @@ async def test_close_before_initialize_is_noop() -> None:
 
 async def test_use_before_initialize_raises() -> None:
     fac = MemoryFacade(agent_id="cold", db_path=":memory:")
-    with pytest.raises(RuntimeError, match="not initialised"):
+    # PR 2a follow-up L1/L2: facade raises the memory-specific error type
+    # (still a RuntimeError subclass for backward compat).
+    with pytest.raises(MemoryDisabledError, match="not initialised"):
         await fac.retrieve_relevant("anything")
 
 
@@ -64,8 +67,15 @@ async def test_close_then_reuse_raises() -> None:
     fac = MemoryFacade(agent_id="reuse", db_path=":memory:")
     await fac.initialize()
     await fac.close()
-    with pytest.raises(RuntimeError, match="not initialised"):
+    with pytest.raises(MemoryDisabledError, match="not initialised"):
         await fac.retrieve_relevant("anything")
+
+
+async def test_episodic_property_raises_memory_disabled() -> None:
+    """L1: ``episodic`` property uses the same error contract as writes."""
+    fac = MemoryFacade(agent_id="ep", db_path=":memory:")
+    with pytest.raises(MemoryDisabledError, match="not initialised"):
+        _ = fac.episodic
 
 
 # ─── store_observation + retrieve_relevant ───────────────────

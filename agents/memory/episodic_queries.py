@@ -70,6 +70,11 @@ class Episode:
     created_at: float
     compressed_at: float | None
     compression_level: int  # 0=raw, 1=summarized, 2=distilled
+    # RFC 0020 §D column-level scope, projected onto the dataclass in
+    # PR 2a so non-facade writers (``InteractionTracker``) are visible to
+    # ``MemoryFacade.retrieve_relevant(scope=...)`` filtering.  Defaults
+    # to ``None`` so legacy rows without a scope value round-trip cleanly.
+    scope: str | None = None
 
 
 # Column list for SELECT queries — keeps row_to_episode() positional
@@ -78,6 +83,7 @@ _EPISODE_COLS = (
     "id", "agent_id", "summary", "context_json", "outcome",
     "importance", "access_count", "last_accessed_at",
     "tags_json", "created_at", "compressed_at", "compression_level",
+    "scope",
 )
 EPISODE_SELECT = ", ".join(_EPISODE_COLS)
 _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
@@ -110,6 +116,7 @@ def row_to_episode(row: aiosqlite.Row) -> Episode:
         created_at=row[9],
         compressed_at=row[10],
         compression_level=row[11],
+        scope=row[12],
     )
 
 

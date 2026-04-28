@@ -187,21 +187,40 @@ Integration (Python):
 
 #### Follow-up findings (from PR #220 deep review)
 
-Local review of PR #220 (the in-flight facade-only split) surfaced items below. None block PR 2 merge under its Phase-2 contract; they are scheduled against the listed follow-on so PR 5 (Phase 4b — procedural decay + recall integrations) does not inherit them.
+All items resolved in PR #221. None blocked PR 2 merge under its Phase-2 contract.
 
-| ID | Severity | Finding | Owner / target |
-|----|----------|---------|----------------|
-| M1 | Medium | `MemoryFacade.retrieve_relevant` scope filter only consults `Episode.context["scope"]`, not the column-level `scope` written by RFC 0020's `InteractionTracker`. Masked today because the facade double-writes scope into `context`, but any non-facade writer is silently invisible to scope filtering. Fix: project the `scope` column onto the `Episode` dataclass and prefer it over `context["scope"]`. Add a unit test that calls `EpisodicMemory.store_episode(scope="x", context={})` directly and then asserts `MemoryFacade.retrieve_relevant(scope="x")` returns it. | PR 2a (`feature/v030-rfc0008-eviction`) |
-| M2 | Medium | `schemas/agent.schema.json` `memory.min_score` defaults to `null`. `_inject_memories` concatenates recalled entries verbatim into the **system** prompt; absent a relevance floor, low-score entries cross the trust boundary (OWASP LLM01 / memory poisoning). Recommend defaulting `min_score: 0.20` (matches existing `DEFAULT_EPISODIC_MIN_SCORE`) and updating the schema description to cite the trust-boundary rationale. | PR 2a |
-| L1 | Low | `MemoryFacade.episodic` property raises bare `RuntimeError("MemoryFacade not initialised — call initialize() first")` while `_require_initialised()` raises `MemoryDisabledError` for the identical condition. Make `episodic` raise `MemoryDisabledError` for a single error contract. | PR 2a |
-| L2 | Low | `tests/unit/python/test_memory_facade.py` pins only `RuntimeError`; the public `MemoryDisabledError` (re-exported) is not asserted. Tighten tests once L1 is fixed. | PR 2a |
-| L3 | Low | `agents/server.py` `stop()` if/else both call `await agent.close_memory()` — only the log line differs. Flatten to a single call with one log statement. | PR 2a |
-| L4 | Low | `MemoryFacade.compress()` silently skips entries larger than `target_tokens` (knapsack-suboptimal). Behaviour is acceptable for Phase 2 but undocumented; add to the docstring. | PR 2a |
-| L5 | Low | `MemoryFacade.store_observation` docstring missing the `outcome` parameter. | PR 2a |
-| Info-1 | Info | Glossary [docs/ai-glossary.md](../ai-glossary.md) does not yet define `MemoryFacade`, `MemoryEntry`, `CompressedView`, `Candidate`, or `MemoryDisabledError`. Per [copilot-instructions §Terminology](../../.github/copilot-instructions.md), new project terms ship in the same change. | ✅ Resolved — section added to `docs/ai-glossary.md` before merge |
-| Info-2 | Info | ROADMAP RFC tracker row + "Current milestone" line need to flip on PR #220 merge per [Status Hygiene](../development-workflow.md#status-hygiene). | ✅ Resolved — ROADMAP "Last updated" + "Current milestone" + Merged PR History updated (2026-04-28) |
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| M1 | Med | `retrieve_relevant` scope filter missed column-level `scope`; non-facade writers invisible. | ✅ PR #221 (`test_facade_scope_filter_finds_non_facade_writer`) |
+| M2 | Med | `memory.min_score` defaulted to `null` — low-score entries reached the system prompt (OWASP LLM01). | ✅ PR #221 (schema default → `0.20`; CHANGELOG entry) |
+| L1 | Low | `MemoryFacade.episodic` raised bare `RuntimeError` instead of `MemoryDisabledError`. | ✅ PR #221 |
+| L2 | Low | Tests pinned `RuntimeError` not `MemoryDisabledError`. | ✅ PR #221 (`test_episodic_property_raises_memory_disabled`) |
+| L3 | Low | `agents/server.py` `stop()` duplicated `close_memory()` call. | ✅ PR #221 |
+| L4 | Low | `MemoryFacade.compress()` silent skip undocumented. | ✅ PR #221 |
+| L5 | Low | `store_observation` docstring missing `outcome` param. | ✅ PR #221 |
+| Info-1 | Info | Glossary missing `MemoryFacade`, `MemoryEntry`, `CompressedView`, `Candidate`, `MemoryDisabledError`. | ✅ PR #221 (glossary section added) |
+| Info-2 | Info | ROADMAP flip needed on PR #220 merge. | ✅ Done (2026-04-28) |
 
 > **PR 2a scope expansion**: PR 2a (`feature/v030-rfc0008-eviction`) was already triggered by the PR 2 sizing-risk split for eviction. Items M1 / M2 / L1–L5 above are absorbed into PR 2a's scope so PR 2 stays at the facade-only surface that the cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) require. PR 2a remains bookkeeping under the PR 2 row — canonical 6-PR count unchanged.
+
+#### Follow-up findings (from PR #221 deep review)
+
+All blockers resolved in PR #221; deferrals routed to PR 5.
+
+| ID | Sev | Finding | Target |
+|----|-----|---------|--------|
+| M1 | Med | `cadence > 0` / `cap >= 1` / `ttl >= 1` validated in async task — silent loss on first tick. Move to `MemoryFacade.__init__`. | ✅ PR #221 |
+| M2 | Med | First eviction deferred a full cadence — over-cap agents stay bloated. Run startup pass after `min(60, cadence/10)` s. | ✅ PR #221 |
+| M3 | Med | `MemoryFacade.initialize` reaches into `EpisodicMemory._ensure_db()`. Promote a `connection` property. | PR 5 (with L7) |
+| L1 | Low | `__init__` eviction params lack validation; subsumed by M1. | ✅ PR #221 |
+| L2 | Low | `test_eviction_loop_survives_pass_failure` never injects a failure. Patch `EvictionPass.run` to raise then succeed. | ✅ PR #221 |
+| L3 | Low | `_score_rows` returns `list[dict]` — opaque to mypy. Promote to `TypedDict`. | PR 5 |
+| L4–L6 | Low | Narrow `except`; drop dead `base` local; strengthen SQLi comment in `_evict_size_cap`. | PR 2a — nice to have |
+| L7 | Low | Missing e2e (gRPC + eviction), concurrent-write, FTS5-sync, `initialize_memory` wiring tests. | PR 5 |
+
+> **Routing**: M1/M2/L2 resolved in PR #221. M3/L3/L7 deferred to PR 5 (Phase 4b) so the SLF001-leak refactor lands with the wiring tests that exercise the new seam, avoiding a re-triggered sizing-risk split. Canonical 6-PR count unchanged.
+
+> **✅ Merged as PR #221 (2026-04-28)** — episodic eviction, startup-delay fix (M2), `__init__` validation (M1), procedure-row exclusion, `min_score` CHANGELOG entry, all PR #220 follow-ups resolved.
 
 ---
 

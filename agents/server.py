@@ -318,12 +318,12 @@ class AgentServer:
             try:
                 # Close persona-agent three-tier memory or task-agent
                 # MemoryFacade (RFC 0008 PR plan PR 2).  ``close_memory``
-                # is a no-op when no facade was opened.
+                # is a no-op when no facade was opened.  PR 2a follow-up
+                # L3: single call site \u2014 the persona/task distinction is
+                # only relevant for logging.
+                await agent.close_memory()
                 if isinstance(agent, _LLMPersonaAgent):
-                    await agent.close_memory()
                     logger.info("Closed memory for persona agent %s", agent_id)
-                else:
-                    await agent.close_memory()
                 await agent.shutdown()
             except Exception:
                 logger.exception("Error shutting down agent %s", agent_id)

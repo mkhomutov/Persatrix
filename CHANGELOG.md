@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`memory.min_score` schema default `null` → `0.20`** (RFC 0008 PR 2a).
+  Operators with `memory.enabled: true` who did not previously set
+  `memory.min_score` will see strictly fewer recall results after this
+  release: low-score entries are no longer concatenated into the system
+  prompt by `BaseAgent._inject_memories`.  Rationale: closes the
+  recall-side trust-boundary leak flagged by OWASP LLM01 / memory
+  poisoning (PR #220 deep-review M-1).  To restore the pre-PR-221
+  behaviour explicitly, set `memory.min_score: null` in
+  [`config/agents.yaml`](config/agents.yaml).
+
+### Added
+
+- **Episodic-tier eviction** (RFC 0008 §G, PR 2a).  TTL eviction of
+  low-importance entries (`importance < 0.3`, default 30-day window) and
+  hybrid-score size-cap eviction (`importance · 0.6 + recency · 0.3 +
+  access · 0.1`, default cap 1000) run on a per-agent background loop
+  (default cadence 1 hour).  Procedural-tier rows are excluded so
+  PR 5 owns confidence decay end-to-end.  New config keys:
+  `memory.episodic_cap`, `memory.ttl_low_importance_days`,
+  `memory.eviction_cadence_seconds`.
+
 ## [0.2.3] - 2026-04-24
 
 > **Codename:** Observability Foundation
