@@ -203,6 +203,21 @@ def test_result_from_metadata_rejects_bad_memory_writes_shape() -> None:
         )
 
 
+def test_result_from_metadata_revalidates_on_deserialise() -> None:
+    """PR #224 (RFC 0008 PR 3a) — S6: ``from_metadata_value`` must
+    re-run :meth:`DelegationResult.validate` so a payload reconstructed
+    from a replay/audit path (log buffer, persisted task metadata, etc.)
+    cannot smuggle an out-of-set ``status`` or non-dict ``artifacts``
+    past the contract.  Symmetric with the S4 fix on
+    :meth:`DelegationRequest.from_context_value`."""
+    bad_status = (
+        '{"version":1,"summary":"s","status":"ok",'
+        '"artifacts":{},"decisions":[],"memory_writes":[],"risks":[]}'
+    )
+    with pytest.raises(DelegationContractError, match="status"):
+        DelegationResult.from_metadata_value(bad_status)
+
+
 # ─── MemoryWriteEntry ──────────────────────────────────────────
 
 

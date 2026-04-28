@@ -29,6 +29,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import jsonschema  # type: ignore[import-untyped]
+
 from ..base import CONTEXT_PACKAGE_KEY, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .delegation import (
     DELEGATION_REQUEST_KEY,
@@ -105,43 +107,45 @@ class SubAgentSpawner:
 
         task_id = f"delegation-{uuid.uuid4().hex[:12]}"
         wf_id = workflow_id or "delegation"
-        context: dict[str, str] = {
-            DELEGATION_REQUEST_KEY: request.to_json(),
-        }
+        # PR #222 deep review S5: bound untrusted-shape input at the
+        # spawner trust boundary (OWASP A05).  ``context_package`` is
+        # typed ``dict[str, Any]`` with no depth or size limit — a
+        # hostile or buggy caller could otherwise push an arbitrarily
+        # large blob into ``task.context`` (which is ``dict[str, str]``)
+        # and the sub-agent's memory.  We fail fast in the *caller*
+        # stack rather than letting the sub-agent OOM.  The per-field
+        # check stays ahead of the whole-payload check below so the
+        # error message points at the offending field.
+        serialised_pkg = ""
         if request.context_package:
             serialised_pkg = _json.dumps(
                 request.context_package, sort_keys=True,
             )
-            # PR #222 deep review S5: bound untrusted-shape input at the
-            # spawner trust boundary (OWASP A05).  ``context_package``
-            # and ``output_schema`` are typed ``dict[str, Any]`` with no
-            # depth or size limit — a hostile or buggy caller could
-            # otherwise push an arbitrarily large blob into
-            # ``task.context`` (which is ``dict[str, str]``) and the
-            # sub-agent's memory.  We fail fast in the *caller* stack
-            # rather than letting the sub-agent OOM.  PR 1 already
-            # established bounded-shape discipline for the existing
-            # ``_context_package`` reservation; PR 3 should not undo it.
             if len(serialised_pkg) > MAX_CONTEXT_PACKAGE_BYTES:
                 raise DelegationContractError(
                     f"DelegationRequest.context_package exceeds size cap: "
                     f"{len(serialised_pkg)} > {MAX_CONTEXT_PACKAGE_BYTES} bytes",
                 )
-            context[CONTEXT_PACKAGE_KEY] = serialised_pkg
-        if request.output_schema:
-            # Same trust-boundary rationale as ``context_package`` above.
-            # ``output_schema`` is *not* placed on the wire here — it is
-            # carried inside ``DelegationRequest.to_json()`` already —
-            # but bounding it at dispatch keeps the cap centralised.
-            serialised_schema = _json.dumps(
-                request.output_schema, sort_keys=True,
+        # PR #224 (RFC 0008 PR 3a) — N7: serialise the request payload
+        # exactly once.  PR 3 called ``request.to_json()`` for
+        # ``DELEGATION_REQUEST_KEY`` and then re-serialised
+        # ``output_schema`` immediately below purely to size-check it,
+        # which both wasted CPU on every dispatch and risked the two
+        # encodings drifting (``sort_keys`` etc.).  The whole-payload
+        # cap subsumes the per-field cap because every constituent
+        # (``context_package``, ``output_schema``, …) is a subset of
+        # the serialised request.
+        request_payload = request.to_json()
+        if len(request_payload) > MAX_CONTEXT_PACKAGE_BYTES:
+            raise DelegationContractError(
+                f"DelegationRequest payload exceeds size cap: "
+                f"{len(request_payload)} > {MAX_CONTEXT_PACKAGE_BYTES} bytes",
             )
-            if len(serialised_schema) > MAX_CONTEXT_PACKAGE_BYTES:
-                raise DelegationContractError(
-                    f"DelegationRequest.output_schema exceeds size cap: "
-                    f"{len(serialised_schema)} > {MAX_CONTEXT_PACKAGE_BYTES} "
-                    "bytes",
-                )
+        context: dict[str, str] = {
+            DELEGATION_REQUEST_KEY: request_payload,
+        }
+        if serialised_pkg:
+            context[CONTEXT_PACKAGE_KEY] = serialised_pkg
 
         task = TaskInput(
             task_id=task_id,
@@ -158,6 +162,15 @@ class SubAgentSpawner:
         output = await child.handle(task)
 
         result = self._extract_result(output)
+        # PR #224 (RFC 0008 PR 3a) — S1: enforce ``output_schema``
+        # against ``DelegationResult.artifacts`` *before* the merge
+        # engine runs.  PR 3 marked this an explicit TODO (OWASP A04
+        # — improper input validation): callers populating
+        # ``output_schema`` were silently treating it as advisory, and
+        # a sub-agent that returned the wrong artifact shape would
+        # surface only at the next consumer.  We fail at the trust
+        # boundary instead.
+        self._enforce_output_schema(request, result)
         outcome = self._merge_engine.merge_result(
             result,
             request,
@@ -178,6 +191,47 @@ class SubAgentSpawner:
         )
 
     # -- internals --------------------------------------------------
+
+    @staticmethod
+    def _enforce_output_schema(
+        request: DelegationRequest,
+        result: DelegationResult,
+    ) -> None:
+        """Validate ``result.artifacts`` against ``request.output_schema``.
+
+        No-op when ``output_schema`` is empty (the contract treats an
+        empty schema as "no constraint").  Surfaces a
+        :class:`DelegationFailure` with the offending JSON-pointer-style
+        path on any violation so callers can route the failure into a
+        retry / human-review queue without having to re-serialise the
+        artifacts.
+
+        The schema itself is validated (Draft-7 meta-schema) only on
+        first use — a malformed ``output_schema`` is a caller bug and
+        surfaces the same way as a contract violation.
+        """
+        if not request.output_schema:
+            return
+        try:
+            jsonschema.Draft7Validator.check_schema(request.output_schema)
+        except jsonschema.SchemaError as exc:
+            raise DelegationFailure(
+                f"DelegationRequest.output_schema is not a valid Draft-7 "
+                f"schema: {exc.message}",
+            ) from exc
+        validator = jsonschema.Draft7Validator(request.output_schema)
+        errors = sorted(
+            validator.iter_errors(result.artifacts),
+            key=lambda e: list(e.absolute_path),
+        )
+        if not errors:
+            return
+        first = errors[0]
+        path = "/".join(str(p) for p in first.absolute_path) or "<root>"
+        raise DelegationFailure(
+            f"DelegationResult.artifacts violates output_schema at "
+            f"{path}: {first.message}",
+        )
 
     def _extract_result(self, output: TaskOutput) -> DelegationResult:
         """Deserialise :data:`DELEGATION_RESULT_KEY` from *output*."""
@@ -238,24 +292,72 @@ class FacadeBoundSpawner(SubAgentSpawner):
         self._facade = memory_facade
 
     async def _persist_admitted(self, outcome: MergeOutcome) -> list[str]:
+        """Persist admitted entries through the bound facade.
+
+        PR #224 (RFC 0008 PR 3a) — N5: best-effort rollback on
+        partial-batch failure.  PR 3 persisted entries one-by-one and,
+        on any ``store_observation`` exception, left a partially-
+        persisted batch behind with no record of which keys had landed.
+        Replay logic and the caller's :class:`SpawnResult.admitted_entry_ids`
+        contract both assumed all-or-nothing semantics.
+
+        We now compensate as follows:
+
+        1. Persist each admitted entry, accumulating the returned IDs.
+        2. On the first ``store_observation`` failure, attempt to
+           ``forget(id)`` every successfully-persisted entry from this
+           batch in reverse order.  Each rollback is best-effort: we
+           swallow individual exceptions so the original error remains
+           the surfaced cause, and we log any rollback failures so the
+           operator can reconcile.
+        3. Re-raise the original exception with the original traceback.
+
+        The facade exposes ``forget`` from PR 2; if a future facade
+        variant lacks it (``AttributeError``) we degrade to a warning
+        and skip rollback rather than masking the real error.
+        """
         ids: list[str] = []
-        for entry in outcome.admitted:
-            # Phase 2 memory facade routes both `episodic` and `notes`
-            # writes through store_observation tagged with the tier
-            # name.  PR 5 introduces a tier-discriminated path.
-            tags = list(entry.tags) + [
-                f"tier:{entry.tier}",
-                f"key:{entry.key}",
-                f"source:{entry.source_agent or 'unknown'}",
-            ]
-            entry_id = await self._facade.store_observation(
-                entry.content,
-                importance=entry.importance,
-                ttl_seconds=entry.ttl_seconds,
-                tags=tags,
-            )
-            ids.append(entry_id)
+        try:
+            for entry in outcome.admitted:
+                # Phase 2 memory facade routes both `episodic` and `notes`
+                # writes through store_observation tagged with the tier
+                # name.  PR 5 introduces a tier-discriminated path.
+                tags = list(entry.tags) + [
+                    f"tier:{entry.tier}",
+                    f"key:{entry.key}",
+                    f"source:{entry.source_agent or 'unknown'}",
+                ]
+                entry_id = await self._facade.store_observation(
+                    entry.content,
+                    importance=entry.importance,
+                    ttl_seconds=entry.ttl_seconds,
+                    tags=tags,
+                )
+                ids.append(entry_id)
+        except Exception:
+            await self._rollback_persisted(ids)
+            raise
         return ids
+
+    async def _rollback_persisted(self, ids: list[str]) -> None:
+        """Best-effort reverse-order delete of partially-persisted IDs."""
+        episodic = getattr(self._facade, "episodic", None)
+        if episodic is None:
+            logger.warning(
+                "facade %r does not expose episodic accessor; skipping "
+                "rollback of %d partially-persisted entries",
+                type(self._facade).__name__, len(ids),
+            )
+            return
+        for entry_id in reversed(ids):
+            try:
+                await episodic.delete_episode(entry_id)
+            except Exception:
+                logger.warning(
+                    "rollback of partially-persisted entry %s failed; "
+                    "operator must reconcile",
+                    entry_id, exc_info=True,
+                )
 
 
 __all__ = [

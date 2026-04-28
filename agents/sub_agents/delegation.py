@@ -198,14 +198,12 @@ class DelegationRequest:
     """JSON-Schema-like description of the expected
     :attr:`DelegationResult.artifacts` shape.
 
-    .. todo::
-       PR #222 deep review S1: this field is round-tripped on the wire
-       and bounded by :data:`MAX_CONTEXT_PACKAGE_BYTES`, but the merge
-       engine does **not** validate :class:`DelegationResult.artifacts`
-       against it yet.  Enforcement (jsonschema-based) is a fast-follow
-       to PR 3 — callers populating ``output_schema`` today should treat
-       it as advisory.  Adding enforcement is mechanical once the
-       optional ``jsonschema`` dependency is on the agent runtime.
+    Enforced by :meth:`agents.sub_agents.spawner.SubAgentSpawner._enforce_output_schema`
+    (added in RFC 0008 PR 3a / PR #224 — closes the S1 TODO from PR #222
+    deep review).  Empty schema = no constraint; otherwise the schema is
+    validated against the Draft-7 meta-schema on first use and the
+    sub-agent's ``artifacts`` must conform or the spawner raises
+    :class:`DelegationFailure` before the merge engine runs.
     """
     trust_ceiling: float = DEFAULT_TRUST_CEILING
     max_memory_writes: int = DEFAULT_MAX_MEMORY_WRITES
@@ -394,7 +392,7 @@ class DelegationResult:
                     source_agent=raw.get("source_agent"),
                 ),
             )
-        return cls(
+        result = cls(
             summary=str(data.get("summary", "")),
             status=str(data.get("status", "")),
             artifacts=dict(data.get("artifacts") or {}),
@@ -402,6 +400,15 @@ class DelegationResult:
             memory_writes=tuple(entries),
             risks=tuple(data.get("risks") or ()),
         )
+        # PR #224 (RFC 0008 PR 3a) — S6: re-validate on deserialisation,
+        # symmetric with :meth:`DelegationRequest.from_context_value`'s
+        # S4 fix.  Replay/audit paths reconstruct results from raw JSON
+        # (e.g. log buffer, persisted task metadata) and previously
+        # bypassed the closed-set ``status`` check entirely; a malformed
+        # status would surface only when downstream code happened to
+        # branch on it.  We fail at the trust boundary instead.
+        result.validate()
+        return result
 
 
 __all__ = [

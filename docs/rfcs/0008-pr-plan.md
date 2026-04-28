@@ -317,6 +317,67 @@ Pass-2 review: S2–S5 + N1–N4 resolved in-PR. Remaining items below.
 
 ---
 
+### PR 3a: `feature/v030-rfc0008-delegation-metrics` — Bookkeeping (PR 3 follow-up)
+
+**Depends on**: PR 3 merged.
+**Estimated size**: ~450 lines (within cap).
+**Bookkeeping under PR 3 row** — canonical 6-PR count unchanged.
+
+#### Scope
+
+Sizing-risk follow-up to PR 3 absorbing the deferred Go-side delegation
+counter inventory plus the must-fix / nice-to-have findings (S1, S6,
+N5–N7) from the [PR #222 deep review](#follow-up-findings-from-pr-222-deep-review).
+
+| File | Change |
+|------|--------|
+| `internal/observability/metrics/metrics.go` | Register four new orchestrator-side counters: `orchestrator.delegation.merge_outcome` (`{result}`), `orchestrator.delegation.memory_writes_admitted` (`{entry}`), `orchestrator.delegation.memory_writes_rejected` (`{entry}`), `orchestrator.delegation.memory_writes_downscaled` (`{entry}`). Names mirror the Python merge engine's structured-log metric strings so the future log → counter bridge is a one-to-one lookup. |
+| `internal/observability/metrics/metrics_test.go` | Extend `TestInstrumentInventory` to assert all four delegation instrument names + units. |
+| `agents/sub_agents/delegation.py` | **S6** — `DelegationResult.from_metadata_value` now calls `result.validate()` before return, symmetric with the S4 fix on `DelegationRequest.from_context_value`. Replay/audit paths can no longer smuggle out-of-set `status`. The S1 TODO docstring on `DelegationRequest.output_schema` is replaced with a pointer to the spawner enforcement step (S1 closed). |
+| `agents/sub_agents/spawner.py` | **S1** — `SubAgentSpawner._enforce_output_schema` runs `jsonschema.Draft7Validator` against `DelegationResult.artifacts` before merge; the schema itself is meta-validated on first use. Empty schema = no constraint. **N7** — request payload is serialised exactly once via `request.to_json()`; the per-field `output_schema` size check is dropped (subsumed by a whole-payload size cap). The per-field `context_package` check stays (more specific error). |
+| `agents/sub_agents/spawner.py` | **N5** — `FacadeBoundSpawner._persist_admitted` now does best-effort reverse-order rollback via the existing `MemoryFacade.episodic` accessor on partial-batch `store_observation` failure. Original exception is re-raised; rollback failures are logged but do not mask the cause. |
+| `agents/memory/episodic.py` | **N5 supporting API** — new `EpisodicMemory.delete_episode(episode_id)` (agent-scoped per-row delete by ID). |
+| `agents/task_agent.py` | **N6** — `_parse_or_synthesise` collapsed into a single `DelegationResult.from_metadata_value` call. The previous `{...}` heuristic + double `json.loads` is gone; rejection is debug-logged (synthesis is the documented common case in v0.3, not a warning). |
+| `tests/unit/python/test_delegation_contract.py` | New `test_result_from_metadata_revalidates_on_deserialise` (S6 mirror of the S4 test). |
+| `tests/integration/test_delegation_end_to_end.py` | New tests: `test_output_schema_enforced_against_artifacts` (S1 violation path), `test_output_schema_pass_persists_admitted` (S1 happy path), `test_malformed_output_schema_rejected` (S1 caller-bug path), `test_partial_persist_failure_rolls_back_admitted` (N5). The pre-existing `test_oversize_output_schema_rejected_at_dispatch` is updated to expect the new whole-payload error message (N7 wording change). |
+
+#### Key implementation details
+
+- **S1 enforcement layer**: validation runs in the spawner — *before* `MergeEngine.merge_result` — so a contract violation surfaces as `DelegationFailure` at the trust boundary, not at the next consumer. The merge engine deliberately stays artifact-shape-agnostic (its concern is `MemoryWriteEntry` admission). `jsonschema` is already an agents-runtime dependency (`agents/validate.py`).
+- **S6 symmetry**: every deserialisation entry-point on the contract (now both `from_context_value` and `from_metadata_value`) re-runs `validate()`. Trust-boundary discipline applies in both directions across the planned RFC 0009 process boundary.
+- **N5 rollback semantics**: best-effort, reverse-order delete via the existing `MemoryFacade.episodic` accessor (no new public method on the facade — the spawner already needs episodic access for other compensation paths). Partial-batch failures are unusual (storage-layer transient) and the rollback is itself best-effort because the same storage layer just failed once. The compensation is "do not amplify the failure into a long-lived inconsistency"; reconciliation tooling lives in PR 6 if it proves needed.
+- **N7 / size-cap consolidation**: dropping the per-field `output_schema` size check removes one of the two encoding paths (was `_json.dumps(request.output_schema, sort_keys=True)`), so `request.to_json()`'s canonical encoding is the sole authority. The whole-payload check is a strict superset.
+- **Go-side counter inventory only**: registering the four counters documents the orchestrator-side surface and stabilises dashboard names. The structured-log → counter ingestion bridge (consuming the `delegation_metric` records on the agent log stream) is a follow-up — same pattern as PR 1b's `cost.ContextPackageMetrics` and PR 2a's `eviction_metric` records, which also ship without an automated bridge.
+
+#### Tests
+
+Unit (Python):
+- `test_result_from_metadata_revalidates_on_deserialise` (S6).
+
+Integration (Python):
+- `test_output_schema_enforced_against_artifacts` — Draft-7 mismatch raises `DelegationFailure` with `output_schema` in the message (S1 violation path).
+- `test_output_schema_pass_persists_admitted` — conforming artifacts flow through to memory (S1 happy path).
+- `test_malformed_output_schema_rejected` — caller-supplied schema that fails the meta-schema raises `DelegationFailure` (S1 caller-bug path).
+- `test_partial_persist_failure_rolls_back_admitted` — flaky `store_observation` triggers rollback; partially-persisted entries are absent from `retrieve_relevant` (N5).
+- `test_oversize_output_schema_rejected_at_dispatch` — updated to assert the new whole-payload error message (N7 wording change).
+
+Go:
+- `TestInstrumentInventory` — asserts `orchestrator.delegation.{merge_outcome, memory_writes_admitted, memory_writes_rejected, memory_writes_downscaled}` are registered with the documented units.
+
+#### PR checklist
+
+- [ ] `make test` passes (Python + Go suites)
+- [ ] `make lint` clean for changed files (`agents/sub_agents/`, `agents/memory/`, `agents/task_agent.py`, integration test)
+- [ ] S1 closed: `output_schema` is no longer advisory — spawner runs Draft-7 validation against `DelegationResult.artifacts` before merge
+- [ ] S6 closed: `DelegationResult.from_metadata_value` re-runs `validate()` on deserialisation
+- [ ] N5 closed: `FacadeBoundSpawner._persist_admitted` rolls back on partial-batch failure
+- [ ] N6 closed: `_parse_or_synthesise` collapsed into a single contract-parser call
+- [ ] N7 closed: request payload serialised exactly once; per-field `output_schema` size check dropped
+- [ ] Go counter inventory: four new instruments registered with documented names + units
+- [ ] PR 4 reviewer pinged: PR 4 (`feature/v030-rfc0008-shared-pools-acl`) `Depends on` line was added during the PR 3 follow-up work; the dependency is now satisfied
+
+---
+
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
 
 **Depends on**: PR 2 + PR 3 + PR 3a.

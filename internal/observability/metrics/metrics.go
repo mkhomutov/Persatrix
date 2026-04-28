@@ -86,6 +86,22 @@ type Instruments struct {
 	WorkflowDuration  metric.Float64Histogram
 	StepDispatched    metric.Int64Counter
 	StepDuration      metric.Float64Histogram
+
+	// RFC 0008 PR 3a — delegation merge counters.
+	//
+	// Back-fills the orchestrator-side metric inventory deferred from PR 3
+	// per the sizing-risk note in docs/rfcs/0008-pr-plan.md.  The Python
+	// merge engine (agents/sub_agents/merge.py) emits structured logs
+	// named ``delegation_metric`` carrying ``{metric, labels, value}``.
+	// Registering the counters here documents the orchestrator-side
+	// inventory and lets dashboards target stable instrument names; the
+	// log → counter ingestion bridge lands alongside the agent-log
+	// ingestion path (LogServiceServer) when delegation traffic is wired
+	// across the gRPC boundary.
+	DelegationMergeOutcome           metric.Int64Counter
+	DelegationMemoryWritesAdmitted   metric.Int64Counter
+	DelegationMemoryWritesRejected   metric.Int64Counter
+	DelegationMemoryWritesDownscaled metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.
@@ -150,6 +166,48 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 		metric.WithDescription("Per-step dispatch + execute wall-clock duration."),
 	); err != nil {
 		return nil, fmt.Errorf("create step.duration: %w", err)
+	}
+
+	// RFC 0008 PR 3a — delegation merge counters.  Names mirror the
+	// metric strings emitted by the Python merge engine
+	// (agents/sub_agents/merge.py) so the log → counter bridge can do a
+	// one-to-one lookup by the ``metric`` field on the structured log.
+	if i.DelegationMergeOutcome, err = m.Int64Counter(
+		"orchestrator.delegation.merge_outcome",
+		metric.WithUnit("{result}"),
+		metric.WithDescription(
+			"DelegationResult merge outcomes labelled by overall status (completed|partial|failed).",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create delegation.merge_outcome: %w", err)
+	}
+	if i.DelegationMemoryWritesAdmitted, err = m.Int64Counter(
+		"orchestrator.delegation.memory_writes_admitted",
+		metric.WithUnit("{entry}"),
+		metric.WithDescription(
+			"MemoryWriteEntry items admitted by the merge engine and persisted to caller memory.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create delegation.memory_writes_admitted: %w", err)
+	}
+	if i.DelegationMemoryWritesRejected, err = m.Int64Counter(
+		"orchestrator.delegation.memory_writes_rejected",
+		metric.WithUnit("{entry}"),
+		metric.WithDescription(
+			"MemoryWriteEntry items rejected by the merge engine, labelled by reason "+
+				"(schema_invalid|cap_exceeded|source_agent_set|procedural_tier_rejected|reserved_tag_prefix|conflict).",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create delegation.memory_writes_rejected: %w", err)
+	}
+	if i.DelegationMemoryWritesDownscaled, err = m.Int64Counter(
+		"orchestrator.delegation.memory_writes_downscaled",
+		metric.WithUnit("{entry}"),
+		metric.WithDescription(
+			"MemoryWriteEntry items admitted with importance downscaled to the caller's trust_ceiling.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create delegation.memory_writes_downscaled: %w", err)
 	}
 	return i, nil
 }

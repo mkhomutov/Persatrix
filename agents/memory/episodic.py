@@ -392,6 +392,16 @@ class EpisodicMemory:
             self._ensure_db(), self._agent_id, older_than_days,
         )
 
+    async def delete_episode(self, episode_id: str) -> bool:
+        """Delete a single episode by ID, agent-scoped. RFC 0008 PR 3a / N5."""
+        db = self._ensure_db()
+        cursor = await db.execute(
+            "DELETE FROM episodes WHERE id = ? AND agent_id = ?",
+            (episode_id, self._agent_id),
+        )
+        await db.commit()
+        return (cursor.rowcount or 0) > 0
+
     # ─── Notes (delegated to NoteStore) ────────────────────
 
     async def store_note(
