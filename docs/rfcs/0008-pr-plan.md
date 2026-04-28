@@ -118,9 +118,9 @@ Integration (Go + Python):
 - [x] ROADMAP.md row for RFC 0008 → `🚧 Implementing`
 - [x] Master Progress Overview row 4 → 🔄 In progress
 - [ ] [RFC 0007 PR plan](0007-pr-plan.md) PR 3 reviewer pinged: `repeat_until` loop budget integration is now unblocked
-- [x] **Sizing-risk split triggered**: cost-metrics + state-persistence rows deferred to follow-on PR `feature/v030-rfc0008-context-metrics` (PR 1b — see note below). Packaging Phase 1 ships with structured-log-only observability via `Metrics.Warnings`; full `cost.ContextPackageMetrics` emission and `remaining_context_budget` step-state persistence land in PR 1b without changing the `_context_package` v1 shape.
+- [x] **Sizing-risk split triggered**: cost-metrics + state-persistence deferred to follow-on PR `feature/v030-rfc0008-context-metrics` (PR 1b). Phase 1 ships with structured-log-only observability via `Metrics.Warnings`; full metrics + persistence land in PR 1b without changing the `_context_package` v1 shape.
 
-> **Sizing-risk follow-up (PR 1b)** — `feature/v030-rfc0008-context-metrics`: wires `internal/cost/` `ContextPackageMetrics` (`tokens_before`, `tokens_after`, `compression_ratio`, `candidates_admitted`, `candidates_dropped`) to per-step cost records, and adds `remaining_context_budget` persistence to `internal/state/` step rows so retries consume from the persisted remainder rather than the original allocation. PR 2 (`MemoryFacade`) `Depends on` is updated to reference both PR 1 and PR 1b. This split is contingent (per [PR plan §Sizing risk](#key-implementation-details)) and does not change the canonical 6-PR count for the milestone burndown — PR 1b is bookkeeping under the PR 1 row. **✅ Merged as PR #219 (2026-04-27).**
+> **Sizing-risk follow-up (PR 1b)** — `feature/v030-rfc0008-context-metrics`: wires `cost.ContextPackageMetrics` to per-step cost records and adds `remaining_context_budget` persistence to `internal/state/` step rows. PR 2 `Depends on` references PR 1 + PR 1b. Bookkeeping under PR 1 row — canonical 6-PR count unchanged. **✅ Merged as PR #219 (2026-04-27).**
 
 ---
 
@@ -129,7 +129,7 @@ Integration (Go + Python):
 **Depends on**: PR 1 and PR 1b (`feature/v030-rfc0008-context-metrics` — cost-metrics + state-persistence follow-on, sizing-risk split triggered at PR 1 merge).
 **Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
-> **Sizing-risk split triggered (PR 2 → PR 2a)** — eviction (`agents/memory/eviction.py` + `tests/unit/python/test_memory_eviction.py`) deferred to follow-on PR `feature/v030-rfc0008-eviction`. PR 2 ships the facade surface (`agents/memory/facade.py`, task-agent wiring, schema, tests) so the cross-RFC pins ([RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) unblock immediately; eviction lands in PR 2a without changing the facade API surface or the `_context_package` v1 shape. This split is contingent (per the *Sizing risk* row below) and does not change the canonical 6-PR count for the milestone burndown — PR 2a is bookkeeping under the PR 2 row.
+> **Sizing-risk split triggered (PR 2 → PR 2a)** — eviction (`agents/memory/eviction.py` + tests) deferred to `feature/v030-rfc0008-eviction`. PR 2 ships the facade surface so the cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) unblock immediately. PR 2a is bookkeeping under PR 2 row — canonical 6-PR count unchanged.
 
 #### Scope
 
@@ -187,25 +187,25 @@ Integration (Python):
 
 #### Follow-up findings (from PR #220 deep review)
 
-All items resolved in PR #221. None blocked PR 2 merge under its Phase-2 contract.
+All items resolved in PR #221.
 
 | ID | Sev | Finding (summary) | Status |
 |----|-----|-------------------|--------|
-| M1 | Med | `retrieve_relevant` scope filter missed column-level `scope`; non-facade writers invisible. | ✅ PR #221 (`test_facade_scope_filter_finds_non_facade_writer`) |
-| M2 | Med | `memory.min_score` defaulted to `null` — low-score entries reached the system prompt (OWASP LLM01). | ✅ PR #221 (schema default → `0.20`; CHANGELOG entry) |
+| M1 | Med | `retrieve_relevant` scope filter missed column-level `scope`; non-facade writers invisible. | ✅ PR #221 |
+| M2 | Med | `memory.min_score` defaulted to `null` — low-score entries reached system prompt (OWASP LLM01). | ✅ PR #221 |
 | L1 | Low | `MemoryFacade.episodic` raised bare `RuntimeError` instead of `MemoryDisabledError`. | ✅ PR #221 |
-| L2 | Low | Tests pinned `RuntimeError` not `MemoryDisabledError`. | ✅ PR #221 (`test_episodic_property_raises_memory_disabled`) |
+| L2 | Low | Tests pinned `RuntimeError` not `MemoryDisabledError`. | ✅ PR #221 |
 | L3 | Low | `agents/server.py` `stop()` duplicated `close_memory()` call. | ✅ PR #221 |
 | L4 | Low | `MemoryFacade.compress()` silent skip undocumented. | ✅ PR #221 |
 | L5 | Low | `store_observation` docstring missing `outcome` param. | ✅ PR #221 |
-| Info-1 | Info | Glossary missing `MemoryFacade`, `MemoryEntry`, `CompressedView`, `Candidate`, `MemoryDisabledError`. | ✅ PR #221 (glossary section added) |
-| Info-2 | Info | ROADMAP flip needed on PR #220 merge. | ✅ Done (2026-04-28) |
+| Info-1 | Info | Glossary missing `MemoryFacade`/`MemoryEntry`/`CompressedView`/`Candidate`/`MemoryDisabledError`. | ✅ PR #221 |
+| Info-2 | Info | ROADMAP flip needed on PR #220 merge. | ✅ Done |
 
-> **PR 2a scope expansion**: PR 2a (`feature/v030-rfc0008-eviction`) was already triggered by the PR 2 sizing-risk split for eviction. Items M1 / M2 / L1–L5 above are absorbed into PR 2a's scope so PR 2 stays at the facade-only surface that the cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) require. PR 2a remains bookkeeping under the PR 2 row — canonical 6-PR count unchanged.
+> **PR 2a scope expansion**: PR 2a (`feature/v030-rfc0008-eviction`) absorbs M1/M2/L1–L5 above so PR 2 stays facade-only. Bookkeeping under PR 2 row — canonical 6-PR count unchanged.
 
 #### Follow-up findings (from PR #221 deep review)
 
-All blockers resolved in PR #221; deferrals routed to PR 5.
+All blockers resolved in PR #221; deferrals routed below.
 
 | ID | Sev | Finding | Target |
 |----|-----|---------|--------|
@@ -218,9 +218,9 @@ All blockers resolved in PR #221; deferrals routed to PR 5.
 | L4–L6 | Low | Narrow `except`; drop dead `base` local; strengthen SQLi comment in `_evict_size_cap`. | PR 2a — nice to have |
 | L7 | Low | Missing e2e (gRPC + eviction), concurrent-write, FTS5-sync, `initialize_memory` wiring tests. | PR 5 |
 
-> **Routing**: M1/M2/L2 resolved in PR #221. M3/L3/L7 deferred to PR 5 (Phase 4b) so the SLF001-leak refactor lands with the wiring tests that exercise the new seam, avoiding a re-triggered sizing-risk split. Canonical 6-PR count unchanged.
+> **Routing**: M1/M2/L2 in PR #221. M3/L3/L7 deferred to PR 5 (Phase 4b) so the SLF001-leak refactor lands with wiring tests, avoiding a re-triggered sizing-risk split. Canonical 6-PR count unchanged.
 
-> **✅ Merged as PR #221 (2026-04-28)** — episodic eviction, startup-delay fix (M2), `__init__` validation (M1), procedure-row exclusion, `min_score` CHANGELOG entry, all PR #220 follow-ups resolved.
+> **✅ Merged as PR #221 (2026-04-28)** — episodic eviction, M1/M2 fixes, procedure-row exclusion, all PR #220 follow-ups resolved.
 
 ---
 
@@ -285,21 +285,41 @@ Integration:
 
 #### PR checklist
 
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes (no schema additions in this PR; validates the existing `_context_package` shape from PR 1 round-trips)
-- [ ] `DelegationRequest` / `DelegationResult` dataclasses are frozen and validated against [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim
-- [ ] `MergeEngine` rejects entries with `tier` outside `{episodic, notes}` and emits `procedural_tier_rejected` metric (procedural exclusion is intentional — see Key implementation details)
-- [ ] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
-- [ ] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
-- [ ] `max_memory_writes` cap (default `20`, security item #7) is enforced
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes (no schema additions in this PR; validates the existing `_context_package` shape from PR 1 round-trips)
+- [x] `DelegationRequest` / `DelegationResult` dataclasses are frozen and validated against [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim
+- [x] `MergeEngine` rejects entries with `tier` outside `{episodic, notes}` and emits `procedural_tier_rejected` metric (procedural exclusion is intentional — see Key implementation details)
+- [x] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
+- [x] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
+- [x] `max_memory_writes` cap (default `20`, security item #7) is enforced
 - [ ] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
+
+#### Follow-up findings (from PR #222 deep review)
+
+Pass-2 review: S2–S5 + N1–N4 resolved in-PR. Remaining items below.
+
+| ID | Sev | Finding (summary) | Target |
+|----|-----|-------------------|--------|
+| S1 | Should | `output_schema` not enforced against `DelegationResult.artifacts` (explicit TODO). OWASP A04. | PR 3a (gate before PR 4) |
+| S6 | Should | `DelegationResult.from_metadata_value` missing `.validate()` — asymmetric with S4 fix on `from_context_value`; bypassed by replay/audit paths. | PR 3a (gate before PR 4) |
+| N5 | Nice | `FacadeBoundSpawner._persist_admitted` lacks rollback + test on partial-batch `store_observation` failure. | PR 3a — nice to have |
+| N6 | Nice | `TaskAgent._parse_or_synthesise` brittle `{...}` heuristic → wasted `json.loads` + noisy logs. | PR 3a — nice to have |
+| N7 | Nice | `output_schema` double-serialised at dispatch. Perf nit. | PR 3a — nice to have |
+| N8 | Nice | Test path drift: `tests/integration/python/...` vs `tests/integration/...` (same as PR 2). | PR 6 (normalise plan) |
+| Info-1 | Info | PR 3 checklist: 8 items still `[ ]` — flip on merge. | ✅ Done |
+| Info-2 | Info | ROADMAP PR-count → "3 of 6"; row stays `🚧`. | ✅ Done |
+| Info-3 | Info | No "PR 3a" bookkeeping row (parity with PR 1b/PR 2a). | See PR 3a row below |
+
+> **Sizing-risk follow-up (PR 3a)** — `feature/v030-rfc0008-delegation-metrics`: back-fills Go-side delegation counters from PR 3. Absorbs S1/S6 + N5–N7. PR 4 `Depends on` adds PR 3a. 6-PR count unchanged.
+
+> **✅ Merged as PR #222 (2026-04-28).**
 
 ---
 
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
 
-**Depends on**: PR 2 + PR 3.
+**Depends on**: PR 2 + PR 3 + PR 3a.
 **Estimated size**: ~300–450 lines (calibrated).
 
 #### Scope
