@@ -201,6 +201,21 @@ async def test_failed_status_payload_is_truncated_in_failure_message(
     assert "… (truncated)" in msg, (
         "DelegationFailure message must use the canonical truncation marker"
     )
+    # PR #224 round-3 (Should #3): pin the documented 200-char cap.  The
+    # round-2 test only asserted the marker plus a 1 KB belt-and-braces
+    # bound — a regression that bumped ``_DELEGATION_FAILURE_MESSAGE_CAP``
+    # from 200 to e.g. 2000 would still pass.  Assert the exact contract:
+    # exactly 200 ``X`` characters from the payload land in the message,
+    # and the 201st does not.  Both assertions together catch any drift
+    # of the cap constant in either direction.
+    assert "X" * 200 in msg, (
+        "DelegationFailure message must include the full 200-char cap "
+        "from the bounded payload"
+    )
+    assert "X" * 201 not in msg, (
+        "DelegationFailure message exceeded the documented 200-char cap"
+    )
     # Cap is 200 chars of payload; full prefix + cap + marker is well
-    # under 1 KB.  Belt-and-braces upper bound to catch regressions.
+    # under 1 KB.  Belt-and-braces upper bound to catch catastrophic
+    # regressions where the cap is removed entirely.
     assert len(msg) < 1024, f"DelegationFailure message exceeded sane cap: {len(msg)}"

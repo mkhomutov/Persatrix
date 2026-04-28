@@ -58,16 +58,50 @@ logger = logging.getLogger(__name__)
 # echo.  Single source of truth so any future tweak applies uniformly.
 _DELEGATION_FAILURE_MESSAGE_CAP = 200
 
+# PR #224 review round-3 (Should #1): volume-bounding alone is insufficient
+# defence against CWE-117 log injection.  A sub-agent that returns
+# ``output.result = "harmless\n[ERROR] fake admin alert"`` (well under the
+# 200-char cap) will inject a forged log line into the ``DelegationFailure``
+# message that downstream ``logger.error("dispatch failed: %s", exc)`` calls
+# render verbatim across newlines.  We therefore strip *all* C0 control
+# characters (0x00-0x1F) plus DEL (0x7F) to a visible sentinel ``"\u2424"``
+# (U+2424 SYMBOL FOR NEWLINE) before truncation.  The sentinel is chosen
+# because (a) it is a printable Unicode glyph that survives any sane log
+# pipeline, (b) it is visually distinct from real text so operators can
+# spot the strip in grep output, and (c) it does not collide with any
+# control character it replaces.  TAB (0x09) is included in the strip set
+# because tab-separated log formats would otherwise allow column injection.
+_CTRL_REPLACEMENT = "\u2424"
+_CTRL_TRANSLATION = str.maketrans(
+    {c: _CTRL_REPLACEMENT for c in list(range(0x20)) + [0x7F]}
+)
+
 
 def _bounded(text: object, *, cap: int = _DELEGATION_FAILURE_MESSAGE_CAP) -> str:
-    """Coerce *text* to ``str`` and truncate to *cap* chars with marker.
+    """Sanitise and truncate *text* for inclusion in error messages.
 
-    Returns ``text`` unchanged when within cap; otherwise returns the
-    first ``cap`` characters followed by ``"… (truncated)"`` (matches
-    the marker already used by :meth:`SubAgentSpawner._enforce_output_schema`
-    so log-grep tooling sees one canonical form).
+    Performs two defences against attacker-influenceable text reaching
+    orchestrator logs (LLM01 / OWASP A09 / CWE-117):
+
+    1. **Control-character strip** — every C0 control character (0x00-0x1F)
+       plus DEL (0x7F) is replaced with :data:`_CTRL_REPLACEMENT`.  This
+       neutralises forged-line injection (`\\n`, `\\r`), ANSI escape
+       sequences (`\\x1b[...`), NUL bytes, and tab-column injection in
+       TSV-style log pipelines.
+    2. **Length cap** — strings longer than *cap* are truncated to the
+       first *cap* characters followed by the canonical marker
+       ``"… (truncated)"``.
+
+    Non-string inputs (e.g. ``Exception`` instances) are coerced via
+    ``str()`` first.  The marker matches the one already used by
+    :meth:`SubAgentSpawner._enforce_output_schema` so log-grep tooling
+    sees one canonical form.
+
+    PR #224 review round-3 (Should #1): added the control-char strip step
+    after round-2's volume cap left the injection vector open.
     """
     s = text if isinstance(text, str) else str(text)
+    s = s.translate(_CTRL_TRANSLATION)
     if len(s) <= cap:
         return s
     return s[:cap] + "… (truncated)"
@@ -268,10 +302,19 @@ class SubAgentSpawner:
         # triage without leaking full payloads.  ``_bounded`` is the same
         # helper used at every other ``DelegationFailure`` raise site that
         # interpolates attacker-influenceable text.
+        #
+        # PR #224 review round-3 (Should #2): ``validator_value`` is also
+        # bounded for symmetry — ``output_schema`` is caller-controlled
+        # (workflow author), but the validator value can itself be a large
+        # nested structure (e.g. a giant ``enum: [...]`` or deep ``oneOf:``
+        # tree) whose ``repr()`` would otherwise flood logs without going
+        # through the same cap that protects the message tail.  Same helper,
+        # ``repr()`` first so structural details survive truncation.
         raise DelegationFailure(
             f"DelegationResult.artifacts violates output_schema at "
             f"{path}: validator={first.validator!r} "
-            f"expected={first.validator_value!r}: {_bounded(first.message)}",
+            f"expected={_bounded(repr(first.validator_value))}: "
+            f"{_bounded(first.message)}",
         )
 
     def _extract_result(self, output: TaskOutput) -> DelegationResult:
