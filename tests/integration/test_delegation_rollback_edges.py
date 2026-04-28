@@ -66,10 +66,18 @@ async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryFacade, None]:
 @pytest.mark.asyncio
 async def test_rollback_failure_does_not_mask_original_cause(
     parent_facade: MemoryFacade,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """N5 coverage: when ``delete_episode`` itself raises during
     rollback, the original ``store_observation`` failure must still be
     the surfaced exception (rollback errors are logged, not re-raised).
+
+    PR #224 review round-5 (Should #2): switched from manual
+    ``parent_facade.store_observation = flaky_store`` assignment to
+    the ``monkeypatch`` fixture so teardown always restores the
+    original attribute even if an inner assertion fails before the
+    explicit restore line.  Also drops the ``# type: ignore[method-
+    assign]`` suppression that the manual assignment required.
     """
     real_store = parent_facade.store_observation
     call_count = {"n": 0}
@@ -80,13 +88,15 @@ async def test_rollback_failure_does_not_mask_original_cause(
             raise RuntimeError("simulated store failure")
         return await real_store(*args, **kwargs)
 
-    parent_facade.store_observation = flaky_store  # type: ignore[method-assign]
+    monkeypatch.setattr(parent_facade, "store_observation", flaky_store)
 
     # Force every rollback delete to raise.
     async def boom_delete(_entry_id: str) -> bool:
         raise RuntimeError("simulated delete_episode failure")
 
-    parent_facade.episodic.delete_episode = boom_delete  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        parent_facade.episodic, "delete_episode", boom_delete,
+    )
 
     canned = DelegationResult(
         summary="batch",

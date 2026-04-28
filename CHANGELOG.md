@@ -23,7 +23,7 @@ All notable changes to this project will be documented in this file.
   [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
   under the `orchestrator.delegation.` namespace (per RFC 0019 OTEL
   naming): `merge_outcome`, `memory_writes_admitted`,
-  `memory_writes_rejected`, `request_failed`.  These mirror the
+  `memory_writes_rejected`, `memory_writes_downscaled`.  These mirror the
   Python-side structured-log metrics the merge engine already emits
   (a future log→counter bridge needs a fixed-prefix translation, not
   a 1-for-1 lookup; see [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)

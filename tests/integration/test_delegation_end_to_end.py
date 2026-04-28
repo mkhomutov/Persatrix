@@ -383,12 +383,25 @@ async def test_malformed_output_schema_rejected(
 @pytest.mark.asyncio
 async def test_partial_persist_failure_rolls_back_admitted(
     parent_facade: MemoryFacade,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """N5: when ``store_observation`` fails part-way through a batch,
     :class:`FacadeBoundSpawner` deletes every successfully-persisted
     entry from the same batch (best-effort, reverse order) so the
     parent's memory does not end up with a partial batch.  The original
-    exception is re-raised so callers see the real cause."""
+    exception is re-raised so callers see the real cause.
+
+    PR #224 review round-5 (Should #2): switched the ``flaky_store``
+    swap from manual attribute assignment + explicit restore to the
+    ``monkeypatch`` fixture.  Always-runs teardown restores the
+    original ``store_observation`` even if the post-``raises``
+    assertion fails before the manual restore line, eliminating the
+    silent-leak hazard the previous pattern carried.  Restore of
+    ``parent_facade.store_observation`` for the post-failure
+    ``retrieve_relevant`` call below is performed explicitly via
+    ``monkeypatch.undo()`` so the assertion runs against the real
+    facade method.
+    """
     # Wrap the facade so the third store_observation call fails.
     real_store = parent_facade.store_observation
     call_count = {"n": 0}
@@ -399,7 +412,7 @@ async def test_partial_persist_failure_rolls_back_admitted(
             raise RuntimeError("simulated store failure")
         return await real_store(*args, **kwargs)
 
-    parent_facade.store_observation = flaky_store  # type: ignore[method-assign]
+    monkeypatch.setattr(parent_facade, "store_observation", flaky_store)
 
     canned = DelegationResult(
         summary="batch",
@@ -419,8 +432,12 @@ async def test_partial_persist_failure_rolls_back_admitted(
         await spawner.dispatch(child, req)
 
     # The two entries that landed before the failure must have been
-    # rolled back; retrieve_relevant should not see them.
-    parent_facade.store_observation = real_store  # type: ignore[method-assign]
+    # rolled back; retrieve_relevant should not see them.  Undo the
+    # patch first so retrieval runs against the real facade method
+    # (the previous ``= real_store`` assignment did the same thing
+    # manually; ``monkeypatch.undo()`` is the fixture-managed
+    # equivalent and runs even if the assertion below raises).
+    monkeypatch.undo()
     hits = await parent_facade.retrieve_relevant(query="c0", limit=10)
     assert all("c0" not in h.content for h in hits), (
         "rollback should have removed partially-persisted entries"

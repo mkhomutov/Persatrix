@@ -25,6 +25,7 @@ from .sub_agents.delegation import (
     DelegationContractError,
     DelegationResult,
 )
+from .sub_agents.spawner import _bounded  # PR #224 r5-S1: CWE-117; lifted to _log_safety.py in PR 6
 from .tools import builtin
 
 logger = logging.getLogger(__name__)
@@ -114,10 +115,19 @@ class TaskAgent(BaseAgent):
         try:
             return DelegationResult.from_metadata_value(text)
         except (DelegationContractError, json.JSONDecodeError) as exc:
+            # PR #224 review round-5 (Should #1): wrap ``exc`` in
+            # ``_bounded`` to neutralise the same CWE-117 / OWASP A09
+            # vector closed at the spawner-side ``DelegationFailure``
+            # raise sites.  The exception text embeds the offending
+            # JSON fragment (``json.JSONDecodeError`` echoes the input
+            # via ``doc[pos-N:pos+N]``; ``DelegationContractError``
+            # interpolates contract-violating values verbatim), so an
+            # unbounded ``%s`` interpolation would render attacker-
+            # influenceable control characters into the debug log.
             logger.debug(
                 "agent %s output is not a DelegationResult payload "
                 "(%s); synthesising envelope",
-                self.agent_id, exc,
+                self.agent_id, _bounded(exc),
             )
             return self._synthesise(output)
 
