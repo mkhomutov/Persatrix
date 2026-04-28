@@ -26,6 +26,7 @@ from agents.memory import MemoryFacade
 from agents.sub_agents import (
     DELEGATION_REQUEST_KEY,
     DELEGATION_RESULT_KEY,
+    DelegationFailure,
     DelegationRequest,
     DelegationResult,
     FacadeBoundSpawner,
@@ -108,10 +109,16 @@ async def test_rollback_failure_does_not_mask_original_cause(
 
 
 @pytest.mark.asyncio
-async def test_rollback_skipped_when_facade_lacks_episodic_accessor() -> None:
+async def test_rollback_skipped_when_facade_lacks_episodic_accessor(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """N5 coverage: a facade variant without an ``episodic`` accessor
     must NOT crash the dispatch path.  The spawner logs a warning and
     re-raises the original cause (no rollback attempted).
+
+    PR #224 review round-2 (S3-caplog) — also pin the documented
+    warning log.  Without the ``caplog`` assertion a regression
+    silently dropping the warning would still pass.
     """
 
     class _NoEpisodicFacade:
@@ -143,5 +150,57 @@ async def test_rollback_skipped_when_facade_lacks_episodic_accessor() -> None:
     )
     req = DelegationRequest(objective="batch persist (no episodic)")
 
-    with pytest.raises(RuntimeError, match="simulated store failure"):
+    with caplog.at_level("WARNING", logger="agents.sub_agents.spawner"):
+        with pytest.raises(RuntimeError, match="simulated store failure"):
+            await spawner.dispatch(child, req)
+
+    assert "does not expose episodic accessor" in caplog.text
+
+
+# ─── PR #224 round-2 (S2-mirror) — DelegationFailure message bound ─
+
+
+class _FailedSubAgent(BaseAgent):
+    """Sub-agent that returns FAILED with a configurable result string."""
+
+    def __init__(self, agent_id: str, payload: str) -> None:
+        super().__init__(agent_id=agent_id, config={})
+        self._payload = payload
+
+    async def handle(self, task: TaskInput) -> TaskOutput:
+        assert DELEGATION_REQUEST_KEY in task.context
+        return TaskOutput(
+            status=TaskStatus.FAILED,
+            result=self._payload,
+            metadata={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_status_payload_is_truncated_in_failure_message(
+    parent_facade: MemoryFacade,
+) -> None:
+    """S2-mirror: when a sub-agent returns FAILED, the spawner's
+    :class:`DelegationFailure` message must funnel ``output.result``
+    through ``_bounded`` so attacker-influenceable text cannot
+    exfiltrate arbitrary-length payloads into orchestrator logs
+    (LLM01 / OWASP A09 log-injection).  Pin the canonical
+    ``… (truncated)`` marker so log-grep tooling continues to work.
+    """
+    huge = "X" * 5000  # well above the 200-char cap
+    child = _FailedSubAgent("failer", huge)
+    spawner = FacadeBoundSpawner(
+        parent_agent_id="coordinator", memory_facade=parent_facade,
+    )
+    req = DelegationRequest(objective="provoke failure")
+
+    with pytest.raises(DelegationFailure) as excinfo:
         await spawner.dispatch(child, req)
+
+    msg = str(excinfo.value)
+    assert "… (truncated)" in msg, (
+        "DelegationFailure message must use the canonical truncation marker"
+    )
+    # Cap is 200 chars of payload; full prefix + cap + marker is well
+    # under 1 KB.  Belt-and-braces upper bound to catch regressions.
+    assert len(msg) < 1024, f"DelegationFailure message exceeded sane cap: {len(msg)}"

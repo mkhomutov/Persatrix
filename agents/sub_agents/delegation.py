@@ -201,7 +201,8 @@ class DelegationRequest:
     Enforced by :meth:`agents.sub_agents.spawner.SubAgentSpawner._enforce_output_schema`
     (added in RFC 0008 PR 3a / PR #224 — closes the S1 TODO from PR #222
     deep review).  Empty schema = no constraint; otherwise the schema is
-    validated against the Draft-7 meta-schema on first use and the
+    validated against the Draft-7 meta-schema on every dispatch (no
+    cache; v0.3 schemas are tiny and statelessness is preferred) and the
     sub-agent's ``artifacts`` must conform or the spawner raises
     :class:`DelegationFailure` before the merge engine runs.
     """

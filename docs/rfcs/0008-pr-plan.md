@@ -366,15 +366,15 @@ Go:
 
 #### PR checklist
 
-- [ ] `make test` passes (Python + Go suites)
-- [ ] `make lint` clean for changed files (`agents/sub_agents/`, `agents/memory/`, `agents/task_agent.py`, integration test)
-- [ ] S1 closed: `output_schema` is no longer advisory — spawner runs Draft-7 validation against `DelegationResult.artifacts` before merge
-- [ ] S6 closed: `DelegationResult.from_metadata_value` re-runs `validate()` on deserialisation
-- [ ] N5 closed: `FacadeBoundSpawner._persist_admitted` rolls back on partial-batch failure
-- [ ] N6 closed: `_parse_or_synthesise` collapsed into a single contract-parser call
-- [ ] N7 closed: request payload serialised exactly once; per-field `output_schema` size check dropped
-- [ ] Go counter inventory: four new instruments registered with documented names + units
-- [ ] PR 4 reviewer pinged: PR 4 (`feature/v030-rfc0008-shared-pools-acl`) `Depends on` line was added during the PR 3 follow-up work; the dependency is now satisfied
+- [x] `make test` passes (Python + Go suites)
+- [x] `make lint` clean for changed files (`agents/sub_agents/`, `agents/memory/`, `agents/task_agent.py`, integration test)
+- [x] S1 closed: `output_schema` is no longer advisory — spawner runs Draft-7 validation against `DelegationResult.artifacts` before merge
+- [x] S6 closed: `DelegationResult.from_metadata_value` re-runs `validate()` on deserialisation
+- [x] N5 closed: `FacadeBoundSpawner._persist_admitted` rolls back on partial-batch failure
+- [x] N6 closed: `_parse_or_synthesise` collapsed into a single contract-parser call
+- [x] N7 closed: request payload serialised exactly once; per-field `output_schema` size check dropped
+- [x] Go counter inventory: four new instruments registered with documented names + units
+- [x] PR 4 reviewer pinged: PR 4 (`feature/v030-rfc0008-shared-pools-acl`) `Depends on` line was added during the PR 3 follow-up work; the dependency is now satisfied
 
 #### Follow-up findings (from PR #224 deep review)
 
@@ -388,7 +388,7 @@ Round-1 review surfaced two Must-fix and four Should-fix items (docstring drift,
 | Should-2 | Should | `_rollback_persisted` `delete_episode` is sufficient today only because both episodic and notes-tier writes route through `store_observation`. Added `TODO(RFC 0008 PR 5)` flagging that PR 5's tier split must dispatch by `entry.tier`. | ✅ Applied in PR |
 | Should-3 | Should | Two N5 rollback branches uncovered: rollback-during-rollback failure mode; missing `episodic` accessor degrade path. New file `tests/integration/test_delegation_rollback_edges.py` with `test_rollback_failure_does_not_mask_original_cause` + `test_rollback_skipped_when_facade_lacks_episodic_accessor`. Suite: 13 passed. | ✅ Applied in PR |
 | Should-4 | Should | `jsonschema.ValidationError.message` embeds `repr()` of the offending instance fragment — unbounded `DelegationFailure` message echoed sub-agent `artifacts` content into orchestrator logs (LLM01 / OWASP A09). `_enforce_output_schema` now surfaces structural fields (`validator`, `validator_value`) plus a 200-char-bounded message tail. | ✅ Applied in PR (single site — see round-2 S2 for sibling raise sites) |
-| Info | Info | Status-hygiene: PR 3a checklist + ROADMAP `PR 3a still pending` line + the merge-order warning at the bottom of the PR #223 follow-up section to be flipped/removed at merge time. | Pending — merge-time |
+| Info | Info | Status-hygiene: PR 3a checklist + ROADMAP `PR 3a still pending` line + the merge-order warning at the bottom of the PR #223 follow-up section to be flipped/removed at merge time. | ✅ Done (merge-time, PR #224) |
 
 #### Follow-up findings (from PR #224 deep review — round 2)
 
@@ -396,15 +396,17 @@ Second-pass companion review re-walked the diff after the round-1 fixes landed. 
 
 | ID | Sev | Finding (summary) | Status |
 |----|-----|-------------------|--------|
-| S1-mirror | Should | `DelegationRequest.output_schema` field docstring in `agents/sub_agents/delegation.py` (~line 204) still says "validated … on first use" — round-1 Should-1 fix corrected only the spawner-side docstring. Mirror the "every dispatch" wording on the contract side so maintainers reading the contract first form the right mental model. | Pending — apply in PR 3a |
-| S2-mirror | Should | Round-1 Should-4 bound the schema-violation message to 200 chars at `_enforce_output_schema`, but the four other `DelegationFailure` raises in `_extract_result` (lines ~248, ~273) still echo unbounded sub-agent `output.result` and wrapped `DelegationContractError` text. Same LLM01 / OWASP A09 surface. Factor a `_bounded(s, *, cap=200)` helper at module scope (or a `_DELEGATION_FAILURE_MESSAGE_CAP` constant) and apply at all four sites; add a focused test pinning the `… (truncated)` marker. | Pending — apply in PR 3a |
-| S3-caplog | Should | `test_rollback_skipped_when_facade_lacks_episodic_accessor` asserts only that the original `RuntimeError` re-raises; it does **not** pin the documented warning log. A regression silently dropping the warning would still pass. Add `caplog` at WARNING on `agents.sub_agents.spawner` and assert `"does not expose episodic accessor" in caplog.text`. | Pending — apply in PR 3a |
+| S1-mirror | Should | `DelegationRequest.output_schema` field docstring in `agents/sub_agents/delegation.py` (~line 204) still says "validated … on first use" — round-1 Should-1 fix corrected only the spawner-side docstring. Mirror the "every dispatch" wording on the contract side so maintainers reading the contract first form the right mental model. | ✅ Applied in PR |
+| S2-mirror | Should | Round-1 Should-4 bound the schema-violation message to 200 chars at `_enforce_output_schema`, but the four other `DelegationFailure` raises in `_extract_result` (lines ~248, ~273) still echo unbounded sub-agent `output.result` and wrapped `DelegationContractError` text. Same LLM01 / OWASP A09 surface. Factor a `_bounded(s, *, cap=200)` helper at module scope (or a `_DELEGATION_FAILURE_MESSAGE_CAP` constant) and apply at all four sites; add a focused test pinning the `… (truncated)` marker. | ✅ Applied in PR (module-scope `_bounded` + `_DELEGATION_FAILURE_MESSAGE_CAP=200`; new `test_failed_status_payload_is_truncated_in_failure_message`) |
+| S3-caplog | Should | `test_rollback_skipped_when_facade_lacks_episodic_accessor` asserts only that the original `RuntimeError` re-raises; it does **not** pin the documented warning log. A regression silently dropping the warning would still pass. Add `caplog` at WARNING on `agents.sub_agents.spawner` and assert `"does not expose episodic accessor" in caplog.text`. | ✅ Applied in PR |
 | L1-task-log | Low | `agents/task_agent.py` `_parse_or_synthesise` debug log `"agent %s output is not a DelegationResult payload (%s); …"` interpolates `exc` (carrying offending JSON fragment) unbounded. Debug-only, but same CWE-117 / log-injection class as Should-4. Bound `str(exc)` to ~200 chars and/or strip control chars. | Deferred — PR 6 (low-severity batch) |
 | L2-helper | Low | `_ScriptedSubAgent` duplicated across `tests/integration/test_delegation_end_to_end.py` and `test_delegation_rollback_edges.py`. Lift to `tests/integration/_delegation_helpers.py` or a `conftest.py` fixture to avoid copy-paste rot when the helper changes. | Deferred — PR 6 |
 | L3-stub-sig | Low | `boom_delete(_entry_id: str)` accepts exactly one positional arg. Future signature evolution of `delete_episode` (e.g. adding `*, force=False`) would fail with `TypeError` rather than reaching the rollback's `except Exception:`, masking the real assertion. Use `async def boom_delete(*_args, **_kwargs)` for forward-compat. | Deferred — PR 6 |
 | L4-dedup | Info | Comment block in `_persist_admitted` ("Phase 2 memory facade routes both…") near-duplicates the new `TODO(RFC 0008 PR 5)` block in `_rollback_persisted`. Both are correct; consolidate when PR 5's tier split actually lands. | Deferred — PR 5 |
 | Info-1 | Info | Path drift: `tests/integration/test_delegation_rollback_edges.py` lives at `tests/integration/` not `tests/integration/python/` — same N8 path drift the plan already defers to PR 6. | Deferred — PR 6 (matches existing N8) |
-| Info-2 | Info | Status-hygiene: same as round-1 Info — flip PR 3a checklist (9 items), ROADMAP "PR 3a still pending" line, and remove the merge-order warning at the bottom of the PR #223 follow-up section, all in the merge-time hygiene commit. | Pending — merge-time |
+| Info-2 | Info | Status-hygiene: same as round-1 Info — flip PR 3a checklist (9 items), ROADMAP "PR 3a still pending" line, and remove the merge-order warning at the bottom of the PR #223 follow-up section, all in the merge-time hygiene commit. | ✅ Done (merge-time, PR #224) |
+
+> **✅ Merged as PR #224 (2026-04-28).**
 
 ---
 
@@ -485,7 +487,7 @@ Pass-1 review applied in-PR (no fix-up PR triggered). Code-side items resolved i
 | S1 | Should | `SharedMemoryPool.write` `source_agent_override` removed; `provenance_set` reason dropped from documented taxonomy (was never raised). Trust boundary is the writer ACL. | ✅ Applied in PR |
 | S2 | Should | `start_shared_pools` evicts pools whose `initialize()` raised; `unknown_pool` semantics now honest. | ✅ Applied in PR |
 | S3 | Should | `min_confidence` filter over-fetches by factor 3 (mirrors PR-220 review M3 / `_TAG_SCOPE_OVERFETCH_FACTOR` in `facade.py`). | ✅ Applied in PR |
-| S4 | Should | PR description claims "PR 3a merged in main"; ROADMAP says PR 3a is next. PR description amendment required at merge time (or sequence PR 3a first). | ⚠️ PR 3a NOT merged — `feature/v030-rfc0008-delegation-metrics` branch never opened; S1/S6 from PR #222 review remain outstanding in PR 3a scope; PR 4 merged out-of-sequence; PR 3a must precede PR 5 |
+| S4 | Should | PR description claims "PR 3a merged in main"; ROADMAP says PR 3a is next. PR description amendment required at merge time (or sequence PR 3a first). | ✅ Resolved — PR 3a merged as PR #224 (2026-04-28); S1/S6 closed; PR 5 unblocked |
 | S5 | Should | `_enforce_fifo_cap` still reaches `EpisodicMemory._ensure_db()`; TODO ref to RFC 0008 PR plan PR 5+ added in-line so the SLF001 access is not re-flagged in future reviews. | ✅ Applied in PR (TODO only — actual fix deferred to PR 5) |
 | S6 | Should | Glossary entries (`SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) + CHANGELOG `Added` bullet. | ✅ Applied in PR |
 | S7 | Should | Direct-`pool.write` provenance contract test (`test_pool_write_signature_has_no_provenance_override`). | ✅ Applied in PR |
@@ -521,9 +523,7 @@ Third-pass deep-review companion re-walked the diff after pass-2 fixes landed. M
 | NTH-1-access-count | Nice | `SharedMemoryPool.read()` calls `EpisodicMemory.recall()` which increments `access_count` on every BM25 hit, *including* rows the post-filter (`min_confidence`) drops. Harmless today (pool FIFO ignores `access_count`) but conflates read attribution if the column is ever surfaced for analytics. RFC 0008 §H already tracks the per-agent access-count gap; added an inline comment in `read()` recording the side-effect for future readers. | ✅ Applied in PR |
 | NTH-4-glossary-verify | Nice | Manually verify all promised glossary terms (`SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) are present at `docs/ai-glossary.md`, not just `SharedMemoryPool`. Verified: lines 525–536 cover the full set. | ✅ Verified (no edit needed) |
 
-> **⚠️ Merge-order note**: PR 3a (`feature/v030-rfc0008-delegation-metrics`) was NOT merged before PR 4. S1 (`output_schema` enforcement) and S6 (`from_metadata_value` missing `.validate()`) from the PR #222 review remain outstanding and must be addressed in PR 3a before PR 5 opens. PR 3a must also precede PR 5 for the Go-side delegation metrics that PR 5's `stale_memory_injection` counter registration depends on.
-
-> **✅ Merged as PR #223 (2026-04-28).**
+> **✅ Merged as PR #223 (2026-04-28).** PR 3a follow-up landed as PR #224 (2026-04-28) — S1/S6 from PR #222 review now closed; Go-side delegation counter inventory in place; PR 5 unblocked.
 
 ---
 

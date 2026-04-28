@@ -48,6 +48,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# PR #224 review round-2 (S2-mirror): ``DelegationFailure`` messages are
+# rendered into orchestrator logs and propagated to callers; sub-agent
+# ``output.result`` and wrapped ``DelegationContractError`` text both
+# carry attacker-influenceable payloads (LLM01 / OWASP A09 log-injection).
+# All ``DelegationFailure`` raise sites that interpolate such strings
+# must funnel them through :func:`_bounded` to cap log surface.  Cap is
+# generous enough for triage signal but small enough to prevent payload
+# echo.  Single source of truth so any future tweak applies uniformly.
+_DELEGATION_FAILURE_MESSAGE_CAP = 200
+
+
+def _bounded(text: object, *, cap: int = _DELEGATION_FAILURE_MESSAGE_CAP) -> str:
+    """Coerce *text* to ``str`` and truncate to *cap* chars with marker.
+
+    Returns ``text`` unchanged when within cap; otherwise returns the
+    first ``cap`` characters followed by ``"… (truncated)"`` (matches
+    the marker already used by :meth:`SubAgentSpawner._enforce_output_schema`
+    so log-grep tooling sees one canonical form).
+    """
+    s = text if isinstance(text, str) else str(text)
+    if len(s) <= cap:
+        return s
+    return s[:cap] + "… (truncated)"
+
 
 @dataclass
 class SpawnResult:
@@ -224,7 +248,7 @@ class SubAgentSpawner:
         except jsonschema.SchemaError as exc:
             raise DelegationFailure(
                 f"DelegationRequest.output_schema is not a valid Draft-7 "
-                f"schema: {exc.message}",
+                f"schema: {_bounded(exc.message)}",
             ) from exc
         validator = jsonschema.Draft7Validator(request.output_schema)
         errors = sorted(
@@ -235,27 +259,31 @@ class SubAgentSpawner:
             return
         first = errors[0]
         path = "/".join(str(p) for p in first.absolute_path) or "<root>"
-        # PR #224 review (Should #4): ``jsonschema``'s ``ValidationError.message``
-        # embeds a ``repr()`` of the offending instance fragment, so an
-        # unbounded message can echo sub-agent ``artifacts`` content into
-        # logs (LLM01 / OWASP A09).  Surface the structural fields
-        # (validator name + expected value) plus a length-bounded message
-        # tail so operators retain enough signal for triage without leaking
-        # full payloads.
-        message_excerpt = first.message
-        if len(message_excerpt) > 200:
-            message_excerpt = message_excerpt[:200] + "… (truncated)"
+        # PR #224 review (Should #4 / round-2 S2-mirror): ``jsonschema``'s
+        # ``ValidationError.message`` embeds a ``repr()`` of the offending
+        # instance fragment, so an unbounded message can echo sub-agent
+        # ``artifacts`` content into logs (LLM01 / OWASP A09).  Surface the
+        # structural fields (validator name + expected value) plus the
+        # ``_bounded`` message tail so operators retain enough signal for
+        # triage without leaking full payloads.  ``_bounded`` is the same
+        # helper used at every other ``DelegationFailure`` raise site that
+        # interpolates attacker-influenceable text.
         raise DelegationFailure(
             f"DelegationResult.artifacts violates output_schema at "
             f"{path}: validator={first.validator!r} "
-            f"expected={first.validator_value!r}: {message_excerpt}",
+            f"expected={first.validator_value!r}: {_bounded(first.message)}",
         )
 
     def _extract_result(self, output: TaskOutput) -> DelegationResult:
         """Deserialise :data:`DELEGATION_RESULT_KEY` from *output*."""
+        # PR #224 review round-2 (S2-mirror): ``output.result`` and the
+        # wrapped ``DelegationContractError`` text both carry
+        # attacker-influenceable payloads (sub-agent reply content).
+        # Funnel through ``_bounded`` so error messages cannot exfiltrate
+        # arbitrary-length payloads into orchestrator logs.
         if output.status == TaskStatus.FAILED:
             raise DelegationFailure(
-                f"sub-agent reported FAILED: {output.result}",
+                f"sub-agent reported FAILED: {_bounded(output.result)}",
             )
         raw = output.metadata.get(DELEGATION_RESULT_KEY)
         if raw is None:
@@ -272,7 +300,7 @@ class SubAgentSpawner:
             return DelegationResult.from_metadata_value(raw)
         except DelegationContractError as exc:
             raise DelegationFailure(
-                f"sub-agent emitted invalid DelegationResult: {exc}",
+                f"sub-agent emitted invalid DelegationResult: {_bounded(exc)}",
             ) from exc
 
     async def _persist_admitted(self, outcome: MergeOutcome) -> list[str]:
