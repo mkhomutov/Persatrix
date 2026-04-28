@@ -129,6 +129,8 @@ Integration (Go + Python):
 **Depends on**: PR 1 and PR 1b (`feature/v030-rfc0008-context-metrics` — cost-metrics + state-persistence follow-on, sizing-risk split triggered at PR 1 merge).
 **Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
+> **Sizing-risk split triggered (PR 2 → PR 2a)** — eviction (`agents/memory/eviction.py` + `tests/unit/python/test_memory_eviction.py`) deferred to follow-on PR `feature/v030-rfc0008-eviction`. PR 2 ships the facade surface (`agents/memory/facade.py`, task-agent wiring, schema, tests) so the cross-RFC pins ([RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) unblock immediately; eviction lands in PR 2a without changing the facade API surface or the `_context_package` v1 shape. This split is contingent (per the *Sizing risk* row below) and does not change the canonical 6-PR count for the milestone burndown — PR 2a is bookkeeping under the PR 2 row.
+
 #### Scope
 
 | File | Change |
@@ -173,15 +175,33 @@ Integration (Python):
 
 #### PR checklist
 
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes (`schemas/agent.schema.json` additions)
-- [ ] `MemoryFacade.retrieve_relevant` exposes the `tags` filter required by [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (AND semantics confirmed in test `test_facade_tags_intersection`)
-- [ ] `MemoryFacade.compress` exposes the `(entries, target_tokens) -> CompressedView` hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4
-- [ ] Per-process lifecycle: a single `EpisodicMemory` instance per agent process; no per-task instantiation
-- [ ] `memory.enabled: false` is the default in the schema (deny-by-default; preserves existing stateless task-agent behaviour)
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes (`schemas/agent.schema.json` additions)
+- [x] `MemoryFacade.retrieve_relevant` exposes the `tags` filter required by [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (AND semantics confirmed in test `test_facade_tags_intersection`)
+- [x] `MemoryFacade.compress` exposes the `(entries, target_tokens) -> CompressedView` hook required by [RFC 0020 PR plan](0020-pr-plan.md) PR 4
+- [x] Per-process lifecycle: a single `EpisodicMemory` instance per agent process; no per-task instantiation
+- [x] `memory.enabled: false` is the default in the schema (deny-by-default; preserves existing stateless task-agent behaviour)
 - [ ] [RFC 0011 PR plan](0011-pr-plan.md) PR 5 reviewer pinged: `MemoryFacade` is now available
 - [ ] [RFC 0020 PR plan](0020-pr-plan.md) PR 4 reviewer pinged: `compress` hook is now available
+
+#### Follow-up findings (from PR #220 deep review)
+
+Local review of PR #220 (the in-flight facade-only split) surfaced items below. None block PR 2 merge under its Phase-2 contract; they are scheduled against the listed follow-on so PR 5 (Phase 4b — procedural decay + recall integrations) does not inherit them.
+
+| ID | Severity | Finding | Owner / target |
+|----|----------|---------|----------------|
+| M1 | Medium | `MemoryFacade.retrieve_relevant` scope filter only consults `Episode.context["scope"]`, not the column-level `scope` written by RFC 0020's `InteractionTracker`. Masked today because the facade double-writes scope into `context`, but any non-facade writer is silently invisible to scope filtering. Fix: project the `scope` column onto the `Episode` dataclass and prefer it over `context["scope"]`. Add a unit test that calls `EpisodicMemory.store_episode(scope="x", context={})` directly and then asserts `MemoryFacade.retrieve_relevant(scope="x")` returns it. | PR 2a (`feature/v030-rfc0008-eviction`) |
+| M2 | Medium | `schemas/agent.schema.json` `memory.min_score` defaults to `null`. `_inject_memories` concatenates recalled entries verbatim into the **system** prompt; absent a relevance floor, low-score entries cross the trust boundary (OWASP LLM01 / memory poisoning). Recommend defaulting `min_score: 0.20` (matches existing `DEFAULT_EPISODIC_MIN_SCORE`) and updating the schema description to cite the trust-boundary rationale. | PR 2a |
+| L1 | Low | `MemoryFacade.episodic` property raises bare `RuntimeError("MemoryFacade not initialised — call initialize() first")` while `_require_initialised()` raises `MemoryDisabledError` for the identical condition. Make `episodic` raise `MemoryDisabledError` for a single error contract. | PR 2a |
+| L2 | Low | `tests/unit/python/test_memory_facade.py` pins only `RuntimeError`; the public `MemoryDisabledError` (re-exported) is not asserted. Tighten tests once L1 is fixed. | PR 2a |
+| L3 | Low | `agents/server.py` `stop()` if/else both call `await agent.close_memory()` — only the log line differs. Flatten to a single call with one log statement. | PR 2a |
+| L4 | Low | `MemoryFacade.compress()` silently skips entries larger than `target_tokens` (knapsack-suboptimal). Behaviour is acceptable for Phase 2 but undocumented; add to the docstring. | PR 2a |
+| L5 | Low | `MemoryFacade.store_observation` docstring missing the `outcome` parameter. | PR 2a |
+| Info-1 | Info | Glossary [docs/ai-glossary.md](../ai-glossary.md) does not yet define `MemoryFacade`, `MemoryEntry`, `CompressedView`, `Candidate`, or `MemoryDisabledError`. Per [copilot-instructions §Terminology](../../.github/copilot-instructions.md), new project terms ship in the same change. | ✅ Resolved — section added to `docs/ai-glossary.md` before merge |
+| Info-2 | Info | ROADMAP RFC tracker row + "Current milestone" line need to flip on PR #220 merge per [Status Hygiene](../development-workflow.md#status-hygiene). | ✅ Resolved — ROADMAP "Last updated" + "Current milestone" + Merged PR History updated (2026-04-28) |
+
+> **PR 2a scope expansion**: PR 2a (`feature/v030-rfc0008-eviction`) was already triggered by the PR 2 sizing-risk split for eviction. Items M1 / M2 / L1–L5 above are absorbed into PR 2a's scope so PR 2 stays at the facade-only surface that the cross-RFC pins ([RFC 0011 PR 5](0011-pr-plan.md), [RFC 0020 PR 4](0020-pr-plan.md)) require. PR 2a remains bookkeeping under the PR 2 row — canonical 6-PR count unchanged.
 
 ---
 

@@ -3,6 +3,14 @@
 from typing import Protocol, runtime_checkable
 
 from .episodic import Episode, EpisodicMemory
+from .facade import (
+    Candidate,
+    CompressedView,
+    MemoryDisabledError,
+    MemoryEntry,
+    MemoryFacade,
+    budget_to_limit,
+)
 from .notes import Note, NoteStore
 from .relationship import RelationshipMemory
 from .relationship_types import Interaction, RelationshipSummary
@@ -31,15 +39,21 @@ class MemoryLifecycle(Protocol):
 
 
 __all__ = [
+    "Candidate",
+    "CompressedView",
     "ContextSection",
     "Episode",
     "EpisodicMemory",
     "Interaction",
+    "MemoryDisabledError",
+    "MemoryEntry",
+    "MemoryFacade",
     "MemoryLifecycle",
     "Note",
     "NoteStore",
     "RelationshipMemory",
     "RelationshipSummary",
     "WorkingMemory",
+    "budget_to_limit",
     "estimate_tokens",
 ]

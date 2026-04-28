@@ -381,3 +381,72 @@ foundation).
 - **Example:** "When every non-pinned candidate is dropped the package
   emits the extreme compression cap."
 
+## RFC 0008 — MemoryFacade (PR 2)
+
+Terms introduced by [RFC 0008](rfcs/0008-agent-memory-context-optimization.md)
+PR 2 (Python-side `MemoryFacade` for task agents).
+
+### MemoryFacade
+- **Aliases:** —
+- **Disallowed:** "memory manager", "memory context" (when meaning the facade
+  class)
+- **Definition:** The `agents.memory.facade.MemoryFacade` class that provides
+  a stable, tier-agnostic memory API for task agents (RFC 0008 §B). Wraps
+  the underlying `EpisodicMemory` tier and exposes `retrieve_relevant`,
+  `store_observation`, `store_procedure`, `list_candidates`, and `compress`.
+  Lifecycle is per-process: one instance per task-agent process, shared
+  across concurrent gRPC calls.
+- **Example:** "The task agent calls `MemoryFacade.retrieve_relevant(query,
+  limit=5)` to hydrate its LLM prompt with relevant past observations."
+
+### MemoryEntry
+- **Aliases:** —
+- **Disallowed:** "memory record", "episode" (when meaning the facade
+  projection)
+- **Definition:** A frozen dataclass (`agents.memory.facade.MemoryEntry`)
+  returned by `MemoryFacade.retrieve_relevant`. Tier-agnostic projection of
+  an underlying episode with fields `id`, `content`, `importance`, `tags`,
+  `created_at`, `score`, and `scope`. Callers must not depend on the
+  underlying storage tier.
+- **Example:** "Each `MemoryEntry.score` is the FTS5 relevance score from
+  `EpisodicMemory.recall`, normalised to `[0, 1]`."
+
+### CompressedView
+- **Aliases:** —
+- **Disallowed:** "compressed context", "memory summary" (when meaning the
+  dataclass)
+- **Definition:** A frozen dataclass (`agents.memory.facade.CompressedView`)
+  returned by `MemoryFacade.compress`. Carries `summary` (extractive
+  concatenation of admitted entries in Phase 2; abstractive in PR 5),
+  `entries_dropped`, `tokens_before`, and `tokens_after`. Required by
+  RFC 0020 PR 4's summarize-on-close path.
+- **Example:** "RFC 0020's `InteractionTracker` calls `facade.compress(
+  entries, target_tokens=1000)` and stores `CompressedView.summary` as the
+  interaction summary."
+
+### Candidate (facade)
+- **Aliases:** —
+- **Disallowed:** "packaging candidate" (when meaning the Python facade type;
+  use "packaging candidate" only for the Go `executor/packaging.Candidate`)
+- **Definition:** A frozen dataclass (`agents.memory.facade.Candidate`) for
+  agent-side context-package admission (RFC 0008 §B, `list_candidates`).
+  Phase 2 stub returns `[]`; populated in PR 5 when the agent-side
+  candidate-listing API integrates with the orchestrator-side packaging
+  pipeline.
+- **Example:** "In PR 5 each `Candidate` will carry `importance` and `tokens`
+  so the facade can rank by density before handing off to the packager."
+
+### MemoryDisabledError
+- **Aliases:** —
+- **Disallowed:** "MemoryError" (standard Python built-in), "uninitialised
+  error"
+- **Definition:** `agents.memory.facade.MemoryDisabledError` — raised when a
+  memory write operation is attempted on an uninitialised `MemoryFacade`.
+  Subclasses `RuntimeError` for backward compatibility. When `memory.enabled:
+  false` (the deny-by-default config), the facade is `None` and callers that
+  attempt writes should surface `MemoryDisabledError` rather than silently
+  no-op'ing.
+- **Example:** "An integration test with `memory.enabled: false` asserts that
+  `store_observation` raises `MemoryDisabledError`, confirming the
+  misconfiguration is visible at startup."
+
