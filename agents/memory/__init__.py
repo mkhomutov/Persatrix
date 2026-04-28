@@ -3,6 +3,7 @@
 from typing import Protocol, runtime_checkable
 
 from .episodic import Episode, EpisodicMemory
+from .eviction import EvictionPass, EvictionStats
 from .facade import (
     Candidate,
     CompressedView,
@@ -44,6 +45,8 @@ __all__ = [
     "ContextSection",
     "Episode",
     "EpisodicMemory",
+    "EvictionPass",
+    "EvictionStats",
     "Interaction",
     "MemoryDisabledError",
     "MemoryEntry",

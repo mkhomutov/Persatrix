@@ -179,11 +179,16 @@ class BaseAgent(ABC):
             return
         memory_cfg = self.config.get("memory") or {}
         db_path = memory_cfg.get("db_path", "data/memory.db")
-        min_score = memory_cfg.get("min_score")
+        # PR 2a M2: default min_score to 0.20 (matches schema default) so
+        # low-score entries do not cross the system-prompt trust boundary.
+        # Callers who explicitly set ``null`` in config opt out of filtering.
         facade = MemoryFacade(
             agent_id=self.agent_id,
             db_path=db_path,
-            default_min_score=min_score,
+            default_min_score=memory_cfg.get("min_score", 0.20),
+            episodic_cap=int(memory_cfg.get("episodic_cap", 1000)),
+            ttl_low_importance_days=int(memory_cfg.get("ttl_low_importance_days", 30)),
+            eviction_cadence_seconds=int(memory_cfg.get("eviction_cadence_seconds", 3600)),
         )
         await facade.initialize()
         self._memory = facade
@@ -196,9 +201,7 @@ class BaseAgent(ABC):
         """Close the agent's :class:`MemoryFacade` if it was opened.
 
         Persona-runtime subclasses override this to close their own
-        per-tier memory state; this base implementation only closes
-        a :class:`MemoryFacade` when one was opened by
-        :meth:`initialize_memory`.
+        per-tier memory state.
         """
         if not isinstance(self.memory, MemoryFacade):
             return

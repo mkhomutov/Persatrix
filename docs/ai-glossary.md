@@ -450,3 +450,31 @@ PR 2 (Python-side `MemoryFacade` for task agents).
   `store_observation` raises `MemoryDisabledError`, confirming the
   misconfiguration is visible at startup."
 
+## RFC 0008 — Eviction (PR 2a)
+
+Terms introduced by [RFC 0008](rfcs/0008-agent-memory-context-optimization.md)
+PR 2a (episodic-tier eviction follow-on to PR 2).
+
+### EvictionPass
+- **Aliases:** —
+- **Disallowed:** "eviction job", "eviction sweep" (when meaning the class)
+- **Definition:** The `agents.memory.eviction.EvictionPass` class that runs
+  one TTL + size-cap eviction sweep over the agent's `episodes` rows
+  (RFC 0008 §G). Stateless across runs — the
+  `~agents.memory.facade.MemoryFacade` schedules one instance per cadence
+  tick from its background loop. Returns an `EvictionStats` report.
+- **Example:** "`EvictionPass(agent_id, episodic_cap=1000,
+  ttl_low_importance_days=30).run(db)` returns the per-pass stats."
+
+### EvictionStats
+- **Aliases:** —
+- **Disallowed:** "eviction result", "eviction report" (when meaning the
+  dataclass)
+- **Definition:** A frozen dataclass (`agents.memory.eviction.EvictionStats`)
+  carrying `ttl_evicted`, `cap_evicted`, and `total_after`. Returned by
+  `EvictionPass.run` so the caller can log / trace each pass.
+- **Example:** "The eviction loop logs `stats.ttl_evicted` and
+  `stats.cap_evicted` only when either is non-zero, to keep idle cadences
+  quiet."
+
+
