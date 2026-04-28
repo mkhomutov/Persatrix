@@ -410,7 +410,7 @@ Pass-1 review applied in-PR (no fix-up PR triggered). Code-side items resolved i
 
 #### Follow-up findings (from PR #223 deep review — pass 2)
 
-Second-pass companion review ([docs/pr-reviews/pr-223-review.md](../pr-reviews/pr-223-review.md)) re-walked the diff after pass-1 fixes landed and surfaced three additional items not covered by the pass-1 follow-up table above. Code-side items applied in-PR; status-hygiene items remain merge-time.
+Second-pass companion review re-walked the diff after pass-1 fixes landed and surfaced three additional items not covered by the pass-1 follow-up table above. Code-side items applied in-PR; status-hygiene items remain merge-time.
 
 | ID | Sev | Finding (summary) | Status |
 |----|-----|-------------------|--------|
@@ -419,6 +419,16 @@ Second-pass companion review ([docs/pr-reviews/pr-223-review.md](../pr-reviews/p
 | N-persona | Nice | `_StatePersistenceMixin.initialize_memory(*, shared_pools=None)` accepts the kwarg as a no-op until persona wiring lands — risk of an accidental wiring landing silently. Added `test_persona_runtime_initialize_memory_accepts_shared_pools_kwarg` (signature-shape contract assertion: kwarg present, keyword-only, default `None`). Replace with behavioural assertion when persona wiring lands. | ✅ Applied in PR |
 | N-doc-episodic | Nice | Pass-2 review suggested documenting the `pool-` reservation inside `agents/memory/episodic.py`. Skipped — the reservation is already documented at the use site (`agents/memory/shared_pool.py` `_POOL_AGENT_PREFIX` + the new schema description). Adding a comment in `episodic.py` that does not reference pools elsewhere would be incidental coupling. | Deferred — design choice |
 | N-metrics-test | Nice | Metric-emission assertion test (recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema). Pass-1 N4 already deferred to PR 6. | Deferred — PR 6 (matches pass-1 N4) |
+
+#### Follow-up findings (from PR #223 deep review — pass 3)
+
+Third-pass deep-review companion re-walked the diff after pass-2 fixes landed. Most findings overlap with pass-1/pass-2 entries above (M1≡S4, L1≡Info-1+Info-2, NTH-3≡N-metrics-test). Two doc-only findings are new and applied in-PR; status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| L2-doc-sensitive | Should | `SharedMemoryPool.write()` docstring did not surface that `sensitive: true` isolation is enforced at the **facade** boundary (`publish_via_facade`) only — a future contributor calling `pool.write()` directly on a sensitive pool would bypass it. Asymmetry is intentional per RFC §H (framework code is trusted) and pinned by `test_sensitive_pool_blocks_publish`, but the docstring now states this explicitly with a `.. note::` block referencing the test. | ✅ Applied in PR |
+| NTH-1-access-count | Nice | `SharedMemoryPool.read()` calls `EpisodicMemory.recall()` which increments `access_count` on every BM25 hit, *including* rows the post-filter (`min_confidence`) drops. Harmless today (pool FIFO ignores `access_count`) but conflates read attribution if the column is ever surfaced for analytics. RFC 0008 §H already tracks the per-agent access-count gap; added an inline comment in `read()` recording the side-effect for future readers. | ✅ Applied in PR |
+| NTH-4-glossary-verify | Nice | Manually verify all promised glossary terms (`SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) are present at `docs/ai-glossary.md`, not just `SharedMemoryPool`. Verified: lines 525–536 cover the full set. | ✅ Verified (no edit needed) |
 
 ---
 

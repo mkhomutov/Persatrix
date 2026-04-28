@@ -249,6 +249,9 @@ class SharedMemoryPool:
             if min_confidence is not None
             else limit
         )
+        # Note: ``recall`` increments ``access_count`` for every BM25 hit,
+        # including rows the post-filter drops. Harmless (FIFO ignores it);
+        # PR #223 pass-3 NTH-1.
         episodes = await self._episodic.recall(query, limit=recall_limit)
         out: list[SharedPoolEntry] = []
         for ep in episodes:
@@ -294,6 +297,9 @@ class SharedMemoryPool:
         ``agent_id`` anyway; RFC 0009 capability tokens may add a token-
         bound override later.)  Returns the new entry ID; FIFO eviction
         on ``created_at`` runs before return when count > ``max_entries``.
+        Note: ``sensitive: true`` isolation (RFC §H safety #3) is enforced
+        at the **facade** (``publish_via_facade``), not here — a direct
+        ``pool.write()`` bypasses it. PR #223 pass-3.
         """
         if not self._initialized:
             raise RuntimeError(
