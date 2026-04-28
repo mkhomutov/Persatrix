@@ -293,7 +293,7 @@ Integration:
 - [x] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
 - [x] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
 - [x] `max_memory_writes` cap (default `20`, security item #7) is enforced
-- [ ] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
+- [x] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
 
 #### Follow-up findings (from PR #222 deep review)
 
@@ -375,21 +375,70 @@ Integration:
 
 #### PR checklist
 
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes (`schemas/agent.schema.json` `shared_memory_pools` additions)
-- [ ] Deny-by-default: agents not in a pool's `readers` / `writers` raise `SharedMemoryPermissionError` (no silent fallthrough)
-- [ ] Provenance: `source_agent` is framework-injected from the calling `agent_id`; caller-set values rejected with `provenance_set`
-- [ ] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
-- [ ] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in)
-- [ ] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
-- [ ] [RFC 0008 PR 5](#pr-5-feature-v030-rfc0008-procedural-revalidation---phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes (`schemas/agent.schema.json` `shared_memory_pools` additions)
+- [x] Deny-by-default: agents not in a pool's `readers` / `writers` raise `SharedMemoryPermissionError` (no silent fallthrough)
+- [x] Provenance: `source_agent` is framework-injected from the calling `agent_id` (1-for-1 binding; `SharedMemoryPool.write` exposes no override knob, so the trust boundary is the writer ACL — see PR #223 review S1)
+- [x] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
+- [x] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in); over-fetch factor 3 ensures `limit` is honoured (PR #223 review S3)
+- [x] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
+- [x] [RFC 0008 PR 5](#pr-5-feature-v030-rfc0008-procedural-revalidation---phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+
+#### Follow-up findings (from PR #223 deep review)
+
+Pass-1 review applied in-PR (no fix-up PR triggered). Code-side items resolved in this PR; status-hygiene items below.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S1 | Should | `SharedMemoryPool.write` `source_agent_override` removed; `provenance_set` reason dropped from documented taxonomy (was never raised). Trust boundary is the writer ACL. | ✅ Applied in PR |
+| S2 | Should | `start_shared_pools` evicts pools whose `initialize()` raised; `unknown_pool` semantics now honest. | ✅ Applied in PR |
+| S3 | Should | `min_confidence` filter over-fetches by factor 3 (mirrors PR-220 review M3 / `_TAG_SCOPE_OVERFETCH_FACTOR` in `facade.py`). | ✅ Applied in PR |
+| S4 | Should | PR description claims "PR 3a merged in main"; ROADMAP says PR 3a is next. PR description amendment required at merge time (or sequence PR 3a first). | ⚠️ PR 3a NOT merged — `feature/v030-rfc0008-delegation-metrics` branch never opened; S1/S6 from PR #222 review remain outstanding in PR 3a scope; PR 4 merged out-of-sequence; PR 3a must precede PR 5 |
+| S5 | Should | `_enforce_fifo_cap` still reaches `EpisodicMemory._ensure_db()`; TODO ref to RFC 0008 PR plan PR 5+ added in-line so the SLF001 access is not re-flagged in future reviews. | ✅ Applied in PR (TODO only — actual fix deferred to PR 5) |
+| S6 | Should | Glossary entries (`SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) + CHANGELOG `Added` bullet. | ✅ Applied in PR |
+| S7 | Should | Direct-`pool.write` provenance contract test (`test_pool_write_signature_has_no_provenance_override`). | ✅ Applied in PR |
+| N1 | Nice | `_record_read` `result.count` attribute dropped (high-cardinality OTLP/Prometheus label). | ✅ Applied in PR |
+| N2 | Nice | `_enforce_fifo_cap` collapsed to single atomic `DELETE … WHERE id NOT IN (… LIMIT max_entries)`; new test `test_fifo_eviction_concurrent_writers`. | ✅ Applied in PR |
+| N3 | Nice | `setup_shared_pools` reads `db_path` from a single agent. Acceptable today (single-agent server); revisit when multi-agent server lands. | Deferred — out of scope for PR 4 |
+| N4 | Nice | New tests: `test_min_confidence_overfetches_under_limit`, `test_fifo_eviction_concurrent_writers`, `test_read_from_pool_and_tag_filter` (AND-tag E2E). Metric-emission tests deferred. | ✅ Partially applied (E2E + concurrency); metric-emission deferred to PR 6 |
+| N5 | Nice | Test path drift `tests/integration/...` vs `tests/integration/python/...`. | PR 6 (normalise plan — same as PR 2 / PR 3 N8) |
+| N6 | Nice | `config/agents.yaml` example pool: inline NOTE that persona-side wiring is partial in Phase 4a. | ✅ Applied in PR |
+| N7 | Nice | Schema does not require `writers ⊆ readers`. Deliberately permissive (a publish-only writer is a valid pattern). | Deferred — design choice |
+| Info-1 | Info | PR 4 checklist: 8 items still `[ ]` — flip on merge. | ✅ Done |
+| Info-2 | Info | ROADMAP last-updated header + PR-count → "4 of 6"; PR 4 row → merged. | ✅ Done |
+
+#### Follow-up findings (from PR #223 deep review — pass 2)
+
+Second-pass companion review re-walked the diff after pass-1 fixes landed and surfaced three additional items not covered by the pass-1 follow-up table above. Code-side items applied in-PR; status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S3-tag | Should | `read_via_facade` AND-tag filter runs *after* `pool.read` trims to `limit` — same trim-after-limit class as pass-1 S3 (min_confidence). Over-fetch by `_TAG_FILTER_OVERFETCH_FACTOR` (= `_MIN_CONFIDENCE_OVERFETCH_FACTOR`) and trim back to `limit` after the filter. New test `test_tag_filter_overfetches_under_limit` pins the contract. | ✅ Applied in PR |
+| S3-schema | Should | `schemas/agent.schema.json` agent `id` did not reserve the `pool-` prefix used by synthetic `SharedMemoryPool` agent IDs — an operator declaring `id: pool-foo` would silently namespace-collide in the shared episodic SQLite store. Added `not: { pattern: "^pool-" }` with description noting the reservation. `make validate` passes (4/4 configs). | ✅ Applied in PR |
+| N-persona | Nice | `_StatePersistenceMixin.initialize_memory(*, shared_pools=None)` accepts the kwarg as a no-op until persona wiring lands — risk of an accidental wiring landing silently. Added `test_persona_runtime_initialize_memory_accepts_shared_pools_kwarg` (signature-shape contract assertion: kwarg present, keyword-only, default `None`). Replace with behavioural assertion when persona wiring lands. | ✅ Applied in PR |
+| N-doc-episodic | Nice | Pass-2 review suggested documenting the `pool-` reservation inside `agents/memory/episodic.py`. Skipped — the reservation is already documented at the use site (`agents/memory/shared_pool.py` `_POOL_AGENT_PREFIX` + the new schema description). Adding a comment in `episodic.py` that does not reference pools elsewhere would be incidental coupling. | Deferred — design choice |
+| N-metrics-test | Nice | Metric-emission assertion test (recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema). Pass-1 N4 already deferred to PR 6. | Deferred — PR 6 (matches pass-1 N4) |
+
+#### Follow-up findings (from PR #223 deep review — pass 3)
+
+Third-pass deep-review companion re-walked the diff after pass-2 fixes landed. Most findings overlap with pass-1/pass-2 entries above (M1≡S4, L1≡Info-1+Info-2, NTH-3≡N-metrics-test). Two doc-only findings are new and applied in-PR; status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| L2-doc-sensitive | Should | `SharedMemoryPool.write()` docstring did not surface that `sensitive: true` isolation is enforced at the **facade** boundary (`publish_via_facade`) only — a future contributor calling `pool.write()` directly on a sensitive pool would bypass it. Asymmetry is intentional per RFC §H (framework code is trusted) and pinned by `test_sensitive_pool_blocks_publish`, but the docstring now states this explicitly with a `.. note::` block referencing the test. | ✅ Applied in PR |
+| NTH-1-access-count | Nice | `SharedMemoryPool.read()` calls `EpisodicMemory.recall()` which increments `access_count` on every BM25 hit, *including* rows the post-filter (`min_confidence`) drops. Harmless today (pool FIFO ignores `access_count`) but conflates read attribution if the column is ever surfaced for analytics. RFC 0008 §H already tracks the per-agent access-count gap; added an inline comment in `read()` recording the side-effect for future readers. | ✅ Applied in PR |
+| NTH-4-glossary-verify | Nice | Manually verify all promised glossary terms (`SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) are present at `docs/ai-glossary.md`, not just `SharedMemoryPool`. Verified: lines 525–536 cover the full set. | ✅ Verified (no edit needed) |
+
+> **⚠️ Merge-order note**: PR 3a (`feature/v030-rfc0008-delegation-metrics`) was NOT merged before PR 4. S1 (`output_schema` enforcement) and S6 (`from_metadata_value` missing `.validate()`) from the PR #222 review remain outstanding and must be addressed in PR 3a before PR 5 opens. PR 3a must also precede PR 5 for the Go-side delegation metrics that PR 5's `stale_memory_injection` counter registration depends on.
+
+> **✅ Merged as PR #223 (2026-04-28).**
 
 ---
 
 ### PR 5: `feature/v030-rfc0008-procedural-revalidation` — Phase 4b: Confidence Decay + Revalidation
 
-**Depends on**: PR 4.
+**Depends on**: PR 4 + PR 3a.
 **Estimated size**: ~250–400 lines (calibrated).
 
 #### Scope

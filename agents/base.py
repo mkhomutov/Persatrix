@@ -21,7 +21,7 @@ from .llm_client import (
     StopReason,
     ToolCall,
 )
-from .memory import MemoryFacade, budget_to_limit
+from .memory import MemoryFacade, SharedPoolRegistry, budget_to_limit
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
@@ -164,14 +164,13 @@ class BaseAgent(ABC):
 
     # ─── Memory lifecycle (RFC 0008 PR plan PR 2) ───────────────
 
-    async def initialize_memory(self) -> None:
+    async def initialize_memory(
+        self, *, shared_pools: SharedPoolRegistry | None = None,
+    ) -> None:
         """Create and open the agent's :class:`MemoryFacade` if enabled.
 
-        No-op when ``memory.enabled`` is false (the deny-by-default config
-        path).  Idempotent — a second call after a successful first call
-        is a no-op.  The agent server calls this from its startup pass for
-        every registered task agent; persona agents have their own memory
-        lifecycle in :mod:`agents.persona_runtime` and are unaffected.
+        No-op when ``memory.enabled`` is false.  Idempotent.
+        ``shared_pools`` (RFC 0008 PR 4) wires named cross-agent pools.
         """
         if self.memory is not None:
             return
@@ -189,6 +188,7 @@ class BaseAgent(ABC):
             episodic_cap=int(memory_cfg.get("episodic_cap", 1000)),
             ttl_low_importance_days=int(memory_cfg.get("ttl_low_importance_days", 30)),
             eviction_cadence_seconds=int(memory_cfg.get("eviction_cadence_seconds", 3600)),
+            shared_pools=shared_pools,
         )
         await facade.initialize()
         self._memory = facade

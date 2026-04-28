@@ -18,6 +18,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Shared memory pools — config-driven cross-agent pools with ACL +
+  provenance** (RFC 0008 §H, PR 4).  New `agents.memory.shared_pool`
+  module ships `SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`,
+  `SharedPoolRegistry`, and `SharedMemoryPermissionError` (with
+  structured `reason` taxonomy).  `MemoryFacade` gains
+  `publish_to_pool` / `read_from_pool` for the curated isolated→shared
+  publish path; deny-by-default reader/writer ACLs declared under a new
+  top-level `shared_memory_pools:` section in
+  [`config/agents.yaml`](config/agents.yaml) (schema:
+  [`schemas/agent.schema.json`](schemas/agent.schema.json) `shared_memory_pool`).
+  Provenance (`source_agent`, `created_at`, `confidence`) is
+  framework-injected and bound 1-for-1 to the calling `agent_id` so an
+  in-process caller cannot spoof it.  `min_confidence` consumer-side
+  trust filter, FIFO eviction at `max_entries`, sensitive-pool
+  publish-isolation per RFC §H safety constraint #3, and OTEL counters
+  (`agent.shared_pool.{reads,writes,denied,evictions}`) round out the
+  surface.  No proto / wire change.  Persona-side wiring is partial in
+  Phase 4a — the `agents/persona_runtime/state_persistence.py` path
+  accepts a `shared_pools` arg but does not yet expose
+  `publish_to_pool` / `read_from_pool` to persona prompts (follow-on PR).
 - **Sub-agent delegation contract + merge engine** (RFC 0008 §E, PR 3).
   New `agents.sub_agents.delegation` module ships
   `DelegationRequest` / `DelegationResult` / `MemoryWriteEntry` /

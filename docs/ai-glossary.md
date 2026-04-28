@@ -515,3 +515,22 @@ Terms from [RFC 0008](rfcs/0008-agent-memory-context-optimization.md) PR 3.
   `agents.sub_agents.delegation.BudgetEnvelope` — `tokens`,
   `timeout_seconds`, `max_llm_calls` caps on a sub-agent invocation.
   `0` means unbounded on that axis.
+
+
+
+## RFC 0008 — Shared Memory Pools (PR 4)
+
+From [RFC 0008](rfcs/0008-agent-memory-context-optimization.md) §H.
+
+- **SharedMemoryPool:** `agents.memory.shared_pool` — named cross-agent pool
+  with reader/writer ACL, framework-injected `source_agent`,
+  `min_confidence` filter, FIFO eviction. Wraps `EpisodicMemory` under
+  `pool-{name}`.
+- **SharedPoolEntry / SharedPoolConfig / SharedPoolRegistry:** Read result,
+  ACL+retention (from `shared_memory_pools`), and per-process owner.
+  `Registry.get` raises `unknown_pool` when missing.
+- **SharedMemoryPermissionError:** `reason` ∈ {`not_in_readers`,
+  `not_in_writers`, `sensitive_pool_isolation`, `unknown_pool`}.
+- **publish_to_pool / read_from_pool:** `MemoryFacade` methods for
+  isolated→shared; `publish_to_pool` rejects `sensitive` pools.
+- **shared_memory_pools:** `config/agents.yaml` section.

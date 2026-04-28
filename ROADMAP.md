@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-28 (RFC 0008 PR 3 merged via PR #222: delegation contract + merge engine + spawner + task-agent output validation; Go metrics deferred to PR 3a)  
+> **Last updated**: 2026-04-28 (RFC 0008 PR 4 merged via PR #223: shared pool ACL + provenance; PR 3a still pending — S1/S6 gating + Go-side delegation metrics)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 merged (#218, #219, #220, #221, #222) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract; PR 3a (delegation metrics + S1/S6 gating) next
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 4 merged (#218, #219, #220, #221, #222, #223) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + shared pool ACL + provenance; PR 3a (delegation metrics + S1/S6 gating) pending (must precede PR 5); PR 5 next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -812,6 +812,7 @@ v0.5.0 complete
 | [#220](https://github.com/mkhomutov/Persatrix/pull/220) | feat(rfc0008): PR 2 — MemoryFacade for task agents | 0008 (2/6) | 2026-04-28 |
 | [#221](https://github.com/mkhomutov/Persatrix/pull/221) | feat(rfc0008): PR 2a — episodic-tier eviction + PR 2 follow-up findings | 0008 (2a/6) | 2026-04-28 |
 | [#222](https://github.com/mkhomutov/Persatrix/pull/222) | feat(rfc0008): PR 3 — delegation contract + merge engine | 0008 (3/6) | 2026-04-28 |
+| [#223](https://github.com/mkhomutov/Persatrix/pull/223) | feat(rfc0008): PR 4 — shared pool ACL + provenance | 0008 (4/6) | 2026-04-28 |
 
 ---
 

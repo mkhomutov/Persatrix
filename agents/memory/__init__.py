@@ -15,6 +15,7 @@ from .facade import (
 from .notes import Note, NoteStore
 from .relationship import RelationshipMemory
 from .relationship_types import Interaction, RelationshipSummary
+from .shared_pool import SharedPoolRegistry
 from .working import ContextSection, WorkingMemory, estimate_tokens
 
 
@@ -56,6 +57,7 @@ __all__ = [
     "NoteStore",
     "RelationshipMemory",
     "RelationshipSummary",
+    "SharedPoolRegistry",
     "WorkingMemory",
     "budget_to_limit",
     "estimate_tokens",

@@ -421,8 +421,16 @@ class _StatePersistenceMixin:
 
     # ─── Memory lifecycle ──────────────────────────────
 
-    async def initialize_memory(self) -> None:
-        """Initialize all memory tiers and load persisted state."""
+    async def initialize_memory(self, *, shared_pools=None) -> None:  # type: ignore[no-untyped-def]
+        """Initialize all memory tiers and load persisted state.
+
+        ``shared_pools`` is accepted for signature parity with
+        :meth:`BaseAgent.initialize_memory` (RFC 0008 PR plan PR 4) but
+        is currently ignored by the persona runtime — persona agents do
+        not yet route through the shared-pool API.  Wiring lands in a
+        follow-on PR; the kwarg is accepted now so callers can pass it
+        unconditionally.
+        """
         await self._episodic_memory.initialize()
         await self._relationship_memory.initialize(
             config_relationships=self.config.get("relationships"),
