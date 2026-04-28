@@ -295,7 +295,7 @@ class TestSendChatMessage:
         memory = MagicMock()
         memory.relationship = MagicMock()
         memory.relationship.record_interaction = AsyncMock()
-        agent.memory = memory  # type: ignore[attr-defined]
+        agent._memory = memory  # type: ignore[attr-defined]
 
         dispatcher = MagicMock(spec=EventDispatcher)
         dispatcher.dispatch = AsyncMock(return_value=actions)
@@ -332,7 +332,7 @@ class TestSendChatMessage:
         memory.relationship.record_interaction = AsyncMock(
             side_effect=RuntimeError("memory db unavailable"),
         )
-        agent.memory = memory  # type: ignore[attr-defined]
+        agent._memory = memory  # type: ignore[attr-defined]
 
         dispatcher = MagicMock(spec=EventDispatcher)
         dispatcher.dispatch = AsyncMock(return_value=actions)

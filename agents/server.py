@@ -176,6 +176,19 @@ class AgentServer:
             self.agents, self._dispatcher, self._tick_schedulers,
         )
 
+        # RFC 0008 PR plan PR 2 — open MemoryFacade for non-persona task
+        # agents that opt into `memory.enabled`.  Per-agent try/except so a
+        # memory outage on one agent cannot block server startup.
+        for agent_id, agent in self.agents.items():
+            if isinstance(agent, _LLMPersonaAgent):
+                continue
+            try:
+                await agent.initialize_memory()
+            except Exception:
+                logger.exception(
+                    "Failed to init memory for task agent %s", agent_id,
+                )
+
         # Deep-review D4: shared aiohttp session for self-registration and
         # http_request tool (via builtin.http_session).
         self._session = aiohttp.ClientSession()
@@ -303,10 +316,14 @@ class AgentServer:
         # doesn't prevent cleanup of remaining agents.
         for agent_id, agent in self.agents.items():
             try:
-                # Close persona agent memory before generic shutdown
+                # Close persona-agent three-tier memory or task-agent
+                # MemoryFacade (RFC 0008 PR plan PR 2).  ``close_memory``
+                # is a no-op when no facade was opened.
                 if isinstance(agent, _LLMPersonaAgent):
                     await agent.close_memory()
                     logger.info("Closed memory for persona agent %s", agent_id)
+                else:
+                    await agent.close_memory()
                 await agent.shutdown()
             except Exception:
                 logger.exception("Error shutting down agent %s", agent_id)

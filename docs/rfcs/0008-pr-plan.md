@@ -129,6 +129,8 @@ Integration (Go + Python):
 **Depends on**: PR 1 and PR 1b (`feature/v030-rfc0008-context-metrics` — cost-metrics + state-persistence follow-on, sizing-risk split triggered at PR 1 merge).
 **Estimated size**: ~350–500 lines (calibrated; near the cap — see *Sizing risk*).
 
+> **Sizing-risk split triggered (PR 2 → PR 2a)** — eviction (`agents/memory/eviction.py` + `tests/unit/python/test_memory_eviction.py`) deferred to follow-on PR `feature/v030-rfc0008-eviction`. PR 2 ships the facade surface (`agents/memory/facade.py`, task-agent wiring, schema, tests) so the cross-RFC pins ([RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) unblock immediately; eviction lands in PR 2a without changing the facade API surface or the `_context_package` v1 shape. This split is contingent (per the *Sizing risk* row below) and does not change the canonical 6-PR count for the milestone burndown — PR 2a is bookkeeping under the PR 2 row.
+
 #### Scope
 
 | File | Change |

@@ -21,9 +21,14 @@ from .llm_client import (
     StopReason,
     ToolCall,
 )
+from .memory import MemoryFacade, budget_to_limit
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
+
+CONTEXT_PACKAGE_KEY = "_context_package"
+"""Reserved TaskInput.context key for the orchestrator's RFC 0008 _context_package
+JSON payload (mirrors `internal/scheduler/context_package.go::ContextPackageKey`)."""
 
 
 class TaskStatus(Enum):
@@ -81,6 +86,26 @@ class BaseAgent(ABC):
         self.agent_id = agent_id
         self.config = config or {}
         self._llm_client = llm_client
+        self._memory: Any = None
+
+    @property
+    def memory(self) -> Any:
+        """Access the agent's memory surface, or ``None`` when disabled.
+
+        For task agents this is a :class:`MemoryFacade` opened by
+        :meth:`initialize_memory` when ``memory.enabled`` is set in
+        ``config/agents.yaml`` (deny-by-default; RFC 0008 PR plan PR 2).
+        Persona-runtime subclasses override this property to expose a
+        ``MemoryNamespace`` over the three persona-memory tiers.
+
+        Read-only — internal code mutates ``self._memory``; tests that
+        need to inject a mock should do the same.
+        """
+        return self._memory
+
+    def _memory_enabled(self) -> bool:
+        memory_cfg = self.config.get("memory") or {}
+        return bool(memory_cfg.get("enabled", False))
 
     @abstractmethod
     async def handle(self, task: TaskInput) -> TaskOutput:
@@ -136,6 +161,51 @@ class BaseAgent(ABC):
     async def shutdown(self) -> None:
         """Called during graceful shutdown. Override to clean up resources."""
         pass
+
+    # ─── Memory lifecycle (RFC 0008 PR plan PR 2) ───────────────
+
+    async def initialize_memory(self) -> None:
+        """Create and open the agent's :class:`MemoryFacade` if enabled.
+
+        No-op when ``memory.enabled`` is false (the deny-by-default config
+        path).  Idempotent — a second call after a successful first call
+        is a no-op.  The agent server calls this from its startup pass for
+        every registered task agent; persona agents have their own memory
+        lifecycle in :mod:`agents.persona_runtime` and are unaffected.
+        """
+        if self.memory is not None:
+            return
+        if not self._memory_enabled():
+            return
+        memory_cfg = self.config.get("memory") or {}
+        db_path = memory_cfg.get("db_path", "data/memory.db")
+        min_score = memory_cfg.get("min_score")
+        facade = MemoryFacade(
+            agent_id=self.agent_id,
+            db_path=db_path,
+            default_min_score=min_score,
+        )
+        await facade.initialize()
+        self._memory = facade
+        logger.info(
+            "Initialised MemoryFacade for task agent %s (db=%s)",
+            self.agent_id, db_path,
+        )
+
+    async def close_memory(self) -> None:
+        """Close the agent's :class:`MemoryFacade` if it was opened.
+
+        Persona-runtime subclasses override this to close their own
+        per-tier memory state; this base implementation only closes
+        a :class:`MemoryFacade` when one was opened by
+        :meth:`initialize_memory`.
+        """
+        if not isinstance(self.memory, MemoryFacade):
+            return
+        try:
+            await self.memory.close()
+        finally:
+            self._memory = None
 
     # ─── Shared LLM Loop ────────────────────────────────────
 
@@ -232,6 +302,55 @@ class BaseAgent(ABC):
                 )
         return results
 
+    async def _inject_memories(
+        self,
+        system_prompt: str,
+        task: TaskInput,
+    ) -> str:
+        """Augment *system_prompt* with relevant memories when memory is enabled.
+
+        Reads the orchestrator's RFC 0008 ``_context_package`` payload
+        (when present) for the advisory ``budget_memory_tokens`` field
+        and translates it into a recall ``limit`` via
+        :func:`agents.memory.budget_to_limit`.  The query passed to
+        ``retrieve_relevant`` is the task payload — Phase 2 keeps the
+        query simple; PR 5 adds richer query-construction.
+
+        Failures are caught and logged: a memory-tier outage must not
+        block task execution, so the system prompt is returned unchanged.
+        """
+        if self.memory is None:
+            return system_prompt
+        budget_tokens = 0
+        package_raw = task.context.get(CONTEXT_PACKAGE_KEY) if task.context else None
+        if isinstance(package_raw, str) and package_raw:
+            try:
+                decoded = json.loads(package_raw)
+                budget_tokens = int(decoded.get("budget_memory_tokens", 0))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                logger.debug(
+                    "agent %s: malformed _context_package, ignoring",
+                    self.agent_id, exc_info=True,
+                )
+        limit = budget_to_limit(budget_tokens)
+        try:
+            entries = await self.memory.retrieve_relevant(
+                task.payload, limit=limit,
+            )
+        except Exception:
+            logger.warning(
+                "agent %s: memory retrieve_relevant failed — proceeding without memory",
+                self.agent_id, exc_info=True,
+            )
+            return system_prompt
+        if not entries:
+            return system_prompt
+        memory_lines = [
+            f"- {entry.content}" for entry in entries
+        ]
+        preamble = "Relevant memories from previous tasks:\n" + "\n".join(memory_lines)
+        return f"{system_prompt}\n\n{preamble}"
+
     async def _run_llm_loop(
         self,
         task: TaskInput,
@@ -258,6 +377,12 @@ class BaseAgent(ABC):
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": task.payload},
         ]
+        # RFC 0008 PR plan PR 2 — opt-in memory injection.  Augments the
+        # system prompt with a "Relevant memories" preamble when the agent
+        # has memory.enabled=true.  The advisory budget comes from the
+        # orchestrator's _context_package.budget_memory_tokens (PR 1 emits
+        # 0; the facade's budget_to_limit() falls back to a small default).
+        system_prompt = await self._inject_memories(system_prompt, task)
         tool_defs = self._llm_client.format_tool_definitions(
             self._build_tool_definitions()
         )

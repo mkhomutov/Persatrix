@@ -262,9 +262,39 @@
     },
     "memory": {
       "type": "object",
-      "description": "Memory configuration for persona agents (RFC 0005)",
+      "description": "Memory configuration for persona agents (RFC 0005) and memory-enabled task agents (RFC 0008 PR plan PR 2).",
       "additionalProperties": false,
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "RFC 0008 PR plan PR 2: opt-in flag for task-agent MemoryFacade. Deny-by-default — preserves existing stateless task-agent behaviour. Persona agents ignore this flag (their memory tiers are always initialised by initialize_persona_agents)."
+        },
+        "min_score": {
+          "type": ["number", "null"],
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": null,
+          "description": "RFC 0008 PR plan PR 2: default relevance floor passed to MemoryFacade.retrieve_relevant. null disables filtering (current EpisodicMemory behaviour)."
+        },
+        "episodic_cap": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000,
+          "description": "RFC 0008 PR plan PR 2: episodic-tier size cap for the eviction follow-on PR. Stored on the schema now so `memory.enabled: true` configs do not need to migrate when eviction lands."
+        },
+        "ttl_low_importance_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "RFC 0008 PR plan PR 2: TTL (in days) for entries with importance < 0.3. Honoured by the eviction follow-on PR."
+        },
+        "eviction_cadence_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 3600,
+          "description": "RFC 0008 PR plan PR 2: eviction-loop cadence. Honoured by the eviction follow-on PR."
+        },
         "db_path": {
           "type": "string",
           "minLength": 1,
