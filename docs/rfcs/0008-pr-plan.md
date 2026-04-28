@@ -285,14 +285,14 @@ Integration:
 
 #### PR checklist
 
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes (no schema additions in this PR; validates the existing `_context_package` shape from PR 1 round-trips)
-- [ ] `DelegationRequest` / `DelegationResult` dataclasses are frozen and validated against [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim
-- [ ] `MergeEngine` rejects entries with `tier` outside `{episodic, notes}` and emits `procedural_tier_rejected` metric (procedural exclusion is intentional — see Key implementation details)
-- [ ] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
-- [ ] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
-- [ ] `max_memory_writes` cap (default `20`, security item #7) is enforced
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes (no schema additions in this PR; validates the existing `_context_package` shape from PR 1 round-trips)
+- [x] `DelegationRequest` / `DelegationResult` dataclasses are frozen and validated against [RFC §E](0008-agent-memory-context-optimization.md#e-delegation-contract-and-merge-semantics) verbatim
+- [x] `MergeEngine` rejects entries with `tier` outside `{episodic, notes}` and emits `procedural_tier_rejected` metric (procedural exclusion is intentional — see Key implementation details)
+- [x] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
+- [x] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
+- [x] `max_memory_writes` cap (default `20`, security item #7) is enforced
 - [ ] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
 
 #### Follow-up findings (from PR #222 deep review)
@@ -301,23 +301,25 @@ Pass-2 review: S2–S5 + N1–N4 resolved in-PR. Remaining items below.
 
 | ID | Sev | Finding (summary) | Target |
 |----|-----|-------------------|--------|
-| S1 | Should | `output_schema` accepted/round-tripped but not enforced against `DelegationResult.artifacts` (explicit TODO). OWASP A04. | PR 3a (gate before PR 4) |
+| S1 | Should | `output_schema` not enforced against `DelegationResult.artifacts` (explicit TODO). OWASP A04. | PR 3a (gate before PR 4) |
 | S6 | Should | `DelegationResult.from_metadata_value` missing `.validate()` — asymmetric with S4 fix on `from_context_value`; bypassed by replay/audit paths. | PR 3a (gate before PR 4) |
 | N5 | Nice | `FacadeBoundSpawner._persist_admitted` lacks rollback + test on partial-batch `store_observation` failure. | PR 3a — nice to have |
 | N6 | Nice | `TaskAgent._parse_or_synthesise` brittle `{...}` heuristic → wasted `json.loads` + noisy logs. | PR 3a — nice to have |
 | N7 | Nice | `output_schema` double-serialised at dispatch. Perf nit. | PR 3a — nice to have |
-| N8 | Nice | Test path drift: plan says `tests/integration/python/...`, landed at `tests/integration/...` (same drift as PR 2). | PR 6 (normalise plan) |
-| Info-1 | Info | PR 3 checklist: 8 items still `[ ]` — flip on merge. | Merge-time |
-| Info-2 | Info | ROADMAP PR-count → "3 of 6"; row stays `🚧`. | Merge-time |
+| N8 | Nice | Test path drift: `tests/integration/python/...` vs `tests/integration/...` (same as PR 2). | PR 6 (normalise plan) |
+| Info-1 | Info | PR 3 checklist: 8 items still `[ ]` — flip on merge. | ✅ Done |
+| Info-2 | Info | ROADMAP PR-count → "3 of 6"; row stays `🚧`. | ✅ Done |
 | Info-3 | Info | No "PR 3a" bookkeeping row (parity with PR 1b/PR 2a). | See PR 3a row below |
 
-> **Sizing-risk follow-up (PR 3a)** — `feature/v030-rfc0008-delegation-metrics`: back-fills Go-side counters deferred from PR 3 (`delegation_merge_outcome{strategy,status}`, `delegation_memory_writes_admitted`, `delegation_memory_writes_rejected{reason}`, `delegation_memory_writes_downscaled`). Absorbs S1/S6 as gating + N5–N7 nice-to-haves. PR 4 `Depends on` adds PR 3a. Bookkeeping under PR 3 — 6-PR count unchanged.
+> **Sizing-risk follow-up (PR 3a)** — `feature/v030-rfc0008-delegation-metrics`: back-fills Go-side delegation counters from PR 3. Absorbs S1/S6 + N5–N7. PR 4 `Depends on` adds PR 3a. 6-PR count unchanged.
+
+> **✅ Merged as PR #222 (2026-04-28).**
 
 ---
 
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
 
-**Depends on**: PR 2 + PR 3.
+**Depends on**: PR 2 + PR 3 + PR 3a.
 **Estimated size**: ~300–450 lines (calibrated).
 
 #### Scope
