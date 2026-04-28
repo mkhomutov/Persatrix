@@ -298,6 +298,65 @@ async def _apply_migration_5(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
+async def _apply_migration_6(db: aiosqlite.Connection) -> None:
+    """RFC 0008 PR plan PR 5: confidence + last_validated_at on episodes.
+
+    Adds two columns used by the procedural-tier confidence decay path:
+
+    - ``confidence REAL NOT NULL DEFAULT 1.0`` — stored ``c_0`` value
+      at the last validation event.  ``DEFAULT 1.0`` lets legacy
+      episodic rows (and PR 2 procedural rows that only carried the
+      mapped ``importance`` column) round-trip cleanly without a
+      backfill — the read path treats DEFAULT 1.0 as "fully fresh"
+      which is the historical pre-decay behaviour.
+    - ``last_validated_at REAL`` — wall-clock seconds of the last
+      ``refresh_confidence`` call (``NULL`` for never-validated rows;
+      the read path falls back to ``created_at`` in that case).
+
+    The ``confidence`` column is intentionally separate from
+    ``importance`` so the eviction hybrid score (which consumes
+    ``importance``) and the procedural decay clock (which consumes
+    ``confidence``) can evolve independently — see RFC 0008 §G.
+
+    Idempotency: same ``PRAGMA table_info`` guard as v5 because
+    ``ALTER TABLE ... ADD COLUMN`` predates ``IF NOT EXISTS`` in SQLite
+    < 3.35 (Persatrix does not require that minimum).
+    """
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='episodes'"
+    )
+    if not await cursor.fetchone():
+        # No episodes table yet — nothing to alter.  Mirrors the v5
+        # defensive guard for partial-baseline test fixtures.
+        await db.commit()
+        return
+
+    cursor = await db.execute("PRAGMA table_info(episodes)")
+    existing = {row[1] for row in await cursor.fetchall()}
+
+    new_columns: tuple[tuple[str, str], ...] = (
+        # ``confidence`` lands NOT NULL with DEFAULT 1.0 so legacy
+        # episodic rows (and PR 2's procedural rows that only used the
+        # ``importance`` column) upgrade cleanly without a backfill
+        # script — the read path treats DEFAULT 1.0 as "fully fresh"
+        # which matches the historical (pre-decay) behaviour.
+        ("confidence", "REAL NOT NULL DEFAULT 1.0"),
+        # ``last_validated_at`` stays nullable; the read-time decay path
+        # falls back to ``created_at`` when this column is NULL so the
+        # decay clock starts from the row's birth for never-validated
+        # procedures.
+        ("last_validated_at", "REAL"),
+    )
+    for name, sqltype in new_columns:
+        if name not in existing:
+            await db.execute(
+                f"ALTER TABLE episodes ADD COLUMN {name} {sqltype}"
+            )
+
+    await db.commit()
+
+
 # Explicit dict replaces the previous globals().get() dispatch, which was
 # fragile (typo in handler name silently fell through) and not IDE-friendly
 # (Find Usages / refactoring didn't discover the dynamic lookup).
@@ -305,4 +364,5 @@ async def _apply_migration_5(db: aiosqlite.Connection) -> None:
 _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]] = {
     4: _apply_migration_4,
     5: _apply_migration_5,
+    6: _apply_migration_6,
 }

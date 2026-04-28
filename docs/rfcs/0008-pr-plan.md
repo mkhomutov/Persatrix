@@ -617,14 +617,14 @@ Integration:
 
 #### PR checklist
 
-- [ ] `make test` passes
-- [ ] `make lint` clean
-- [ ] `make validate` passes (`schemas/agent.schema.json` `procedural_memory` additions)
-- [ ] `confidence` column migration is non-destructive (`DEFAULT 1.0`); a fixture v0.2.x DB opens cleanly under v0.3.0
-- [ ] Decay is computed at read time using `last_validated_at` (or `created_at` if never validated); no periodic rewrite pass
-- [ ] `MemoryFacade.store_procedure` on an existing key calls `refresh_confidence(key)` (does not blindly overwrite)
-- [ ] `stale_memory_injection` is registered exactly once, orchestrator-side (incremented from agent structured-log ingestion); agents emit the log but do not register the counter, to avoid duplicate emission across the gRPC boundary
-- [ ] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
+- [x] `make test` passes
+- [x] `make lint` clean
+- [x] `make validate` passes (`schemas/agent.schema.json` `procedural_memory` additions)
+- [x] `confidence` column migration is non-destructive (`DEFAULT 1.0`); a fixture v0.2.x DB opens cleanly under v0.3.0
+- [x] Decay is computed at read time using `last_validated_at` (or `created_at` if never validated); no periodic rewrite pass
+- [x] `MemoryFacade.store_procedure` on an existing key calls `refresh_confidence(key)` (does not blindly overwrite)
+- [x] `stale_memory_injection` is registered exactly once, orchestrator-side (incremented from agent structured-log ingestion); agents emit the log but do not register the counter, to avoid duplicate emission across the gRPC boundary
+- [x] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
 - [ ] 30-day calibration review (PR 6) must validate or retune `avg_entry_tokens = 100` (the PR 2 advisory-budget translation constant) against the observed `episodic_entry_token_count` distribution; record outcome in the calibration review summary
 - [ ] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
 

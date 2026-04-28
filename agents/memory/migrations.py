@@ -23,6 +23,7 @@ from ._migration_handlers import (
     _MIGRATION_HANDLERS,
     _apply_migration_4,
     _apply_migration_5,
+    _apply_migration_6,
 )
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "_SCORE_EXPR_BARE",
     "_apply_migration_4",
     "_apply_migration_5",
+    "_apply_migration_6",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -182,6 +184,16 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         5,
         "RFC 0020: episodes interaction columns + scope index",
         "",  # handled by _apply_migration_5()
+    ),
+    # Migration 6 (RFC 0008 PR plan PR 5) adds the procedural-tier
+    # ``confidence`` and ``last_validated_at`` columns to the
+    # ``episodes`` table.  Same callable-handler rationale as v5: the
+    # ``ALTER TABLE ... ADD COLUMN`` path is not idempotent before
+    # SQLite 3.35 so the handler does the ``PRAGMA table_info`` guard.
+    (
+        6,
+        "RFC 0008 PR 5: procedural-tier confidence + last_validated_at",
+        "",  # handled by _apply_migration_6()
     ),
 ]
 

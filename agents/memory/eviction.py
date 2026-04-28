@@ -40,6 +40,12 @@ from dataclasses import dataclass
 
 import aiosqlite
 
+from .decay import (
+    DEFAULT_C_MIN,
+    DEFAULT_LAMBDA_PER_DAY,
+    compute_decayed_confidence,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +81,7 @@ class EvictionStats:
     ttl_evicted: int
     cap_evicted: int
     total_after: int
+    procedural_evicted: int = 0
 
 
 class EvictionPass:
@@ -91,6 +98,8 @@ class EvictionPass:
         *,
         episodic_cap: int,
         ttl_low_importance_days: int,
+        lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
+        c_min: float = DEFAULT_C_MIN,
     ) -> None:
         if episodic_cap < 1:
             raise ValueError(
@@ -104,16 +113,20 @@ class EvictionPass:
         self._agent_id = agent_id
         self._episodic_cap = episodic_cap
         self._ttl_seconds = ttl_low_importance_days * 86400.0
+        self._lambda_per_day = lambda_per_day
+        self._c_min = c_min
 
     async def run(self, db: aiosqlite.Connection) -> EvictionStats:
         """Execute one eviction pass and return the stats report."""
         ttl_evicted = await self._evict_ttl(db)
         cap_evicted = await self._evict_size_cap(db)
+        procedural_evicted = await self._evict_procedural_decay(db)
         total_after = await self._count(db)
         return EvictionStats(
             ttl_evicted=ttl_evicted,
             cap_evicted=cap_evicted,
             total_after=total_after,
+            procedural_evicted=procedural_evicted,
         )
 
     # ─── TTL eviction ───────────────────────────────────────────
@@ -174,6 +187,55 @@ class EvictionPass:
         await db.execute(
             f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders})",
             (self._agent_id, *ids),
+        )
+        await db.commit()
+        return len(victims)
+
+    # ─── Procedural-tier decay eviction (RFC 0008 PR 5) ─────
+
+    async def _evict_procedural_decay(
+        self, db: aiosqlite.Connection,
+    ) -> int:
+        """Delete procedural rows whose decayed confidence is below ``c_min``.
+
+        Procedural rows live in the same ``episodes`` table tagged
+        ``procedure:{key}`` (see ``_NOT_PROCEDURE_PREDICATE``).  Their
+        eviction policy is **not** the episodic hybrid score — it is the
+        confidence-decay model from RFC 0008 §G:
+
+        ``c_t = confidence * exp(-lambda_per_day * age_days)``
+
+        where ``age_days`` is measured from ``last_validated_at`` if set,
+        else ``created_at`` (so a never-revalidated procedure decays
+        from its creation, while a refreshed procedure restarts the
+        clock at 1.0 — see ``episodic_procedural.refresh_confidence``).
+        """
+        async with db.execute(
+            "SELECT id, confidence, last_validated_at, created_at "
+            "FROM episodes "
+            "WHERE agent_id = ? AND tags_json LIKE '%\"procedure:%'",
+            (self._agent_id,),
+        ) as cur:
+            rows = list(await cur.fetchall())
+        if not rows:
+            return 0
+        now = time.time()
+        victims: list[str] = []
+        for r in rows:
+            base = float(r[1] if r[1] is not None else 1.0)
+            anchor = r[2] if r[2] is not None else r[3]
+            age_seconds = max(0.0, now - float(anchor))
+            decayed = compute_decayed_confidence(
+                base, age_seconds, self._lambda_per_day,
+            )
+            if decayed < self._c_min:
+                victims.append(r[0])
+        if not victims:
+            return 0
+        placeholders = ",".join("?" for _ in victims)
+        await db.execute(
+            f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders})",
+            (self._agent_id, *victims),
         )
         await db.commit()
         return len(victims)
@@ -245,6 +307,8 @@ async def eviction_loop(
     episodic_cap: int,
     ttl_low_importance_days: int,
     cadence_seconds: float,
+    lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
+    c_min: float = DEFAULT_C_MIN,
 ) -> None:
     """Periodic eviction loop scheduled by ``MemoryFacade.initialize()``.
 
@@ -261,6 +325,8 @@ async def eviction_loop(
         agent_id,
         episodic_cap=episodic_cap,
         ttl_low_importance_days=ttl_low_importance_days,
+        lambda_per_day=lambda_per_day,
+        c_min=c_min,
     )
     logger.info(
         "Eviction loop started for agent %s (cadence=%.0fs, cap=%d, ttl=%dd)",
@@ -275,11 +341,11 @@ async def eviction_loop(
         while True:
             try:
                 stats = await pass_runner.run(db)
-                if stats.ttl_evicted or stats.cap_evicted:
+                if stats.ttl_evicted or stats.cap_evicted or stats.procedural_evicted:
                     logger.info(
-                        "Eviction pass for %s: ttl=%d cap=%d remaining=%d",
+                        "Eviction pass for %s: ttl=%d cap=%d procedural=%d remaining=%d",
                         agent_id, stats.ttl_evicted, stats.cap_evicted,
-                        stats.total_after,
+                        stats.procedural_evicted, stats.total_after,
                     )
             except Exception:  # noqa: BLE001 — best-effort; loop must survive
                 logger.warning(

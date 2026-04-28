@@ -150,6 +150,14 @@ agents:
         max_notes: 500
         auto_reflect_after: 5
         inject_recent_notes: 3
+      # RFC 0008 PR plan PR 5 (Phase 4b): procedural-tier confidence-decay
+      # knobs.  Defaults match agents.memory.decay; the example block is
+      # included so operators see the surface, even though removing it
+      # changes nothing.  See schemas/agent.schema.json#memory.procedural_memory.
+      procedural_memory:
+        lambda_per_day: 0.01            # ~69-day half-life
+        c_min: 0.1                      # eviction + retrieval floor
+        stale_confidence_alert_threshold: 0.3
     relationships:
       - agent_id: "iron-fox"
         type: "reports_to_me"

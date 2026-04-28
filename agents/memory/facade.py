@@ -21,8 +21,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from .decay import (
+    DEFAULT_C_MIN,
+    DEFAULT_LAMBDA_PER_DAY,
+    DEFAULT_STALE_CONFIDENCE_ALERT_THRESHOLD,
+)
 from .episodic import EpisodicMemory
 from .eviction import eviction_loop
+from .facade_procedural import (
+    ProceduralFacadeMixin,
+    validate_decay_params,
+)
 from .shared_pool import SharedPoolRegistry
 from .shared_pool_facade import SharedPoolFacadeMixin
 from .working import estimate_tokens
@@ -96,7 +105,7 @@ class MemoryDisabledError(RuntimeError):
 # ─── MemoryFacade ────────────────────────────────────────────────
 
 
-class MemoryFacade(SharedPoolFacadeMixin):
+class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
     """Unified memory access for task agents (RFC 0008 §B).
 
     Per-process lifecycle (RFC 0008 Open Question 7): a single
@@ -121,6 +130,11 @@ class MemoryFacade(SharedPoolFacadeMixin):
         ttl_low_importance_days: int = 30,
         eviction_cadence_seconds: int = 3600,
         shared_pools: SharedPoolRegistry | None = None,
+        lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
+        c_min: float = DEFAULT_C_MIN,
+        stale_confidence_alert_threshold: float = (
+            DEFAULT_STALE_CONFIDENCE_ALERT_THRESHOLD
+        ),
     ) -> None:
         if episodic_cap < 1:
             raise ValueError(f"episodic_cap must be >= 1, got {episodic_cap}")
@@ -130,12 +144,21 @@ class MemoryFacade(SharedPoolFacadeMixin):
             raise ValueError(
                 f"eviction_cadence_seconds must be positive, got {eviction_cadence_seconds}"
             )
+        # PR 5: validate procedural-tier decay knobs at the boundary.
+        validate_decay_params(
+            lambda_per_day=lambda_per_day,
+            c_min=c_min,
+            stale_confidence_alert_threshold=stale_confidence_alert_threshold,
+        )
         self._agent_id = agent_id
         self._db_path = db_path
         self._default_min_score = default_min_score
         self._episodic_cap = episodic_cap
         self._ttl_low_importance_days = ttl_low_importance_days
         self._eviction_cadence_seconds = eviction_cadence_seconds
+        self._lambda_per_day = lambda_per_day
+        self._c_min = c_min
+        self._stale_alert_threshold = stale_confidence_alert_threshold
         self._episodic = EpisodicMemory(agent_id=agent_id, db_path=db_path)
         self._initialized = False
         self._eviction_task: asyncio.Task[None] | None = None
@@ -179,6 +202,8 @@ class MemoryFacade(SharedPoolFacadeMixin):
                 self._agent_id, db, episodic_cap=self._episodic_cap,
                 ttl_low_importance_days=self._ttl_low_importance_days,
                 cadence_seconds=self._eviction_cadence_seconds,
+                lambda_per_day=self._lambda_per_day,
+                c_min=self._c_min,
             ),
             name=f"memory-eviction-{self._agent_id}",
         )
@@ -361,37 +386,12 @@ class MemoryFacade(SharedPoolFacadeMixin):
             scope=scope,
         )
 
-    async def store_procedure(
-        self,
-        key: str,
-        content: str,
-        *,
-        confidence: float,
-        expires_at: float | None = None,
-    ) -> None:
-        """Persist a procedural-tier entry under *key* (Phase 2 minimal).
+    # ─── Procedural tier (RFC 0008 PR 5) ─────────────────────
+    # ``store_procedure`` and ``retrieve_procedures`` come from
+    # :class:`ProceduralFacadeMixin` to keep this file under the
+    # repo's 500-line cap.
 
-        Phase 2 implementation stores the procedure as an episode tagged
-        ``procedure:{key}`` with the supplied ``confidence`` mapped onto
-        the importance field.  The full procedural tier with confidence
-        decay lands in PR 5 — until then ``store_procedure`` exists so
-        callers can target the API now and the storage path upgrades
-        transparently.
-        """
-        self._require_initialised()
-        if not key or not key.strip():
-            raise ValueError("key must not be empty")
-        if not 0.0 <= confidence <= 1.0:
-            raise ValueError(f"confidence must be in [0.0, 1.0], got {confidence}")
-        context: dict[str, Any] = {"procedure_key": key}
-        if expires_at is not None:
-            context["expires_at"] = expires_at
-        await self._episodic.store_episode(
-            summary=content,
-            context=context,
-            importance=confidence,
-            tags=[f"procedure:{key}"],
-        )
+
 
     # ─── Compression hook (RFC 0020 PR 4 contract) ───────────────
 

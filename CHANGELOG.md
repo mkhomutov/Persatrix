@@ -18,6 +18,39 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Confidence decay + procedural revalidation** (RFC 0008 PR 5,
+  Phase 4b).  The procedural memory tier now applies read-time
+  exponential confidence decay (`c_t = c_0 * exp(-lambda_per_day * age_days)`,
+  default `lambda = 0.01/day` ≈ 69-day half-life) so stale
+  procedural knowledge naturally fades.  New surface:
+  [`agents/memory/decay.py`](agents/memory/decay.py) (pure-stdlib
+  formula), [`agents/memory/episodic_procedural.py`](agents/memory/episodic_procedural.py)
+  (`recall_procedures` + `refresh_confidence` SQL helpers), facade
+  mixin [`agents/memory/facade_procedural.py`](agents/memory/facade_procedural.py)
+  exposing `MemoryFacade.store_procedure` (refreshes confidence on
+  existing keys) + `MemoryFacade.retrieve_procedures` (filters below
+  `c_min` and emits a `stale_memory_injection` structured log when
+  decayed confidence falls in `[c_min, stale_confidence_alert_threshold)`).
+  Procedural rows below `c_min` are also evicted by the periodic loop
+  ([`agents/memory/eviction.py`](agents/memory/eviction.py)) via a new
+  `_evict_procedural_decay` pass.  Schema migration v6 adds the
+  `confidence` and `last_validated_at` columns to `episodes` (non-destructive,
+  `DEFAULT 1.0` / NULL).  Operators tune the knobs via the new
+  `memory.procedural_memory: {lambda_per_day, c_min, stale_confidence_alert_threshold}`
+  block in [`config/agents.yaml`](config/agents.yaml) (schema:
+  [`schemas/agent.schema.json`](schemas/agent.schema.json)).
+  Orchestrator-side observability: seven new instruments under the
+  `orchestrator.memory.*` namespace registered in
+  [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
+  (`evictions_count`, `average_confidence_at_eviction`,
+  `average_importance_at_eviction`, `memory_utilization_ratio`,
+  `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`,
+  `stale_memory_injection`).  The 30-day post-merge calibration review
+  required by RFC 0008 Open Question 12 is scheduled in
+  [`docs/rfcs/0008-calibration-review.md`](docs/rfcs/0008-calibration-review.md);
+  PR 6 (RFC close) replaces the placeholder with the actual review
+  summary before flipping the RFC to `✅ Implemented`.
+
 - **Sub-agent delegation Go-side metrics + spawner hardening** (RFC 0008
   PR 3a, follow-up to PR 3).  Four new Go counters land in
   [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)

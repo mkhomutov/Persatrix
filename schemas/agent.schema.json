@@ -301,6 +301,33 @@
           "default": 3600,
           "description": "RFC 0008 PR plan PR 2: eviction-loop cadence. Honoured by the eviction follow-on PR."
         },
+        "procedural_memory": {
+          "type": "object",
+          "description": "RFC 0008 PR plan PR 5 (Phase 4b): confidence-decay knobs for the procedural tier. Decayed confidence is computed at recall time as `c0 * exp(-lambda_per_day * age_days)`; entries below `c_min` are filtered from `retrieve_procedures` and evicted by the periodic loop. Entries in `[c_min, stale_confidence_alert_threshold)` emit a `stale_memory_injection` structured log on admission so operators can spot procedural drift before it impacts execution.",
+          "additionalProperties": false,
+          "properties": {
+            "lambda_per_day": {
+              "type": "number",
+              "minimum": 0.0,
+              "default": 0.01,
+              "description": "Per-day exponential decay rate. The default 0.01 yields a ~69-day half-life; raise for fast-changing domains, lower for stable procedural knowledge. A 30-day post-merge calibration review (RFC 0008 Open Question 12) revisits the default."
+            },
+            "c_min": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.1,
+              "description": "Decayed-confidence floor below which procedural entries are excluded from `retrieve_procedures` and evicted by the periodic loop."
+            },
+            "stale_confidence_alert_threshold": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.3,
+              "description": "Entries admitted with decayed confidence in `[c_min, stale_confidence_alert_threshold)` emit a `stale_memory_injection` warning log (RFC 0008 Open Question 5). Must be >= `c_min`; the facade rejects inverted pairs at startup."
+            }
+          }
+        },
         "db_path": {
           "type": "string",
           "minLength": 1,
