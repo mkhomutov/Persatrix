@@ -82,11 +82,21 @@ class Candidate:
 
 
 class MemoryDisabledError(RuntimeError):
-    """Raised when memory operations are attempted on an agent with ``memory.enabled=false``.
+    """Raised when memory operations are attempted on an uninitialised facade.
 
     Per RFC 0008 PR plan PR 2 integration test: tool calls that would write
     memory must raise instead of silently no-op'ing, so the misconfiguration
     surfaces during agent startup integration testing.
+
+    Subclasses :class:`RuntimeError` for backward compatibility with the
+    pre-PR-220 facade error type and with tests that match on
+    ``RuntimeError`` (see ``tests/unit/python/test_memory_facade.py``).
+    Phase 2 raises this from :meth:`MemoryFacade._require_initialised` so
+    write-side callers can catch a memory-specific error type, satisfying
+    the contract advertised in [RFC 0008 PR plan](../../docs/rfcs/0008-pr-plan.md)
+    PR 2.  PR 2a / PR 5 may extend it to the disabled-config path once
+    write-side callers are wired through the facade rather than through
+    ``BaseAgent.memory is None`` checks.
     """
 
 
@@ -219,12 +229,23 @@ class MemoryFacade:
         effective_min_score = (
             min_score if min_score is not None else self._default_min_score
         )
+        required_tags = frozenset(tags or ())
+        # PR-220 review M3: when a tag/scope filter is active the Python-
+        # side cull can drop matches that exist further down the BM25
+        # ranking, yielding an empty result for a small ``limit`` even
+        # when matches exist.  Over-fetch by a factor of 3 to make the
+        # AND-tag/scope contract honour ``limit`` in Phase 2.  Drop this
+        # once SQL-side tag/scope filtering lands in PR 5.
+        recall_limit = (
+            limit * _TAG_SCOPE_OVERFETCH_FACTOR
+            if (required_tags or scope is not None)
+            else limit
+        )
         episodes = await self._episodic.recall(
             query,
-            limit=limit,
+            limit=recall_limit,
             min_score=effective_min_score,
         )
-        required_tags = frozenset(tags or ())
         out: list[MemoryEntry] = []
         for ep in episodes:
             ep_tags = frozenset(ep.tags or ())
@@ -253,6 +274,12 @@ class MemoryFacade:
                     scope=entry_scope,
                 )
             )
+            # Truncate once the requested ``limit`` is reached even when
+            # over-fetching above (M3 mitigation): callers must never
+            # observe more than ``limit`` entries, regardless of whether
+            # a tag/scope filter was applied.
+            if len(out) >= limit:
+                break
         return out
 
     async def list_candidates(self, task_context: dict[str, Any]) -> list[Candidate]:
@@ -403,7 +430,12 @@ class MemoryFacade:
 
     def _require_initialised(self) -> None:
         if not self._initialized:
-            raise RuntimeError(
+            # PR-220 review M2: raise MemoryDisabledError (a RuntimeError
+            # subclass) so write-side callers can catch a memory-specific
+            # error type per the contract advertised in the RFC 0008 PR
+            # plan.  RuntimeError-matching tests remain green because
+            # MemoryDisabledError IS-A RuntimeError.
+            raise MemoryDisabledError(
                 "MemoryFacade not initialised — call initialize() first",
             )
 
@@ -418,6 +450,13 @@ class MemoryFacade:
 # in PR 5; until then the value matches the PR plan integration test
 # (``budget=500 → limit=5``).
 DEFAULT_AVG_ENTRY_TOKENS = 100
+
+# PR-220 review M3: over-fetch multiplier applied by ``retrieve_relevant``
+# when a tag or scope filter is active.  Phase 2 mitigation only — PR 5
+# replaces this with SQL-side filtering at which point the multiplier is
+# removed.  Value of 3 chosen to match typical BM25 hit-rate after AND-tag
+# culling without unbounded recall-side cost.
+_TAG_SCOPE_OVERFETCH_FACTOR = 3
 
 
 def budget_to_limit(

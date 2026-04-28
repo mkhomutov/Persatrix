@@ -318,6 +318,20 @@ class BaseAgent(ABC):
 
         Failures are caught and logged: a memory-tier outage must not
         block task execution, so the system prompt is returned unchanged.
+
+        **Phase 2 trust boundary (PR-220 review M1, OWASP LLM01).**  Memory
+        content is concatenated verbatim into the system prompt with no
+        sanitisation.  The Phase-2 contract trusts every entry written
+        under the same ``agent_id`` because (a) the SQLite store is
+        scoped per ``agent_id`` so cross-agent bleed cannot occur, and
+        (b) operators control which tools can call ``store_observation``
+        via the deny-by-default permission whitelist.  A relevance floor
+        is plumbed via the facade's ``default_min_score`` (read from
+        ``config/agents.yaml`` ``memory.min_score``) so operators can
+        raise the bar without code change.  Scope-isolation and per-call
+        ``min_score`` enforcement land in RFC 0008 PR 5 once SQL-side
+        filtering is wired; until then any tool that persists
+        attacker-controlled text is in scope for the trust assumption.
         """
         if self.memory is None:
             return system_prompt
