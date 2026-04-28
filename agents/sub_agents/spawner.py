@@ -29,6 +29,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import jsonschema  # type: ignore[import-untyped]
+
 from ..base import CONTEXT_PACKAGE_KEY, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .delegation import (
     DELEGATION_REQUEST_KEY,
@@ -45,6 +47,64 @@ if TYPE_CHECKING:
     from ..base import BaseAgent
 
 logger = logging.getLogger(__name__)
+
+# PR #224 review round-2 (S2-mirror): ``DelegationFailure`` messages are
+# rendered into orchestrator logs and propagated to callers; sub-agent
+# ``output.result`` and wrapped ``DelegationContractError`` text both
+# carry attacker-influenceable payloads (LLM01 / OWASP A09 log-injection).
+# All ``DelegationFailure`` raise sites that interpolate such strings
+# must funnel them through :func:`_bounded` to cap log surface.  Cap is
+# generous enough for triage signal but small enough to prevent payload
+# echo.  Single source of truth so any future tweak applies uniformly.
+_DELEGATION_FAILURE_MESSAGE_CAP = 200
+
+# PR #224 review round-3 (Should #1): volume-bounding alone is insufficient
+# defence against CWE-117 log injection.  A sub-agent that returns
+# ``output.result = "harmless\n[ERROR] fake admin alert"`` (well under the
+# 200-char cap) will inject a forged log line into the ``DelegationFailure``
+# message that downstream ``logger.error("dispatch failed: %s", exc)`` calls
+# render verbatim across newlines.  We therefore strip *all* C0 control
+# characters (0x00-0x1F) plus DEL (0x7F) to a visible sentinel ``"\u2424"``
+# (U+2424 SYMBOL FOR NEWLINE) before truncation.  The sentinel is chosen
+# because (a) it is a printable Unicode glyph that survives any sane log
+# pipeline, (b) it is visually distinct from real text so operators can
+# spot the strip in grep output, and (c) it does not collide with any
+# control character it replaces.  TAB (0x09) is included in the strip set
+# because tab-separated log formats would otherwise allow column injection.
+_CTRL_REPLACEMENT = "\u2424"
+_CTRL_TRANSLATION = str.maketrans(
+    {c: _CTRL_REPLACEMENT for c in list(range(0x20)) + [0x7F]}
+)
+
+
+def _bounded(text: object, *, cap: int = _DELEGATION_FAILURE_MESSAGE_CAP) -> str:
+    """Sanitise and truncate *text* for inclusion in error messages.
+
+    Performs two defences against attacker-influenceable text reaching
+    orchestrator logs (LLM01 / OWASP A09 / CWE-117):
+
+    1. **Control-character strip** — every C0 control character (0x00-0x1F)
+       plus DEL (0x7F) is replaced with :data:`_CTRL_REPLACEMENT`.  This
+       neutralises forged-line injection (`\\n`, `\\r`), ANSI escape
+       sequences (`\\x1b[...`), NUL bytes, and tab-column injection in
+       TSV-style log pipelines.
+    2. **Length cap** — strings longer than *cap* are truncated to the
+       first *cap* characters followed by the canonical marker
+       ``"… (truncated)"``.
+
+    Non-string inputs (e.g. ``Exception`` instances) are coerced via
+    ``str()`` first.  The marker matches the one already used by
+    :meth:`SubAgentSpawner._enforce_output_schema` so log-grep tooling
+    sees one canonical form.
+
+    PR #224 review round-3 (Should #1): added the control-char strip step
+    after round-2's volume cap left the injection vector open.
+    """
+    s = text if isinstance(text, str) else str(text)
+    s = s.translate(_CTRL_TRANSLATION)
+    if len(s) <= cap:
+        return s
+    return s[:cap] + "… (truncated)"
 
 
 @dataclass
@@ -105,43 +165,45 @@ class SubAgentSpawner:
 
         task_id = f"delegation-{uuid.uuid4().hex[:12]}"
         wf_id = workflow_id or "delegation"
-        context: dict[str, str] = {
-            DELEGATION_REQUEST_KEY: request.to_json(),
-        }
+        # PR #222 deep review S5: bound untrusted-shape input at the
+        # spawner trust boundary (OWASP A05).  ``context_package`` is
+        # typed ``dict[str, Any]`` with no depth or size limit — a
+        # hostile or buggy caller could otherwise push an arbitrarily
+        # large blob into ``task.context`` (which is ``dict[str, str]``)
+        # and the sub-agent's memory.  We fail fast in the *caller*
+        # stack rather than letting the sub-agent OOM.  The per-field
+        # check stays ahead of the whole-payload check below so the
+        # error message points at the offending field.
+        serialised_pkg = ""
         if request.context_package:
             serialised_pkg = _json.dumps(
                 request.context_package, sort_keys=True,
             )
-            # PR #222 deep review S5: bound untrusted-shape input at the
-            # spawner trust boundary (OWASP A05).  ``context_package``
-            # and ``output_schema`` are typed ``dict[str, Any]`` with no
-            # depth or size limit — a hostile or buggy caller could
-            # otherwise push an arbitrarily large blob into
-            # ``task.context`` (which is ``dict[str, str]``) and the
-            # sub-agent's memory.  We fail fast in the *caller* stack
-            # rather than letting the sub-agent OOM.  PR 1 already
-            # established bounded-shape discipline for the existing
-            # ``_context_package`` reservation; PR 3 should not undo it.
             if len(serialised_pkg) > MAX_CONTEXT_PACKAGE_BYTES:
                 raise DelegationContractError(
                     f"DelegationRequest.context_package exceeds size cap: "
                     f"{len(serialised_pkg)} > {MAX_CONTEXT_PACKAGE_BYTES} bytes",
                 )
-            context[CONTEXT_PACKAGE_KEY] = serialised_pkg
-        if request.output_schema:
-            # Same trust-boundary rationale as ``context_package`` above.
-            # ``output_schema`` is *not* placed on the wire here — it is
-            # carried inside ``DelegationRequest.to_json()`` already —
-            # but bounding it at dispatch keeps the cap centralised.
-            serialised_schema = _json.dumps(
-                request.output_schema, sort_keys=True,
+        # PR #224 (RFC 0008 PR 3a) — N7: serialise the request payload
+        # exactly once.  PR 3 called ``request.to_json()`` for
+        # ``DELEGATION_REQUEST_KEY`` and then re-serialised
+        # ``output_schema`` immediately below purely to size-check it,
+        # which both wasted CPU on every dispatch and risked the two
+        # encodings drifting (``sort_keys`` etc.).  The whole-payload
+        # cap subsumes the per-field cap because every constituent
+        # (``context_package``, ``output_schema``, …) is a subset of
+        # the serialised request.
+        request_payload = request.to_json()
+        if len(request_payload) > MAX_CONTEXT_PACKAGE_BYTES:
+            raise DelegationContractError(
+                f"DelegationRequest payload exceeds size cap: "
+                f"{len(request_payload)} > {MAX_CONTEXT_PACKAGE_BYTES} bytes",
             )
-            if len(serialised_schema) > MAX_CONTEXT_PACKAGE_BYTES:
-                raise DelegationContractError(
-                    f"DelegationRequest.output_schema exceeds size cap: "
-                    f"{len(serialised_schema)} > {MAX_CONTEXT_PACKAGE_BYTES} "
-                    "bytes",
-                )
+        context: dict[str, str] = {
+            DELEGATION_REQUEST_KEY: request_payload,
+        }
+        if serialised_pkg:
+            context[CONTEXT_PACKAGE_KEY] = serialised_pkg
 
         task = TaskInput(
             task_id=task_id,
@@ -158,6 +220,15 @@ class SubAgentSpawner:
         output = await child.handle(task)
 
         result = self._extract_result(output)
+        # PR #224 (RFC 0008 PR 3a) — S1: enforce ``output_schema``
+        # against ``DelegationResult.artifacts`` *before* the merge
+        # engine runs.  PR 3 marked this an explicit TODO (OWASP A04
+        # — improper input validation): callers populating
+        # ``output_schema`` were silently treating it as advisory, and
+        # a sub-agent that returned the wrong artifact shape would
+        # surface only at the next consumer.  We fail at the trust
+        # boundary instead.
+        self._enforce_output_schema(request, result)
         outcome = self._merge_engine.merge_result(
             result,
             request,
@@ -179,11 +250,83 @@ class SubAgentSpawner:
 
     # -- internals --------------------------------------------------
 
+    @staticmethod
+    def _enforce_output_schema(
+        request: DelegationRequest,
+        result: DelegationResult,
+    ) -> None:
+        """Validate ``result.artifacts`` against ``request.output_schema``.
+
+        No-op when ``output_schema`` is empty (the contract treats an
+        empty schema as "no constraint").  Surfaces a
+        :class:`DelegationFailure` with the offending JSON-pointer-style
+        path on any violation so callers can route the failure into a
+        retry / human-review queue without having to re-serialise the
+        artifacts.
+
+        The schema itself is re-validated (Draft-7 meta-schema) on
+        every dispatch — caller-supplied ``output_schema`` payloads in
+        v0.3 are tiny (sub-agent reply contracts), so the cost is
+        negligible and avoiding a cache keeps the spawner stateless.
+        A malformed ``output_schema`` is a caller bug and surfaces the
+        same way as a contract violation.
+
+        PR #224 review (Should #1): the prior "validated only on first
+        use" wording implied caching that the implementation does not
+        provide — corrected to match behaviour.
+        """
+        if not request.output_schema:
+            return
+        try:
+            jsonschema.Draft7Validator.check_schema(request.output_schema)
+        except jsonschema.SchemaError as exc:
+            raise DelegationFailure(
+                f"DelegationRequest.output_schema is not a valid Draft-7 "
+                f"schema: {_bounded(exc.message)}",
+            ) from exc
+        validator = jsonschema.Draft7Validator(request.output_schema)
+        errors = sorted(
+            validator.iter_errors(result.artifacts),
+            key=lambda e: list(e.absolute_path),
+        )
+        if not errors:
+            return
+        first = errors[0]
+        path = "/".join(str(p) for p in first.absolute_path) or "<root>"
+        # PR #224 review (Should #4 / round-2 S2-mirror): ``jsonschema``'s
+        # ``ValidationError.message`` embeds a ``repr()`` of the offending
+        # instance fragment, so an unbounded message can echo sub-agent
+        # ``artifacts`` content into logs (LLM01 / OWASP A09).  Surface the
+        # structural fields (validator name + expected value) plus the
+        # ``_bounded`` message tail so operators retain enough signal for
+        # triage without leaking full payloads.  ``_bounded`` is the same
+        # helper used at every other ``DelegationFailure`` raise site that
+        # interpolates attacker-influenceable text.
+        #
+        # PR #224 review round-3 (Should #2): ``validator_value`` is also
+        # bounded for symmetry — ``output_schema`` is caller-controlled
+        # (workflow author), but the validator value can itself be a large
+        # nested structure (e.g. a giant ``enum: [...]`` or deep ``oneOf:``
+        # tree) whose ``repr()`` would otherwise flood logs without going
+        # through the same cap that protects the message tail.  Same helper,
+        # ``repr()`` first so structural details survive truncation.
+        raise DelegationFailure(
+            f"DelegationResult.artifacts violates output_schema at "
+            f"{path}: validator={first.validator!r} "
+            f"expected={_bounded(repr(first.validator_value))}: "
+            f"{_bounded(first.message)}",
+        )
+
     def _extract_result(self, output: TaskOutput) -> DelegationResult:
         """Deserialise :data:`DELEGATION_RESULT_KEY` from *output*."""
+        # PR #224 review round-2 (S2-mirror): ``output.result`` and the
+        # wrapped ``DelegationContractError`` text both carry
+        # attacker-influenceable payloads (sub-agent reply content).
+        # Funnel through ``_bounded`` so error messages cannot exfiltrate
+        # arbitrary-length payloads into orchestrator logs.
         if output.status == TaskStatus.FAILED:
             raise DelegationFailure(
-                f"sub-agent reported FAILED: {output.result}",
+                f"sub-agent reported FAILED: {_bounded(output.result)}",
             )
         raw = output.metadata.get(DELEGATION_RESULT_KEY)
         if raw is None:
@@ -200,7 +343,7 @@ class SubAgentSpawner:
             return DelegationResult.from_metadata_value(raw)
         except DelegationContractError as exc:
             raise DelegationFailure(
-                f"sub-agent emitted invalid DelegationResult: {exc}",
+                f"sub-agent emitted invalid DelegationResult: {_bounded(exc)}",
             ) from exc
 
     async def _persist_admitted(self, outcome: MergeOutcome) -> list[str]:
@@ -238,24 +381,87 @@ class FacadeBoundSpawner(SubAgentSpawner):
         self._facade = memory_facade
 
     async def _persist_admitted(self, outcome: MergeOutcome) -> list[str]:
+        """Persist admitted entries through the bound facade.
+
+        PR #224 (RFC 0008 PR 3a) — N5: best-effort rollback on
+        partial-batch failure.  PR 3 persisted entries one-by-one and,
+        on any ``store_observation`` exception, left a partially-
+        persisted batch behind with no record of which keys had landed.
+        Replay logic and the caller's :class:`SpawnResult.admitted_entry_ids`
+        contract both assumed all-or-nothing semantics.
+
+        We now compensate as follows:
+
+        1. Persist each admitted entry, accumulating the returned IDs.
+        2. On the first ``store_observation`` failure, delegate to
+           :meth:`_rollback_persisted`, which calls
+           ``self._facade.episodic.delete_episode(id)`` on every
+           successfully-persisted entry from this batch in reverse
+           order.  Each rollback is best-effort: we swallow individual
+           exceptions so the original error remains the surfaced cause,
+           and we log any rollback failures so the operator can reconcile.
+        3. Re-raise the original exception with the original traceback.
+
+        The facade's ``episodic`` accessor exposes ``delete_episode``
+        (added in PR 3a alongside this rollback path); if a future
+        facade variant lacks the accessor we degrade to a warning and
+        skip rollback rather than masking the real error.
+
+        PR #224 review (Must #1): prior wording referenced a non-existent
+        ``facade.forget`` API — corrected to point at the actual
+        ``episodic.delete_episode`` call site below.
+        """
         ids: list[str] = []
-        for entry in outcome.admitted:
-            # Phase 2 memory facade routes both `episodic` and `notes`
-            # writes through store_observation tagged with the tier
-            # name.  PR 5 introduces a tier-discriminated path.
-            tags = list(entry.tags) + [
-                f"tier:{entry.tier}",
-                f"key:{entry.key}",
-                f"source:{entry.source_agent or 'unknown'}",
-            ]
-            entry_id = await self._facade.store_observation(
-                entry.content,
-                importance=entry.importance,
-                ttl_seconds=entry.ttl_seconds,
-                tags=tags,
-            )
-            ids.append(entry_id)
+        try:
+            for entry in outcome.admitted:
+                # Phase 2 memory facade routes both `episodic` and `notes`
+                # writes through store_observation tagged with the tier
+                # name.  PR 5 introduces a tier-discriminated path.
+                tags = list(entry.tags) + [
+                    f"tier:{entry.tier}",
+                    f"key:{entry.key}",
+                    f"source:{entry.source_agent or 'unknown'}",
+                ]
+                entry_id = await self._facade.store_observation(
+                    entry.content,
+                    importance=entry.importance,
+                    ttl_seconds=entry.ttl_seconds,
+                    tags=tags,
+                )
+                ids.append(entry_id)
+        except Exception:
+            await self._rollback_persisted(ids)
+            raise
         return ids
+
+    async def _rollback_persisted(self, ids: list[str]) -> None:
+        """Best-effort reverse-order delete of partially-persisted IDs."""
+        episodic = getattr(self._facade, "episodic", None)
+        if episodic is None:
+            logger.warning(
+                "facade %r does not expose episodic accessor; skipping "
+                "rollback of %d partially-persisted entries",
+                type(self._facade).__name__, len(ids),
+            )
+            return
+        # TODO(RFC 0008 PR 5): ``_persist_admitted`` currently routes
+        # both ``episodic`` and ``notes`` tier writes through
+        # ``store_observation`` (which lands them in episodic storage),
+        # so a single ``delete_episode`` rollback is sufficient.  When
+        # PR 5 splits the notes tier to a separate persistence path,
+        # this rollback must dispatch by ``entry.tier`` rather than
+        # calling ``delete_episode`` unconditionally — otherwise notes-
+        # tier rollbacks will silently no-op.  Flagged by PR #224 review
+        # (Should #2) as a forward-compat hazard.
+        for entry_id in reversed(ids):
+            try:
+                await episodic.delete_episode(entry_id)
+            except Exception:
+                logger.warning(
+                    "rollback of partially-persisted entry %s failed; "
+                    "operator must reconcile",
+                    entry_id, exc_info=True,
+                )
 
 
 __all__ = [

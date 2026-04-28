@@ -60,6 +60,10 @@ func TestInstrumentInventory(t *testing.T) {
 	inst.WorkflowDuration.Record(ctx, 0)
 	inst.StepDispatched.Add(ctx, 0)
 	inst.StepDuration.Record(ctx, 0)
+	inst.DelegationMergeOutcome.Add(ctx, 0)
+	inst.DelegationMemoryWritesAdmitted.Add(ctx, 0)
+	inst.DelegationMemoryWritesRejected.Add(ctx, 0)
+	inst.DelegationMemoryWritesDownscaled.Add(ctx, 0)
 
 	rm := collect(t, reader)
 
@@ -72,6 +76,11 @@ func TestInstrumentInventory(t *testing.T) {
 		"orchestrator.workflow.duration": "ms",
 		"orchestrator.step.dispatched":   "{step}",
 		"orchestrator.step.duration":     "ms",
+		// RFC 0008 PR 3a — delegation counter inventory.
+		"orchestrator.delegation.merge_outcome":            "{result}",
+		"orchestrator.delegation.memory_writes_admitted":   "{entry}",
+		"orchestrator.delegation.memory_writes_rejected":   "{entry}",
+		"orchestrator.delegation.memory_writes_downscaled": "{entry}",
 	}
 	for name, unit := range expected {
 		m := findMetric(rm, name)

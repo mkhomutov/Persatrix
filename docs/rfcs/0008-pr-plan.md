@@ -317,6 +317,140 @@ Pass-2 review: S2–S5 + N1–N4 resolved in-PR. Remaining items below.
 
 ---
 
+### PR 3a: `feature/v030-rfc0008-delegation-metrics` — Bookkeeping (PR 3 follow-up)
+
+**Depends on**: PR 3 merged.
+**Estimated size**: ~450 lines (within cap).
+**Bookkeeping under PR 3 row** — canonical 6-PR count unchanged.
+
+#### Scope
+
+Sizing-risk follow-up to PR 3 absorbing the deferred Go-side delegation
+counter inventory plus the must-fix / nice-to-have findings (S1, S6,
+N5–N7) from the [PR #222 deep review](#follow-up-findings-from-pr-222-deep-review).
+
+| File | Change |
+|------|--------|
+| `internal/observability/metrics/metrics.go` | Register four new orchestrator-side counters: `orchestrator.delegation.merge_outcome` (`{result}`), `orchestrator.delegation.memory_writes_admitted` (`{entry}`), `orchestrator.delegation.memory_writes_rejected` (`{entry}`), `orchestrator.delegation.memory_writes_downscaled` (`{entry}`). Names mirror the Python merge engine's structured-log metric strings under the `orchestrator.delegation.` namespace prefix (e.g. Python `metric=delegation_merge_outcome` → Go `orchestrator.delegation.merge_outcome`); the future log → counter bridge therefore needs a fixed-prefix translation, not an opaque lookup. Corrected per PR #224 review (Must #2). |
+| `internal/observability/metrics/metrics_test.go` | Extend `TestInstrumentInventory` to assert all four delegation instrument names + units. |
+| `agents/sub_agents/delegation.py` | **S6** — `DelegationResult.from_metadata_value` now calls `result.validate()` before return, symmetric with the S4 fix on `DelegationRequest.from_context_value`. Replay/audit paths can no longer smuggle out-of-set `status`. The S1 TODO docstring on `DelegationRequest.output_schema` is replaced with a pointer to the spawner enforcement step (S1 closed). |
+| `agents/sub_agents/spawner.py` | **S1** — `SubAgentSpawner._enforce_output_schema` runs `jsonschema.Draft7Validator` against `DelegationResult.artifacts` before merge; the schema itself is meta-validated on first use. Empty schema = no constraint. **N7** — request payload is serialised exactly once via `request.to_json()`; the per-field `output_schema` size check is dropped (subsumed by a whole-payload size cap). The per-field `context_package` check stays (more specific error). |
+| `agents/sub_agents/spawner.py` | **N5** — `FacadeBoundSpawner._persist_admitted` now does best-effort reverse-order rollback via the existing `MemoryFacade.episodic` accessor on partial-batch `store_observation` failure. Original exception is re-raised; rollback failures are logged but do not mask the cause. |
+| `agents/memory/episodic.py` | **N5 supporting API** — new `EpisodicMemory.delete_episode(episode_id)` (agent-scoped per-row delete by ID). |
+| `agents/task_agent.py` | **N6** — `_parse_or_synthesise` collapsed into a single `DelegationResult.from_metadata_value` call. The previous `{...}` heuristic + double `json.loads` is gone; rejection is debug-logged (synthesis is the documented common case in v0.3, not a warning). |
+| `tests/unit/python/test_delegation_contract.py` | New `test_result_from_metadata_revalidates_on_deserialise` (S6 mirror of the S4 test). |
+| `tests/integration/test_delegation_end_to_end.py` | New tests: `test_output_schema_enforced_against_artifacts` (S1 violation path), `test_output_schema_pass_persists_admitted` (S1 happy path), `test_malformed_output_schema_rejected` (S1 caller-bug path), `test_partial_persist_failure_rolls_back_admitted` (N5). The pre-existing `test_oversize_output_schema_rejected_at_dispatch` is updated to expect the new whole-payload error message (N7 wording change). |
+
+#### Key implementation details
+
+- **S1 enforcement layer**: validation runs in the spawner — *before* `MergeEngine.merge_result` — so a contract violation surfaces as `DelegationFailure` at the trust boundary, not at the next consumer. The merge engine deliberately stays artifact-shape-agnostic (its concern is `MemoryWriteEntry` admission). `jsonschema` is already an agents-runtime dependency (`agents/validate.py`).
+- **S6 symmetry**: every deserialisation entry-point on the contract (now both `from_context_value` and `from_metadata_value`) re-runs `validate()`. Trust-boundary discipline applies in both directions across the planned RFC 0009 process boundary.
+- **N5 rollback semantics**: best-effort, reverse-order delete via the existing `MemoryFacade.episodic` accessor (no new public method on the facade — the spawner already needs episodic access for other compensation paths). Partial-batch failures are unusual (storage-layer transient) and the rollback is itself best-effort because the same storage layer just failed once. The compensation is "do not amplify the failure into a long-lived inconsistency"; reconciliation tooling lives in PR 6 if it proves needed.
+- **N7 / size-cap consolidation**: dropping the per-field `output_schema` size check removes one of the two encoding paths (was `_json.dumps(request.output_schema, sort_keys=True)`), so `request.to_json()`'s canonical encoding is the sole authority. The whole-payload check is a strict superset.
+- **Go-side counter inventory only**: registering the four counters documents the orchestrator-side surface and stabilises dashboard names. The structured-log → counter ingestion bridge (consuming the `delegation_metric` records on the agent log stream) is a follow-up — same pattern as PR 1b's `cost.ContextPackageMetrics` and PR 2a's `eviction_metric` records, which also ship without an automated bridge.
+
+#### Tests
+
+Unit (Python):
+- `test_result_from_metadata_revalidates_on_deserialise` (S6).
+
+Integration (Python):
+- `test_output_schema_enforced_against_artifacts` — Draft-7 mismatch raises `DelegationFailure` with `output_schema` in the message (S1 violation path).
+- `test_output_schema_pass_persists_admitted` — conforming artifacts flow through to memory (S1 happy path).
+- `test_malformed_output_schema_rejected` — caller-supplied schema that fails the meta-schema raises `DelegationFailure` (S1 caller-bug path).
+- `test_partial_persist_failure_rolls_back_admitted` — flaky `store_observation` triggers rollback; partially-persisted entries are absent from `retrieve_relevant` (N5).
+- `test_oversize_output_schema_rejected_at_dispatch` — updated to assert the new whole-payload error message (N7 wording change).
+
+Go:
+- `TestInstrumentInventory` — asserts `orchestrator.delegation.{merge_outcome, memory_writes_admitted, memory_writes_rejected, memory_writes_downscaled}` are registered with the documented units.
+
+#### PR checklist
+
+- [ ] `make test` passes (Python + Go suites)
+- [ ] `make lint` clean for changed files (`agents/sub_agents/`, `agents/memory/`, `agents/task_agent.py`, integration test)
+- [ ] S1 closed: `output_schema` is no longer advisory — spawner runs Draft-7 validation against `DelegationResult.artifacts` before merge
+- [ ] S6 closed: `DelegationResult.from_metadata_value` re-runs `validate()` on deserialisation
+- [ ] N5 closed: `FacadeBoundSpawner._persist_admitted` rolls back on partial-batch failure
+- [ ] N6 closed: `_parse_or_synthesise` collapsed into a single contract-parser call
+- [ ] N7 closed: request payload serialised exactly once; per-field `output_schema` size check dropped
+- [ ] Go counter inventory: four new instruments registered with documented names + units
+- [ ] PR 4 reviewer pinged: PR 4 (`feature/v030-rfc0008-shared-pools-acl`) `Depends on` line was added during the PR 3 follow-up work; the dependency is now satisfied
+
+#### Follow-up findings (from PR #224 deep review)
+
+Round-1 review surfaced two Must-fix and four Should-fix items (docstring drift, metric-name comment / PR-plan claim, `TODO(PR 5)` at rollback site, two N5 coverage gaps, jsonschema message log-injection bound). All applied in-PR via the `fix(rfc0008): apply PR #224 deep-review findings` commit; the new edge-case tests live in `tests/integration/test_delegation_rollback_edges.py` (split out to stay under the 500-line `scripts/checks/file_size.py` cap). Status-hygiene items remain merge-time.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| Must-1 | Must | `_persist_admitted` docstring referenced a non-existent `facade.forget` API; rollback actually calls `episodic.delete_episode`. Docstring + AttributeError-degrade clause corrected to point at the `episodic` accessor. | ✅ Applied in PR |
+| Must-2 | Must | Comment + PR-plan row claimed the Python merge-engine metric strings map "one-to-one" to Go counters. Python emits `metric=delegation_merge_outcome` (no namespace); Go counters carry the `orchestrator.delegation.` prefix per RFC 0019. Comment + PR 3a row corrected; bridge needs fixed-prefix translation. Counter names unchanged. | ✅ Applied in PR |
+| Should-1 | Should | `_enforce_output_schema` docstring claimed Draft-7 meta-validation "only on first use", implying caching. No cache exists — meta-validation runs every dispatch. Docstring corrected. | ✅ Applied in PR (spawner side only — see round-2 S1 below for sibling) |
+| Should-2 | Should | `_rollback_persisted` `delete_episode` is sufficient today only because both episodic and notes-tier writes route through `store_observation`. Added `TODO(RFC 0008 PR 5)` flagging that PR 5's tier split must dispatch by `entry.tier`. | ✅ Applied in PR |
+| Should-3 | Should | Two N5 rollback branches uncovered: rollback-during-rollback failure mode; missing `episodic` accessor degrade path. New file `tests/integration/test_delegation_rollback_edges.py` with `test_rollback_failure_does_not_mask_original_cause` + `test_rollback_skipped_when_facade_lacks_episodic_accessor`. Suite: 13 passed. | ✅ Applied in PR |
+| Should-4 | Should | `jsonschema.ValidationError.message` embeds `repr()` of the offending instance fragment — unbounded `DelegationFailure` message echoed sub-agent `artifacts` content into orchestrator logs (LLM01 / OWASP A09). `_enforce_output_schema` now surfaces structural fields (`validator`, `validator_value`) plus a 200-char-bounded message tail. | ✅ Applied in PR (single site — see round-2 S2 for sibling raise sites) |
+| Info | Info | Status-hygiene: PR 3a checklist + ROADMAP `PR 3a still pending` line + the merge-order warning at the bottom of the PR #223 follow-up section to be flipped/removed at merge time. | Pending — merge-time |
+
+#### Follow-up findings (from PR #224 deep review — round 2)
+
+Second-pass companion review re-walked the diff after the round-1 fixes landed. Two doc/security mirror items (S1, S2) extend round-1 fixes to sibling sites; one test-robustness item (S3) tightens the new edge-case test. Low-priority items are deferred per review report.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S1-mirror | Should | `DelegationRequest.output_schema` field docstring in `agents/sub_agents/delegation.py` (~line 204) still says "validated … on first use" — round-1 Should-1 fix corrected only the spawner-side docstring. Mirror the "every dispatch" wording on the contract side so maintainers reading the contract first form the right mental model. | ✅ Applied in PR |
+| S2-mirror | Should | Round-1 Should-4 bound the schema-violation message to 200 chars at `_enforce_output_schema`, but the four other `DelegationFailure` raises in `_extract_result` (lines ~248, ~273) still echo unbounded sub-agent `output.result` and wrapped `DelegationContractError` text. Same LLM01 / OWASP A09 surface. Factor a `_bounded(s, *, cap=200)` helper at module scope (or a `_DELEGATION_FAILURE_MESSAGE_CAP` constant) and apply at all four sites; add a focused test pinning the `… (truncated)` marker. | ✅ Applied in PR (module-scope `_bounded` + `_DELEGATION_FAILURE_MESSAGE_CAP=200`; new `test_failed_status_payload_is_truncated_in_failure_message`) |
+| S3-caplog | Should | `test_rollback_skipped_when_facade_lacks_episodic_accessor` asserts only that the original `RuntimeError` re-raises; it does **not** pin the documented warning log. A regression silently dropping the warning would still pass. Add `caplog` at WARNING on `agents.sub_agents.spawner` and assert `"does not expose episodic accessor" in caplog.text`. | ✅ Applied in PR |
+| L1-task-log | Low | `agents/task_agent.py` `_parse_or_synthesise` debug log `"agent %s output is not a DelegationResult payload (%s); …"` interpolates `exc` (carrying offending JSON fragment) unbounded. Debug-only, but same CWE-117 / log-injection class as Should-4. Bound `str(exc)` to ~200 chars and/or strip control chars. | Deferred — PR 6 (low-severity batch) |
+| L2-helper | Low | `_ScriptedSubAgent` duplicated across `tests/integration/test_delegation_end_to_end.py` and `test_delegation_rollback_edges.py`. Lift to `tests/integration/_delegation_helpers.py` or a `conftest.py` fixture to avoid copy-paste rot when the helper changes. | Deferred — PR 6 |
+| L3-stub-sig | Low | `boom_delete(_entry_id: str)` accepts exactly one positional arg. Future signature evolution of `delete_episode` (e.g. adding `*, force=False`) would fail with `TypeError` rather than reaching the rollback's `except Exception:`, masking the real assertion. Use `async def boom_delete(*_args, **_kwargs)` for forward-compat. | Deferred — PR 6 |
+| L4-dedup | Info | Comment block in `_persist_admitted` ("Phase 2 memory facade routes both…") near-duplicates the new `TODO(RFC 0008 PR 5)` block in `_rollback_persisted`. Both are correct; consolidate when PR 5's tier split actually lands. | Deferred — PR 5 |
+| Info-1 | Info | Path drift: `tests/integration/test_delegation_rollback_edges.py` lives at `tests/integration/` not `tests/integration/python/` — same N8 path drift the plan already defers to PR 6. | Deferred — PR 6 (matches existing N8) |
+| Info-2 | Info | Status-hygiene: same as round-1 Info — flip PR 3a checklist (9 items), ROADMAP "PR 3a still pending" line, remove the merge-order warning at the bottom of the PR #223 follow-up section, and add a `CHANGELOG.md` `[Unreleased] → Added` bullet for PR 3a (per the PR #223 review S6 convention), all in the merge-time hygiene commit. | Pending — merge-time |
+
+#### Follow-up findings (from PR #224 deep review — round 3)
+
+Third-pass companion review re-walked the diff after the round-2 fixes landed.  Round 3 surfaced one **High** (premature status-hygiene flip — ROADMAP and PR plan claimed `Merged as PR #224` while the PR was still open) plus three **Should** items hardening the round-2 `_bounded` helper against CWE-117 control-character log injection.  All applied in-PR; round-4 then surfaced two follow-on Should items closing test/plan coverage on the round-3 deltas.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| H1-status | High | Round-2 hygiene commit prematurely flipped ROADMAP line 3 to "PR 3a merged as PR #224" and added a `> ✅ Merged as PR #224` block to the PR plan while the PR was still open.  Reverted both to "PR 3a still pending"; restored Info-2 row to `Pending — merge-time`. | ✅ Applied in PR (revert) |
+| S1-ctrl-strip | Should | Round-2's volume cap left CWE-117 forged-line injection open: a sub-agent returning `"harmless\n[ADMIN] forged"` (well under 200 chars) would inject a fake log line that downstream `logger.error("dispatch failed: %s", exc)` renders verbatim across the newline.  Added `_CTRL_TRANSLATION = str.maketrans({c: "\u2424" for c in list(range(0x20)) + [0x7F]})` and `s.translate(_CTRL_TRANSLATION)` in `_bounded`.  U+2424 SYMBOL FOR NEWLINE is a printable, grep-discoverable sentinel; TAB included to block TSV-column injection. | ✅ Applied in PR (`agents/sub_agents/spawner.py`); test-pinned in round-4 (Should #1) |
+| S2-validator-value | Should | `_enforce_output_schema` raise wrapped `first.message` in `_bounded` but echoed `first.validator_value` raw — a `validator: "enum"` violation against `output_schema={"enum": ["x" * 5000]}` would still leak the unbounded enum into the failure message.  Now reads `expected={_bounded(repr(first.validator_value))}: {_bounded(first.message)}`; both interpolations symmetric. | ✅ Applied in PR (`agents/sub_agents/spawner.py:286-296`) |
+| S3-cap-pin | Should | Round-2 cap-pin test `test_failed_status_payload_is_truncated_in_failure_message` asserted only the `"… (truncated)"` marker plus a 1 KB belt-and-braces upper bound — a regression bumping `_DELEGATION_FAILURE_MESSAGE_CAP` from 200 to 2000 would still pass.  Now asserts exact-equal `"X" * 200 in msg and "X" * 201 not in msg`; pins the cap from both directions. | ✅ Applied in PR (`tests/integration/test_delegation_rollback_edges.py:213-219`) |
+| L4-bounded-units | Low | `_bounded` had three behavioural surfaces (control-char strip, length cap, non-string coercion) all exercised only indirectly through one integration test.  Round-3 + round-4 reviews flagged the gap (round-4 L4 / round-3 L4). | ✅ Applied in round-4 fix-up — new `tests/unit/python/test_spawner_helpers.py` covers empty/cap-boundary/cap+1 input, custom cap, per-codepoint strip parametrisation, mixed-control-char strip, non-control Unicode passthrough, exception coercion, non-string coercion. |
+| L5-invalid-result | Low | The second `_bounded(exc)` raise site at `_extract_result` (invalid `DelegationResult`) had no focused integration test — a regression dropping `_bounded` there would not be caught.  Round-4 L4 unit tests (`test_bounded_coerces_exception_via_str`) now pin the helper's contract directly, which closes the regression hole at the point that matters (the helper itself).  A site-specific integration test would add value but is redundant with the unit-level pin. | Deferred — PR 6 (low-severity batch; redundancy with L4 noted) |
+| L6-pr6-scope | Low | Round-2 follow-up table marks L1/L2/L3 as `Deferred — PR 6 (low-severity batch)` but the PR-plan rows for PR 6 do not enumerate them.  PR 6 reviewer will not know to expect this work. | Deferred — PR 6 (will be folded into PR 6 scope row when that PR's branch opens) |
+
+#### Follow-up findings (from PR #224 deep review — round 4)
+
+Fourth-pass review verified all round-3 fixes landed correctly (all High + Should items closed; code-side risk **Low**).  Round 4 surfaced two Should items closing the **test-pin gap on the round-3 control-char strip** and the **plan-side bookkeeping gap for round 3**.  Both applied in-PR (the round-3 table above is the closure of round-4 Should #2; this round-4 table is itself a continuation of that bookkeeping).
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S1-strip-test-pin | Should | Round-3 Should #1 added the highest-value security defence in this PR (CWE-117 control-char strip in `_bounded`), but no test exercised it — a regression dropping `s = s.translate(_CTRL_TRANSLATION)` would silently pass.  Same regression pattern that round-3 Should #3 caught for the 200-char cap.  Added `test_failed_status_payload_control_chars_are_stripped` using a payload mixing `\n`, `\r`, `\x1b`, `\x00`, and `\t`; asserts the U+2424 sentinel appears at least once per stripped codepoint and no raw control char survives. | ✅ Applied in PR (`tests/integration/test_delegation_rollback_edges.py`) |
+| S2-round3-table | Should | Plan had Round-1 + Round-2 follow-up tables but no Round-3 table even though round-3 fixes were present in source with explicit `PR #224 review round-3 (Should #N)` citations.  Future readers of the plan would see code citations with no plan-side row. | ✅ Applied in PR (this commit — round-3 table added above) |
+| L1-changelog | Low | Merge-time hygiene checklist (Info-2 in round-2 table) did not list a `CHANGELOG.md` `[Unreleased] → Added` bullet for PR 3a despite the PR touching public security/observability surface (Go counter inventory, `output_schema` enforcement, partial-batch rollback).  Convention established by PR #223 review S6. | ✅ Applied in PR — bullet added now (so the surface is visible at review time, not a merge-time scramble); Info-2 row updated to enumerate it. |
+| L2-glossary | Low | `DelegationFailure` and `delegation_metric` are not in `docs/ai-glossary.md`. | Deferred — both terms were introduced in PR 3 (#222), not PR 3a; gap predates this PR.  Will be folded into PR 6 documentation hygiene or a standalone glossary commit. |
+| L3-roadmap-wording | Info | ROADMAP line 3 wording `S1/S6 gating + Go-side delegation metrics` understates scope (actual: S1, S6, N5, N6, N7 + counter inventory).  Tighten to `S1/S6/N5–N7 + Go-side delegation metrics` at the merge-time flip. | Pending — merge-time |
+| L4-bounded-lift | Info | `_bounded` + constants will eventually move to `agents/sub_agents/_log_safety.py` once round-2 L1 (`task_agent.py` debug log) lands.  Round-2 L1 row should reference the lift target so PR 6's reviewer is not surprised. | Deferred — PR 6 |
+| L5-stub-third-dup | Info | Round-2 L2 row says "duplicated across [end-to-end] and [rollback-edges]" but `_FailedSubAgent` is now a third stub.  Update L2 row at PR 6 prep time. | Deferred — PR 6 |
+| L6-u2424-encoding | Info | U+2424 sentinel is non-ASCII; legacy log pipelines (CP-1252, GBK) will re-encode it as `?`.  Still safe (no injection), but the visual signal is lost.  Optional docstring note. | Deferred — PR 6 (cosmetic) |
+
+#### Follow-up findings (from PR #224 deep review — round 5)
+
+Fifth-pass review verified all rounds 1–4 fixes landed correctly (code-side risk **Low**; trust-boundary triangle S1+S4+S6 closed, compensator pinned both directions, `_bounded` helper has dedicated unit suite).  Round 5 surfaced one **Must** (CHANGELOG counter-name drift naming a non-existent counter), one **Should** revisiting the round-2 L1 deferral on the same-PR asymmetry argument, and one **Should** on test-fixture hygiene that affects two files.  All three applied in-PR; the remaining Lows + Info are cosmetic / previously-deferred.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| M1-changelog-drift | Must | `CHANGELOG.md` `[Unreleased] → Added` bullet for PR 3a listed the four delegation counters as `merge_outcome, memory_writes_admitted, memory_writes_rejected, request_failed`.  The actual fourth counter registered in `internal/observability/metrics/metrics.go` is `memory_writes_downscaled` — there is **no** `request_failed`.  Operators wiring dashboards from the changelog would hit a "metric not found" error.  Single-token fix. | ✅ Applied in PR — `request_failed` → `memory_writes_downscaled` (verified against `m.Int64Counter("orchestrator.delegation.memory_writes_downscaled", …)` registration). |
+| S1-task-agent-bound | Should | Round-2 L1 deferred wrapping `exc` in `_bounded` at `agents/task_agent.py::_parse_or_synthesise` line ~117 to PR 6 on debug-level grounds.  Round-5 reviewer correctly counters that (a) `LOG_LEVEL=DEBUG` is operator-supported in production, (b) the spawner-side `logger.error("dispatch failed: %s", exc)` cited in the round-2 S2-mirror comment renders the same exception class verbatim downstream, and (c) leaving it deferred creates a single-PR asymmetric defence — the spawner-side raise sites all funnel through `_bounded` but the task-agent-side debug log does not.  Apply now: import `_bounded` from `agents.sub_agents.spawner` (cross-module borrow noted in import comment), wrap `exc` in the `%s` interpolation. | ✅ Applied in PR (`agents/task_agent.py` import block + `_parse_or_synthesise`).  Round-2 L1 row is now **closed**.  Round-4 L4 (lift `_bounded` to `agents/sub_agents/_log_safety.py`) is reinforced by this change — there are now two callers in different modules, giving PR 6 a concrete relocation anchor. |
+| S2-monkeypatch-hygiene | Should | `tests/integration/test_delegation_end_to_end.py::test_partial_persist_failure_rolls_back_admitted` and `tests/integration/test_delegation_rollback_edges.py::test_rollback_failure_does_not_mask_original_cause` swap `parent_facade.store_observation` (and `parent_facade.episodic.delete_episode`) via direct attribute assignment with a manual restore line *after* `pytest.raises`.  If an inner assertion fails before the restore line, the next test in the same fixture session would see a still-patched facade.  The fixture is per-test (`tmp_path`-scoped) so the leak is contained today, but the pattern is fragile and required `# type: ignore[method-assign]` suppressions.  Switch to the `monkeypatch` fixture (always-runs teardown). | ✅ Applied in PR (both files).  End-to-end test additionally calls `monkeypatch.undo()` before the post-failure `retrieve_relevant` so retrieval still runs against the real `store_observation` (semantically equivalent to the previous explicit re-assignment, but managed by the fixture). |
+| L1-failed-status-schema | Low | `_enforce_output_schema` runs even when `result.status == "failed"`; a sub-agent that fails (and therefore emits empty `artifacts`) surfaces a schema-violation `DelegationFailure` instead of the actual failure cause.  Not a contract violation — the contract is artifact-shape regardless of status — but the diagnostic ordering buries the real problem. | Deferred — PR 5 / PR 6 (low; consider short-circuiting on `result.status == "failed"` or appending `result.summary` to the surfaced message; weigh against the trust-boundary argument that a failed agent might still emit poisoned artifacts worth validating). |
+| L2-spawner-headroom | Low | `agents/sub_agents/spawner.py` is now ~471 LOC under the 500-LOC `scripts/checks/file_size.py` cap.  PR 5 will add tier-discriminated rollback dispatch (round-1 Should #2 TODO at the rollback site) and is likely to push past the cap.  Pre-flag the split: the existing round-4 L4 lift target `agents/sub_agents/_log_safety.py` (now reinforced by round-5 S1's cross-module borrow) covers ~50 LOC of helper + constants, which gives PR 5 the headroom needed for the tier-dispatch helper without a hard split. | Pending — fold into PR 5 prep (no PR 3a-side action). |
+| Info-1 | Info | `DelegationFailure`, `DelegationContractError`, `delegation_metric`, and `_bounded` / log-safety helper missing from `docs/ai-glossary.md` (round-4 L2 already deferred; re-flagged for visibility — round-5 S1 lift adds `_bounded` to the deferred list). | Deferred — PR 6 documentation hygiene. |
+| Info-2 | Info | Status hygiene checklist for merge-time (round-2 Info-2, round-4 L1) is unchanged: flip PR 3a `[ ]` → `[x]`, mark all follow-up rows ✅, update ROADMAP merged row + last-updated header, tighten ROADMAP wording per round-4 L3 (`S1/S6` → `S1/S6/N5–N7`). | Pending — merge-time |
+
+---
+
 ### PR 4: `feature/v030-rfc0008-shared-pools-acl` — Phase 4a: Shared Pool ACL + Provenance
 
 **Depends on**: PR 2 + PR 3 + PR 3a.
