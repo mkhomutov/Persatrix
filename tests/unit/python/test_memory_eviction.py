@@ -253,6 +253,60 @@ async def test_eviction_loop_rejects_non_positive_cadence(
         )
 
 
+async def test_eviction_loop_startup_pass_before_full_cadence(
+    episodic: EpisodicMemory,
+) -> None:
+    """First pass fires after min(60, cadence/10), not the full cadence.
+
+    PR 2a M-2: without the startup-delay fix, an agent with the default
+    1-hour cadence stays over-cap for a full hour after restart.  Here we
+    use a 0.5 s cadence so the expected startup delay is
+    min(60, 0.05) = 0.05 s; we wait 4× that delay (0.2 s) — well below
+    the full cadence — and assert the first pass has already run.
+    """
+    db = episodic._ensure_db()  # noqa: SLF001
+    cadence_seconds = 0.5
+    startup_delay = min(60.0, cadence_seconds / 10.0)  # 0.05 s
+
+    call_count = 0
+    original_run = EvictionPass.run
+
+    async def counting_run(
+        self: EvictionPass, conn: "object",
+    ) -> EvictionStats:
+        nonlocal call_count
+        call_count += 1
+        return await original_run(self, conn)  # type: ignore[arg-type]
+
+    EvictionPass.run = counting_run  # type: ignore[method-assign]
+    try:
+        task = asyncio.create_task(
+            eviction_loop(
+                "evict-test", db,
+                episodic_cap=100,
+                ttl_low_importance_days=30,
+                cadence_seconds=cadence_seconds,
+            ),
+        )
+        # Wait 4× startup delay (0.20 s) — only 40% of the full
+        # cadence (0.5 s), so without the M-2 fix the first pass would
+        # not have fired yet and the assertion below would fail.
+        for _ in range(4):
+            if call_count >= 1:
+                break
+            await asyncio.sleep(startup_delay)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        EvictionPass.run = original_run  # type: ignore[method-assign]
+
+    assert call_count >= 1, (
+        f"first pass did not fire before full cadence ({cadence_seconds}s); "
+        f"expected startup delay of {startup_delay:.3f}s"
+    )
+
+
 # ─── MemoryFacade integration ─────────────────────────────────
 
 
@@ -299,6 +353,31 @@ def test_eviction_stats_is_frozen() -> None:
     stats = EvictionStats(ttl_evicted=0, cap_evicted=0, total_after=0)
     with pytest.raises(Exception):  # noqa: BLE001 — frozen-dataclass error
         stats.ttl_evicted = 1  # type: ignore[misc]
+
+
+# ─── MemoryFacade __init__ validation (PR #221 deep-review M1) ────────
+
+
+def test_facade_rejects_invalid_episodic_cap() -> None:
+    """MemoryFacade.__init__ must reject episodic_cap < 1 immediately."""
+    with pytest.raises(ValueError, match="episodic_cap"):
+        MemoryFacade(agent_id="a", db_path=":memory:", episodic_cap=0)
+
+
+def test_facade_rejects_invalid_ttl() -> None:
+    """MemoryFacade.__init__ must reject ttl_low_importance_days < 1 immediately."""
+    with pytest.raises(ValueError, match="ttl_low_importance_days"):
+        MemoryFacade(
+            agent_id="a", db_path=":memory:", ttl_low_importance_days=0,
+        )
+
+
+def test_facade_rejects_non_positive_cadence() -> None:
+    """MemoryFacade.__init__ must reject eviction_cadence_seconds <= 0 immediately."""
+    with pytest.raises(ValueError, match="eviction_cadence_seconds"):
+        MemoryFacade(
+            agent_id="a", db_path=":memory:", eviction_cadence_seconds=0,
+        )
 
 
 # ─── Procedural-tier separation (PR #221 review M-1) ─────────────────

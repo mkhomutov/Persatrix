@@ -15,6 +15,7 @@ against it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -118,6 +119,14 @@ class MemoryFacade:
         ttl_low_importance_days: int = 30,
         eviction_cadence_seconds: int = 3600,
     ) -> None:
+        if episodic_cap < 1:
+            raise ValueError(f"episodic_cap must be >= 1, got {episodic_cap}")
+        if ttl_low_importance_days < 1:
+            raise ValueError(f"ttl_low_importance_days must be >= 1, got {ttl_low_importance_days}")
+        if eviction_cadence_seconds <= 0:
+            raise ValueError(
+                f"eviction_cadence_seconds must be positive, got {eviction_cadence_seconds}"
+            )
         self._agent_id = agent_id
         self._db_path = db_path
         self._default_min_score = default_min_score
@@ -160,12 +169,10 @@ class MemoryFacade:
             return
         await self._episodic.initialize()
         self._initialized = True
-        # PR 2a — schedule the periodic eviction loop.
-        db = self._episodic._ensure_db()  # noqa: SLF001 — same-package access
+        db = self._episodic._ensure_db()  # noqa: SLF001 — PR 2a: schedule eviction loop
         self._eviction_task = asyncio.create_task(
             eviction_loop(
-                self._agent_id, db,
-                episodic_cap=self._episodic_cap,
+                self._agent_id, db, episodic_cap=self._episodic_cap,
                 ttl_low_importance_days=self._ttl_low_importance_days,
                 cadence_seconds=self._eviction_cadence_seconds,
             ),
@@ -180,13 +187,10 @@ class MemoryFacade:
         """
         if not self._initialized:
             return
-        # PR 2a — cancel the eviction loop before tearing down the DB.
         if self._eviction_task is not None:
             self._eviction_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._eviction_task
-            except asyncio.CancelledError:
-                pass
             self._eviction_task = None
         await self._episodic.close()
         self._initialized = False
@@ -342,9 +346,7 @@ class MemoryFacade:
             context["scope"] = scope
         if ttl_seconds is not None:
             if ttl_seconds <= 0:
-                raise ValueError(
-                    f"ttl_seconds must be positive, got {ttl_seconds}",
-                )
+                raise ValueError(f"ttl_seconds must be positive, got {ttl_seconds}")
             context["ttl_seconds"] = ttl_seconds
         return await self._episodic.store_episode(
             summary=content,
@@ -376,9 +378,7 @@ class MemoryFacade:
         if not key or not key.strip():
             raise ValueError("key must not be empty")
         if not 0.0 <= confidence <= 1.0:
-            raise ValueError(
-                f"confidence must be in [0.0, 1.0], got {confidence}",
-            )
+            raise ValueError(f"confidence must be in [0.0, 1.0], got {confidence}")
         context: dict[str, Any] = {"procedure_key": key}
         if expires_at is not None:
             context["expires_at"] = expires_at
@@ -408,9 +408,7 @@ class MemoryFacade:
         [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4.
         """
         if target_tokens < 0:
-            raise ValueError(
-                f"target_tokens must be >= 0, got {target_tokens}",
-            )
+            raise ValueError(f"target_tokens must be >= 0, got {target_tokens}")
         entry_list = list(entries)
         # Stable-sort by importance descending so equal-importance entries
         # retain their input order (deterministic for tests).
@@ -483,9 +481,7 @@ def budget_to_limit(
     if budget_memory_tokens <= 0:
         return max(1, fallback_limit)
     if avg_entry_tokens <= 0:
-        raise ValueError(
-            f"avg_entry_tokens must be positive, got {avg_entry_tokens}",
-        )
+        raise ValueError(f"avg_entry_tokens must be positive, got {avg_entry_tokens}")
     return max(1, budget_memory_tokens // avg_entry_tokens)
 
 

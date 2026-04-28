@@ -205,20 +205,22 @@ All items resolved in PR #221. None blocked PR 2 merge under its Phase-2 contrac
 
 #### Follow-up findings (from PR #221 deep review)
 
-Deep review of PR #221. M1/M2/L2 block merge; M3/L1/L3 are should-fix; L4–L7/Info-1 are nice-to-have or deferred.
+All blockers resolved in PR #221; deferrals routed to PR 5.
 
 | ID | Sev | Finding | Target |
 |----|-----|---------|--------|
-| M1 | Med | Config validation (`cadence > 0`, `cap >= 1`, `ttl >= 1`) runs inside the async task — misconfigured agents lose eviction silently on first tick. Move to `MemoryFacade.__init__`; keep in-loop checks as defence-in-depth. | PR 2a — must fix |
-| M2 | Med | First eviction deferred a full cadence (default 3600 s). Over-cap agents stay bloated for one hour after restart. Run a startup pass after `min(60, cadence/10)` s, or document the contract. | PR 2a — must fix |
-| M3 | Med | `MemoryFacade.initialize` reaches into `EpisodicMemory._ensure_db()` (`# noqa: SLF001`). Promote a `connection` property or move eviction scheduling into the tier. | PR 2a — should fix |
-| L1 | Low | `MemoryFacade.__init__` passes eviction params with no validation; subsumed by M1. | PR 2a — fix with M1 |
-| L2 | Low | `test_eviction_loop_survives_pass_failure` never injects a failure (`caplog` unused). Patch `EvictionPass.run` to raise on call-1, succeed on call-2; assert the warning log. | PR 2a — must fix |
-| L3 | Low | `_score_rows` returns `list[dict]` — opaque to mypy. Promote to a `TypedDict` or frozen dataclass. | PR 2a — should fix |
-| L4–L6 | Low | Narrow `except Exception` to `(aiosqlite.Error, OSError)`; drop dead `base` local in `test_size_cap_keeps_highest_scored`; strengthen SQLi comment in `_evict_size_cap` (ids come from `uuid.uuid4()`). | PR 2a — nice to have |
-| L7 | Low | No e2e integration test (gRPC + eviction), no concurrent-write test, no FTS5-sync regression, no `initialize_memory` wiring test for `eviction_cadence_seconds`. | PR 5 — Phase 4b |
+| M1 | Med | `cadence > 0` / `cap >= 1` / `ttl >= 1` validated in async task — silent loss on first tick. Move to `MemoryFacade.__init__`. | ✅ PR #221 |
+| M2 | Med | First eviction deferred a full cadence — over-cap agents stay bloated. Run startup pass after `min(60, cadence/10)` s. | ✅ PR #221 |
+| M3 | Med | `MemoryFacade.initialize` reaches into `EpisodicMemory._ensure_db()`. Promote a `connection` property. | PR 5 (with L7) |
+| L1 | Low | `__init__` eviction params lack validation; subsumed by M1. | ✅ PR #221 |
+| L2 | Low | `test_eviction_loop_survives_pass_failure` never injects a failure. Patch `EvictionPass.run` to raise then succeed. | ✅ PR #221 |
+| L3 | Low | `_score_rows` returns `list[dict]` — opaque to mypy. Promote to `TypedDict`. | PR 5 |
+| L4–L6 | Low | Narrow `except`; drop dead `base` local; strengthen SQLi comment in `_evict_size_cap`. | PR 2a — nice to have |
+| L7 | Low | Missing e2e (gRPC + eviction), concurrent-write, FTS5-sync, `initialize_memory` wiring tests. | PR 5 |
 
-> **Routing**: M1/M2/L2 block merge (deny-by-default + fail-fast; explicit tests contract). M3/L1/L3 fit the diff. L7 deferred to PR 5 to avoid re-triggering the sizing-risk split. Canonical 6-PR count unchanged.
+> **Routing**: M1/M2/L2 resolved in PR #221. M3/L3/L7 deferred to PR 5 (Phase 4b) so the SLF001-leak refactor lands with the wiring tests that exercise the new seam, avoiding a re-triggered sizing-risk split. Canonical 6-PR count unchanged.
+
+> **✅ Merged as PR #221 (2026-04-28)** — episodic eviction, startup-delay fix (M2), `__init__` validation (M1), procedure-row exclusion, `min_score` CHANGELOG entry, all PR #220 follow-ups resolved.
 
 ---
 

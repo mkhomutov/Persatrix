@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-28 (RFC 0008 PR 2 merged via PR #220: `MemoryFacade` for task agents — facade surface, task-agent wiring, `agents/memory/facade.py`, `schemas/agent.schema.json`; eviction deferred to PR 2a)  
+> **Last updated**: 2026-04-28 (RFC 0008 PR 2a merged via PR #221: episodic-tier eviction — `agents/memory/eviction.py`, startup-delay fix, `MemoryFacade.__init__` validation, procedure-row exclusion)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 merged (#218, #219, #220) — context budget + packaging + metrics + MemoryFacade; PR 2a (eviction) + PR 3 (delegation) next
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a merged (#218, #219, #220, #221) — context budget + packaging + metrics + MemoryFacade + episodic eviction; PR 3 (delegation) next
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -810,6 +810,7 @@ v0.5.0 complete
 | [#218](https://github.com/mkhomutov/Persatrix/pull/218) | feat(rfc0008): PR 1 — context budget allocator + packaging foundation | 0008 (1/6) | 2026-04-27 |
 | [#219](https://github.com/mkhomutov/Persatrix/pull/219) | feat(rfc0008): PR 1b — context metrics emission + remaining-budget persistence | 0008 (1b/6) | 2026-04-27 |
 | [#220](https://github.com/mkhomutov/Persatrix/pull/220) | feat(rfc0008): PR 2 — MemoryFacade for task agents | 0008 (2/6) | 2026-04-28 |
+| [#221](https://github.com/mkhomutov/Persatrix/pull/221) | feat(rfc0008): PR 2a — episodic-tier eviction + PR 2 follow-up findings | 0008 (2a/6) | 2026-04-28 |
 
 ---
 

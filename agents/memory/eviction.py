@@ -266,9 +266,13 @@ async def eviction_loop(
         "Eviction loop started for agent %s (cadence=%.0fs, cap=%d, ttl=%dd)",
         agent_id, cadence_seconds, episodic_cap, ttl_low_importance_days,
     )
+    # PR 2a M-2: run the first pass after a short startup delay so that
+    # over-cap agents don't stay bloated for a full cadence after restart.
+    # Subsequent passes keep the full cadence period.
+    startup_delay = min(60.0, cadence_seconds / 10.0)
     try:
+        await asyncio.sleep(startup_delay)
         while True:
-            await asyncio.sleep(cadence_seconds)
             try:
                 stats = await pass_runner.run(db)
                 if stats.ttl_evicted or stats.cap_evicted:
@@ -282,6 +286,7 @@ async def eviction_loop(
                     "Eviction pass failed for agent %s — loop continues",
                     agent_id, exc_info=True,
                 )
+            await asyncio.sleep(cadence_seconds)
     except asyncio.CancelledError:
         logger.info("Eviction loop cancelled for agent %s", agent_id)
         raise
