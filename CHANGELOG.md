@@ -18,6 +18,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Sub-agent delegation Go-side metrics + spawner hardening** (RFC 0008
+  PR 3a, follow-up to PR 3).  Four new Go counters land in
+  [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
+  under the `orchestrator.delegation.` namespace (per RFC 0019 OTEL
+  naming): `merge_outcome`, `memory_writes_admitted`,
+  `memory_writes_rejected`, `request_failed`.  These mirror the
+  Python-side structured-log metrics the merge engine already emits
+  (a future log→counter bridge needs a fixed-prefix translation, not
+  a 1-for-1 lookup; see [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
+  comment).  Spawner-side hardening lands alongside the counters:
+  (a) **S1** — `output_schema` is no longer advisory; the spawner now
+  runs Draft-7 validation against `DelegationResult.artifacts` before
+  the merge engine sees it (OWASP A04); (b) **S6** —
+  `DelegationResult.from_metadata_value` re-runs `validate()` on
+  deserialisation; (c) **N5** — `FacadeBoundSpawner._persist_admitted`
+  rolls back partial-batch failure via `episodic.delete_episode` so a
+  mid-batch crash cannot leave orphaned writes; (d) **N6** —
+  `_parse_or_synthesise` collapsed into a single contract-parser call;
+  (e) **N7** — request payload serialised exactly once (the per-field
+  `output_schema` size check is subsumed by the whole-payload cap).
+  All `DelegationFailure` raise sites that interpolate
+  attacker-influenceable text now funnel through a module-private
+  `_bounded` helper (200-char cap, control-character strip to U+2424
+  sentinel) to neutralise CWE-117 log injection / OWASP A09.  No proto
+  / wire change.
 - **Shared memory pools — config-driven cross-agent pools with ACL +
   provenance** (RFC 0008 §H, PR 4).  New `agents.memory.shared_pool`
   module ships `SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`,

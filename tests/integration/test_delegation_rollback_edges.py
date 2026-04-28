@@ -219,3 +219,57 @@ async def test_failed_status_payload_is_truncated_in_failure_message(
     # under 1 KB.  Belt-and-braces upper bound to catch catastrophic
     # regressions where the cap is removed entirely.
     assert len(msg) < 1024, f"DelegationFailure message exceeded sane cap: {len(msg)}"
+
+
+@pytest.mark.asyncio
+async def test_failed_status_payload_control_chars_are_stripped(
+    parent_facade: MemoryFacade,
+) -> None:
+    """PR #224 review round-4 (Should #1): pin the CWE-117 control-char
+    strip in ``_bounded``.
+
+    Round-3 added ``s.translate(_CTRL_TRANSLATION)`` in
+    ``agents/sub_agents/spawner.py`` to neutralise forged-line
+    injection — a sub-agent that returns
+    ``output.result = "harmless\\n[ERROR] forged admin alert"`` (well
+    under the 200-char volume cap) would otherwise inject a fake log
+    line into the ``DelegationFailure`` message that downstream
+    ``logger.error("dispatch failed: %s", exc)`` calls render verbatim
+    across the newline.  The existing truncation test uses a payload
+    with no control characters, so a regression dropping the strip
+    would silently pass.  This test pins the strip from both
+    directions: the U+2424 sentinel must appear, *and* the original
+    control characters must be absent.
+    """
+    # Mix of the most dangerous control characters: \n / \r (forged-line
+    # injection), \x1b (ANSI escape sequence — terminal hijack), \x00
+    # (NUL — log-pipeline truncation), \t (TSV column injection).
+    payload = "harmless\n[ADMIN] forged\r\x1b[31mred\x00trail\there"
+    child = _FailedSubAgent("ctrl-injector", payload)
+    spawner = FacadeBoundSpawner(
+        parent_agent_id="coordinator", memory_facade=parent_facade,
+    )
+    req = DelegationRequest(objective="provoke ctrl-char failure")
+
+    with pytest.raises(DelegationFailure) as excinfo:
+        await spawner.dispatch(child, req)
+
+    msg = str(excinfo.value)
+    # Sentinel must appear at least once for every stripped codepoint
+    # in the payload (5 control chars: \n \r \x1b \x00 \t).
+    assert msg.count("\u2424") >= 5, (
+        "DelegationFailure message must replace each control character "
+        f"with the U+2424 sentinel; got: {msg!r}"
+    )
+    # No raw control characters from the payload may survive into the
+    # rendered failure message.  Asserting per-character so a regression
+    # report points at the offending codepoint.
+    for ctrl in ("\n", "\r", "\x1b", "\x00", "\t"):
+        assert ctrl not in msg, (
+            f"DelegationFailure message leaked raw control char {ctrl!r}"
+        )
+    # The visible payload prefix ("harmless") must still be present —
+    # the strip must not nuke surrounding text.  Operator-triage signal
+    # is the whole point of bounding rather than redacting.
+    assert "harmless" in msg
+    assert "forged" in msg
