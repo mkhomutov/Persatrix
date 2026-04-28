@@ -478,3 +478,40 @@ PR 2a (episodic-tier eviction follow-on to PR 2).
   quiet."
 
 
+
+## RFC 0008 — Delegation Contract (PR 3)
+
+Terms from [RFC 0008](rfcs/0008-agent-memory-context-optimization.md) PR 3.
+
+### DelegationRequest
+- **Definition:** Frozen dataclass
+  `agents.sub_agents.delegation.DelegationRequest` — caller-to-sub-agent
+  envelope (objective, acceptance criteria, context package, budget,
+  allowed tools, output schema, trust ceiling, max memory writes).
+  Travels under reserved `_delegation_request` `TaskInput.context` key.
+
+### DelegationResult
+- **Definition:** Frozen dataclass
+  `agents.sub_agents.delegation.DelegationResult` — sub-agent reply
+  (summary, status, artifacts, decisions, memory_writes, risks).
+  `status ∈ {completed, partial, failed}`. Travels under reserved
+  `_delegation_result` `TaskOutput.metadata` key.
+
+### MemoryWriteEntry
+- **Definition:** Frozen dataclass
+  `agents.sub_agents.delegation.MemoryWriteEntry` — a single proposed
+  memory write inside a `DelegationResult`. `tier ∈ {episodic, notes}`
+  (procedural intentionally excluded). `source_agent` is
+  framework-injected; caller-set values are rejected.
+
+### MergeEngine
+- **Definition:** `agents.sub_agents.merge.MergeEngine` — applies the
+  deterministic 6-step pipeline (schema → source-agent inject → cap →
+  trust-ceiling → per-entry strategy → metrics) to a `DelegationResult`.
+  Strategies: `replace`, `append`, `patch` (RFC 7396), `reject_on_conflict`.
+
+### BudgetEnvelope
+- **Definition:** Frozen dataclass
+  `agents.sub_agents.delegation.BudgetEnvelope` — `tokens`,
+  `timeout_seconds`, `max_llm_calls` caps on a sub-agent invocation.
+  `0` means unbounded on that axis.

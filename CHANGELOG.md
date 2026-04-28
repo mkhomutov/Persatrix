@@ -18,6 +18,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Sub-agent delegation contract + merge engine** (RFC 0008 §E, PR 3).
+  New `agents.sub_agents.delegation` module ships
+  `DelegationRequest` / `DelegationResult` / `MemoryWriteEntry` /
+  `BudgetEnvelope` frozen dataclasses on the reserved
+  `_delegation_request` / `_delegation_result` `TaskInput.context` /
+  `TaskOutput.metadata` keys (no proto changes).  New
+  `agents.sub_agents.merge.MergeEngine` applies the deterministic 6-step
+  pipeline (schema → source-agent inject → cap → trust-ceiling
+  downscale → per-entry strategy → metrics) with strategies `replace`,
+  `append`, `patch` (RFC 7396 JSON Merge Patch on objects, tag-list
+  union for arrays, replace-for-strings on scalars), and
+  `reject_on_conflict`.  Procedural tier is intentionally excluded from
+  delegated writes (dedicated `procedural_tier_rejected` reason) — see
+  [RFC 0008 PR 3 plan](docs/rfcs/0008-pr-plan.md) Key implementation
+  details.  In-process `SubAgentSpawner` + `FacadeBoundSpawner` exercise
+  the contract end-to-end without sub-process isolation (full RFC 0009
+  isolation lands later).  `TaskAgent` now auto-emits a synthesised
+  `DelegationResult` envelope when invoked under a delegation request.
+  Per-rejection structured-log metric emission (`delegation_merge_outcome`,
+  `delegation_memory_writes_admitted`, `delegation_memory_writes_rejected`);
+  Go counter back-fill ships in the follow-on
+  `feature/v030-rfc0008-delegation-metrics` PR per the PR 3 sizing-risk
+  note.
 - **Episodic-tier eviction** (RFC 0008 §G, PR 2a).  TTL eviction of
   low-importance entries (`importance < 0.3`, default 30-day window) and
   hybrid-score size-cap eviction (`importance · 0.6 + recency · 0.3 +
