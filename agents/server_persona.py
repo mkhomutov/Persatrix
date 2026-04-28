@@ -245,7 +245,17 @@ def load_shared_pools(
 
 async def start_shared_pools(registry) -> None:  # type: ignore[no-untyped-def]
     """Initialize each pool in *registry*; per-pool failures are logged
-    but do not block startup (callers see ``unknown_pool`` until restart).
+    and the failing pool is removed from the registry so subsequent
+    ``read``/``write`` raise the documented
+    :class:`SharedMemoryPermissionError` (``unknown_pool``) instead of a
+    bare ``RuntimeError("not initialised")`` from a half-built pool.
+
+    PR #223 deep-review S2: an earlier draft swallowed the exception
+    and left the failing pool in the registry, so ``registry.get(name)``
+    succeeded but the next ``pool.read``/``pool.write`` raised
+    ``RuntimeError("... not initialised")`` — which an operator could
+    not distinguish from a programming error.  Evicting on failure makes
+    ``unknown_pool`` semantics honest until process restart.
     """
     if registry is None:
         return
@@ -254,8 +264,11 @@ async def start_shared_pools(registry) -> None:  # type: ignore[no-untyped-def]
             await registry.get(pool_name).initialize()
         except Exception:
             logger.exception(
-                "Failed to initialise shared pool %s", pool_name,
+                "Failed to initialise shared pool %s — dropping from "
+                "registry; subsequent calls will raise unknown_pool",
+                pool_name,
             )
+            registry.drop(pool_name)
 
 
 async def stop_shared_pools(registry) -> None:  # type: ignore[no-untyped-def]

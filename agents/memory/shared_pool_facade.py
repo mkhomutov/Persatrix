@@ -46,10 +46,12 @@ async def publish_via_facade(
             "is forbidden by RFC 0008 §H safety constraint #3",
             reason="sensitive_pool_isolation",
         )
+    # PR #223 deep-review S1: ``SharedMemoryPool.write`` binds
+    # ``source_agent`` 1-for-1 to ``agent_id`` (no override knob), which
+    # is exactly the framework-injection guarantee the facade promises.
     return await pool.write(
         agent_id, content,
         confidence=confidence, tags=tags,
-        source_agent_override=agent_id,
     )
 
 

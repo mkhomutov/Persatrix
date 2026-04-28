@@ -158,6 +158,15 @@ agents:
 # ─── Shared Memory Pools (RFC 0008 Phase 4a) ──────────────
 # Named cross-agent memory pools with ACL + provenance enforcement.
 # Schema: schemas/agent.schema.json#shared_memory_pool
+#
+# NOTE (RFC 0008 PR plan PR 4 / PR #223 deep-review N6): the persona-side
+# wiring is partial in Phase 4a — `agents/persona_runtime/state_persistence.py`
+# accepts a `shared_pools` arg but does not yet expose
+# `publish_to_pool` / `read_from_pool` to persona prompts.  The
+# `planner` / `code-writer` / `code-reviewer` ACLs below are therefore
+# operator-visible but a no-op until a follow-on PR (RFC 0008 PR plan
+# PR 5+) wires the persona path through.  Listed here so the example
+# is complete by the time that PR lands; remove this NOTE then.
 shared_memory_pools:
   team-knowledge:
     readers: ["planner", "code-writer", "code-reviewer"]

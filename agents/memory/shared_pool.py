@@ -48,7 +48,10 @@ class SharedMemoryPermissionError(PermissionError):
     Subclasses :class:`PermissionError` so callers can catch the broader
     standard-library type.  The structured ``reason`` attribute identifies
     the deny path (``not_in_readers`` / ``not_in_writers`` /
-    ``sensitive_pool_isolation`` / ``provenance_set`` / ``unknown_pool``).
+    ``sensitive_pool_isolation`` / ``unknown_pool``).  PR #223 review S1
+    dropped a previously-documented ``provenance_set`` reason that was
+    never raised; RFC 0009 capability tokens may re-introduce a token-
+    mismatch reason later.
     """
 
     def __init__(self, message: str, *, reason: str) -> None:
@@ -128,6 +131,13 @@ class SharedPoolConfig:
 # correctly.  The ``pool-`` prefix is reserved — no real agent may use it.
 _POOL_AGENT_PREFIX = "pool-"
 _POOL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+
+# PR #223 review S3 (mirrors PR-220 M3 / facade.py constant of same name):
+# over-fetch when a Python-side ``min_confidence`` trust filter follows a
+# fixed FTS5 ``recall(limit=N)`` so the post-filter result honours
+# ``limit``.  Duplicated here (not imported from facade.py) to avoid an
+# import cycle.  Drop once SQL-side ``importance`` pre-filter lands (PR 5+).
+_MIN_CONFIDENCE_OVERFETCH_FACTOR = 3
 
 
 def _pool_agent_id(name: str) -> str:
@@ -231,7 +241,15 @@ class SharedMemoryPool:
             raise ValueError(
                 f"min_confidence must be in [0.0, 1.0], got {min_confidence}",
             )
-        episodes = await self._episodic.recall(query, limit=limit)
+        # PR #223 deep-review S3: over-fetch when a trust filter is
+        # active so the post-filter result honours ``limit``.  No-op when
+        # ``min_confidence is None`` (no culling will happen).
+        recall_limit = (
+            limit * _MIN_CONFIDENCE_OVERFETCH_FACTOR
+            if min_confidence is not None
+            else limit
+        )
+        episodes = await self._episodic.recall(query, limit=recall_limit)
         out: list[SharedPoolEntry] = []
         for ep in episodes:
             ctx = ep.context if isinstance(ep.context, dict) else {}
@@ -249,6 +267,10 @@ class SharedMemoryPool:
                     tags=tuple(ep.tags or ()),
                 ),
             )
+            if len(out) >= limit:
+                # Truncate at the caller-requested ``limit`` so the
+                # over-fetch is invisible to the consumer.
+                break
         _record_read(self._config.name, agent_id, len(out))
         return out
 
@@ -261,18 +283,17 @@ class SharedMemoryPool:
         *,
         confidence: float,
         tags: Iterable[str] = (),
-        source_agent_override: str | None = None,
     ) -> str:
         """Persist *content* into the pool with framework-injected provenance.
 
         Raises :class:`SharedMemoryPermissionError` when ``agent_id`` is
-        not a writer.  ``source_agent_override`` is reserved for
-        :meth:`MemoryFacade.publish_to_pool` to assert the calling agent
-        — *callers* must not pass it; doing so yields ``provenance_set``.
-
-        Returns the new entry ID.  When the post-write count exceeds
-        ``max_entries`` the oldest entries (FIFO by ``created_at``
-        ascending) are evicted before the call returns.
+        not a writer.  ``source_agent`` is bound 1-for-1 to *agent_id* —
+        no override knob, so an in-process caller cannot spoof it without
+        also impersonating the writer ACL.  (PR #223 review S1 removed an
+        earlier ``source_agent_override`` kwarg the facade always set to
+        ``agent_id`` anyway; RFC 0009 capability tokens may add a token-
+        bound override later.)  Returns the new entry ID; FIFO eviction
+        on ``created_at`` runs before return when count > ``max_entries``.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -291,12 +312,10 @@ class SharedMemoryPool:
                 f"{self._config.required_confidence} for pool "
                 f"{self._config.name!r}",
             )
-        # Provenance: source_agent is the calling agent_id.  An override
-        # is honoured ONLY for the facade's publish-from-isolated path,
-        # which itself enforces that the caller has writer permission.
-        source = source_agent_override or agent_id
+        # Provenance is bound 1-for-1 to ``agent_id`` (PR #223 review S1
+        # — see method docstring for the trust-boundary rationale).
         ctx: dict[str, Any] = {
-            "source_agent": source,
+            "source_agent": agent_id,
             "confidence": confidence,
             "pool": self._config.name,
         }
@@ -311,36 +330,33 @@ class SharedMemoryPool:
         return entry_id
 
     async def _enforce_fifo_cap(self) -> None:
-        """Drop oldest rows when the pool exceeds ``max_entries``.
+        """Drop oldest rows when the pool exceeds ``max_entries`` (FIFO).
 
-        FIFO on ``created_at`` ascending — see module docstring for why
-        the §G hybrid formula does not apply to shared pools.
+        Single atomic ``DELETE ... WHERE id NOT IN (SELECT ... LIMIT
+        max_entries)`` per PR #223 review N2 — eliminates the count→
+        delete race a concurrent writer could open.  Reaches into
+        ``EpisodicMemory._ensure_db()`` (review S5 / PR-2 M3); the
+        canonical ``connection`` property is deferred to PR 5+.
         """
-        db = self._episodic._ensure_db()  # noqa: SLF001 — same package
+        db = self._episodic._ensure_db()  # noqa: SLF001 — RFC 0008 PR 5
         pool_agent = _pool_agent_id(self._config.name)
-        async with db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE agent_id = ?",
-            (pool_agent,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        count = int(row[0]) if row else 0
-        excess = count - self._config.max_entries
-        if excess <= 0:
-            return
-        await db.execute(
+        cursor = await db.execute(
             """
             DELETE FROM episodes
-            WHERE id IN (
+            WHERE agent_id = ?
+              AND id NOT IN (
                 SELECT id FROM episodes
                 WHERE agent_id = ?
-                ORDER BY created_at ASC
+                ORDER BY created_at DESC
                 LIMIT ?
-            )
+              )
             """,
-            (pool_agent, excess),
+            (pool_agent, pool_agent, self._config.max_entries),
         )
+        evicted = cursor.rowcount or 0
         await db.commit()
-        _record_evictions(self._config.name, excess)
+        if evicted > 0:
+            _record_evictions(self._config.name, evicted)
 
 
 # ─── SharedPoolRegistry ──────────────────────────────────────────
@@ -371,6 +387,16 @@ class SharedPoolRegistry:
 
     def names(self) -> tuple[str, ...]:
         return tuple(self._pools)
+
+    def drop(self, name: str) -> None:
+        """Remove *name* (idempotent).
+
+        PR #223 review S2: ``start_shared_pools`` evicts pools whose
+        ``initialize()`` raised so callers see the documented
+        ``unknown_pool`` deny instead of a half-built pool's
+        ``RuntimeError("not initialised")``.
+        """
+        self._pools.pop(name, None)
 
     async def close_all(self) -> None:
         for pool in self._pools.values():
@@ -407,11 +433,15 @@ def build_registry_from_config(
 
 
 def _record_read(pool: str, agent: str, count: int) -> None:
+    # PR #223 review N1: do NOT emit ``count`` as a counter attribute —
+    # high cardinality.  Use a Histogram instead if per-call distribution
+    # becomes interesting.  Param kept for caller-shape stability.
+    del count
     inst = _try_instruments()
     if inst is None:
         return
     inst.shared_pool_reads.add(
-        1, attributes={"pool": pool, "agent.id": agent, "result.count": count},
+        1, attributes={"pool": pool, "agent.id": agent},
     )
 
 

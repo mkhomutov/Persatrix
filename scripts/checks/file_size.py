@@ -78,6 +78,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/rfcs/0006-pr-plan.md",
     # PR plan accumulates per-PR review residuals throughout the multi-PR
     # lifecycle (one review-findings subsection per merged PR). The plan
+    # exited PR 3's review window with ~7 984 words; the PR 4 (RFC 0008
+    # PR 4) review captures pushed it over the 8 000-word threshold.
+    # Same rationale as `docs/rfcs/0019-pr-plan.md` below — trim/split is
+    # more disruptive than informative on a plan that is still actively
+    # accumulating per-PR follow-ups. Remove this entry once the
+    # remaining 6-PR sequence completes and the plan is closed out.
+    "docs/rfcs/0008-pr-plan.md",
+    # PR plan accumulates per-PR review residuals throughout the multi-PR
+    # lifecycle (one review-findings subsection per merged PR). The plan
     # exited PR 4's review window with ~7 980 words; the closeout PR 5
     # (RFC 0019 PR 5) tipped the file over the 8 000-word threshold while
     # appending the standard Disposition / Applied / Deferred sections.

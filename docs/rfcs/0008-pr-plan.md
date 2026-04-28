@@ -379,11 +379,34 @@ Integration:
 - [ ] `make lint` clean
 - [ ] `make validate` passes (`schemas/agent.schema.json` `shared_memory_pools` additions)
 - [ ] Deny-by-default: agents not in a pool's `readers` / `writers` raise `SharedMemoryPermissionError` (no silent fallthrough)
-- [ ] Provenance: `source_agent` is framework-injected from the calling `agent_id`; caller-set values rejected with `provenance_set`
+- [ ] Provenance: `source_agent` is framework-injected from the calling `agent_id` (1-for-1 binding; `SharedMemoryPool.write` exposes no override knob, so the trust boundary is the writer ACL — see PR #223 review S1)
 - [ ] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
-- [ ] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in)
+- [ ] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in); over-fetch factor 3 ensures `limit` is honoured (PR #223 review S3)
 - [ ] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
 - [ ] [RFC 0008 PR 5](#pr-5-feature-v030-rfc0008-procedural-revalidation---phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+
+#### Follow-up findings (from PR #223 deep review)
+
+Pass-1 review applied in-PR (no fix-up PR triggered). Code-side items resolved in this PR; status-hygiene items below.
+
+| ID | Sev | Finding (summary) | Status |
+|----|-----|-------------------|--------|
+| S1 | Should | `SharedMemoryPool.write` `source_agent_override` removed; `provenance_set` reason dropped from documented taxonomy (was never raised). Trust boundary is the writer ACL. | ✅ Applied in PR |
+| S2 | Should | `start_shared_pools` evicts pools whose `initialize()` raised; `unknown_pool` semantics now honest. | ✅ Applied in PR |
+| S3 | Should | `min_confidence` filter over-fetches by factor 3 (mirrors PR-220 review M3 / `_TAG_SCOPE_OVERFETCH_FACTOR` in `facade.py`). | ✅ Applied in PR |
+| S4 | Should | PR description claims "PR 3a merged in main"; ROADMAP says PR 3a is next. PR description amendment required at merge time (or sequence PR 3a first). | Pending — PR description / merge order |
+| S5 | Should | `_enforce_fifo_cap` still reaches `EpisodicMemory._ensure_db()`; TODO ref to RFC 0008 PR plan PR 5+ added in-line so the SLF001 access is not re-flagged in future reviews. | ✅ Applied in PR (TODO only — actual fix deferred to PR 5) |
+| S6 | Should | Glossary entries (`SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`, `SharedPoolRegistry`, `SharedMemoryPermissionError`, `publish_to_pool`, `read_from_pool`, `shared_memory_pools`) + CHANGELOG `Added` bullet. | ✅ Applied in PR |
+| S7 | Should | Direct-`pool.write` provenance contract test (`test_pool_write_signature_has_no_provenance_override`). | ✅ Applied in PR |
+| N1 | Nice | `_record_read` `result.count` attribute dropped (high-cardinality OTLP/Prometheus label). | ✅ Applied in PR |
+| N2 | Nice | `_enforce_fifo_cap` collapsed to single atomic `DELETE … WHERE id NOT IN (… LIMIT max_entries)`; new test `test_fifo_eviction_concurrent_writers`. | ✅ Applied in PR |
+| N3 | Nice | `setup_shared_pools` reads `db_path` from a single agent. Acceptable today (single-agent server); revisit when multi-agent server lands. | Deferred — out of scope for PR 4 |
+| N4 | Nice | New tests: `test_min_confidence_overfetches_under_limit`, `test_fifo_eviction_concurrent_writers`, `test_read_from_pool_and_tag_filter` (AND-tag E2E). Metric-emission tests deferred. | ✅ Partially applied (E2E + concurrency); metric-emission deferred to PR 6 |
+| N5 | Nice | Test path drift `tests/integration/...` vs `tests/integration/python/...`. | PR 6 (normalise plan — same as PR 2 / PR 3 N8) |
+| N6 | Nice | `config/agents.yaml` example pool: inline NOTE that persona-side wiring is partial in Phase 4a. | ✅ Applied in PR |
+| N7 | Nice | Schema does not require `writers ⊆ readers`. Deliberately permissive (a publish-only writer is a valid pattern). | Deferred — design choice |
+| Info-1 | Info | PR 4 checklist: 8 items still `[ ]` — flip on merge. | Pending — merge time |
+| Info-2 | Info | ROADMAP last-updated header + PR-count → "4 of 6"; PR 4 row → merged. | Pending — merge time |
 
 ---
 
