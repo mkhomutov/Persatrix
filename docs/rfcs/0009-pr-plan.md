@@ -31,39 +31,53 @@ This plan splits Phases 1–2 into **4 PRs**.
 ## Dependency Graph
 
 ```
-PR 1 (Phase 1a — AuditLogger + SecretRedactor)
+PR 1  (Phase 1a — AuditLogger + SecretRedactor [package + unit tests])
   ↓
-PR 2 (Phase 1b — RateLimiter + middleware integration)
+PR 1b (Phase 1a wiring — server/executor/main + integration tests)
   ↓
-PR 3 (Phase 2 — InputSanitizer + ContextItem + provenance tagging)
+PR 2  (Phase 1b — RateLimiter + middleware integration)
   ↓
-PR 4 (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
+PR 3  (Phase 2 — InputSanitizer + ContextItem + provenance tagging)
+  ↓
+PR 4  (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 ```
+
+> **Split rationale (PR 1 → PR 1 + PR 1b)**: opted into the plan's stated
+> contingency to keep PR 1 below the 500-line size cap. PR 1 ships the
+> security package (audit logger + redactor + closed-set event types) plus
+> unit tests; PR 1b wires the package into `internal/server`,
+> `internal/executor`, and `cmd/orchestrator`, adds the integration tests,
+> and ships the `OBSERVABILITY_AUDIT_PATH` config + observability docs.
 
 ---
 
 ## PR Sequence
 
-### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor
+### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor (package + unit tests)
 
 **Depends on**: Nothing.
-**Estimated size**: ~450–500 lines (new files + wiring + tests). At the 1.7× calibration ceiling; if scope expands during implementation, split the orchestrator wiring into a follow-up PR 1b.
+**Estimated size**: ~450–500 lines originally. **Split into PR 1 (this) + PR 1b** at implementation time per the contingency below: PR 1 ships the security package + unit tests only, PR 1b ships orchestrator wiring + integration tests + observability docs. The split keeps each PR comfortably below the 500-line cap and lets PR 1 land on a pure-additive package boundary with no orchestrator surface change.
 
 #### Scope
 
-| File | Change |
-|------|--------|
-| `internal/security/audit.go` | **New** — `AuditLogger` interface, `FileSink` implementation: append-only JSONL with severity-driven flush (per-event `fsync` for security-class events; batched flush every 64 events / 250 ms for telemetry-class), checksum chain, correlation-ID schema. |
-| `internal/security/audit_event.go` | **New** — `AuditEvent` struct, `AuditEventType` constants (16 types per RFC §G), severity classifier (`isSecurityEvent(t AuditEventType) bool`). |
-| `internal/security/redactor.go` | **New** — `SecretRedactor`: 5 default patterns from RFC §I (`anthropic-api-key`, `openai-api-key`, `bearer-token`, `aws-access-key`, `generic-secret`); `Redact(string) string`; `RedactStruct(any) any` via reflection over exported string fields. |
-| `internal/security/security.go` | Replace 5 TODO stubs with re-exports / constructors; keep package doc comment. |
-| `internal/server/server.go` | Wire `AuditLogger` into `RegisterAgent` handler (emit `agent.registered` on success, `capability.violation` on registration with capabilities outside config). |
-| `internal/executor/executor.go` | Emit `tool.invoked` on every dispatched tool call (telemetry-class — batched). |
-| `cmd/orchestrator/main.go` | Construct `AuditLogger` with file path from `OBSERVABILITY_AUDIT_PATH` env (default `data/logs/audit.jsonl`); pass into server + executor. |
-| `config/observability/audit.yaml` (or extend existing observability config) | Sink path, batch size, batch interval, fsync policy override. |
-| `internal/security/audit_test.go` | Unit tests — see Tests below. |
-| `internal/security/redactor_test.go` | Unit tests — see Tests below. |
-| `tests/integration/audit_logger_integration_test.go` | Integration — agent registration writes `agent.registered`; redactor scrubs API key from `Detail` field. |
+> **PR 1 (this PR) ships only the rows marked _package_.** The _wiring_ rows
+> are deferred to PR 1b (see new section below).
+
+| File | Change | PR |
+|------|--------|----|
+| `internal/security/audit.go` | **New** — `AuditLogger` interface + `fileAuditLogger` (JSONL append-only sink, severity-driven flush, batched flush every 64 events / 250 ms). | 1 (package) |
+| `internal/security/audit_chain.go` | **New** — checksum-chain helpers, canonical event encoding, startup recovery (`chain.bootstrap` / `chain.restart` / `chain.recovered`), tail inspection. Split out of `audit.go` for the 500-line file cap. | 1 (package) |
+| `internal/security/audit_event.go` | **New** — `AuditEvent` struct, `AuditEventType` constants (20 types — RFC §G core 16 + `chain.bootstrap` / `chain.restart` / `chain.recovered` / `rate_limit.unauthenticated_caller`), severity classifier (`isSecurityEvent`), `AllAuditEventTypes()` helper for closed-set test. | 1 (package) |
+| `internal/security/redactor.go` | **New** — `Redactor` interface + `SecretRedactor`: 5 default patterns from RFC §I; `Redact(string) string`; `RedactStruct(any) any` via reflection over exported fields with cycle / depth bounds. | 1 (package) |
+| `internal/security/security.go` | Remove implemented stubs; keep package doc + remaining TODOs. | 1 (package) |
+| `internal/security/audit_test.go` | Unit tests — chain integrity, fsync policy, batch flush triggers, recovery paths, redactor wiring. | 1 (package) |
+| `internal/security/redactor_test.go` | Unit tests — patterns, nested / cyclic / deep-nested struct walks, `map[string]any`. | 1 (package) |
+| `internal/server/server.go` | Wire `AuditLogger` into `RegisterAgent` handler (emit `agent.registered` on success, `capability.violation` on registration with capabilities outside config). | 1b (wiring) |
+| `internal/executor/executor.go` | Emit `tool.invoked` on every dispatched tool call (telemetry-class — batched). | 1b (wiring) |
+| `cmd/orchestrator/main.go` | Construct `AuditLogger` with file path from `OBSERVABILITY_AUDIT_PATH` env (default `data/logs/audit.jsonl`); pass into server + executor. | 1b (wiring) |
+| `config/observability/audit.yaml` (or extend existing observability config) | Sink path, batch size, batch interval, fsync policy override. | 1b (wiring) |
+| `tests/integration/audit_logger_integration_test.go` | Integration — agent registration writes `agent.registered`; redactor scrubs API key from `Detail` field. | 1b (wiring) |
+| `docs/observability.md` | Document `OBSERVABILITY_AUDIT_PATH` env + default sink path. | 1b (wiring) |
 
 #### Key implementation details
 
@@ -103,13 +117,35 @@ Integration (`tests/integration/`):
 
 #### PR checklist
 
-- [ ] ROADMAP.md row for RFC 0009 → `🚧 Implementing` on PR open
-- [ ] Master Progress Overview ([v0.3.0-plan.md](../v0.3.0-plan.md#master-progress-overview)) row 5 → 🔄 In progress
+- [x] ROADMAP.md row for RFC 0009 → `🚧 Implementing` on PR open
+- [x] Master Progress Overview ([v0.3.0-plan.md](../v0.3.0-plan.md#master-progress-overview)) row 5 → 🔄 In progress
+- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default) — *PR 1b*
+- [ ] `chain.restart` synthetic event documented in RFC 0009 §G appendix — *PR 1b (with the rest of the wiring docs)*
+- [x] All 16 `AuditEventType` constants present (procedural-memory ones reserved, unwired)
+- [x] `chain.bootstrap` and `chain.recovered` constants present and classed as security-class (PR #232 review SF-3)
+- [x] `RedactStruct` cycle/depth bound covered by `TestRedactStruct_CyclicInputSafe` + `TestRedactStruct_DeepNestingBounded` (PR #232 review SF-2)
+- [x] `make test` + `make lint` clean (security package)
+
+---
+
+### PR 1b: `feature/v030-rfc0009-audit-wiring` — Phase 1a wiring
+
+**Depends on**: PR 1.
+**Estimated size**: ~250–350 lines (handler + executor wiring + integration tests + docs).
+
+#### Scope
+
+See the _wiring_ rows in PR 1's scope table above. Adds the orchestrator-side
+emit sites for `agent.registered`, `capability.violation`, and `tool.invoked`,
+the `OBSERVABILITY_AUDIT_PATH` env wiring in `cmd/orchestrator/main.go`, the
+`config/observability/audit.yaml` toggles, the integration tests, and the
+observability docs update.
+
+#### PR checklist
+
 - [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default)
-- [ ] `chain.restart` synthetic event documented in RFC 0009 §G appendix
-- [ ] All 16 `AuditEventType` constants present (procedural-memory ones reserved, unwired)
-- [ ] `chain.bootstrap` and `chain.recovered` constants present and classed as security-class (PR #232 review SF-3)
-- [ ] `RedactStruct` cycle/depth bound covered by `TestRedactStruct_CyclicInputSafe` + `TestRedactStruct_DeepNestingBounded` (PR #232 review SF-2)
+- [ ] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in RFC 0009 §G appendix
+- [ ] Integration tests live under `tests/integration/`
 - [ ] `make test` + `make lint` clean
 
 ---
