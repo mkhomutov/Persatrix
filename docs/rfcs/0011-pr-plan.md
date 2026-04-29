@@ -8,7 +8,7 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
-> **Status**: ✅ Ready — Per-PR key implementation details, tests, and checklists are pinned against the RFC's Phased Implementation Plan and Files Touched table. PR 1 may open once RFC 0009 PR 2 (rate-limit middleware) lands or its startup-WARN opt-out gate is agreed.
+> **Status**: ✅ Ready — Per-PR key implementation details, tests, and checklists are pinned against the RFC's Phased Implementation Plan and Files Touched table. PR 2 may open once RFC 0009 PR 2 (rate-limit middleware) lands or its startup-WARN opt-out gate is agreed. (PR 1 has no upstream RFC dependency — see Dependency Graph.)
 
 ---
 
@@ -44,7 +44,7 @@ PR 3 (Phase 2a — proto regen: ChannelMessageEvent + ReceiveChannelMessage RPC;
 PR 4 (Phase 2b — SEND_CHANNEL_MESSAGE action + Python servicer + response gate + DELETE endpoints)
   ↓
 PR 5 (Phase 3 — joint with RFC 0020 PR 5: interaction-scoped channel memory; depends on RFC 0008 PR 2 + RFC 0009 PR 3)
-  ↓
+  ↓ (PR 5 ‖ PR 6 — both depend only on PR 4; the Phase 3 / Phase 4a split below is conservative)
 PR 6 (Phase 4a — Rust CLI subcommands: list/join/send/reply/history/watch)
   ↓
 PR 7 (Phase 4b — UserParticipant membership + watch polling + manual tests + docs)
@@ -136,6 +136,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - [ ] RFC 0009 PR 2 merged **or** startup-WARN opt-out path landed and documented in `docs/v0.3.0-plan.md`
 - [ ] `make validate` green against `config/channels.yaml`
 - [ ] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
+- [ ] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
 
 ---
 
@@ -177,7 +178,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 ### PR 4: `feature/v030-rfc0011-agent-delivery` — Phase 2b: Action + Servicer + Gate
 
 **Depends on**: PR 3.
-**Estimated size**: ~400–500 lines.
+**Estimated size**: ~500–700 lines — **expect to split** into PR 4a/4b per [Sizing Risks](#sizing-risks-and-contingent-splits). The cross-cutting `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` rename touches every persona-runtime call site that emits or consumes the old names, in addition to the new servicer, response gate (three policy branches plus thread-reply-to-self), DELETE endpoints + cascade tests, and two-agent integration test.
 
 #### Scope (high-level)
 
@@ -216,6 +217,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - [ ] Two-agent integration test (one agent on `when_mentioned`, no mention → `channel.messages.gated` increments)
 - [ ] Self-mention through `MENTION` derived event verified or explicitly deferred
 - [ ] `cascade_depth` backstop test green (drop happens upstream of the gate, regardless of policy)
+- [ ] New metrics (`channel.messages.gated{policy}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
 
 ---
 
@@ -240,7 +242,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - `MemoryFacade.retrieve_relevant(query, *, scope="channel", tags=[event.channel_id], limit=_CHANNEL_RECALL_LIMIT)` per [RFC §E](0011-channels-bridges.md#e-memory-integration). `_CHANNEL_RECALL_LIMIT` defaults to 20 and is exposed as `optimization.yaml → channels.recall_limit`.
 - Channel-history tier slot in the `MemoryBudget.try_add` order matches the **canonical cross-RFC priority order** in [RFC §E](0011-channels-bridges.md#e-memory-integration): relationship → open commitments → **channel history (this RFC, only on `CHANNEL_MESSAGE`)** → episodic recall → recent notes → duration priors. No change to `MemoryBudget` itself; this PR only edits the persona-runtime caller.
 - Relationship updates: `record_interaction` runs on **interaction close**, not per-message — preserves the RFC 0020 PR 4 contract. Channel interactions feed the same trust-score path as RFC 0016 direct chats.
-- `InputSanitizer.Sanitize()` is applied **once on ingest**, before `add_turn` and before persistence. The audit-event side channel from RFC 0009 PR 3 fires on every inbound message regardless of mutation result. Outbound `SEND_CHANNEL_MESSAGE` content is **not** sanitized again — agents are trusted producers within the deployment; sanitization protects the inbound boundary.
+- `InputSanitizer.Sanitize()` is applied **once on ingest**, before `add_turn` and before persistence. The audit-event side channel from RFC 0009 PR 3 fires on every inbound message regardless of mutation result. Outbound `SEND_CHANNEL_MESSAGE` content is **not** sanitized again at the producer — every cross-agent hop traverses a receiving agent's inbound boundary, and that boundary re-runs the sanitizer. The model is *single-ingest sanitization at every consumer*, not *trust the producer*: prompt-injection that makes an LLM emit adversarial content is still caught when the next agent ingests it.
 - DM-privacy invariant from [RFC §Security Considerations](0011-channels-bridges.md#security-considerations) holds: DM content is stored in each participant's isolated episodic memory, never in a shared store visible to other agents.
 
 #### Tests
@@ -361,6 +363,9 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 - [ ] All deferred review findings addressed or downgraded
 - [ ] `make test` passes; `make lint` clean
+- [ ] [docs/rfcs/0011-channels-bridges.md](0011-channels-bridges.md) status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0)
+- [ ] [ROADMAP.md](../../ROADMAP.md) RFC 0011 row → `⚠️ Partially Implemented (internal channels)`
+- [ ] [docs/v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 6 → ✅
 
 ---
 
@@ -387,7 +392,8 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 Estimated sizes above include the 1.7× calibration factor. The two PRs most at risk of crossing the [BRANCHING.md](../BRANCHING.md) 500-line soft cap:
 
 - **PR 1 (channels store + schema)**: SQLite migration + `ChannelStore` interface + per-channel cap pruning + thread-FK cascade test. If the implementation crosses 500 lines, split into PR 1a (`ChannelStore` + schema migration + CRUD/membership tests) and PR 1b (per-channel cap pruning + global cap check + thread-FK cascade test). 1b depends on 1a; total dependency chain length grows by one but no other plan is affected.
-- **PR 4 (action + servicer + gate + DELETE)**: largest persona-runtime touch + DELETE endpoints + integration test. If implementation crosses the cap, split into PR 4a (proto-side wiring: action type, servicer, dispatcher, basic delivery test) and PR 4b (response gate + DELETE endpoints + two-agent gate integration test). PR 5's joint-delivery dependency moves to 4b.
+- **PR 4 (action + servicer + gate + DELETE)**: largest persona-runtime touch + DELETE endpoints + integration test, plus the cross-cutting `EventType` / `ActionType` rename touching every persona-runtime call site. The `~500–700 lines` estimate already exceeds the [BRANCHING.md](../BRANCHING.md) 500-line soft cap, so this plan **pre-commits to a split** rather than discovering the crossing mid-PR: PR 4a (proto-side wiring: action/event types, servicer, dispatcher, basic delivery test) and PR 4b (response gate + DELETE endpoints + two-agent gate integration test). PR 5's joint-delivery dependency moves to 4b.
+  - **Downstream impact** — [RFC 0020 PR plan](0020-pr-plan.md) PR 5's `Depends on: PR 4, RFC 0011 PR 4` row must be re-pinned to **RFC 0011 PR 4a** when the split lands: RFC 0020 PR 5 needs the proto contract (event type, servicer, dispatcher), not the response gate. Update both plans in the same PR that opens 4a so the dependency graph cannot drift.
 
 PRs 2, 3, 5, 6, 7 are within the calibrated band and are not pre-committing to a split.
 
