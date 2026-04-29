@@ -102,10 +102,14 @@ check-licenses: check-licenses-go check-licenses-python check-licenses-rust ## R
 check-licenses-go: ## Check Go module licenses against the allow-list
 	@echo "→ Checking Go dependency licenses..."
 	@command -v go-licenses >/dev/null 2>&1 || go install github.com/google/go-licenses@latest
+	@# modernc.org/mathutil ships its license under a non-standard filename
+	@# (LICENSE-MATHUTIL) that go-licenses cannot auto-detect. Upstream license
+	@# is BSD-3-Clause; verified manually and recorded in THIRD_PARTY_NOTICES.md.
 	@ALLOWED=$$(grep -v '^\s*#' scripts/checks/allowed_licenses.txt | grep -v '^\s*$$' | paste -sd, -); \
 		go-licenses check ./cmd/... ./internal/... \
 			--allowed_licenses="$$ALLOWED" \
-			--ignore=$(GO_MODULE)
+			--ignore=$(GO_MODULE) \
+			--ignore=modernc.org/mathutil
 	@echo "✓ Go licenses OK"
 
 check-licenses-python: ## Check Python dependency licenses against the allow-list

@@ -1,30 +1,66 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/channel.schema.json",
-  "title": "Persatrix Channel Configuration (v0.2+)",
+  "title": "Persatrix Channel Configuration (v0.3.0+)",
+  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. Per RFC 0011 §A the canonical channel address is derived at runtime as `<channel_type>:<name>` (e.g., `group:planning`); the SQL `channels.id` PK column is a separate concern. DMs open on demand and are not declared here; threads anchor to a parent message and are likewise implicit.",
   "type": "object",
-  "required": ["schema_version"],
+  "additionalProperties": false,
   "properties": {
-    "schema_version": { "type": "string" },
+    "max_channels": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 50,
+      "description": "Global cap on declared named group channels. DMs and threads are not counted."
+    },
     "channels": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "type"],
-        "properties": {
-          "id": { "type": "string" },
-          "type": { "type": "string", "enum": ["group", "direct", "broadcast", "meeting"] },
-          "name": { "type": "string" },
-          "members": {
-            "oneOf": [
-              { "type": "string", "const": "all" },
-              { "type": "array", "items": { "type": "string" } }
-            ]
-          },
-          "history_visible": { "type": "boolean" },
-          "max_history_messages": { "type": "integer" }
+      "items": { "$ref": "#/definitions/channel" }
+    }
+  },
+  "definitions": {
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "members"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+          "description": "Group-channel name. Canonical address is `group:<name>`."
+        },
+        "description": { "type": "string" },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/member" },
+          "description": "Explicit, auditable membership list. The v0.2-era `members: \"all\"` shorthand was dropped per RFC 0011."
         }
       }
+    },
+    "member": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Shorthand: equivalent to {id: <string>, respond: when_mentioned}.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+            },
+            "respond": {
+              "type": "string",
+              "enum": ["when_mentioned", "always", "never"],
+              "default": "when_mentioned"
+            }
+          }
+        }
+      ]
     }
   }
 }

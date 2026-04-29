@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **RFC 0011 PR 1 — Channel store + SQLite migration + schema rewrite.**
+  `internal/channels/` is filled in (was a 7-line stub) with the
+  canonical `group | dm | thread` model, a SQLite-backed
+  `ChannelStore` interface (CRUD, idempotent membership, history
+  pagination, `GetOrCreateDM` canonicalisation, `DeleteChannel`),
+  per-channel oldest-first message-cap pruning with `thread_id`
+  cascade, a global `max_channels` cap on declared group channels,
+  and a YAML config loader (`config.go`) backed by a strict YAML
+  decoder so legacy `direct`/`broadcast`/`meeting` schemas fail
+  loudly. `schemas/channel.schema.json` is rewritten in place with
+  the new vocabulary plus the "internal-only until v1.0" disclaimer
+  per RFC 0011 OQ #9; `config/channels.yaml` is rewritten as a
+  commented-out template against the new schema. New dependency:
+  `modernc.org/sqlite` (pure-Go driver — preserves the
+  `CGO_ENABLED=0` orchestrator build). REST endpoints, fanout, and
+  the response gate land in subsequent RFC 0011 PRs.
+
 ### Changed
 
 - **RFC 0020 PR 4 — Interaction summarisation is two-phase and

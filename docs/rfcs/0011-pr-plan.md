@@ -92,11 +92,26 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 #### PR checklist
 
-- [ ] ROADMAP.md row for RFC 0011 → `🚧 Implementing`
-- [ ] Master Progress Overview row 6 → 🔄 In progress
-- [ ] Schema `description` carries the "internal-only until v1.0" disclaimer per [OQ #9 resolution](0011-channels-bridges.md#open-questions)
-- [ ] `make validate` green against the rewritten `config/channels.yaml`
-- [ ] `make test` Go suite green; thread-FK cascade test present and named so it cannot be silently dropped
+- [x] ROADMAP.md row for RFC 0011 → `🚧 Implementing`
+- [x] Master Progress Overview row 6 → 🔄 In progress
+- [x] Schema `description` carries the "internal-only until v1.0" disclaimer per [OQ #9 resolution](0011-channels-bridges.md#open-questions)
+- [x] `make validate` green against the rewritten `config/channels.yaml`
+- [x] `make test` Go suite green; thread-FK cascade test present and named so it cannot be silently dropped (`TestSQLiteStore_ThreadFKCascade`)
+
+> **✅ Merged as PR #231 (2026-04-29).**
+
+#### PR #231 review follow-ups
+
+Deep review filed at `docs/pr-reviews/pr-231-review.md` (local-only). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.
+
+| # | Finding | Target PR | Rationale |
+|---|---------|-----------|-----------|
+| SF-1 | `buildDSN()` ([sqlite.go#L99-L106](../../internal/channels/sqlite.go#L99-L106)) concatenates `path + "?" + q.Encode()` and silently drops every PRAGMA when `path` is a `file:` URI (e.g. `file::memory:?cache=shared`, which the function's own doc-comment advertises). | **PR 8** | No production caller today; reject paths containing `?` with a typed error, or split on `?` and merge into `url.Values`. |
+| SF-2 | `CreateChannel()` ([sqlite.go#L184-L212](../../internal/channels/sqlite.go#L184-L212)) does not assert `ch.ID == "group:" + ch.Name` for `ChannelTypeGroup`. PR 2's REST handler is the first external caller and can desync the canonical address from the row PK. | **PR 2** | Cheapest before REST surface ships: either compute `ch.ID = "group:" + ch.Name` inside `CreateChannel` (canonical-id authority) or guard with `ErrInvalidChannelType`. |
+| SF-3 | `PublishMessage()` ([sqlite_messages.go#L31-L70](../../internal/channels/sqlite_messages.go#L31-L70)) does not run `validateParticipantID` over `msg.Mentions`. The response gate (PR 4) treats `agent_id ∈ event.mentions` as a trigger; junk values become defense-in-depth gaps. | **PR 4** | Validate at the store boundary in the same PR that wires the response gate, so the gate's contract is end-to-end. |
+| SF-4 | `channels.name TEXT NOT NULL UNIQUE` with the id-as-placeholder shim for DM/thread couples the schema to a reader convention ([sqlite.go#L124-L138](../../internal/channels/sqlite.go#L124-L138), [#L226-L232](../../internal/channels/sqlite.go#L226-L232), [#L259-L264](../../internal/channels/sqlite.go#L259-L264)). | **PR 2** | Cheap to change while no production data exists; switch to `name TEXT` plus `CREATE UNIQUE INDEX … ON channels(name) WHERE channel_type='group'` and drop the `if name != ch.ID` branches. |
+
+Nice-to-Have items (also pinned to PR 8 unless an earlier PR's diff naturally includes the file): `PRAGMA user_version = 1` baseline in `applySchema`; soft byte cap on `msg.Content` at the store boundary; FK-disambiguation test for the "channel deleted concurrently" branch (needs a test-only mutation seam); rename or tighten `TestSQLiteStore_Close_Idempotent`; `db.Stats().MaxOpenConnections == 1` invariant test; `BeforeConnect`-style hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift; `Mentions` JSON-special-character round-trip test.
 
 ---
 
@@ -120,12 +135,16 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - Config + REST coexistence rules from [RFC §B](0011-channels-bridges.md#b-channel-store) are enforced at startup: REST-created-only channels preserved; membership disagreement between config and store is **loud failure** with the divergent participant IDs listed.
 - Rate-limit middleware applied to `POST /api/v1/channels/{id}/messages` and `POST /api/v1/channels` per [RFC 0009 PR plan](0009-pr-plan.md) PR 2. If RFC 0009 PR 2 slips, ship the startup-WARN path gated by `security.rate_limit_enforced: false` (or equivalent CLI flag) — the choice between config knob and flag is decided in this PR's review.
 - Thread-pre-resolution helper (`ChannelStore.GetMessage(id) → sender_id`) added here in preparation for PR 4's `thread_parent_sender_id` pre-resolution; lookup is `SELECT sender_id FROM messages WHERE id = ?` against the PK index.
+- **PR #231 review SF-2** — make `CreateChannel` the canonical-id authority: either compute `ch.ID = "group:" + ch.Name` inside the store (preferred) or guard with `if ch.Type == ChannelTypeGroup && ch.ID != "group:"+ch.Name { return ErrInvalidChannelType }`. Lands in this PR so the new REST handler cannot insert a row whose PK disagrees with its display name.
+- **PR #231 review SF-4** — collapse the `name`-as-placeholder coupling before REST traffic exists: schema migration changes `channels.name` to `TEXT` (nullable) and adds `CREATE UNIQUE INDEX ux_channels_name ON channels(name) WHERE channel_type='group'`; readers (`GetChannel`, `ListChannels`) drop the `if name != ch.ID` branches. Gated by the migration runner work this PR introduces (see `applySchema` `TODO(rfc0011-pr2+)`) — `PRAGMA user_version` jumps from `0`→`2` (or `1`→`2` if PR 8's NTH-1 baseline lands first).
 
 #### Tests
 
 - Unit: each REST handler — happy path, 404 on unknown channel, 403 on non-member publish, 409 on duplicate channel name, 409 on `max_channels` overflow.
 - Unit: `ChannelRouter.Publish` validates `channel_type`/`channel_id` prefix agreement; mismatch returns a typed error and does **not** persist.
 - Unit: pagination — `GET /api/v1/channels/{id}/messages?limit=N&before=T` honours both, returns newest-first.
+- Unit: SF-2 regression — `CreateChannel(Channel{Type: "group", ID: "group:foo", Name: "bar"})` is rejected (or normalised); `ID == "group:" + Name` invariant pinned.
+- Unit: SF-4 regression — two `group` rows cannot share a `name` (partial unique index fires); a `dm` row with `name = NULL` and a `group` row with `name = "<dm-id>"` coexist without conflict.
 - Integration: orchestrator starts with `config/channels.yaml`, channels and memberships visible via `GET /api/v1/channels`. Rerun → idempotent (no duplicate rows, no spurious membership inserts).
 - Integration: config-vs-store divergence — pre-seed the store with a membership not in `channels.yaml`, restart, assert startup fails loudly listing the divergent participant ID.
 - Integration: rate-limit middleware engaged on the publish endpoint; aggressive `curl` loop receives 429 once the per-agent quota is exhausted (uses RFC 0009 PR 2 fixtures). If RFC 0009 PR 2 hasn't merged, this case ships behind the startup-WARN opt-out and is exercised by a separate test asserting the WARN log fires.
@@ -137,6 +156,8 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - [ ] `make validate` green against `config/channels.yaml`
 - [ ] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
 - [ ] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
+- [ ] PR #231 review SF-2 closed: `CreateChannel` enforces `ID == "group:" + Name` (or computes it) for `ChannelTypeGroup`
+- [ ] PR #231 review SF-4 closed: `channels.name` migrated to nullable + partial unique index on `channel_type='group'`; `GetChannel`/`ListChannels` placeholder shim removed; `user_version` bumped
 
 ---
 
@@ -199,6 +220,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - `ActionExecutor.execute(SendChannelMessageAction)` calls `POST /api/v1/channels/{id}/messages` with `sender_id` injected by the framework from the agent's registered ID — agents cannot spoof another sender. `_MAX_MENTIONS_PER_ACTION` cap and `no_targets` status taxonomy from the existing `_handle_send_message` are preserved.
 - DELETE endpoints rely on the PR-1 cascade columns; handler is thin (membership check → `DELETE FROM channels WHERE id = ?`). Removing a participant does **not** delete that participant's prior messages — `messages.sender_id` retains the historical value per [RFC §C endpoint table](0011-channels-bridges.md#c-message-routing-and-delivery).
 - `internal/executor/dispatch.go::DispatchChannelMessage` reuses the existing gRPC connection pool and per-call timeout from `MESSAGE_RECEIVED` dispatch — at-most-once delivery, no retry on failure (recovery via history endpoint per RFC §C "Delivery guarantees").
+- **PR #231 review SF-3** — `ChannelStore.PublishMessage` runs `validateParticipantID` over `msg.Mentions` before INSERT; invalid entries return `fmt.Errorf("mentions[%d]: %w", i, err)`. Lands here so the response gate's `agent_id ∈ event.mentions` trigger has an end-to-end contract from REST boundary through store to gate, with no junk values reaching the gate.
 
 #### Tests
 
@@ -218,6 +240,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - [ ] Self-mention through `MENTION` derived event verified or explicitly deferred
 - [ ] `cascade_depth` backstop test green (drop happens upstream of the gate, regardless of policy)
 - [ ] New metrics (`channel.messages.gated{policy}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
+- [ ] PR #231 review SF-3 closed: `PublishMessage` validates every `msg.Mentions` entry via `validateParticipantID`; regression test covers invalid id rejection + JSON-special-character round-trip
 
 ---
 
@@ -366,6 +389,8 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 - [ ] [docs/rfcs/0011-channels-bridges.md](0011-channels-bridges.md) status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0)
 - [ ] [ROADMAP.md](../../ROADMAP.md) RFC 0011 row → `⚠️ Partially Implemented (internal channels)`
 - [ ] [docs/v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 6 → ✅
+- [ ] PR #231 review SF-1 closed: `buildDSN()` rejects (or merges) paths containing `?`; regression test for `file:`-URI input
+- [ ] PR #231 review NTH items dispatched: `PRAGMA user_version` baseline (if not already bumped by PR 2's SF-4 migration), soft byte cap on `msg.Content`, FK-disambiguation "channel deleted concurrently" test, `TestSQLiteStore_Close_Idempotent` rename or tightened assertion, `db.Stats().MaxOpenConnections == 1` invariant test, `BeforeConnect` hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift
 
 ---
 

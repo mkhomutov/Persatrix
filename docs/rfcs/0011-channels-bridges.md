@@ -1,7 +1,7 @@
 # RFC 0011 — Channels & Internal Agent Messaging
 
 **Type**: feature  
-**Status**: 📋 Proposed  
+**Status**: � Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-25  
 **Target**: v0.3.0 (internal channels) + v0.5.0 (external bridges)  

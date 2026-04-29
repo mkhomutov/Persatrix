@@ -277,6 +277,43 @@ This file is referenced by both `.github/CLAUDE.md` and
   unique across `config/agents.yaml`.
 - **Example:** "Use the agent ID `ember-owl`, not the display name `Ember Owl`."
 
+### Participant ID
+- **Aliases:** —
+- **Disallowed:** "user id" (when meaning a channel participant), "member id"
+- **Definition:** The identifier of a channel participant — either an **Agent
+  ID** or a non-agent participant such as a CLI user (`User_1`). Matches
+  `^[A-Za-z0-9][A-Za-z0-9_-]*$` (RFC 0011 §A; enforced by the JSON Schema,
+  the loader, and the channel store). The pattern is intentionally looser
+  than the **Agent ID** pattern so non-agent participants can keep their
+  upstream casing (e.g. CLI usernames). Reserved characters: `:` (canonical
+  address separator) and any whitespace.
+- **Example:** "The membership row carries both the agent's `Participant ID`
+  `code-writer` and the human user's `Participant ID` `User_1`."
+
+### Channel Type
+- **Aliases:** —
+- **Disallowed:** "channel kind", "channel category"
+- **Definition:** The fixed vocabulary `group | dm | thread` used by the
+  channel store (RFC 0011) to classify rows in the `channels` table:
+  - **group** — user-declared, named, multi-participant; subject to the
+    global `max_channels` cap.
+  - **dm** — auto-created direct message between exactly two participants;
+    canonical id is `dm:<a>:<b>` with `<a> < <b>` lexicographically.
+  - **thread** — reply chain anchored to a parent message id; cascade-prunes
+    when the parent is pruned.
+- **Example:** "The Channel Type `dm` is exempt from the named-group cap."
+
+### Respond Policy
+- **Aliases:** —
+- **Disallowed:** "response mode", "trigger mode"
+- **Definition:** Per-membership delivery hint stored on the
+  `memberships.respond_policy` column (RFC 0011 §A). Values:
+  `when_mentioned` (default), `always`, `never`. Persisted at the channel
+  store; the dispatch layer consults it when deciding whether to wake a
+  member on a publish.
+- **Example:** "Setting `respond_policy: never` on the audit-log channel
+  membership silences the agent without removing visibility."
+
 ### Persona Nickname
 - **Aliases:** —
 - **Disallowed:** "persona ID" (when meaning the nickname), "human name"

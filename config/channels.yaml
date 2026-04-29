@@ -1,10 +1,31 @@
-# Channel Configuration (v0.2+)
-schema_version: "0.2"
+# Channel Configuration (RFC 0011 — internal channels, v0.3.0+).
+#
+# Schema: schemas/channel.schema.json — `make validate` against this file.
+# Canonical addresses are derived at runtime as `<channel_type>:<name>`:
+#   - group channels declared here address as `group:<name>`
+#   - DMs open on demand under `dm:<a>:<b>` (participants lexicographically sorted)
+#   - threads anchor to a parent message under `thread:<message_id>`
+# Per-membership `respond` policies (`when_mentioned` | `always` | `never`)
+# control the response gate; see RFC 0011 §D.
 
+max_channels: 50
+
+# Uncomment and adapt to declare named group channels:
+#
 # channels:
-#   - id: "eng-general"
-#     type: "group"
-#     name: "#engineering-general"
-#     members: ["ember-owl", "iron-fox", "cobalt-lark"]
-#     history_visible: true
-#     max_history_messages: 100
+#   - name: planning
+#     description: "Strategy and planning discussions"
+#     members:
+#       - id: planner-agent
+#         respond: when_mentioned
+#       - id: code-writer
+#         respond: when_mentioned
+#       - code-reviewer            # shorthand: respond defaults to when_mentioned
+#
+#   - name: code-review
+#     description: "Code review coordination — tight-loop pair channel"
+#     members:
+#       - id: code-writer
+#         respond: always
+#       - id: code-reviewer
+#         respond: always

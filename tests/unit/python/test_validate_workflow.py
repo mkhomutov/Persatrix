@@ -212,14 +212,13 @@ class TestChannelsValidation:
     def test_valid_channels_yaml_passes(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
+        # RFC 0011 PR 1: canonical address is `group:<name>`; explicit
+        # `members` list is required (the v0.2 `"all"` shorthand was dropped).
         data = {
-            "schema_version": "0.2",
             "channels": [
                 {
-                    "id": "general",
-                    "type": "group",
-                    "name": "General",
-                    "members": "all",
+                    "name": "general",
+                    "members": ["alice", "bob"],
                 }
             ],
         }
@@ -230,13 +229,14 @@ class TestChannelsValidation:
     def test_invalid_channel_type_fails(
         self, config_dir: Path, schemas_dir: Path, workflow_dir: Path
     ) -> None:
+        # RFC 0011 PR 1: schema is `additionalProperties: false`, so a stray
+        # `type` field at the channel level must fail validation.
         data = {
-            "schema_version": "0.2",
             "channels": [
                 {
-                    "id": "general",
+                    "name": "general",
                     "type": "invalid-type",
-                    "name": "General",
+                    "members": ["alice"],
                 }
             ],
         }
