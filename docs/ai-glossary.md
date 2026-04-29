@@ -601,3 +601,72 @@ Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
   rewriting closing-state rows past `grace_sec` to the
   summary-unavailable sentinel. Invoked from `on_tick` at most once
   per `JANITOR_INTERVAL_SEC` (default 300 s).
+
+## RFC 0009 — Security & Sandboxing (PR plan)
+
+Terms pinned by [RFC 0009 PR plan](rfcs/0009-pr-plan.md) Open-Question
+resolutions (PR #232). The broader Go type names (`AuditLogger`,
+`SecretRedactor`, `RateLimiter`, `CircuitBreaker`, `InputSanitizer`,
+`ContextItem`) are reserved here and will get full entries in the
+glossary update that ships **with** PR 1 / PR 2 / PR 3 — when the types
+actually exist in the tree — to avoid documenting a contract before the
+code lands. Only the OQ-resolution terms (which this PR commits us to
+verbatim) are defined now (PR #232 review SF-5).
+
+### `_provenance` sidecar
+- **Disallowed:** "context provenance proto field", "provenance map".
+- **Definition:** Reserved key under `TaskRequest.context` (a
+  `map<string, string>` in the existing proto) whose value is a JSON
+  string mapping each other context key to
+  `{"source", "sanitized", "flagged", "flags"}`. Avoids a v0.3.0 proto
+  regen cycle; promoted to a typed proto in v0.4.0 alongside the
+  Phase 4 token field. Reserved-key precedent: RFC 0008 `_budget`.
+
+### `chain.restart` / `chain.bootstrap` / `chain.recovered`
+- **Disallowed:** "audit chain reset", "checksum break event".
+- **Definition:** Three security-class audit events emitted at
+  `AuditLogger` startup based on the state of `audit.jsonl`:
+  - `chain.bootstrap` — file missing or zero-length; chain seeded from
+    `sha256("")`.
+  - `chain.restart` — tail line parses and its checksum recomputes;
+    event carries the prior tail checksum so external tooling can
+    detect the process-boundary discontinuity.
+  - `chain.recovered` — tail line is unparseable / truncated /
+    checksum-mismatch; carries `Detail.prior_tail = "unknown"` and a
+    WARN log. Operators must acknowledge — the log is **not** silently
+    continued from a fresh chain.
+
+### `SanitizerAction.Passthrough` / `SanitizerAction.Quarantine`
+- **Disallowed:** "sanitizer mode", "drop-on-flag".
+- **Definition:** Enum binding `security.sanitizer_action`.
+  `Passthrough` (v0.3.0 default) wraps flagged tool results in a
+  `<external_data flagged="true">` envelope and delivers them to the
+  agent. `Quarantine` returns the structured agent error
+  `{"error": "tool_result_quarantined", "flags": [...]}` and drops the
+  content. Silent strip (option *c* in OQ 2) is rejected.
+
+### `tool_result_quarantined`
+- **Aliases:** none — the literal string is the contract.
+- **Disallowed:** "blocked tool result", "sanitizer error".
+- **Definition:** Agent-facing error string returned by the tool layer
+  when `SanitizerAction.Quarantine` drops a flagged result. Documented
+  in `prompts/system/external_data_handling.txt` so personas can
+  recognise and back off without re-deriving the shape.
+
+### `ContextSource.channel_message`
+- **Disallowed:** "channel-sourced input", "RFC-0011 message source".
+- **Definition:** New `ContextSource` enum variant (Phase 2) tagging
+  inputs that arrive through the RFC 0011 channel-publish path.
+  Treated as `external`-equivalent for sanitization but kept distinct
+  in the audit trail so forensics can distinguish "agent posted to
+  channel" from "scraped webpage". The orchestrator is the authority on
+  this tagging — agents cannot self-report `source` values.
+
+### Audit `CorrelationID` (4-segment form)
+- **Disallowed:** "correlation tuple", "audit trace ID".
+- **Definition:** Colon-delimited string
+  `WorkflowRunID:StepID:AgentID:InteractionID?` written into
+  `AuditEvent.CorrelationID`. The fourth segment is empty (`run:step:agent:`
+  — trailing colon **kept**) when the event was emitted outside an open
+  RFC 0020 interaction. The fixed-4-field shape is a parse contract for
+  downstream tooling.
