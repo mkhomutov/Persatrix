@@ -9,13 +9,17 @@ connection and ``_require_initialised`` lifecycle gate.
 
 The companion module :mod:`agents.memory.episodic_procedural` owns the
 SQL; this mixin owns the *facade* concerns: arg validation against the
-configured ``c_min``/``lambda_per_day``/stale-threshold knobs and the
-``stale_memory_injection`` structured log emitted by ``retrieve_procedures``.
+configured ``c_min``/``lambda_per_day``/stale-threshold knobs.  The
+``stale_memory_injection`` structured log is emitted from
+:func:`agents.memory.episodic_procedural.recall_procedures` (PR 6b
+relocation per PR 5 R2 Mi2 — keeps the stale-detection + log together
+with the row that triggers it).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +37,16 @@ from .episodic_procedural import (
 )
 
 logger = logging.getLogger(__name__)
+
+# PR 6b (PR 5 R2 M1): procedural ``key`` is interpolated into a SQL
+# LIKE pattern (after meta-char escaping) and renders into structured
+# logs (``stale_memory_injection``).  Restrict to a conservative
+# ASCII alphabet so a future SQL or log-pipeline change cannot be
+# blindsided by an exotic Unicode key.  This is a **breaking change**
+# relative to v0.2.x — any existing caller passing keys outside this
+# alphabet will start raising ``ValueError`` at the facade boundary.
+_PROCEDURE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+_PROCEDURE_KEY_MAX_LEN = 256
 
 
 def validate_decay_params(
@@ -125,8 +139,7 @@ class ProceduralFacadeMixin:
         review L1: no consumer reads it yet — vestige of PR 2 stub).
         """
         self._require_initialised()
-        if not key or not key.strip():
-            raise ValueError("key must not be empty")
+        _validate_procedure_key(key)
         if not 0.0 <= confidence <= 1.0:
             raise ValueError(
                 f"confidence must be in [0.0, 1.0], got {confidence}"
@@ -159,6 +172,7 @@ class ProceduralFacadeMixin:
         query: str = "",
         *,
         limit: int = 10,
+        now: float | None = None,
     ) -> list[ProcedureRecallEntry]:
         """Return procedural entries with read-time confidence decay applied.
 
@@ -172,37 +186,45 @@ class ProceduralFacadeMixin:
         admitted entry whose decayed confidence falls in
         ``[c_min, stale_confidence_alert_threshold)`` per RFC 0008
         Open Question 5 — execution is not blocked, the entry is still
-        returned to the caller.
+        returned to the caller.  PR 6b (PR 5 R2 Mi2): the log is
+        emitted from inside ``recall_procedures`` itself so the
+        decision lives next to the decayed-confidence value that
+        triggers it.
+
+        ``now`` (PR 6b, PR 5 R1 L4): override the read-time clock for
+        deterministic tests.  When ``None`` (the default) the helper
+        uses :func:`time.time`.
         """
         self._require_initialised()
-        entries = await _recall_procedures(
+        return await _recall_procedures(
             self._episodic._ensure_db(),  # noqa: SLF001
             self._agent_id,
             query=query,
             limit=limit,
             c_min=self._c_min,
             lambda_per_day=self._lambda_per_day,
+            stale_threshold=self._stale_alert_threshold,
+            now=now,
         )
-        for entry in entries:
-            if entry.decayed_confidence < self._stale_alert_threshold:
-                # Structured log — the orchestrator-side log ingestion
-                # path (RFC 0019 PR 4 LogServiceServer) increments the
-                # ``orchestrator.memory.stale_memory_injection`` counter
-                # when it sees this event.  Field names are part of the
-                # log contract and must match the Go-side parser.
-                logger.warning(
-                    "stale_memory_injection",
-                    extra={
-                        "metric": "stale_memory_injection",
-                        "agent_id": self._agent_id,
-                        "key": entry.key,
-                        "decayed_confidence": entry.decayed_confidence,
-                        "base_confidence": entry.base_confidence,
-                        "c_min": self._c_min,
-                        "stale_threshold": self._stale_alert_threshold,
-                    },
-                )
-        return entries
+
+
+def _validate_procedure_key(key: str) -> None:
+    """Validate *key* against :data:`_PROCEDURE_KEY_PATTERN`.
+
+    PR 6b (PR 5 R2 M1): centralised so the rule is stated once and the
+    error message is consistent across the refresh + insert paths.
+    """
+    if not isinstance(key, str) or not key:
+        raise ValueError("key must not be empty")
+    if len(key) > _PROCEDURE_KEY_MAX_LEN:
+        raise ValueError(
+            f"key must be ≤ {_PROCEDURE_KEY_MAX_LEN} chars, got {len(key)}"
+        )
+    if not _PROCEDURE_KEY_PATTERN.fullmatch(key):
+        raise ValueError(
+            "key must match ^[A-Za-z0-9._-]+$ "
+            f"(PR 6b breaking change — see CHANGELOG); got {key!r}"
+        )
 
 
 __all__ = [

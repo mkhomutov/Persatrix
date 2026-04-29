@@ -21,11 +21,8 @@ from typing import Any
 
 import pytest
 
-from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.memory import MemoryFacade
 from agents.sub_agents import (
-    DELEGATION_REQUEST_KEY,
-    DELEGATION_RESULT_KEY,
     DelegationFailure,
     DelegationRequest,
     DelegationResult,
@@ -33,22 +30,11 @@ from agents.sub_agents import (
     MemoryWriteEntry,
 )
 
-
-class _ScriptedSubAgent(BaseAgent):
-    """Pre-canned sub-agent — duplicated from the end-to-end suite to
-    keep this file self-contained (the original is module-private)."""
-
-    def __init__(self, agent_id: str, result: DelegationResult) -> None:
-        super().__init__(agent_id=agent_id, config={})
-        self._result = result
-
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        assert DELEGATION_REQUEST_KEY in task.context
-        return TaskOutput(
-            status=TaskStatus.COMPLETED,
-            result=self._result.summary,
-            metadata={DELEGATION_RESULT_KEY: self._result.to_json()},
-        )
+from ._delegation_helpers import (
+    FailedSubAgent as _FailedSubAgent,
+    ScriptedSubAgent as _ScriptedSubAgent,
+    boom_delete,
+)
 
 
 @pytest.fixture
@@ -91,9 +77,6 @@ async def test_rollback_failure_does_not_mask_original_cause(
     monkeypatch.setattr(parent_facade, "store_observation", flaky_store)
 
     # Force every rollback delete to raise.
-    async def boom_delete(_entry_id: str) -> bool:
-        raise RuntimeError("simulated delete_episode failure")
-
     monkeypatch.setattr(
         parent_facade.episodic, "delete_episode", boom_delete,
     )
@@ -168,22 +151,6 @@ async def test_rollback_skipped_when_facade_lacks_episodic_accessor(
 
 
 # ─── PR #224 round-2 (S2-mirror) — DelegationFailure message bound ─
-
-
-class _FailedSubAgent(BaseAgent):
-    """Sub-agent that returns FAILED with a configurable result string."""
-
-    def __init__(self, agent_id: str, payload: str) -> None:
-        super().__init__(agent_id=agent_id, config={})
-        self._payload = payload
-
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        assert DELEGATION_REQUEST_KEY in task.context
-        return TaskOutput(
-            status=TaskStatus.FAILED,
-            result=self._payload,
-            metadata={},
-        )
 
 
 @pytest.mark.asyncio

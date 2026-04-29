@@ -1,4 +1,4 @@
-"""Unit tests for the log-safety helpers in ``agents.sub_agents.spawner``.
+"""Unit tests for the log-safety helpers in ``agents.sub_agents._log_safety``.
 
 Closes the round-3 L4 / round-4 L4 deferred coverage gap on
 ``_bounded`` and its constants.  Prior to this file the helper had
@@ -12,17 +12,16 @@ the integration tests because they only assert the post-conditions
 relevant to one specific raise site.
 
 Tests here are deliberately surface-focused (input → returned string),
-not site-focused, so the helper can be lifted to
-``agents/sub_agents/_log_safety.py`` later (round-3 Info: shared with
-``agents/task_agent.py`` once round-2 L1 lands in PR 6) without
-churning the test suite.
+not site-focused.  PR 6b lifted the helper from
+``agents.sub_agents.spawner`` to ``agents.sub_agents._log_safety`` —
+the imports below were updated accordingly (round-3 Info closed).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from agents.sub_agents.spawner import (
+from agents.sub_agents._log_safety import (
     _CTRL_REPLACEMENT,
     _DELEGATION_FAILURE_MESSAGE_CAP,
     _bounded,

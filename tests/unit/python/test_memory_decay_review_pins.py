@@ -118,20 +118,44 @@ async def test_refresh_confidence_does_not_widen_match_on_percent_in_key(
     inner ``%`` would match across the JSON boundary, refreshing
     every co-tenant procedure for the agent.  With escaping (and the
     paired ``ESCAPE '\\\\'`` clause) only the literal-key row matches.
+
+    PR 6b (PR 5 R2 M1) note: the facade-level ``store_procedure`` /
+    ``retrieve_procedures`` boundary now rejects keys with characters
+    outside ``^[A-Za-z0-9._-]+$``, so this test exercises the
+    helper-level :func:`refresh_confidence` directly to keep pinning
+    the in-helper LIKE-escape behaviour as a defence-in-depth
+    invariant — a future caller bypassing the facade (or a relaxation
+    of the facade-side regex) must still see the escape work.
     """
     # Sibling row that must NOT be touched.
     await facade.store_procedure("sibling", "untouched", confidence=0.5)
+    db = facade.episodic._ensure_db()  # noqa: SLF001
     # Forge a stale baseline on the sibling so a spurious refresh
     # would be observable (confidence would jump 0.5 → 1.0).
-    db = facade.episodic._ensure_db()  # noqa: SLF001
     await db.execute(
         "UPDATE episodes SET confidence = 0.5 WHERE agent_id = ?",
         ("proc-test",),
     )
     await db.commit()
 
-    # Target row whose key contains LIKE-meta characters.
-    await facade.store_procedure("50% off_promo", "body", confidence=0.4)
+    # Forge the target row directly (bypassing the facade-level key
+    # validator) so the helper-level escape gets exercised end-to-end.
+    forged_id = "forged-proc-id"
+    await db.execute(
+        "INSERT INTO episodes (id, agent_id, summary, tags_json, "
+        "confidence, importance, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            forged_id,
+            "proc-test",
+            "body",
+            '["procedure:50% off_promo"]',
+            0.4,
+            0.4,
+            0.0,
+        ),
+    )
+    await db.commit()
+
     # Refresh the sibling under the literal target key — only the
     # target's row should reset to 1.0.
     refreshed = await refresh_confidence(db, "proc-test", "50% off_promo")

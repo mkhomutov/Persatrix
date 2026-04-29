@@ -350,7 +350,9 @@ async def test_facade_scope_filter_finds_non_facade_writer() -> None:
 
 
 def test_eviction_stats_is_frozen() -> None:
-    stats = EvictionStats(ttl_evicted=0, cap_evicted=0, total_after=0)
+    stats = EvictionStats(
+        ttl_evicted=0, cap_evicted=0, total_after=0, procedural_evicted=0,
+    )
     with pytest.raises(Exception):  # noqa: BLE001 — frozen-dataclass error
         stats.ttl_evicted = 1  # type: ignore[misc]
 
