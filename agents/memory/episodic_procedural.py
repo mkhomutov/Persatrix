@@ -31,6 +31,24 @@ from .decay import (
     compute_decayed_confidence,
 )
 
+# PR 6b review Should-Fix #1: defence-in-depth log-safety on the
+# ``stale_memory_injection`` warn-log ``key`` field.  Procedural rows
+# written *before* PR 6b's facade validator landed could carry
+# arbitrary characters (the prior validator only rejected empty /
+# whitespace keys), so the value pulled out of ``tags_json`` is not
+# guaranteed to be control-char-free even though every *new* row is.
+# ``_log_safety`` is dependency-free and explicitly anticipates this
+# callsite in its module docstring.
+#
+# The import is *lazy* (inside :func:`recall_procedures`) because
+# importing it at module load-time would trigger
+# ``agents/sub_agents/__init__.py`` → spawner → ``agents.base`` →
+# ``agents.memory`` → this module — a circular import while
+# ``agents.base`` is still being initialised.  Using
+# ``importlib.import_module`` inside the warn-log path side-steps
+# the cycle and keeps the runtime cost out of the hot path (the
+# import is cached after first use).
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -231,12 +249,25 @@ async def recall_procedures(
             # ``orchestrator.memory.stale_memory_injection`` counter
             # when it sees this event.  Field names are part of the
             # log contract and must match the Go-side parser.
+            #
+            # PR 6b review Should-Fix #1: lazy-import ``_bounded`` to
+            # avoid a circular import via ``agents.sub_agents`` at
+            # module load time (see module-level comment above).
+            from ..sub_agents._log_safety import bounded as _bounded
             logger.warning(
                 "stale_memory_injection",
                 extra={
                     "metric": "stale_memory_injection",
                     "agent_id": agent_id,
-                    "key": entry.key,
+                    # PR 6b review Should-Fix #1: ``entry.key`` is
+                    # extracted from ``tags_json`` and may carry
+                    # control characters on rows written before the
+                    # facade-side regex validator landed.  Pipe through
+                    # ``_bounded`` to neutralise CWE-117 log-injection
+                    # vectors on legacy rows; new rows pass through
+                    # unchanged because the facade regex already
+                    # rejects control chars.
+                    "key": _bounded(entry.key) if entry.key else None,
                     "decayed_confidence": entry.decayed_confidence,
                     "base_confidence": entry.base_confidence,
                     "c_min": c_min,

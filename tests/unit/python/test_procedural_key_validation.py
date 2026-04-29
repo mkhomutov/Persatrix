@@ -1,9 +1,13 @@
 """PR 5 R2 M1 procedural-key validation pins (RFC 0008 PR 6b).
 
-The :meth:`MemoryFacade.store_procedure` and
-:meth:`MemoryFacade.retrieve_procedures` boundaries reject keys whose
+The :meth:`MemoryFacade.store_procedure` boundary rejects keys whose
 characters fall outside ``^[A-Za-z0-9._-]+$`` so a future SQL or
 log-pipeline change cannot be blindsided by an exotic Unicode key.
+
+(Note: :meth:`MemoryFacade.retrieve_procedures` takes a free-text
+``query``, not a key — that path is escaped for ``LIKE`` semantics by
+:func:`agents.memory.episodic_procedural._escape_like` and is not
+covered by the regex validator.  PR 6b deep review Should-Fix #2.)
 
 The escape behaviour at the helper level
 (:func:`agents.memory.episodic_procedural.refresh_confidence` /

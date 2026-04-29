@@ -20,13 +20,20 @@ All notable changes to this project will be documented in this file.
   Internal-only follow-up consolidating deferred review findings from
   PR 3a (delegation log-safety) and PR 5 (procedural decay) into the
   Python agent + memory surfaces.  No wire-shape changes.  Highlights:
-  log-safety helpers (`_bounded`, `_CTRL_TRANSLATION`,
-  `_DELEGATION_FAILURE_MESSAGE_CAP`) lifted from
+  log-safety helpers (`bounded`, `_CTRL_TRANSLATION`,
+  `_CTRL_REPLACEMENT`, `_DELEGATION_FAILURE_MESSAGE_CAP`) lifted from
   [`agents/sub_agents/spawner.py`](agents/sub_agents/spawner.py) into
   the new [`agents/sub_agents/_log_safety.py`](agents/sub_agents/_log_safety.py)
   single-source-of-truth module (PR 3a R4 L4 / R5 S1) — `task_agent.py`
-  now imports from `_log_safety` directly; spawner re-exports the
-  underscore aliases via `__all__` for backwards-compat callers.
+  now imports from `_log_safety` directly; `spawner.py` re-imports
+  `bounded` as the module-local `_bounded` alias so its existing call
+  sites are unchanged. The underscore-prefixed names
+  (`_bounded`, `_CTRL_TRANSLATION`, `_CTRL_REPLACEMENT`,
+  `_DELEGATION_FAILURE_MESSAGE_CAP`) remain importable from
+  `agents.sub_agents._log_safety` (listed in that module's `__all__`)
+  for any out-of-tree caller pinned to the old names; they are *not*
+  re-exported from `agents.sub_agents.spawner` and that import path is
+  removed.
   Delegation test harness consolidated: `_ScriptedSubAgent`,
   `_FailedSubAgent`, `_MalformedSubAgent`, `boom_delete` now live in
   shared [`tests/integration/_delegation_helpers.py`](tests/integration/_delegation_helpers.py)

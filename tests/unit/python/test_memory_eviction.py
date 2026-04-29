@@ -357,6 +357,21 @@ def test_eviction_stats_is_frozen() -> None:
         stats.ttl_evicted = 1  # type: ignore[misc]
 
 
+def test_eviction_stats_procedural_evicted_is_required() -> None:
+    """PR 6b deep-review Should-Fix #3: pin the intentional removal of
+    the ``procedural_evicted`` default value (PR 5 R2 N2).
+
+    Without this pin a future contributor restoring the default would
+    only break the documented intent — every eviction call site must
+    populate ``procedural_evicted`` explicitly so the field cannot
+    silently read as ``0`` when an actual count is missing.
+    """
+    with pytest.raises(TypeError):
+        EvictionStats(  # type: ignore[call-arg]
+            ttl_evicted=0, cap_evicted=0, total_after=0,
+        )
+
+
 # ─── MemoryFacade __init__ validation (PR #221 deep-review M1) ────────
 
 
