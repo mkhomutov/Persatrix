@@ -196,6 +196,18 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	if ch.Type == ChannelTypeGroup && ch.Name == "" {
 		return errors.New("channels: group channel requires a name")
 	}
+	// PR #231 review-2 Should-Fix #1: enforce channelNamePattern at the
+	// store boundary too, not only in the loader (Config.Validate). The REST
+	// surface in PR 2 will route through CreateChannel and would otherwise
+	// accept group names that the next restart's LoadConfig would reject,
+	// breaking the config-vs-store parity invariant from RFC 0011 §B.
+	// DM and thread channels store their canonical id in the `name` column
+	// as a placeholder (see storedName below) and are exempt — only
+	// user-declared group names are user-visible.
+	if ch.Type == ChannelTypeGroup && !channelNamePattern.MatchString(ch.Name) {
+		return fmt.Errorf("channels: group channel name %q does not match %s",
+			ch.Name, channelNamePattern.String())
+	}
 	if ch.CreatedAt.IsZero() {
 		ch.CreatedAt = time.Now().UTC()
 	}

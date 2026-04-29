@@ -107,10 +107,35 @@ func TestSQLiteStore_CreateChannel_DuplicateRejected(t *testing.T) {
 func TestSQLiteStore_GlobalChannelCapEnforced(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{MaxChannels: 2})
 	ctx := context.Background()
-	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:a", Name: "a", Type: ChannelTypeGroup}))
-	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:b", Name: "b", Type: ChannelTypeGroup}))
-	err := store.CreateChannel(ctx, Channel{ID: "group:c", Name: "c", Type: ChannelTypeGroup})
+	// Names must satisfy channelNamePattern (≥2 chars, lowercase-kebab) —
+	// see PR #231 review-2 Should-Fix #1; the previous single-char names
+	// ("a"/"b"/"c") only passed because CreateChannel did not enforce the
+	// regex. The cap behaviour is independent of name shape.
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:a1", Name: "a1", Type: ChannelTypeGroup}))
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:b1", Name: "b1", Type: ChannelTypeGroup}))
+	err := store.CreateChannel(ctx, Channel{ID: "group:c1", Name: "c1", Type: ChannelTypeGroup})
 	assert.ErrorIs(t, err, ErrChannelCapExceeded)
+}
+
+// TestSQLiteStore_CreateChannel_RejectsBadName pins PR #231 review-2
+// Should-Fix #1: the store enforces channelNamePattern for group channels,
+// matching the loader and JSON Schema. Without this, REST callers in PR 2
+// could insert names that LoadConfig would reject on next restart.
+func TestSQLiteStore_CreateChannel_RejectsBadName(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+	cases := []string{"Planning", "x", "-bad", "bad-", "with space"}
+	for _, name := range cases {
+		err := store.CreateChannel(ctx, Channel{
+			ID: "group:" + name, Name: name, Type: ChannelTypeGroup,
+		})
+		assert.Error(t, err, "name=%q should be rejected", name)
+	}
+	// DM/thread channels are exempt from the user-visible name regex —
+	// CanonicalDMID and parent message id are the placeholder names.
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: "dm:agent-a:agent-b", Type: ChannelTypeDM,
+	}))
 }
 
 func TestSQLiteStore_AddMember_Idempotent(t *testing.T) {
@@ -122,12 +147,18 @@ func TestSQLiteStore_AddMember_Idempotent(t *testing.T) {
 	first, err := store.GetMember(ctx, id, "alice")
 	require.NoError(t, err)
 
-	// Re-add must not change the joined_at or policy.
+	// Re-add must not change the joined_at or policy. PR #231 review-2
+	// Nice-to-Have #3: assert on the time.Time directly rather than its
+	// UnixNano, so the test survives a future column-type change (e.g.
+	// switching `joined_at` to a richer encoding) and exercises the same
+	// equality consumers actually rely on.
 	time.Sleep(2 * time.Millisecond)
 	require.NoError(t, store.AddMember(ctx, id, "alice", RespondNever))
 	second, err := store.GetMember(ctx, id, "alice")
 	require.NoError(t, err)
-	assert.Equal(t, first.JoinedAt.UnixNano(), second.JoinedAt.UnixNano())
+	assert.True(t, first.JoinedAt.Equal(second.JoinedAt),
+		"joined_at must be stable across re-add (first=%v second=%v)",
+		first.JoinedAt, second.JoinedAt)
 	assert.Equal(t, RespondAlways, second.RespondPolicy, "re-add must not overwrite policy")
 }
 

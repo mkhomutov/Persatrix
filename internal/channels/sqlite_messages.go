@@ -10,6 +10,22 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	sqlite "modernc.org/sqlite"
+)
+
+// SQLite extended result codes used to classify driver errors. Defined
+// locally so this package does not need to import `modernc.org/sqlite/lib`
+// (the generated CGO-equivalent symbol table is large and platform-tagged).
+// Values are part of the public SQLite C API and stable across versions:
+//
+//	https://www.sqlite.org/rescode.html
+//
+// PR #231 review-2 Should-Fix #3: replaces the previous substring matching
+// against err.Error(). Substring matching survives an English-locale driver
+// today but is fragile against driver-message rewording, l10n, or wrapping.
+const (
+	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
+	sqliteConstraintForeignKey = 787  // SQLITE_CONSTRAINT_FOREIGNKEY
 )
 
 // PublishMessage implements [ChannelStore.PublishMessage].
@@ -86,18 +102,37 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 		}
 		if isForeignKeyViolation(err) {
 			// The INSERT touches two FK columns: `channel_id` and (when set)
-			// `thread_id`. modernc.org/sqlite reports both as the same
-			// generic FOREIGN KEY constraint failure, so we disambiguate by
-			// what the caller supplied. When `ThreadID` is empty, the only
-			// possible FK target is `channel_id` — the channel was deleted
-			// between the membership probe and this INSERT (memberships
-			// cascade-delete with the channel, so the probe could still have
-			// read its own snapshot). Surface that as ErrChannelNotFound
-			// instead of the misleading "invalid thread_id <empty>" reported
-			// pre-PR-#231-review.
-			if msg.ThreadID == "" {
+			// `thread_id`. modernc.org/sqlite reports both with the same
+			// `SQLITE_CONSTRAINT_FOREIGNKEY` extended code, so we
+			// disambiguate by re-probing the channel row inside the same
+			// transaction (see PR #231 review-2 Nice-to-Have #1):
+			//
+			//   * channel row missing → ErrChannelNotFound (the channel was
+			//     dropped between the membership probe and this INSERT;
+			//     memberships cascade-delete with the channel, so the probe
+			//     could still have read its own snapshot).
+			//   * channel row present, ThreadID set → the violation must be
+			//     on `thread_id`; surface as "invalid thread_id".
+			//   * channel row present, ThreadID empty → only `channel_id`
+			//     could violate; reaching this branch means the channel
+			//     vanished between probe and re-probe (rare but possible).
+			//
+			// Round 1 only handled the ThreadID == "" path; round 2 widens
+			// the disambiguation so a non-empty ThreadID with a concurrent
+			// channel deletion no longer surfaces as "invalid thread_id".
+			var chCount int
+			if probeErr := tx.QueryRowContext(ctx,
+				`SELECT COUNT(1) FROM channels WHERE id = ?`, msg.ChannelID).Scan(&chCount); probeErr != nil {
+				return fmt.Errorf("channels: lookup channel after FK violation: %w", probeErr)
+			}
+			if chCount == 0 {
 				return fmt.Errorf("%w: %s (deleted concurrently)",
 					ErrChannelNotFound, msg.ChannelID)
+			}
+			if msg.ThreadID == "" {
+				// Channel still present yet the FK fired with no thread_id
+				// supplied — this is unexpected; surface raw.
+				return fmt.Errorf("channels: insert message: %w", err)
 			}
 			return fmt.Errorf("channels: invalid thread_id %s: %w", msg.ThreadID, err)
 		}
@@ -290,16 +325,33 @@ func encodeMetadata(m map[string]any) (string, error) {
 }
 
 // isUniqueViolation reports whether err signals a SQLite UNIQUE constraint
-// failure. modernc.org/sqlite returns errors with messages like
-// "constraint failed: UNIQUE ...". A typed-error path via the driver's
-// `*sqlite.Error` would be cleaner, but matching on the message text keeps
-// this package free of driver-specific imports beyond the `_` registration.
+// failure. Prefers the typed `*sqlite.Error` extended-code path
+// (`SQLITE_CONSTRAINT_UNIQUE` = 2067) and falls back to a substring match
+// only if the error is not the modernc driver's typed error — defensive in
+// case a future wrapper (e.g. an OTel-instrumented `database/sql` driver)
+// strips the type before propagation.
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code() == sqliteConstraintUnique
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint")
 }
 
 // isForeignKeyViolation reports whether err signals a SQLite FOREIGN KEY
-// constraint failure (e.g., AddMember against a missing channel id).
+// constraint failure (e.g., AddMember against a missing channel id, or
+// PublishMessage with a non-existent thread_id). Same typed-first /
+// substring-fallback strategy as [isUniqueViolation].
 func isForeignKeyViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "FOREIGN KEY constraint")
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code() == sqliteConstraintForeignKey
+	}
+	return strings.Contains(err.Error(), "FOREIGN KEY constraint")
 }
