@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -234,7 +235,7 @@ func TestSQLiteStore_ThreadFKCascade(t *testing.T) {
 	assert.Empty(t, thread, "thread replies cascade-deleted with root")
 
 	_, err = store.GetMessage(ctx, rootID)
-	assert.ErrorIs(t, err, ErrChannelNotFound, "root pruned")
+	assert.ErrorIs(t, err, ErrMessageNotFound, "root pruned")
 }
 
 func TestSQLiteStore_ChannelDeletionCascade(t *testing.T) {
@@ -369,4 +370,66 @@ func TestErrors_Unwrap(t *testing.T) {
 	_, err := store.GetChannel(context.Background(), "missing")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrChannelNotFound))
+}
+
+// TestSQLiteStore_GetMessage_NotFound pins the post-PR-#231-review contract
+// that a missing message id surfaces as ErrMessageNotFound (distinct from
+// ErrChannelNotFound). Without this test, a future refactor could collapse
+// the two sentinels and silently regress the REST 404-mapping plan in PR 2.
+func TestSQLiteStore_GetMessage_NotFound(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	_, err := store.GetMessage(context.Background(), "no-such-id")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMessageNotFound)
+	assert.False(t, errors.Is(err, ErrChannelNotFound),
+		"missing message must not surface as ErrChannelNotFound")
+}
+
+// TestSQLiteStore_GetOrCreateDM_ConcurrentRace locks in the contract that
+// dmMu (plus SetMaxOpenConns(1)) serialises GetOrCreateDM so that N
+// concurrent callers for the same canonical pair observe exactly one
+// channel row and exactly two membership rows.
+//
+// Added per PR #231 review (Should-Fix #4): without this test, a future
+// refactor that relaxes either the mutex or the connection cap could
+// reintroduce the duplicate-DM race that the current design forecloses.
+func TestSQLiteStore_GetOrCreateDM_ConcurrentRace(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+
+	const goroutines = 50
+	var wg sync.WaitGroup
+	ids := make([]string, goroutines)
+	errs := make([]error, goroutines)
+	wg.Add(goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			ch, err := store.GetOrCreateDM(ctx, "agent-a", "agent-b")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			ids[i] = ch.ID
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "goroutine %d", i)
+	}
+	for i, id := range ids {
+		assert.Equal(t, "dm:agent-a:agent-b", id, "goroutine %d", i)
+	}
+
+	// Exactly one channel row and exactly two membership rows.
+	channels, err := store.ListChannels(ctx)
+	require.NoError(t, err)
+	require.Len(t, channels, 1, "single canonical DM row")
+	members, err := store.GetMembers(ctx, "dm:agent-a:agent-b")
+	require.NoError(t, err)
+	require.Len(t, members, 2, "exactly two memberships, no duplicates")
 }

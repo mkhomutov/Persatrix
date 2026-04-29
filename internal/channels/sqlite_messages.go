@@ -83,7 +83,20 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 			return fmt.Errorf("channels: duplicate message id %s", msg.ID)
 		}
 		if isForeignKeyViolation(err) {
-			// `thread_id` referenced a missing or deleted message.
+			// The INSERT touches two FK columns: `channel_id` and (when set)
+			// `thread_id`. modernc.org/sqlite reports both as the same
+			// generic FOREIGN KEY constraint failure, so we disambiguate by
+			// what the caller supplied. When `ThreadID` is empty, the only
+			// possible FK target is `channel_id` — the channel was deleted
+			// between the membership probe and this INSERT (memberships
+			// cascade-delete with the channel, so the probe could still have
+			// read its own snapshot). Surface that as ErrChannelNotFound
+			// instead of the misleading "invalid thread_id <empty>" reported
+			// pre-PR-#231-review.
+			if msg.ThreadID == "" {
+				return fmt.Errorf("%w: %s (deleted concurrently)",
+					ErrChannelNotFound, msg.ChannelID)
+			}
 			return fmt.Errorf("channels: invalid thread_id %s: %w", msg.ThreadID, err)
 		}
 		return fmt.Errorf("channels: insert message: %w", err)
@@ -138,7 +151,7 @@ func (s *sqliteStore) GetMessage(ctx context.Context, messageID string) (Channel
 	msg, err := scanMessage(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ChannelMessage{}, fmt.Errorf("%w: message %s", ErrChannelNotFound, messageID)
+			return ChannelMessage{}, fmt.Errorf("%w: %s", ErrMessageNotFound, messageID)
 		}
 		return ChannelMessage{}, err
 	}
@@ -150,17 +163,31 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 	if limit <= 0 {
 		limit = 50
 	}
+	// Branch on `before.IsZero()` rather than substituting a future-dated
+	// sentinel: a synthetic "now+1h" upper bound would skew if the system
+	// clock jumped backwards mid-pagination and is harder to read at the
+	// SQL site. Two query strings keep the predicate honest.
+	var (
+		rows *sql.Rows
+		qErr error
+	)
 	if before.IsZero() {
-		before = time.Now().UTC().Add(time.Hour) // future-dated sentinel: include "now"
+		rows, qErr = s.db.QueryContext(ctx,
+			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+			   FROM messages
+			  WHERE channel_id = ?
+			  ORDER BY timestamp DESC
+			  LIMIT ?`, channelID, limit)
+	} else {
+		rows, qErr = s.db.QueryContext(ctx,
+			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+			   FROM messages
+			  WHERE channel_id = ? AND timestamp < ?
+			  ORDER BY timestamp DESC
+			  LIMIT ?`, channelID, before, limit)
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
-		   FROM messages
-		  WHERE channel_id = ? AND timestamp < ?
-		  ORDER BY timestamp DESC
-		  LIMIT ?`, channelID, before, limit)
-	if err != nil {
-		return nil, fmt.Errorf("channels: history query: %w", err)
+	if qErr != nil {
+		return nil, fmt.Errorf("channels: history query: %w", qErr)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanMessageRows(rows)

@@ -16,7 +16,7 @@ package channels
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 	"time"
 )
 
@@ -93,6 +93,10 @@ type ChannelMessage struct {
 var (
 	// ErrChannelNotFound — GetChannel/PublishMessage against a missing id.
 	ErrChannelNotFound = errors.New("channels: channel not found")
+	// ErrMessageNotFound — GetMessage against an unknown message id. Distinct
+	// from ErrChannelNotFound so callers (and the future REST layer) can map
+	// 404-on-message vs. 404-on-channel without re-parsing error strings.
+	ErrMessageNotFound = errors.New("channels: message not found")
 	// ErrChannelExists — CreateChannel collided with an existing name (group)
 	// or canonical DM id.
 	ErrChannelExists = errors.New("channels: channel already exists")
@@ -113,19 +117,31 @@ var (
 	ErrChannelCapExceeded = errors.New("channels: max_channels exceeded")
 )
 
+// participantIDPattern is the single source of truth for legal participant
+// ids across all three RFC 0011 validation surfaces:
+//
+//   - schemas/channel.schema.json (config-time validation via `make validate`)
+//   - LoadConfig→Validate (loader-time, calls validateParticipantID below)
+//   - the runtime store guards (PublishMessage, CanonicalDMID, AddMember)
+//
+// Keeping the schema, loader, and runtime in lock-step closes the
+// PR-#231-review gap where the three layers had drifted apart. The pattern
+// matches schemas/channel.schema.json `definitions.member` and accepts both
+// agent ids (e.g. `code-writer`) and human/CLI participants (e.g. `User_1`)
+// while excluding the `:` reserved by the canonical-address grammar and any
+// whitespace.
+var participantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // validateParticipantID enforces the runtime half of the §A constraint set.
-// The other half lives at config-load and registration boundaries.
+// The other half lives at config-load and registration boundaries; both now
+// share `participantIDPattern` so a value that passes one passes all three.
 func validateParticipantID(id string) error {
 	if id == "" {
 		return fmt.Errorf("%w: empty", ErrInvalidParticipantID)
 	}
-	if strings.ContainsAny(id, ": \t\r\n") {
-		return fmt.Errorf("%w: %q contains forbidden character", ErrInvalidParticipantID, id)
-	}
-	for _, r := range id {
-		if r > 0x7E || r < 0x21 { // printable ASCII only
-			return fmt.Errorf("%w: %q is not printable ASCII", ErrInvalidParticipantID, id)
-		}
+	if !participantIDPattern.MatchString(id) {
+		return fmt.Errorf("%w: %q does not match %s",
+			ErrInvalidParticipantID, id, participantIDPattern.String())
 	}
 	return nil
 }

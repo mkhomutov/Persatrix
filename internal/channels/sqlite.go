@@ -52,9 +52,25 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("channels: open %s: %w", path, err)
 	}
-	// modernc.org/sqlite is connection-safe but a single connection avoids
-	// surprising lock-stepping with the file-backed file. WAL mode is set per
-	// connection via the DSN above so it survives reconnects.
+	// MaxOpenConns is intentionally pinned to 1 for v0.3.0.
+	//
+	// Rationale (per PR #231 review): WAL mode permits concurrent readers and
+	// modernc.org/sqlite is connection-safe, so the file is technically
+	// capable of more. We pin to 1 anyway because:
+	//
+	//  1. Every write path in this PR (CreateChannel cap check, PublishMessage
+	//     publish+prune, GetOrCreateDM existence check + insert) wraps a
+	//     read-then-write transaction whose correctness depends on the lack
+	//     of an interleaved writer. A pool of >1 + WAL would still serialise
+	//     writers via SQLITE_BUSY, but the cap-check TOCTOU window in
+	//     CreateChannel widens.
+	//  2. PR 1 ships persistence only — no REST traffic is layered on top yet,
+	//     so the read-throughput penalty is not measurable.
+	//
+	// TODO(rfc0011-pr2): when the REST router lands and concurrent reads
+	// matter, lift the cap to a small bounded value (4–8), gate writers via
+	// busy_timeout/sqlite-side serialisation, and replace the cap-check
+	// SELECT+INSERT with an idempotent INSERT-or-fail.
 	db.SetMaxOpenConns(1)
 
 	if err := applySchema(db); err != nil {
@@ -81,6 +97,17 @@ func buildDSN(path string) string {
 	return path + "?" + q.Encode()
 }
 
+// schemaSQL is the v0.3.0 channel-store schema. It is intentionally applied
+// via `CREATE TABLE IF NOT EXISTS` rather than a migration runner because
+// PR 1 ships the first revision — there is nothing to migrate from. As soon
+// as a future PR needs an `ALTER TABLE` (column add, type change, index
+// rename, etc.) this in-place approach becomes a footgun: existing
+// production databases will silently keep the old shape.
+//
+// TODO(rfc0011-pr2+): introduce an embedded migrations runner (e.g.
+// golang-migrate or a hand-rolled `schema_version` PRAGMA + ordered .sql
+// files) before the first schema-altering PR lands. Until then, every
+// schema change in this package MUST be additive and IF-NOT-EXISTS-safe.
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS channels (
     id           TEXT PRIMARY KEY,

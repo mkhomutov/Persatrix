@@ -57,9 +57,9 @@ type ChannelStore interface {
 	PublishMessage(ctx context.Context, msg ChannelMessage) error
 
 	// GetMessage looks up a single message by primary key. Returns
-	// [ErrChannelNotFound] for an unknown id (the only "not found" sentinel
-	// the store currently surfaces; future PRs may introduce a separate
-	// `ErrMessageNotFound`).
+	// [ErrMessageNotFound] for an unknown id; this is distinct from
+	// [ErrChannelNotFound] so the future REST layer can map message-vs-
+	// channel 404s without re-parsing error strings.
 	GetMessage(ctx context.Context, messageID string) (ChannelMessage, error)
 
 	// GetHistory returns up to `limit` messages from `channelID` strictly
