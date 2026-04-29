@@ -24,8 +24,6 @@ import pytest
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.memory import MemoryFacade
 from agents.sub_agents import (
-    DELEGATION_REQUEST_KEY,
-    DELEGATION_RESULT_KEY,
     BudgetEnvelope,
     DelegationFailure,
     DelegationRequest,
@@ -38,36 +36,10 @@ from agents.sub_agents.delegation import (
     DelegationContractError,
 )
 
-
-class _ScriptedSubAgent(BaseAgent):
-    """A minimal sub-agent that returns a pre-canned ``DelegationResult``.
-
-    Bypasses the LLM loop so the integration test exercises only the
-    delegation contract + merge engine + memory persistence path.
-    """
-
-    def __init__(self, agent_id: str, result: DelegationResult) -> None:
-        super().__init__(agent_id=agent_id, config={})
-        self._result = result
-
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        # Sanity-check the request is on the wire under the reserved key.
-        assert DELEGATION_REQUEST_KEY in task.context
-        return TaskOutput(
-            status=TaskStatus.COMPLETED,
-            result=self._result.summary,
-            metadata={DELEGATION_RESULT_KEY: self._result.to_json()},
-        )
-
-
-class _MalformedSubAgent(BaseAgent):
-    """Returns a TaskOutput without the reserved metadata key."""
-
-    def __init__(self, agent_id: str = "malformed") -> None:
-        super().__init__(agent_id=agent_id, config={})
-
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        return TaskOutput(status=TaskStatus.COMPLETED, result="raw text")
+from ._delegation_helpers import (
+    MalformedSubAgent as _MalformedSubAgent,
+    ScriptedSubAgent as _ScriptedSubAgent,
+)
 
 
 @pytest.fixture

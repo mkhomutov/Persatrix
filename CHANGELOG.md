@@ -6,6 +6,52 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **BREAKING — `MemoryFacade.store_procedure` now validates `key`**
+  against `^[A-Za-z0-9._-]+$` (max 256 chars) and raises `ValueError`
+  on non-conforming keys (RFC 0008 PR 6b, closes PR 5 review M1).
+  Previously the facade only rejected empty / whitespace-only keys,
+  letting in payloads with spaces, slashes, percent-signs, non-ASCII
+  characters, or newlines that could (a) confuse downstream FTS5
+  tokenisation and (b) silently widen `LIKE` matches inside the
+  refresh-confidence path.  Existing callers persisting procedural
+  keys with disallowed characters must rename them before upgrading.
+  Pinned by `tests/unit/python/test_procedural_key_validation.py`.
+- **RFC 0008 PR 6b — Python procedural memory + log-safety cleanup.**
+  Internal-only follow-up consolidating deferred review findings from
+  PR 3a (delegation log-safety) and PR 5 (procedural decay) into the
+  Python agent + memory surfaces.  No wire-shape changes.  Highlights:
+  log-safety helpers (`bounded`, `_CTRL_TRANSLATION`,
+  `_CTRL_REPLACEMENT`, `_DELEGATION_FAILURE_MESSAGE_CAP`) lifted from
+  [`agents/sub_agents/spawner.py`](agents/sub_agents/spawner.py) into
+  the new [`agents/sub_agents/_log_safety.py`](agents/sub_agents/_log_safety.py)
+  single-source-of-truth module (PR 3a R4 L4 / R5 S1) — `task_agent.py`
+  now imports from `_log_safety` directly; `spawner.py` re-imports
+  `bounded` as the module-local `_bounded` alias so its existing call
+  sites are unchanged. The underscore-prefixed names
+  (`_bounded`, `_CTRL_TRANSLATION`, `_CTRL_REPLACEMENT`,
+  `_DELEGATION_FAILURE_MESSAGE_CAP`) remain importable from
+  `agents.sub_agents._log_safety` (listed in that module's `__all__`)
+  for any out-of-tree caller pinned to the old names; they are *not*
+  re-exported from `agents.sub_agents.spawner` and that import path is
+  removed.
+  Delegation test harness consolidated: `_ScriptedSubAgent`,
+  `_FailedSubAgent`, `_MalformedSubAgent`, `boom_delete` now live in
+  shared [`tests/integration/_delegation_helpers.py`](tests/integration/_delegation_helpers.py)
+  (PR 3a R2 L2 / R4 L5).  `MemoryFacade.retrieve_procedures` exposes a
+  new `now: float | None` parameter (deterministic-time test injection;
+  PR 5 R1 L4).  `recall_procedures` now pushes the
+  `t_max = -ln(c_min) / lambda_per_day` decay cutoff into the SQL
+  `WHERE` clause and adds a `LIMIT` over-fetch (PR 5 R1 S3 + Info-3).
+  Promoted `_resolve_base_confidence` → public
+  `resolve_base_confidence` (PR 5 R1 L2 / R2 M2; legacy alias kept for
+  v0.3.x).  `stale_memory_injection` warn-log relocated into
+  `recall_procedures` so it fires regardless of caller (PR 5 R2 Mi2).
+  `EvictionStats.procedural_evicted` no longer has a default value
+  (PR 5 R2 N2 — forces explicit construction at every call site).
+  New attribute-schema pin
+  [`tests/integration/test_shared_pool_metrics.py`](tests/integration/test_shared_pool_metrics.py)
+  closes PR 4 N4 (verifies `agent.shared_pool.{reads,writes,denied}`
+  emit the documented `{pool, agent.id[, operation]}` keys).
 - **RFC 0008 PR 6a — Go scheduler hygiene + sampler bookkeeping.**
   Internal-only follow-up consolidating ~22 deferred review findings from
   PR 1 / PR 1b / PR 3 / PR 4 / PR 5 into the Go scheduler & packaging

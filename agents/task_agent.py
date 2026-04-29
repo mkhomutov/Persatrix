@@ -19,13 +19,15 @@ import json
 import logging
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from .sub_agents._log_safety import (
+    bounded as _bounded,  # PR #224 r5-S1: CWE-117 (lifted to _log_safety in PR 6b)
+)
 from .sub_agents.delegation import (
     DELEGATION_REQUEST_KEY,
     DELEGATION_RESULT_KEY,
     DelegationContractError,
     DelegationResult,
 )
-from .sub_agents.spawner import _bounded  # PR #224 r5-S1: CWE-117; lifted to _log_safety.py in PR 6
 from .tools import builtin
 
 logger = logging.getLogger(__name__)

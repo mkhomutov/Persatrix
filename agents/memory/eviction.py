@@ -50,7 +50,7 @@ from .decay import (
 # recall path so a row's eviction disposition cannot disagree with its
 # recall disposition (a legacy row whose ``importance`` is the real
 # authored confidence must decay from that value in *both* paths).
-from .episodic_procedural import _resolve_base_confidence
+from .episodic_procedural import resolve_base_confidence
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +82,19 @@ _NOT_PROCEDURE_PREDICATE: str = (
 
 @dataclass(frozen=True)
 class EvictionStats:
-    """Per-pass eviction telemetry."""
+    """Per-pass eviction telemetry.
+
+    PR 6b (PR 5 R2 N2): ``procedural_evicted`` is now required at
+    construction so a future caller cannot accidentally drop the
+    procedural-tier row count by relying on the previous default of
+    ``0``.  The only construction site (:meth:`EvictionPass.run`)
+    already supplies the value explicitly.
+    """
 
     ttl_evicted: int
     cap_evicted: int
     total_after: int
-    procedural_evicted: int = 0
+    procedural_evicted: int
 
 
 class EvictionPass:
@@ -238,7 +245,7 @@ class EvictionPass:
         now = time.time()
         victims: list[str] = []
         for r in rows:
-            base = _resolve_base_confidence(r[1], r[4])
+            base = resolve_base_confidence(r[1], r[4])
             anchor = r[2] if r[2] is not None else r[3]
             age_seconds = max(0.0, now - float(anchor))
             decayed = compute_decayed_confidence(
