@@ -32,6 +32,14 @@ func wireShapeFixturePath(t *testing.T) string {
 // this helper as the single producer guarantees that both tests assert
 // against bit-identical inputs — if the writer and the equality test ever
 // drift, the contract is meaningless.
+//
+// The fixture is intentionally minimal: a single step output, no warnings,
+// no pinned sections, no dropped candidates. This keeps the canonical
+// cross-language contract small and stable. Additional wire-shape coverage
+// (warnings array, multiple outputs, pinned sections, dropped candidates)
+// belongs in separate parametrised pin tests rather than expanding this
+// fixture, which would force a Python-side fixture refresh on every Go
+// behavioural tweak unrelated to the wire shape itself.
 func buildWireShapeFixturePackage(t *testing.T) *packaging.Package {
 	t.Helper()
 	s := &WorkflowScheduler{
@@ -96,8 +104,8 @@ func TestContextPackage_WriteWireShapeFixture(t *testing.T) {
 // in `attachContextPackage`'s determinism contract) could land while the
 // checked-in fixture went stale. The only protection would be the Python
 // consumer noticing at integration time, and only after someone manually
-// regenerated the fixture — which the original review (`docs/pr-reviews/
-// pr-227-deep-review.md`, "Should Fix #2") flagged as a coverage gap.
+// regenerated the fixture — a coverage gap called out in the RFC 0008
+// PR 6a wire-shape contract follow-up.
 //
 // On failure the test points the developer at the regen command rather than
 // silently rewriting the fixture: a wire-shape change should be a deliberate,

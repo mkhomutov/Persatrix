@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from agents.base import TaskInput, TaskInputConfig
 
@@ -40,7 +41,11 @@ _FIXTURE_PATH = (
 )
 
 
-def _load_fixture() -> dict[str, object]:
+# NOTE: the value type is `Any` (not `object`) so spread expressions like
+# `**_GO_PRODUCED_SAMPLE["metrics"]` (see
+# `test_context_package_tolerates_unknown_fields`) type-check under strict
+# mypy. The runtime contract is unchanged — every value is JSON-decoded.
+def _load_fixture() -> dict[str, Any]:
     """Load the Go-produced v1 fixture; fall back to a minimal in-tree sample
     if the fixture is absent (e.g. fresh clone before the Go test has run).
     The fall-back is structurally identical so the test still asserts the
@@ -76,7 +81,7 @@ def _load_fixture() -> dict[str, object]:
     }
 
 
-_GO_PRODUCED_SAMPLE: dict[str, object] = _load_fixture()
+_GO_PRODUCED_SAMPLE: dict[str, Any] = _load_fixture()
 
 
 def test_context_package_v1_payload_parses() -> None:
