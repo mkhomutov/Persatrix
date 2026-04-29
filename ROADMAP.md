@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-28 (RFC 0008 PR 5 opened: confidence decay + procedural revalidation; PR 3a merged via PR #224, PR 4 merged via PR #223)  
+> **Last updated**: 2026-04-29 (RFC 0008 PR 5 merged via PR #225: confidence decay + procedural revalidation; 5 of 6 canonical PRs merged)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 merged (#218, #219, #220, #221, #222, #224, #223) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance; PR 5 (confidence decay + procedural revalidation) open; PR 6 (RFC close) pending
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; PR 6 (RFC close + 30-day calibration review) pending
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -814,6 +814,7 @@ v0.5.0 complete
 | [#222](https://github.com/mkhomutov/Persatrix/pull/222) | feat(rfc0008): PR 3 — delegation contract + merge engine | 0008 (3/6) | 2026-04-28 |
 | [#223](https://github.com/mkhomutov/Persatrix/pull/223) | feat(rfc0008): PR 4 — shared pool ACL + provenance | 0008 (4/6) | 2026-04-28 |
 | [#224](https://github.com/mkhomutov/Persatrix/pull/224) | feat(rfc0008): PR 3a — delegation metrics + PR 3 follow-up findings | 0008 (3a/6) | 2026-04-28 |
+| [#225](https://github.com/mkhomutov/Persatrix/pull/225) | feat(rfc0008): PR 5 — confidence decay + procedural revalidation | 0008 (5/6) | 2026-04-29 |
 
 ---
 

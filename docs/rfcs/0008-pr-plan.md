@@ -626,7 +626,9 @@ Integration:
 - [x] `stale_memory_injection` is registered exactly once, orchestrator-side (incremented from agent structured-log ingestion); agents emit the log but do not register the counter, to avoid duplicate emission across the gRPC boundary
 - [x] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
 - [ ] 30-day calibration review (PR 6) must validate or retune `avg_entry_tokens = 100` (the PR 2 advisory-budget translation constant) against the observed `episodic_entry_token_count` distribution; record outcome in the calibration review summary
-- [ ] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
+- [x] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
+
+> **✅ Merged as PR #225 (2026-04-29).**
 
 #### Follow-up findings (from PR #225 deep review — round 1)
 
