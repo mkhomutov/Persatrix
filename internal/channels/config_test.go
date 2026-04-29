@@ -107,9 +107,9 @@ func TestLoadConfig_RejectsExceedingCap(t *testing.T) {
 	body := `
 max_channels: 1
 channels:
-  - name: a
+  - name: alpha
     members: [alice]
-  - name: b
+  - name: bravo
     members: [bob]
 `
 	_, err := LoadConfig(writeYAML(t, body))
@@ -133,4 +133,29 @@ channels:
 func TestChannelConfig_CanonicalID(t *testing.T) {
 	cc := ChannelConfig{Name: "planning"}
 	assert.Equal(t, "group:planning", cc.CanonicalID())
+}
+
+// TestLoadConfig_RejectsBadChannelName pins PR #231 review Should-Fix #6:
+// the loader's Validate() now compiles and applies the same `name` regex the
+// JSON Schema does (`schemas/channel.schema.json` →
+// `definitions.channel.name.pattern`). Before this fix, a `name` like
+// "Planning" or "x" parsed through `LoadConfig` cleanly and only blew up at
+// `make validate`, so the loader and the schema disagreed about what a legal
+// channel name was.
+func TestLoadConfig_RejectsBadChannelName(t *testing.T) {
+	cases := map[string]string{
+		"uppercase":     "Planning",
+		"single-char":   "x",
+		"trailing-dash": "planning-",
+		"leading-dash":  "-planning",
+		"underscore":    "team_alpha",
+	}
+	for label, name := range cases {
+		t.Run(label, func(t *testing.T) {
+			body := "channels:\n  - name: " + name + "\n    members: [alice]\n"
+			_, err := LoadConfig(writeYAML(t, body))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "does not match")
+		})
+	}
 }

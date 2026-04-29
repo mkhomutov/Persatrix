@@ -132,6 +132,18 @@ var (
 // whitespace.
 var participantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+// channelNamePattern mirrors `schemas/channel.schema.json` →
+// `definitions.channel.properties.name.pattern`. Compiled here so the loader
+// (`Config.Validate`) and any future runtime call can enforce the same
+// predicate the JSON Schema does at `make validate`. Closes Should-Fix #6
+// of PR #231 review: previously a `config/channels.yaml` with `name:
+// "Planning"` (or `name: "x"`) parsed cleanly through `LoadConfig` and only
+// failed at `make validate`. The pattern is intentionally stricter than the
+// participant-id pattern: channel names are user-visible canonical-address
+// segments (`group:<name>`), so we lock them to the same lowercase-kebab
+// shape used for agent ids in `schemas/agent.schema.json`.
+var channelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
 // validateParticipantID enforces the runtime half of the §A constraint set.
 // The other half lives at config-load and registration boundaries; both now
 // share `participantIDPattern` so a value that passes one passes all three.

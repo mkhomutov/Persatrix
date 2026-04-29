@@ -115,6 +115,13 @@ func (c *Config) Validate() error {
 		if ch.Name == "" {
 			return fmt.Errorf("channels[%d]: name is required", i)
 		}
+		// Mirror `schemas/channel.schema.json` → `definitions.channel.name.pattern`
+		// so a value that passes the loader also passes `make validate`. See
+		// channelNamePattern (channels.go) and PR #231 review Should-Fix #6.
+		if !channelNamePattern.MatchString(ch.Name) {
+			return fmt.Errorf("channels[%d]: name %q does not match %s",
+				i, ch.Name, channelNamePattern.String())
+		}
 		if seenName[ch.Name] {
 			return fmt.Errorf("channels[%d]: duplicate name %q", i, ch.Name)
 		}

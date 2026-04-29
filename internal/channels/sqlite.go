@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; matches CGO_ENABLED=0 build (Dockerfile.orchestrator)
 )
 
@@ -26,9 +28,15 @@ const DefaultMaxChannels = 50
 // `CreateChannel`. `MaxMessagesPerChannel` is checked inside `PublishMessage`
 // after the insert; oldest-first pruning runs in the same transaction so the
 // thread-FK cascade resolves atomically with the new write.
+//
+// `Logger` is optional. When nil the store uses `zap.NewNop()` so callers in
+// tests can omit it without losing the orchestrator's structured-logging
+// convention (PR #231 review Should-Fix #4: previously every cap-enforcement
+// and channel-lifecycle event was silent in production).
 type SQLiteOptions struct {
 	MaxChannels           int
 	MaxMessagesPerChannel int
+	Logger                *zap.Logger
 }
 
 // NewSQLiteStore opens (or creates) the channel database at `path` and
@@ -45,6 +53,10 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 	}
 	if opts.MaxMessagesPerChannel <= 0 {
 		opts.MaxMessagesPerChannel = DefaultMaxMessagesPerChannel
+	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 
 	dsn := buildDSN(path)
@@ -82,6 +94,7 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		db:                    db,
 		maxChannels:           opts.MaxChannels,
 		maxMessagesPerChannel: opts.MaxMessagesPerChannel,
+		logger:                logger,
 	}, nil
 }
 
@@ -164,6 +177,7 @@ type sqliteStore struct {
 	db                    *sql.DB
 	maxChannels           int
 	maxMessagesPerChannel int
+	logger                *zap.Logger
 
 	dmMu sync.Mutex
 }
@@ -225,7 +239,16 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 		return fmt.Errorf("channels: insert channel: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// PR #231 review Should-Fix #4: surface lifecycle events through the
+	// orchestrator's structured logger. Info-level matches the cardinality
+	// (one event per declared channel + one per implicit DM/thread).
+	s.logger.Info("channels: channel created",
+		zap.String("channel_id", ch.ID),
+		zap.String("channel_type", string(ch.Type)))
+	return nil
 }
 
 // GetChannel implements [ChannelStore.GetChannel].
@@ -289,6 +312,7 @@ func (s *sqliteStore) DeleteChannel(ctx context.Context, id string) error {
 	if n == 0 {
 		return fmt.Errorf("%w: %s", ErrChannelNotFound, id)
 	}
+	s.logger.Info("channels: channel deleted", zap.String("channel_id", id))
 	return nil
 }
 

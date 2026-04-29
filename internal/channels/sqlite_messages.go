@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // PublishMessage implements [ChannelStore.PublishMessage].
@@ -140,6 +142,14 @@ func (s *sqliteStore) pruneExcess(ctx context.Context, tx *sql.Tx, channelID str
 		   )`, channelID, excess); err != nil {
 		return fmt.Errorf("channels: prune oldest %d: %w", excess, err)
 	}
+	// PR #231 review Should-Fix #4: cap-pruning was previously silent.
+	// Debug-level keeps the steady-state log volume bounded (this only fires
+	// when a publish actually exceeds maxMessagesPerChannel) but makes the
+	// behaviour observable when operators tune the cap.
+	s.logger.Debug("channels: pruned oldest messages",
+		zap.String("channel_id", channelID),
+		zap.Int("count", excess),
+		zap.Int("cap", s.maxMessagesPerChannel))
 	return nil
 }
 
