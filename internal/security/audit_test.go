@@ -104,6 +104,21 @@ func TestStartup_RecoversFromTruncatedTail(t *testing.T) {
 	if got := last.Detail["prior_tail"]; got != "unknown" {
 		t.Fatalf("prior_tail = %v; want \"unknown\"", got)
 	}
+	// PR #233 review SF-1 regression: the partial bytes after the last
+	// complete newline must be surfaced as `prior_tail_raw_truncated` so
+	// the forensic field is non-empty for the truncated-tail case it was
+	// designed for. Previously the truncated-tail branch in `inspectTail`
+	// discarded `last`, so this field always serialised as "".
+	rawTrunc, ok := last.Detail["prior_tail_raw_truncated"].(string)
+	if !ok {
+		t.Fatalf("prior_tail_raw_truncated = %v (type %T); want non-empty string", last.Detail["prior_tail_raw_truncated"], last.Detail["prior_tail_raw_truncated"])
+	}
+	if rawTrunc == "" {
+		t.Fatalf("prior_tail_raw_truncated is empty; expected the partial mid-JSON fragment from the seeded file")
+	}
+	if !strings.Contains(rawTrunc, `"event_type":"tool.invoked"`) {
+		t.Errorf("prior_tail_raw_truncated = %q; expected to contain the seeded partial fragment", rawTrunc)
+	}
 }
 
 func TestProcessRestart_EmitsChainRestartEvent(t *testing.T) {

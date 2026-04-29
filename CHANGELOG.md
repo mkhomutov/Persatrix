@@ -6,6 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0009 PR 1 — `internal/security/` package: AuditLogger +
+  SecretRedactor.** First implementation PR for RFC 0009 Phase 1a ships
+  the `internal/security/` package surface with no orchestrator wiring
+  (PR 1b carries the wiring): `AuditLogger` interface +
+  `NewFileAuditLogger` JSONL append-only sink with checksum-chained
+  tamper evidence (length-tagged `prev=<len>:<sum>|` prefix per RFC
+  0009 §G), per-event fsync for security-class events, batched
+  flush for telemetry-class events, and three-state startup recovery
+  (`chain.bootstrap` / `chain.restart` / `chain.recovered`) addressing
+  PR #232 review SF-3; `Redactor` interface + `NewSecretRedactor` with
+  five default patterns (anthropic, openai, bearer, aws, generic) and
+  a cycle-safe + depth-bounded reflective struct walk (PR #232 review
+  SF-2); closed-set `AuditEventType` enum (20 constants, including the
+  reserved chain / token / HITL types) with a CI guard
+  (`TestEveryAuditEventType_HasSeverityClassification`) that fails the
+  build if a new event type lands without a severity classification.
+  PR #233 review applied: openai-key regex now matches real-world
+  shapes (`sk-proj-AbCd_…`), generic-secret value class is bounded
+  (`[^\s,"'}\]]+`) so JSON payloads no longer over-match, and the
+  truncated-tail recovery path now persists the partial tail bytes as
+  `prior_tail_raw_truncated`.
+
 - **RFC 0011 PR 1 — Channel store + SQLite migration + schema rewrite.**
   `internal/channels/` is filled in (was a 7-line stub) with the
   canonical `group | dm | thread` model, a SQLite-backed

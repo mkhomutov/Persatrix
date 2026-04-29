@@ -49,7 +49,12 @@ func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKi
 
 	last, ok := readLastLine(f)
 	if !ok {
-		return "", emptyChecksum(), recoveryRecovered
+		// PR #233 review SF-1: forward the partial bytes so
+		// emitRecoveryEvent can persist them as
+		// `prior_tail_raw_truncated`. Previously we returned "" here, which
+		// meant the forensic field was always empty for the truncated-tail
+		// case it was designed for.
+		return last, emptyChecksum(), recoveryRecovered
 	}
 
 	var ev AuditEvent
@@ -84,7 +89,13 @@ func readLastLine(r io.ReadSeeker) (string, bool) {
 	if n := len(buf); n > 0 && buf[n-1] == '\n' {
 		buf = buf[:n-1]
 	} else if len(buf) > 0 {
-		// Last line is unterminated → treat as truncated tail.
+		// Last line is unterminated → treat as truncated tail. Return only
+		// the bytes after the last complete newline so the forensic record
+		// (`prior_tail_raw_truncated`, PR #233 review SF-1) carries just the
+		// partial last line rather than the whole 64 KiB tail window.
+		if i := lastIndexByte(buf, '\n'); i >= 0 {
+			return string(buf[i+1:]), false
+		}
 		return string(buf), false
 	}
 	if i := lastIndexByte(buf, '\n'); i >= 0 {

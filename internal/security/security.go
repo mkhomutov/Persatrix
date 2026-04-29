@@ -13,6 +13,8 @@
 // provenance tagging) land in the follow-up RFC 0009 PRs.
 package security
 
-// TODO: Implement PermissionGate (deny-by-default, glob path matching) — RFC 0009 Phase 3.
+// TODO: Implement PermissionGate (deny-by-default, glob path matching) — RFC 0009 Phase 1
+// (PR 233 review SF-6: PermissionGate is a Phase 1 component per the RFC and the
+// PR plan; the previous "Phase 3" tag conflated it with identity tokens / HITL).
 // TODO: Implement RateLimiter (per-agent action rate limits) — RFC 0009 PR 2.
 // TODO: Implement InputSanitizer (bridge/A2A/webhook input wrapping + filtering) — RFC 0009 PR 3.

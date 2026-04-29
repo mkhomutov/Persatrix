@@ -75,11 +75,29 @@ type patternSpec struct {
 func defaultPatterns() []patternSpec {
 	return []patternSpec{
 		// Order matters only for debugging; matches do not overlap in practice.
+		// `anthropic-api-key` runs before `openai-api-key` so the more specific
+		// `sk-ant-…` prefix wins on Anthropic keys (covered by
+		// `TestRedact_PatternOrdering`).
 		{name: "anthropic-api-key", expr: `sk-ant-[A-Za-z0-9\-_]{20,}`},
-		{name: "openai-api-key", expr: `sk-[A-Za-z0-9]{20,}`},
+		// PR #233 review MF-1: real-world OpenAI keys (e.g. `sk-proj-AbCd_…`)
+		// embed `-` and `_` in the suffix. The pre-fix `[A-Za-z0-9]{20,}` class
+		// terminated at the first `-`, leaving the rest of the secret in plain
+		// text. Allow `-` and `_` in the suffix charset so the full key is
+		// captured and replaced.
+		{name: "openai-api-key", expr: `sk-[A-Za-z0-9_\-]{20,}`},
 		{name: "bearer-token", expr: `(?i)bearer\s+[A-Za-z0-9\-_.~+/]+=*`},
 		{name: "aws-access-key", expr: `AKIA[0-9A-Z]{16}`},
-		{name: "generic-secret", expr: `(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*\S+`},
+		// PR #233 review MF-2: the previous `\S+` value class was greedy and
+		// unbounded — on a JSON payload like
+		// `{"password":"hunter2","next":"x"}` the match swallowed the closing
+		// quote, comma, and the next field, both corrupting log parsers and
+		// risking obscuring an adjacent secret-shaped value. Replace with a
+		// bounded class that stops at JSON / shell delimiters and tolerate
+		// the optional quotes around the separator that JSON uses
+		// (`"key":"val"`). `[` is excluded from the value class so a second
+		// pass cannot chew into a `[REDACTED:…]` marker emitted by an
+		// earlier pattern.
+		{name: "generic-secret", expr: `(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s,"'}\]\[]+`},
 	}
 }
 

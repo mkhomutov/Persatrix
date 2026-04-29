@@ -15,6 +15,11 @@ func TestRedact_AllDefaultPatterns(t *testing.T) {
 	}{
 		{"anthropic", "key=sk-ant-abcdef0123456789abcdef0123456789", "[REDACTED:anthropic-api-key]"},
 		{"openai", "use sk-abcdef0123456789abcdef", "[REDACTED:openai-api-key]"},
+		// PR #233 review MF-1 regression: real-world OpenAI keys carry `-`
+		// and `_` in the suffix (e.g. `sk-proj-…`). The pre-fix pattern
+		// truncated at the first `-` and left the rest of the secret in
+		// plain text. Pin the full-key shape here.
+		{"openai-proj", "OPENAI_API_KEY=sk-proj-AbCd_efgh-ijkl0123456789xyz", "[REDACTED:openai-api-key]"},
 		{"bearer", "Authorization: Bearer abc.def.ghi==", "[REDACTED:bearer-token]"},
 		{"aws", "AKIAABCDEFGHIJKLMNOP", "[REDACTED:aws-access-key]"},
 		{"generic-secret", "password = hunter2", "[REDACTED:generic-secret]"},
@@ -205,5 +210,39 @@ func TestAddPattern_RejectsBadRegex(t *testing.T) {
 	r := NewSecretRedactor()
 	if err := r.AddPattern("bad", "(unterminated"); err == nil {
 		t.Fatalf("expected error for malformed regex")
+	}
+}
+
+// TestRedact_GenericSecretInJSON pins PR #233 review MF-2: the prior
+// `\S+` value class was greedy and unbounded, so on a JSON payload the
+// generic-secret match swallowed the closing quote and the next field,
+// corrupting log parsers and risking obscuring an adjacent secret-shaped
+// value. The bounded `[^\s,"'}\]]+` value class keeps the match scoped to
+// the secret's own value and leaves neighbouring fields intact.
+func TestRedact_GenericSecretInJSON(t *testing.T) {
+	r := NewSecretRedactor()
+	in := `{"password":"hunter2","next":"keep-me"}`
+	got := r.Redact(in)
+	if !strings.Contains(got, "[REDACTED:generic-secret]") {
+		t.Fatalf("password value not redacted: %q", got)
+	}
+	if !strings.Contains(got, `"next":"keep-me"`) {
+		t.Errorf("adjacent field corrupted by greedy match: %q", got)
+	}
+}
+
+// TestRedact_PatternOrdering pins the documented order-dependency between
+// `anthropic-api-key` and `openai-api-key`: the more specific Anthropic
+// prefix must win on `sk-ant-…` strings, even though the OpenAI pattern
+// would also technically match the suffix shape. (PR #233 review noted
+// the ordering was relied on but not asserted.)
+func TestRedact_PatternOrdering(t *testing.T) {
+	r := NewSecretRedactor()
+	got := r.Redact("k=sk-ant-abcdef0123456789abcdef0123456789")
+	if !strings.Contains(got, "[REDACTED:anthropic-api-key]") {
+		t.Errorf("Anthropic pattern did not win on sk-ant- prefix: %q", got)
+	}
+	if strings.Contains(got, "[REDACTED:openai-api-key]") {
+		t.Errorf("OpenAI pattern incorrectly fired on Anthropic key: %q", got)
 	}
 }
