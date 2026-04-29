@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-29 (RFC 0008 PR 6a opened: `feature/v030-rfc0008-go-scheduler-hygiene` lands ~22 PR 1/1b deferred items — determinism via sorted candidate IDs, per-run sampler bookkeeping with `pruneRun`, `noCopy` sentinel, rune-count token estimate, planner-tighten for the `Σ overrides == total` zero-budget case, M10 docs-only, plus Go-produced wire-shape fixture consumed by the Python contract test; canonical 6-PR count unchanged)  
+> **Last updated**: 2026-04-29 (RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path; two-phase write so the closed row is visible synchronously and Phase 2 / janitor races are scoped to the `SUMMARY_PENDING_TEXT` sentinel; 0020 progress 4/7)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged; PR 4 open as #229 — summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
+> **Current milestone**: RFC 0020 implementation in progress (4/7 PRs merged — PR 4 #229 summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -815,6 +815,7 @@ v0.5.0 complete
 | [#223](https://github.com/mkhomutov/Persatrix/pull/223) | feat(rfc0008): PR 4 — shared pool ACL + provenance | 0008 (4/6) | 2026-04-28 |
 | [#224](https://github.com/mkhomutov/Persatrix/pull/224) | feat(rfc0008): PR 3a — delegation metrics + PR 3 follow-up findings | 0008 (3a/6) | 2026-04-28 |
 | [#225](https://github.com/mkhomutov/Persatrix/pull/225) | feat(rfc0008): PR 5 — confidence decay + procedural revalidation | 0008 (5/6) | 2026-04-29 |
+| [#229](https://github.com/mkhomutov/Persatrix/pull/229) | feat(rfc0020): PR 4 — summarization-on-close + janitor + record_interaction move | 0020 (4/7) | 2026-04-29 |
 
 ---
 
