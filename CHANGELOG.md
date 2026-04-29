@@ -50,6 +50,14 @@ All notable changes to this project will be documented in this file.
   [`docs/rfcs/0008-calibration-review.md`](docs/rfcs/0008-calibration-review.md);
   PR 6 (RFC close) replaces the placeholder with the actual review
   summary before flipping the RFC to `✅ Implemented`.
+  Round-1 review follow-up (in-PR fix commit): escape SQLite LIKE
+  meta-characters (`%`, `_`, `\`) in the procedural `recall_procedures`
+  query and `refresh_confidence` UPDATE paths and align the eviction
+  pass with the same legacy-row base-confidence shim
+  (`_resolve_base_confidence`) the recall path uses, so a pre-PR-5
+  row's eviction disposition cannot disagree with its recall
+  disposition.  Closes PR #225 round-1 deep-review S1 / S2 /
+  S4-doc.
 
 - **Sub-agent delegation Go-side metrics + spawner hardening** (RFC 0008
   PR 3a, follow-up to PR 3).  Four new Go counters land in

@@ -19,6 +19,10 @@ Pins:
   default left at ``confidence = 1.0``).
 - **S4** — the documented silent discard of the ``confidence``
   argument on the ``store_procedure`` refresh path.
+- **Mi1** (round 2) — ``_escape_like`` order-of-operation: backslash
+  must be escaped before ``%`` / ``_`` so the helper does not
+  double-escape its own inserted backslashes.  Pinned to surface a
+  plausible alphabetical-cleanup regression.
 
 When the ``_resolve_base_confidence`` shim is removed in PR 6 the S2
 pin will need to either be retired or re-pinned at the new contract.
@@ -32,7 +36,10 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from agents.memory.decay import SECONDS_PER_DAY
-from agents.memory.episodic_procedural import refresh_confidence
+from agents.memory.episodic_procedural import (
+    _escape_like,
+    refresh_confidence,
+)
 from agents.memory.eviction import EvictionPass
 from agents.memory.facade import MemoryFacade
 
@@ -83,6 +90,22 @@ async def test_store_procedure_refresh_silently_discards_confidence_arg(
 
 
 # ─── S1: LIKE-wildcard escaping on key / query ───────────────
+
+
+def test_escape_like_escapes_backslash_before_meta_chars() -> None:
+    """PR #225 round-2 review Mi1 regression pin.
+
+    ``_escape_like`` iterates ``_LIKE_META_CHARS = ("\\\\", "%", "_")``
+    in that exact order — the backslash MUST be escaped first, otherwise
+    the backslashes inserted by the subsequent ``%`` / ``_`` substitutions
+    would themselves be re-escaped, producing ``\\\\%`` / ``\\\\_`` (literal
+    backslash + literal meta-char) in the LIKE pattern instead of the
+    intended ``\\%`` / ``\\_`` (escaped meta-char).  A reviewer reordering
+    the tuple alphabetically (a plausible cleanup) would silently break
+    every escape-paired LIKE clause.  Pinning the exact transform output
+    makes the contract testable rather than implicit in tuple ordering.
+    """
+    assert _escape_like("a%b\\c_d") == "a\\%b\\\\c\\_d"
 
 
 async def test_refresh_confidence_does_not_widen_match_on_percent_in_key(
