@@ -42,8 +42,14 @@ PR 4 (Phase 4a — shared pool ACL + provenance)
   ↓
 PR 5 (Phase 4b — confidence decay + procedural revalidation)
   ↓
-PR 6 (Review follow-ups + RFC close)
+PR 6a (Go scheduler determinism + sampler hygiene — bookkeeping under PR 1/1b)
+  ↓
+PR 6b (Python procedural memory + log-safety cleanup — bookkeeping under PR 3a/5)
+  ↓
+PR 6 (Review follow-ups absorbed + 30-day calibration review + RFC close)
 ```
+
+> **Sub-PR bookkeeping**: PR 6a and PR 6b are sizing-risk follow-ups under the existing PR 1/1b and PR 3a/5 rows, mirroring the PR 1b / PR 2a / PR 3a precedent. The canonical 6-PR count this plan's downstream consumers ([RFC 0007 PR plan](0007-pr-plan.md), [RFC 0011 PR plan](0011-pr-plan.md), [RFC 0020 PR plan](0020-pr-plan.md)) pin is preserved.
 
 ---
 
@@ -668,10 +674,160 @@ Status hygiene flagged for merge time: flip the unchecked PR 5 checklist items, 
 
 ---
 
+## Accumulated Follow-Ups Triage (PR 6 Prep)
+
+**Branch**: `feature/v030-rfc0008-followup-triage` — docs-only triage PR opened 2026-04-29.
+**Purpose**: enumerate every follow-up deferred from the per-PR review tables above (PRs 1, 1b, 2/2a, 3/3a, 4, 5), assign a binding disposition, and add new sub-PR rows (PR 6a / PR 6b) for the items that require code changes large enough to warrant their own branch under the [Phase 5 splitting strategy](../development-workflow.md#phase-5--follow-up-prs). Final dispositions are confirmed during this triage PR's review; the binding decision per row is the post-review state of the `Disposition` column.
+
+> **Why a separate triage PR**: the deferred-item count across PRs 1–5 (≈55 items) exceeds what PR 6 can absorb under the 500-line soft cap, and the calibration window opened by PR 5's merge runs through 2026-05-29 — PR 6 cannot merge before then. Triaging now lets PR 6a / PR 6b proceed in parallel with the calibration window so PR 6 itself stays a small, focused close-out PR (calibration summary + RFC status flip + low-batch absorption).
+
+### Disposition legend
+
+- ✅ **Apply in PR 6** — small, doc-or-test-only, fits the close-out PR.
+- 🔧 **PR 6a (Go scheduler hygiene)** — Go-side `internal/scheduler/`, `internal/state/`, `internal/cost/` determinism + sampler bookkeeping.
+- 🔨 **PR 6b (Python procedural cleanup)** — `agents/memory/`, `agents/sub_agents/`, `agents/task_agent.py` cleanup + `_log_safety` helper lift.
+- ⏸️ **Defer (post-RFC)** — out of scope for v0.3.0 / RFC 0008 close; tracked in ROADMAP backlog or the next RFC that touches the surface.
+- ❌ **Won't fix** — design choice or anti-pattern per [implementation-discipline rules](../../.github/copilot-instructions.md); rationale recorded.
+
+### Consolidated triage table
+
+| Source | Item | Summary | Proposed disposition |
+|--------|------|---------|----------------------|
+| PR 1 | M6 | Sort candidate IDs in `attachContextPackage` for cross-retry determinism. | 🔧 PR 6a |
+| PR 1 | M7 | Decide planner-tighten vs. scheduler-soften for `Σ overrides == total` zero-budget case. | 🔧 PR 6a (proposed: planner-tighten — reject at parse time) |
+| PR 1 | M8 | Document v1 advisory-only budget semantics in `Package` GoDoc + RFC 0008 §D. | ✅ Apply in PR 6 (docs-only) |
+| PR 1 | M9 | Decouple `RelevanceScorer` from heuristic backend's dep boost. | 🔧 PR 6a (proposed: scheduler emits uniform `Importance`; scorer owns dep-proximity) |
+| PR 1 | L7 | `utf8.RuneCountInString(s)/4` in `estimateTokens`. | 🔧 PR 6a |
+| PR 1 | L9 | `Packager.Build` test asserting `remaining < 0 → 0` clamp. | 🔧 PR 6a (test-only) |
+| PR 1 | L10 | Wire-shape test asserts `metrics.warnings == []` when absent. | 🔧 PR 6a (test-only) |
+| PR 1 | N5 | Comment in `attachContextPackage` referencing `outputKeyRegex`. | 🔧 PR 6a (comment-only) |
+| PR 1 | N6 | Reword `context_budget` schema description ("inherit" → "participates in equal-split"). | ✅ Apply in PR 6 (schema description; runs `make validate`) |
+| PR 1 | N7 | Drop `TestContextPackage_DisabledByDefault` deadline 3 s → 1 s. | 🔧 PR 6a (test-only) |
+| PR 1 | N8 | `Packager` GoDoc concurrency-safety wording. | 🔧 PR 6a (doc-only) |
+| PR 1 | Wire-shape | Promote Python wire-shape test to read a Go-produced fixture. | 🔧 PR 6a |
+| PR 1b | M10 | `markStepFailed` erases `RemainingContextBudget` — pick code-fix or doc-only. | 🔧 PR 6a (proposed: docs-only — defer code fix to retry-impl PR post-v0.3 per option B in the original row) |
+| PR 1b | M11 | `warningSampler.counts` (`sync.Map`) unbounded growth. | 🔧 PR 6a (proposed: prune by run-completion event) |
+| PR 1b | M12 | `shouldEmit()` allocates fresh `samplerCounter` per call. | 🔧 PR 6a |
+| PR 1b | L13 | Unreachable defensive cast in `shouldEmit()`. | 🔧 PR 6a |
+| PR 1b | L14 | `warningSampleCap = 1` over-engineering. | 🔧 PR 6a (proposed: rename `warningOnceCap`, inline the check) |
+| PR 1b | L15 | `remainingContextBudgetForStep()` clamp to `max(0, allocated)`. | 🔧 PR 6a |
+| PR 1b | L16 | `TestRemainingContextBudgetForStep_RemainderCappedAtAllocation` set explicit `Status: state.RunCompleted`. | 🔧 PR 6a (test-only) |
+| PR 1b | L17 | Tautological assertion — replace with explicit per-step checks. | 🔧 PR 6a (test-only) |
+| PR 1b | N9 | `NewContextPackageMetrics` take `*packaging.Package` directly. | 🔧 PR 6a |
+| PR 1b | N10 | Sampler key construction collision-safety. | 🔧 PR 6a |
+| PR 1b | N11 | `noCopy` sentinel on `warningSampler` or embed pointer. | 🔧 PR 6a |
+| PR 1b | N12 | `recordStepUsage` GoDoc trim. | 🔧 PR 6a (doc-only) |
+| PR 2a / PR 3 N8 / PR 4 N5 | Path drift | `tests/integration/python/...` vs `tests/integration/...` — normalise the plan rows OR move the files. | ✅ Apply in PR 6 (proposed: normalise the plan rows to match the actual filesystem layout — `tests/integration/`; one-line edits to the affected scope tables) |
+| PR 3a R2 | L1-task-log | Bound `exc` in `agents/task_agent.py` `_parse_or_synthesise` debug log. | ✅ Closed by PR 3a R5 S1 — verify and mark closed |
+| PR 3a R2 | L2-helper | Lift `_ScriptedSubAgent` to a shared helper / fixture. | 🔨 PR 6b |
+| PR 3a R2 | L3-stub-sig | `boom_delete(*_args, **_kwargs)` for forward-compat. | 🔨 PR 6b |
+| PR 3a R3 | L5-invalid-result | Site-specific integration test for second `_bounded(exc)` raise site. | ❌ Won't fix — round-3 L4 unit suite for `_bounded` already pins the helper contract; site-specific test is redundant per the row's own "redundancy with L4 noted" call-out. |
+| PR 3a R4 | L4-bounded-lift | Lift `_bounded` + constants to `agents/sub_agents/_log_safety.py`. | 🔨 PR 6b (anchor for the multi-caller relocation noted in PR 3a R5 S1) |
+| PR 3a R4 | L5-stub-third-dup | `_FailedSubAgent` is a third stub — fold into the L2-helper consolidation. | 🔨 PR 6b (with L2-helper) |
+| PR 3a R4 | L6-u2424-encoding | Cosmetic docstring note about U+2424 sentinel. | ✅ Apply in PR 6 (docstring) |
+| PR 3a R4 | L3-roadmap-wording | Tighten ROADMAP wording `S1/S6` → `S1/S6/N5–N7`. | ✅ Closed at PR 3a merge time — verify ROADMAP entry and mark closed |
+| PR 3a R5 | Info-1 / glossary | `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` to `docs/ai-glossary.md`. | ✅ Apply in PR 6 (glossary) |
+| PR 4 N3 | Multi-agent `setup_shared_pools` | Revisit `db_path` derivation when multi-agent server lands. | ⏸️ Defer (post-RFC; tracked under multi-agent-server work, not RFC 0008) |
+| PR 4 N4 / N-metrics-test | Metric-emission tests | Recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema. | 🔨 PR 6b (Python test, but emits Go-side counter inventory — keep with the Python batch since the test lives in `tests/integration/python/`) |
+| PR 4 N7 | Schema `writers ⊆ readers` | Deliberately permissive (publish-only writer is valid). | ❌ Won't fix — design choice already recorded |
+| PR 4 N-doc-episodic | Doc `pool-` reservation in `agents/memory/episodic.py`. | ❌ Won't fix — incidental coupling; reservation already documented at the use site (`shared_pool.py` + schema) per row's existing rationale |
+| PR 5 R1 | S3 | Push `t_max = -ln(c_min)/lambda_per_day` cutoff into `recall_procedures` SQL WHERE. | 🔨 PR 6b |
+| PR 5 R1 | S4 | `store_procedure` API decision (downgrade-on-refresh / split into `refresh_confidence` / status quo). | 🔨 PR 6b (proposed: status quo per RFC 0008 §G + RFC 0014 §1 — close via docstring tightening; final call in PR 6b review) |
+| PR 5 R1 | L1 | `expires_at` consumer / removal decision. | ⏸️ Defer (RFC 0014 contract surface — track there) |
+| PR 5 R1 | L2 | Remove `_resolve_base_confidence` legacy shim once all deployments on v6+ writes. | 🔨 PR 6b (paired with R2 M2 relocation) |
+| PR 5 R1 | L3 | Type `dict` → `dict[str, Any]` in `procedural_kwargs_from_config`. | 🔨 PR 6b (typing nit) |
+| PR 5 R1 | L4 | Surface `now=` parameter on `MemoryFacade.retrieve_procedures`. | 🔨 PR 6b (paired with R2 Mi2 — move warn-log into `recall_procedures`) |
+| PR 5 R1 | Info-2 | `agents/sub_agents/spawner.py` headroom split (re-routed from PR #224 round 6 L2). | 🔨 PR 6b (covered by L4-bounded-lift relocating ~50 LOC of helpers) |
+| PR 5 R1 | Info-3 | `_evict_procedural_decay` no SQL `LIMIT` — bundled with S3. | 🔨 PR 6b (with S3) |
+| PR 5 R1 | Info-4 | Test gaps for `_resolve_base_confidence` branches + `expires_at` round-trip. | 🔨 PR 6b (test-only; a subset closes when L1 / L2 land) |
+| PR 5 R2 | M1 | Validate procedural `key` characters at `MemoryFacade.store_procedure` entry. | 🔨 PR 6b (proposed: `^[A-Za-z0-9._-]+$`; document as breaking-change in CHANGELOG) |
+| PR 5 R2 | M2 | Promote/relocate `_resolve_base_confidence` to remove cross-module private import. | 🔨 PR 6b (paired with R1 L2 removal — relocate then delete) |
+| PR 5 R2 | Mi2 | Move warn-log emission into `recall_procedures` (with R1 L4). | 🔨 PR 6b |
+| PR 5 R2 | Mi3 | Validate `EvictionPass.__init__` kwargs. | ❌ Won't fix — facade is the boundary per implementation-discipline rule |
+| PR 5 R2 | N2 | Remove `EvictionStats.procedural_evicted` default. | 🔨 PR 6b (one-line) |
+
+### Sub-PR additions
+
+The triage above proposes two new sub-PR rows below. Both are bookkeeping additions — neither expands the canonical 6-PR count downstream consumers pin.
+
+#### PR 6a: `feature/v030-rfc0008-go-scheduler-hygiene` — Go scheduler determinism + sampler bookkeeping
+
+**Depends on**: PR 5 merged.
+**Estimated size**: ~250–400 lines (scope-bounded by the triage table; calibrated against PR 1b's similar "metrics + sampler" follow-up which landed at ~430 LOC).
+**Bookkeeping under PR 1 / PR 1b row** — canonical 6-PR count unchanged.
+
+##### Scope
+
+Absorbs every PR 1 + PR 1b deferred item routed to 🔧 PR 6a in the [triage table](#consolidated-triage-table) above. The high-impact changes are:
+
+| File | Change |
+|------|--------|
+| `internal/scheduler/context_package.go` | M6 (sort candidate IDs via `slices.Sorted(maps.Keys(...))`); M11 (prune `warningSampler.counts` on run completion via `executeRun` terminal-status hook); M12 (`Load` first, fall through to `LoadOrStore` on miss); L13 (delete unreachable cast); L14 (rename `warningOnceCap`, inline check); L7 (`utf8.RuneCountInString` in `estimateTokens`); N5 (`outputKeyRegex` comment); N8 (GoDoc concurrency wording); N10 (collision-safe sampler key); N11 (`noCopy` sentinel). |
+| `internal/scheduler/scheduler.go` | M11 supporting wiring (run-completion sampler prune callback). |
+| `internal/scheduler/context_budget_remaining.go` | L15 (`max(0, allocated)` clamp). |
+| `internal/cost/context_package_metrics.go` | N9 (take `*packaging.Package` directly). |
+| `internal/scheduler/budget.go` | N12 (GoDoc trim). |
+| `internal/state/state.go` | M10 (docs-only — note failure-path preservation deferred to retry-impl PR per option B). |
+| `internal/planner/planner_context_budget.go` | M7 (planner-tighten — reject `Σ overrides + nonOverriddenCount > total` at parse time; add `TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected`). |
+| `internal/scheduler/packaging/scorer.go` | M9 (uniform `Importance = 0.5` from scheduler; scorer owns `DependsOn` proximity entirely). |
+| `internal/scheduler/context_package_test.go`, `internal/scheduler/context_metrics_test.go`, `internal/scheduler/context_package_persistence_test.go` | L9, L10, L16, L17, N7 (test fixes); M6 determinism guard test (≥ 5 outputs of equal density). |
+| `tests/fixtures/context_package_v1.json` | New — Go writes via `json.Marshal(pkg)` test; Python wire-shape test reads it (replaces hand-rolled fixture per the PR 1 wire-shape contract follow-up). |
+| `tests/unit/python/test_context_package_wire_shape.py` | Read the Go-produced fixture instead of hand-rolling. |
+
+##### PR checklist
+
+- [ ] `make test` passes (Go + Python wire-shape suites)
+- [ ] `make lint` clean
+- [ ] M6 / M9 / M11 / M12 land with the proposed dispositions confirmed in this triage PR's review
+- [ ] M7 dispatched per the proposed disposition (planner-tighten); if the review picks scheduler-soften instead, re-scope before opening
+- [ ] M10 lands as docs-only; the retry-impl PR ticket is filed in the v0.4.0 backlog
+- [ ] Python wire-shape test reads the Go-produced fixture (mutual contract)
+
+#### PR 6b: `feature/v030-rfc0008-procedural-cleanup` — Python procedural memory + log-safety cleanup
+
+**Depends on**: PR 5 merged.
+**Estimated size**: ~300–450 lines (calibrated against PR 2a's similar "memory cleanup + helpers + tests" follow-up).
+**Bookkeeping under PR 3a / PR 5 row** — canonical 6-PR count unchanged.
+
+##### Scope
+
+Absorbs every PR 3a + PR 4 + PR 5 deferred item routed to 🔨 PR 6b in the [triage table](#consolidated-triage-table) above. The high-impact changes are:
+
+| File | Change |
+|------|--------|
+| `agents/sub_agents/_log_safety.py` | **New** — `_bounded` + `_CTRL_TRANSLATION` + `_DELEGATION_FAILURE_MESSAGE_CAP` lifted from `spawner.py` (PR 3a R4 L4 / R5 S1 anchor). Two existing callers (`spawner.py`, `task_agent.py`) re-import. |
+| `agents/sub_agents/spawner.py` | Re-import `_bounded` from `_log_safety`; clears ~50 LOC for PR 5's tier-discriminated rollback dispatch headroom (PR 5 R1 Info-2). |
+| `agents/task_agent.py` | Re-import `_bounded` from `_log_safety`. |
+| `tests/integration/_delegation_helpers.py` | **New** — `_ScriptedSubAgent` + `_FailedSubAgent` consolidation (PR 3a R2 L2 + R4 L5). |
+| `tests/integration/test_delegation_end_to_end.py`, `tests/integration/test_delegation_rollback_edges.py` | Switch to shared helpers; `boom_delete(*_args, **_kwargs)` (PR 3a R2 L3). |
+| `agents/memory/facade.py` | `MemoryFacade.store_procedure` validates `key` against `^[A-Za-z0-9._-]+$` (PR 5 R2 M1; CHANGELOG breaking-change bullet); surface `now=` parameter on `retrieve_procedures` (PR 5 R1 L4). |
+| `agents/memory/episodic_procedural.py` | Push `t_max = -ln(c_min)/lambda_per_day` cutoff into `recall_procedures` SQL WHERE + add SQL `LIMIT` (PR 5 R1 S3 + Info-3); promote `_resolve_base_confidence` → `resolve_base_confidence` then schedule for removal once v6+ assumption verified (PR 5 R1 L2 + R2 M2); move warn-log emission into `recall_procedures` (PR 5 R2 Mi2). |
+| `agents/memory/eviction.py` | Update import to public `resolve_base_confidence`; remove `EvictionStats.procedural_evicted` default (PR 5 R2 N2). |
+| `agents/memory/decay.py` | Optional landing site for `validate_decay_constants` if `EvictionPass` direct construction surfaces (Mi3 only triggers if a periodic-task script lands). |
+| `tests/unit/python/test_procedural_key_validation.py` | **New** — PR 5 R2 M1 round-trip + idempotent re-store. |
+| `tests/unit/python/test_memory_decay_review_pins.py`, `test_memory_eviction.py` | Test gap closures for PR 5 R1 Info-4 + R2 N2. |
+| `tests/integration/python/test_shared_pool_metrics.py` | **New** — PR 4 N4 metric-emission attribute schema check. |
+| `agents/sub_agents/spawner.py` (docstring), `agents/memory/facade.py` (docstring) | PR 3a R4 L6 U+2424 sentinel encoding note (cosmetic). |
+
+##### PR checklist
+
+- [ ] `make test` passes (Python suites)
+- [ ] `make lint` clean (ruff + mypy)
+- [ ] `make validate` passes (no schema changes expected; runs anyway for the schema description tweaks landing in PR 6)
+- [ ] PR 5 R2 M1 key validation lands with the breaking-change CHANGELOG bullet
+- [ ] PR 5 R1 S4 disposition (status quo / docstring tightening) confirmed in this triage PR's review
+- [ ] `agents/sub_agents/spawner.py` LOC drops below 425 after the `_log_safety` lift
+
+#### Cross-cutting check
+
+PR 6 (close) `Depends on` row updates from `PR 5` → `PR 5 + PR 6a + PR 6b` once this triage PR merges. All three (PR 6a, PR 6b, PR 6) can land inside the 30-day calibration window (window closes 2026-05-29).
+
+---
+
 ### PR 6: `feature/v030-rfc0008-close` — Review Follow-Ups + RFC Close
 
-**Depends on**: PR 5.
-**Estimated size**: ~150–300 lines.
+**Depends on**: PR 5 + PR 6a + PR 6b (per the [triage cross-cutting check](#cross-cutting-check); pre-triage value was `PR 5`).
+**Estimated size**: ~150–300 lines (calibration summary + glossary + schema description + docstring nits + status flips; the bulk-code follow-ups now live in PR 6a / PR 6b).
 
 #### Scope
 
@@ -686,6 +842,8 @@ Status hygiene flagged for merge time: flip the unchecked PR 5 checklist items, 
 ##### From PR 1 review
 
 Carry-over findings from the PR 1 (`feature/v030-rfc0008-context-budget`, merged as #218) deep review that were not blocking and were deferred here. Each is self-contained so the merged history needs no external report.
+
+> **Routing (post-triage)**: M6 / M7 / M9 / L7 / L9 / L10 / N5 / N7 / N8 / Wire-shape → 🔧 PR 6a; M8 (docs) and N6 (schema description) absorbed in this PR. Per the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) above. Items below remain documented verbatim for self-contained merged history.
 
 - M6 — Sort candidate IDs in `attachContextPackage` (`internal/scheduler/context_package.go`) before constructing the candidate slice. Today it ranges over a `map[string]string` so iteration order is randomised per process; that defeats the `Packager.Build` "emit admitted in original input order" determinism contract once a packaging-aware agent (PR 2) starts comparing packages across retries. Fix: `keys := slices.Sorted(maps.Keys(outputsCopy))` then range `keys`. Add a determinism guard test with ≥ 5 outputs of equal density asserting `pkg.StepOutputs` ordering is stable across two `attachContextPackage` calls (covers L8 too).
 - M7 — Decide planner-tighten vs. scheduler-soften for the `Σ overrides == total` zero-budget case. Today the allocator returns `0` for every non-overridden step when overrides exhaust the total, and `stage_runner.executeStep` skips packaging because of its `budget > 0` gate, so a forgotten step gets legacy passthrough even though the workflow opted into packaging. Pick one: (a) reject the workflow at parse time when `Σ overrides + nonOverriddenCount > total` (require ≥ 1 token per non-overridden step); or (b) drop the `budget > 0` gate and always attach a package when `contextBudgets != nil`, emitting a `zero_budget` warning. Add a planner test (`TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected`) or an allocator test asserting the chosen semantics.
@@ -705,6 +863,8 @@ Carry-over findings from the PR 1 (`feature/v030-rfc0008-context-budget`, merged
 ##### From PR 1b review
 
 Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merged as #219) deep review. Each is self-contained so the merged history needs no external report.
+
+> **Routing (post-triage)**: every M / L / N item below → 🔧 PR 6a per the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) above. Items below remain documented verbatim for self-contained merged history.
 
 - M10 — `markStepFailed` erases `RemainingContextBudget` on every failure path (`internal/scheduler/stage_runner.go`). PR 1b's stated purpose is "future scheduler-level retries can resume from the leftover budget." Today `UpdateStepState` full-replacement zeros the field on every `markStepFailed` call site, so a step that previously persisted a remainder loses it on any subsequent failure. The retry-resume contract is unreachable across success → fail → retry transitions. Fix (option A, code): read the prior `StepState` and copy `RemainingContextBudget` forward before writing, or accept it as a parameter to `markStepFailed` and thread it from the four call sites. Fix (option B, docs): amend the `RemainingContextBudget` docstring in `internal/state/state.go` and this plan to note that failure-path preservation lands in the retry-implementation PR (post-v0.3 — a TODO + tracking note suffices).
 - M11 — `warningSampler.counts` (`sync.Map`) grows unbounded across the scheduler's lifetime (`internal/scheduler/context_package.go`). One entry per `(execID, stepID, warning)` tuple — a long-running orchestrator accumulates entries without bound. Fix: prune by run-completion event (the scheduler already knows terminal status via `executeRun`), or move the sampler under `WorkflowRun` so it is GC'd with the run.
@@ -733,7 +893,12 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 #### PR checklist
 
 - [ ] 30-day calibration review summary recorded in `docs/rfcs/0008-calibration-review.md`
-- [ ] All PR 1–5 deep-review follow-ups either resolved or explicitly deferred with a tracking issue
+- [ ] PR 6a + PR 6b merged; every `Disposition` cell in the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) is either ✅ closed (PR 6a / PR 6b / this PR) or explicitly ⏸️ Deferred / ❌ Won't fix with rationale recorded in the row
+- [ ] M8 (advisory-only budget semantics) documented in `Package` GoDoc + RFC 0008 §D
+- [ ] N6 schema description tweaked in `schemas/workflow.schema.json`; `make validate` green
+- [ ] Path-drift normalisation applied to PR 2 / PR 3 / PR 4 plan rows (`tests/integration/python/...` → `tests/integration/...`)
+- [ ] Glossary additions: `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` (PR 3a R5 Info-1)
+- [ ] U+2424 sentinel encoding note added to `_log_safety` docstring (PR 3a R4 L6)
 - [ ] ROADMAP.md RFC 0008 row → `✅ Implemented`
 - [ ] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
 - [ ] No reference to `docs/pr-reviews/` files in this committed plan
@@ -754,4 +919,6 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 ## ROADMAP Hygiene
 
 - **PR 1 opens** → ROADMAP RFC 0008 → `🚧 Implementing`; Master Progress Overview row 4 → 🔄.
+- **Triage PR (this branch) opens** → ROADMAP `last-updated` header bumped; merged-PR history row notes the triage decisions land before PR 6a / 6b / 6.
+- **PR 6a / PR 6b merge** → ROADMAP merged-PR history row added per merge (sub-PR bookkeeping under PR 1/1b and PR 3a/5 respectively; canonical 6-PR count unchanged).
 - **PR 6 merges** → ROADMAP RFC 0008 → `✅ Implemented`; row 4 → ✅.
