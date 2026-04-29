@@ -16,7 +16,7 @@
         "context_budget_total": {
           "type": "integer",
           "minimum": 0,
-          "description": "Workflow-level total context window budget in tokens (RFC 0008). When set (>0), the scheduler equal-splits the remainder across non-overridden steps after subtracting any per-step `context_budget` overrides, and the executor packages context for each dispatch. When unset (or omitted), packaging is disabled (legacy passthrough preserved)."
+          "description": "Workflow-level total context window budget in tokens (RFC 0008). When set (>0), the scheduler equal-splits the remainder across non-overridden steps after subtracting any per-step `context_budget` overrides, and the executor packages context for each dispatch. When unset, omitted, or 0, packaging is disabled (legacy passthrough preserved)."
         },
         "steps": {
           "type": "array",

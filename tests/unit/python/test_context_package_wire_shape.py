@@ -45,6 +45,15 @@ def _load_fixture() -> dict[str, object]:
     if the fixture is absent (e.g. fresh clone before the Go test has run).
     The fall-back is structurally identical so the test still asserts the
     contract; CI runs the Go test first via `make test`.
+
+    PR 227 review follow-up (Should Fix #3): the literal type of
+    ``compression_ratio`` MUST mirror what Go's ``encoding/json`` actually
+    emits for ``float64(1.0)`` — namely the integer-form ``1`` (no decimal
+    point). Python's ``json.loads`` decodes that as ``int``, while a literal
+    ``1.0`` here would decode as ``float``. Keeping the fall-back as ``1``
+    (with this comment) prevents the fixture-loaded and fall-back-loaded
+    paths from disagreeing under a future strict ``isinstance(..., float)``
+    assertion. The two paths must yield identical Python types.
     """
     if _FIXTURE_PATH.is_file():
         return json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -57,7 +66,10 @@ def _load_fixture() -> dict[str, object]:
         "metrics": {
             "tokens_before": 4,
             "tokens_after": 4,
-            "compression_ratio": 1.0,
+            # See docstring: integer form mirrors Go's `encoding/json`
+            # rendering of `float64(1.0)`. Numeric-equality assertions below
+            # still pass via Python's `1 == 1.0` coercion.
+            "compression_ratio": 1,
             "candidates_dropped": 0,
         },
         "budget_memory_tokens": 0,
