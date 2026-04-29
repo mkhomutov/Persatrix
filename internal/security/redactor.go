@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sync"
 )
 
 // Redactor scrubs known secret patterns from strings and arbitrary structs
@@ -14,16 +15,21 @@ import (
 // from RFC 0009 §I. Callers may compose additional patterns via
 // [Redactor.AddPattern].
 //
-// Redactor is safe for concurrent use; the internal pattern slice is only
-// mutated through [Redactor.AddPattern] which is documented as not safe to
-// call once redaction is in flight.
+// Implementations must be safe for concurrent use by multiple goroutines.
 type Redactor interface {
 	Redact(s string) string
 	RedactStruct(v any) any
 }
 
-// SecretRedactor implements [Redactor] with a list of compiled regex patterns.
+// SecretRedactor implements [Redactor] with a list of compiled regex
+// patterns. The pattern slice is guarded by an RWMutex so concurrent
+// readers ([Redact] / [RedactStruct]) and writers ([AddPattern]) cannot
+// race — PR #233 review flagged the prior "safe for concurrent use" doc
+// claim as enforced only by caller convention. AddPattern is still
+// expected to be a startup-time call in practice; the lock simply makes
+// the contract self-enforcing rather than documentation-only.
 type SecretRedactor struct {
+	mu       sync.RWMutex
 	patterns []redactPattern
 }
 
@@ -104,13 +110,17 @@ func defaultPatterns() []patternSpec {
 // AddPattern compiles expr and appends it to the redactor's pattern list.
 // Returns an error if the regex fails to compile.
 //
-// Not safe to call concurrently with [SecretRedactor.Redact] /
-// [SecretRedactor.RedactStruct]; intended to run during process startup.
+// Safe for concurrent use with [SecretRedactor.Redact] /
+// [SecretRedactor.RedactStruct]: the pattern slice is guarded by an
+// RWMutex (PR #233 review). In practice callers register all patterns at
+// process startup; the lock is defensive against future hot-reload paths.
 func (r *SecretRedactor) AddPattern(name, expr string) error {
 	re, err := regexp.Compile(expr)
 	if err != nil {
 		return fmt.Errorf("security: compile redact pattern %q: %w", name, err)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.patterns = append(r.patterns, redactPattern{
 		name:    name,
 		pattern: re,
@@ -125,6 +135,17 @@ func (r *SecretRedactor) AddPattern(name, expr string) error {
 // Patterns are applied in registration order. Earlier matches do not feed
 // into later patterns (the marker text contains no secret-like content).
 func (r *SecretRedactor) Redact(s string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.redactLocked(s)
+}
+
+// redactLocked is the unsynchronised redact body. The caller must hold
+// r.mu (read or write). Used internally by Redact and by the reflective
+// walk so a single RedactStruct call only takes the RLock once —
+// re-entrant RLock acquisition can deadlock if a writer is queued between
+// the outer and inner RLock (see sync.RWMutex docs).
+func (r *SecretRedactor) redactLocked(s string) string {
 	for _, p := range r.patterns {
 		s = p.pattern.ReplaceAllString(s, p.replace)
 	}
@@ -154,6 +175,10 @@ func (r *SecretRedactor) RedactStruct(v any) any {
 	if v == nil {
 		return nil
 	}
+	// Take the read lock once for the whole walk; the recursive helper
+	// calls redactLocked (no lock) so we don't re-enter the RWMutex.
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	visited := make(map[uintptr]struct{})
 	out := r.walk(reflect.ValueOf(v), 0, visited)
 	if !out.IsValid() {
@@ -275,7 +300,7 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		return out
 
 	case reflect.String:
-		return reflect.ValueOf(r.Redact(v.String()))
+		return reflect.ValueOf(r.redactLocked(v.String()))
 
 	default:
 		// Numbers, booleans, channels, funcs — return as-is.

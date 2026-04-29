@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -295,5 +296,64 @@ func TestEmit_RedactsDetail(t *testing.T) {
 	last := events[len(events)-1]
 	if !strings.Contains(last.Detail["args"].(string), "[REDACTED:bearer-token]") {
 		t.Fatalf("redactor did not scrub bearer token; got %v", last.Detail["args"])
+	}
+}
+
+// TestEmit_ConcurrentSafe pins PR #233 review: the AuditLogger doc claims
+// "safe for concurrent use" but no test exercised it. Fire N goroutines
+// emitting alternating security/telemetry events, then re-validate the
+// chain end-to-end. Must run clean under `go test -race`.
+//
+// The contract being locked: under any goroutine interleaving, the
+// canonical-encoding + checksum step (which references prevChecksum) and
+// the slice append happen atomically with respect to other emitters — a
+// regression that ever moved canonical encoding outside `mu` would either
+// produce a chain-break (caught by recomputing) or surface as a race-
+// detector report on prevChecksum.
+func TestEmit_ConcurrentSafe(t *testing.T) {
+	l, path := newTestLogger(t, WithBatchSize(1), WithBatchInterval(0))
+	const goroutines = 8
+	const perGoroutine = 25
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				et := AuditToolInvoked
+				if (g+i)%2 == 0 {
+					et = AuditAgentRegistered // security-class → fsync path
+				}
+				if err := l.Emit(context.Background(), AuditEvent{
+					EventType: et,
+					AgentID:   "a",
+					Action:    "concurrent",
+				}); err != nil {
+					t.Errorf("emit g=%d i=%d: %v", g, i, err)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	if err := l.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	events := readEvents(t, path)
+	want := 1 + goroutines*perGoroutine // bootstrap + emitted
+	if len(events) != want {
+		t.Fatalf("event count = %d; want %d (bootstrap + %d×%d)", len(events), want, goroutines, perGoroutine)
+	}
+	prev := emptyChecksum()
+	for i, ev := range events {
+		canon, err := canonicalEventJSON(ev, prev)
+		if err != nil {
+			t.Fatalf("canonical %d: %v", i, err)
+		}
+		if got := hashHex(canon); got != ev.Checksum {
+			t.Fatalf("chain break at event %d: stored=%s recomputed=%s", i, ev.Checksum, got)
+		}
+		prev = ev.Checksum
 	}
 }

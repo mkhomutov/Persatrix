@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -69,8 +70,16 @@ func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKi
 
 // readLastLine returns the last newline-terminated line in r (without the
 // trailing newline). Returns ok=false if r contains no complete line.
+//
+// The tail window is sized at 1 MiB so any realistic AuditEvent.Detail
+// payload fits inside it. PR #233 review flagged the prior 64 KiB cap as
+// asymmetric with the unbounded `Detail` map: any single serialised event
+// exceeding the window would misclassify a clean tail as truncated and
+// emit a spurious `chain.recovered` on every restart. 1 MiB keeps the
+// per-startup read cheap (one syscall, well under any practical event
+// size) while leaving headroom for adversarial / very-detailed events.
 func readLastLine(r io.ReadSeeker) (string, bool) {
-	const tailWindow = 64 * 1024
+	const tailWindow = 1 << 20 // 1 MiB; see PR #233 review (was 64 KiB).
 	size, err := r.Seek(0, io.SeekEnd)
 	if err != nil {
 		return "", false
@@ -92,25 +101,16 @@ func readLastLine(r io.ReadSeeker) (string, bool) {
 		// Last line is unterminated → treat as truncated tail. Return only
 		// the bytes after the last complete newline so the forensic record
 		// (`prior_tail_raw_truncated`, PR #233 review SF-1) carries just the
-		// partial last line rather than the whole 64 KiB tail window.
-		if i := lastIndexByte(buf, '\n'); i >= 0 {
+		// partial last line rather than the whole tail window.
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
 			return string(buf[i+1:]), false
 		}
 		return string(buf), false
 	}
-	if i := lastIndexByte(buf, '\n'); i >= 0 {
+	if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
 		return string(buf[i+1:]), true
 	}
 	return string(buf), len(buf) > 0
-}
-
-func lastIndexByte(b []byte, c byte) int {
-	for i := len(b) - 1; i >= 0; i-- {
-		if b[i] == c {
-			return i
-		}
-	}
-	return -1
 }
 
 func looksLikeSHA256(s string) bool {

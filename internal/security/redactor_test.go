@@ -156,7 +156,10 @@ type linkedNode struct {
 }
 
 func TestRedactStruct_DeepNestingBounded(t *testing.T) {
-	// Build a 64-deep linked list, each carrying a redactable tag.
+	// Build a 64-deep linked list, each carrying a redactable tag. The
+	// reflective walk increments depth at every struct/pointer/slice hop,
+	// so a 64-node chain comfortably exceeds reflectionDepthCap=32 and
+	// guarantees the cap fires somewhere in the middle of the chain.
 	const depth = 64
 	nodes := make([]*linkedNode, depth)
 	for i := range nodes {
@@ -170,9 +173,70 @@ func TestRedactStruct_DeepNestingBounded(t *testing.T) {
 	if out == nil {
 		t.Fatalf("nil output")
 	}
-	// Ensure no panic and that the function returns. We don't try to
-	// over-specify behaviour at the depth boundary — just that the function
-	// terminates and produces *something*.
+	head, ok := out.(*linkedNode)
+	if !ok {
+		t.Fatalf("unexpected output type %T", out)
+	}
+	// PR #233 review: lock the cap-32 contract by asserting positive
+	// behaviour at *both* ends of the chain. We deliberately avoid pinning
+	// the exact boundary node \u2014 that depends on the implementation detail
+	// of how `depth` is incremented per kind of hop \u2014 and instead require
+	// only that:
+	//   (a) the recursion ran far enough to redact at least one tag, AND
+	//   (b) the cap actually fired before the chain was fully walked,
+	//       leaving at least one deep tag in its original (unredacted)
+	//       form.
+	//
+	// Note: when the depth cap fires, the marker (a `string`) is not
+	// assignable to a `*linkedNode` field, so the walk falls back to the
+	// original pointer (see the `reflect.Struct` branch in walk()). The
+	// observable signature of the cap is therefore an unredacted Tag deep
+	// in the chain, not the marker string itself.
+	var redactedCount, plainCount int
+	for n := head; n != nil; n = n.Next {
+		switch {
+		case strings.Contains(n.Tag, "[REDACTED:"):
+			redactedCount++
+		case n.Tag == "Bearer xyz==":
+			plainCount++
+		}
+	}
+	if redactedCount == 0 {
+		t.Errorf("walk never redacted any tag (recursion did not run)")
+	}
+	if plainCount == 0 {
+		t.Errorf("walk redacted every tag (depth cap did not fire on a %d-deep chain)", depth)
+	}
+}
+
+// TestRedactStruct_PointerCycleBounded pins PR #233 review NTH-6: when
+// the per-call visited-pointer set re-enters a known address, the walk
+// must terminate with the depth-exceeded marker rather than recursing
+// forever. We use a self-referential struct (different from the simpler
+// TestRedactStruct_CyclicInputSafe above) and assert termination plus
+// top-level redaction \u2014 the pointer-cap path returns the marker as a
+// bare string when the pointee type is non-string, which the parent
+// struct walk discards due to assignability (same fallback as the depth
+// cap). Observable contract: function returns, top-level fields are
+// redacted, no panic.
+func TestRedactStruct_PointerCycleBounded(t *testing.T) {
+	r := NewSecretRedactor()
+	c := &cyclic{Tag: "sk-ant-abcdef0123456789abcdef0123456789"}
+	c.Self = c
+	done := make(chan any, 1)
+	go func() { done <- r.RedactStruct(c) }()
+	select {
+	case out := <-done:
+		cc, ok := out.(*cyclic)
+		if !ok {
+			t.Fatalf("unexpected output type %T", out)
+		}
+		if !strings.Contains(cc.Tag, "[REDACTED:anthropic-api-key]") {
+			t.Errorf("top-level Tag not redacted on cycle: %q", cc.Tag)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("RedactStruct did not terminate on pointer cycle")
+	}
 }
 
 func TestRedactStruct_NilInput(t *testing.T) {
