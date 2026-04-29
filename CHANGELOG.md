@@ -6,6 +6,43 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **RFC 0020 PR 4 — Interaction summarisation is two-phase and
+  asynchronous.** The persona runtime's close-path
+  (`_StatePersistenceMixin._persist_closed_interaction`) now writes the
+  closed-interaction episode row twice: once synchronously with the
+  `[summary pending]` sentinel inside the per-agent lock, then again
+  from a background `asyncio` task that runs the LLM summariser
+  (≤30 s, bounded by `MemoryFacade.compress`), updates the `summary`
+  column to the final text, calls `record_interaction`, and ticks the
+  auto-reflect counter.  This change addresses two findings from the
+  PR #229 deep review:
+    - **Must-Fix #1:** the prior single-INSERT-with-final-summary path
+      never wrote the `[summary pending]` sentinel from production
+      code, so RFC 0020 §C's crash-recovery contract (the
+      `cleanup_closing_interactions` janitor) was effectively dead
+      code.  The two-phase write makes the sentinel reachable on every
+      close, so the janitor now has real rows to sweep.
+    - **Should-Fix #1:** the LLM round-trip no longer holds the
+      per-agent `_lock`, so a second inbound event for the same agent
+      no longer queues head-of-line behind the summariser.
+  The runtime exposes `_LLMPersonaAgent.drain_pending_summaries()` so
+  callers (tests, shutdown paths) can synchronise against the
+  background tail.  `close_memory()` drains pending tasks before
+  closing the underlying memory tiers.
+- **RFC 0020 PR 4 — Interaction janitor wired into `on_tick`.** The
+  closing-state janitor (`cleanup_closing_interactions`) is now
+  invoked opportunistically from `_LLMPersonaAgent.on_tick` at most
+  once per `_JANITOR_INTERVAL_SEC` (300 s by default).  Operators no
+  longer need an out-of-band cron path to recover crash-stuck
+  `[summary pending]` rows.  Closes PR #229 review Should-Fix #2.
+- **`relationships.interaction_count` and `auto_reflect_after` units
+  changed from per-message to per-closed-interaction.** A 10-message
+  DM session now bumps `interaction_count` by 1 (previously by 10).
+  Operators with bespoke trust thresholds calibrated against the
+  per-message scale should consult the Migration Notes appendix in
+  [docs/rfcs/0020-interaction-lifecycle.md](docs/rfcs/0020-interaction-lifecycle.md)
+  before upgrading; RFC 0008 PR 6's 30-day calibration window is the
+  canonical recovery path for production deployments.
 - **BREAKING — `MemoryFacade.store_procedure` now validates `key`**
   against `^[A-Za-z0-9._-]+$` (max 256 chars) and raises `ValueError`
   on non-conforming keys (RFC 0008 PR 6b, closes PR 5 review M1).
@@ -92,8 +129,33 @@ All notable changes to this project will be documented in this file.
   behaviour explicitly, set `memory.min_score: null` in
   [`config/agents.yaml`](config/agents.yaml).
 
+### Removed
+
+- **Deprecated underscore aliases `_DEFAULT_EPISODIC_MIN_SCORE` /
+  `_DEFAULT_NOTES_MIN_SCORE` in `agents.memory.episodic`.**  The
+  shim was introduced in v0.2 (RFC 0017 PR 6) with an explicit
+  "remove in v0.3" deprecation banner; v0.3 is the current
+  development cycle and no internal caller still references the
+  underscore form.  The public names `DEFAULT_EPISODIC_MIN_SCORE` /
+  `DEFAULT_NOTES_MIN_SCORE` are unchanged.  External consumers
+  pinned to the underscore alias must rename to the public form.
+  The corresponding back-compat test
+  (`test_underscore_aliases_back_compat`) was removed.
+
 ### Added
 
+- **`EpisodicMemory.update_episode_summary(interaction_id, summary)`**
+  (RFC 0020 PR 4).  Replaces the `summary` column on a single episode
+  row keyed by `(agent_id, interaction_id)`.  Used by the close-path
+  two-phase write to swap the `[summary pending]` sentinel for the
+  final LLM-generated text; agent-scoped `WHERE` clause prevents a
+  malformed caller from rewriting a different agent's summary.
+- **`_LLMPersonaAgent.drain_pending_summaries()`** (RFC 0020 PR 4).
+  Awaits every in-flight background summarisation task spawned by the
+  two-phase close path.  Called from `close_memory()` on shutdown;
+  exposed publicly so integration tests can synchronise against the
+  background tail before asserting on the final episode `summary`
+  column.
 - **Confidence decay + procedural revalidation** (RFC 0008 PR 5,
   Phase 4b).  The procedural memory tier now applies read-time
   exponential confidence decay (`c_t = c_0 * exp(-lambda_per_day * age_days)`,

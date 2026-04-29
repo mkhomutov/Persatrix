@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import grpc
 import grpc.aio
-import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher

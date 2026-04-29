@@ -11,7 +11,6 @@ from agents.memory.relationship import (
     RelationshipMemory,
     RelationshipSummary,
     _DEFAULT_TRUST,
-    _MAX_RECENT_INTERACTIONS,
     _MAX_TRUST_DELTA,
 )
 

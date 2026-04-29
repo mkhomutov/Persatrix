@@ -68,6 +68,7 @@ from .action_loop import _ActionLoopMixin
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
+from .summarize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -234,6 +235,10 @@ class _LLMPersonaAgent(
         self._interaction_tracker = InteractionTracker(
             idle_timeout_sec=idle_timeout_sec,
         )
+        # RFC 0020 PR 4 (PR #229 Must-Fix #1 + Should-Fix #2): bg summary
+        # tasks + janitor cooldown.
+        self._pending_summarize_tasks: set[asyncio.Task[None]] = set()
+        self._last_janitor_monotonic: float | None = None
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record
@@ -482,6 +487,11 @@ class _LLMPersonaAgent(
                 # comparing per-tick DB write rates pre/post RFC 0017 PR 5.
                 self._state.recover_energy()
                 span.set_attribute("actions.count", len(actions))
+                # RFC 0020 PR 4 (PR #229 Should-Fix #2): janitor sweep, best-effort.
+                self._last_janitor_monotonic = await maybe_run_janitor(
+                    self.cleanup_closing_interactions, self._last_janitor_monotonic,
+                    now_monotonic, JANITOR_INTERVAL_SEC, self.agent_id,
+                )
                 return actions
 
     # handle() is inherited from PersonaAgent — no override needed.

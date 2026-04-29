@@ -375,3 +375,58 @@ This RFC is a prerequisite for the v0.3.0 user-facing promise to land cleanly. W
 - [RFC 0016](0016-human-participant-chat-interface.md) — Human chat (multi-turn aggregation in Phase 2).
 - [RFC 0017](0017-persona-memory-injection-budget.md) — `MemoryBudget` allocator (composes unchanged).
 - [RFC 0019](0019-opentelemetry-completion.md) — Telemetry pipeline (interaction lifecycle counters).
+
+## Migration Notes (PR 4)
+
+PR 4 changes when `RelationshipMemory.record_interaction` fires and what
+`interaction_count` measures. Operators tuning trust-bootstrap or
+auto-reflect thresholds calibrated against the pre-PR-4 behavior should
+re-tune.
+
+**Before PR 4 (RFC 0005 §F semantics, shipped through PR 3):**
+
+- `record_interaction` ran once **per inbound chat message** in
+  `SendChatMessage` (`agents/server_servicers.py`).
+- `relationships.interaction_count` therefore counted **messages**, not
+  conversations.
+- The auto-reflect counter (`config.memory.notes.auto_reflect_after`)
+  also incremented **per message**.
+
+**After PR 4:**
+
+- `record_interaction` fires **once per closed interaction**, from
+  `_StatePersistenceMixin._persist_closed_interaction`. A 10-turn DM
+  produces one bump, not ten.
+- `relationships.interaction_count` now counts **conversations**.
+- The auto-reflect counter increments **once per closed interaction**.
+- The `outcome` field carries the (truncated) episode summary, or
+  `NULL` when the LLM summariser failed and we fell back to
+  `[interaction summary unavailable]`.
+
+**Recalibration guide:**
+
+| Knob | Old units (per message) | New units (per closed interaction) | Suggested rescale |
+|------|-------------------------|------------------------------------|-------------------|
+| `config.memory.notes.auto_reflect_after` | messages | interactions | divide by your typical turns/conversation (e.g., 50 → 5–10) |
+| RFC 0005 trust-bootstrap thresholds (see RFC 0005 §F lines 889–920) | message count | interaction count | divide by typical turns/conversation |
+| Any external dashboard derived from `relationships.interaction_count` | messages | interactions | re-baseline; do not chart across the migration |
+
+**Calibration window (RFC 0008 PR 6):** the production calibration
+window for memory-context tuning closes 2026-05-29. Calibration data
+collected before PR 4 lands reflects per-message semantics; reset the
+window after PR 4 deploys before drawing conclusions about
+`interaction_count`-based heuristics.
+
+**Operational notes:**
+
+- A summariser failure (LLM timeout / error / empty response) writes
+  `[interaction summary unavailable]` to the episode `summary` and
+  emits the `agent.interactions.summary.failed` counter with
+  `{reason: "timeout"|"llm_error"|"empty"}`.
+- A persisted-but-unsummarised interaction (`closing` state ended
+  before the summariser ran) leaves `summary = "[summary pending]"`;
+  the periodic janitor (`cleanup_closing_interactions`, default grace
+  300s) backfills these to the unavailable sentinel and emits the same
+  counter with `reason: "janitor"`.
+- No data migration is required for existing rows — pre-PR-4 episodes
+  retain their per-message semantics and remain searchable.

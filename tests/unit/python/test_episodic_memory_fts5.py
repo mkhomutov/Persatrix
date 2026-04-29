@@ -6,7 +6,6 @@ and query sanitization.
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 from agents.memory.episodic import EpisodicMemory
 

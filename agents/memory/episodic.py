@@ -40,6 +40,9 @@ from .episodic_queries import (
     reset_interaction_count,
     row_to_episode,
 )
+from .episodic_queries import (
+    update_episode_summary as _update_episode_summary,
+)
 from .episodic_retention import (
     delete_old_episodes as _delete_old_episodes,
 )
@@ -72,14 +75,9 @@ logger = logging.getLogger(__name__)
 # Public API (PR 6 — RFC 0017 PR 4 review finding 1): the persona runtime is
 # already a consumer and RFC 0008's vector tier will be the third.  Public
 # names avoid ``ruff PLC2701`` (``import-private-name``) at consumer sites
-# and signal the cross-module contract.  The leading-underscore aliases are
-# retained for one release as a deprecation shim; remove in v0.3.
+# and signal the cross-module contract.
 DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
 DEFAULT_NOTES_MIN_SCORE: float = 0.20
-
-# Deprecated underscore aliases — remove in v0.3 once external pins clear.
-_DEFAULT_EPISODIC_MIN_SCORE: float = DEFAULT_EPISODIC_MIN_SCORE
-_DEFAULT_NOTES_MIN_SCORE: float = DEFAULT_NOTES_MIN_SCORE
 
 
 # ─── EpisodicMemory ────────────────────────────────────────
@@ -246,6 +244,10 @@ class EpisodicMemory:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
+
+    async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
+        return await _update_episode_summary(
+            self._ensure_db(), self._agent_id, interaction_id, summary)
 
     async def recall(
         self,

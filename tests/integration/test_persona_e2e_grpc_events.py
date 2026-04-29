@@ -5,7 +5,6 @@ Tests the full cycle: event dispatch → LLM call → action execution → memor
 using in-process agents with mock LLM.  No real API calls or external dependencies.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import grpc
@@ -14,11 +13,10 @@ import pytest
 
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
-from agents.dispatch import ActionExecutor, EventDispatcher
+from agents.dispatch import EventDispatcher
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentEvent, EventType
-from agents.tick import TickScheduler
 from agents.server import AgentServiceServicer
 from agents.tools.registry import clear_registry
 

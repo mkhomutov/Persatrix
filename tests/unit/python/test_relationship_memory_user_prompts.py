@@ -13,7 +13,6 @@ import pytest
 
 from agents.memory.relationship import (
     RelationshipMemory,
-    _DEFAULT_TRUST,
 )
 
 

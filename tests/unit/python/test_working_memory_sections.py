@@ -5,7 +5,6 @@ priority-weighted retention and automatic summarization.
 All tests use mock LLM client — no real API calls.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

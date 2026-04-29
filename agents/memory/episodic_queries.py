@@ -373,3 +373,23 @@ async def load_agent_state(
         result: str = row[0]
         return result
     return None
+
+
+async def update_episode_summary(
+    db: aiosqlite.Connection, agent_id: str,
+    interaction_id: str, summary: str,
+) -> bool:
+    """Replace ``summary`` for an episode (RFC 0020 PR 4 close-path).
+
+    Agent-scoped UPDATE (``WHERE agent_id AND interaction_id``); returns
+    ``True`` iff a row was updated.  See PR #229 review Must-Fix #1.
+    """
+    if not summary or not summary.strip():
+        raise ValueError("summary must not be empty")
+    cursor = await db.execute(
+        "UPDATE episodes SET summary = ? "
+        "WHERE agent_id = ? AND interaction_id = ?",
+        (summary, agent_id, interaction_id),
+    )
+    await db.commit()
+    return (cursor.rowcount or 0) > 0

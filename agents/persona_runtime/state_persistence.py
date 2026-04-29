@@ -6,25 +6,36 @@ table and managing the initialization/shutdown of all three memory tiers.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import asyncio
+    from ..llm_client import LLMClient
+    from . import MemoryNamespace
 
-from ..memory.boundary_detectors import REASON_STRUCTURAL
+from ..memory.boundary_detectors import (
+    DEFAULT_CLOSING_GRACE_SEC,
+    REASON_STRUCTURAL,
+)
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import (
     SCOPE_TICK,
+    SUMMARY_PENDING_TEXT,
     Interaction,
     InteractionTracker,
+    cleanup_closing_interactions,
     scope_for_dm,
     scope_for_thread,
 )
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from ..persona_types import AgentAction, AgentEvent, EventType, PersonaState
+from .summarize_close import (
+    drain_pending_summary_tasks,
+    finalize_closed_interaction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +66,10 @@ class _StatePersistenceMixin:
     _working_memory: WorkingMemory
     _lock: asyncio.Lock
     _interaction_tracker: InteractionTracker
+    _llm_client: LLMClient | None
+    _memory_ns: MemoryNamespace
+    # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
+    _pending_summarize_tasks: set[asyncio.Task[None]]
 
     # RFC 0020 §G event-type routing.  Both sets are *positive lists* —
     # the prior implementation used a single multi-turn deny-list
@@ -84,33 +99,12 @@ class _StatePersistenceMixin:
     ) -> None:
         """Persist the episode for a completed event (RFC 0020 PR 2/PR 3).
 
-        Single-turn paths (TICK, tool-only) route through
-        :class:`InteractionTracker` so the row carries the new
-        ``interaction_id`` / ``started_at`` / ``closed_at`` /
-        ``turn_count`` / ``scope`` columns added in PR 1's schema
-        migration.  Multi-turn paths (``MESSAGE_RECEIVED`` / ``MENTION``)
-        accumulate turns in the open interaction and persist a single
-        episode only when the interaction closes (PR 3); the close is
-        triggered either by an explicit session-end marker on the event
-        metadata (``chat_end`` / ``session_end`` truthy — the RFC 0016
-        ``chat_end`` event surface lands in a follow-up) or by the
-        :class:`~agents.memory.boundary_detectors.IdleGapDetector` once
-        the per-channel idle timeout elapses.
-
-        Idle-gap evaluation runs at the top of every event so a stale
-        interaction is flushed the moment the next event arrives in any
-        scope.  PR 4 will additionally drive ``idle_check`` from a
-        periodic janitor so closure does not depend on event traffic.
-
-        Scope labelling for single-turn rows preserves event-type
-        provenance per PR-215 review (Should-Fix #1): only actual
-        ``TICK`` events use :data:`SCOPE_TICK`; tool-only events store
-        their ``EventType.value`` (e.g. ``"task_assigned"``) so that
-        ``WHERE scope = 'task_assigned'`` analytics work without
-        having to re-parse ``summary``.  RFC 0020 §G's "share the TICK
-        boundary policy" wording refers to *close timing*, not scope
-        labels.  Multi-turn rows carry the channel-typed scope built by
-        :func:`scope_for_dm` / :func:`scope_for_thread`.
+        Routes single-turn paths through :class:`InteractionTracker`
+        and accumulates multi-turn paths into the open interaction;
+        closure is driven by ``chat_end`` metadata, idle gap, or the
+        PR-4 janitor.  See PR-215 review for scope-labelling
+        rationale (single-turn rows carry the event-type value, not
+        :data:`SCOPE_TICK`).
         """
         summary = (
             f"Event: {event.event_type.value} → "
@@ -312,6 +306,12 @@ class _StatePersistenceMixin:
             "sender": event.sender_id,
             "channel_id": event.channel_id,
             "timestamp": event.timestamp,
+            # RFC 0020 PR 4: stash sender's participant_type so the
+            # close-path ``record_interaction`` can carry the correct
+            # ``other_participant_type`` (defaults "agent" downstream).
+            "participant_type": event.metadata.get(
+                "sender_participant_type", "agent",
+            ),
         }
         self._interaction_tracker.add_turn(scope, payload=payload)
         if self._is_session_end_event(event):
@@ -322,63 +322,92 @@ class _StatePersistenceMixin:
                 await self._persist_closed_interaction(closed)
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
-        """Write a single episode row for a just-closed multi-turn interaction.
+        """RFC 0020 PR 4 close-path orchestrator (two-phase write).
 
-        PR 3 ships a deterministic placeholder summary that mirrors the
-        single-row legacy text the per-event store would have written;
-        PR 4 replaces it with the LLM-generated summary plumbed through
-        ``MemoryFacade.compress``.  The interaction's accumulated turn
-        payloads ride on ``context_json`` so PR 4 can read them back
-        without a schema change.
+        Phase 1 (sync, under ``_lock``): INSERT a ``closing`` row with
+        :data:`SUMMARY_PENDING_TEXT` so the row exists before any LLM
+        call and the janitor can sweep it on crash recovery.  Phase 2
+        (background): :func:`finalize_closed_interaction` summarises
+        and ``UPDATE``s outside the lock.  See
+        ``docs/pr-reviews/pr-229-review.md`` Must-Fix #1 + Should-Fix #1.
         """
-        if interaction.turn_count == 0:
-            # Defensive: an interaction can only close after at least
-            # one ``add_turn``, but ``idle_check`` running on a freshly
-            # ``start``-ed (no-turn) scope would still hit this path.
-            # Skip the row rather than write a contentless episode.
+        if interaction.turn_count == 0 or self._llm_client is None:
+            return  # idle no-turn scope, or test bootstrap path.
+        if interaction.interaction_id is None:
+            logger.warning(
+                "Closed interaction for agent %s has no interaction_id "
+                "(scope=%s); skipping persistence",
+                self.agent_id, interaction.scope,
+            )
             return
-        first_payload = interaction.turns[0].payload
-        last_payload = interaction.turns[-1].payload
-        # PR-216 review (Nice-to-have #2): apply the ``<no-summary>``
-        # fallback symmetrically.  Earlier draft only guarded ``first``,
-        # so an empty-summary closing turn rendered ``... last[]`` while
-        # the analogous opener rendered ``... first[<no-summary>]``.
-        first_summary = str(first_payload.get("summary", "")) or "<no-summary>"
-        last_summary = str(last_payload.get("summary", "")) or "<no-summary>"
-        # Placeholder summary: turn count + first/last per-turn summary.
-        # Stable, deterministic, easy to assert in tests.  PR 4 swaps
-        # this for an LLM call.
-        summary = (
-            f"Multi-turn interaction (scope={interaction.scope}, "
-            f"turns={interaction.turn_count}, reason={interaction.close_reason}): "
-            f"first[{first_summary}] last[{last_summary}]"
-        )
         ctx: dict[str, Any] = {
             "scope": interaction.scope,
             "close_reason": interaction.close_reason,
             "turn_count": interaction.turn_count,
-            "turns": [
-                {"at": t.at, "payload": t.payload}
-                for t in interaction.turns
-            ],
+            "turns": [{"at": t.at, "payload": t.payload} for t in interaction.turns],
         }
         try:
             await self._episodic_memory.store_episode(
-                summary=summary,
-                context=ctx,
+                summary=SUMMARY_PENDING_TEXT, context=ctx,
                 interaction_id=interaction.interaction_id,
                 started_at=interaction.started_at,
                 closed_at=interaction.closed_at,
-                turn_count=interaction.turn_count,
-                scope=interaction.scope,
+                turn_count=interaction.turn_count, scope=interaction.scope,
             )
         except Exception:
             logger.warning(
                 "Failed to persist closed interaction for agent %s (scope=%s)",
-                self.agent_id,
-                interaction.scope,
-                exc_info=True,
+                self.agent_id, interaction.scope, exc_info=True,
             )
+            return
+        # Phase 2: background summarise + finalise.  add_done_callback
+        # auto-cleans the tracking set so references don't accumulate.
+        task: asyncio.Task[None] = asyncio.create_task(
+            finalize_closed_interaction(
+                llm_client=self._llm_client, memory_ns=self._memory_ns,
+                episodic=self._episodic_memory, agent_id=self.agent_id,
+                interaction=interaction,
+                on_finalized=self._tick_auto_reflect_counter,
+            ),
+        )
+        self._pending_summarize_tasks.add(task)
+        task.add_done_callback(self._pending_summarize_tasks.discard)
+
+    async def drain_pending_summaries(self) -> None:
+        """Await in-flight background summary tasks (RFC 0020 PR 4)."""
+        await drain_pending_summary_tasks(self._pending_summarize_tasks)
+
+    async def _tick_auto_reflect_counter(self) -> None:
+        """Increment the auto-reflect counter on close (RFC 0020 §H).
+
+        Nudges now fire on N closed interactions, not N inbound events.
+        Best-effort: counter-store hiccup must not break the close path.
+        """
+        memory_cfg = self.config.get("memory") or {}
+        notes_cfg = memory_cfg.get("notes") or {}
+        if int(notes_cfg.get("auto_reflect_after", 0)) <= 0:
+            return
+        try:
+            await self._episodic_memory.increment_interaction_count()
+        except Exception:
+            logger.debug(
+                "auto-reflect counter increment failed for agent %s",
+                self.agent_id, exc_info=True,
+            )
+
+    async def cleanup_closing_interactions(
+        self, *, grace_sec: float = DEFAULT_CLOSING_GRACE_SEC,
+        now: float | None = None,
+    ) -> int:
+        """Public janitor entry point (RFC 0020 PR 4 §C).
+
+        Wires the agent's own DB handle and id into
+        :func:`agents.memory.interactions.cleanup_closing_interactions`.
+        """
+        db = self._episodic_memory._ensure_db()
+        return await cleanup_closing_interactions(
+            db, self.agent_id, grace_sec=grace_sec, now=now,
+        )
 
     # ─── State persistence ─────────────────────────────
 
@@ -441,14 +470,22 @@ class _StatePersistenceMixin:
     async def close_memory(self) -> None:
         """Close all memory tiers, awaiting in-flight operations.
 
-        Each tier is closed in its own try/except so that a failure in one
-        tier (e.g. disk-full on SQLite) does not prevent the remaining
-        tiers from releasing their resources (PR #54 review).
+        Each tier closes in its own try/except so a failure in one
+        does not prevent the rest from releasing resources (PR #54).
+        RFC 0020 PR 4: drains pending background summary tasks first
+        so they don't outlive the EpisodicMemory DB handle.
         """
         async with self._lock:
             await self._persist_persona_state()
             errors: list[Exception] = []
-            # Close order: working (flush compression) → episodic (DB) → relationship (DB)
+            try:
+                await self.drain_pending_summaries()
+            except Exception as exc:
+                errors.append(exc)
+                logger.warning(
+                    "Failed to drain pending summaries on close: %s", exc,
+                )
+            # working (flush compression) → episodic (DB) → relationship (DB)
             for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
                 try:
                     await tier.close()
