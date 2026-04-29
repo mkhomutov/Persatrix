@@ -529,15 +529,35 @@ Dependencies: Phases 1 and 3.
 
 ## Open Questions
 
-1. **Token delivery in proto**: Should `AgentCapabilityToken` be delivered in the existing `RegisterAgent` response proto fields, or does this require a proto change? **Proposed default**: encode the token as a base64 string in a new `capability_token` field added to `RegisterAgentResponse`. This requires a proto change and RFC review, but the alternative (out-of-band delivery) adds coordination complexity. The proto change is narrow and non-breaking.
+> **Status (2026-04-29)**: Open Questions 2, 3, and 5 are in-scope for v0.3.0 (Phases 1–2) and have been **resolved** below — the resolutions are folded into the design sections referenced in each entry. Open Questions 1 and 4 remain genuinely open because they belong to Phase 4 (v0.4.0) and depend on a proto change cycle that is not gated until then.
 
-2. **Flagged input behavior**: When `InputSanitizer` flags external content, should the orchestrator (a) pass it through with the flag annotation and let the agent decide, (b) quarantine it and return an error to the agent, or (c) strip the flagged patterns before passing through? **Proposed default**: pass through with flag annotation (option a) for Phase 2. The agent's system prompt instructs it to discard flagged content. Option (b) is a stricter policy that can be toggled via a `sanitizer_action: "quarantine"` config flag without changing the core interface.
+### Resolved (in-scope for v0.3.0)
 
-3. **Audit log sink durability**: The Phase 1 file sink is not externally durable. If the orchestrator process is killed mid-write, the last event may be corrupt. Should the Phase 1 implementation include fsync per write (safe but slow) or accept the risk (fast)? **Proposed default**: fsync per batch (flush every N events or every T seconds), with a note that production deployments should forward the file to an external log pipeline.
+2. **Flagged input behavior — RESOLVED (pass-through with flag, configurable to quarantine).** When `InputSanitizer` flags external content the orchestrator passes it through with the flag annotation (option *a*) and lets the agent decide. The agent system prompt instructs it to discard flagged content. A `security.sanitizer_action: "passthrough" | "quarantine"` config flag (default `"passthrough"`) lets operators tighten to option *b* without an interface change. Option *c* (silent strip) is rejected because it loses the audit trail and can mask a real attack as a "successful" tool result. Folded into [§C — Input Sanitization & Prompt Injection Defense](#c-input-sanitization--prompt-injection-defense).
 
-4. **Token revocation**: Short TTLs mitigate replay risk, but a compromised token is valid until expiry. Should Phase 4 include a lightweight in-memory revocation list (bloom filter or hash set keyed by `AgentID + IssuedAt`) that the orchestrator checks before accepting a token? **Proposed default**: yes — the list only needs to survive for `max_token_ttl`, so memory overhead is bounded and no persistence is required.
+3. **Audit log sink durability — RESOLVED (per-event `fsync` for security events, batched for high-volume).** The Phase 1 file sink classifies events by severity and writes:
+   - **Per-event `fsync`** for `capability.violation`, `tool.denied`, `tool.arg_invalid`, `agent.token_invalid`, `hitl.*`, and `rate_limit.violated` — these are the events an operator forensically replays and we tolerate the latency cost (≤1 ms typical on local SSD; the volume is low by definition).
+   - **Batched flush (every 64 events or 250 ms, whichever first)** for `tool.invoked`, `memory.read`, `memory.write`, `agent.registered`, `agent.token_issued` — high-volume telemetry where a few-event window of loss on crash is acceptable.
 
-5. **Context provenance in proto**: Should `ContextItem` source annotations flow into the `TaskRequest.context` proto field as typed metadata, or as a JSON sidecar in the existing map? **Proposed default**: JSON sidecar in the existing `context` map under a reserved key `"_provenance"` for Phase 2, avoiding a proto change until the schema is proven stable. Typed proto fields in Phase 4 when token model and context model are both stable.
+   This matches the existing `internal/observability/logbuffer` pattern (severity-driven admission) so we reuse the same operational mental model. Production deployments should still forward the file to an external pipeline; the file sink is the ground truth, not the only sink. Folded into [§G — Immutable Audit Logging](#g-immutable-audit-logging).
+
+5. **Context provenance in proto — RESOLVED (JSON sidecar under reserved `_provenance` key).** Provenance flows in the existing `TaskRequest.context` `map<string, string>` under the reserved key `_provenance`, encoded as a JSON object whose keys are the other context keys and whose values are `{"source": ..., "sanitized": bool, "flagged": bool, "flags": [...]}`. No proto change in v0.3.0. Phase 4 (v0.4.0) will promote this to a typed proto message alongside the token-delivery proto change (Open Question 1). The reserved-key convention follows the precedent set by RFC 0008's `_budget` context key. Folded into [§C — Input Sanitization & Prompt Injection Defense](#c-input-sanitization--prompt-injection-defense).
+
+### Genuinely open (deferred to Phase 4 / v0.4.0)
+
+1. **Token delivery in proto.** Encoding the token as a base64 string in a new `capability_token` field on `RegisterAgentResponse` is the proposed default, but the proto change must be batched with the Phase 4 token + HITL work to avoid two regen cycles. Decision deferred until Phase 4 PR plan is opened (v0.4.0 RFC 0009 PR plan, post-v0.3.0).
+
+4. **Token revocation list.** Short TTLs mitigate but do not eliminate replay risk for compromised tokens. The proposed in-memory hash set keyed by `(AgentID, IssuedAt)` with TTL = `max_token_ttl` remains the right shape, but the question of whether the list is per-orchestrator-process (simple) or shared across orchestrator replicas (requires Redis / etcd) is bound to the v0.4.0 multi-node story (RFC TBD). Decision deferred to Phase 4.
+
+### New questions surfaced by current realities (2026-04-29)
+
+These arose from RFCs 0008, 0011, and 0020 landing or partly landing during v0.3.0. Each is resolved below; the resolutions are folded into the relevant phase scope.
+
+6. **Audit correlation key under RFC 0020 InteractionTracker — RESOLVED (extend `CorrelationID` to `WorkflowRunID:StepID:AgentID:InteractionID?`).** RFC 0020's `interaction_id` is the new natural unit for forensic replay of agent dialogues. The audit `CorrelationID` schema gains an optional fourth segment that is populated when the event was emitted within an open interaction scope. Empty-segment shape (`workflow:step:agent:`) preserves backward compatibility for events emitted outside an interaction (TICK before any episode, agent-registration, etc.). Folded into [§G](#g-immutable-audit-logging) and PR 1 scope.
+
+7. **Channel publish endpoint as new high-trust ingress — RESOLVED (PR 2 RateLimiter middleware ships before RFC 0011 PR 2).** RFC 0011's REST channel publish endpoint is the first non-tool ingress that accepts agent-attributable input. The rate limiter must protect it from runaway agents the same way it protects gRPC tool dispatch. Sequencing pin already in [PR plan §Overview](0009-pr-plan.md#overview).
+
+8. **Procedural memory — RESOLVED (out of audit scope for v0.3.0).** The Python procedural memory landed in PR #228 (RFC 0008 prep). It records skill outcomes, not externally-attributable actions, and is read-only from the orchestrator's perspective. v0.3.0 does **not** wire `memory.read` / `memory.write` audit events into the procedural store; that lands with the broader RFC 0008 shared-pool ACL work in v0.4.0. PR 1 scope explicitly excludes procedural memory hooks.
 
 ## Decision / Next Steps
 
