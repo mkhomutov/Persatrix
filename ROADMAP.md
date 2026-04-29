@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-29 (RFC 0008 PR 5 merged via PR #225: confidence decay + procedural revalidation; 5 of 6 canonical PRs merged)  
+> **Last updated**: 2026-04-29 (RFC 0008 follow-up triage PR opened: `feature/v030-rfc0008-followup-triage` enumerates ~55 deferred items from PRs 1–5, proposes PR 6a [Go scheduler hygiene] + PR 6b [Python procedural cleanup] sub-PR rows under existing PR 1/1b and PR 3a/5 bookkeeping; canonical 6-PR count unchanged)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; PR 6 (RFC close + 30-day calibration review) pending
+> **Current milestone**: RFC 0020 implementation in progress (3/7 PRs merged); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
