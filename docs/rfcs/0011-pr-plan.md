@@ -98,6 +98,8 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 - [x] `make validate` green against the rewritten `config/channels.yaml`
 - [x] `make test` Go suite green; thread-FK cascade test present and named so it cannot be silently dropped (`TestSQLiteStore_ThreadFKCascade`)
 
+> **✅ Merged as PR #231 (2026-04-29).**
+
 #### PR #231 review follow-ups
 
 Deep review filed at `docs/pr-reviews/pr-231-review.md` (local-only). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.

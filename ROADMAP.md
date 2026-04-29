@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-29 (RFC 0011 PR 1 opened: channel store + SQLite migration + schema rewrite per RFC 0011 §A/§B; RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path; two-phase write so the closed row is visible synchronously and Phase 2 / janitor races are scoped to the `SUMMARY_PENDING_TEXT` sentinel; 0020 progress 4/7)  
+> **Last updated**: 2026-04-29 (RFC 0011 PR 1 merged as #231: channel store + SQLite migration + schema rewrite per RFC 0011 §A/§B — `internal/channels/` rewritten from stub, `ChannelStore` SQLite implementation with FK-on migration runner, `GetOrCreateDM` canonicalization, per-channel + global caps, thread-FK cascade test (`TestSQLiteStore_ThreadFKCascade`), `schemas/channel.schema.json` + `config/channels.yaml` rewritten to the new `group | dm | thread` vocabulary; 0011 progress 1/8; four Should-Fix items from PR #231 review dispatched to PR 2 / PR 4 / PR 8; RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path; two-phase write so the closed row is visible synchronously and Phase 2 / janitor races are scoped to the `SUMMARY_PENDING_TEXT` sentinel; 0020 progress 4/7)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
-> **Current milestone**: RFC 0020 implementation in progress (4/7 PRs merged — PR 4 #229 summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
+> **Current milestone**: RFC 0011 implementation in progress (1/8 PRs merged — PR 1 #231 channel store + SQLite migration + schema rewrite); RFC 0020 implementation in progress (4/7 PRs merged — PR 4 #229 summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -816,6 +816,7 @@ v0.5.0 complete
 | [#224](https://github.com/mkhomutov/Persatrix/pull/224) | feat(rfc0008): PR 3a — delegation metrics + PR 3 follow-up findings | 0008 (3a/6) | 2026-04-28 |
 | [#225](https://github.com/mkhomutov/Persatrix/pull/225) | feat(rfc0008): PR 5 — confidence decay + procedural revalidation | 0008 (5/6) | 2026-04-29 |
 | [#229](https://github.com/mkhomutov/Persatrix/pull/229) | feat(rfc0020): PR 4 — summarization-on-close + janitor + record_interaction move | 0020 (4/7) | 2026-04-29 |
+| [#231](https://github.com/mkhomutov/Persatrix/pull/231) | feat(rfc0011): PR 1 — channel store + SQLite migration + schema rewrite | 0011 (1/8) | 2026-04-29 |
 
 ---
 
