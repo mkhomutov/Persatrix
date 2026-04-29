@@ -6,6 +6,36 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **RFC 0008 PR 6a — Go scheduler hygiene + sampler bookkeeping.**
+  Internal-only follow-up consolidating ~22 deferred review findings from
+  PR 1 / PR 1b / PR 3 / PR 4 / PR 5 into the Go scheduler & packaging
+  surfaces.  No wire-shape or schema-shape changes.  Highlights:
+  deterministic candidate ordering in `attachContextPackage` (sorts map
+  keys before building `packaging.Candidate`s); per-run warning-sampler
+  bookkeeping with `pruneRun(execID)` invoked from `executeRun`
+  (eliminates unbounded growth on long-running orchestrators); `noCopy`
+  sentinel on the sampler (verified by `go vet -copylocks`); rune-count
+  token estimate for multibyte payloads; cross-language wire-shape
+  contract pinned via Go-produced fixture
+  (`tests/fixtures/context_package_v1.json`, regenerated with
+  `PERSATRIX_REGEN_FIXTURES=1`) consumed by the Python wire-shape test.
+  See `internal/scheduler/context_package_pr6a_pins_test.go` for the
+  contract pin tests.
+  - **Operator-visible behaviour change (planner-tighten, M7).** The
+    planner now rejects workflows where the sum of per-step
+    `context_budget` overrides plus the count of non-overridden steps
+    exceeds `workflow.context_budget_total` (each non-overridden step
+    must receive at least one token). Previously such workflows parsed
+    and silently dispatched non-overridden steps with zero-budget legacy
+    passthrough — masking author intent. Operators with tightly-budgeted
+    workflows that previously parsed will see a new parse-time error of
+    the form `workflow %q: per-step context_budget overrides (%d) plus
+    %d non-overridden step(s) requires at least %d tokens but
+    context_budget_total is %d`. Fix: raise `context_budget_total`, drop
+    one or more per-step overrides, or remove `context_budget_total` to
+    fall back to legacy passthrough end-to-end. Pinned by
+    `TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected` in
+    `internal/planner/planner_context_budget_test.go`.
 - **`memory.min_score` schema default `null` → `0.20`** (RFC 0008 PR 2a).
   Operators with `memory.enabled: true` who did not previously set
   `memory.min_score` will see strictly fewer recall results after this

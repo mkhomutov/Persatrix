@@ -75,14 +75,24 @@ workflow:
 	require.EqualValues(t, 2, dispatched.Load(), "both steps should have dispatched")
 
 	// (a) cost record carries ContextPackage on every step.
+	// L17 (RFC 0008 PR 6a): replace the tautological
+	// `GreaterOrEqual(admitted, 0)` (always true for an unsigned-by-shape
+	// `int`) with explicit per-step expectations: s1 has no upstream
+	// outputs and admits 0; s2 admits exactly out1 (== 1).
 	summary := cr.WorkflowSummary("ctxpkg-persist")
 	require.Len(t, summary.Steps, 2)
+	stepByID := map[string]cost.StepCostEntry{}
 	for _, entry := range summary.Steps {
 		require.NotNilf(t, entry.ContextPackage,
 			"step %q must carry ContextPackage in its cost record", entry.StepID)
-		assert.GreaterOrEqual(t, entry.ContextPackage.CandidatesAdmitted, 0)
-		// admitted == len(StepOutputs); s1 has no upstream candidates, s2 has out1.
+		stepByID[entry.StepID] = entry
 	}
+	require.Contains(t, stepByID, "s1")
+	require.Contains(t, stepByID, "s2")
+	assert.Equal(t, 0, stepByID["s1"].ContextPackage.CandidatesAdmitted,
+		"s1 has no upstream outputs so admitted candidates must be 0")
+	assert.Equal(t, 1, stepByID["s2"].ContextPackage.CandidatesAdmitted,
+		"s2 admits exactly its sole upstream `out1` candidate")
 
 	// (b) state rows persist RemainingContextBudget. With a 4000-token
 	// total split across 2 steps (allocator gives 2000 each) and tiny payloads

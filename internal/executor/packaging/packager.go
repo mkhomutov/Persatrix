@@ -5,7 +5,10 @@ import (
 )
 
 // Packager assembles a per-step Package from a list of candidates under a
-// token budget. It is stateless and safe for concurrent use.
+// token budget. The Packager itself is stateless; concurrency-safety
+// depends on the injected RelevanceScorer (RFC 0008 PR 6a / N8). The
+// default HeuristicScorer is safe for concurrent use; future embedding-
+// backed scorers must document their own concurrency contract.
 type Packager struct {
 	scorer RelevanceScorer
 }

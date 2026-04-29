@@ -16,7 +16,7 @@
         "context_budget_total": {
           "type": "integer",
           "minimum": 0,
-          "description": "Workflow-level total context window budget in tokens (RFC 0008). When set (>0), the scheduler equal-splits the remainder across non-overridden steps after subtracting any per-step `context_budget` overrides, and the executor packages context for each dispatch. When unset or 0, packaging is disabled (legacy passthrough preserved)."
+          "description": "Workflow-level total context window budget in tokens (RFC 0008). When set (>0), the scheduler equal-splits the remainder across non-overridden steps after subtracting any per-step `context_budget` overrides, and the executor packages context for each dispatch. When unset, omitted, or 0, packaging is disabled (legacy passthrough preserved)."
         },
         "steps": {
           "type": "array",
@@ -35,7 +35,7 @@
               "timeout_seconds": { "type": "integer", "minimum": 1, "description": "Per-step wall-clock timeout in seconds. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
               "max_llm_calls": { "type": "integer", "minimum": 1, "description": "Maximum LLM calls for this step. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
               "max_tokens": { "type": "integer", "minimum": 1, "description": "Maximum output tokens per LLM call for this step. Minimum 1 when specified. Omit to inherit from agent config or system defaults." },
-              "context_budget": { "type": "integer", "minimum": 0, "description": "Per-step context window budget in tokens (RFC 0008). 0 means inherit (equal-split from `workflow.context_budget_total`). Negative values are rejected at parse time." },
+              "context_budget": { "type": "integer", "minimum": 0, "description": "Per-step context window budget in tokens (RFC 0008). 0 (or omitted) participates in the equal-split allocation from `workflow.context_budget_total`; >0 sets a hard per-step override. Negative values are rejected at parse time." },
               "cacheable": { "type": "boolean" }
             }
           }

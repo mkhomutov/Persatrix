@@ -776,12 +776,14 @@ Absorbs every PR 1 + PR 1b deferred item routed to 🔧 PR 6a in the [triage tab
 
 ##### PR checklist
 
-- [ ] `make test` passes (Go + Python wire-shape suites)
-- [ ] `make lint` clean
-- [ ] M6 / M9 / M11 / M12 land with the proposed dispositions confirmed in this triage PR's review
-- [ ] M7 dispatched per the proposed disposition (planner-tighten); if the review picks scheduler-soften instead, re-scope before opening
-- [ ] M10 lands as docs-only; the retry-impl PR ticket is filed in the v0.4.0 backlog
-- [ ] Python wire-shape test reads the Go-produced fixture (mutual contract)
+- [x] `make test` passes (Go + Python wire-shape suites)
+- [x] `make lint` clean
+- [x] M6 / M9 / M11 / M12 land with the proposed dispositions confirmed in this triage PR's review
+- [x] M7 dispatched per the proposed disposition (planner-tighten); if the review picks scheduler-soften instead, re-scope before opening
+- [x] M10 lands as docs-only; the retry-impl PR ticket is filed in the v0.4.0 backlog
+- [x] Python wire-shape test reads the Go-produced fixture (mutual contract)
+
+> 🔀 **PR open** as `feature/v030-rfc0008-go-scheduler-hygiene` (2026-04-29). All 22 routed items + the wire-shape Go-produced fixture landed; pin tests live in [`internal/scheduler/context_package_pr6a_pins_test.go`](../../internal/scheduler/context_package_pr6a_pins_test.go); Go-produced fixture at [`tests/fixtures/context_package_v1.json`](../../tests/fixtures/context_package_v1.json) (regenerate via `PERSATRIX_REGEN_FIXTURES=1 go test ./internal/scheduler -run TestContextPackage_WriteWireShapeFixture`).
 
 #### PR 6b: `feature/v030-rfc0008-procedural-cleanup` — Python procedural memory + log-safety cleanup
 

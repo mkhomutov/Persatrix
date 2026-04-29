@@ -133,3 +133,37 @@ workflow:
 	assert.Contains(t, err.Error(), `step "s1": context_budget set`)
 	assert.Contains(t, err.Error(), "context_budget_total is unset")
 }
+
+// TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected pins the M7
+// planner-tighten disposition (RFC 0008 PR 6a): when per-step overrides
+// exhaust the total but at least one step is non-overridden, the equal-
+// split allocator hands that step zero tokens and `executeStep`'s
+// `budget > 0` gate then skips packaging entirely — the author opted into
+// packaging on the workflow yet a step silently gets legacy passthrough.
+// The planner must reject the workflow at parse time.
+func TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected(t *testing.T) {
+	yaml := `
+schema_version: "0.1"
+workflow:
+  id: "test-wf"
+  name: "Sum equals total but a non-overridden step exists"
+  context_budget_total: 1000
+  steps:
+    - id: "s1"
+      agent: "planner"
+      input: "a"
+      context_budget: 600
+    - id: "s2"
+      agent: "planner"
+      input: "b"
+      context_budget: 400
+    - id: "s3"
+      agent: "planner"
+      input: "c"
+`
+	p := newTestPlanner()
+	_, err := p.Parse(context.Background(), writeTempYAML(t, yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-overridden step")
+	assert.Contains(t, err.Error(), ">= 1 token")
+}

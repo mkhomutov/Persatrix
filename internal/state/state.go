@@ -65,6 +65,14 @@ type StepExecutionMetadata struct {
 // step retries (when scheduler-level retry lands post-v0.3) so the second
 // attempt consumes from the persisted remainder rather than re-allocating
 // the full per-step budget. Wired in RFC 0008 PR 1b.
+//
+// M10 (RFC 0008 PR 6a): today `markStepFailed` in stage_runner.go writes a
+// fresh StepState without copying RemainingContextBudget forward, so a
+// success → fail → retry transition currently zeroes the field on the fail
+// step. Failure-path preservation is intentionally deferred to the
+// scheduler-level retry-implementation PR (post-v0.3) — the retry path does
+// not exist yet, so the contract is unreachable today and the fix is
+// scoped to land alongside the consumer.
 type StepState struct {
 	StepID                 string
 	Status                 RunStatus

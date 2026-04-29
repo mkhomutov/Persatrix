@@ -26,8 +26,16 @@ import (
 //
 // Lookup failures (run not found, store error, missing step) all degrade to
 // the original allocation — the budget read is best-effort, never fatal.
+//
+// L15 (RFC 0008 PR 6a): the allocator never emits a negative `allocated`,
+// but the function's contract is "return the budget to use" — clamp to 0
+// on the early-return paths so a hypothetical negative input cannot leak
+// into the packager.
 func (s *WorkflowScheduler) remainingContextBudgetForStep(ctx context.Context, runID, stepID string, allocated int) int {
-	if s.store == nil || allocated <= 0 {
+	if allocated < 0 {
+		return 0
+	}
+	if s.store == nil || allocated == 0 {
 		return allocated
 	}
 	run, err := s.store.GetRun(ctx, runID)
@@ -81,5 +89,5 @@ func contextPackageMetricsFromPackage(pkg *packaging.Package) *cost.ContextPacka
 	if pkg == nil {
 		return nil
 	}
-	return cost.NewContextPackageMetrics(&pkg.Metrics, len(pkg.StepOutputs))
+	return cost.NewContextPackageMetrics(pkg)
 }
