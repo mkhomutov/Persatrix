@@ -22,6 +22,7 @@ from .llm_client import (
     ToolCall,
 )
 from .memory import MemoryFacade, SharedPoolRegistry, budget_to_limit
+from .memory.facade_procedural import procedural_kwargs_from_config
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
@@ -178,9 +179,6 @@ class BaseAgent(ABC):
             return
         memory_cfg = self.config.get("memory") or {}
         db_path = memory_cfg.get("db_path", "data/memory.db")
-        # PR 2a M2: default min_score to 0.20 (matches schema default) so
-        # low-score entries do not cross the system-prompt trust boundary.
-        # Callers who explicitly set ``null`` in config opt out of filtering.
         facade = MemoryFacade(
             agent_id=self.agent_id,
             db_path=db_path,
@@ -189,6 +187,7 @@ class BaseAgent(ABC):
             ttl_low_importance_days=int(memory_cfg.get("ttl_low_importance_days", 30)),
             eviction_cadence_seconds=int(memory_cfg.get("eviction_cadence_seconds", 3600)),
             shared_pools=shared_pools,
+            **procedural_kwargs_from_config(memory_cfg),
         )
         await facade.initialize()
         self._memory = facade

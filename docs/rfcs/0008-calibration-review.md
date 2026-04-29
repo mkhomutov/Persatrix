@@ -1,0 +1,75 @@
+# RFC 0008 — 30-Day Eviction Parameter Calibration Review
+
+**Status**: 📋 Placeholder — landed in [PR 5](0008-pr-plan.md#pr-5-featurev030-rfc0008-procedural-revalidation--phase-4b-confidence-decay--revalidation); will be filled in by [PR 6](0008-pr-plan.md#pr-6-featurev030-rfc0008-close--review-follow-ups--rfc-close).
+**Calibration window opens**: PR 5 merge date.
+**Calibration window closes**: PR 5 merge date + 30 days.
+**Gate**: this review must complete before RFC 0008 flips to `✅ Implemented` (Open Question 12 commitment).
+
+---
+
+## Purpose
+
+[RFC 0008 Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection)
+commits the project to shipping the v0.3.0 memory eviction defaults
+(`episodic_cap = 1000`, `ttl_low_importance_days = 30`,
+`lambda_per_day = 0.01`, `c_min = 0.1`, `stale_confidence_alert_threshold = 0.3`)
+with a **mandatory** 30-day post-merge review. The review must either
+validate the shipped defaults or retune them via a one-line
+`config/agents.yaml` change before the RFC closes. The retune (if any)
+ships in PR 6 alongside the RFC status flip.
+
+---
+
+## Inputs (to be filled in by PR 6)
+
+Aggregate the following over the 30-day window from the
+`orchestrator.memory.*` instruments registered in
+[`internal/observability/metrics/metrics.go`](../../internal/observability/metrics/metrics.go)
+(see RFC 0008 PR 5):
+
+- `evictions_count` — per-tier (episodic|procedural) and per-reason (ttl|cap|decay) totals.
+- `average_confidence_at_eviction` — distribution percentiles (p50, p90, p99).
+- `average_importance_at_eviction` — distribution percentiles (p50, p90, p99).
+- `memory_utilization_ratio` — per-agent fill ratio (count / `episodic_cap`); flag agents consistently > 0.95 or < 0.20.
+- `oldest_surviving_entry_age_days` — distribution; flag agents with values exceeding the TTL.
+- `entries_below_stale_threshold` — per-agent counts; sustained non-zero values indicate the stale window is too narrow or `lambda` is too aggressive.
+- `stale_memory_injection` — counter; sustained-rate alerting baseline.
+
+Additionally, validate the PR 2 advisory-budget translation constant
+`avg_entry_tokens = 100` against the observed `episodic_entry_token_count`
+distribution (PR 5 checklist item).
+
+---
+
+## Findings (PR 6)
+
+> Replace this section with the actual findings before merging PR 6.
+
+| Parameter | Shipped default | Observed range | Action | Justification |
+|-----------|-----------------|----------------|--------|---------------|
+| `episodic_cap` | 1000 | TBD | TBD | TBD |
+| `ttl_low_importance_days` | 30 | TBD | TBD | TBD |
+| `lambda_per_day` | 0.01 (~69-day half-life) | TBD | TBD | TBD |
+| `c_min` | 0.1 | TBD | TBD | TBD |
+| `stale_confidence_alert_threshold` | 0.3 | TBD | TBD | TBD |
+| `avg_entry_tokens` | 100 | TBD | TBD | TBD |
+
+---
+
+## Decision (PR 6)
+
+> Replace with one of:
+>
+> - **Defaults stand** — no config change required; instrumentation
+>   confirmed the shipped values across the observed agent population.
+> - **Retune** — one-line `config/agents.yaml` change(s) listed above;
+>   schema defaults updated to match.
+
+---
+
+## References
+
+- [RFC 0008 §G — Memory eviction, decay, and validation](0008-agent-memory-context-optimization.md#g-memory-eviction-decay-and-validation)
+- [RFC 0008 Open Question 12 — Memory eviction parameter calibration](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection)
+- [RFC 0008 PR plan PR 5 — Confidence decay + procedural revalidation](0008-pr-plan.md#pr-5-featurev030-rfc0008-procedural-revalidation--phase-4b-confidence-decay--revalidation)
+- [RFC 0008 PR plan PR 6 — Review follow-ups + RFC close](0008-pr-plan.md#pr-6-featurev030-rfc0008-close--review-follow-ups--rfc-close)

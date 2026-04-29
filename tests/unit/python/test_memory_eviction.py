@@ -433,13 +433,19 @@ async def test_size_cap_skips_procedure_rows(
     """
     db = episodic._ensure_db()  # noqa: SLF001
     for i in range(3):
+        # Set ``confidence`` explicitly to match ``importance`` so the
+        # PR #225 review S2 legacy-row shim in
+        # ``episodic_procedural._resolve_base_confidence`` does not
+        # interpret these as pre-PR-5 rows and hand a low decay base
+        # to ``_evict_procedural_decay``.  The test's intent is "procs
+        # are excluded from size-cap eviction", not decay eviction.
         await db.execute(
             "INSERT INTO episodes (id, agent_id, summary, importance, "
-            "tags_json, created_at, compression_level) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0)",
+            "tags_json, created_at, compression_level, confidence) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
             (
                 f"proc-{i}", "evict-test", f"procedure-{i}",
-                0.1, f'["procedure:k{i}"]', time.time(),
+                0.9, f'["procedure:k{i}"]', time.time(), 0.9,
             ),
         )
     await db.commit()

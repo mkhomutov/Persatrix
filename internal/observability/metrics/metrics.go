@@ -102,6 +102,22 @@ type Instruments struct {
 	DelegationMemoryWritesAdmitted   metric.Int64Counter
 	DelegationMemoryWritesRejected   metric.Int64Counter
 	DelegationMemoryWritesDownscaled metric.Int64Counter
+
+	// RFC 0008 PR 5 — procedural-tier confidence-decay observability.
+	//
+	// Counters are incremented by the Python eviction loop / facade via
+	// the same structured-log → metric bridge as the delegation
+	// counters above.  Gauges are intended to be polled directly from
+	// the agent process when the LogServiceServer ingests the
+	// ``memory.snapshot`` periodic event (PR 6); shipped here so the
+	// inventory is stable for dashboards and the v0.3.0 release notes.
+	MemoryEvictionsCount              metric.Int64Counter
+	MemoryAvgConfidenceAtEviction     metric.Float64Histogram
+	MemoryAvgImportanceAtEviction     metric.Float64Histogram
+	MemoryUtilizationRatio            metric.Float64Gauge
+	MemoryOldestSurvivingEntryAgeDays metric.Float64Gauge
+	MemoryEntriesBelowStaleThreshold  metric.Int64Gauge
+	MemoryStaleMemoryInjection        metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.
@@ -218,6 +234,77 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 		),
 	); err != nil {
 		return nil, fmt.Errorf("create delegation.memory_writes_downscaled: %w", err)
+	}
+
+	// RFC 0008 PR 5 — procedural-tier observability.  Names follow the
+	// ``orchestrator.memory.*`` namespace per RFC 0019 § F; the Python
+	// agent emits matching structured-log events (e.g. log
+	// ``metric=stale_memory_injection``) which the LogServiceServer
+	// ingestion bridge translates to counter increments after
+	// prepending the ``orchestrator.memory.`` prefix — same one-line
+	// translation rule as the delegation counters above.
+	if i.MemoryEvictionsCount, err = m.Int64Counter(
+		"orchestrator.memory.evictions_count",
+		metric.WithUnit("{entry}"),
+		metric.WithDescription(
+			"Memory entries evicted by the periodic loop, labelled by tier (episodic|procedural) and reason (ttl|cap|decay).",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.evictions_count: %w", err)
+	}
+	if i.MemoryAvgConfidenceAtEviction, err = m.Float64Histogram(
+		"orchestrator.memory.average_confidence_at_eviction",
+		metric.WithUnit("1"),
+		metric.WithDescription(
+			"Decayed confidence value of procedural entries at the moment of eviction.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.average_confidence_at_eviction: %w", err)
+	}
+	if i.MemoryAvgImportanceAtEviction, err = m.Float64Histogram(
+		"orchestrator.memory.average_importance_at_eviction",
+		metric.WithUnit("1"),
+		metric.WithDescription(
+			"Importance value of episodic entries at the moment of eviction.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.average_importance_at_eviction: %w", err)
+	}
+	if i.MemoryUtilizationRatio, err = m.Float64Gauge(
+		"orchestrator.memory.memory_utilization_ratio",
+		metric.WithUnit("1"),
+		metric.WithDescription(
+			"Per-agent episodic-tier fill ratio (count / episodic_cap).",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.memory_utilization_ratio: %w", err)
+	}
+	if i.MemoryOldestSurvivingEntryAgeDays, err = m.Float64Gauge(
+		"orchestrator.memory.oldest_surviving_entry_age_days",
+		metric.WithUnit("d"),
+		metric.WithDescription(
+			"Age in days of the oldest non-evicted episodic entry per agent.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.oldest_surviving_entry_age_days: %w", err)
+	}
+	if i.MemoryEntriesBelowStaleThreshold, err = m.Int64Gauge(
+		"orchestrator.memory.entries_below_stale_threshold",
+		metric.WithUnit("{entry}"),
+		metric.WithDescription(
+			"Per-agent count of procedural entries with decayed_confidence < stale_confidence_alert_threshold.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.entries_below_stale_threshold: %w", err)
+	}
+	if i.MemoryStaleMemoryInjection, err = m.Int64Counter(
+		"orchestrator.memory.stale_memory_injection",
+		metric.WithUnit("{event}"),
+		metric.WithDescription(
+			"Procedural-tier admissions whose decayed_confidence fell into [c_min, stale_confidence_alert_threshold).",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create memory.stale_memory_injection: %w", err)
 	}
 	return i, nil
 }
