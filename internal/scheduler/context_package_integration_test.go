@@ -127,7 +127,9 @@ workflow:
 	// Diagnostic: surface the actual failure error if the run doesn't complete.
 	// (Review M2: previously polled the wrong run ID — "ctxpkg-run" — which was
 	// the prior test's run and never matched, so the diagnostic never fired.)
-	deadline := time.Now().Add(3 * time.Second)
+	// N7 (RFC 0008 PR 6a): trimmed the diagnostic deadline 3s → 1s; the real
+	// `waitForRunStatus` (5s) still fires after if the run truly stalls.
+	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
 		run, _ := store.GetRun(context.Background(), "legacy-run")
 		if run != nil && (run.Status == state.RunFailed || run.Status == state.RunCompleted) {

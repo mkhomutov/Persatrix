@@ -11,27 +11,33 @@ import (
 )
 
 // TestNewContextPackageMetrics verifies the helper copies fields out of
-// packaging.Metrics and stamps the derived `candidates_admitted` count.
-// RFC 0008 PR 1b — admitted is intentionally cost-record-only (the wire
-// shape derives it from len(step_outputs)) so it must be supplied by the
-// caller, not pulled from the Metrics block.
+// the supplied packaging.Package and stamps the derived
+// `candidates_admitted` count from `len(pkg.StepOutputs)`. RFC 0008 PR 1b
+// — admitted is intentionally cost-record-only (the wire shape derives it
+// from len(step_outputs)). PR 6a / N9 changed the signature to take the
+// package directly so callers cannot miswire the admitted count.
 func TestNewContextPackageMetrics(t *testing.T) {
-	t.Run("nil metrics returns nil", func(t *testing.T) {
-		assert.Nil(t, NewContextPackageMetrics(nil, 5))
+	t.Run("nil package returns nil", func(t *testing.T) {
+		assert.Nil(t, NewContextPackageMetrics(nil))
 	})
 	t.Run("happy path copies fields", func(t *testing.T) {
-		m := &packaging.Metrics{
-			TokensBefore:      200,
-			TokensAfter:       150,
-			CompressionRatio:  1.33,
-			CandidatesDropped: 2,
+		pkg := &packaging.Package{
+			StepOutputs: []packaging.AdmittedSection{
+				{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"},
+			},
+			Metrics: packaging.Metrics{
+				TokensBefore:      200,
+				TokensAfter:       150,
+				CompressionRatio:  1.33,
+				CandidatesDropped: 2,
+			},
 		}
-		got := NewContextPackageMetrics(m, 4)
+		got := NewContextPackageMetrics(pkg)
 		require.NotNil(t, got)
 		assert.Equal(t, 200, got.TokensBefore)
 		assert.Equal(t, 150, got.TokensAfter)
 		assert.Equal(t, 1.33, got.CompressionRatio)
-		assert.Equal(t, 4, got.CandidatesAdmitted)
+		assert.Equal(t, 4, got.CandidatesAdmitted, "admitted == len(pkg.StepOutputs)")
 		assert.Equal(t, 2, got.CandidatesDropped)
 	})
 }

@@ -29,15 +29,28 @@ func validateContextBudget(w *Workflow) error {
 		return fmt.Errorf("workflow %q: context_budget_total must not be negative", w.ID)
 	}
 	if w.ContextBudgetTotal > 0 {
-		var overrideSum int
+		var overrideSum, nonOverriddenCount int
 		for _, step := range w.Steps {
 			if step.ContextBudget > 0 {
 				overrideSum += step.ContextBudget
+			} else {
+				nonOverriddenCount++
 			}
 		}
 		if overrideSum > w.ContextBudgetTotal {
 			return fmt.Errorf("workflow %q: sum of per-step context_budget overrides (%d) exceeds context_budget_total (%d)",
 				w.ID, overrideSum, w.ContextBudgetTotal)
+		}
+		// M7 (RFC 0008 PR 6a): planner-tighten disposition. When per-step
+		// overrides exhaust the total but at least one step is non-overridden,
+		// the equal-split allocator hands that step zero tokens and
+		// `executeStep`'s `budget > 0` gate then skips packaging entirely —
+		// the author opted into packaging on the workflow yet a step silently
+		// gets legacy passthrough. Reject loudly: every non-overridden step
+		// must receive at least one token.
+		if overrideSum+nonOverriddenCount > w.ContextBudgetTotal {
+			return fmt.Errorf("workflow %q: per-step context_budget overrides (%d) plus %d non-overridden step(s) requires at least %d tokens but context_budget_total is %d (each non-overridden step needs >= 1 token)",
+				w.ID, overrideSum, nonOverriddenCount, overrideSum+nonOverriddenCount, w.ContextBudgetTotal)
 		}
 		return nil
 	}

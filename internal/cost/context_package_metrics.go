@@ -25,18 +25,23 @@ type ContextPackageMetrics struct {
 }
 
 // NewContextPackageMetrics constructs a ContextPackageMetrics from the Phase-1
-// `packaging.Metrics` block plus the admitted-count derived from the package
-// itself (== len(StepOutputs)). Returns nil when m is nil so callers can use
-// the helper unconditionally on the post-build path.
-func NewContextPackageMetrics(m *packaging.Metrics, admitted int) *ContextPackageMetrics {
-	if m == nil {
+// `packaging.Package`, deriving admitted-count from `len(pkg.StepOutputs)`.
+// Returns nil when pkg is nil so callers can use the helper unconditionally
+// on the post-build path.
+//
+// N9 (RFC 0008 PR 6a): the prior signature took `*packaging.Metrics` plus
+// a separate admitted int — easy to miswire (caller must remember to pass
+// `len(pkg.StepOutputs)` and not e.g. `len(pkg.Memories)`). Taking the
+// package directly removes the foot-gun.
+func NewContextPackageMetrics(pkg *packaging.Package) *ContextPackageMetrics {
+	if pkg == nil {
 		return nil
 	}
 	return &ContextPackageMetrics{
-		TokensBefore:       m.TokensBefore,
-		TokensAfter:        m.TokensAfter,
-		CompressionRatio:   m.CompressionRatio,
-		CandidatesAdmitted: admitted,
-		CandidatesDropped:  m.CandidatesDropped,
+		TokensBefore:       pkg.Metrics.TokensBefore,
+		TokensAfter:        pkg.Metrics.TokensAfter,
+		CompressionRatio:   pkg.Metrics.CompressionRatio,
+		CandidatesAdmitted: len(pkg.StepOutputs),
+		CandidatesDropped:  pkg.Metrics.CandidatesDropped,
 	}
 }

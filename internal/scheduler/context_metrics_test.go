@@ -19,8 +19,8 @@ import (
 
 // TestAttachContextPackage_WarningSamplerDedupesPerStep asserts the L11
 // review follow-up: the warn channel emits each (execution_id, step_id,
-// warning) tuple at most warningSampleCap times, even when the same step
-// re-attaches its package N times (the future scheduler-level retry path).
+// warning) tuple at most once per run, even when the same step re-attaches
+// its package N times (the future scheduler-level retry path).
 // The cost record on StepCostEntry.ContextPackage carries the unsampled
 // metric for every attempt, so capping log noise here loses no telemetry.
 func TestAttachContextPackage_WarningSamplerDedupesPerStep(t *testing.T) {
@@ -42,8 +42,8 @@ func TestAttachContextPackage_WarningSamplerDedupesPerStep(t *testing.T) {
 	}
 
 	entries := recorded.FilterMessage("context_package warning").All()
-	require.Len(t, entries, warningSampleCap,
-		"sampler should cap repeated warnings per (run, step, kind) tuple at warningSampleCap")
+	require.Len(t, entries, 1,
+		"sampler should cap repeated warnings per (run, step, kind) tuple at one emission")
 }
 
 // TestAttachContextPackage_WarningSamplerKeysOnRunAndStep asserts the
@@ -220,12 +220,18 @@ func TestRemainingContextBudgetForStep_UsesPersistedRemainder(t *testing.T) {
 // against a buggy writer persisting a remainder larger than the original
 // allocation — the lookup must never hand the packager more tokens than the
 // allocator originally granted.
+//
+// L16 (RFC 0008 PR 6a): set Status explicitly to RunCompleted so the test
+// would still exercise the intended path if the function ever filters by
+// status (currently it does not, but the explicit status documents intent
+// and prevents a future status-gated read from silently passing).
 func TestRemainingContextBudgetForStep_RemainderCappedAtAllocation(t *testing.T) {
 	store := state.NewInMemoryStore(zap.NewNop())
 	ctx := context.Background()
 	require.NoError(t, store.CreateRun(ctx, &state.WorkflowRun{ID: "run-1", WorkflowID: "wf-1"}))
 	require.NoError(t, store.UpdateStepState(ctx, "run-1", state.StepState{
 		StepID:                 "s1",
+		Status:                 state.RunCompleted,
 		RemainingContextBudget: 5000,
 	}))
 	s := &WorkflowScheduler{store: store, logger: zap.NewNop()}

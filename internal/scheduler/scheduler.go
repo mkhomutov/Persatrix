@@ -203,6 +203,11 @@ func (s *WorkflowScheduler) pollAndExecute(ctx context.Context, sem chan struct{
 
 // executeRun drives a single workflow run through all stages.
 func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
+	// M11 (RFC 0008 PR 6a): drop the per-run sampler bucket on terminal
+	// status so the warningSampler.runs map does not accumulate state for
+	// completed runs across a long-running orchestrator. Runs that never
+	// emitted a sampled warning are no-ops here.
+	defer s.warningSampler.pruneRun(runID)
 	run, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		s.logger.Error("failed to get run", zap.String("execution_id", runID), zap.Error(err))

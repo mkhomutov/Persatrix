@@ -22,29 +22,49 @@ Coverage:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from agents.base import TaskInput, TaskInputConfig
 
 # Reserved key — must match `internal/scheduler/context_package.go::ContextPackageKey`.
 CONTEXT_PACKAGE_KEY = "_context_package"
 
-# Sample payload modelled directly on `internal/executor/packaging.Package`.
-# Field tags here must match the Go json tags so a renaming on either side
-# trips this test before it reaches integration.
-_GO_PRODUCED_SAMPLE = {
-    "version": 1,
-    "pinned_sections": [],
-    "step_outputs": [
-        {"id": "out1", "content": "first step output", "tokens": 4},
-    ],
-    "metrics": {
-        "tokens_before": 4,
-        "tokens_after": 4,
-        "compression_ratio": 1.0,
-        "candidates_dropped": 0,
-    },
-    "budget_memory_tokens": 0,
-}
+# RFC 0008 PR 6a — wire-shape contract follow-up. The fixture is produced by
+# `internal/scheduler/context_package_wire_shape_fixture_test.go` (run
+# `PERSATRIX_REGEN_FIXTURES=1 go test ./internal/scheduler -run
+# TestContextPackage_WriteWireShapeFixture` to refresh after wire-shape
+# edits). Reading the Go-produced JSON here pins the cross-language contract:
+# a unilateral tag rename on either side fails this test before integration.
+_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[2] / "fixtures" / "context_package_v1.json"
+)
+
+
+def _load_fixture() -> dict[str, object]:
+    """Load the Go-produced v1 fixture; fall back to a minimal in-tree sample
+    if the fixture is absent (e.g. fresh clone before the Go test has run).
+    The fall-back is structurally identical so the test still asserts the
+    contract; CI runs the Go test first via `make test`.
+    """
+    if _FIXTURE_PATH.is_file():
+        return json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    return {
+        "version": 1,
+        "pinned_sections": [],
+        "step_outputs": [
+            {"id": "out1", "content": "first step output", "tokens": 4},
+        ],
+        "metrics": {
+            "tokens_before": 4,
+            "tokens_after": 4,
+            "compression_ratio": 1.0,
+            "candidates_dropped": 0,
+        },
+        "budget_memory_tokens": 0,
+    }
+
+
+_GO_PRODUCED_SAMPLE: dict[str, object] = _load_fixture()
 
 
 def test_context_package_v1_payload_parses() -> None:

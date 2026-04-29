@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "pinned_sections": [],
+  "step_outputs": [
+    {
+      "id": "out1",
+      "content": "first step output",
+      "tokens": 4
+    }
+  ],
+  "metrics": {
+    "tokens_before": 4,
+    "tokens_after": 4,
+    "compression_ratio": 1,
+    "candidates_dropped": 0
+  },
+  "budget_memory_tokens": 0
+}

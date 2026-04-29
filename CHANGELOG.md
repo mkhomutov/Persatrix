@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **RFC 0008 PR 6a — Go scheduler hygiene + sampler bookkeeping.**
+  Internal-only follow-up consolidating ~22 deferred review findings from
+  PR 1 / PR 1b / PR 3 / PR 4 / PR 5 into the Go scheduler & packaging
+  surfaces.  No wire-shape, schema-shape, or operator-visible behaviour
+  changes.  Highlights: deterministic candidate ordering in
+  `attachContextPackage` (sorts map keys before building
+  `packaging.Candidate`s); per-run warning-sampler bookkeeping with
+  `pruneRun(execID)` invoked from `executeRun` (eliminates unbounded
+  growth on long-running orchestrators); `noCopy` sentinel on the sampler
+  (verified by `go vet -copylocks`); rune-count token estimate for
+  multibyte payloads; planner now rejects workflows where overrides leave
+  no remainder for non-overridden steps; cross-language wire-shape
+  contract pinned via Go-produced fixture
+  (`tests/fixtures/context_package_v1.json`, regenerated with
+  `PERSATRIX_REGEN_FIXTURES=1`) consumed by the Python wire-shape test.
+  See `internal/scheduler/context_package_pr6a_pins_test.go` for the
+  contract pin tests.
 - **`memory.min_score` schema default `null` → `0.20`** (RFC 0008 PR 2a).
   Operators with `memory.enabled: true` who did not previously set
   `memory.min_score` will see strictly fewer recall results after this
