@@ -377,6 +377,85 @@ Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../
     around `interaction_idle_timeout_sec` could be one call by adding a `min_value=` kwarg to
     `_coerce_event_timeout` (or a small `_coerce_positive_float` helper). Cosmetic.
 
+##### From PR 4 review (round 2)
+
+20. **Phase 2 ↔ janitor write race inflates `agent.interactions.summary.failed` and lets a
+    late LLM overwrite a janitor-finalised row** (`agents/memory/episodic_queries.py`,
+    `agents/persona_runtime/summarize_close.py`). The Phase 2 UPDATE in
+    `update_episode_summary()` is unscoped — if the janitor sweeps the row first and writes
+    `SUMMARY_UNAVAILABLE_TEXT`, a late-successful LLM completion will still overwrite it
+    with the LLM text, and a late-failing Phase 2 will increment the failure counter a
+    second time for the same interaction (`reason="janitor"` + `reason="timeout"`). Scope
+    the UPDATE with `WHERE summary = SUMMARY_PENDING_TEXT`; on the returned-`False` path,
+    skip `record_closed_interaction` and `_tick_auto_reflect_counter` so the janitor's
+    decision is final. Document the contract in §C and in
+    `finalize_closed_interaction`'s docstring.
+
+21. **`finalize_closed_interaction` uses `assert` for a runtime invariant**
+    (`agents/persona_runtime/summarize_close.py`). `assert interaction.interaction_id is
+    not None` is stripped under `python -O`. Replace with an explicit
+    `if interaction.interaction_id is None: logger.warning(...); return` guard so a future
+    Phase-1 reorder cannot let `None` through silently.
+
+22. **`update_episode_summary` raises `ValueError` on empty summary that the caller
+    guarantees is non-empty** (`agents/memory/episodic_queries.py`). The validation is
+    unreachable today (`summarize_closed_interaction` always returns either the LLM text
+    or `SUMMARY_UNAVAILABLE_TEXT`), but the contract is undocumented at the call site and
+    the exception escapes Phase 2's inner `try`. Either drop the validation (single-writer
+    invariant) or document it as a precondition in the docstring.
+
+23. **`drain_pending_summaries` snapshot semantics depend on `_lock`**
+    (`agents/persona_runtime/state_persistence.py`,
+    `agents/persona_runtime/summarize_close.py`). `drain_pending_summary_tasks()` snapshots
+    the pending set with `list(pending)` so tasks spawned during drain are not awaited.
+    `close_memory()` runs the drain under `self._lock`, which is the property the snapshot
+    relies on. Add a one-line comment at the drain call site noting the lock dependency so
+    a future refactor that moves the drain outside the lock does not silently lose
+    late-arriving tasks.
+
+24. **`maybe_run_janitor` swallows sweep failures and advances the cooldown by a full
+    interval** (`agents/persona_runtime/summarize_close.py`). On a transient DB error the
+    next sweep is delayed another `JANITOR_INTERVAL_SEC` (5 min), so during a persistent
+    outage stuck rows accumulate quietly. Add an `agent.interactions.janitor.failed`
+    counter, or shorten the cooldown on the failure path, so operators can SLO-alert on
+    repeated failures.
+
+25. **`_persist_closed_interaction` silently drops the close path when
+    `_llm_client is None`** (`agents/persona_runtime/state_persistence.py`). Production
+    agents always construct with an LLM client, so the early return exists only for
+    test bootstrap. Tighten at construction time (assert non-None or fold the bootstrap
+    path into a dedicated test seam) so the silent-drop branch is dead in production.
+
+26. **No regression test for the Phase 2 ↔ janitor race** (finding #20)
+    (`tests/integration/test_summarize_on_close_phases.py`). Extend `TestTwoPhaseWrite`
+    with a case that calls `cleanup_closing_interactions(grace_sec=0.0)` between Phase 1
+    and `gate.set()`, asserts the row is `SUMMARY_UNAVAILABLE_TEXT`, then releases the
+    gate, drains, and asserts the row is *still* `SUMMARY_UNAVAILABLE_TEXT` (locks finding
+    #20's fix in place).
+
+27. **No test pins `close_memory`-without-explicit-drain shutdown ordering** (PR 4 round-2
+    coverage gap). Add a test that triggers a close, then immediately calls `close_memory`
+    with no explicit `drain_pending_summaries`, and asserts the final summary is the LLM
+    text (not the sentinel). Locks in the contract that `close_memory` drains on the way
+    out.
+
+28. **No test pins `update_episode_summary`'s `agent_id` scoping**
+    (`tests/unit/python/test_episodic_memory.py`). Add a two-agent test that updates agent
+    A's row and asserts agent B's pending row is untouched. Closes the loop on the
+    agent-scoped UPDATE contract.
+
+29. **`maybe_run_janitor` cooldown is exercised only indirectly** (`tests/unit/python/`).
+    `TestJanitorBackfillsPendingSummaries` calls `cleanup_closing_interactions` directly,
+    not via `on_tick`. Add a unit test that invokes `on_tick` twice within
+    `JANITOR_INTERVAL_SEC` and asserts the cleanup runs only once. Pins the cooldown
+    semantics so a future refactor that drops the monotonic guard surfaces immediately.
+
+30. **`test_pending_sentinel_visible_before_drain` relies on `await asyncio.sleep(0)` to
+    observe Phase-1 mid-flight** (`tests/integration/test_summarize_on_close_phases.py`).
+    Works today, fragile under event-loop scheduling changes. Replace with an
+    `asyncio.Event` set from the mock provider's first await so the test deterministically
+    waits for the Phase-2 task to park on `gate.wait()`.
+
 ---
 
 ### PR 7: `feature/v030-rfc0020-close` — RFC Close
