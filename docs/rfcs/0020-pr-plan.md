@@ -191,9 +191,9 @@ PR 7 (RFC close)
 
 #### PR checklist
 
-- [ ] Migration Notes appendix lands with this PR
-- [ ] RFC 0008 `MemoryFacade.compress` import resolves (cross-RFC dep is concrete)
-- [ ] No regression on RFC 0017 token-bound contract
+- [x] Migration Notes appendix lands with this PR
+- [x] RFC 0008 `MemoryFacade.compress` import resolves (cross-RFC dep is concrete)
+- [x] No regression on RFC 0017 token-bound contract
 
 ---
 

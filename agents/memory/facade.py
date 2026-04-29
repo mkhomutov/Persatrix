@@ -393,23 +393,23 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
 
 
 
-    # ─── Compression hook (RFC 0020 PR 4 contract) ───────────────
-
+    @staticmethod
     def compress(
-        self,
         entries: Iterable[MemoryEntry],
         *,
         target_tokens: int,
     ) -> CompressedView:
-        """Extractively compress *entries* into a single view of ≤ ``target_tokens``.
+        """Extractively compress *entries* into a view of ≤ ``target_tokens``.
 
-        Phase 2 implementation: highest-importance first, in-order until the
-        running token count would exceed ``target_tokens``.  Idempotent.
-        Entries individually larger than ``target_tokens`` are silently
-        skipped (knapsack-suboptimal but acceptable for Phase 2 — the
-        extractive path is a stop-gap until PR 5's abstractive path) and
-        count toward ``entries_dropped``.  The signature is pinned by
-        [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4.
+        RFC 0020 PR 4 contract.  Phase 2 implementation: highest-
+        importance first, in-order until the running token count would
+        exceed ``target_tokens``.  Idempotent.  Entries individually
+        larger than ``target_tokens`` are silently skipped (knapsack-
+        suboptimal but acceptable for Phase 2 — the extractive path is a
+        stop-gap until PR 5's abstractive path) and count toward
+        ``entries_dropped``.  :func:`staticmethod` so RFC 0020 PR 4's
+        persona-runtime call site can invoke it without a facade instance.
+        Pinned by [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4.
         """
         if target_tokens < 0:
             raise ValueError(f"target_tokens must be >= 0, got {target_tokens}")

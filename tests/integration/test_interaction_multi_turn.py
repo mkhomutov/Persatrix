@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
-from agents.memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
+from agents.memory.boundary_detectors import REASON_IDLE_GAP
 from agents.memory.interactions import scope_for_dm
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
@@ -180,7 +180,15 @@ class TestMultiTurnAggregation:
         assert ep["scope"] == expected_scope
         assert ep["closed_at"] is not None
         assert ep["closed_at"] >= ep["started_at"]
-        assert REASON_STRUCTURAL in ep["summary"]
+        # RFC 0020 PR 4 swapped the deterministic placeholder summary
+        # (which carried ``REASON_STRUCTURAL``) for an LLM-generated
+        # summary.  The mock LLM returns the DO_NOTHING JSON blob for
+        # every call site; the close_reason now lives in ``context_json``
+        # (asserted in ``test_summarize_on_close.py``).  Here we only
+        # assert that *some* non-empty, non-fallback summary was written.
+        from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT
+        assert ep["summary"]
+        assert ep["summary"] != SUMMARY_UNAVAILABLE_TEXT
 
         # Tracker is empty \u2014 the closed scope was popped per RFC 0020
         # \u00a7C "do not reopen".

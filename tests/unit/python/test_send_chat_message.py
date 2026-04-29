@@ -14,7 +14,6 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
-import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher
@@ -286,8 +285,17 @@ class TestSendChatMessage:
         assert resp.reply == "safe reply"
         assert resp.reply_status == "ok"
 
-    async def test_relationship_memory_recorded(self):
-        """record_interaction() is called when agent has relationship memory."""
+    async def test_relationship_memory_not_recorded_per_event(self):
+        """RFC 0020 PR 4: per-event ``record_interaction`` was removed.
+
+        The relationship row is now bumped once per closed interaction
+        in :meth:`_StatePersistenceMixin._persist_closed_interaction`
+        (see ``tests/integration/test_summarize_on_close.py::
+        TestRecordInteractionMove``).  This test guards against the
+        per-event call site sneaking back in — if it did,
+        ``interaction_count`` would inflate by N for every N-turn
+        chat session.
+        """
         actions = [
             AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]}),
         ]
@@ -305,50 +313,13 @@ class TestSendChatMessage:
         servicer = AgentServiceServicer({"ember-owl": agent}, dispatcher)
         context = _mock_context()
 
-        await servicer.SendChatMessage(
-            _chat_request(user_id="local", participant_type="user"), context,
-        )
-
-        memory.relationship.record_interaction.assert_called_once_with(
-            other_id="local",
-            interaction_type="chat",
-            outcome="hi",
-            other_participant_type="user",
-        )
-
-    async def test_relationship_memory_failure_still_returns_reply(self):
-        """Reply is returned even when record_interaction() raises.
-
-        Validates the exception handler at server_servicers.py that wraps
-        the relationship memory call — the reply must never be lost due to
-        a memory subsystem failure.  (Review finding: untested path.)
-        """
-        actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]}),
-        ]
-        agent = _StubAgent(agent_id="ember-owl", config={"model": "test"})
-        memory = MagicMock()
-        memory.relationship = MagicMock()
-        memory.relationship.record_interaction = AsyncMock(
-            side_effect=RuntimeError("memory db unavailable"),
-        )
-        agent._memory = memory  # type: ignore[attr-defined]
-
-        dispatcher = MagicMock(spec=EventDispatcher)
-        dispatcher.dispatch = AsyncMock(return_value=actions)
-        dispatcher.executor = MagicMock()
-        dispatcher.executor.execute = AsyncMock(return_value=[])
-
-        servicer = AgentServiceServicer({"ember-owl": agent}, dispatcher)
-        context = _mock_context()
-
         resp = await servicer.SendChatMessage(
             _chat_request(user_id="local", participant_type="user"), context,
         )
 
         assert resp.reply == "hi"
         assert resp.reply_status == "ok"
-        memory.relationship.record_interaction.assert_called_once()
+        memory.relationship.record_interaction.assert_not_called()
 
     # ─── Input Validation Length Limits ──────────────────────
 

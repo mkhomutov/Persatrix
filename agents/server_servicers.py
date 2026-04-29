@@ -303,20 +303,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 agent_id, exc_info=True,
             )
 
-        # Record human→agent interaction in relationship memory (OQ 11).
-        if hasattr(agent, "memory") and hasattr(agent.memory, "relationship"):
-            try:
-                await agent.memory.relationship.record_interaction(
-                    other_id=user_id or "unknown",
-                    interaction_type="chat",
-                    outcome=reply or None,
-                    other_participant_type=participant_type,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to record chat interaction for agent %s with %s",
-                    agent_id, user_id, exc_info=True,
-                )
+        # RFC 0020 PR 4: per-event ``record_interaction`` removed.
+        # Relationship-row bumps now happen once per closed interaction
+        # in :meth:`_StatePersistenceMixin._persist_closed_interaction`,
+        # so ``interaction_count`` reflects N closed interactions rather
+        # than N inbound chat events.
 
         return task_pb2.ChatResponse(
             reply=reply,
