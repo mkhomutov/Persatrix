@@ -101,13 +101,6 @@ class Clock(Protocol):
 
 _DEFAULT_CLOCK: Clock = time.time
 
-# RFC 0020 PR 4 reintroduces the module-level ``logger`` at the point of
-# first use — :func:`cleanup_closing_interactions` (the closing-state
-# janitor) and any future summary-failure path want a per-module
-# logger so operators can filter on ``agents.memory.interactions``.
-# Declared at the top of the module above (see ``logger =
-# logging.getLogger(__name__)``) so this banner is only a pointer.
-
 
 # ─── Scope vocabulary (RFC 0020 §G + §D scope-prefix table) ─────
 
@@ -406,9 +399,12 @@ async def cleanup_closing_interactions(
         await db.commit()
         inst = try_get_instruments()
         if inst is not None:
+            # PR #229 review nice-to-have #2: a single ``add(updated,
+            # attrs)`` is OTel-equivalent to N ``add(1, attrs)`` calls
+            # for a Counter and avoids a per-row Python loop on a
+            # potentially large backfill.
             attrs = {"agent_id": current_agent_id(), "reason": "janitor"}
-            for _ in range(updated):
-                inst.interactions_summary_failed.add(1, attrs)
+            inst.interactions_summary_failed.add(updated, attrs)
         logger.info(
             "Janitor backfilled %d closing-state interaction(s) for agent %s",
             updated, agent_id,

@@ -1,7 +1,7 @@
 """Tests for _inject_memory_context: truncation, stale-section clearing,
 and user/agent relationship lookup."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from agents.persona import create_persona_agent
 from agents.persona_types import AgentEvent, EventType

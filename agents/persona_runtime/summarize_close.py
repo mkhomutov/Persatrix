@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from ..memory.facade import CompressedView, MemoryEntry, MemoryFacade
@@ -32,6 +33,7 @@ from ..prompt_loader import load_snippet
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
+    from ..memory.episodic import EpisodicMemory
     from ..memory.interactions import Interaction
     from . import MemoryNamespace
 
@@ -56,6 +58,9 @@ SUMMARIZATION_TARGET_TOKENS: int = 2000
 # path's defensive truncation so an unusually long LLM summary cannot
 # blow up the relationship row's outcome column.
 RECORD_INTERACTION_OUTCOME_CHARS: int = 200
+
+# RFC 0020 PR 4 (PR #229 Should-Fix #2): on-tick janitor cooldown.
+JANITOR_INTERVAL_SEC: float = 300.0
 
 
 async def summarize_closed_interaction(
@@ -263,6 +268,16 @@ def extract_peer_from_interaction(
     peer = b if a == agent_id else a if b == agent_id else None
     if peer is None:
         return (None, "agent")
+    # PR #229 review Should-Fix #4: defensive self-DM guard.  A
+    # ``dm:<id>:<id>`` scope (where both sides equal the agent's own
+    # id) would otherwise return ``(agent_id, ...)`` and let
+    # ``record_interaction`` write a self-relationship row.  The
+    # current ``scope_for_dm`` sorts but does not de-duplicate, so
+    # this is reachable if a future caller passes
+    # ``self.agent_id`` as ``other_id`` either intentionally
+    # (self-talk) or via a routing bug.  Treat as "no peer".
+    if peer == agent_id:
+        return (None, "agent")
     peer_type = "agent"
     if interaction.turns:
         first_payload = interaction.turns[0].payload or {}
@@ -270,3 +285,103 @@ def extract_peer_from_interaction(
         if isinstance(raw, str) and raw in {"agent", "user"}:
             peer_type = raw
     return (peer, peer_type)
+
+
+# ─── Two-phase close-path tail (PR #229 review Must-Fix #1) ─────────
+#
+# Extracted from ``_StatePersistenceMixin`` so the mixin module stays
+# under the 500-line code-file size cap (``scripts/checks/file_size.py``).
+# These helpers run **outside** the agent ``_lock`` so a second inbound
+# event for the same agent does not queue head-of-line behind the LLM
+# round-trip.  They are best-effort: the ``[summary pending]`` row is
+# already persisted by Phase 1, so a failure here just leaves the
+# janitor a row to upgrade rather than losing the interaction.
+
+
+async def finalize_closed_interaction(
+    *,
+    llm_client: LLMClient,
+    memory_ns: MemoryNamespace,
+    episodic: EpisodicMemory,
+    agent_id: str,
+    interaction: Interaction,
+    on_finalized: Callable[[], Awaitable[None]],
+) -> None:
+    """Background tail of the two-phase close path (RFC 0020 PR 4).
+
+    Runs the LLM summariser, ``UPDATE``s the pending row, bumps the
+    relationship row, and invokes ``on_finalized`` (used by the mixin
+    to tick the auto-reflect counter).  Top-level guarded so a failure
+    does not surface as ``Task exception was never retrieved`` at GC.
+    """
+    try:
+        assert interaction.interaction_id is not None
+        summary, summary_failed = await summarize_closed_interaction(
+            llm_client, agent_id, interaction,
+        )
+        try:
+            updated = await episodic.update_episode_summary(
+                interaction.interaction_id, summary,
+            )
+            if not updated:
+                logger.warning(
+                    "Pending-summary row not found for agent %s "
+                    "(interaction_id=%s); janitor will not see this row",
+                    agent_id, interaction.interaction_id,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to update summary for agent %s (interaction_id=%s); "
+                "row will be backfilled by the janitor",
+                agent_id, interaction.interaction_id, exc_info=True,
+            )
+        await record_closed_interaction(
+            memory_ns, agent_id, interaction, summary, summary_failed,
+        )
+        await on_finalized()
+    except Exception:
+        logger.warning(
+            "Background summary finalisation failed for agent %s "
+            "(scope=%s)",
+            agent_id, interaction.scope, exc_info=True,
+        )
+
+
+async def drain_pending_summary_tasks(
+    pending: set[asyncio.Task[None]],
+) -> None:
+    """Await every in-flight background summary task.
+
+    Snapshot semantics: a task spawned during the await is picked up
+    by the next call rather than this one, which is what callers want
+    on shutdown (``close_memory``) and in tests.
+    """
+    snapshot = list(pending)
+    if snapshot:
+        await asyncio.gather(*snapshot, return_exceptions=True)
+
+
+async def maybe_run_janitor(
+    cleanup: Callable[[], Awaitable[int]],
+    last_monotonic: float | None,
+    now_monotonic: float,
+    interval_sec: float,
+    agent_id: str,
+) -> float | None:
+    """Run the closing-state janitor if the cooldown has elapsed.
+
+    Returns the new ``last_monotonic`` (caller stores it on the agent).
+    Best-effort: any failure is logged and swallowed so a janitor
+    hiccup never breaks the tick path.  See PR #229 review Should-Fix
+    #2.
+    """
+    if last_monotonic is not None and now_monotonic - last_monotonic < interval_sec:
+        return last_monotonic
+    try:
+        await cleanup()
+    except Exception:
+        logger.warning(
+            "Janitor sweep failed for agent %s",
+            agent_id, exc_info=True,
+        )
+    return now_monotonic

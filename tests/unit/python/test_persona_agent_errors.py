@@ -4,7 +4,6 @@ MAX_TOKENS stop reason, missing model config, and action payload validation."""
 import json
 from unittest.mock import AsyncMock
 
-import pytest
 
 from agents.llm_client import LLMResponse, StopReason, ToolCall
 from agents.persona import create_persona_agent

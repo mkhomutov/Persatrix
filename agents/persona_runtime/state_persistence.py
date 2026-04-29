@@ -22,6 +22,7 @@ from ..memory.boundary_detectors import (
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import (
     SCOPE_TICK,
+    SUMMARY_PENDING_TEXT,
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
@@ -32,8 +33,8 @@ from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from ..persona_types import AgentAction, AgentEvent, EventType, PersonaState
 from .summarize_close import (
-    record_closed_interaction,
-    summarize_closed_interaction,
+    drain_pending_summary_tasks,
+    finalize_closed_interaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class _StatePersistenceMixin:
     _interaction_tracker: InteractionTracker
     _llm_client: LLMClient | None
     _memory_ns: MemoryNamespace
+    # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
+    _pending_summarize_tasks: set[asyncio.Task[None]]
 
     # RFC 0020 §G event-type routing.  Both sets are *positive lists* —
     # the prior implementation used a single multi-turn deny-list
@@ -319,21 +322,24 @@ class _StatePersistenceMixin:
                 await self._persist_closed_interaction(closed)
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
-        """RFC 0020 PR 4 close-path orchestrator.
+        """RFC 0020 PR 4 close-path orchestrator (two-phase write).
 
-        Summarise (LLM bounded by timeout + ``MemoryFacade.compress``)
-        → persist episode → bump relationship row (DM only) → bump
-        auto-reflect counter.  All but the episode write are best-
-        effort.  Heavy lifting in :mod:`.summarize_close`.
+        Phase 1 (sync, under ``_lock``): INSERT a ``closing`` row with
+        :data:`SUMMARY_PENDING_TEXT` so the row exists before any LLM
+        call and the janitor can sweep it on crash recovery.  Phase 2
+        (background): :func:`finalize_closed_interaction` summarises
+        and ``UPDATE``s outside the lock.  See
+        ``docs/pr-reviews/pr-229-review.md`` Must-Fix #1 + Should-Fix #1.
         """
-        if interaction.turn_count == 0:
-            return  # ``idle_check`` on a freshly-started no-turn scope.
-        if self._llm_client is None:
-            return  # No LLM client wired (test bootstrap path); skip.
-
-        summary, summary_failed = await summarize_closed_interaction(
-            self._llm_client, self.agent_id, interaction,
-        )
+        if interaction.turn_count == 0 or self._llm_client is None:
+            return  # idle no-turn scope, or test bootstrap path.
+        if interaction.interaction_id is None:
+            logger.warning(
+                "Closed interaction for agent %s has no interaction_id "
+                "(scope=%s); skipping persistence",
+                self.agent_id, interaction.scope,
+            )
+            return
         ctx: dict[str, Any] = {
             "scope": interaction.scope,
             "close_reason": interaction.close_reason,
@@ -342,30 +348,34 @@ class _StatePersistenceMixin:
         }
         try:
             await self._episodic_memory.store_episode(
-                summary=summary,
-                context=ctx,
+                summary=SUMMARY_PENDING_TEXT, context=ctx,
                 interaction_id=interaction.interaction_id,
                 started_at=interaction.started_at,
                 closed_at=interaction.closed_at,
-                turn_count=interaction.turn_count,
-                scope=interaction.scope,
+                turn_count=interaction.turn_count, scope=interaction.scope,
             )
         except Exception:
             logger.warning(
                 "Failed to persist closed interaction for agent %s (scope=%s)",
-                self.agent_id,
-                interaction.scope,
-                exc_info=True,
+                self.agent_id, interaction.scope, exc_info=True,
             )
             return
-
-        # Relationship-memory bookkeeping + auto-reflect counter
-        # (RFC 0020 §§F, H).  Both best-effort.
-        await record_closed_interaction(
-            self._memory_ns, self.agent_id,
-            interaction, summary, summary_failed,
+        # Phase 2: background summarise + finalise.  add_done_callback
+        # auto-cleans the tracking set so references don't accumulate.
+        task: asyncio.Task[None] = asyncio.create_task(
+            finalize_closed_interaction(
+                llm_client=self._llm_client, memory_ns=self._memory_ns,
+                episodic=self._episodic_memory, agent_id=self.agent_id,
+                interaction=interaction,
+                on_finalized=self._tick_auto_reflect_counter,
+            ),
         )
-        await self._tick_auto_reflect_counter()
+        self._pending_summarize_tasks.add(task)
+        task.add_done_callback(self._pending_summarize_tasks.discard)
+
+    async def drain_pending_summaries(self) -> None:
+        """Await in-flight background summary tasks (RFC 0020 PR 4)."""
+        await drain_pending_summary_tasks(self._pending_summarize_tasks)
 
     async def _tick_auto_reflect_counter(self) -> None:
         """Increment the auto-reflect counter on close (RFC 0020 §H).
@@ -399,7 +409,6 @@ class _StatePersistenceMixin:
             db, self.agent_id, grace_sec=grace_sec, now=now,
         )
 
-    # ─── State persistence ─────────────────────────────
     # ─── State persistence ─────────────────────────────
 
     async def _persist_persona_state(self) -> None:
@@ -461,14 +470,22 @@ class _StatePersistenceMixin:
     async def close_memory(self) -> None:
         """Close all memory tiers, awaiting in-flight operations.
 
-        Each tier is closed in its own try/except so that a failure in one
-        tier (e.g. disk-full on SQLite) does not prevent the remaining
-        tiers from releasing their resources (PR #54 review).
+        Each tier closes in its own try/except so a failure in one
+        does not prevent the rest from releasing resources (PR #54).
+        RFC 0020 PR 4: drains pending background summary tasks first
+        so they don't outlive the EpisodicMemory DB handle.
         """
         async with self._lock:
             await self._persist_persona_state()
             errors: list[Exception] = []
-            # Close order: working (flush compression) → episodic (DB) → relationship (DB)
+            try:
+                await self.drain_pending_summaries()
+            except Exception as exc:
+                errors.append(exc)
+                logger.warning(
+                    "Failed to drain pending summaries on close: %s", exc,
+                )
+            # working (flush compression) → episodic (DB) → relationship (DB)
             for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
                 try:
                     await tier.close()

@@ -100,6 +100,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
+    # docs/ai-glossary.md was at 2 999 words (1 word under the cap) when
+    # RFC 0020 PR 4 (PR #229) landed. The PR #229 review Should-Fix #5
+    # required adding the canonical PR-4 terminology (closing-state
+    # interaction, summary-pending sentinel, summary-unavailable
+    # sentinel, interaction janitor) to the glossary per the project's
+    # own term-policy in `.github/copilot-instructions.md`. The new
+    # section is already trimmed to ~150 words (one definition per
+    # term, no aliases/examples sections). Splitting the glossary by
+    # topic is a separate maintenance refactor; grandfather here until
+    # that lands.
+    "docs/ai-glossary.md",
 })
 
 

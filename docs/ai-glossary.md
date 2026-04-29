@@ -534,3 +534,33 @@ From [RFC 0008](rfcs/0008-agent-memory-context-optimization.md) §H.
 - **publish_to_pool / read_from_pool:** `MemoryFacade` methods for
   isolated→shared; `publish_to_pool` rejects `sensitive` pools.
 - **shared_memory_pools:** `config/agents.yaml` section.
+
+## RFC 0020 — Interaction Lifecycle (PR 4)
+
+Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
+
+### Closing-state interaction
+- **Disallowed:** "pending interaction", "in-flight interaction".
+- **Definition:** Episode row with `closed_at` set whose `summary`
+  still carries the **summary-pending sentinel**. Phase 1 of the
+  close-path two-phase write produces it; the background summariser
+  or **interaction janitor** resolves it. See PR #229 Must-Fix #1.
+
+### Summary-pending sentinel
+- **Disallowed:** "pending marker", "TBD summary".
+- **Definition:** Literal `[summary pending]` (`SUMMARY_PENDING_TEXT`)
+  written between Phase 1 and Phase 2 of the close-path write.
+
+### Summary-unavailable sentinel
+- **Disallowed:** "summary failed", "no summary".
+- **Definition:** Literal `[interaction summary unavailable]`
+  (`SUMMARY_UNAVAILABLE_TEXT`) written on summariser failure
+  (`timeout`, `llm_error`, `empty`) or janitor backfill.
+
+### Interaction janitor
+- **Aliases:** "closing-state janitor", "PR 4 janitor".
+- **Disallowed:** "garbage collector".
+- **Definition:** `cleanup_closing_interactions` — idempotent `UPDATE`
+  rewriting closing-state rows past `grace_sec` to the
+  summary-unavailable sentinel. Invoked from `on_tick` at most once
+  per `JANITOR_INTERVAL_SEC` (default 300 s).

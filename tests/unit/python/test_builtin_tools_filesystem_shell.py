@@ -7,9 +7,7 @@ Uses autouse fixture for tool-module state isolation.
 """
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
 import pytest
 
 from agents.tools import builtin

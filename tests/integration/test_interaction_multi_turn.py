@@ -171,6 +171,11 @@ class TestMultiTurnAggregation:
             sender_id=peer,
             metadata={"chat_end": True},
         ))
+        # PR #229 review Must-Fix #1: the close path is now two-phase
+        # (sync INSERT [summary pending] → background LLM → UPDATE).
+        # Drain the background task so the assertions below see the
+        # post-LLM ``summary`` column rather than racing the sentinel.
+        await agent.drain_pending_summaries()
 
         episodes = await _all_episodes(agent)
         assert len(episodes) == 1
@@ -229,6 +234,9 @@ class TestMultiTurnAggregation:
         # on the next event \u2014 then verify the persisted row carries the
         # idle-gap reason.
         await agent._persist_closed_interaction(closed_list[0])  # type: ignore[attr-defined]
+        # PR #229 review Must-Fix #1: drain the two-phase background
+        # task before reading the ``summary`` column.
+        await agent.drain_pending_summaries()
         episodes = await _all_episodes(agent)
         assert len(episodes) == 1
         assert episodes[0]["interaction_id"] == first_id
@@ -438,6 +446,11 @@ async def test_closed_interaction_context_does_not_embed_message_body():
         sender_id=peer,
         metadata={"chat_end": True},
     ))
+    # PR #229 review Must-Fix #1: drain the two-phase background task
+    # so its aiosqlite write completes before the test loop tears
+    # down.  Without this, the worker thread can race the loop close
+    # and surface a ``Event loop is closed`` warning.
+    await agent.drain_pending_summaries()
 
     db = agent._episodic_memory._ensure_db()
     async with db.execute(

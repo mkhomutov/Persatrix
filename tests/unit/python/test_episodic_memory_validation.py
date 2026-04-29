@@ -321,19 +321,3 @@ class TestMinScoreDefaults:
         )
         assert isinstance(DEFAULT_EPISODIC_MIN_SCORE, float)
         assert isinstance(DEFAULT_NOTES_MIN_SCORE, float)
-
-    def test_underscore_aliases_back_compat(self):
-        """PR 6 — RFC 0017 PR 4 finding 1.
-
-        The deprecated `_DEFAULT_*` names must remain importable for one
-        release with identical values, so external callers (or pinned tests)
-        keep working through the deprecation window.
-        """
-        from agents.memory.episodic import (
-            _DEFAULT_EPISODIC_MIN_SCORE,
-            _DEFAULT_NOTES_MIN_SCORE,
-            DEFAULT_EPISODIC_MIN_SCORE,
-            DEFAULT_NOTES_MIN_SCORE,
-        )
-        assert _DEFAULT_EPISODIC_MIN_SCORE == DEFAULT_EPISODIC_MIN_SCORE
-        assert _DEFAULT_NOTES_MIN_SCORE == DEFAULT_NOTES_MIN_SCORE

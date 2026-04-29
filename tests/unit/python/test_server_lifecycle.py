@@ -4,7 +4,7 @@ Tests for AgentServer start/stop lifecycle and in-process gRPC integration.
 All tests use in-process gRPC — no external network calls.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import grpc
 import grpc.aio

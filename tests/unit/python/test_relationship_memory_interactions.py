@@ -7,12 +7,9 @@ All tests use in-memory SQLite (:memory:) for isolation and speed.
 import pytest
 
 from agents.memory.relationship import (
-    Interaction,
     RelationshipMemory,
-    RelationshipSummary,
     _DEFAULT_TRUST,
     _MAX_RECENT_INTERACTIONS,
-    _MAX_TRUST_DELTA,
 )
 
 

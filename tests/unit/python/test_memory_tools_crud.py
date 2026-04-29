@@ -5,16 +5,14 @@ permission gating, and auto_reflect_after counter).
 All tests use in-memory SQLite (:memory:) for isolation and speed.
 """
 
-import os
-import tempfile
 
 import pytest
 
 from agents.memory.episodic import EpisodicMemory
-from agents.memory.notes import Note, _FTS5_SPECIAL, _MAX_NOTE_CONTENT_BYTES
-from agents.tools.builtin import check_auto_reflect, create_memory_tools
+from agents.memory.notes import Note, _MAX_NOTE_CONTENT_BYTES
+from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
-from agents.tools.registry import clear_registry, get_tool
+from agents.tools.registry import clear_registry
 
 
 # ─── Fixtures ───────────────────────────────────────────────
