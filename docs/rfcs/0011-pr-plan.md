@@ -92,11 +92,11 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 #### PR checklist
 
-- [ ] ROADMAP.md row for RFC 0011 → `🚧 Implementing`
-- [ ] Master Progress Overview row 6 → 🔄 In progress
-- [ ] Schema `description` carries the "internal-only until v1.0" disclaimer per [OQ #9 resolution](0011-channels-bridges.md#open-questions)
-- [ ] `make validate` green against the rewritten `config/channels.yaml`
-- [ ] `make test` Go suite green; thread-FK cascade test present and named so it cannot be silently dropped
+- [x] ROADMAP.md row for RFC 0011 → `🚧 Implementing`
+- [x] Master Progress Overview row 6 → 🔄 In progress
+- [x] Schema `description` carries the "internal-only until v1.0" disclaimer per [OQ #9 resolution](0011-channels-bridges.md#open-questions)
+- [x] `make validate` green against the rewritten `config/channels.yaml`
+- [x] `make test` Go suite green; thread-FK cascade test present and named so it cannot be silently dropped (`TestSQLiteStore_ThreadFKCascade`)
 
 ---
 

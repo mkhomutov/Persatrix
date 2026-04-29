@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-29 (RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path; two-phase write so the closed row is visible synchronously and Phase 2 / janitor races are scoped to the `SUMMARY_PENDING_TEXT` sentinel; 0020 progress 4/7)  
+> **Last updated**: 2026-04-29 (RFC 0011 PR 1 opened: channel store + SQLite migration + schema rewrite per RFC 0011 §A/§B; RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path; two-phase write so the closed row is visible synchronously and Phase 2 / janitor races are scoped to the `SUMMARY_PENDING_TEXT` sentinel; 0020 progress 4/7)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
 > **Current milestone**: RFC 0020 implementation in progress (4/7 PRs merged — PR 4 #229 summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
 
@@ -42,7 +42,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 🚧 Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 📋 Proposed |
 | 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
-| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | 📋 Proposed |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | � Implementing |
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
@@ -439,7 +439,7 @@ v0.2.2 complete
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | � Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
-| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | 📋 Proposed |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | � Implementing |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | � Implementing |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | 📋 Proposed |
 
