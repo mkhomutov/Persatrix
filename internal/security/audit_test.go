@@ -357,3 +357,47 @@ func TestEmit_ConcurrentSafe(t *testing.T) {
 		prev = ev.Checksum
 	}
 }
+
+// TestStartup_OversizedTailRecoversNotMisclassified pins PR #233
+// deep-review M-2: when a single complete record is larger than the
+// 1 MiB tailWindow, the tail-read returns only a suffix of that record.
+// Previously readLastLine treated the suffix as a complete line (ok=true),
+// JSON-unmarshalled it (failing), and emitted a spurious chain.recovered
+// on every restart — silently chaining the next event onto a truncated
+// checksum. The fix returns ok=false in the windowed-no-newline case so
+// the recovery path runs deterministically with a real "we can't see the
+// start of the last record" signal.
+//
+// Test strategy: seed a file containing a single ~1.2 MiB JSON line so
+// the tail window cannot see its leading newline. We assert the recovery
+// path fires (ok), the last event is chain.recovered, and prior_tail_raw
+// carries a non-empty suffix.
+func TestStartup_OversizedTailRecoversNotMisclassified(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	// Build a single complete JSON line larger than tailWindow (1 MiB).
+	// The line starts at byte 0 and ends with \n. The tail window
+	// (last 1 MiB) will contain only the suffix of this line.
+	const padBytes = (1 << 20) + (200 << 10) // ~1.2 MiB payload
+	pad := strings.Repeat("x", padBytes)
+	line := `{"event_type":"agent.registered","action":"seed","outcome":"ok","detail":{"pad":"` + pad + `"},"checksum":"deadbeef"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	l, err := NewFileAuditLogger(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	events := readEvents(t, path)
+	if len(events) == 0 {
+		t.Fatalf("expected at least one event after recovery, got 0")
+	}
+	last := events[len(events)-1]
+	if last.EventType != AuditChainRecovered {
+		t.Fatalf("last event type = %s; want chain.recovered (oversized tail must trigger recovery)", last.EventType)
+	}
+}

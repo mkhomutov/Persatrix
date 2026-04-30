@@ -78,6 +78,13 @@ func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKi
 // emit a spurious `chain.recovered` on every restart. 1 MiB keeps the
 // per-startup read cheap (one syscall, well under any practical event
 // size) while leaving headroom for adversarial / very-detailed events.
+//
+// PR #233 deep-review M-2: when the read is window-bounded (start > 0)
+// and the window contains no internal newline, the last record is itself
+// larger than tailWindow — the bytes we hold are only its suffix. We
+// return ok=false in that case so the caller emits chain.recovered rather
+// than treating a record fragment as a complete line (which would chain
+// the next event onto a truncated checksum and silently corrupt the log).
 func readLastLine(r io.ReadSeeker) (string, bool) {
 	const tailWindow = 1 << 20 // 1 MiB; see PR #233 review (was 64 KiB).
 	size, err := r.Seek(0, io.SeekEnd)
@@ -88,6 +95,7 @@ func readLastLine(r io.ReadSeeker) (string, bool) {
 	if start < 0 {
 		start = 0
 	}
+	windowed := start > 0
 	if _, err := r.Seek(start, io.SeekStart); err != nil {
 		return "", false
 	}
@@ -109,6 +117,13 @@ func readLastLine(r io.ReadSeeker) (string, bool) {
 	}
 	if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
 		return string(buf[i+1:]), true
+	}
+	// PR #233 deep-review M-2: no internal newline. If the read was
+	// windowed (start > 0), the bytes we have are a suffix of a record
+	// larger than tailWindow — fail loudly so the caller emits
+	// chain.recovered rather than chaining onto a record fragment.
+	if windowed {
+		return string(buf), false
 	}
 	return string(buf), len(buf) > 0
 }

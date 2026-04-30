@@ -102,8 +102,11 @@ func defaultPatterns() []patternSpec {
 		// the optional quotes around the separator that JSON uses
 		// (`"key":"val"`). `[` is excluded from the value class so a second
 		// pass cannot chew into a `[REDACTED:…]` marker emitted by an
-		// earlier pattern.
-		{name: "generic-secret", expr: `(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s,"'}\]\[]+`},
+		// earlier pattern. PR #233 deep-review L-1: also exclude `;` and
+		// `&` so URL-encoded forms (`password=hunter2&next=foo`) and
+		// shell-style key-value pairs (`password=hunter2; next=foo`) do not
+		// over-redact the adjacent field.
+		{name: "generic-secret", expr: `(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s,;&"'}\]\[]+`},
 	}
 }
 

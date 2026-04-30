@@ -310,3 +310,37 @@ func TestRedact_PatternOrdering(t *testing.T) {
 		t.Errorf("OpenAI pattern incorrectly fired on Anthropic key: %q", got)
 	}
 }
+
+// TestRedact_GenericSecretStopsAtURLAndShellDelimiters pins PR #233
+// deep-review L-1: the bounded value class must also stop at `;` and
+// `&` so URL-encoded forms (`password=hunter2&next=foo`) and shell-style
+// key-value pairs (`password=hunter2; next=foo`) do not over-redact the
+// adjacent field. The previous class `[^\s,"'}\]\[]+` only excluded JSON
+// delimiters, so non-JSON payloads carrying secrets adjacent to other
+// data would have the next field swallowed by the match — the same class
+// of leak/corruption that motivated MF-2 for JSON, applied to non-JSON
+// transports (HTTP query strings, CLI logs, env-style records).
+func TestRedact_GenericSecretStopsAtURLAndShellDelimiters(t *testing.T) {
+	r := NewSecretRedactor()
+	cases := []struct {
+		name string
+		in   string
+		// keep is a substring that must remain intact (the adjacent field
+		// the previous greedy class would have swallowed).
+		keep string
+	}{
+		{name: "url-form", in: "password=hunter2&next=foo", keep: "next=foo"},
+		{name: "shell-style", in: "password=hunter2; next=foo", keep: "next=foo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := r.Redact(tc.in)
+			if !strings.Contains(got, "[REDACTED:generic-secret]") {
+				t.Fatalf("password value not redacted: %q", got)
+			}
+			if !strings.Contains(got, tc.keep) {
+				t.Errorf("adjacent field corrupted by greedy match: got %q, expected to contain %q", got, tc.keep)
+			}
+		})
+	}
+}

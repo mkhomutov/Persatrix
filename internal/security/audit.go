@@ -254,10 +254,10 @@ func (l *fileAuditLogger) Close() error {
 		l.tickerStopOnce.Do(func() { close(l.tickerStop) })
 	}
 
-	if flushErr != nil {
-		return flushErr
-	}
-	return closeErr
+	// PR #233 deep-review: surface both signals during shutdown — closing a
+	// file with a pending fsync error is exactly when both matter. Prior
+	// behaviour silently dropped closeErr if flushErr was non-nil.
+	return errors.Join(flushErr, closeErr)
 }
 
 func (l *fileAuditLogger) tickerLoop(d time.Duration, stop <-chan struct{}) {
