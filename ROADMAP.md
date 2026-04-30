@@ -438,7 +438,7 @@ v0.2.2 complete
 |-----|-------|--------------|--------|
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 🚧 Implementing |
-| [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 📋 Proposed |
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | � Implementing |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | 🚧 Implementing |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 🚧 Implementing |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | 📋 Proposed |
