@@ -127,8 +127,11 @@ func TestAuditLogger_AgentRegistrationEmitsAgentRegistered(t *testing.T) {
 	ev := registered[0]
 	assert.Equal(t, "audit-test-agent", ev.AgentID)
 	assert.Equal(t, "register", ev.Action)
-	assert.Equal(t, "localhost:50099", ev.Resource)
+	// PR #234 review N-1: Resource is the agent ID (forensic anchor),
+	// the rotating address moved to Detail["address"].
+	assert.Equal(t, "audit-test-agent", ev.Resource)
 	require.NotNil(t, ev.Detail)
+	assert.Equal(t, "localhost:50099", ev.Detail["address"])
 	caps, ok := ev.Detail["capabilities"].([]any)
 	require.True(t, ok, "capabilities should be a JSON array")
 	assert.Equal(t, []any{"planning", "code_generation"}, caps)

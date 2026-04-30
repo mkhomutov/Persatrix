@@ -130,12 +130,19 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PR #234 review N-1: use the agent ID (not the address) as Resource
+	// for forensic stability. Addresses rotate on redeploy / port change,
+	// so the agent ID is the durable anchor that joins this event to
+	// downstream `tool.invoked` / `capability.violation` records (which
+	// already use agent_id as Resource per dispatch.go). The address is
+	// still useful for incident response, so it moves to Detail["address"].
 	s.emitAudit(r.Context(), security.AuditEvent{
 		EventType: security.AuditAgentRegistered,
 		AgentID:   req.ID,
 		Action:    "register",
-		Resource:  req.Address,
+		Resource:  req.ID,
 		Detail: map[string]any{
+			"address":      req.Address,
 			"capabilities": req.Capabilities,
 			"name":         req.Name,
 		},
@@ -143,6 +150,21 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, agentToResponse(&info), http.StatusCreated)
 }
+
+// maxCapabilityEchoLen bounds the verbatim echo of a rejected capability
+// name back into the audit event Detail.
+//
+// PR #234 review N-2: the secret redactor scrubs known patterns, but a
+// hostile registration carrying a capability value that is e.g. 1 MiB of
+// arbitrary bytes would otherwise be written verbatim to the audit log
+// (after redaction, but redaction does not truncate). Combined with the
+// per-slice cap (maxCapabilitiesPerAgent) this keeps the worst-case
+// audit-write size from a single registration bounded at
+// 64 * 256 = 16 KiB rather than 64 * client_max_body_size. 256 chars is
+// generous compared to the 64-char regex-enforced legal upper bound, so
+// rejected values that are merely "off by a few characters" survive
+// intact for operator triage.
+const maxCapabilityEchoLen = 256
 
 // validateCapabilities checks each capability name against the documented
 // charset/length contract and emits `capability.violation` for every
@@ -155,15 +177,26 @@ func (s *Server) validateCapabilities(ctx context.Context, agentID string, caps 
 			continue
 		}
 		bad = append(bad, c)
+		echoed := c
+		truncated := false
+		if len(echoed) > maxCapabilityEchoLen {
+			echoed = echoed[:maxCapabilityEchoLen]
+			truncated = true
+		}
+		detail := map[string]any{
+			"capability": echoed,
+			"reason":     "format",
+		}
+		if truncated {
+			detail["truncated"] = true
+			detail["original_length"] = len(c)
+		}
 		s.emitAudit(ctx, security.AuditEvent{
 			EventType: security.AuditCapabilityViolation,
 			AgentID:   agentID,
 			Action:    "register",
 			Resource:  "capability",
-			Detail: map[string]any{
-				"capability": c,
-				"reason":     "format",
-			},
+			Detail:    detail,
 		})
 	}
 	return bad
