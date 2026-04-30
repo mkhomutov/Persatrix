@@ -1,0 +1,42 @@
+# RFC 0009 PR 1b — security audit log configuration.
+#
+# This file documents the audit-log knobs the orchestrator honours via
+# environment variables. Mirroring the existing prometheus.yaml /
+# otel-collector.yaml convention keeps every observability surface
+# documented in one directory; runtime behaviour is still driven by the
+# env vars below (see docs/observability.md §Audit Log).
+#
+# Status: documentation-only in PR 1b. PR 2 (rate-limit middleware)
+# extends this file with the security.rate_limit.* keys.
+
+audit:
+  # On-disk JSONL sink. Override via OBSERVABILITY_AUDIT_PATH; set the env
+  # var to the literal "off" to disable audit emission entirely (matches
+  # the logbuffer / metrics opt-out convention).
+  path: "data/logs/audit.jsonl"
+
+  # File mode applied on every open. The orchestrator self-heals to 0o600
+  # so a pre-existing file created under a relaxed umask cannot leak the
+  # audit chain (PR #233 review Should-Fix #6).
+  file_mode: "0o600"
+
+  # Telemetry-class events (tool.invoked, agent.registered, etc.) are
+  # batched. Security-class events (capability.violation, chain.bootstrap,
+  # chain.recovered, rate_limit.unauthenticated_caller) bypass the batch
+  # and fsync per-event so an attacker cannot mask probing activity by
+  # crashing the process inside the 250 ms window.
+  batch:
+    size: 64
+    interval_ms: 250
+
+# Reserved for PR 2 — rate-limit middleware knobs land here.
+# security:
+#   rate_limit:
+#     enabled: true
+#     calls_per_window: 60
+#     window_seconds: 60
+#     # Bounds the per-agent ring map under self-reported X-Agent-ID
+#     # (PR #232 review SF-1). Until Phase 4 token validation lands,
+#     # an attacker spamming distinct fake IDs can grow the map without
+#     # bound; the LRU cap below is the v0.3.0 mitigation.
+#     max_tracked_agents: 1000

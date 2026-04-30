@@ -7,12 +7,12 @@
 
 This document is the **single source of truth** for the Persatrix structured-log
 schema. Both the Go orchestrator (`go.uber.org/zap`) and the Python agents
-(`structlog`) emit records conforming to this schema. Future RFCs append to this
-document — they never overwrite a published schema field. Breaking changes (field
-removal, rename, type change, semantic change) bump `schema_version` to `"2"` and
-are called out in `CHANGELOG.md`.
+(`structlog`) emit records conforming to this schema. Future RFCs append; they
+never overwrite a published field. Breaking changes (removal, rename, type or
+semantic change) bump `schema_version` to `"2"` and are called out in
+`CHANGELOG.md`.
 
-Refer to the RFC for the design rationale; this doc is the operational reference.
+See the RFC for design rationale; this doc is the operational reference.
 
 ---
 
@@ -158,8 +158,8 @@ Metadata key conventions are documented in
 
 ## 9. Roadmap for this document
 
-Future RFCs append the following sections to this file (single-source-of-truth
-discipline):
+Future RFCs append sections here (single-source-of-truth discipline);
+never overwrite a section owned by another PR.
 
 | Section | Owning RFC + PR |
 |---------|-----------------|
@@ -169,9 +169,6 @@ discipline):
 | Persisted log layout (`data/logs/<execution_id>/...`) + env knobs | RFC 0018 PR 4 |
 | `LogService` gRPC + REST + SSE endpoint shapes | RFC 0018 PR 5 |
 | `persatrix logs` CLI flags + colour scheme | RFC 0018 PR 6 |
-
-When editing this doc, **never overwrite a section owned by another PR**;
-append instead.
 
 ---
 
@@ -434,3 +431,10 @@ Across an orchestrator restart, `--follow` prints `[reconnected]` and resumes fr
 ### 12.4 End-to-end coverage
 
 Locked in by `tests/integration/test_logs_e2e.py` (opt-in via `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`): snapshot, `--trace` filter, `--follow` latency, warm-load restart, `--level` parse rejection.
+
+
+## 13. Security audit log (RFC 0009 PR 1b)
+
+JSONL + SHA-256 chain at `OBSERVABILITY_AUDIT_PATH` (default
+`data/logs/audit.jsonl`, `=off` disables). Knobs:
+[audit.yaml](../config/observability/audit.yaml). Contracts: RFC 0009.

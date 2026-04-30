@@ -18,6 +18,7 @@ import (
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
@@ -46,6 +47,11 @@ type Server struct {
 	// Log buffer (optional — nil-safe).  Wired in RFC 0018 PR 5.
 	// When unset, the log REST + SSE endpoints return 501 NOT_IMPLEMENTED.
 	logBuffer *logbuffer.Buffer
+
+	// Audit logger (optional — nil-safe).  Wired in RFC 0009 PR 1b
+	// (security audit log).  When nil, audit emit sites no-op so unit
+	// tests and minimal-deployment fixtures stay zero-config.
+	auditor security.AuditLogger
 }
 
 // ServerOption configures optional Server dependencies.
@@ -88,6 +94,19 @@ func WithMetrics(inst *obsmetrics.Instruments) ServerOption {
 func WithLogBuffer(buf *logbuffer.Buffer) ServerOption {
 	return func(s *Server) {
 		s.logBuffer = buf
+	}
+}
+
+// WithAuditLogger injects the security audit logger used by the
+// agent-registration handler (and future security-bearing endpoints) to
+// emit structured audit events.  Nil-safe: when unset, emit sites no-op
+// so callers that do not opt into audit retain their existing behaviour.
+//
+// Wired from cmd/orchestrator/main.go via OBSERVABILITY_AUDIT_PATH
+// (RFC 0009 PR 1b).
+func WithAuditLogger(a security.AuditLogger) ServerOption {
+	return func(s *Server) {
+		s.auditor = a
 	}
 }
 
@@ -190,6 +209,25 @@ func (s *Server) Handler() http.Handler {
 		h = s.handlerWrapper(h)
 	}
 	return h
+}
+
+// emitAudit forwards ev to the configured AuditLogger if one was injected.
+// Nil-safe: when no auditor is wired, the call no-ops so handler code can
+// stay free of conditional guards. Emit errors are logged at debug level —
+// audit emission must never block the orchestrator's user-facing response,
+// and a stalled sink is its own incident already surfaced via the
+// Prometheus `audit_emit_latency_seconds` histogram (RFC 0009 PR 1b).
+func (s *Server) emitAudit(ctx context.Context, ev security.AuditEvent) {
+	if s.auditor == nil {
+		return
+	}
+	if err := s.auditor.Emit(ctx, ev); err != nil {
+		s.logger.Debug("audit emit failed",
+			zap.String("event_type", string(ev.EventType)),
+			zap.String("agent_id", ev.AgentID),
+			zap.Error(err),
+		)
+	}
 }
 
 // Start runs the HTTP server until the context is cancelled, then drains

@@ -41,6 +41,13 @@ type AuditLogger interface {
 
 	// Close flushes pending events and releases the sink. Safe to call once.
 	Close() error
+
+	// Path returns the on-disk location backing the logger, or the empty
+	// string for non-file-backed sinks (e.g. future SIEM transports).
+	// Used by orchestrator startup logs and integration tests so the
+	// resolved path is observable without depending on the concrete type
+	// (PR #233 review Should-Fix #4).
+	Path() string
 }
 
 // AuditLoggerOption configures a file-backed AuditLogger.
@@ -65,8 +72,15 @@ func WithBatchInterval(d time.Duration) AuditLoggerOption {
 	}
 }
 
-// WithRedactor installs a [Redactor] that scrubs the [AuditEvent.Detail] map
-// before each event is serialised. Defaults to a no-op when not set.
+// WithRedactor overrides the default [Redactor] (set by [NewFileAuditLogger]
+// to [NewSecretRedactor]) used to scrub event fields before serialisation.
+// Pass nil to disable redaction entirely — required only for tests that
+// intentionally write plaintext fixtures.
+//
+// PR #233 review Should-Fix #3: prior behaviour defaulted to nil, so any
+// caller that forgot WithRedactor silently shipped unredacted secrets to the
+// audit log. The constructor now installs [NewSecretRedactor] up front and
+// this option only customises the choice.
 func WithRedactor(r Redactor) AuditLoggerOption {
 	return func(l *fileAuditLogger) {
 		l.redactor = r
@@ -136,6 +150,18 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 	if err != nil {
 		return nil, fmt.Errorf("security: open audit log %q: %w", path, err)
 	}
+	// PR #233 review Should-Fix #6: a pre-existing audit file may have been
+	// created with relaxed permissions before this build's umask was tightened
+	// (or by an earlier process running under a different umask). Re-apply
+	// 0o600 on every open so the on-disk ACL is self-healing. Errors are
+	// logged-and-continue rather than fatal: chmod is unsupported on some
+	// filesystems (e.g. FAT-mounted bind volumes in CI) and refusing to
+	// open the audit log there would deny operators forensic data for a
+	// permission concern that no longer applies.
+	if chErr := f.Chmod(0o600); chErr != nil && !errors.Is(chErr, os.ErrPermission) {
+		// Best-effort; surface via stderr since no logger is available here.
+		fmt.Fprintf(os.Stderr, "security: chmod 0o600 %q: %v\n", path, chErr)
+	}
 
 	l := &fileAuditLogger{
 		path:          path,
@@ -145,6 +171,7 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 		batchSize:     defaultBatchSize,
 		batchInterval: defaultBatchInterval,
 		now:           time.Now,
+		redactor:      NewSecretRedactor(),
 	}
 	for _, opt := range opts {
 		opt(l)

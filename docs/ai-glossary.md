@@ -670,3 +670,36 @@ verbatim) are defined now (PR #232 review SF-5).
   — trailing colon **kept**) when the event was emitted outside an open
   RFC 0020 interaction. The fixed-4-field shape is a parse contract for
   downstream tooling.
+
+
+### `AuditLogger` (PR 1 / PR 1b)
+- **Aliases:** "audit sink"; **Disallowed:** "security log writer".
+- **Definition:** Interface in `internal/security/audit.go` writing
+  `AuditEvent` records to a durable JSONL sink with SHA-256 chained
+  tamper evidence. The Phase 1 implementation (`fileAuditLogger`) is
+  file-backed; the interface is small so future SIEM / write-once
+  transports can drop in without churning call sites. `Path()` is
+  hoisted onto the interface so callers can surface the resolved sink
+  in startup logs without depending on the concrete type
+  (PR #233 review Should-Fix #4).
+
+### `SecretRedactor` (PR 1)
+- **Aliases:** none; **Disallowed:** "secret scrubber", "PII filter"
+  (PII is a separate v0.4.0 concern).
+- **Definition:** `Redactor` implementation in
+  `internal/security/redactor.go` carrying the five default patterns
+  from RFC 0009 §I (`anthropic-api-key`, `openai-api-key`,
+  `bearer-token`, `aws-access-key`, `generic-secret`). Installed by
+  default in `NewFileAuditLogger` (PR #233 review Should-Fix #3) so any
+  caller embedding a secret in `AuditEvent.Detail` / `Action` /
+  `Resource` sees it scrubbed before the canonical-JSON encode.
+
+### Tamper evidence
+- **Aliases:** "audit chain integrity"; **Disallowed:** "audit signing"
+  (no signature is computed — only a content-addressed hash chain).
+- **Definition:** Property of the audit log whereby every record
+  carries `Checksum = sha256(prevChecksum || canonicalJSON(event))`.
+  Any in-place mutation of a prior record invalidates every subsequent
+  checksum, making post-hoc redaction observable. Operator-verifiable
+  with a 50-line script; not a defence against append-only-after-the-fact
+  attackers — see RFC 0009 §G for threat-model bounds.

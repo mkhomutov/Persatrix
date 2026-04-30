@@ -25,6 +25,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/observability/grpcmeta"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 var executorTracer = otel.Tracer("persatrix/executor")
@@ -229,6 +230,31 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 				zap.Int("retryCount", attempt),
 				zap.Int64("wallTimeMs", wallTimeMs),
 			)
+
+			// RFC 0009 PR 1b — emit tool.invoked (telemetry-class, batched).
+			// Action carries the agent capability invoked; Resource is
+			// agent_id (not the agent address — addresses rotate, agent IDs
+			// are the stable forensic anchor). Detail records workflow/step
+			// IDs so the audit chain links to the workflow run audit trail.
+			// Emit is best-effort: a stalled audit sink must not block the
+			// dispatch hot path. Errors land in debug logs and the
+			// audit_emit_latency_seconds histogram.
+			if e.auditor != nil {
+				_ = e.auditor.Emit(ctx, security.AuditEvent{
+					EventType: security.AuditToolInvoked,
+					AgentID:   req.AgentID,
+					Action:    "execute_task",
+					Resource:  req.AgentID,
+					Detail: map[string]any{
+						"workflow_id":  req.WorkflowID,
+						"step_id":      req.StepID,
+						"task_id":      req.TaskID,
+						"retry_count":  attempt,
+						"wall_time_ms": wallTimeMs,
+						"cache_hit":    result.CacheHit,
+					},
+				})
+			}
 
 			// Store result in cache for cacheable steps.
 			if req.Cacheable && e.cache != nil {

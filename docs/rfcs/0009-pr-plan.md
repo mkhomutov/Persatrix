@@ -35,6 +35,9 @@ PR 1  (Phase 1a — AuditLogger + SecretRedactor [package + unit tests])
   ↓
 PR 1b (Phase 1a wiring — server/executor/main + integration tests)
   ↓
+PR 1c (Phase 1a hardening — RedactStruct opaque-struct surface (SF-2)
+       + Prometheus metrics (Nice-to-have #5); gates PR 3)
+  ↓
 PR 2  (Phase 1b — RateLimiter + middleware integration)
   ↓
 PR 3  (Phase 2 — InputSanitizer + ContextItem + provenance tagging)
@@ -175,15 +178,46 @@ observability docs update.
 
 #### PR checklist
 
-- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default + `chmod 0o600`-on-restart contract)
-- [ ] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in RFC 0009 §G appendix
-- [ ] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
-- [ ] `Path()` hoisted onto `AuditLogger` interface or `NewFileAuditLogger` returns concrete type (PR #233 review Should-Fix #4)
-- [ ] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
-- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2)
-- [ ] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
-- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5)
-- [ ] Integration tests live under `tests/integration/`
+- [x] `audit.jsonl` path documented in [docs/observability.md](../observability.md) §13 (env var + default + `chmod 0o600`-on-restart contract)
+- [x] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in observability §13.2 (RFC 0009 §G appendix backfill deferred to PR 4 close-out)
+- [x] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
+- [x] `Path()` hoisted onto `AuditLogger` interface (PR #233 review Should-Fix #4)
+- [x] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
+- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2). **Deferred to PR 1c** — design choice non-trivial; pulled out to keep PR 1b strictly within the 250–350 line wiring budget.
+- [x] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
+- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5). **Deferred to PR 1c** — Nice-to-have; the OTEL meter scaffolding lands cleanly alongside the RedactStruct surface change.
+- [x] Integration tests live under `tests/integration/audit_logger_integration_test.go` (4 tests covering register-emit, capability-violation, redaction default, tool.invoked)
+- [x] `go test ./...` + `go vet ./...` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR)
+
+---
+
+### PR 1c: `feature/v030-rfc0009-audit-hardening` — Phase 1a hardening
+
+**Depends on**: PR 1b. **Gates**: PR 3.
+**Estimated size**: ~250–400 lines.
+
+#### Scope
+
+Pulled out of PR 1b to keep that PR strictly within its wiring budget. Two
+items both surface non-trivial design choices that warrant their own review:
+
+- **`RedactStruct` surface change** (PR #233 review Should-Fix #2). Replace
+  the current opaque-struct deny-list with one of: struct-tag opt-in
+  (`audit:"redact"`), explicit allow-list, or unexported-non-primitive
+  bail-out. **Must land before PR 3** — PR 3 routes tool-call argument
+  structs through `RedactStruct` and would otherwise lock in the unsafe
+  surface.
+- **Prometheus / OTEL metrics surface** (PR #233 review Nice-to-have #5):
+  `audit_events_total{event_type,class}`, `audit_chain_recovered_total`,
+  `audit_emit_latency_seconds`. Wire from the existing PR 1b emit sites
+  using `internal/observability/metrics.Instruments`.
+
+#### PR checklist
+
+- [ ] `RedactStruct` surface design recorded in RFC 0009 §I addendum (one of three options chosen with rationale)
+- [ ] All call sites in `internal/security/` updated to new surface
+- [ ] Unit tests cover the new contract (struct-tag honoured, unexported fields bail out, recursion bounded)
+- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths
 - [ ] `make test` + `make lint` clean
 
 ---

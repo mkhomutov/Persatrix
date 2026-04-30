@@ -11,6 +11,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 // DeadlineMode controls how per-dispatch RPC timeouts are computed.
@@ -144,6 +145,16 @@ func WithResponseCache(cache *cost.ResponseCache) Option {
 	}
 }
 
+// WithAuditLogger injects the security audit logger used to emit
+// `tool.invoked` (telemetry-class, batched) for every successful dispatch.
+// Nil-safe: when unset, the executor skips audit emit so callers that do
+// not opt into RFC 0009 audit retain prior behaviour. (RFC 0009 PR 1b.)
+func WithAuditLogger(a security.AuditLogger) Option {
+	return func(e *GRPCExecutor) {
+		e.auditor = a
+	}
+}
+
 // GRPCExecutor dispatches tasks to agents via gRPC.
 type GRPCExecutor struct {
 	registry     registry.Registry
@@ -154,6 +165,7 @@ type GRPCExecutor struct {
 	deadlineMode DeadlineMode
 	tokenParser  func(error) int64
 	cache        *cost.ResponseCache
+	auditor      security.AuditLogger
 }
 
 // NewGRPCExecutor creates a new GRPCExecutor with the given registry and options.

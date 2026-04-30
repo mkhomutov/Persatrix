@@ -211,6 +211,18 @@ func main() {
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
 
 	// 4. Initialize security (permission gate, rate limiter, audit logger)
+	auditor, err := initAuditLogger(logger)
+	if err != nil {
+		logger.Fatal("failed to initialize audit logger", zap.Error(err))
+	}
+	if auditor != nil {
+		defer func() {
+			if err := auditor.Close(); err != nil {
+				logger.Warn("audit logger close failed", zap.Error(err))
+			}
+		}()
+		logger.Info("audit logger initialized", zap.String("path", auditor.Path()))
+	}
 	// 5. Initialize resilience (circuit breakers)
 
 	// 6. Initialize agent registry
@@ -235,6 +247,9 @@ func main() {
 		// Inject the otelgrpc client-side stats handler so every outbound
 		// ExecuteTask / HealthCheck gRPC call is recorded as a child span.
 		executor.WithDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
+		// RFC 0009 PR 1b — audit emit on every successful dispatch
+		// (telemetry-class, batched). Nil-safe when audit is disabled.
+		executor.WithAuditLogger(auditor),
 	}
 
 	// 9. Initialize cost tracker
@@ -274,7 +289,6 @@ func main() {
 	exec := executor.NewGRPCExecutor(reg, logger, execOpts...)
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
-
 	// RFC 0016 PR 4: Initialize chat executor for human→agent chat dispatch.
 	chatExec := executor.NewGRPCChatExecutor(reg, logger,
 		// Inject the otelgrpc client-side stats handler for chat gRPC calls.
@@ -301,6 +315,10 @@ func main() {
 	if logBuf != nil {
 		srvOpts = append(srvOpts, server.WithLogBuffer(logBuf))
 	}
+
+	// RFC 0009 PR 1b — audit emit from the agent registration handler.
+	// Nil-safe when audit is disabled (OBSERVABILITY_AUDIT_PATH=off).
+	srvOpts = append(srvOpts, server.WithAuditLogger(auditor))
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
