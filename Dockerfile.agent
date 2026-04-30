@@ -8,7 +8,19 @@ COPY agents/ agents/
 COPY config/ config/
 # Non-editable install: -e is a dev pattern that complicates layer caching
 # and adds no value in containers where source is already copied.
+# Layer ordering: pip install is intentionally placed before COPY prompts/ so
+# that editing prompt files does not bust the pip cache and force a full
+# package re-download on every CI rebuild.
 RUN pip install --no-cache-dir agents/
+
+# RFC 0009 PR 1b: copy prompts into site-packages where the installed package
+# looks for them. The package resolves prompts relative to
+# Path(__file__).parent.parent, which resolves to site-packages/ in
+# non-editable container installs (not the repo root). Placed after pip install
+# to keep the pip layer cache hot across prompt-only edits.
+COPY prompts/ prompts/
+RUN SITE_PKGS=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))') && \
+    cp -r prompts "$SITE_PKGS/"
 
 # Security: run as non-root to limit blast radius if agent code is compromised
 # (agents execute LLM-suggested actions and must be sandboxed).
