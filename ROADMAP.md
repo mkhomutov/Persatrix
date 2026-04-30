@@ -40,7 +40,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0006](docs/rfcs/0006-efficiency-execution-limits.md) | Efficiency & Execution Limits | v0.2.0 | ✅ Implemented |
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | v0.3.0 | 📋 Proposed |
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 🚧 Implementing |
-| [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 🚧 Implementing ([#233](https://github.com/mkhomutov/Persatrix/pull/233) open — PR 1 audit logger + secret redactor) |
+| [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 🚧 Implementing ([#233](https://github.com/mkhomutov/Persatrix/pull/233) open — PR 1 audit logger + secret redactor; [#235](https://github.com/mkhomutov/Persatrix/pull/235) open — prep: prompts in agent image + audit path in compose) |
 | 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | 🚧 Implementing |
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
