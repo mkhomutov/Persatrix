@@ -31,39 +31,53 @@ This plan splits Phases 1–2 into **4 PRs**.
 ## Dependency Graph
 
 ```
-PR 1 (Phase 1a — AuditLogger + SecretRedactor)
+PR 1  (Phase 1a — AuditLogger + SecretRedactor [package + unit tests])
   ↓
-PR 2 (Phase 1b — RateLimiter + middleware integration)
+PR 1b (Phase 1a wiring — server/executor/main + integration tests)
   ↓
-PR 3 (Phase 2 — InputSanitizer + ContextItem + provenance tagging)
+PR 2  (Phase 1b — RateLimiter + middleware integration)
   ↓
-PR 4 (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
+PR 3  (Phase 2 — InputSanitizer + ContextItem + provenance tagging)
+  ↓
+PR 4  (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 ```
+
+> **Split rationale (PR 1 → PR 1 + PR 1b)**: opted into the plan's stated
+> contingency to keep PR 1 below the 500-line size cap. PR 1 ships the
+> security package (audit logger + redactor + closed-set event types) plus
+> unit tests; PR 1b wires the package into `internal/server`,
+> `internal/executor`, and `cmd/orchestrator`, adds the integration tests,
+> and ships the `OBSERVABILITY_AUDIT_PATH` config + observability docs.
 
 ---
 
 ## PR Sequence
 
-### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor
+### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor (package + unit tests)
 
 **Depends on**: Nothing.
-**Estimated size**: ~450–500 lines (new files + wiring + tests). At the 1.7× calibration ceiling; if scope expands during implementation, split the orchestrator wiring into a follow-up PR 1b.
+**Estimated size**: ~450–500 lines originally. **Split into PR 1 (this) + PR 1b** at implementation time per the contingency below: PR 1 ships the security package + unit tests only, PR 1b ships orchestrator wiring + integration tests + observability docs. The split keeps each PR comfortably below the 500-line cap and lets PR 1 land on a pure-additive package boundary with no orchestrator surface change.
 
 #### Scope
 
-| File | Change |
-|------|--------|
-| `internal/security/audit.go` | **New** — `AuditLogger` interface, `FileSink` implementation: append-only JSONL with severity-driven flush (per-event `fsync` for security-class events; batched flush every 64 events / 250 ms for telemetry-class), checksum chain, correlation-ID schema. |
-| `internal/security/audit_event.go` | **New** — `AuditEvent` struct, `AuditEventType` constants (16 types per RFC §G), severity classifier (`isSecurityEvent(t AuditEventType) bool`). |
-| `internal/security/redactor.go` | **New** — `SecretRedactor`: 5 default patterns from RFC §I (`anthropic-api-key`, `openai-api-key`, `bearer-token`, `aws-access-key`, `generic-secret`); `Redact(string) string`; `RedactStruct(any) any` via reflection over exported string fields. |
-| `internal/security/security.go` | Replace 5 TODO stubs with re-exports / constructors; keep package doc comment. |
-| `internal/server/server.go` | Wire `AuditLogger` into `RegisterAgent` handler (emit `agent.registered` on success, `capability.violation` on registration with capabilities outside config). |
-| `internal/executor/executor.go` | Emit `tool.invoked` on every dispatched tool call (telemetry-class — batched). |
-| `cmd/orchestrator/main.go` | Construct `AuditLogger` with file path from `OBSERVABILITY_AUDIT_PATH` env (default `data/logs/audit.jsonl`); pass into server + executor. |
-| `config/observability/audit.yaml` (or extend existing observability config) | Sink path, batch size, batch interval, fsync policy override. |
-| `internal/security/audit_test.go` | Unit tests — see Tests below. |
-| `internal/security/redactor_test.go` | Unit tests — see Tests below. |
-| `tests/integration/audit_logger_integration_test.go` | Integration — agent registration writes `agent.registered`; redactor scrubs API key from `Detail` field. |
+> **PR 1 (this PR) ships only the rows marked _package_.** The _wiring_ rows
+> are deferred to PR 1b (see new section below).
+
+| File | Change | PR |
+|------|--------|----|
+| `internal/security/audit.go` | **New** — `AuditLogger` interface + `fileAuditLogger` (JSONL append-only sink, severity-driven flush, batched flush every 64 events / 250 ms). | 1 (package) |
+| `internal/security/audit_chain.go` | **New** — checksum-chain helpers, canonical event encoding, startup recovery (`chain.bootstrap` / `chain.restart` / `chain.recovered`), tail inspection. Split out of `audit.go` for the 500-line file cap. | 1 (package) |
+| `internal/security/audit_event.go` | **New** — `AuditEvent` struct, `AuditEventType` constants (20 types — RFC §G core 16 + `chain.bootstrap` / `chain.restart` / `chain.recovered` / `rate_limit.unauthenticated_caller`), severity classifier (`isSecurityEvent`), `AllAuditEventTypes()` helper for closed-set test. | 1 (package) |
+| `internal/security/redactor.go` | **New** — `Redactor` interface + `SecretRedactor`: 5 default patterns from RFC §I; `Redact(string) string`; `RedactStruct(any) any` via reflection over exported fields with cycle / depth bounds. | 1 (package) |
+| `internal/security/security.go` | Remove implemented stubs; keep package doc + remaining TODOs. | 1 (package) |
+| `internal/security/audit_test.go` | Unit tests — chain integrity, fsync policy, batch flush triggers, recovery paths, redactor wiring. | 1 (package) |
+| `internal/security/redactor_test.go` | Unit tests — patterns, nested / cyclic / deep-nested struct walks, `map[string]any`. | 1 (package) |
+| `internal/server/server.go` | Wire `AuditLogger` into `RegisterAgent` handler (emit `agent.registered` on success, `capability.violation` on registration with capabilities outside config). | 1b (wiring) |
+| `internal/executor/executor.go` | Emit `tool.invoked` on every dispatched tool call (telemetry-class — batched). | 1b (wiring) |
+| `cmd/orchestrator/main.go` | Construct `AuditLogger` with file path from `OBSERVABILITY_AUDIT_PATH` env (default `data/logs/audit.jsonl`); pass into server + executor. | 1b (wiring) |
+| `config/observability/audit.yaml` (or extend existing observability config) | Sink path, batch size, batch interval, fsync policy override. | 1b (wiring) |
+| `tests/integration/audit_logger_integration_test.go` | Integration — agent registration writes `agent.registered`; redactor scrubs API key from `Detail` field. | 1b (wiring) |
+| `docs/observability.md` | Document `OBSERVABILITY_AUDIT_PATH` env + default sink path. | 1b (wiring) |
 
 #### Key implementation details
 
@@ -103,13 +117,73 @@ Integration (`tests/integration/`):
 
 #### PR checklist
 
-- [ ] ROADMAP.md row for RFC 0009 → `🚧 Implementing` on PR open
-- [ ] Master Progress Overview ([v0.3.0-plan.md](../v0.3.0-plan.md#master-progress-overview)) row 5 → 🔄 In progress
-- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default)
-- [ ] `chain.restart` synthetic event documented in RFC 0009 §G appendix
-- [ ] All 16 `AuditEventType` constants present (procedural-memory ones reserved, unwired)
-- [ ] `chain.bootstrap` and `chain.recovered` constants present and classed as security-class (PR #232 review SF-3)
-- [ ] `RedactStruct` cycle/depth bound covered by `TestRedactStruct_CyclicInputSafe` + `TestRedactStruct_DeepNestingBounded` (PR #232 review SF-2)
+- [x] ROADMAP.md row for RFC 0009 → `🚧 Implementing` on PR open
+- [x] Master Progress Overview ([v0.3.0-plan.md](../v0.3.0-plan.md#master-progress-overview)) row 5 → 🔄 In progress
+- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default) — *PR 1b*
+- [ ] `chain.restart` synthetic event documented in RFC 0009 §G appendix — *PR 1b (with the rest of the wiring docs)*
+- [x] All 16 `AuditEventType` constants present (procedural-memory ones reserved, unwired)
+- [x] `chain.bootstrap` and `chain.recovered` constants present and classed as security-class (PR #232 review SF-3)
+- [x] `RedactStruct` cycle/depth bound covered by `TestRedactStruct_CyclicInputSafe` + `TestRedactStruct_DeepNestingBounded` (PR #232 review SF-2)
+- [x] `make test` + `make lint` clean (security package)
+
+#### Review follow-ups (PR #233 deep review — HEAD `737158b`)
+
+All prior High/Critical findings (H-1, H-2, M-1, M-2, M-4, L-1, L-2, L-4, MF-1, MF-2, SF-1, SF-6) are **resolved in HEAD** with pinning regression tests; PR 1 is approve-with-follow-ups. Remaining items dispatched to PR 1b (wiring contract) and PR 4 (package-internal cleanup):
+
+- **PR 1b owns**:
+  - **Make `WithRedactor` mandatory at construction** — default to `NewSecretRedactor()` in `NewFileAuditLogger` when no `WithRedactor` is supplied so `chain.recovered` cannot leak attacker-influenced `prior_tail_raw_truncated` bytes verbatim. (Review Should-Fix #3)
+  - **Hoist `Path()` onto the `AuditLogger` interface** (or have `NewFileAuditLogger` return the concrete `*FileAuditLogger`) so wiring sites do not need to type-assert through an anonymous interface. (Review Should-Fix #4)
+  - **`chmod 0o600` on pre-existing audit files** — `Stat` + `Chmod` after `os.OpenFile` if perms are looser than `0o600`. (Review Should-Fix #6)
+  - **`RedactStruct` opaque-struct deny-list** — single-element deny-list (`time.Time`) is fragile; any `Detail` value embedding `sync.Mutex`/`sync.Once`/`atomic.Value`/channels would silently zero unexported state on round-trip. Replace with struct-tag opt-in (`secret:"redact"`), an allow-list of known-safe types, or a runtime bail-out on structs with unexported non-primitive fields. **Must land in PR 1b** since PR 3 routes tool-call args through `RedactStruct`. (Review Should-Fix #2)
+  - **Document `OBSERVABILITY_AUDIT_PATH` umask expectations** in [docs/observability.md](../observability.md) (already on PR 1b checklist; tighten to call out perm-on-restart contract).
+  - **Backfill glossary** — add `AuditLogger`, `SecretRedactor`, `chain.bootstrap` / `chain.restart` / `chain.recovered`, "tamper evidence" (vs. resistance) to [docs/ai-glossary.md](../ai-glossary.md) per the project Terminology rule.
+
+- **PR 4 owns** (package-internal quality / observability / API ergonomics):
+  - **`WithClock` does not drive the ticker** — `tickerLoop` calls `time.NewTicker` directly so `WithClock` injection is half-honoured; `TestBatchFlush_TimerTrigger` is wall-clock-dependent (1 s deadline / 20 ms poll, flaky-prone on Windows ~15 ms timer resolution). Either drop `WithClock` or thread a `func(d time.Duration) <-chan time.Time` factory into the option. (Review Should-Fix #1)
+  - **Pin the type-erasing pointer-cap path** — `walk()`'s `reflect.Pointer` branch returns the marker for non-string pointees; add a regression test asserting the marker (not the original) reaches the caller. (Review Should-Fix #5)
+  - **Replace `looksLikeSHA256` with `encoding/hex.DecodeString`** — drop the hand-rolled hex check. (Review Should-Fix #7)
+  - **Versioned / non-printable depth-marker sentinel** so `isDepthMarker` cannot false-positive on caller data equal to the literal `[REDACTED:max-depth-exceeded]`. (Review Nice-to-have #3)
+  - **Export `VerifyChain(path string) error`** alongside the writer so external auditors / a future `persatrix audit verify` CLI subcommand do not reimplement `canonicalEventJSON`. Natural home is PR 1b if the CLI surface is in scope; otherwise PR 4. (Review Nice-to-have #1)
+  - **Additional default redaction patterns** — GitHub PATs (`gh[pousr]_…`), GCP service-account JSON keys, Slack tokens (`xox[bp]-…`), Stripe keys (`sk_live_…`/`pk_live_…`). Realistic for the orchestrator's MCP / container deployment story. (Review Nice-to-have #2)
+  - **Prometheus metrics surface** — `audit_events_total{event_type,outcome}`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`. Lands with PR 1b wiring per [docs/observability.md](../observability.md) conventions. (Review Nice-to-have #5)
+  - **`Emit` allocation** — replace `append(line, '\n')` with `writer.Write(line)` + `writer.WriteByte('\n')` to drop one alloc per event on the telemetry hot path. (Review Nice-to-have #6)
+  - **Cosmetic generic-secret tail** — consume the trailing `"` of a JSON value so the redacted output does not carry a stray quote. (Review Nice-to-have #7)
+  - **Benchmark `RedactStruct`** against a representative `Detail` payload (10–20 fields, 2–3 levels of nesting) once PR 1b wires `tool.invoked` to inform a v0.4.0 `sync.Pool` decision. (Review Nice-to-have #8)
+  - **Coverage-gap tests** — `WithClock` actually drives the ticker; `Detail` not mutated by `Emit`; serialised events at the 1 MiB tail-window boundary; behaviour when no `WithRedactor` is configured and the truncated tail contains a secret (documents the contract even if PR 1b makes the redactor mandatory).
+
+- **Accepted divergences** (no PR action):
+  - `mu` held across `fsync` for security-class events serialises emitters — acceptable today; revisit only if benchmarks at PR 1b wire-time show a bottleneck.
+  - Per-call pointer-cycle visited-set with `defer delete` re-walks shared subtrees in DAGs — depth cap still terminates; perf cliff only on wide DAGs, not a v0.3.0 concern.
+  - `truncate()` produces output up to `max+3` bytes (UTF-8 ellipsis) — cosmetic; 256-byte cap on `prior_tail_raw_truncated` is loose by design.
+  - `fileEndsWithoutNewline` re-opens the file under the documented single-writer invariant — track for the day a log rotator joins.
+  - `AuditEvent.Checksum` lacks a `// not omitempty: canonicalisation excludes` comment — purely descriptive; add opportunistically.
+
+---
+
+### PR 1b: `feature/v030-rfc0009-audit-wiring` — Phase 1a wiring
+
+**Depends on**: PR 1.
+**Estimated size**: ~250–350 lines (handler + executor wiring + integration tests + docs).
+
+#### Scope
+
+See the _wiring_ rows in PR 1's scope table above. Adds the orchestrator-side
+emit sites for `agent.registered`, `capability.violation`, and `tool.invoked`,
+the `OBSERVABILITY_AUDIT_PATH` env wiring in `cmd/orchestrator/main.go`, the
+`config/observability/audit.yaml` toggles, the integration tests, and the
+observability docs update.
+
+#### PR checklist
+
+- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default + `chmod 0o600`-on-restart contract)
+- [ ] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in RFC 0009 §G appendix
+- [ ] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
+- [ ] `Path()` hoisted onto `AuditLogger` interface or `NewFileAuditLogger` returns concrete type (PR #233 review Should-Fix #4)
+- [ ] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
+- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2)
+- [ ] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
+- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5)
+- [ ] Integration tests live under `tests/integration/`
 - [ ] `make test` + `make lint` clean
 
 ---
@@ -289,6 +363,7 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 #### PR checklist
 
 - [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
+- [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
 - [ ] RFC 0009 status block reflects the partial-close shape
 - [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
 - [ ] v0.3.0 master plan row 5 → ✅
