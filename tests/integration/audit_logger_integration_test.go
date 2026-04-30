@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -273,4 +274,75 @@ func TestAuditLogger_ToolInvokedOnDispatch(t *testing.T) {
 	assert.Equal(t, "execute_task", ev.Action)
 	assert.Equal(t, "wf-1", ev.Detail["workflow_id"])
 	assert.Equal(t, "step-1", ev.Detail["step_id"])
+}
+
+// TestAuditLogger_ExcessCapabilitiesEmitsSingleTooManyEvent locks in the
+// PR #234 review M-4 fix: a registration carrying more than
+// `maxCapabilitiesPerAgent` (64) entries must short-circuit at the handler
+// boundary and emit exactly ONE `capability.violation` with
+// reason="too_many" — not one per entry. The original wiring iterated
+// `validateCapabilities` over every entry, fanning a single hostile
+// request into N synchronous fsyncs serialised under the audit logger
+// mutex (DoS amplification bypassing per-request HTTP timeouts because
+// the work lives inside the audit logger, not the handler). The cap +
+// summary emit bounds the worst case to a single fsync regardless of
+// caller-controlled slice length.
+func TestAuditLogger_ExcessCapabilitiesEmitsSingleTooManyEvent(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	auditor, auditPath := newAuditLogger(t)
+	t.Cleanup(func() { _ = auditor.Close() })
+
+	store := state.NewInMemoryStore(logger)
+	reg := registry.NewInMemoryRegistry(logger)
+	pl := planner.NewYAMLPlanner(logger)
+
+	abs, err := filepath.Abs(filepath.Join("..", "..", "workflows"))
+	require.NoError(t, err)
+	srv, err := server.New("127.0.0.1:0", abs, store, reg, pl, logger,
+		server.WithAuditLogger(auditor),
+	)
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Build a request with 200 well-formed-looking capability names — well
+	// over the 64-entry cap. Names are valid against capabilityNameRegex so
+	// the rejection is purely on count, not shape.
+	const overCount = 200
+	caps := make([]string, overCount)
+	for i := range caps {
+		caps[i] = "cap-" + strconv.Itoa(i)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"id":           "dos-amp",
+		"name":         "DoS Amp",
+		"address":      "localhost:50101",
+		"capabilities": caps,
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Post(ts.URL+"/api/v1/agents/register", "application/json", strings.NewReader(string(payload)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	// capability.violation is security-class — fsync'd before Emit returns.
+	// Close to keep the helper symmetrical with sibling tests.
+	require.NoError(t, auditor.Close())
+
+	events := readAuditEvents(t, auditPath)
+	violations := findEvents(events, "capability.violation")
+	require.Len(t, violations, 1, "M-4 regression: hostile registration must produce ONE summary event, not one per capability")
+
+	ev := violations[0]
+	assert.Equal(t, "dos-amp", ev.AgentID)
+	assert.Equal(t, "register", ev.Action)
+	assert.Equal(t, "capability", ev.Resource)
+	assert.Equal(t, "too_many", ev.Detail["reason"])
+	// JSON numeric decode → float64
+	assert.EqualValues(t, overCount, ev.Detail["count"])
+	assert.EqualValues(t, 64, ev.Detail["limit"])
+
+	// And no agent.registered for the rejected request.
+	assert.Empty(t, findEvents(events, "agent.registered"))
 }

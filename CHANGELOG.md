@@ -6,6 +6,36 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0009 PR 1b — Audit wiring + default redactor + chmod self-heal.**
+  Wires the PR 1 `AuditLogger` + `SecretRedactor` into orchestrator hot
+  paths so security-relevant lifecycle events become forensically
+  observable on disk. New env var `OBSERVABILITY_AUDIT_PATH` (default
+  `data/logs/audit.jsonl`, resolved to absolute at startup; literal
+  `=off` disables, case-insensitive) selects the JSONL sink; parent
+  directory is created `0o700` and the file is opened `0o600` with
+  per-open chmod self-heal that re-tightens pre-existing files
+  (POSIX-only — on Windows the call is a no-op against ACLs; see
+  `docs/observability.md` §13). The orchestrator REST `register`
+  handler now emits `agent.registered` (success) and
+  `capability.violation` (rejection) and the gRPC executor emits
+  `tool.invoked` on every successful dispatch. Both wiring points are
+  nil-safe and opt-in via `WithAuditLogger`. Default `Redactor`
+  installed at constructor (closes prior plaintext-leak window from
+  PR #233 review SF-3); pass `WithRedactor(nil)` only for tests that
+  need to write plaintext fixtures. New `WithLogger(*zap.Logger)`
+  option routes audit-logger self-diagnostics (e.g. chmod warnings)
+  through the structured pipeline instead of raw stderr. PR #234
+  review applied: `tool.invoked` and `agent.registered` emits use
+  `context.WithoutCancel` so cancellation racing a committed side
+  effect cannot drop the forensic record; `validateCapabilities` caps
+  per-request capability count at 64 and per-value echo at 256 chars
+  to bound audit-log fan-out from hostile registrations; `Resource`
+  on `agent.registered` is the agent ID (consistent with
+  `tool.invoked`) with the rotating address moved to
+  `Detail["address"]`. Doc-only `config/observability/audit.yaml`
+  ships as a forward-looking knob template (no loader reads it in
+  this PR — runtime knobs are env vars).
+
 - **RFC 0009 PR 1 — `internal/security/` package: AuditLogger +
   SecretRedactor.** First implementation PR for RFC 0009 Phase 1a ships
   the `internal/security/` package surface with no orchestrator wiring
