@@ -130,13 +130,25 @@ var telemetryEvents = map[AuditEventType]struct{}{
 
 // isSecurityEvent reports whether t requires per-event fsync (vs batched flush).
 //
-// Returns false for unknown / not-yet-classified types so the writer fails
-// closed on telemetry latency rather than open on integrity. The companion
-// closed-set test catches gaps at CI time; this function's runtime behavior
-// just keeps an unclassified event from being synchronously flushed forever.
+// PR #233 deep-review M-1: previously this returned false for unknown
+// types, batching them. The docstring claimed "fails closed on telemetry
+// latency rather than open on integrity" — but the implementation did the
+// opposite: a runtime-constructed event with an unrecognised type (e.g.
+// from a deserialised RPC payload) would be batched and could be lost on
+// crash. The closed-set CI test catches *constants* added without
+// classification, but cannot catch values constructed from arbitrary
+// strings at runtime.
+//
+// New contract: known telemetry types batch; everything else (known
+// security types AND unknown types) flushes synchronously. This errs on
+// the side of integrity. The cost is one extra fsync per unrecognised
+// event; in the steady state every event type is one of the constants
+// defined above, so the path is only exercised under operator error.
 func isSecurityEvent(t AuditEventType) bool {
-	_, ok := securityEvents[t]
-	return ok
+	if _, ok := telemetryEvents[t]; ok {
+		return false
+	}
+	return true
 }
 
 // AuditEvent is the wire shape written to the audit sink (one JSON line per event).

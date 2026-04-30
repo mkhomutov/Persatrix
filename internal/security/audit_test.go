@@ -299,6 +299,46 @@ func TestEmit_RedactsDetail(t *testing.T) {
 	}
 }
 
+// TestEmit_RedactsActionAndResource pins PR #233 deep-review H-1: the
+// initial implementation only scrubbed AuditEvent.Detail. Tools whose
+// Resource is the target URL (e.g. an HTTP fetch) and whose Action carries
+// the invoked operation routinely embed credentials in those fields.
+// Without redaction the audit log itself becomes the leak surface.
+//
+// Contract: the redactor MUST be applied to Action and Resource before
+// the event is canonicalised + checksummed + written. AgentID and
+// CorrelationID remain verbatim — they are caller-controlled identifiers
+// (validated upstream) whose stability is required for forensic linkage.
+func TestEmit_RedactsActionAndResource(t *testing.T) {
+	red := NewSecretRedactor()
+	l, path := newTestLogger(t, WithRedactor(red))
+	if err := l.Emit(context.Background(), AuditEvent{
+		EventType: AuditToolInvoked,
+		AgentID:   "agent-1",
+		Action:    "POST Authorization: Bearer leak.me.now==",
+		Resource:  "https://api.example.com/?token=sk-ant-abcdef0123456789abcdef",
+	}); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if err := l.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	events := readEvents(t, path)
+	last := events[len(events)-1]
+	if !strings.Contains(last.Action, "[REDACTED:bearer-token]") {
+		t.Errorf("Action not redacted: %q", last.Action)
+	}
+	if strings.Contains(last.Action, "leak.me.now") {
+		t.Errorf("Action retained raw secret: %q", last.Action)
+	}
+	if !strings.Contains(last.Resource, "[REDACTED:anthropic-api-key]") {
+		t.Errorf("Resource not redacted: %q", last.Resource)
+	}
+	if last.AgentID != "agent-1" {
+		t.Errorf("AgentID was modified: %q (must remain verbatim per contract)", last.AgentID)
+	}
+}
+
 // TestEmit_ConcurrentSafe pins PR #233 review: the AuditLogger doc claims
 // "safe for concurrent use" but no test exercised it. Fire N goroutines
 // emitting alternating security/telemetry events, then re-validate the

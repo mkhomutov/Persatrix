@@ -177,23 +177,20 @@ func TestRedactStruct_DeepNestingBounded(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected output type %T", out)
 	}
-	// PR #233 review: lock the cap-32 contract by asserting positive
-	// behaviour at *both* ends of the chain. We deliberately avoid pinning
-	// the exact boundary node \u2014 that depends on the implementation detail
-	// of how `depth` is incremented per kind of hop \u2014 and instead require
-	// only that:
-	//   (a) the recursion ran far enough to redact at least one tag, AND
-	//   (b) the cap actually fired before the chain was fully walked,
-	//       leaving at least one deep tag in its original (unredacted)
-	//       form.
+	// PR #233 deep-review H-2: when the depth cap fires on a non-string
+	// field (here a `*linkedNode`), the marker is not assignable to the
+	// destination type. The previous contract was "fall back to the
+	// original value" — which silently leaked any secrets living past
+	// the cap. The new contract is "leave the destination at its zero
+	// value" so the cap actually contains the leak.
 	//
-	// Note: when the depth cap fires, the marker (a `string`) is not
-	// assignable to a `*linkedNode` field, so the walk falls back to the
-	// original pointer (see the `reflect.Struct` branch in walk()). The
-	// observable signature of the cap is therefore an unredacted Tag deep
-	// in the chain, not the marker string itself.
-	var redactedCount, plainCount int
+	// Observable signature: the chain still has at least one redacted
+	// tag near the head (recursion did run), but at some point the
+	// `Next` pointer is nil (the cap zeroed it), terminating the chain
+	// before all 64 nodes are visited.
+	var redactedCount, plainCount, visitedNodes int
 	for n := head; n != nil; n = n.Next {
+		visitedNodes++
 		switch {
 		case strings.Contains(n.Tag, "[REDACTED:"):
 			redactedCount++
@@ -204,8 +201,11 @@ func TestRedactStruct_DeepNestingBounded(t *testing.T) {
 	if redactedCount == 0 {
 		t.Errorf("walk never redacted any tag (recursion did not run)")
 	}
-	if plainCount == 0 {
-		t.Errorf("walk redacted every tag (depth cap did not fire on a %d-deep chain)", depth)
+	if plainCount != 0 {
+		t.Errorf("walk left %d unredacted tags reachable from head; depth-cap leak fix regressed (visited=%d/%d)", plainCount, visitedNodes, depth)
+	}
+	if visitedNodes >= depth {
+		t.Errorf("walk reached all %d nodes; depth cap did not fire (visited=%d)", depth, visitedNodes)
 	}
 }
 

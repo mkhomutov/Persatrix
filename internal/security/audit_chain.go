@@ -25,26 +25,31 @@ const (
 )
 
 // inspectTail reads the last newline-terminated record from path (if any)
-// and reports (priorTailRaw, priorChecksum, recoveryKind).
+// and reports (priorTailRaw, priorChecksum, recoveryKind, recoveryReason).
 //
 // On any error short of "file does not exist" the function returns
 // recoveryRecovered so the caller emits chain.recovered — the design
 // intentionally fails loudly rather than silently rolling forward.
-func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKind) {
+//
+// PR #233 deep-review L-4: recoveryReason carries the underlying I/O or
+// parse-failure message so the synthetic chain.recovered event records
+// *why* recovery fired (permission denied vs malformed JSON vs truncated
+// tail). Empty for the bootstrap and restart paths.
+func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKind, reason string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", emptyChecksum(), recoveryBootstrap
+			return "", emptyChecksum(), recoveryBootstrap, ""
 		}
-		return "", emptyChecksum(), recoveryRecovered
+		return "", emptyChecksum(), recoveryRecovered, fmt.Sprintf("stat: %v", err)
 	}
 	if info.Size() == 0 {
-		return "", emptyChecksum(), recoveryBootstrap
+		return "", emptyChecksum(), recoveryBootstrap, ""
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return "", emptyChecksum(), recoveryRecovered
+		return "", emptyChecksum(), recoveryRecovered, fmt.Sprintf("open: %v", err)
 	}
 	defer f.Close()
 
@@ -55,17 +60,17 @@ func inspectTail(path string) (priorTail string, prevSum string, kind recoveryKi
 		// `prior_tail_raw_truncated`. Previously we returned "" here, which
 		// meant the forensic field was always empty for the truncated-tail
 		// case it was designed for.
-		return last, emptyChecksum(), recoveryRecovered
+		return last, emptyChecksum(), recoveryRecovered, "tail-read: incomplete final line (truncated or oversized record)"
 	}
 
 	var ev AuditEvent
 	if err := json.Unmarshal([]byte(last), &ev); err != nil {
-		return last, emptyChecksum(), recoveryRecovered
+		return last, emptyChecksum(), recoveryRecovered, fmt.Sprintf("tail-parse: %v", err)
 	}
 	if !looksLikeSHA256(ev.Checksum) {
-		return last, emptyChecksum(), recoveryRecovered
+		return last, emptyChecksum(), recoveryRecovered, "tail-parse: missing or malformed checksum field"
 	}
-	return last, ev.Checksum, recoveryRestart
+	return last, ev.Checksum, recoveryRestart, ""
 }
 
 // readLastLine returns the last newline-terminated line in r (without the
@@ -152,6 +157,14 @@ func emptyChecksum() string {
 // fileEndsWithoutNewline reports whether path's last byte is not '\n'.
 // Returns false on any error (including non-existent path) — callers only
 // invoke this after recovery detected a truncated tail, so the file exists.
+//
+// PR #233 deep-review L-3: this opens the file a second time while
+// NewFileAuditLogger is already holding an O_APPEND handle. The orchestrator
+// is the sole writer to the audit file, so concurrent mutation between the
+// two opens is not possible in practice. If a future change adds a second
+// writer (e.g. external log rotator) this assumption breaks; consider
+// refactoring to share a single handle via Stat()+Pread on the existing
+// file descriptor at that point.
 func fileEndsWithoutNewline(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -168,7 +181,7 @@ func fileEndsWithoutNewline(path string) bool {
 	return b[0] != '\n'
 }
 
-func (l *fileAuditLogger) emitRecoveryEvent(kind recoveryKind, tail string) error {
+func (l *fileAuditLogger) emitRecoveryEvent(kind recoveryKind, tail string, reason string) error {
 	var ev AuditEvent
 	switch kind {
 	case recoveryBootstrap:
@@ -181,11 +194,19 @@ func (l *fileAuditLogger) emitRecoveryEvent(kind recoveryKind, tail string) erro
 			Detail:    map[string]any{"prior_tail_checksum": l.prevChecksum},
 		}
 	case recoveryRecovered:
+		// PR #233 deep-review L-4: surface the underlying recovery reason
+		// (permission failure, parse failure, oversized tail, etc.) so an
+		// operator inspecting chain.recovered events can distinguish a
+		// benign restart-after-crash from a real integrity incident.
+		detail := map[string]any{"prior_tail": "unknown", "prior_tail_raw_truncated": truncate(tail, 256)}
+		if reason != "" {
+			detail["recovery_reason"] = reason
+		}
 		ev = AuditEvent{
 			EventType: AuditChainRecovered,
 			Action:    "recovered",
 			Outcome:   "warn",
-			Detail:    map[string]any{"prior_tail": "unknown", "prior_tail_raw_truncated": truncate(tail, 256)},
+			Detail:    detail,
 		}
 	}
 	return l.Emit(context.Background(), ev)
@@ -203,6 +224,16 @@ func truncate(s string, max int) string {
 // are emitted in alphabetical key order with the prevChecksum prefixed as a
 // length-tagged segment so an attacker cannot construct a colliding event by
 // shifting bytes between fields.
+//
+// SECURITY NOTE (PR #233 deep-review L-2): the chain is unauthenticated
+// SHA-256 — it provides tamper *evidence* (accidental corruption,
+// truncation, partial writes will mismatch on re-validation) but NOT
+// tamper *resistance*. Anyone with write access to the audit file can
+// recompute the entire chain from scratch and produce a self-consistent
+// forgery. RFC 0009 §G accepts this trade-off because non-repudiation
+// belongs to the off-host SIEM forwarding path (v0.4.0). Future readers
+// should not mistake the chain for an HMAC — adding a key here without
+// also solving secure key storage would be cargo-cult security.
 func canonicalEventJSON(ev AuditEvent, prevChecksum string) ([]byte, error) {
 	m := map[string]any{
 		"timestamp":      ev.Timestamp.UTC().Format(time.RFC3339Nano),

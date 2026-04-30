@@ -51,6 +51,30 @@ const reflectionDepthCap = 32
 // downstream consumers can use a single regex to detect any redacted value.
 const redactDepthExceededMarker = "[REDACTED:max-depth-exceeded]"
 
+// isDepthMarker reports whether v carries the [redactDepthExceededMarker]
+// sentinel string. Used by the reflective walk to distinguish two cases
+// where `walk` returns a value that is not assignable to the destination
+// field type:
+//
+//  1. The walk hit the depth cap or a pointer cycle on a non-string field
+//     and returned the marker (a Go string). In that case the original
+//     subtree MUST NOT be re-copied into the output — doing so would
+//     silently leak any secrets that lived past the cap (PR #233
+//     deep-review H-2).
+//  2. The walk returned an unrelated invalid / non-assignable value (e.g.
+//     a channel/func that walk returns as-is). In that case copying the
+//     original is safe because the value cannot embed secrets reachable
+//     by the regex pass.
+func isDepthMarker(v reflect.Value) bool {
+	if !v.IsValid() {
+		return false
+	}
+	if v.Kind() != reflect.String {
+		return false
+	}
+	return v.String() == redactDepthExceededMarker
+}
+
 // NewSecretRedactor returns a [SecretRedactor] preloaded with the five
 // default patterns from RFC 0009 §I:
 //
@@ -166,11 +190,19 @@ func (r *SecretRedactor) redactLocked(s string) string {
 //
 // Skipped: time.Time, numeric types, unexported fields, channel/func/unsafe.
 //
-// Cycle and depth bound (PR #232 review SF-2): visited pointer addresses
-// are tracked in a per-call set; recursion is capped at
-// [reflectionDepthCap] levels. When the cap is hit or a previously visited
-// pointer is re-entered, the current node is replaced with
-// [redactDepthExceededMarker] rather than panicking on stack overflow.
+// Cycle and depth bound (PR #232 review SF-2 + PR #233 deep-review H-2):
+// visited pointer addresses are tracked in a per-call set; recursion is
+// capped at [reflectionDepthCap] levels. When the cap or a cycle fires:
+//
+//   - For a string field the value is replaced with
+//     [redactDepthExceededMarker].
+//   - For any other field type (struct, pointer, slice element, etc.) the
+//     destination is left at its zero value. The previous behaviour
+//     copied the original subtree across, which silently leaked any
+//     secrets living past the cap (a struct nested 33 levels deep would
+//     bypass redaction entirely).
+//   - For map entries the marker is preserved if the element type can
+//     hold it; otherwise the key is omitted.
 //
 // The input is not mutated. The returned value is a deep copy of every
 // container the walk descends into; primitives are returned by value.
@@ -251,9 +283,15 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 				continue
 			}
 			fieldOut := r.walk(v.Field(i), depth+1, visited)
-			if fieldOut.IsValid() && fieldOut.Type().AssignableTo(out.Field(i).Type()) {
+			switch {
+			case fieldOut.IsValid() && fieldOut.Type().AssignableTo(out.Field(i).Type()):
 				out.Field(i).Set(fieldOut)
-			} else {
+			case isDepthMarker(fieldOut):
+				// PR #233 deep-review H-2: depth cap fired below this
+				// non-string field. Leave the destination at its zero
+				// value rather than copying the (potentially secret-
+				// bearing) original subtree.
+			default:
 				out.Field(i).Set(v.Field(i))
 			}
 		}
@@ -266,9 +304,12 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 		for i := 0; i < v.Len(); i++ {
 			elemOut := r.walk(v.Index(i), depth+1, visited)
-			if elemOut.IsValid() && elemOut.Type().AssignableTo(out.Index(i).Type()) {
+			switch {
+			case elemOut.IsValid() && elemOut.Type().AssignableTo(out.Index(i).Type()):
 				out.Index(i).Set(elemOut)
-			} else {
+			case isDepthMarker(elemOut):
+				// H-2: keep zero element rather than leaking original.
+			default:
 				out.Index(i).Set(v.Index(i))
 			}
 		}
@@ -278,9 +319,12 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		out := reflect.New(v.Type()).Elem()
 		for i := 0; i < v.Len(); i++ {
 			elemOut := r.walk(v.Index(i), depth+1, visited)
-			if elemOut.IsValid() && elemOut.Type().AssignableTo(out.Index(i).Type()) {
+			switch {
+			case elemOut.IsValid() && elemOut.Type().AssignableTo(out.Index(i).Type()):
 				out.Index(i).Set(elemOut)
-			} else {
+			case isDepthMarker(elemOut):
+				// H-2: keep zero element rather than leaking original.
+			default:
 				out.Index(i).Set(v.Index(i))
 			}
 		}
@@ -294,9 +338,20 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		iter := v.MapRange()
 		for iter.Next() {
 			valOut := r.walk(iter.Value(), depth+1, visited)
-			if valOut.IsValid() && valOut.Type().AssignableTo(out.Type().Elem()) {
+			switch {
+			case valOut.IsValid() && valOut.Type().AssignableTo(out.Type().Elem()):
 				out.SetMapIndex(iter.Key(), valOut)
-			} else {
+			case isDepthMarker(valOut):
+				// PR #233 deep-review H-2: drop the entry entirely
+				// rather than re-inserting the unredacted original.
+				// If the element type can hold the marker string
+				// (any/string), preserve it so operators can see the
+				// path was elided; otherwise leave the key absent.
+				marker := reflect.ValueOf(redactDepthExceededMarker)
+				if marker.Type().AssignableTo(out.Type().Elem()) {
+					out.SetMapIndex(iter.Key(), marker)
+				}
+			default:
 				out.SetMapIndex(iter.Key(), iter.Value())
 			}
 		}

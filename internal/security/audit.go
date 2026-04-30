@@ -130,7 +130,7 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 		return nil, errors.New("security: audit log path is required")
 	}
 
-	tail, prevSum, recovery := inspectTail(path)
+	tail, prevSum, recovery, reason := inspectTail(path)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -161,7 +161,7 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 		}
 	}
 
-	if err := l.emitRecoveryEvent(recovery, tail); err != nil {
+	if err := l.emitRecoveryEvent(recovery, tail, reason); err != nil {
 		_ = l.Close()
 		return nil, err
 	}
@@ -189,9 +189,33 @@ func (l *fileAuditLogger) Emit(ctx context.Context, ev AuditEvent) error {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = l.now().UTC()
 	}
-	if l.redactor != nil && ev.Detail != nil {
-		if redacted, ok := l.redactor.RedactStruct(ev.Detail).(map[string]any); ok {
-			ev.Detail = redacted
+	if l.redactor != nil {
+		// PR #233 deep-review H-1: prior implementation only scrubbed
+		// ev.Detail. PR 1b will start emitting tool.invoked events whose
+		// Resource is the tool's target URL and whose Action carries the
+		// invoked operation — both fields most likely to embed secrets in
+		// the wild (e.g. `https://api.example.com/?token=sk-ant-…`). Apply
+		// pattern redaction to the string-valued caller fields as well.
+		//
+		// AgentID and CorrelationID are intentionally NOT redacted: they
+		// are caller-controlled identifiers (not free-form strings) whose
+		// stability is required to correlate events across the chain. Any
+		// caller embedding a secret in an identifier is a misconfiguration
+		// the audit log cannot fix without breaking forensic linkage.
+		ev.Action = l.redactor.Redact(ev.Action)
+		ev.Resource = l.redactor.Redact(ev.Resource)
+		if ev.Detail != nil {
+			if redacted, ok := l.redactor.RedactStruct(ev.Detail).(map[string]any); ok {
+				ev.Detail = redacted
+			} else {
+				// PR #233 deep-review M-4: RedactStruct may return a
+				// non-map (e.g. the depth-exceeded marker string if the
+				// top-level Detail map's reflective walk hit the cap).
+				// Preserving the original here would silently leak the
+				// unredacted payload — drop Detail entirely and signal
+				// that redaction failed so an operator can investigate.
+				ev.Detail = map[string]any{"_redacted": "depth-exceeded"}
+			}
 		}
 	}
 	canonical, err := canonicalEventJSON(ev, l.prevChecksum)
