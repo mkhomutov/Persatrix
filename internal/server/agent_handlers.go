@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 
@@ -19,6 +20,19 @@ import (
 // the [docs/ai-glossary.md] capability-name convention: lowercase
 // alphanumeric with `_` or `-` separators, 1–64 chars.
 var capabilityNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// maxCapabilitiesPerAgent caps the per-registration capability slice to
+// bound the audit-side work performed by validateCapabilities.
+//
+// PR #234 review M-4: each malformed capability triggers a security-class
+// audit emit (synchronous fsync under the audit logger's mutex). Without
+// a cap, a single hostile registration with N bogus entries fan-outs to
+// N serialised fsyncs, blocking every other audit emit site in the
+// orchestrator until the registration handler returns. 64 is the same
+// magnitude as the per-name length bound and is generous for realistic
+// agents (the largest blueprint capability lists in templates/ are well
+// under a dozen).
+const maxCapabilitiesPerAgent = 64
 
 // handleRegisterAgent handles POST /api/v1/agents/register.
 func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +82,31 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	// unbounded / hostile strings cannot enter the registry, audit log, or
 	// prompt context. Each rejection emits `capability.violation` (security-
 	// class, fsync’d immediately) so an operator can correlate noisy clients.
+	//
+	// PR #234 review M-4: bound the slice length first. Without this an
+	// attacker can submit thousands of bogus capabilities and amplify a
+	// single registration into thousands of synchronous fsyncs serialised
+	// under the audit logger's mutex (DoS amplification that bypasses the
+	// per-request HTTP timeout because the work happens inside the audit
+	// logger, not the handler). When the cap is exceeded we emit one
+	// `capability.violation` with reason="too_many" carrying the offending
+	// count, then short-circuit — operators still get forensic visibility
+	// without paying the per-entry fsync cost.
+	if len(req.Capabilities) > maxCapabilitiesPerAgent {
+		s.emitAudit(r.Context(), security.AuditEvent{
+			EventType: security.AuditCapabilityViolation,
+			AgentID:   req.ID,
+			Action:    "register",
+			Resource:  "capability",
+			Detail: map[string]any{
+				"reason": "too_many",
+				"count":  len(req.Capabilities),
+				"limit":  maxCapabilitiesPerAgent,
+			},
+		})
+		writeError(w, "BAD_REQUEST", fmt.Sprintf("capabilities exceeds maximum of %d entries", maxCapabilitiesPerAgent), http.StatusBadRequest)
+		return
+	}
 	if violations := s.validateCapabilities(r.Context(), req.ID, req.Capabilities); len(violations) > 0 {
 		writeError(w, "BAD_REQUEST", "capability "+violations[0]+" must match ^[a-z0-9][a-z0-9_-]{0,63}$", http.StatusBadRequest)
 		return

@@ -237,10 +237,24 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			// are the stable forensic anchor). Detail records workflow/step
 			// IDs so the audit chain links to the workflow run audit trail.
 			// Emit is best-effort: a stalled audit sink must not block the
-			// dispatch hot path. Errors land in debug logs and the
-			// audit_emit_latency_seconds histogram.
+			// dispatch hot path.
+			//
+			// PR #234 review M-2: detach the parent ctx via
+			// [context.WithoutCancel]. The dispatch already succeeded;
+			// tying the audit emit to ctx means a cancellation racing the
+			// successful return (e.g. caller deadline expiring just after
+			// dispatch unblocks, or a derived-deadline budget that consumed
+			// nearly the whole window) silently drops the only forensic
+			// record of the completed side effect via Emit's `ctx.Err()`
+			// short-circuit. Values still propagate so trace/correlation
+			// IDs are preserved on the emitted event.
+			//
+			// PR #234 review L-5: prior code discarded the Emit error with
+			// `_ = ...` while the inline comment claimed it landed in debug
+			// logs — it didn't. Honour the documented contract.
 			if e.auditor != nil {
-				_ = e.auditor.Emit(ctx, security.AuditEvent{
+				emitCtx := context.WithoutCancel(ctx)
+				if emitErr := e.auditor.Emit(emitCtx, security.AuditEvent{
 					EventType: security.AuditToolInvoked,
 					AgentID:   req.AgentID,
 					Action:    "execute_task",
@@ -253,7 +267,13 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 						"wall_time_ms": wallTimeMs,
 						"cache_hit":    result.CacheHit,
 					},
-				})
+				}); emitErr != nil {
+					logger.Debug("audit emit failed",
+						zap.String("event_type", string(security.AuditToolInvoked)),
+						zap.String("agent_id", req.AgentID),
+						zap.Error(emitErr),
+					)
+				}
 			}
 
 			// Store result in cache for cacheable steps.

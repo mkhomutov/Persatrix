@@ -5,7 +5,7 @@ import "time"
 // AuditEventType identifies the kind of security-relevant event being recorded.
 //
 // The full set is fixed at compile time so the table-driven severity
-// classifier in [isSecurityEvent] can be exhaustively unit-tested via
+// classifier in [IsSecurityEvent] can be exhaustively unit-tested via
 // [AllAuditEventTypes]. Adding a new constant without also adding a
 // classification entry will be caught by
 // `TestEveryAuditEventType_HasSeverityClassification`.
@@ -128,7 +128,7 @@ var telemetryEvents = map[AuditEventType]struct{}{
 	AuditMemoryWrite:     {},
 }
 
-// isSecurityEvent reports whether t requires per-event fsync (vs batched flush).
+// IsSecurityEvent reports whether t requires per-event fsync (vs batched flush).
 //
 // PR #233 deep-review M-1: previously this returned false for unknown
 // types, batching them. The docstring claimed "fails closed on telemetry
@@ -144,7 +144,11 @@ var telemetryEvents = map[AuditEventType]struct{}{
 // the side of integrity. The cost is one extra fsync per unrecognised
 // event; in the steady state every event type is one of the constants
 // defined above, so the path is only exercised under operator error.
-func isSecurityEvent(t AuditEventType) bool {
+//
+// PR #234 review L-6: exported so server.emitAudit can branch on the
+// classification when choosing log severity for emit failures (security-
+// class → Warn, telemetry-class → Debug).
+func IsSecurityEvent(t AuditEventType) bool {
 	if _, ok := telemetryEvents[t]; ok {
 		return false
 	}

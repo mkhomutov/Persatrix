@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -23,31 +24,50 @@ const (
 	// defaultAuditPath is the audit-log fallback when auditPathEnvVar is
 	// unset. Lives under data/logs/ alongside other operator-facing JSONL
 	// artifacts.
+	//
+	// Resolved via [filepath.Abs] in initAuditLogger so the file lands in
+	// a deterministic location regardless of process cwd (PR #234 review
+	// L-2). Without this, running the orchestrator under systemd with
+	// `WorkingDirectory=/var/lib/persatrix` would silently land the audit
+	// log at `/var/lib/persatrix/data/logs/audit.jsonl`, outside the
+	// operator's expected `chmod` scope.
 	defaultAuditPath = "data/logs/audit.jsonl"
 
 	// auditDisableSentinel opts out of audit logging entirely. Mirrors the
 	// existing logbuffer / metrics opt-out convention so operators have a
 	// single mental model for "this subsystem is off".
+	//
+	// Comparison is case-insensitive (PR #234 review L-3) — operators
+	// copying `OFF` from documentation must not silently land on a file
+	// literally named "OFF" in cwd.
 	auditDisableSentinel = "off"
 )
 
 // initAuditLogger constructs the orchestrator's audit sink from the
 // OBSERVABILITY_AUDIT_PATH env var. Returns (nil, nil) when the operator
-// has explicitly opted out via "=off" so callers can branch on the nil
-// logger without a separate disabled flag.
+// has explicitly opted out via "=off" (any case) so callers can branch
+// on the nil logger without a separate disabled flag.
 func initAuditLogger(logger *zap.Logger) (security.AuditLogger, error) {
 	path := os.Getenv(auditPathEnvVar)
-	switch path {
-	case auditDisableSentinel:
+	switch {
+	case strings.EqualFold(path, auditDisableSentinel):
 		logger.Warn("audit logger disabled via " + auditPathEnvVar + "=off")
 		return nil, nil
-	case "":
-		path = defaultAuditPath
+	case path == "":
+		// Resolve the default path relative to the process cwd at startup.
+		// We deliberately resolve once here (not per-write) so the
+		// effective path is stable across the orchestrator lifetime even
+		// if some downstream code calls os.Chdir.
+		abs, err := filepath.Abs(defaultAuditPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve default audit log path: %w", err)
+		}
+		path = abs
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create audit log directory %q: %w", dir, err)
 		}
 	}
-	return security.NewFileAuditLogger(path)
+	return security.NewFileAuditLogger(path, security.WithLogger(logger))
 }

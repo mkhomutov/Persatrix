@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -439,5 +440,42 @@ func TestStartup_OversizedTailRecoversNotMisclassified(t *testing.T) {
 	last := events[len(events)-1]
 	if last.EventType != AuditChainRecovered {
 		t.Fatalf("last event type = %s; want chain.recovered (oversized tail must trigger recovery)", last.EventType)
+	}
+}
+
+// TestNewFileAuditLogger_ChmodSelfHeal verifies the SF-6 self-heal added in
+// PR #234: a pre-existing audit file with relaxed permissions is tightened
+// to 0o600 on open. Skipped on Windows because Chmod on NTFS does not map
+// to the POSIX mode bits checked here (the file's stat-mode after Chmod is
+// implementation-defined).
+//
+// PR #234 review (testing gap "No test for chmod 0o600 self-heal").
+func TestNewFileAuditLogger_ChmodSelfHeal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Chmod 0o600 semantics do not apply on Windows NTFS")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+
+	// Pre-create the file with deliberately relaxed mode so the constructor
+	// has something to tighten. 0o644 is the umask-default on most Linux
+	// distros, which is precisely the misconfiguration the self-heal exists
+	// to repair.
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	l, err := NewFileAuditLogger(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode after open = %o; want 0o600 (self-heal regression)", got)
 	}
 }
