@@ -2,7 +2,7 @@
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-04-29
+**Last updated**: 2026-04-30
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
@@ -188,6 +188,29 @@ observability docs update.
 - [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5). **Deferred to PR 1c** — Nice-to-have; the OTEL meter scaffolding lands cleanly alongside the RedactStruct surface change.
 - [x] Integration tests live under `tests/integration/audit_logger_integration_test.go` (4 tests covering register-emit, capability-violation, redaction default, tool.invoked)
 - [x] `go test ./...` + `go vet ./...` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR)
+- [ ] `filepath.Abs` applied to all audit log paths, including operator-set `OBSERVABILITY_AUDIT_PATH` values (PR #234 review L-1 — 1-line fix)
+- [ ] Test for capability-echo truncation path: name >256 chars produces `truncated:true` + `original_length:N` in `Detail` (PR #234 review L-4 — ~15 lines)
+
+#### Review follow-ups (PR #234 deep review — HEAD `feature/v030-rfc0009-audit-wiring`)
+
+Verdict: **APPROVE with minor follow-ups.** No blocking findings. Items dispatched as follows:
+
+- **Fix in this PR (L-1, L-4)**:
+  - **L-1** — Operator-set relative paths still chdir-unsafe. The prior L-2 fix (PR #233) resolves `filepath.Abs` only when `OBSERVABILITY_AUDIT_PATH` is *unset*. An operator explicitly setting the env var to a relative path hits the same `os.Chdir` failure. Fix: unconditionally resolve `path` via `filepath.Abs` when `!filepath.IsAbs(path)` before `MkdirAll`. Collapses both branches. 1-line change in `cmd/orchestrator/audit.go`.
+  - **L-4** — Truncation regression test missing. `TestAuditLogger_CapabilityViolationOnMalformedName` uses `"BAD CAP"` (7 chars) and never exercises the >256-char N-2 branch. Removing the truncation logic would silently pass CI. Add `TestAuditLogger_CapabilityViolationName_Truncated` (~15 lines) in `tests/integration/audit_logger_integration_test.go`.
+
+- **Deferred to PR 1c**:
+  - **Medium-1** — `validateCapabilities` still emits up to 64 sequential fsyncs when a registration carries exactly 64 all-bad entries (M-4 cap-check only fires when the count *exceeds* the cap, not when at the cap). Accepted residual — bounded and documented. Add `audit_emit_latency_seconds` histogram + SLO alert in PR 1c so operators detect serialisation pile-ups. Alternatives (stop-after-first-violation or batch into one event) remain on the table if alerting surfaces a problem.
+  - **L-2** — `Resource` field semantics are heterogeneous: `agent.registered` and `tool.invoked` carry the agent_id; `capability.violation` events carry the literal `"capability"`. Document the heterogeneity in `docs/observability.md §13` (cheap option) or move the literal to `Detail.resource_kind` and make `Resource` consistently the agent_id (cleaner but touches three emit sites).
+  - **L-3** — `dispatch.go` comment overstates the safety of `Emit` ("a stalled audit sink must not block the dispatch hot path"). In practice the mutex is held through fsync for security-class events. Rephrase to "audit emit is best-effort; under contention it can block on the audit logger's mutex" and record the emit-or-drop trade-off in RFC 0009 §G appendix alongside the latency SLO.
+
+- **Deferred to PR 4 (nits)**:
+  - **N-1** — `fmt.Sprintf` used for a single integer interpolation in `agent_handlers.go:107`; adjacent error messages use plain string concat. Replace with `strconv.Itoa` concat.
+  - **N-2** — `config/observability/audit.yaml` is doc-only but its neighbours (`prometheus.yaml`, `otel-collector.yaml`) are consumed at runtime — misleading during incident response. Add `# DOCUMENTATION ONLY — runtime config is env-driven` as the first comment line above the `audit:` key.
+  - **N-3** — `TestAuditLogger_RedactsBearerTokenInDetail` uses `defer auditor.Close()` while every other test in the file uses `t.Cleanup`. Standardise on `t.Cleanup`.
+
+- **Accepted divergences** (no PR action):
+  - Mutex serialises every `Emit` call including fsync for security-class events — acceptable today; revisit once `audit_emit_latency_seconds` lands in PR 1c and benchmarks are available. A bounded-channel emit-or-drop buffer was considered and rejected for tamper-evidence integrity.
 
 ---
 
@@ -217,7 +240,10 @@ items both surface non-trivial design choices that warrant their own review:
 - [ ] `RedactStruct` surface design recorded in RFC 0009 §I addendum (one of three options chosen with rationale)
 - [ ] All call sites in `internal/security/` updated to new surface
 - [ ] Unit tests cover the new contract (struct-tag honoured, unexported fields bail out, recursion bounded)
-- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths
+- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5)
+- [ ] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
+- [ ] `Resource` field semantics documented or made consistent across all three emit-site event types (PR #234 review L-2)
+- [ ] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
 - [ ] `make test` + `make lint` clean
 
 ---
@@ -398,6 +424,7 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 
 - [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
 - [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
+- [ ] PR #234 nit sweep: `fmt.Sprintf` → `strconv.Itoa` in `agent_handlers.go` (N-1); `# DOCUMENTATION ONLY` header in `config/observability/audit.yaml` (N-2); `defer` → `t.Cleanup` in `TestAuditLogger_RedactsBearerTokenInDetail` (N-3)
 - [ ] RFC 0009 status block reflects the partial-close shape
 - [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
 - [ ] v0.3.0 master plan row 5 → ✅
