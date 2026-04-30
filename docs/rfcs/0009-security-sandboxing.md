@@ -436,6 +436,25 @@ Default patterns:
 
 The `SecretRedactor` is applied to all `AuditEvent.Detail` fields before writing, and to all agent task result bodies before they are stored in the state store.
 
+#### Addendum (PR 1c): `RedactStruct` opaque-struct surface
+
+PR 1 shipped `RedactStruct` with a one-element opaque-type deny-list (`time.Time`). PR #233 review Should-Fix #2 flagged the deny-list as fragile: any future `Detail` payload embedding `sync.Mutex` / `sync.Once` / `sync.WaitGroup` / `atomic.Value` / a channel would be reflectively walked and its unexported state silently zeroed in the redacted copy. PR 3 routes tool-call argument structs through `RedactStruct`, so the surface had to be hardened before that PR locked in arbitrary caller-supplied types.
+
+**Decision (PR 1c)**: replace the deny-list with a structural rule — a struct type `T` is opaque (returned as-is, no recursive walk) if either:
+
+1. **Any unexported field of `T` has a non-primitive type** (anything that is not `bool`, an integer kind, a float kind, a complex kind, `uintptr`, or `string`), or
+2. **`T` has no exported fields at all** (nothing the walk could redact even if it descended).
+
+Why this rule over the alternatives considered in the PR 1c plan:
+
+- **Struct-tag opt-in (`audit:"redact"`)** — would require every caller-supplied type to be annotated. PR 3 will pass tool argument structs from external configs we do not control; opt-in produces a redaction hole on every un-annotated type. Rejected.
+- **Explicit allow-list of safe types** — same problem as above plus a permanent maintenance burden every time a new caller surface lands. Rejected.
+- **Unexported-non-primitive bail-out (chosen, with rule 2 added)** — `time.Time` (has unexported `loc *Location` — a pointer), `sync.Once` / `sync.WaitGroup` (have embedded structs as unexported fields), and `atomic.Value` (has unexported `v any` — an interface) all trip rule 1. `sync.Mutex` has `state int32` + `sema uint32` — both primitive, so rule 1 alone would walk it; rule 2 fires because Mutex has no exported fields, so the walk would produce a freshly zeroed Mutex regardless and there is no redaction value to extract. The combined rule covers every standard-library hazard without requiring per-type registration.
+
+The `isOpaqueStruct(t)` decision is computed at the call site rather than cached: the reflective walk is already on a slow path (audit emission, not the orchestrator hot loop), and a cache would bloat the API surface for negligible gain. Revisit if `RedactStruct` shows up in CPU profiles after PR 3 lands.
+
+**Failure mode the rule does not cover**: a type that exposes exported string fields *and* carries unexported non-primitive state — its strings are not redacted under the new rule, so a secret stored in an exported field of e.g. `*sync.Cond` would survive into the audit log. The fallback is the surface-level `Redact()` pass over `Action` / `Resource` (audit.go:263-264) plus the per-key string redaction inside `Detail`'s top-level map values; the only un-covered case is a string nested *inside* a struct that is itself opaque under the rule. Logged as accepted divergence pending a v0.4.0 revisit if PR 3's tool-call surface surfaces real instances.
+
 ---
 
 ## Security Considerations

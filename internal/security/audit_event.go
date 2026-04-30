@@ -173,10 +173,33 @@ type AuditEvent struct {
 	EventType     AuditEventType `json:"event_type"`
 	AgentID       string         `json:"agent_id"`
 	Action        string         `json:"action"`
-	Resource      string         `json:"resource"`
-	Outcome       string         `json:"outcome"`
-	Detail        map[string]any `json:"detail,omitempty"`
-	Checksum      string         `json:"checksum"`
+	// Resource identifies the object the event acts upon. Semantics
+	// vary by event type and the heterogeneity is intentional (PR #234
+	// review L-2):
+	//
+	//   - `agent.registered` / `tool.invoked` carry the agent_id — the
+	//     stable forensic anchor that joins these events to downstream
+	//     records emitted on the same agent's behalf.
+	//   - `capability.violation` carries the literal `"capability"` —
+	//     the event is *about* the capability subsystem rather than a
+	//     specific named resource (the offending capability string
+	//     lives in `Detail["capability"]`). Cleaning this up to also
+	//     carry agent_id was considered but rejected as churn that
+	//     touches three emit sites for cosmetic improvement; the
+	//     forensic linkage is already provided by the AgentID field
+	//     and the CorrelationID's third segment.
+	//   - `chain.bootstrap` / `chain.restart` / `chain.recovered`
+	//     leave Resource empty — these are sink-lifecycle events with
+	//     no acted-upon resource.
+	//
+	// Future emit sites should pick the agent_id form unless they are
+	// genuinely subsystem-scoped (the capability.violation case).
+	// Consumers that need a uniform key should join on AgentID, not
+	// Resource.
+	Resource string         `json:"resource"`
+	Outcome  string         `json:"outcome"`
+	Detail   map[string]any `json:"detail,omitempty"`
+	Checksum string         `json:"checksum"`
 }
 
 // CorrelationID composes the canonical 4-field correlation identifier.

@@ -100,6 +100,27 @@ func WithClock(now func() time.Time) AuditLoggerOption {
 	}
 }
 
+// WithAuditMetrics injects the metrics surface the logger publishes
+// per-event counters and an emit-latency histogram through (RFC 0009
+// PR 1c). Pass nil — or omit the option — to disable metric emission;
+// the logger uses a zero-cost no-op surface in that case so existing
+// callers and tests continue to work unchanged.
+//
+// The orchestrator wires this from the OTEL-backed implementation in
+// [observability/metrics.NewAuditMetrics]; production deployments rely
+// on the resulting `audit_events_total` / `audit_chain_recovered_total`
+// / `audit_emit_latency_seconds` instruments to detect the
+// capability-fsync amplification documented in PR #234 review Medium-1.
+func WithAuditMetrics(m AuditMetrics) AuditLoggerOption {
+	return func(l *fileAuditLogger) {
+		if m == nil {
+			l.metrics = noopAuditMetrics{}
+			return
+		}
+		l.metrics = m
+	}
+}
+
 // WithLogger injects a structured logger used for diagnostic warnings
 // emitted by the audit logger itself (e.g. chmod self-heal failures).
 //
@@ -140,6 +161,7 @@ type fileAuditLogger struct {
 	redactor      Redactor
 	now           func() time.Time
 	logger        *zap.Logger
+	metrics       AuditMetrics
 }
 
 // NewFileAuditLogger opens path for append-only writes and returns an
@@ -182,6 +204,7 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 		now:           time.Now,
 		redactor:      NewSecretRedactor(),
 		logger:        zap.NewNop(),
+		metrics:       noopAuditMetrics{},
 	}
 	for _, opt := range opts {
 		opt(l)
@@ -237,6 +260,17 @@ func (l *fileAuditLogger) Emit(ctx context.Context, ev AuditEvent) error {
 		return err
 	}
 
+	// PR 1c (PR #234 review Medium-1): time the full Emit including
+	// mutex acquisition + serialise + write + (for security-class
+	// events) fsync. This is the canonical surface the operator alert
+	// on `audit_emit_latency_seconds` watches; the histogram makes the
+	// capability-fsync amplification visible without requiring the
+	// caller to instrument every emit site.
+	start := l.now()
+	defer func() {
+		l.metrics.ObserveEmitLatency(l.now().Sub(start))
+	}()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -291,6 +325,18 @@ func (l *fileAuditLogger) Emit(ctx context.Context, ev AuditEvent) error {
 		return fmt.Errorf("security: write audit event: %w", err)
 	}
 	l.prevChecksum = ev.Checksum
+
+	// PR 1c — record the per-event counter once the line has been
+	// committed to the buffer. Security-class events are about to fsync
+	// in flushLocked; telemetry-class events are batched. Either way
+	// the line is durable enough that an operator alert on a missing
+	// counter increment after a confirmed event is meaningful. Chain-
+	// recovery synthetic events also flow through here, so
+	// chain.recovered's counter increments alongside the dedicated
+	// audit_chain_recovered_total counter set in emitRecoveryEvent
+	// (the two counters serve different alerts: events_total drives
+	// per-type SLOs, chain_recovered_total drives integrity alerting).
+	l.metrics.RecordEvent(ev.EventType, classifyAuditEvent(ev.EventType))
 
 	if IsSecurityEvent(ev.EventType) {
 		return l.flushLocked()

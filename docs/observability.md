@@ -438,3 +438,37 @@ Locked in by `tests/integration/test_logs_e2e.py` (opt-in via `pytest -m require
 JSONL + SHA-256 chain at `OBSERVABILITY_AUDIT_PATH` (default
 `data/logs/audit.jsonl`, `=off` disables). Knobs:
 [audit.yaml](../config/observability/audit.yaml). Contracts: RFC 0009.
+
+### 13.1. Metrics + SLO alerts (RFC 0009 PR 1c)
+
+OTEL surface in
+[audit_instruments.go](../internal/observability/metrics/audit_instruments.go):
+`audit.events_total{event_type,class}` (latency early-warning),
+`audit.chain_recovered_total` (integrity incidents),
+`audit.emit_latency_seconds` (1 ms → 2.5 s buckets, PR #234 Medium-1).
+
+```yaml
+# Prometheus alert templates. Thresholds tuned for SSD-backed sinks.
+- alert: AuditEmitLatencyP95High
+  expr: |
+    histogram_quantile(0.95,
+      sum by (le) (rate(orchestrator_audit_emit_latency_seconds_bucket[5m]))
+    ) > 0.1
+  for: 5m
+  labels: { severity: page }
+  annotations:
+    summary: AuditLogger Emit p95 latency exceeds 100 ms
+
+- alert: AuditChainRecovered
+  expr: increase(orchestrator_audit_chain_recovered_total[5m]) > 0
+  labels: { severity: page }
+  annotations:
+    summary: Audit chain recovered — integrity incident or mid-write crash
+
+- alert: AuditSecurityClassSilent
+  expr: rate(orchestrator_audit_events_total{class="security"}[15m]) == 0
+  for: 30m
+  labels: { severity: warn }
+  annotations:
+    summary: No security-class audit events for 30 minutes
+```

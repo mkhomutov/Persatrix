@@ -208,6 +208,14 @@ func (l *fileAuditLogger) emitRecoveryEvent(kind recoveryKind, tail string, reas
 			Outcome:   "warn",
 			Detail:    detail,
 		}
+		// PR 1c — dedicated chain-recovery counter so operators can
+		// alert on integrity events without needing to slice
+		// audit_events_total{event_type=...}. Bumped *before* Emit so
+		// the count survives even if Emit's downstream write fails;
+		// the counter is monotonic and a duplicate-on-retry would
+		// exaggerate by one which is preferable to under-counting an
+		// integrity incident.
+		l.metrics.RecordChainRecovered()
 	}
 	return l.Emit(context.Background(), ev)
 }

@@ -211,7 +211,7 @@ func main() {
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
 
 	// 4. Initialize security (permission gate, rate limiter, audit logger)
-	auditor, err := initAuditLogger(logger)
+	auditor, err := initAuditLogger(logger, orchMetrics)
 	if err != nil {
 		logger.Fatal("failed to initialize audit logger", zap.Error(err))
 	}

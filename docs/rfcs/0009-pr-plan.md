@@ -237,14 +237,14 @@ items both surface non-trivial design choices that warrant their own review:
 
 #### PR checklist
 
-- [ ] `RedactStruct` surface design recorded in RFC 0009 §I addendum (one of three options chosen with rationale)
-- [ ] All call sites in `internal/security/` updated to new surface
-- [ ] Unit tests cover the new contract (struct-tag honoured, unexported fields bail out, recursion bounded)
-- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5)
-- [ ] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
-- [ ] `Resource` field semantics documented or made consistent across all three emit-site event types (PR #234 review L-2)
-- [ ] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
-- [ ] `make test` + `make lint` clean
+- [x] `RedactStruct` surface design recorded in RFC 0009 §I addendum (unexported-non-primitive bail-out chosen, with rule 2 — no exported fields → opaque — added to cover `sync.Mutex`)
+- [x] All call sites in `internal/security/` updated to new surface (the per-type `isOpaqueStruct` deny-list is gone; no other caller in `internal/security/` invokes the rule directly — `audit.go` is the only `RedactStruct` consumer)
+- [x] Unit tests cover the new contract (`TestRedactStruct_OpaqueByUnexportedPointer`, `_OpaqueByUnexportedChan`, `_OpaqueByUnexportedMap`, `_OpaqueOnTimeTime`, `_OpaqueOnSyncPrimitives`, `_WalkableUnexportedPrimitive`)
+- [x] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5) — `orchestrator.audit.events_total`, `orchestrator.audit.chain_recovered_total`, `orchestrator.audit.emit_latency_seconds` registered in `internal/observability/metrics.Instruments`; OTEL adapter in `internal/observability/metrics/audit_adapter.go`; wired through `cmd/orchestrator/audit.go`
+- [x] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
+- [x] `Resource` field semantics documented on `AuditEvent.Resource` doc comment (PR #234 review L-2 — chosen the cheaper "document the heterogeneity" path; the alternative of moving the literal to `Detail.resource_kind` was rejected as touching three emit sites for cosmetic improvement)
+- [x] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
+- [x] `make test` + `make lint` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR — same as PR 1b)
 
 ---
 

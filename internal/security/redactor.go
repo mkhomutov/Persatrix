@@ -188,7 +188,13 @@ func (r *SecretRedactor) redactLocked(s string) string {
 //     would be a misconfiguration, not a leak vector)
 //   - nested structs and pointer-to-struct
 //
-// Skipped: time.Time, numeric types, unexported fields, channel/func/unsafe.
+// Opaque structs (returned as-is, no recursive walk) — RFC 0009 §I
+// addendum, PR 1c: any struct type whose [isOpaqueStruct] check returns
+// true. The rule covers `time.Time`, the `sync` primitives, and
+// `atomic.Value` automatically; per-type registration is no longer
+// required.
+//
+// Skipped: numeric types, unexported fields, channel/func/unsafe.
 //
 // Cycle and depth bound (PR #232 review SF-2 + PR #233 deep-review H-2):
 // visited pointer addresses are tracked in a per-call set; recursion is
@@ -272,7 +278,11 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		return out
 
 	case reflect.Struct:
-		// Skip well-known opaque structs.
+		// PR 1c: structural opaque-struct rule (RFC 0009 §I addendum).
+		// Replaces the prior single-element type deny-list with a rule
+		// that covers every standard-library hazard (`time.Time` /
+		// `sync.*` / `atomic.Value` / chan-bearing types) without
+		// per-type registration. See [isOpaqueStruct] for the rule.
 		if isOpaqueStruct(v.Type()) {
 			return v
 		}
@@ -366,15 +376,63 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 	}
 }
 
-// isOpaqueStruct lists struct types whose internals must not be mutated by
-// reflective redaction. time.Time is the canonical case — its unexported
-// fields encode wall/mono clock state and walking them would corrupt the value.
+// isOpaqueStruct reports whether t must not be reflectively walked by
+// [SecretRedactor.RedactStruct] (RFC 0009 §I addendum, PR 1c).
+//
+// A struct is opaque when either:
+//
+//  1. it has at least one unexported field whose type is not a primitive
+//     (anything except [reflect.Bool], the integer kinds, the float kinds,
+//     the complex kinds, [reflect.Uintptr], or [reflect.String]); or
+//  2. it has no exported fields at all — the walk could not redact
+//     anything but would still allocate a zeroed copy that loses the
+//     original's unexported state.
+//
+// Rule (1) catches `time.Time` (unexported `loc *Location`),
+// `sync.Once` / `sync.WaitGroup` (unexported embedded structs), and
+// `atomic.Value` (unexported `v any`). Rule (2) catches `sync.Mutex`
+// (`state int32` / `sema uint32` are primitive but there is nothing
+// exported to redact).
+//
+// Replacing the prior single-element deny-list (PR 1) means new caller
+// surfaces — notably PR 3's tool-call argument structs — cannot
+// accidentally route their unexported state through reflective copying.
+// See RFC 0009 §I addendum for the alternatives that were considered
+// (struct-tag opt-in / explicit allow-list) and rejected.
 func isOpaqueStruct(t reflect.Type) bool {
-	pkg := t.PkgPath()
-	name := t.Name()
-	switch {
-	case pkg == "time" && name == "Time":
-		return true
+	if t.Kind() != reflect.Struct {
+		return false
 	}
-	return false
+	hasExported := false
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.IsExported() {
+			hasExported = true
+			continue
+		}
+		if !isPrimitiveKind(f.Type.Kind()) {
+			return true
+		}
+	}
+	return !hasExported
+}
+
+// isPrimitiveKind reports whether k is a Go primitive for the purposes of
+// the [isOpaqueStruct] rule. Pointers, interfaces, slices, maps, structs,
+// arrays, channels, funcs, and unsafe pointers are non-primitive — each
+// can carry references to state the reflective walk has no business
+// mutating.
+func isPrimitiveKind(k reflect.Kind) bool {
+	switch k {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uintptr,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128,
+		reflect.String:
+		return true
+	default:
+		return false
+	}
 }
