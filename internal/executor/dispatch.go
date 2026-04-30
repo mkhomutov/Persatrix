@@ -236,8 +236,17 @@ func (e *GRPCExecutor) ExecuteTask(ctx context.Context, req ExecuteRequest) (*Ex
 			// agent_id (not the agent address — addresses rotate, agent IDs
 			// are the stable forensic anchor). Detail records workflow/step
 			// IDs so the audit chain links to the workflow run audit trail.
-			// Emit is best-effort: a stalled audit sink must not block the
-			// dispatch hot path.
+			//
+			// PR #234 review L-3: prior wording claimed audit emit "must not
+			// block the dispatch hot path". That overstates the safety: Emit
+			// holds the audit logger's mutex through fsync for security-class
+			// events and through the buffer write for telemetry-class events,
+			// so a contended sink CAN block this call. The accepted trade-off
+			// is integrity over latency — the bounded-channel emit-or-drop
+			// alternative was rejected for tamper-evidence integrity (see
+			// audit.go and RFC 0009 §G). Latency observability is provided by
+			// the audit_emit_latency_seconds histogram (PR 1c) so a stalled
+			// sink shows up as an SLO alert rather than a silent drop.
 			//
 			// PR #234 review M-2: detach the parent ctx via
 			// [context.WithoutCancel]. The dispatch already succeeded;

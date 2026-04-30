@@ -237,14 +237,32 @@ items both surface non-trivial design choices that warrant their own review:
 
 #### PR checklist
 
-- [ ] `RedactStruct` surface design recorded in RFC 0009 §I addendum (one of three options chosen with rationale)
-- [ ] All call sites in `internal/security/` updated to new surface
-- [ ] Unit tests cover the new contract (struct-tag honoured, unexported fields bail out, recursion bounded)
-- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5)
-- [ ] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
-- [ ] `Resource` field semantics documented or made consistent across all three emit-site event types (PR #234 review L-2)
-- [ ] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
-- [ ] `make test` + `make lint` clean
+- [x] `RedactStruct` surface design recorded in RFC 0009 §I addendum (unexported-non-primitive bail-out chosen, with rule 2 — no exported fields → opaque — added to cover `sync.Mutex`)
+- [x] All call sites in `internal/security/` updated to new surface (the per-type `isOpaqueStruct` deny-list is gone; no other caller in `internal/security/` invokes the rule directly — `audit.go` is the only `RedactStruct` consumer)
+- [x] Unit tests cover the new contract (`TestRedactStruct_OpaqueByUnexportedPointer`, `_OpaqueByUnexportedChan`, `_OpaqueByUnexportedMap`, `_OpaqueOnTimeTime`, `_OpaqueOnSyncPrimitives`, `_WalkableUnexportedPrimitive`)
+- [x] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5) — `orchestrator.audit.events_total`, `orchestrator.audit.chain_recovered_total`, `orchestrator.audit.emit_latency_seconds` registered in `internal/observability/metrics.Instruments`; OTEL adapter in `internal/observability/metrics/audit_adapter.go`; wired through `cmd/orchestrator/audit.go`
+- [x] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
+- [x] `Resource` field semantics documented on `AuditEvent.Resource` doc comment (PR #234 review L-2 — chosen the cheaper "document the heterogeneity" path; the alternative of moving the literal to `Detail.resource_kind` was rejected as touching three emit sites for cosmetic improvement)
+- [x] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
+- [x] `make test` + `make lint` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR — same as PR 1b)
+
+#### Review follow-ups (PR #236 deep review — HEAD `0e6c194`)
+
+Verdict: **APPROVE with minor follow-ups.** All three surfaces (opaque-struct rule, audit-metrics surface, PR 1b residuals) are technically sound; build / vet / unit / `-race` runs all clean. No blocking findings. Items dispatched as follows:
+
+- **Deferred to PR 4 (clarity / docs)**:
+  - **L-1** — `[16]byte` array fixture missing from `redactor_opaque_test.go`. Unexported arrays (and slices / func types) trip rule 1 because `reflect.Array` is non-primitive, but no test pins the contract. A future maintainer narrowing `isPrimitiveKind` (e.g. "treat `[N]byte` as primitive — it's just bytes") would silently weaken the rule on UUID-bearing structs. Add a `fixtureOpaqueByArray` test (~8 lines) to make the rule's reach unambiguous before PR 3 routes tool-call argument structs through `RedactStruct`.
+  - **L-2** — `isOpaqueStruct` doc comment overstates `time.Time`'s shape. Current text reads "Rule (1) catches `time.Time` (unexported `loc *Location`)" but `time.Time` actually has three unexported fields (`wall uint64, ext int64, loc *Location`) — `wall` and `ext` are primitives that on their own wouldn't trip rule 1. One-line clarification on [redactor.go:391](../../internal/security/redactor.go#L391) so a future reader does not conclude the rule depends on Time being mostly-primitive.
+  - **L-3** — `audit_adapter.go` `RecordEvent` doc misattributes `context.Background()`. Current text claims `Emit` "detaches its caller context via context.WithoutCancel" — that detachment actually happens in [dispatch.go:265](../../internal/executor/dispatch.go#L265) (the caller), not `Emit` itself. Rewrite the comment on [audit_adapter.go:43-46](../../internal/observability/metrics/audit_adapter.go#L43-L46) to point at the real reason: the deferred latency record runs after `l.mu.Unlock()` returns, so the original Emit caller may already be unwinding when the metrics push fires.
+  - **L-5** — `AuditSecurityClassSilent` alert is masked by missing-metric semantics. If the orchestrator boots with metrics-init failure, `orchestrator_audit_events_total{class="security"}` series never exists in Prometheus — `rate(...)` returns empty and `empty == 0` evaluates to nothing, so the alert never fires. Add a sibling `AuditMetricsAbsent` template using `absent(orchestrator_audit_events_total{class="security"}) == 1 for: 1h` to [docs/observability.md §13.1](../../docs/observability.md). Log-based alerting ([cmd/orchestrator/main.go:169](../../cmd/orchestrator/main.go#L169) Warn on metrics-init failure) partially covers it, but the §13 alert template should not silently rely on log-based monitoring.
+
+- **Deferred to v0.4.0**:
+  - **L-4** — `audit_emit_latency_seconds` histogram is unlabelled (no `event_type` / `class` / `outcome`). The SLO alert only needs the unlabelled p95, but operators triaging a fired alert cannot answer "is the p99 latency on `tool.invoked` (telemetry, batched) different from `capability.violation` (security, fsync'd)?". `audit_events_total` carries `event_type` and `class` labels for the count split; only latency lacks them. Decide alongside the v0.4.0 cardinality budget — if PR 3's tool-call invocation rate makes the histogram-by-class split meaningful, add the labels then.
+
+- **Accepted divergences** (no PR action):
+  - Closed-logger `Emit` calls still observe latency (deferred `ObserveEmitLatency` fires even on the `"audit logger is closed"` short-circuit at [audit.go:277-279](../../internal/security/audit.go#L277-L279)). Bounded — orchestrator only `Close`s once at shutdown — and the recorded latency is microseconds. Not worth fixing.
+  - `AuditMetrics` interface contract phrasing under-specifies that `ObserveEmitLatency` is invoked **outside** `l.mu` (deferred after `mu.Unlock`) — only `RecordEvent` is invoked under the lock. OTEL histograms are lock-free so the practical safety is fine; flag for a phrasing tightening if the contract ever needs to be reasoned about by a non-OTEL implementer.
+  - `fixtureWalkable`'s unexported primitive drops to zero in the redacted copy because reflection cannot `Set` unexported fields. This is pinned by [redactor_opaque_test.go:159-164](../../internal/security/redactor_opaque_test.go#L159-L164) so a future regression is visible — no further action.
 
 ---
 
@@ -425,6 +443,7 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 - [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
 - [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
 - [ ] PR #234 nit sweep: `fmt.Sprintf` → `strconv.Itoa` in `agent_handlers.go` (N-1); `# DOCUMENTATION ONLY` header in `config/observability/audit.yaml` (N-2); `defer` → `t.Cleanup` in `TestAuditLogger_RedactsBearerTokenInDetail` (N-3)
+- [ ] PR #236 review follow-ups landed: `[16]byte`-array fixture in `redactor_opaque_test.go` (L-1); `isOpaqueStruct` doc clarified re `time.Time`'s three unexported fields (L-2); `audit_adapter.go` `RecordEvent` doc rewritten to attribute `context.Background()` to the post-`mu.Unlock` defer ordering, not `Emit` (L-3); `AuditMetricsAbsent` alert sibling added to `docs/observability.md §13.1` to cover metrics-init-failure case where `AuditSecurityClassSilent` is masked by missing-series semantics (L-5)
 - [ ] RFC 0009 status block reflects the partial-close shape
 - [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
 - [ ] v0.3.0 master plan row 5 → ✅

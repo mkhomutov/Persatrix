@@ -64,6 +64,10 @@ func TestInstrumentInventory(t *testing.T) {
 	inst.DelegationMemoryWritesAdmitted.Add(ctx, 0)
 	inst.DelegationMemoryWritesRejected.Add(ctx, 0)
 	inst.DelegationMemoryWritesDownscaled.Add(ctx, 0)
+	// RFC 0009 PR 1c — audit-logger instrument inventory.
+	inst.AuditEventsTotal.Add(ctx, 0)
+	inst.AuditChainRecoveredTotal.Add(ctx, 0)
+	inst.AuditEmitLatencySeconds.Record(ctx, 0)
 
 	rm := collect(t, reader)
 
@@ -81,6 +85,10 @@ func TestInstrumentInventory(t *testing.T) {
 		"orchestrator.delegation.memory_writes_admitted":   "{entry}",
 		"orchestrator.delegation.memory_writes_rejected":   "{entry}",
 		"orchestrator.delegation.memory_writes_downscaled": "{entry}",
+		// RFC 0009 PR 1c — audit-logger instrument inventory.
+		"orchestrator.audit.events_total":          "{event}",
+		"orchestrator.audit.chain_recovered_total": "{event}",
+		"orchestrator.audit.emit_latency_seconds":  "s",
 	}
 	for name, unit := range expected {
 		m := findMetric(rm, name)

@@ -94,6 +94,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # plan; remove this entry if a future maintenance PR splits the
     # per-PR review captures into a separate document.
     "docs/rfcs/0019-pr-plan.md",
+    # docs/observability.md tipped over the 3 000-word prose limit when
+    # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert
+    # templates to §13. The new content is already trimmed (a one-line
+    # instrument list and three Prometheus alert blocks — code-fenced
+    # YAML does not count toward the prose limit). The §13 expansion is
+    # required by the PR #234 review Medium-1 finding (capability-fsync
+    # amplification monitoring) and PR #233 review Nice-to-have #5;
+    # splitting observability.md by topic is a separate maintenance
+    # refactor. Grandfather here until that lands.
+    "docs/observability.md",
     # CHANGELOG.md grows over a release cycle and is trimmed/archived at
     # each release tag by the git-cliff pipeline (see `cliff.toml` and
     # the release process in `docs/development-workflow.md`), so size

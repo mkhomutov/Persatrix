@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/security"
 )
 
@@ -47,7 +48,14 @@ const (
 // OBSERVABILITY_AUDIT_PATH env var. Returns (nil, nil) when the operator
 // has explicitly opted out via "=off" (any case) so callers can branch
 // on the nil logger without a separate disabled flag.
-func initAuditLogger(logger *zap.Logger) (security.AuditLogger, error) {
+//
+// inst is the orchestrator instrument inventory; when non-nil the
+// audit logger publishes `audit_events_total`, `audit_chain_recovered_total`,
+// and `audit_emit_latency_seconds` through the OTEL adapter (RFC 0009
+// PR 1c). Pass nil when metrics initialisation failed earlier in
+// startup — the audit logger uses a zero-cost no-op surface in that
+// case so emission still works.
+func initAuditLogger(logger *zap.Logger, inst *obsmetrics.Instruments) (security.AuditLogger, error) {
 	path := os.Getenv(auditPathEnvVar)
 	switch {
 	case strings.EqualFold(path, auditDisableSentinel):
@@ -75,5 +83,9 @@ func initAuditLogger(logger *zap.Logger) (security.AuditLogger, error) {
 			return nil, fmt.Errorf("create audit log directory %q: %w", dir, err)
 		}
 	}
-	return security.NewFileAuditLogger(path, security.WithLogger(logger))
+	opts := []security.AuditLoggerOption{security.WithLogger(logger)}
+	if inst != nil {
+		opts = append(opts, security.WithAuditMetrics(obsmetrics.NewAuditMetrics(inst)))
+	}
+	return security.NewFileAuditLogger(path, opts...)
 }

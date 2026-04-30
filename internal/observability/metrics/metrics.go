@@ -118,6 +118,18 @@ type Instruments struct {
 	MemoryOldestSurvivingEntryAgeDays metric.Float64Gauge
 	MemoryEntriesBelowStaleThreshold  metric.Int64Gauge
 	MemoryStaleMemoryInjection        metric.Int64Counter
+
+	// RFC 0009 PR 1c — audit-logger observability surface.
+	//
+	// Names follow the documented `orchestrator.<area>.<noun>` scheme
+	// (RFC 0019 §F): event/class-labelled emit counter, dedicated
+	// chain-recovery counter, and emit-latency histogram. The
+	// histogram drives the capability-fsync amplification SLO
+	// documented in docs/observability.md §13 (PR #234 review
+	// Medium-1).
+	AuditEventsTotal         metric.Int64Counter
+	AuditChainRecoveredTotal metric.Int64Counter
+	AuditEmitLatencySeconds  metric.Float64Histogram
 }
 
 // NewInstruments registers every instrument against the provided meter.
@@ -305,6 +317,10 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 		),
 	); err != nil {
 		return nil, fmt.Errorf("create memory.stale_memory_injection: %w", err)
+	}
+
+	if err := registerAuditInstruments(m, i); err != nil {
+		return nil, err
 	}
 	return i, nil
 }

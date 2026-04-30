@@ -479,3 +479,5 @@ func TestNewFileAuditLogger_ChmodSelfHeal(t *testing.T) {
 		t.Fatalf("file mode after open = %o; want 0o600 (self-heal regression)", got)
 	}
 }
+
+// PR 1c audit-metrics tests live in audit_metrics_test.go.
