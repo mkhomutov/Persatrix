@@ -3,12 +3,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 COPY agents/ agents/
+COPY prompts/ prompts/
 # Fallback config for standalone builds (without docker-compose).
 # In compose, ./config is bind-mounted at /app/config:ro and shadows this copy.
 COPY config/ config/
 # Non-editable install: -e is a dev pattern that complicates layer caching
 # and adds no value in containers where source is already copied.
-RUN pip install --no-cache-dir agents/
+RUN pip install --no-cache-dir agents/ && \
+    # RFC 0009 PR 1b: copy prompts into site-packages where the installed package
+    # looks for them. The package resolves prompts relative to
+    # Path(__file__).parent.parent, which resolves to site-packages in
+    # non-editable installations.
+    cp -r prompts /usr/local/lib/python3.12/site-packages/
 
 # Security: run as non-root to limit blast radius if agent code is compromised
 # (agents execute LLM-suggested actions and must be sandboxed).

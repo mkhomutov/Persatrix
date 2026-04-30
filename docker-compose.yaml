@@ -48,6 +48,9 @@ services:
       # relative path and the non-root container has no writable CWD,
       # so leaving it unset disables the entire log-service surface.
       - PERSATRIX_LOGBUFFER_DIR=/var/lib/persatrix/logs
+      # RFC 0009 PR 1b: set audit logger path to the mounted volume to avoid
+      # permission denied errors when creating data/logs relative to /.
+      - OBSERVABILITY_AUDIT_PATH=/var/lib/persatrix/audit.jsonl
     depends_on:
       - otel-collector
     healthcheck:
