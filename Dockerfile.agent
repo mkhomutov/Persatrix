@@ -13,8 +13,11 @@ RUN pip install --no-cache-dir agents/ && \
     # RFC 0009 PR 1b: copy prompts into site-packages where the installed package
     # looks for them. The package resolves prompts relative to
     # Path(__file__).parent.parent, which resolves to site-packages in
-    # non-editable installations.
-    cp -r prompts /usr/local/lib/python3.12/site-packages/
+    # non-editable installations. SITE_PKGS is resolved at build time via
+    # sysconfig so the path stays correct when the base image is updated to a
+    # newer Python minor version (avoids hardcoding "python3.12").
+    SITE_PKGS=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))') && \
+    cp -r prompts "$SITE_PKGS/"
 
 # Security: run as non-root to limit blast radius if agent code is compromised
 # (agents execute LLM-suggested actions and must be sandboxed).
