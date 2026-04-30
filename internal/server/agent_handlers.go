@@ -1,13 +1,38 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
+
+// capabilityNameRegex bounds the per-capability identifier surface so a
+// malformed or hostile registration cannot push arbitrary strings (e.g.
+// secret-shaped tokens, control characters, or 1-MiB ANSI sequences) into
+// the registry, audit log, and downstream prompts. The pattern matches
+// the [docs/ai-glossary.md] capability-name convention: lowercase
+// alphanumeric with `_` or `-` separators, 1–64 chars.
+var capabilityNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// maxCapabilitiesPerAgent caps the per-registration capability slice to
+// bound the audit-side work performed by validateCapabilities.
+//
+// PR #234 review M-4: each malformed capability triggers a security-class
+// audit emit (synchronous fsync under the audit logger's mutex). Without
+// a cap, a single hostile registration with N bogus entries fan-outs to
+// N serialised fsyncs, blocking every other audit emit site in the
+// orchestrator until the registration handler returns. 64 is the same
+// magnitude as the per-name length bound and is generous for realistic
+// agents (the largest blueprint capability lists in templates/ are well
+// under a dozen).
+const maxCapabilitiesPerAgent = 64
 
 // handleRegisterAgent handles POST /api/v1/agents/register.
 func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +78,40 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0009 PR 1b — reject ill-formed capability names at the boundary so
+	// unbounded / hostile strings cannot enter the registry, audit log, or
+	// prompt context. Each rejection emits `capability.violation` (security-
+	// class, fsync’d immediately) so an operator can correlate noisy clients.
+	//
+	// PR #234 review M-4: bound the slice length first. Without this an
+	// attacker can submit thousands of bogus capabilities and amplify a
+	// single registration into thousands of synchronous fsyncs serialised
+	// under the audit logger's mutex (DoS amplification that bypasses the
+	// per-request HTTP timeout because the work happens inside the audit
+	// logger, not the handler). When the cap is exceeded we emit one
+	// `capability.violation` with reason="too_many" carrying the offending
+	// count, then short-circuit — operators still get forensic visibility
+	// without paying the per-entry fsync cost.
+	if len(req.Capabilities) > maxCapabilitiesPerAgent {
+		s.emitAudit(r.Context(), security.AuditEvent{
+			EventType: security.AuditCapabilityViolation,
+			AgentID:   req.ID,
+			Action:    "register",
+			Resource:  "capability",
+			Detail: map[string]any{
+				"reason": "too_many",
+				"count":  len(req.Capabilities),
+				"limit":  maxCapabilitiesPerAgent,
+			},
+		})
+		writeError(w, "BAD_REQUEST", fmt.Sprintf("capabilities exceeds maximum of %d entries", maxCapabilitiesPerAgent), http.StatusBadRequest)
+		return
+	}
+	if violations := s.validateCapabilities(r.Context(), req.ID, req.Capabilities); len(violations) > 0 {
+		writeError(w, "BAD_REQUEST", "capability "+violations[0]+" must match ^[a-z0-9][a-z0-9_-]{0,63}$", http.StatusBadRequest)
+		return
+	}
+
 	info := registry.AgentInfo{
 		ID:           req.ID,
 		Name:         req.Name,
@@ -71,7 +130,76 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PR #234 review N-1: use the agent ID (not the address) as Resource
+	// for forensic stability. Addresses rotate on redeploy / port change,
+	// so the agent ID is the durable anchor that joins this event to
+	// downstream `tool.invoked` / `capability.violation` records (which
+	// already use agent_id as Resource per dispatch.go). The address is
+	// still useful for incident response, so it moves to Detail["address"].
+	s.emitAudit(r.Context(), security.AuditEvent{
+		EventType: security.AuditAgentRegistered,
+		AgentID:   req.ID,
+		Action:    "register",
+		Resource:  req.ID,
+		Detail: map[string]any{
+			"address":      req.Address,
+			"capabilities": req.Capabilities,
+			"name":         req.Name,
+		},
+	})
+
 	writeJSON(w, agentToResponse(&info), http.StatusCreated)
+}
+
+// maxCapabilityEchoLen bounds the verbatim echo of a rejected capability
+// name back into the audit event Detail.
+//
+// PR #234 review N-2: the secret redactor scrubs known patterns, but a
+// hostile registration carrying a capability value that is e.g. 1 MiB of
+// arbitrary bytes would otherwise be written verbatim to the audit log
+// (after redaction, but redaction does not truncate). Combined with the
+// per-slice cap (maxCapabilitiesPerAgent) this keeps the worst-case
+// audit-write size from a single registration bounded at
+// 64 * 256 = 16 KiB rather than 64 * client_max_body_size. 256 chars is
+// generous compared to the 64-char regex-enforced legal upper bound, so
+// rejected values that are merely "off by a few characters" survive
+// intact for operator triage.
+const maxCapabilityEchoLen = 256
+
+// validateCapabilities checks each capability name against the documented
+// charset/length contract and emits `capability.violation` for every
+// rejected entry. Returns the list of rejected names in input order so the
+// caller can surface a deterministic error message.
+func (s *Server) validateCapabilities(ctx context.Context, agentID string, caps []string) []string {
+	var bad []string
+	for _, c := range caps {
+		if capabilityNameRegex.MatchString(c) {
+			continue
+		}
+		bad = append(bad, c)
+		echoed := c
+		truncated := false
+		if len(echoed) > maxCapabilityEchoLen {
+			echoed = echoed[:maxCapabilityEchoLen]
+			truncated = true
+		}
+		detail := map[string]any{
+			"capability": echoed,
+			"reason":     "format",
+		}
+		if truncated {
+			detail["truncated"] = true
+			detail["original_length"] = len(c)
+		}
+		s.emitAudit(ctx, security.AuditEvent{
+			EventType: security.AuditCapabilityViolation,
+			AgentID:   agentID,
+			Action:    "register",
+			Resource:  "capability",
+			Detail:    detail,
+		})
+	}
+	return bad
 }
 
 // handleListAgents handles GET /api/v1/agents.

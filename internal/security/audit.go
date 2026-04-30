@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Audit-sink defaults. Callers may override via [AuditLoggerOption]s.
@@ -41,6 +43,13 @@ type AuditLogger interface {
 
 	// Close flushes pending events and releases the sink. Safe to call once.
 	Close() error
+
+	// Path returns the on-disk location backing the logger, or the empty
+	// string for non-file-backed sinks (e.g. future SIEM transports).
+	// Used by orchestrator startup logs and integration tests so the
+	// resolved path is observable without depending on the concrete type
+	// (PR #233 review Should-Fix #4).
+	Path() string
 }
 
 // AuditLoggerOption configures a file-backed AuditLogger.
@@ -65,8 +74,15 @@ func WithBatchInterval(d time.Duration) AuditLoggerOption {
 	}
 }
 
-// WithRedactor installs a [Redactor] that scrubs the [AuditEvent.Detail] map
-// before each event is serialised. Defaults to a no-op when not set.
+// WithRedactor overrides the default [Redactor] (set by [NewFileAuditLogger]
+// to [NewSecretRedactor]) used to scrub event fields before serialisation.
+// Pass nil to disable redaction entirely — required only for tests that
+// intentionally write plaintext fixtures.
+//
+// PR #233 review Should-Fix #3: prior behaviour defaulted to nil, so any
+// caller that forgot WithRedactor silently shipped unredacted secrets to the
+// audit log. The constructor now installs [NewSecretRedactor] up front and
+// this option only customises the choice.
 func WithRedactor(r Redactor) AuditLoggerOption {
 	return func(l *fileAuditLogger) {
 		l.redactor = r
@@ -80,6 +96,24 @@ func WithClock(now func() time.Time) AuditLoggerOption {
 	return func(l *fileAuditLogger) {
 		if now != nil {
 			l.now = now
+		}
+	}
+}
+
+// WithLogger injects a structured logger used for diagnostic warnings
+// emitted by the audit logger itself (e.g. chmod self-heal failures).
+//
+// PR #234 review M-3: the chmod self-heal previously surfaced via
+// `fmt.Fprintf(os.Stderr, …)` because no logger was plumbed through.
+// JSON-only log collectors route raw stderr to a separate stream and
+// commonly drop it, hiding a security-relevant misconfiguration. With a
+// logger injected, chmod failures land in the same structured pipeline
+// as the rest of orchestrator's warnings. Defaults to [zap.NewNop] so
+// existing callers (and tests) continue to work unchanged.
+func WithLogger(logger *zap.Logger) AuditLoggerOption {
+	return func(l *fileAuditLogger) {
+		if logger != nil {
+			l.logger = logger
 		}
 	}
 }
@@ -105,6 +139,7 @@ type fileAuditLogger struct {
 	batchInterval time.Duration
 	redactor      Redactor
 	now           func() time.Time
+	logger        *zap.Logger
 }
 
 // NewFileAuditLogger opens path for append-only writes and returns an
@@ -145,9 +180,32 @@ func NewFileAuditLogger(path string, opts ...AuditLoggerOption) (AuditLogger, er
 		batchSize:     defaultBatchSize,
 		batchInterval: defaultBatchInterval,
 		now:           time.Now,
+		redactor:      NewSecretRedactor(),
+		logger:        zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(l)
+	}
+
+	// PR #233 review Should-Fix #6: a pre-existing audit file may have been
+	// created with relaxed permissions before this build's umask was tightened
+	// (or by an earlier process running under a different umask). Re-apply
+	// 0o600 on every open so the on-disk ACL is self-healing. Errors are
+	// logged-and-continue rather than fatal: chmod is unsupported on some
+	// filesystems (e.g. FAT-mounted bind volumes in CI) and refusing to
+	// open the audit log there would deny operators forensic data for a
+	// permission concern that no longer applies.
+	//
+	// PR #234 review M-3: route the warning through the injected logger
+	// (defaults to a nop logger so call sites without [WithLogger] keep
+	// the previous "silent best-effort" behaviour rather than spraying
+	// stderr in tests). Production callers (cmd/orchestrator) wire a
+	// real *zap.Logger so the warning lands in the structured pipeline.
+	if chErr := f.Chmod(0o600); chErr != nil && !errors.Is(chErr, os.ErrPermission) {
+		l.logger.Warn("audit log chmod 0o600 failed",
+			zap.String("path", path),
+			zap.Error(chErr),
+		)
 	}
 
 	// If recovery detected a truncated tail, the existing file may not end
@@ -234,7 +292,7 @@ func (l *fileAuditLogger) Emit(ctx context.Context, ev AuditEvent) error {
 	}
 	l.prevChecksum = ev.Checksum
 
-	if isSecurityEvent(ev.EventType) {
+	if IsSecurityEvent(ev.EventType) {
 		return l.flushLocked()
 	}
 	l.pendingTel++

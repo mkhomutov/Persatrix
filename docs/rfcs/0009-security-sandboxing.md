@@ -370,6 +370,17 @@ The checksum chain provides lightweight tamper evidence: altering any historical
 
 Phase 1 logs to a local append-only file (JSON lines). The `AuditLogger` interface is defined to allow future sinks (structured logging pipeline, SIEM). The file sink uses `O_APPEND` with a `sync.Mutex` for thread safety.
 
+**Context propagation policy (PR #234 review M-1/M-2):**
+
+`AuditLogger.Emit` honours `ctx.Err()` so callers can short-circuit emission when the parent operation is cancelled. Call sites must therefore distinguish two cases:
+
+1. **In-flight authorization decisions** (e.g. capability checks, token validation, HITL probes): pass the request/RPC context through unchanged. A cancelled probe is no longer probing — dropping its audit event is the correct behaviour because no side effect occurred.
+2. **Post-commit emits** (e.g. `agent.registered` after the registry write returns, `tool.invoked` after dispatch succeeds): wrap the parent context with [`context.WithoutCancel`](https://pkg.go.dev/context#WithoutCancel) before calling `Emit`. The side effect has already committed, so a client disconnect or deadline expiry between commit and emit must not be allowed to drop the only forensic record of the completed action — that would silently undermine the tamper-evidence guarantee for the most common drop path. Trace/correlation values still propagate; only the cancellation signal is detached. A stalled sink remains its own incident, surfaced via the `audit_emit_latency_seconds` histogram (Phase 1 PR 1c) rather than masked as a quiet drop.
+
+**Boundary-validation amplification (PR #234 review M-4):**
+
+When boundary validation rejects a *list* of inputs (e.g. capability names on agent registration), the handler must cap the slice length **before** iterating and emitting one security-class event per rejected element. Each `capability.violation` (or peer security event) triggers a synchronous fsync under the audit logger's mutex; an unbounded slice fan-outs into N serialised fsyncs that block every other audit emit site in the orchestrator until the handler returns, bypassing per-request HTTP timeouts because the work happens inside the audit logger rather than the handler. The recommended pattern is: cap → emit one `reason: "too_many"` event with the offending count → reject. This is documented as an anti-pattern so future per-element validators in the security package follow the same shape.
+
 **Memory operation audit (Python side):**
 
 All `EpisodicMemory`, `NoteStore`, and (when implemented by RFC 0008) shared-pool writes emit a structured Python log entry at `INFO` level using the zap-compatible JSON format. These are forwarded to the orchestrator via the existing agent→orchestrator event pathway and written to the Go audit log.

@@ -2,7 +2,7 @@
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-04-29
+**Last updated**: 2026-04-30
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
@@ -34,6 +34,9 @@ This plan splits Phases 1–2 into **4 PRs**.
 PR 1  (Phase 1a — AuditLogger + SecretRedactor [package + unit tests])
   ↓
 PR 1b (Phase 1a wiring — server/executor/main + integration tests)
+  ↓
+PR 1c (Phase 1a hardening — RedactStruct opaque-struct surface (SF-2)
+       + Prometheus metrics (Nice-to-have #5); gates PR 3)
   ↓
 PR 2  (Phase 1b — RateLimiter + middleware integration)
   ↓
@@ -175,15 +178,72 @@ observability docs update.
 
 #### PR checklist
 
-- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default + `chmod 0o600`-on-restart contract)
-- [ ] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in RFC 0009 §G appendix
-- [ ] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
-- [ ] `Path()` hoisted onto `AuditLogger` interface or `NewFileAuditLogger` returns concrete type (PR #233 review Should-Fix #4)
-- [ ] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
-- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2)
-- [ ] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
-- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5)
-- [ ] Integration tests live under `tests/integration/`
+- [x] `audit.jsonl` path documented in [docs/observability.md](../observability.md) §13 (env var + default + `chmod 0o600`-on-restart contract)
+- [x] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in observability §13.2 (RFC 0009 §G appendix backfill deferred to PR 4 close-out)
+- [x] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
+- [x] `Path()` hoisted onto `AuditLogger` interface (PR #233 review Should-Fix #4)
+- [x] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
+- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2). **Deferred to PR 1c** — design choice non-trivial; pulled out to keep PR 1b strictly within the 250–350 line wiring budget.
+- [x] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
+- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5). **Deferred to PR 1c** — Nice-to-have; the OTEL meter scaffolding lands cleanly alongside the RedactStruct surface change.
+- [x] Integration tests live under `tests/integration/audit_logger_integration_test.go` (4 tests covering register-emit, capability-violation, redaction default, tool.invoked)
+- [x] `go test ./...` + `go vet ./...` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR)
+- [x] `filepath.Abs` applied to all audit log paths, including operator-set `OBSERVABILITY_AUDIT_PATH` values (PR #234 review L-1 — 1-line fix)
+- [x] Test for capability-echo truncation path: name >256 chars produces `truncated:true` + `original_length:N` in `Detail` (PR #234 review L-4 — ~15 lines)
+
+#### Review follow-ups (PR #234 deep review — HEAD `feature/v030-rfc0009-audit-wiring`)
+
+Verdict: **APPROVE with minor follow-ups.** No blocking findings. Items dispatched as follows:
+
+- **Fix in this PR (L-1, L-4)**:
+  - **L-1** — Operator-set relative paths still chdir-unsafe. The prior L-2 fix (PR #233) resolves `filepath.Abs` only when `OBSERVABILITY_AUDIT_PATH` is *unset*. An operator explicitly setting the env var to a relative path hits the same `os.Chdir` failure. Fix: unconditionally resolve `path` via `filepath.Abs` when `!filepath.IsAbs(path)` before `MkdirAll`. Collapses both branches. 1-line change in `cmd/orchestrator/audit.go`.
+  - **L-4** — Truncation regression test missing. `TestAuditLogger_CapabilityViolationOnMalformedName` uses `"BAD CAP"` (7 chars) and never exercises the >256-char N-2 branch. Removing the truncation logic would silently pass CI. Add `TestAuditLogger_CapabilityViolationName_Truncated` (~15 lines) in `tests/integration/audit_logger_integration_test.go`.
+
+- **Deferred to PR 1c**:
+  - **Medium-1** — `validateCapabilities` still emits up to 64 sequential fsyncs when a registration carries exactly 64 all-bad entries (M-4 cap-check only fires when the count *exceeds* the cap, not when at the cap). Accepted residual — bounded and documented. Add `audit_emit_latency_seconds` histogram + SLO alert in PR 1c so operators detect serialisation pile-ups. Alternatives (stop-after-first-violation or batch into one event) remain on the table if alerting surfaces a problem.
+  - **L-2** — `Resource` field semantics are heterogeneous: `agent.registered` and `tool.invoked` carry the agent_id; `capability.violation` events carry the literal `"capability"`. Document the heterogeneity in `docs/observability.md §13` (cheap option) or move the literal to `Detail.resource_kind` and make `Resource` consistently the agent_id (cleaner but touches three emit sites).
+  - **L-3** — `dispatch.go` comment overstates the safety of `Emit` ("a stalled audit sink must not block the dispatch hot path"). In practice the mutex is held through fsync for security-class events. Rephrase to "audit emit is best-effort; under contention it can block on the audit logger's mutex" and record the emit-or-drop trade-off in RFC 0009 §G appendix alongside the latency SLO.
+
+- **Deferred to PR 4 (nits)**:
+  - **N-1** — `fmt.Sprintf` used for a single integer interpolation in `agent_handlers.go:107`; adjacent error messages use plain string concat. Replace with `strconv.Itoa` concat.
+  - **N-2** — `config/observability/audit.yaml` is doc-only but its neighbours (`prometheus.yaml`, `otel-collector.yaml`) are consumed at runtime — misleading during incident response. Add `# DOCUMENTATION ONLY — runtime config is env-driven` as the first comment line above the `audit:` key.
+  - **N-3** — `TestAuditLogger_RedactsBearerTokenInDetail` uses `defer auditor.Close()` while every other test in the file uses `t.Cleanup`. Standardise on `t.Cleanup`.
+
+- **Accepted divergences** (no PR action):
+  - Mutex serialises every `Emit` call including fsync for security-class events — acceptable today; revisit once `audit_emit_latency_seconds` lands in PR 1c and benchmarks are available. A bounded-channel emit-or-drop buffer was considered and rejected for tamper-evidence integrity.
+
+---
+
+### PR 1c: `feature/v030-rfc0009-audit-hardening` — Phase 1a hardening
+
+**Depends on**: PR 1b. **Gates**: PR 3.
+**Estimated size**: ~250–400 lines.
+
+#### Scope
+
+Pulled out of PR 1b to keep that PR strictly within its wiring budget. Two
+items both surface non-trivial design choices that warrant their own review:
+
+- **`RedactStruct` surface change** (PR #233 review Should-Fix #2). Replace
+  the current opaque-struct deny-list with one of: struct-tag opt-in
+  (`audit:"redact"`), explicit allow-list, or unexported-non-primitive
+  bail-out. **Must land before PR 3** — PR 3 routes tool-call argument
+  structs through `RedactStruct` and would otherwise lock in the unsafe
+  surface.
+- **Prometheus / OTEL metrics surface** (PR #233 review Nice-to-have #5):
+  `audit_events_total{event_type,class}`, `audit_chain_recovered_total`,
+  `audit_emit_latency_seconds`. Wire from the existing PR 1b emit sites
+  using `internal/observability/metrics.Instruments`.
+
+#### PR checklist
+
+- [ ] `RedactStruct` surface design recorded in RFC 0009 §I addendum (one of three options chosen with rationale)
+- [ ] All call sites in `internal/security/` updated to new surface
+- [ ] Unit tests cover the new contract (struct-tag honoured, unexported fields bail out, recursion bounded)
+- [ ] Three audit metrics emitted from `Emit()` and `recoverChain()` paths (PR #233 review Nice-to-have #5)
+- [ ] `audit_emit_latency_seconds` histogram wired; SLO alert template documented in `docs/observability.md §13` (PR #234 review Medium-1 — gates capability-fsync amplification monitoring)
+- [ ] `Resource` field semantics documented or made consistent across all three emit-site event types (PR #234 review L-2)
+- [ ] `dispatch.go` audit-emit comment rephrased to reflect best-effort / mutex-blocking reality (PR #234 review L-3)
 - [ ] `make test` + `make lint` clean
 
 ---
@@ -364,6 +424,7 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 
 - [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
 - [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
+- [ ] PR #234 nit sweep: `fmt.Sprintf` → `strconv.Itoa` in `agent_handlers.go` (N-1); `# DOCUMENTATION ONLY` header in `config/observability/audit.yaml` (N-2); `defer` → `t.Cleanup` in `TestAuditLogger_RedactsBearerTokenInDetail` (N-3)
 - [ ] RFC 0009 status block reflects the partial-close shape
 - [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
 - [ ] v0.3.0 master plan row 5 → ✅

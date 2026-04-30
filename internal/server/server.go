@@ -18,6 +18,7 @@ import (
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
@@ -46,6 +47,11 @@ type Server struct {
 	// Log buffer (optional — nil-safe).  Wired in RFC 0018 PR 5.
 	// When unset, the log REST + SSE endpoints return 501 NOT_IMPLEMENTED.
 	logBuffer *logbuffer.Buffer
+
+	// Audit logger (optional — nil-safe).  Wired in RFC 0009 PR 1b
+	// (security audit log).  When nil, audit emit sites no-op so unit
+	// tests and minimal-deployment fixtures stay zero-config.
+	auditor security.AuditLogger
 }
 
 // ServerOption configures optional Server dependencies.
@@ -88,6 +94,19 @@ func WithMetrics(inst *obsmetrics.Instruments) ServerOption {
 func WithLogBuffer(buf *logbuffer.Buffer) ServerOption {
 	return func(s *Server) {
 		s.logBuffer = buf
+	}
+}
+
+// WithAuditLogger injects the security audit logger used by the
+// agent-registration handler (and future security-bearing endpoints) to
+// emit structured audit events.  Nil-safe: when unset, emit sites no-op
+// so callers that do not opt into audit retain their existing behaviour.
+//
+// Wired from cmd/orchestrator/main.go via OBSERVABILITY_AUDIT_PATH
+// (RFC 0009 PR 1b).
+func WithAuditLogger(a security.AuditLogger) ServerOption {
+	return func(s *Server) {
+		s.auditor = a
 	}
 }
 
@@ -190,6 +209,46 @@ func (s *Server) Handler() http.Handler {
 		h = s.handlerWrapper(h)
 	}
 	return h
+}
+
+// emitAudit forwards ev to the configured AuditLogger if one was injected.
+// Nil-safe: when no auditor is wired, the call no-ops so handler code can
+// stay free of conditional guards.
+//
+// Context handling (PR #234 review M-1): callers pass `r.Context()` so
+// trace/correlation values propagate to the sink, but the parent context
+// is canceled the instant the HTTP client disconnects. For post-success
+// audit emits (e.g. `agent.registered` after the registry write commits)
+// that cancellation would silently drop the only forensic record of the
+// completed side effect. We detach cancellation here via
+// [context.WithoutCancel] so values still propagate but Emit's
+// `ctx.Err()` short-circuit cannot fire mid-flush. Deadlines are
+// intentionally also stripped: a stalled sink is its own incident
+// surfaced via the audit_emit_latency_seconds histogram (PR 1c), not
+// something to silently drop.
+//
+// Emit errors are logged at debug level for telemetry-class events
+// (audit emission must never block the orchestrator's user-facing
+// response) and at warn for security-class events, where a write failure
+// means the tamper-evident chain just broke and an operator needs to
+// know (PR #234 review L-6).
+func (s *Server) emitAudit(ctx context.Context, ev security.AuditEvent) {
+	if s.auditor == nil {
+		return
+	}
+	emitCtx := context.WithoutCancel(ctx)
+	if err := s.auditor.Emit(emitCtx, ev); err != nil {
+		fields := []zap.Field{
+			zap.String("event_type", string(ev.EventType)),
+			zap.String("agent_id", ev.AgentID),
+			zap.Error(err),
+		}
+		if security.IsSecurityEvent(ev.EventType) {
+			s.logger.Warn("audit emit failed (security-class)", fields...)
+		} else {
+			s.logger.Debug("audit emit failed", fields...)
+		}
+	}
 }
 
 // Start runs the HTTP server until the context is cancelled, then drains
