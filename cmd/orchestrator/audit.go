@@ -54,13 +54,19 @@ func initAuditLogger(logger *zap.Logger) (security.AuditLogger, error) {
 		logger.Warn("audit logger disabled via " + auditPathEnvVar + "=off")
 		return nil, nil
 	case path == "":
-		// Resolve the default path relative to the process cwd at startup.
-		// We deliberately resolve once here (not per-write) so the
-		// effective path is stable across the orchestrator lifetime even
-		// if some downstream code calls os.Chdir.
-		abs, err := filepath.Abs(defaultAuditPath)
+		path = defaultAuditPath
+	}
+	// Resolve any relative path (default OR operator-set) once at startup so
+	// the effective location is stable across the orchestrator lifetime
+	// regardless of downstream os.Chdir calls. Without this, an operator
+	// setting OBSERVABILITY_AUDIT_PATH="logs/audit.jsonl" and a service
+	// runtime that chdirs (e.g. systemd WorkingDirectory) would silently
+	// land the audit log outside the operator's expected chmod scope.
+	// (PR #234 review L-1 — extends the prior L-2 fix to operator-set paths.)
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
 		if err != nil {
-			return nil, fmt.Errorf("resolve default audit log path: %w", err)
+			return nil, fmt.Errorf("resolve audit log path %q: %w", path, err)
 		}
 		path = abs
 	}

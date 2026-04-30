@@ -184,6 +184,65 @@ func TestAuditLogger_CapabilityViolationOnMalformedName(t *testing.T) {
 	assert.Empty(t, findEvents(events, "agent.registered"))
 }
 
+// TestAuditLogger_CapabilityViolationName_Truncated locks in the PR #234
+// review N-2 fix: a capability name longer than maxCapabilityEchoLen (256)
+// must be truncated in the audit event Detail with truncated:true and
+// original_length:N markers, bounding the worst-case audit-write size from
+// a single registration to maxCapabilitiesPerAgent * maxCapabilityEchoLen
+// rather than maxCapabilitiesPerAgent * client_max_body_size. Without this
+// regression test, a future refactor that drops the truncation branch
+// would silently pass CI (the existing malformed-name test uses a 7-char
+// "BAD CAP" payload that never exercises the >256-char path).
+func TestAuditLogger_CapabilityViolationName_Truncated(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	auditor, auditPath := newAuditLogger(t)
+	t.Cleanup(func() { _ = auditor.Close() })
+
+	store := state.NewInMemoryStore(logger)
+	reg := registry.NewInMemoryRegistry(logger)
+	pl := planner.NewYAMLPlanner(logger)
+
+	abs, err := filepath.Abs(filepath.Join("..", "..", "workflows"))
+	require.NoError(t, err)
+	srv, err := server.New("127.0.0.1:0", abs, store, reg, pl, logger,
+		server.WithAuditLogger(auditor),
+	)
+	require.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// 300-char capability — well over the 64-char regex cap (so it fails
+	// validation and lands in the violation path) and over the 256-char
+	// echo cap (so it triggers the truncation branch). Charset is
+	// regex-legal so the rejection is purely on length.
+	const oversizedLen = 300
+	oversized := strings.Repeat("a", oversizedLen)
+	body := `{"id":"trunc-test","name":"Trunc","address":"localhost:1","capabilities":["` + oversized + `"]}`
+	resp, err := http.Post(ts.URL+"/api/v1/agents/register", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	// capability.violation is security-class — fsync'd before Emit returns.
+	require.NoError(t, auditor.Close())
+
+	events := readAuditEvents(t, auditPath)
+	violations := findEvents(events, "capability.violation")
+	require.Len(t, violations, 1)
+
+	ev := violations[0]
+	assert.Equal(t, "trunc-test", ev.AgentID)
+	assert.Equal(t, "format", ev.Detail["reason"])
+	assert.Equal(t, true, ev.Detail["truncated"], "truncated marker must be true for >256-char names")
+	assert.EqualValues(t, oversizedLen, ev.Detail["original_length"], "original_length must record pre-truncation length")
+	echoed, ok := ev.Detail["capability"].(string)
+	require.True(t, ok, "capability detail must be a string")
+	assert.Len(t, echoed, 256, "echoed capability must be truncated to maxCapabilityEchoLen")
+
+	// And no agent.registered for the rejected request.
+	assert.Empty(t, findEvents(events, "agent.registered"))
+}
+
 // TestAuditLogger_RedactsBearerTokenInDetail verifies the default-redactor
 // install (PR #233 review Should-Fix #3): a caller embedding a secret in
 // AuditEvent.Detail must see it scrubbed even when no explicit

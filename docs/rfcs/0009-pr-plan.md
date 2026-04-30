@@ -188,8 +188,8 @@ observability docs update.
 - [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5). **Deferred to PR 1c** — Nice-to-have; the OTEL meter scaffolding lands cleanly alongside the RedactStruct surface change.
 - [x] Integration tests live under `tests/integration/audit_logger_integration_test.go` (4 tests covering register-emit, capability-violation, redaction default, tool.invoked)
 - [x] `go test ./...` + `go vet ./...` clean (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR)
-- [ ] `filepath.Abs` applied to all audit log paths, including operator-set `OBSERVABILITY_AUDIT_PATH` values (PR #234 review L-1 — 1-line fix)
-- [ ] Test for capability-echo truncation path: name >256 chars produces `truncated:true` + `original_length:N` in `Detail` (PR #234 review L-4 — ~15 lines)
+- [x] `filepath.Abs` applied to all audit log paths, including operator-set `OBSERVABILITY_AUDIT_PATH` values (PR #234 review L-1 — 1-line fix)
+- [x] Test for capability-echo truncation path: name >256 chars produces `truncated:true` + `original_length:N` in `Detail` (PR #234 review L-4 — ~15 lines)
 
 #### Review follow-ups (PR #234 deep review — HEAD `feature/v030-rfc0009-audit-wiring`)
 
