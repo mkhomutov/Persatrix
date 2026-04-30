@@ -126,6 +126,38 @@ Integration (`tests/integration/`):
 - [x] `RedactStruct` cycle/depth bound covered by `TestRedactStruct_CyclicInputSafe` + `TestRedactStruct_DeepNestingBounded` (PR #232 review SF-2)
 - [x] `make test` + `make lint` clean (security package)
 
+#### Review follow-ups (PR #233 deep review — HEAD `737158b`)
+
+All prior High/Critical findings (H-1, H-2, M-1, M-2, M-4, L-1, L-2, L-4, MF-1, MF-2, SF-1, SF-6) are **resolved in HEAD** with pinning regression tests; PR 1 is approve-with-follow-ups. Remaining items dispatched to PR 1b (wiring contract) and PR 4 (package-internal cleanup):
+
+- **PR 1b owns**:
+  - **Make `WithRedactor` mandatory at construction** — default to `NewSecretRedactor()` in `NewFileAuditLogger` when no `WithRedactor` is supplied so `chain.recovered` cannot leak attacker-influenced `prior_tail_raw_truncated` bytes verbatim. (Review Should-Fix #3)
+  - **Hoist `Path()` onto the `AuditLogger` interface** (or have `NewFileAuditLogger` return the concrete `*FileAuditLogger`) so wiring sites do not need to type-assert through an anonymous interface. (Review Should-Fix #4)
+  - **`chmod 0o600` on pre-existing audit files** — `Stat` + `Chmod` after `os.OpenFile` if perms are looser than `0o600`. (Review Should-Fix #6)
+  - **`RedactStruct` opaque-struct deny-list** — single-element deny-list (`time.Time`) is fragile; any `Detail` value embedding `sync.Mutex`/`sync.Once`/`atomic.Value`/channels would silently zero unexported state on round-trip. Replace with struct-tag opt-in (`secret:"redact"`), an allow-list of known-safe types, or a runtime bail-out on structs with unexported non-primitive fields. **Must land in PR 1b** since PR 3 routes tool-call args through `RedactStruct`. (Review Should-Fix #2)
+  - **Document `OBSERVABILITY_AUDIT_PATH` umask expectations** in [docs/observability.md](../observability.md) (already on PR 1b checklist; tighten to call out perm-on-restart contract).
+  - **Backfill glossary** — add `AuditLogger`, `SecretRedactor`, `chain.bootstrap` / `chain.restart` / `chain.recovered`, "tamper evidence" (vs. resistance) to [docs/ai-glossary.md](../ai-glossary.md) per the project Terminology rule.
+
+- **PR 4 owns** (package-internal quality / observability / API ergonomics):
+  - **`WithClock` does not drive the ticker** — `tickerLoop` calls `time.NewTicker` directly so `WithClock` injection is half-honoured; `TestBatchFlush_TimerTrigger` is wall-clock-dependent (1 s deadline / 20 ms poll, flaky-prone on Windows ~15 ms timer resolution). Either drop `WithClock` or thread a `func(d time.Duration) <-chan time.Time` factory into the option. (Review Should-Fix #1)
+  - **Pin the type-erasing pointer-cap path** — `walk()`'s `reflect.Pointer` branch returns the marker for non-string pointees; add a regression test asserting the marker (not the original) reaches the caller. (Review Should-Fix #5)
+  - **Replace `looksLikeSHA256` with `encoding/hex.DecodeString`** — drop the hand-rolled hex check. (Review Should-Fix #7)
+  - **Versioned / non-printable depth-marker sentinel** so `isDepthMarker` cannot false-positive on caller data equal to the literal `[REDACTED:max-depth-exceeded]`. (Review Nice-to-have #3)
+  - **Export `VerifyChain(path string) error`** alongside the writer so external auditors / a future `persatrix audit verify` CLI subcommand do not reimplement `canonicalEventJSON`. Natural home is PR 1b if the CLI surface is in scope; otherwise PR 4. (Review Nice-to-have #1)
+  - **Additional default redaction patterns** — GitHub PATs (`gh[pousr]_…`), GCP service-account JSON keys, Slack tokens (`xox[bp]-…`), Stripe keys (`sk_live_…`/`pk_live_…`). Realistic for the orchestrator's MCP / container deployment story. (Review Nice-to-have #2)
+  - **Prometheus metrics surface** — `audit_events_total{event_type,outcome}`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`. Lands with PR 1b wiring per [docs/observability.md](../observability.md) conventions. (Review Nice-to-have #5)
+  - **`Emit` allocation** — replace `append(line, '\n')` with `writer.Write(line)` + `writer.WriteByte('\n')` to drop one alloc per event on the telemetry hot path. (Review Nice-to-have #6)
+  - **Cosmetic generic-secret tail** — consume the trailing `"` of a JSON value so the redacted output does not carry a stray quote. (Review Nice-to-have #7)
+  - **Benchmark `RedactStruct`** against a representative `Detail` payload (10–20 fields, 2–3 levels of nesting) once PR 1b wires `tool.invoked` to inform a v0.4.0 `sync.Pool` decision. (Review Nice-to-have #8)
+  - **Coverage-gap tests** — `WithClock` actually drives the ticker; `Detail` not mutated by `Emit`; serialised events at the 1 MiB tail-window boundary; behaviour when no `WithRedactor` is configured and the truncated tail contains a secret (documents the contract even if PR 1b makes the redactor mandatory).
+
+- **Accepted divergences** (no PR action):
+  - `mu` held across `fsync` for security-class events serialises emitters — acceptable today; revisit only if benchmarks at PR 1b wire-time show a bottleneck.
+  - Per-call pointer-cycle visited-set with `defer delete` re-walks shared subtrees in DAGs — depth cap still terminates; perf cliff only on wide DAGs, not a v0.3.0 concern.
+  - `truncate()` produces output up to `max+3` bytes (UTF-8 ellipsis) — cosmetic; 256-byte cap on `prior_tail_raw_truncated` is loose by design.
+  - `fileEndsWithoutNewline` re-opens the file under the documented single-writer invariant — track for the day a log rotator joins.
+  - `AuditEvent.Checksum` lacks a `// not omitempty: canonicalisation excludes` comment — purely descriptive; add opportunistically.
+
 ---
 
 ### PR 1b: `feature/v030-rfc0009-audit-wiring` — Phase 1a wiring
@@ -143,8 +175,14 @@ observability docs update.
 
 #### PR checklist
 
-- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default)
+- [ ] `audit.jsonl` path documented in [docs/observability.md](../observability.md) (env var + default + `chmod 0o600`-on-restart contract)
 - [ ] `chain.restart` / `chain.bootstrap` / `chain.recovered` events documented in RFC 0009 §G appendix
+- [ ] `NewFileAuditLogger` defaults to `NewSecretRedactor()` when no `WithRedactor` supplied (PR #233 review Should-Fix #3)
+- [ ] `Path()` hoisted onto `AuditLogger` interface or `NewFileAuditLogger` returns concrete type (PR #233 review Should-Fix #4)
+- [ ] `chmod 0o600` applied to pre-existing audit files on open (PR #233 review Should-Fix #6)
+- [ ] `RedactStruct` opaque-struct deny-list replaced with safer surface (struct-tag opt-in / allow-list / unexported-non-primitive bail-out) — **gates PR 3** which routes tool-call args through `RedactStruct` (PR #233 review Should-Fix #2)
+- [ ] Glossary backfill: `AuditLogger`, `SecretRedactor`, `chain.bootstrap`/`restart`/`recovered`, "tamper evidence" added to [docs/ai-glossary.md](../ai-glossary.md) (PR #233 review)
+- [ ] Prometheus metrics surface (`audit_events_total`, `audit_chain_recovered_total`, `audit_emit_latency_seconds`) emitted from wiring sites (PR #233 review Nice-to-have #5)
 - [ ] Integration tests live under `tests/integration/`
 - [ ] `make test` + `make lint` clean
 
@@ -325,6 +363,7 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 #### PR checklist
 
 - [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
+- [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
 - [ ] RFC 0009 status block reflects the partial-close shape
 - [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
 - [ ] v0.3.0 master plan row 5 → ✅
