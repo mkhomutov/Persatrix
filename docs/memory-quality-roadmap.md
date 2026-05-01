@@ -1,6 +1,6 @@
 # Memory Quality Roadmap — Discussion Notes
 
-**Status**: 🔨 Draft (discussion doc, not an RFC)
+**Status**: 📋 Proposed — ratified 2026-05-01; integrated into v0.3.0 plan + RFC index. Tracks: [RFC 0026](rfcs/0026-declarative-facts-tier.md) (§A), [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) (§E), [MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md) (§G), [v0.3.0-plan.md §Memory Quality Follow-Ups](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) (§B/§C/§D/§F).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
 **Target**: scope-shaping for draft RFCs 0023/0024/0025; seeds for v0.3.x and v0.4.0
@@ -24,7 +24,6 @@
   - [F. Structured "since we last spoke" prompt header](#f-structured-since-we-last-spoke-prompt-header)
   - [G. Memory-of-context dogfood test](#g-memory-of-context-dogfood-test)
 - [Recommended sequencing](#recommended-sequencing)
-- [Where each idea will eventually land](#where-each-idea-will-eventually-land)
 - [Open questions](#open-questions)
 - [Decision / next steps](#decision--next-steps)
 - [Related documentation](#related-documentation)
@@ -242,12 +241,16 @@ The throughline: stop treating memory as a retrieval problem and start treating 
 
 ## Decision / next steps
 
-1. **Review and ratify (or reject) the assessment in [§Assessment](#assessment-of-draft-rfcs-0023--0024--0025).** This doc is not load-bearing until that happens.
-2. **If ratified:** open the [§D](#d-outcome-tagged-importance-not-turn-count-importance) PR against RFC 0020 P2's plan first — it's the smallest, unblocks [§C](#c-salience-score-with-use-based-reinforcement), and lands in v0.3.0 with no scope change.
-3. **Author [§G](#g-memory-of-context-dogfood-test) before any of A–F merges.** Without the test, "did dementia get better?" is not answerable.
-4. **Communicate the scope change to draft-RFC-0023/0024/0025 authoring** — the user holds those reservations; this doc proposes that 0023 narrows, 0024 defers, 0025 is replaced.
+**Ratified 2026-05-01.** Integration landed in the same PR that flipped this doc's status to `📋 Proposed`:
 
-This doc stays at `🔨 Draft` until step 1 lands; on ratification it flips to `📋 Proposed` and a follow-up PR seeds the new "Declarative Facts Tier" RFC plus the v0.4.0 reflection-consolidation RFC.
+- [RFC 0026 — Declarative Facts Tier](rfcs/0026-declarative-facts-tier.md) (§A, v0.3.x) and [RFC 0027 — Reflection-Driven Consolidation](rfcs/0027-reflection-driven-consolidation.md) (§E, v0.4.0; supersedes draft 0025) scaffolded.
+- [MT-MEMORY-005 dementia test](manual-tests/MT-MEMORY-005-dementia-test.md) (§G) scaffolded.
+- §B / §C / §D / §F tracked in [v0.3.0-plan.md §Memory Quality Follow-Ups](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) — no new RFCs.
+- §D resolution pinned into [`0020-pr-plan.md`](rfcs/0020-pr-plan.md) as a v0.3.x carve-out (RFC 0020 PR 4 is merged; schema add is additive).
+- §C and 0023's recency boost folded into the [RFC 0008 calibration review](rfcs/0008-calibration-review.md) — both ride the same 30-day window.
+- Draft RFCs: 0023 narrows to JSON-summary schema only; 0024 defers (gated on dementia-test data); 0025 is superseded by RFC 0027.
+
+Next implementation step is §D outcome tags — smallest scope; resolves [RFC 0020 OQ #6](rfcs/0020-interaction-lifecycle.md#open-questions).
 
 ---
 
