@@ -237,20 +237,15 @@ The throughline: stop treating memory as a retrieval problem and start treating 
 
 5. **Is [§F](#f-structured-since-we-last-spoke-prompt-header) duplicative of [RFC 0021 P1](rfcs/0021-persona-temporal-awareness.md)'s recency rendering?** Depends on the shape P1 lands. Verify after P1 merges; collapse to a P1 follow-up if redundant.
 
+Items 6–15 surfaced during [PR 238](https://github.com/mkhomutov/Persatrix/pull/238) review and are tracked in [v0.3.0-plan.md MQ-10..MQ-13](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) plus per-RFC OQs: telemetry recall-vs-reasoning miss (**MQ-11**), cross-scope subject identity (**MQ-12**), within-interaction memory pressure (**MQ-13**), paraphrase recall as RFC 0024 trigger (**MQ-8 + Leg 4**), GDPR SubjectErasure across new tiers (**MQ-10**), negative/inferred/state-history facts ([RFC 0026 OQ #6–#8](rfcs/0026-declarative-facts-tier.md)), cross-predicate semantic contradiction ([RFC 0027 §B + OQ #6](rfcs/0027-reflection-driven-consolidation.md)), persona self-consistency ([Leg 5](manual-tests/MT-MEMORY-005-dementia-test.md) + [RFC 0026 §C.4](rfcs/0026-declarative-facts-tier.md)), cold-start seeding ([RFC 0026 OQ #9](rfcs/0026-declarative-facts-tier.md)), multi-write atomicity ([RFC 0026 Phase 1.4](rfcs/0026-declarative-facts-tier.md) + [RFC 0027 Phase 2.4](rfcs/0027-reflection-driven-consolidation.md)).
+
 ---
 
 ## Decision / next steps
 
-**Ratified 2026-05-01.** Integration landed in the same PR that flipped this doc's status to `📋 Proposed`:
+**Ratified 2026-05-01.** Same-PR integration: [RFC 0026](rfcs/0026-declarative-facts-tier.md) + [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) + [MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md) scaffolded; §B/§C/§D/§F tracked in [v0.3.0-plan.md MQ rows](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond); §D pinned into [`0020-pr-plan.md`](rfcs/0020-pr-plan.md); §C folded into [0008 calibration review](rfcs/0008-calibration-review.md); 0023 narrowed, 0024 deferred, 0025 superseded. PR 238 review extended OQs 6–15 + MQ-10..MQ-13.
 
-- [RFC 0026 — Declarative Facts Tier](rfcs/0026-declarative-facts-tier.md) (§A, v0.3.x) and [RFC 0027 — Reflection-Driven Consolidation](rfcs/0027-reflection-driven-consolidation.md) (§E, v0.4.0; supersedes draft 0025) scaffolded.
-- [MT-MEMORY-005 dementia test](manual-tests/MT-MEMORY-005-dementia-test.md) (§G) scaffolded.
-- §B / §C / §D / §F tracked in [v0.3.0-plan.md §Memory Quality Follow-Ups](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) — no new RFCs.
-- §D resolution pinned into [`0020-pr-plan.md`](rfcs/0020-pr-plan.md) as a v0.3.x carve-out (RFC 0020 PR 4 is merged; schema add is additive).
-- §C and 0023's recency boost folded into the [RFC 0008 calibration review](rfcs/0008-calibration-review.md) — both ride the same 30-day window.
-- Draft RFCs: 0023 narrows to JSON-summary schema only; 0024 defers (gated on dementia-test data); 0025 is superseded by RFC 0027.
-
-Next implementation step is §D outcome tags — smallest scope; resolves [RFC 0020 OQ #6](rfcs/0020-interaction-lifecycle.md#open-questions).
+Next step: §D outcome tags. MQ-11 precedes first MQ-4 V2 run.
 
 ---
 

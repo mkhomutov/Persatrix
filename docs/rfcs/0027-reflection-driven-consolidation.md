@@ -5,7 +5,7 @@
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
 **Target**: v0.4.0
-**Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0026
+**Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0013, RFC 0026
 
 ---
 
@@ -16,6 +16,7 @@
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
 - [Design / Implementation](#design--implementation)
+  - [G. Subject erasure (RFC 0013 traversal)](#g-subject-erasure-rfc-0013-traversal)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -72,8 +73,9 @@ Reflection scope = the active conversational scope (DM partner, channel, thread)
 1. The top-N recent closed episodes for this scope (default N=8; configurable).
 2. The current relationship summary for the scope's counterparty (if any).
 3. The most recent prior consolidation note for this scope (if any) — so consolidations chain rather than restart.
+4. The list of [RFC 0026 facts](0026-declarative-facts-tier.md) about the active subject — used for a reflection-time **semantic-contradiction sanity check** that flags conflict pairs across different predicates (e.g., `is_vegetarian=true` + `loves="ribeye"`). When a conflict is detected, the consolidation note records it (`contradictions: [{a: fact_id, b: fact_id, kind: "semantic"}]`) for the persona to reconcile rather than silently retracting either fact. Counter increment: `consolidation.contradictions_detected`.
 
-Token cost is bounded: 8 × ~500 tokens of episode summary + ~200 of relationship + ~300 of prior consolidation ≈ 4500 tokens of input, single output of ≤ 600 tokens.
+Token cost is bounded: 8 × ~500 tokens of episode summary + ~200 of relationship + ~300 of prior consolidation + ~400 of subject facts ≈ 4900 tokens of input, single output of ≤ 600 tokens.
 
 ### C. Consolidation note shape
 
@@ -115,6 +117,15 @@ Operators can reconstruct any consolidation chain from audit logs without touchi
 
 The two are independently retrievable. A typical injected context after both ship: working memory + relationship summary + relevant facts (RFC 0026 tier slot) + relevant notes (including consolidations) + episodic recall, all under the [RFC 0017 budget](0017-persona-memory-injection-budget.md).
 
+### G. Subject erasure (RFC 0013 traversal)
+
+[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md) must traverse the new `consolidated_into` and `consolidates` graph when erasing a subject's data. Two paths matter:
+
+- **Forward (note → episodes)**: when a consolidation note is erased (its `scope` belonged to the erased subject), null `consolidated_into` on every episode whose row is *not* itself erased — otherwise demoted episodes orphan with a dangling pointer and become unrecallable.
+- **Reverse (episode → note)**: when source episodes are erased, rewrite each referencing note's `consolidates` array; if the array empties, delete the note. The audit-logged `records_deleted` map gains `consolidation_notes_deleted` and `episode_pointers_nulled` keys.
+
+Phase 2 must include this traversal alongside the schema migration. Without it, GDPR / CCPA erasure leaves orphan-pointer fragments that violate "no historical record loss" §Security from the operator's side but do leak through "data is here but unreachable" from the data-subject's side.
+
 ## Security Considerations
 
 - **Reflection prompt injection.** The reflection LLM call receives episode summary content, which can include user-supplied text. Standard [RFC 0009](0009-security-sandboxing.md) input-sanitization rules apply at the recall side; the consolidation prompt itself is short and templated.
@@ -136,7 +147,9 @@ The two are independently retrievable. A typical injected context after both shi
 1. Schema migration adds `consolidated_into` to `episodes`.
 2. Recall ranker checks the column; default policy = demote (configurable to skip).
 3. `--include-consolidated` query flag for operator visibility.
-4. Integration test asserts a reflection across 8 episodes produces one consolidation note + 8 demoted episode rows.
+4. **Atomicity**: the consolidation-note `INSERT` and the `UPDATE episodes SET consolidated_into = ?` writes execute in a single transaction. A crash between the two leaves no partial state.
+5. `SubjectErasure` traversal extended per §G — forward and reverse paths covered; audit map gains the two new keys.
+6. Integration test asserts a reflection across 8 episodes produces one consolidation note + 8 demoted episode rows; an erasure-after-consolidation test verifies no dangling pointers remain.
 
 ### Phase 3: Tuning + dementia-test pass
 
@@ -155,7 +168,8 @@ The two are independently retrievable. A typical injected context after both shi
 | Python agents | `agents/persona_runtime/__init__.py` | Wire `auto_reflect_after` firing → `ReflectionRunner`. |
 | Python agents | `agents/observability/metrics.py` | `consolidation.notes_written`, `consolidation.failed`, `consolidation.episodes_demoted`. |
 | Config / schema | `config/agents.yaml`, `schemas/agent.schema.json` | `memory.consolidation.*` knobs (N, demote-vs-skip, model). |
-| Tests | `tests/unit/python/test_reflection_runner.py`, `tests/integration/test_consolidation_recall.py` | Trigger, write, demotion, audit. |
+| Tests | `tests/unit/python/test_reflection_runner.py`, `tests/integration/test_consolidation_recall.py`, `tests/integration/test_consolidation_erasure.py` | Trigger, write, demotion, audit, atomicity, subject erasure. |
+| Python agents | `agents/memory/erasure.py` (RFC 0013) | Traverse `consolidated_into` (forward) and `consolidates` arrays (reverse) during subject erasure. |
 
 ## Test Strategy
 
@@ -171,6 +185,7 @@ The two are independently retrievable. A typical injected context after both shi
 3. **Reflection model.** Inherit summarization model, or pick a stronger model for reflection? Reflection is rarer than summarization, so a stronger model is feasible. Defer to Phase 1.
 4. **Chain depth.** A consolidation note that includes prior consolidations as input could chain indefinitely. Cap at one prior consolidation (default) — a longer chain is a v0.5.0 question.
 5. **Cross-scope reflection.** Today, reflection is per-scope. A persona that talks to many users might want a meta-reflection ("I'm spending more time on technical questions lately"). Out of scope for this RFC; tracked as a v0.5.0 follow-up.
+6. **Reflection-time contradiction reporting.** When the §B sanity-check finds a semantic-conflict pair, what should the persona do — surface it in the next turn ("I think I have conflicting info — which is right?"), record it silently in the consolidation `contradictions` array, or escalate to the operator? Default: silent record + counter increment (`consolidation.contradictions_detected`); user-facing surfacing deferred to v0.5.0 once dogfood data shows whether silent-record creates compounding drift.
 
 ## Decision / Next Steps
 

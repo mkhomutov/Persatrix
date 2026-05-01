@@ -13,7 +13,7 @@
 
 **Purpose**: Qualitatively verify that the persona-memory subsystem passes the **dementia test** — recall@k metrics alone are insufficient because high recall scores can co-exist with a persona that fails to *act* on retrieved facts. The acceptance bar is qualitative: across a five-interaction scenario over 30 minutes, the persona must reference earlier-established facts when natural triggers appear, *without* keyword overlap to seed retrieval.
 
-**Scope**: End-to-end persona behaviour after the [Memory Quality Roadmap](../memory-quality-roadmap.md) deliverables ship — specifically [§A facts tier](../memory-quality-roadmap.md#a-promote-key_facts-to-a-declarative-fact-tier) (RFC 0026), [§B continuity bridge](../memory-quality-roadmap.md#b-continuity-bridge-across-interaction-close), [§D outcome-tagged importance](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance), [§E reflection-driven consolidation](../memory-quality-roadmap.md#e-reflection-driven-consolidation-not-llm-clustering) (RFC 0027), and [§F since-we-last-spoke header](../memory-quality-roadmap.md#f-structured-since-we-last-spoke-prompt-header).
+**Scope**: End-to-end persona behaviour after the [Memory Quality Roadmap](../memory-quality-roadmap.md) deliverables ship — specifically [§A facts tier](../memory-quality-roadmap.md#a-promote-key_facts-to-a-declarative-fact-tier) (RFC 0026), [§B continuity bridge](../memory-quality-roadmap.md#b-continuity-bridge-across-interaction-close), [§D outcome-tagged importance](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance), [§E reflection-driven consolidation](../memory-quality-roadmap.md#e-reflection-driven-consolidation-not-llm-clustering) (RFC 0027), and [§F since-we-last-spoke header](../memory-quality-roadmap.md#f-structured-since-we-last-spoke-prompt-header). Leg 4 also serves as the **trigger signal** for the deferred draft RFC 0024 (vector recall) per [v0.3.0-plan.md MQ-8](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond).
 
 **Out of Scope**: `recall@k` metric measurement (covered by automated tests at the `agents/memory/` layer); LLM response quality unrelated to memory; multi-agent shared-memory scenarios.
 
@@ -63,7 +63,11 @@
 
 ## Test Procedure
 
-The test runs **three legs** over **five interactions**. Each leg covers one of the three signal classes the dementia test asserts: **named entity**, **stated preference**, **explicit commitment**. The five-interaction shape spreads them over enough wall-clock time (30 minutes minimum) to exercise [RFC 0020](../rfcs/0020-interaction-lifecycle.md) idle-gap closure between turns 2/3 and 4/5.
+The test runs **five legs** over **five interactions**. Legs cover the five signal classes the dementia test asserts: **named entity**, **stated preference**, **explicit commitment**, **paraphrase recall**, and **persona self-consistency**. The five-interaction shape spreads them over enough wall-clock time (30 minutes minimum) to exercise [RFC 0020](../rfcs/0020-interaction-lifecycle.md) idle-gap closure between turns 2/3 and 4/5. Variants gate which legs apply — see §Variants. Allow 45 minutes for a full V4 run including the paraphrase + self-consistency legs.
+
+### Telemetry (required for diagnosis)
+
+For each turn, capture the per-tier provenance of what the [`MemoryBudget` allocator](../rfcs/0017-persona-memory-injection-budget.md#b-memory-budget-allocator) admitted into the prompt: `{working: [...], relationship: [...], facts: [...], notes: [...], episodic: [...]}`. A leg fail with the relevant fact / episode in the admitted slice is a **reasoning miss** (LLM had it and ignored it). A leg fail with the fact / episode absent is a **recall miss**. Without this distinction, every fail becomes an open-ended investigation. Provenance is a debug-mode artifact (gate `PERSATRIX_MEMORY_PROVENANCE=1`); not a production log path. Tracked as MQ-11.
 
 ### Setup
 
@@ -120,17 +124,56 @@ The test runs **three legs** over **five interactions**. Each leg covers one of 
 
 **Fail criterion**: persona has no awareness of the commitment when it would naturally come up; persona re-asks what was committed.
 
+### Leg 4 — Paraphrase Recall (Interaction 1 → 5)
+
+Leg 4 is the **trigger leg for draft RFC 0024 (vector recall)**. RFC 0026 facts handle structured recall; paraphrase recall sits between facts and prose summaries. Without this leg, MQ-8 has no signal and vectors stay deferred forever.
+
+**Interaction 1 (establish, paraphrase form)**: Embed a topic that admits paraphrase recall — established under one phrasing, retrieved under another:
+
+> "We need to renegotiate the rate card before the contract renewal."
+
+**Expected**: persona acknowledges naturally.
+
+**Interaction 5 (trigger, paraphrase, no keyword overlap with "rate card")**: Ask the topic by paraphrase:
+
+> "Have we ever discussed pricing?"
+
+**Pass criterion**: persona surfaces the rate-card discussion (referenced as pricing, contract terms, or similar). BM25 over multi-turn summaries may pass this; consistent fail across runs is the data signal that triggers RFC 0024.
+
+**Fail criterion**: persona answers "no, this is new" or asks "what kind of pricing?" without referencing the prior rate-card thread. Two or more consecutive V4 fails on Leg 4 + provenance showing the relevant episode absent from the `episodic` slice = MQ-8 trigger met.
+
+### Leg 5 — Persona Self-Consistency (Interaction 1 → 5)
+
+Leg 5 measures the persona's stability *as a subject of its own facts* — orthogonal to user-about-memory. Maps to [RFC 0026 §C.4](../rfcs/0026-declarative-facts-tier.md) (`subject = "self"`).
+
+**Interaction 1 (establish persona self-claim)**: Elicit a stable trait. Phrase the question naturally:
+
+> User: "What kinds of books do you enjoy?"
+> Persona: "I really like sci-fi — especially Ted Chiang."
+
+**Expected**: persona makes a coherent self-claim. The fact extractor at interaction close should write `(self, has_preference, "sci-fi / Ted Chiang", source_interaction_id=...)`.
+
+**Interaction 5 (trigger)**: Re-ask, framed differently:
+
+> "Are you a sci-fi fan?" or "Recommend me a book."
+
+**Pass criterion**: persona's response is consistent with Interaction 1 (affirms the preference; or qualifies it consistently — "yes, especially short fiction"). Bonus: persona references Ted Chiang.
+
+**Fail criterion**: persona contradicts Interaction 1 ("not really a sci-fi person") or invents a different stable claim ("I'm more of a literary-fiction reader") without bridging from the original.
+
 ---
 
 ## Expected Results Summary
 
-| Leg | Established at | Triggered at | Pass criterion | Pass/Fail |
-|-----|----------------|--------------|----------------|-----------|
-| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | ☐ |
-| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | ☐ |
-| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | ☐ |
+| Leg | Established at | Triggered at | Pass criterion | Variant gate | Pass/Fail |
+|-----|----------------|--------------|----------------|--------------|-----------|
+| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | V2+ | ☐ |
+| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | V2+ | ☐ |
+| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | V2 (fact form) / V4 (commitment form) | ☐ |
+| 4 — Paraphrase Recall | Interaction 1 | Interaction 5 | Rate-card / pricing thread surfaced via paraphrase | V2+ (fail = MQ-8 signal) | ☐ |
+| 5 — Self-Consistency | Interaction 1 | Interaction 5 | Persona's self-claim stable across the window | V2+ | ☐ |
 
-**Overall pass**: all three legs pass. **Two of three** = partial; investigate which deliverable hasn't landed yet. **One or zero** = fail.
+**Overall pass per variant**: all variant-gated legs pass. A pass on N-1 of N is partial — investigate which deliverable hasn't landed yet. Two or more fails = fail. Per-leg telemetry (recall miss vs. reasoning miss) determines the next action.
 
 ---
 
@@ -142,7 +185,12 @@ Run the full procedure against `main` *before* RFC 0026 Phase 1 lands. Record re
 
 ### V2 — Post-RFC 0026 Phase 1 (facts tier shipped)
 
-Re-run after [RFC 0026](../rfcs/0026-declarative-facts-tier.md) Phase 1 + Phase 2. Legs 1 and 2 should now pass cleanly because both the named entity and the preference are extractable as facts (`(subject="user", predicate="has_daughter_named", object="Mira")` and `(subject="user", predicate="prefers", object="text or async")`). Leg 3 may still fail — commitments are an [RFC 0021 P2 surface](../rfcs/0021-persona-temporal-awareness.md) (v0.4.0).
+Re-run after [RFC 0026](../rfcs/0026-declarative-facts-tier.md) Phase 1 + Phase 2. Legs 1, 2, 4, 5 should pass:
+- **Leg 1 / 2**: extractable as facts (`(subject="user", predicate="has_daughter_named", object="Mira")` and `(subject="user", predicate="prefers", object="text or async")`).
+- **Leg 4 (paraphrase)**: passes if BM25 over interaction summaries is sufficient. A consistent V2 fail on Leg 4 — with provenance showing the relevant episode is absent from the `episodic` slice — is the [MQ-8](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) trigger for RFC 0024.
+- **Leg 5 (self-consistency)**: passes if `subject = "self"` predicates are in the Phase-1 vocabulary (RFC 0026 OQ #10). If Phase 1 ships without self-predicates, Leg 5 is a V4 leg, not V2.
+
+**Leg 3 in V2** — *not* a regression if it fails. Structured commitment tracking lands in v0.4.0 with [RFC 0021 P2](../rfcs/0021-persona-temporal-awareness.md). In V2, Leg 3 passes only if the persona references the spreadsheet via fact-tier extraction, e.g. `(user, committed_to, "send budget spreadsheet by tomorrow")`. A V2 Leg-3 fail with the fact present in the `facts` slice is a *reasoning miss* (LLM ignored the fact). A V2 Leg-3 fail with the fact absent is a *recall miss* — investigate the extractor's commitment-class predicates, not RFC 0021. Either way: **not a regression**, just a known gap until v0.4.0.
 
 ### V3 — Post-§B continuity bridge
 
@@ -190,3 +238,5 @@ Re-run after [RFC 0027](../rfcs/0027-reflection-driven-consolidation.md) lands i
 - Each leg's "no keyword overlap" rule is the test's load-bearing constraint. If the trigger turn contains the established entity or preference, the test exercises retrieval-by-keyword, not memory-by-relevance, and the result is meaningless.
 - This test should re-run before any v0.3.x or v0.4.0 release that touches memory. Add a row to the Test Results table with the variant identifier.
 - After [§D outcome tags](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance) lands, instrument the test to capture the `outcome` tag emitted by the summarizer for each interaction — Leg 3's commitment leg should produce `outcome: commitment`.
+- **Leg 4 is a one-way trigger** for [MQ-8 (RFC 0024 vector recall)](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) — two or more consecutive V2/V3 fails on Leg 4 (with provenance showing recall miss, not reasoning miss) is the data signal that escalates RFC 0024 from deferred to in-scope.
+- **Leg 5 is the only leg that tests the persona as a subject of its own facts**. Self-consistency drift is a distinct dementia mode from user-fact drift; do not collapse the two.

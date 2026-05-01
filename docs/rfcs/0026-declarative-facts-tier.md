@@ -5,7 +5,7 @@
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
 **Target**: v0.3.x
-**Depends on**: RFC 0005, RFC 0008, RFC 0017, RFC 0020
+**Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0013, RFC 0017, RFC 0020
 
 ---
 
@@ -16,6 +16,7 @@
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
 - [Design / Implementation](#design--implementation)
+  - [H. Subject erasure (RFC 0013 traversal)](#h-subject-erasure-rfc-0013-traversal)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -93,6 +94,7 @@ The extractor prompt enumerates a small predicate vocabulary (~30 verbs covering
 1. If the entity is the conversational counterparty, `subject = sender_id`.
 2. If the entity has an existing fact row, reuse the canonical form there (case- and whitespace-normalized).
 3. Otherwise, normalize and store as a new canonical key.
+4. The persona itself is a valid subject (`subject = "self"`) — used by the [MT-MEMORY-005 Leg 5 self-consistency](../manual-tests/MT-MEMORY-005-dementia-test.md) gate. The predicate vocabulary covers self-attribute / self-preference / self-value classes alongside the user-facing predicates.
 
 This keeps subject-indexed lookup correct without an embeddings step — the canonical form lives in the row itself.
 
@@ -124,6 +126,10 @@ Retraction policy: **latest-asserted-wins**. A new fact tuple with the same `(su
 
 Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-security-sandboxing.md) records fact extraction events at `INFO` level; redaction policy follows the existing `RedactStruct` rules (no raw PII in audit metadata). A `superseded_by` write is also audited.
 
+### H. Subject erasure (RFC 0013 traversal)
+
+[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md) promises deletion of all data associated with a subject across **all** memory tiers. The new `facts` table is one such tier — `SubjectErasure.delete(subject_id)` MUST traverse it, both as the `subject` column directly and as the `source_interaction_id` foreign key (a fact extracted *during* an erased subject's interaction is also erasable, even if its declared subject is someone else). Phase 1 extends the erasure surface with `FactStore.delete_by_subject(subject_id)` and includes the count in the audit-logged `records_deleted` map. Without this, the first GDPR / CCPA request after v0.3.x ships will silently miss extracted facts.
+
 ## Security Considerations
 
 - **PII concentration**: a `facts` table is a denser PII surface than prose summaries. The [RFC 0009 redactor](0009-security-sandboxing.md) must be applied at extraction time, not at recall time, so the table never persists raw secrets.
@@ -138,7 +144,8 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 1. New `agents/memory/facts.py` module — `Fact` dataclass, `FactStore` with `store`, `recall`, `supersede`, `prune`.
 2. SQLite migration adds `facts` table + `idx_facts_subject_agent` index.
 3. Extractor wired into the [RFC 0020 PR 4 summarize-on-close](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) path — combined prompt; structured outputs parsed and stored.
-4. Unit tests for the extractor's empty-list path, the predicate-allowlist rejection, and the schema migration.
+4. **Atomicity**: the prose-summary write and the fact-tuple writes occur inside a single SQLite transaction. A parse failure on either output rolls back both — never a half-written interaction-close state. A parse failure on facts but not summary commits only the summary plus a counter increment (`facts.extraction_failed`).
+5. Unit tests for the extractor's empty-list path, the predicate-allowlist rejection, the schema migration, and the partial-failure rollback.
 
 ### Phase 2: Recall + budget integration
 
@@ -151,7 +158,8 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 
 1. `last_recalled_at` updated on `MemoryBudget`-admitted recall (composes with [RFC 0008 calibration §C](0008-calibration-review.md)).
 2. Latest-asserted-wins retraction with `superseded_by` writes; audit-log entry per supersede.
-3. [MT-MEMORY-005 dementia test](../manual-tests/MT-MEMORY-005-dementia-test.md) re-run; named-entity and preference legs must pass.
+3. Per-turn tier-provenance instrumentation surfaced through the [`MemoryBudget` allocator](0017-persona-memory-injection-budget.md) — gates [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) Telemetry section so leg-fail diagnoses can disambiguate recall miss from reasoning miss.
+4. [MT-MEMORY-005 dementia test](../manual-tests/MT-MEMORY-005-dementia-test.md) re-run; named-entity, preference, and self-consistency (Leg 5) legs must pass.
 
 ## Files Touched (Estimated)
 
@@ -163,7 +171,8 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 | Python agents | `agents/persona_runtime/memory_context.py` | New tier slot in the budget allocator. |
 | Python agents | `agents/observability/metrics.py` | `facts.extracted`, `facts.injected`, `facts.superseded`, `facts.extraction_failed`. |
 | Config / schema | `config/agents.yaml`, `schemas/agent.schema.json` | `memory.facts.*` keys. |
-| Tests | `tests/unit/python/test_fact_store.py`, `tests/integration/test_facts_recall.py` | Storage, recall, retraction, allocator integration. |
+| Tests | `tests/unit/python/test_fact_store.py`, `tests/integration/test_facts_recall.py` | Storage, recall, retraction, allocator integration, partial-failure rollback. |
+| Python agents | `agents/memory/erasure.py` (RFC 0013) | Extend `SubjectErasure.delete` to traverse the `facts` table (both `subject` and `source_interaction_id`); include `facts_deleted` in the audit map. |
 | Docs | `docs/rfcs/0017-persona-memory-injection-budget.md` | OQ #1 tier-budget split addendum (facts slot). |
 
 ## Test Strategy
@@ -180,6 +189,11 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 3. **Should `subject` accept multiple forms?** A single canonical form is simpler; a subject-alias table is more robust to name variants ("Bob" vs "Robert"). Defer to Phase 2.
 4. **Cross-agent fact sharing.** v0.3.x ships per-agent only. The cross-agent surface pairs with [RFC 0008 §H](0008-agent-memory-context-optimization.md) and is a v0.4.0 question.
 5. **Extraction model selection.** Inherit `optimization.yaml → context_management.summarization.model`, or pin a smaller/faster model for facts? Defer to Phase 1 implementation.
+6. **Negative facts and state-history retention.** `superseded_by` keeps the latest assertion but loses prior states ("user used to live in Boston, now Seattle"). Should superseded rows remain queryable for "where did you used to live?" via an explicit history flag on `recall`? Lean toward yes; defer policy to Phase 3 once dogfood data shows whether the persona attempts state-history queries.
+7. **Cross-fact semantic contradiction.** Latest-asserted-wins handles `(subject, predicate)` collisions but not semantic conflicts across different predicates (`is_vegetarian=true` + `loves=ribeye`). Detection is owned by [RFC 0027 §B reflection-time sanity sweep](0027-reflection-driven-consolidation.md), not this RFC.
+8. **Inferred facts.** Extraction is literal-only by design (predicate allowlist). Multi-utterance inferences ("she handles school pickups") live between facts and consolidations and are out of scope here. Track as a v0.4.0 surface alongside RFC 0027.
+9. **Operator-seeded facts (cold start).** A new persona has zero facts; an operator may want to pre-seed brand voice / company info / persona self-claims. Defer to a `seed_facts:` block in `config/agents.yaml` — Phase 2 follow-up, not load-bearing for v0.3.x.
+10. **Self-as-subject coverage.** §C.4 admits `subject = "self"`. The Phase-1 predicate vocabulary needs to include self-attribute predicates (e.g., `self.has_preference`, `self.holds_value`) alongside user-facing ones; finalize the list before extractor prompt freezes.
 
 ## Decision / Next Steps
 
