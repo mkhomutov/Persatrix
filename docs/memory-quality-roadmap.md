@@ -24,7 +24,6 @@
   - [F. Structured "since we last spoke" prompt header](#f-structured-since-we-last-spoke-prompt-header)
   - [G. Memory-of-context dogfood test](#g-memory-of-context-dogfood-test)
 - [Recommended sequencing](#recommended-sequencing)
-- [Where each idea will eventually land](#where-each-idea-will-eventually-land)
 - [Open questions](#open-questions)
 - [Decision / next steps](#decision--next-steps)
 - [Related documentation](#related-documentation)
@@ -53,7 +52,7 @@ The acceptance bar is **qualitative**, not just metric-driven. A persona that sc
 
 > Across a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment, does the persona reference each of those when an appropriate trigger appears later, **without keyword overlap to seed the retrieval**?
 
-If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md L420](../ROADMAP.md#v030--agent-conversations) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
+If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
 
 ---
 
@@ -196,7 +195,7 @@ since-we-last-spoke:
 
 ### G. Memory-of-context dogfood test
 
-**Idea.** A new manual-test slot under [`docs/manual-tests/`](manual-tests/) that scripts a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment. Pass criterion: the persona references each of the three when an appropriate trigger appears later, *without keyword overlap*. Fail criterion: the persona re-introduces the fact, asks for it again, or contradicts it.
+**Idea.** A new manual-test slot under [`manual-tests/`](manual-tests/) that scripts a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment. Pass criterion: the persona references each of the three when an appropriate trigger appears later, *without keyword overlap*. Fail criterion: the persona re-introduces the fact, asks for it again, or contradicts it.
 
 **Layer.** Manual-test artifact + a small driver script. No code change to the persona runtime. Should be re-run before each release that touches memory.
 
