@@ -52,7 +52,7 @@ The acceptance bar is **qualitative**, not just metric-driven. A persona that sc
 
 > Across a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment, does the persona reference each of those when an appropriate trigger appears later, **without keyword overlap to seed the retrieval**?
 
-If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md L420](../ROADMAP.md#v030--agent-conversations) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
+If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
 
 ---
 

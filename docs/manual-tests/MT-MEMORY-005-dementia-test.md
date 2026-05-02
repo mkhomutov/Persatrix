@@ -140,7 +140,7 @@ Leg 4 is the **trigger leg for draft RFC 0024 (vector recall)**. RFC 0026 facts 
 
 **Pass criterion**: persona surfaces the rate-card discussion (referenced as pricing, contract terms, or similar). BM25 over multi-turn summaries may pass this; consistent fail across runs is the data signal that triggers RFC 0024.
 
-**Fail criterion**: persona answers "no, this is new" or asks "what kind of pricing?" without referencing the prior rate-card thread. Two or more consecutive V4 fails on Leg 4 + provenance showing the relevant episode absent from the `episodic` slice = MQ-8 trigger met.
+**Fail criterion**: persona answers "no, this is new" or asks "what kind of pricing?" without referencing the prior rate-card thread. Two or more consecutive **V2 or V3** fails on Leg 4 + provenance showing the relevant episode absent from the `episodic` slice = MQ-8 trigger met. (V4 fails do not count: post-RFC 0027 consolidation notes can carry the relationship-arc abstraction and mask the vector-recall signal — see the §Notes coda.)
 
 ### Leg 5 — Persona Self-Consistency (Interaction 1 → 5)
 
@@ -186,11 +186,11 @@ Run the full procedure against `main` *before* RFC 0026 Phase 1 lands. Record re
 ### V2 — Post-RFC 0026 Phase 1 (facts tier shipped)
 
 Re-run after [RFC 0026](../rfcs/0026-declarative-facts-tier.md) Phase 1 + Phase 2. Legs 1, 2, 4, 5 should pass:
-- **Leg 1 / 2**: extractable as facts (`(subject="user", predicate="has_daughter_named", object="Mira")` and `(subject="user", predicate="prefers", object="text or async")`).
-- **Leg 4 (paraphrase)**: passes if BM25 over interaction summaries is sufficient. A consistent V2 fail on Leg 4 — with provenance showing the relevant episode is absent from the `episodic` slice — is the [MQ-8](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) trigger for RFC 0024.
+- **Leg 1 / 2**: extractable as facts (`(subject=<sender_id>, predicate="has_daughter_named", object="Mira")` and `(subject=<sender_id>, predicate="prefers", object="text or async")`). `<sender_id>` is the canonical entity key resolved by [RFC 0026 §C](../rfcs/0026-declarative-facts-tier.md#c-subject-canonicalization) at write time — not a literal `"user"` string. Tests asserting on these tuples must use the resolved `sender_id`, not a hard-coded placeholder.
+- **Leg 4 (paraphrase)**: passes if BM25 over interaction summaries is sufficient. A consistent **V2 or V3** fail on Leg 4 — with provenance showing the relevant episode is absent from the `episodic` slice — is the [MQ-8](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) trigger for RFC 0024. V4 fails do not count: post-RFC 0027 consolidation can mask vector-recall need behind consolidation notes (see §Notes coda).
 - **Leg 5 (self-consistency)**: passes if `subject = "self"` predicates are in the Phase-1 vocabulary (RFC 0026 OQ #10). If Phase 1 ships without self-predicates, Leg 5 is a V4 leg, not V2.
 
-**Leg 3 in V2** — *not* a regression if it fails. Structured commitment tracking lands in v0.4.0 with [RFC 0021 P2](../rfcs/0021-persona-temporal-awareness.md). In V2, Leg 3 passes only if the persona references the spreadsheet via fact-tier extraction, e.g. `(user, committed_to, "send budget spreadsheet by tomorrow")`. A V2 Leg-3 fail with the fact present in the `facts` slice is a *reasoning miss* (LLM ignored the fact). A V2 Leg-3 fail with the fact absent is a *recall miss* — investigate the extractor's commitment-class predicates, not RFC 0021. Either way: **not a regression**, just a known gap until v0.4.0.
+**Leg 3 in V2** — *not* a regression if it fails. Structured commitment tracking lands in v0.4.0 with [RFC 0021 P2](../rfcs/0021-persona-temporal-awareness.md). In V2, Leg 3 passes only if the persona references the spreadsheet via fact-tier extraction, e.g. `(<sender_id>, committed_to, "send budget spreadsheet by tomorrow")` where `<sender_id>` is the [§C-canonicalized](../rfcs/0026-declarative-facts-tier.md#c-subject-canonicalization) subject key. A V2 Leg-3 fail with the fact present in the `facts` slice is a *reasoning miss* (LLM ignored the fact). A V2 Leg-3 fail with the fact absent is a *recall miss* — investigate the extractor's commitment-class predicates, not RFC 0021. Either way: **not a regression**, just a known gap until v0.4.0.
 
 ### V3 — Post-§B continuity bridge
 

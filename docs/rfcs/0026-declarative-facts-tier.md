@@ -102,7 +102,7 @@ This keeps subject-indexed lookup correct without an embeddings step — the can
 
 `FactStore.recall(subject, limit) -> list[Fact]` returns facts about a subject ordered by a salience score (see §F). The persona runtime calls this for each `(sender, *mentioned_entities)` and feeds the union into the [RFC 0017 budget allocator](0017-persona-memory-injection-budget.md) as a new tier slot, ranked above episodic recall.
 
-The allocator's tier-priority list grows by one entry: facts come *after* working memory + relationship summaries and *before* episodic recall. The [RFC 0017 OQ #1](0017-persona-memory-injection-budget.md#open-questions) tier-budget split must be revisited — facts are short and high-signal, so a small dedicated slice (e.g. 200 of the 1500 token budget) is reasonable.
+The allocator's tier-priority list grows by one entry: facts come *after* working memory + relationship summaries and *before* notes + episodic recall. The five enumerated tiers post-RFC 0026 are: working → relationship → **facts** → notes → episodic — matching the post-[RFC 0027](0027-reflection-driven-consolidation.md) end-state described in [RFC 0027 §F](0027-reflection-driven-consolidation.md#f-composition-with-rfc-0026-facts). The notes-vs-episodic relative ordering is owned by [RFC 0017 OQ #1](0017-persona-memory-injection-budget.md#open-questions); the current allocator places notes *after* episodic (priority 6 < 7), and that ordering shifts to notes-before-episodic when consolidation notes ship. The [RFC 0017 OQ #1](0017-persona-memory-injection-budget.md#open-questions) tier-budget split must be revisited — facts are short and high-signal, so a small dedicated slice (e.g. 200 of the 1500 token budget) is reasonable.
 
 ### E. Composition with `recall_notes`
 
@@ -116,6 +116,8 @@ memory:
     extraction_model: claude-haiku-4-5  # or null to inherit context_management.summarization.model
 ```
 
+The `claude-haiku-4-5` value is a model alias that resolves at runtime via `optimization.yaml` to the dated model id (e.g. `claude-haiku-4-5-20251001`). Using the alias keeps the example stable across model-id rotations.
+
 ### F. Salience and reinforcement
 
 Each fact's `certainty` evolves under the [§C use-based reinforcement rule](../memory-quality-roadmap.md#c-salience-score-with-use-based-reinforcement) — a fact admitted into a prompt by `MemoryBudget` resets its decay timer. The full reinforcement formula lands in the [RFC 0008 calibration review](0008-calibration-review.md); this RFC consumes that contract.
@@ -128,7 +130,7 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 
 ### H. Subject erasure (RFC 0013 traversal)
 
-[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md) promises deletion of all data associated with a subject across **all** memory tiers. The new `facts` table is one such tier — `SubjectErasure.delete(subject_id)` MUST traverse it, both as the `subject` column directly and as the `source_interaction_id` foreign key (a fact extracted *during* an erased subject's interaction is also erasable, even if its declared subject is someone else). Phase 1 extends the erasure surface with `FactStore.delete_by_subject(subject_id)` and includes the count in the audit-logged `records_deleted` map. Without this, the first GDPR / CCPA request after v0.3.x ships will silently miss extracted facts.
+[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md#c-right-to-erasure--memory-compliance) promises deletion of all data associated with a subject across **all** memory tiers. The new `facts` table is one such tier — `SubjectErasure.delete(subject_id)` MUST traverse it, both as the `subject` column directly and as the `source_interaction_id` foreign key (a fact extracted *during* an erased subject's interaction is also erasable, even if its declared subject is someone else). Phase 1 extends the erasure surface with `FactStore.delete_by_subject(subject_id)` and includes the count in the audit-logged `records_deleted` map. Without this, the first GDPR / CCPA request after v0.3.x ships will silently miss extracted facts.
 
 ## Security Considerations
 
@@ -150,7 +152,7 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 ### Phase 2: Recall + budget integration
 
 1. `FactStore.recall(subject, limit)` wired into `agents/persona_runtime/memory_context.py` as a new tier feeding `MemoryBudget.try_add`.
-2. Tier priority order updated: working → relationship → **facts** → episodic.
+2. Tier priority order updated: working → relationship → **facts** → notes → episodic. Cross-link to [RFC 0017 OQ #1](0017-persona-memory-injection-budget.md#open-questions) for the budget split; notes-before-episodic ordering aligns with the post-[RFC 0027](0027-reflection-driven-consolidation.md) end state in [§F](0027-reflection-driven-consolidation.md#f-composition-with-rfc-0026-facts).
 3. `config/agents.yaml` + `schemas/agent.schema.json` additions for `memory.facts.*` knobs.
 4. Integration test: a fact stored at interaction N is injected at interaction N+1 when the subject reappears, *without* the subject string appearing in the query.
 

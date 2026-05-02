@@ -62,7 +62,7 @@ The roadmap-doc's framing: humans consolidate during *reflection*, and the perso
 
 ### A. Trigger
 
-`auto_reflect_after` is the existing [RFC 0005](0005-persona-agent-memory.md) counter. [RFC 0020 PR 4](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) already moved the increment to the interaction-close path. When the counter trips, the persona enters a brief reflection state instead of being a no-op.
+`auto_reflect_after` is the existing [RFC 0005](0005-persona-agent-memory.md) counter. [RFC 0020 PR 4](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) already moved the increment to the interaction-close path ([`_tick_auto_reflect_counter` in `agents/persona_runtime/state_persistence.py`](../../agents/persona_runtime/state_persistence.py)). Today, the counter increments at every interaction close, but no production caller invokes [`check_auto_reflect` in `agents/tools/builtin.py`](../../agents/tools/builtin.py) — so the threshold check never runs and the [`reflection-nudge` snippet](../../prompts/runtime/safety/reflection-nudge.md) never reaches the persona. The trip is effectively a no-op. This RFC replaces that no-op: when the counter trips, `ReflectionRunner.run()` is invoked from the same close path, the counter is reset, and the persona enters a brief reflection state.
 
 Reflection runs at most once per `auto_reflect_after` firing. A second firing during an active reflection coalesces — no concurrent reflections per agent.
 
@@ -119,7 +119,7 @@ The two are independently retrievable. A typical injected context after both shi
 
 ### G. Subject erasure (RFC 0013 traversal)
 
-[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md) must traverse the new `consolidated_into` and `consolidates` graph when erasing a subject's data. Two paths matter:
+[RFC 0013 §SubjectErasure](0013-legal-ethical-compliance.md#c-right-to-erasure--memory-compliance) must traverse the new `consolidated_into` and `consolidates` graph when erasing a subject's data. Two paths matter:
 
 - **Forward (note → episodes)**: when a consolidation note is erased (its `scope` belonged to the erased subject), null `consolidated_into` on every episode whose row is *not* itself erased — otherwise demoted episodes orphan with a dangling pointer and become unrecallable.
 - **Reverse (episode → note)**: when source episodes are erased, rewrite each referencing note's `consolidates` array; if the array empties, delete the note. The audit-logged `records_deleted` map gains `consolidation_notes_deleted` and `episode_pointers_nulled` keys.
@@ -141,6 +141,8 @@ Phase 2 must include this traversal alongside the schema migration. Without it, 
 2. Reflection LLM call with top-N episode + relationship + prior-consolidation input; output validated and persisted via `store_note`.
 3. New `kind = "consolidation"` discriminator on notes; metadata extensions persisted.
 4. Audit-log integration (event + counters).
+
+> **Transitional state (Phase 1 land → Phase 2 land).** Until Phase 2 ships the `consolidated_into` column and the recall-rank demotion (§D), consolidation notes and their source episodes both compete for the [RFC 0017 budget](0017-persona-memory-injection-budget.md) on the same scope — temporarily doubling the relevant-content footprint per active scope. Two acceptable mitigations: **(a)** sequence Phases 1 and 2 in adjacent PRs so the window is short, or **(b)** gate Phase 1 writes behind a `memory.consolidation.enabled` config knob (default `false`) and flip it to `true` only after Phase 2 lands. Pick one before the Phase 1 PR opens; the v0.4.0 PR plan should record which.
 
 ### Phase 2: Source-episode demotion + recall ranking
 
