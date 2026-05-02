@@ -81,6 +81,7 @@ Per-language details are in `.github/instructions/`. Key rules:
 | `templates/personas.yaml` | Reusable persona archetypes |
 | `schemas/` | JSON Schema for validation |
 | `docs/` | Specs, RFCs, guides |
+| `docs/issues/` | Deferred/cross-cutting findings (`make issues` to list) |
 | `workflows/` | Workflow DAG definitions |
 
 Full details: [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md), [persatrix-extension-spec.md](../docs/persatrix-extension-spec.md).

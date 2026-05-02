@@ -122,6 +122,9 @@ jobs:
       - name: Validate YAML configs
         run: python agents/validate.py config/
 
+      - name: Check issues index is up to date
+        run: make issues-check
+
   file-size-check:
     name: File size check
     runs-on: ubuntu-latest
