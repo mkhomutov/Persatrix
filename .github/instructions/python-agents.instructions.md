@@ -17,3 +17,12 @@ description: "Python agent conventions: async-first, 3.11+ type hints, ruff lint
 - **Sub-agents** are ephemeral: spawned by parent agents via `orchestrator_client.spawn_sub_agent()` with inherited permissions.
 - **Platform awareness:** Guard `loop.add_signal_handler()` with `sys.platform != "win32"`.
 - **Dataclasses:** Use `field(default_factory=...)` for mutable defaults.
+
+## TDD (from v0.3.0 onward)
+
+- **Red-Green-Refactor:** Add a failing test in `tests/unit/python/` before writing implementation code. Run `pytest tests/unit/python/test_<module>.py -v` to confirm the red state.
+- **Test file naming:** `tests/unit/python/test_<module>.py` mirrors `agents/<module>.py`. Component tests that need agent fixtures go in `agents/tests/`.
+- **One assert per logical case:** Prefer separate test methods over multi-assert blocks; failures pinpoint the broken behaviour immediately.
+- **Mocking LLM calls:** Always mock `LLMClient` at the boundary (`unittest.mock.AsyncMock`). Never let a unit test make real LLM or network calls.
+- **Async tests:** Mark with `@pytest.mark.asyncio` (or rely on `asyncio_mode = "auto"`). Do not use `asyncio.run()` inside tests.
+- **Integration tests** (`tests/integration/`) are exempt from strict TDD — write them after the unit layer validates the pieces.
