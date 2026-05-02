@@ -10,6 +10,18 @@ default:
       task_agents: "claude-sonnet-4-20250514"
       sub_agents: "claude-sonnet-4-20250514"
       evaluators: "claude-haiku-4-5-20251001"
+    provider_inference:
+      anthropic_prefixes:
+        - "claude"
+      openai_exact:
+        - "o1"
+        - "o3"
+        - "o4"
+      openai_prefixes:
+        - "gpt-"
+        - "o1-"
+        - "o3-"
+        - "o4-"
 
   caching:
     exact:

@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 
 from ..llm_client import LLMClient
+from ..prompt_loader import load_snippet
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class WorkingMemory:
                 response = await llm_client.create_message(
                     model=self._compression_model,
                     messages=[{"role": "user", "content": section.content}],
-                    system="Summarize the following content concisely, preserving key information.",
+                    system=load_snippet("working-memory-compressor"),
                     tools=[],
                     max_tokens=max(section.token_count // 2, 64),
                     temperature=0.2,

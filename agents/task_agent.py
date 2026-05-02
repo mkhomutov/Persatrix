@@ -19,6 +19,7 @@ import json
 import logging
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from .prompt_loader import load_snippet
 from .sub_agents._log_safety import (
     bounded as _bounded,  # PR #224 r5-S1: CWE-117 (lifted to _log_safety in PR 6b)
 )
@@ -54,13 +55,20 @@ class TaskAgent(BaseAgent):
             system_prompt = f"{system_prompt}\n\n{instructions}"
         # Inject workspace root so the LLM uses correct absolute paths when
         # calling file_read / file_write / shell_exec tools.
+        #
+        # NOTE: workspace-root-instructions.md is a ``str.format`` template,
+        # not a verbatim snippet — it contains the literal placeholder
+        # ``{workspace_root}``.  Any future edit to that file must keep the
+        # placeholder intact and avoid introducing literal ``{`` / ``}``
+        # outside it (escape as ``{{`` / ``}}``), or this call will raise
+        # KeyError / IndexError at runtime.  This is the only snippet on
+        # which the runtime calls ``.format`` — the other four are passed
+        # through unchanged.
         if builtin.workspace_root is not None and self.config.get("tools"):
-            system_prompt = (
-                f"{system_prompt}\n\n"
-                f"Workspace root: {builtin.workspace_root}\n"
-                f"Always use absolute paths under the workspace root when "
-                f"reading or writing files."
+            workspace_instructions = load_snippet("workspace-root-instructions").format(
+                workspace_root=builtin.workspace_root,
             )
+            system_prompt = f"{system_prompt}\n\n{workspace_instructions}"
         output = await self._run_llm_loop(task, system_prompt=system_prompt)
         if DELEGATION_REQUEST_KEY in task.context:
             self._attach_delegation_result(output)
