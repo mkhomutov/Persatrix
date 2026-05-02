@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-04-30 (RFC 0009 PR 1c open: audit-hardening — replaces single-element opaque-struct deny-list with structural unexported-non-primitive bail-out (RFC 0009 §I addendum); registers three audit OTEL instruments (`audit.events_total{event_type,class}`, `audit.chain_recovered_total`, `audit.emit_latency_seconds`) wired through a `security.AuditMetrics` interface + `observability/metrics` adapter; documents `AuditEvent.Resource` heterogeneity (PR #234 review L-2); rephrases dispatch.go audit-emit comment to reflect mutex-blocking reality (PR #234 review L-3); ships SLO alert templates in docs/observability.md §13 for the capability-fsync amplification path (PR #234 review Medium-1). RFC 0011 PR 1 merged as #231: channel store + SQLite migration + schema rewrite per RFC 0011 §A/§B; RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path)  
+> **Last updated**: 2026-05-01 (Memory Quality Roadmap ratified — [memory-quality-roadmap.md](docs/memory-quality-roadmap.md) flipped `📋 Proposed`; RFC 0026 Declarative Facts Tier scaffolded for v0.3.x; RFC 0027 Reflection-Driven Consolidation scaffolded for v0.4.0 — supersedes draft RFC 0025; MT-MEMORY-005 dementia-test scaffolded; RFC index extended with 0023–0027; v0.3.0-plan §Memory Quality Follow-Ups added. RFC 0009 PR 1c open: audit-hardening — replaces single-element opaque-struct deny-list with structural unexported-non-primitive bail-out (RFC 0009 §I addendum); registers three audit OTEL instruments (`audit.events_total{event_type,class}`, `audit.chain_recovered_total`, `audit.emit_latency_seconds`) wired through a `security.AuditMetrics` interface + `observability/metrics` adapter; documents `AuditEvent.Resource` heterogeneity (PR #234 review L-2); rephrases dispatch.go audit-emit comment to reflect mutex-blocking reality (PR #234 review L-3); ships SLO alert templates in docs/observability.md §13 for the capability-fsync amplification path (PR #234 review Medium-1). RFC 0011 PR 1 merged as #231: channel store + SQLite migration + schema rewrite per RFC 0011 §A/§B; RFC 0020 PR 4 merged as #229: summarization-on-close + closing-state janitor on `on_tick` cadence + `record_interaction` moved to interaction-close path)  
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0007, 0008, 0009, 0011, 0020, 0021 P1) — 🚧 Implementing  
 > **Current milestone**: RFC 0011 implementation in progress (1/8 PRs merged — PR 1 #231 channel store + SQLite migration + schema rewrite); RFC 0020 implementation in progress (4/7 PRs merged — PR 4 #229 summarize-on-close + janitor + per-interaction `record_interaction`); RFC 0008 PR 1 + PR 1b + PR 2 + PR 2a + PR 3 + PR 3a + PR 4 + PR 5 merged (#218, #219, #220, #221, #222, #224, #223, #225) — context budget + packaging + metrics + MemoryFacade + episodic eviction + delegation contract + delegation metrics + shared pool ACL + provenance + confidence decay + procedural revalidation; follow-up triage PR open; PR 6a / PR 6b / PR 6 (RFC close + 30-day calibration review) pending
 
@@ -54,6 +54,11 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 🚧 Implementing |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 📋 Proposed |
 | [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | ✅ Implemented |
+| 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)) | v0.3.x | Reserved (narrowed) |
+| 0024 | Episodic Vector Recall — deferred, gated on [MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md) data | v0.3.x or v0.4.0 | Reserved (deferred) |
+| 0025 | Thematic Episode Clustering — superseded by RFC 0027 per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md) | superseded | Reserved (superseded by 0027) |
+| [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.x | 📋 Proposed |
+| [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | v0.4.0 | 📋 Proposed |
 
 ---
 
@@ -432,6 +437,20 @@ v0.2.2 complete
 - **Agent memory and context optimization** — per-step context budget allocation, caller-prepared context packaging, delegation result merge contracts (RFC 0008)
 - **Security hardening Phases 1–2** — audit logging, rate limiting, input sanitization (RFC 0009)
 
+### Memory Quality Roadmap
+
+The persona-memory subsystem failed a qualitative review on 2026-05-01 (the "dementia test" — see [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)). The ratified follow-up plan rides v0.3.x and v0.4.0 alongside the six in-flight RFCs *without* expanding v0.3.0 scope. Tracked deliverables:
+
+- **§A — Declarative Facts Tier** ([RFC 0026](docs/rfcs/0026-declarative-facts-tier.md)) — v0.3.x, new RFC.
+- **§B — Continuity bridge across interaction close** — v0.3.x, no RFC, single PR.
+- **§C — Salience score with use-based reinforcement** — v0.3.x, folded into the [RFC 0008 calibration review](docs/rfcs/0008-calibration-review.md).
+- **§D — Outcome-tagged importance** — v0.3.x, resolves [RFC 0020 OQ #6](docs/rfcs/0020-interaction-lifecycle.md#open-questions); pinned in [`0020-pr-plan.md`](docs/rfcs/0020-pr-plan.md).
+- **§E — Reflection-driven consolidation** ([RFC 0027](docs/rfcs/0027-reflection-driven-consolidation.md)) — v0.4.0, supersedes draft RFC 0025.
+- **§F — Structured "since we last spoke" prompt header** — v0.3.x, single PR following [RFC 0021 P1](docs/rfcs/0021-persona-temporal-awareness.md).
+- **§G — Dementia-test manual artifact** ([MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md)) — v0.3.0 release-prep gate.
+
+Sequencing and rationale live in [v0.3.0-plan.md §Memory Quality Follow-Ups](docs/v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond).
+
 ### RFC Scope
 
 | RFC | Title | Target scope | Status |
@@ -532,6 +551,7 @@ Phase 1 is small, self-contained, and high-leverage — a now-anchor in the syst
 | 0012 | Protocols + Organizations | Partial: org topologies, authority, spawning | Not yet written |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | Full RFC | 📋 Proposed |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phases 2–4 (commitments, REMINDER event, duration calibration) | 📋 Proposed |
+| [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | Full RFC (supersedes draft RFC 0025) | 📋 Proposed |
 
 ### Dependency Chain (v0.4.0)
 

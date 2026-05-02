@@ -24,6 +24,15 @@ This plan splits the work into **7 PRs**. Each stays under the [BRANCHING.md](..
 - **PR 4 (Phase 2 close path)** pairs with the RFC 0008 `MemoryFacade` summarization hook. Coordinate landing order with the RFC 0008 PR plan; the joint pairing rationale is documented in [ROADMAP.md](../../ROADMAP.md#why-rfc-0020-p2-pairs-with-rfc-0008-d).
 - **PR 5 (Phase 3)** is the joint-delivery PR with RFC 0011 P3 — see RFC 0011 PR plan, same PR row.
 
+**Memory Quality Roadmap §D — Outcome-tagged importance** ([memory-quality-roadmap.md §D](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance)). Resolves [RFC 0020 Open Question #6](0020-interaction-lifecycle.md#open-questions). Because PR 4 (summarize-on-close) is already merged, §D ships as a **v0.3.x carve-out PR** after PR 7 closes — not as an in-line PR-4 amendment. Surface (additive only):
+
+- Summarizer prompt change in [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) emits `outcome ∈ {neutral, agreement, conflict, disclosure, commitment}` and `emotional_weight ∈ [0.0, 1.0]` alongside the prose summary.
+- New columns on `interactions` (additive, nullable for legacy rows): `outcome TEXT`, `emotional_weight REAL`.
+- `_compute_interaction_importance` formula change: `importance = clamp(0.4 + 0.4 * emotional_weight + outcome_bonus, 0, 1)`, where `outcome_bonus` is a small lookup (`disclosure: +0.2`, `commitment: +0.2`, `conflict: +0.15`, `agreement: +0.05`, `neutral: 0.0`). `turn_count` becomes a tiebreaker, not a primary signal.
+- Backward compatibility: legacy rows with `outcome IS NULL` continue to use the existing `0.3 + 0.05 * turn_count` formula; OQ #6 resolution applies only to new rows.
+
+Tracked as **MQ-1** in [v0.3.0-plan.md §Memory Quality Follow-Ups](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond). Branch suggestion: `feature/v03x-rfc0020-outcome-tags`.
+
 ---
 
 ## Dependency Graph

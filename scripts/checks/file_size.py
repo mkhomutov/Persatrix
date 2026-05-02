@@ -73,6 +73,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/ai-agents-orchestration-spec.md",
     "docs/persatrix-extension-spec.md",
     "docs/v0.2-release-prep-plan.md",
+    # v0.3.0-plan.md is the active release plan; it accumulates MQ rows
+    # and Memory Quality follow-ups during the v0.3.x release cycle (same
+    # pattern as the PR plans below and as v0.2-release-prep-plan above).
+    # PR 238 ratified the Memory Quality Roadmap and added MQ-1..MQ-9; the
+    # PR 238 review pass added MQ-10..MQ-13 (SubjectErasure traversal,
+    # per-turn provenance, cross-scope identity, within-interaction
+    # pressure). These tracking rows are load-bearing for the v0.3.x
+    # work and trimming the surrounding narrative would erase release-cycle
+    # context. Remove this entry once v0.3.0 ships and the plan is archived.
+    "docs/v0.3.0-plan.md",
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
     "docs/rfcs/0006-pr-plan.md",

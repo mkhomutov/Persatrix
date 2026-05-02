@@ -1,6 +1,6 @@
 # Memory Quality Roadmap — Discussion Notes
 
-**Status**: 🔨 Draft (discussion doc, not an RFC)
+**Status**: 📋 Proposed — ratified 2026-05-01; integrated into v0.3.0 plan + RFC index. Tracks: [RFC 0026](rfcs/0026-declarative-facts-tier.md) (§A), [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) (§E), [MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md) (§G), [v0.3.0-plan.md §Memory Quality Follow-Ups](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) (§B/§C/§D/§F).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
 **Target**: scope-shaping for draft RFCs 0023/0024/0025; seeds for v0.3.x and v0.4.0
@@ -195,7 +195,7 @@ since-we-last-spoke:
 
 ### G. Memory-of-context dogfood test
 
-**Idea.** A new manual-test slot under [`manual-tests/`](manual-tests/) that scripts a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment. Pass criterion: the persona references each of the three when an appropriate trigger appears later, *without keyword overlap*. Fail criterion: the persona re-introduces the fact, asks for it again, or contradicts it.
+**Idea.** A new manual-test slot under [`docs/manual-tests/`](manual-tests/) that scripts a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment. Pass criterion: the persona references each of the three when an appropriate trigger appears later, *without keyword overlap*. Fail criterion: the persona re-introduces the fact, asks for it again, or contradicts it.
 
 **Layer.** Manual-test artifact + a small driver script. No code change to the persona runtime. Should be re-run before each release that touches memory.
 
@@ -237,16 +237,15 @@ The throughline: stop treating memory as a retrieval problem and start treating 
 
 5. **Is [§F](#f-structured-since-we-last-spoke-prompt-header) duplicative of [RFC 0021 P1](rfcs/0021-persona-temporal-awareness.md)'s recency rendering?** Depends on the shape P1 lands. Verify after P1 merges; collapse to a P1 follow-up if redundant.
 
+Items 6–15 surfaced during [PR 238](https://github.com/mkhomutov/Persatrix/pull/238) review and are tracked in [v0.3.0-plan.md MQ-10..MQ-13](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) plus per-RFC OQs: telemetry recall-vs-reasoning miss (**MQ-11**), cross-scope subject identity (**MQ-12**), within-interaction memory pressure (**MQ-13**), paraphrase recall as RFC 0024 trigger (**MQ-8 + Leg 4**), GDPR SubjectErasure across new tiers (**MQ-10**), negative/inferred/state-history facts ([RFC 0026 OQ #6–#8](rfcs/0026-declarative-facts-tier.md)), cross-predicate semantic contradiction ([RFC 0027 §B + OQ #6](rfcs/0027-reflection-driven-consolidation.md)), persona self-consistency ([Leg 5](manual-tests/MT-MEMORY-005-dementia-test.md) + [RFC 0026 §C.4](rfcs/0026-declarative-facts-tier.md)), cold-start seeding ([RFC 0026 OQ #9](rfcs/0026-declarative-facts-tier.md)), multi-write atomicity ([RFC 0026 Phase 1.4](rfcs/0026-declarative-facts-tier.md) + [RFC 0027 Phase 2.4](rfcs/0027-reflection-driven-consolidation.md)).
+
 ---
 
 ## Decision / next steps
 
-1. **Review and ratify (or reject) the assessment in [§Assessment](#assessment-of-draft-rfcs-0023--0024--0025).** This doc is not load-bearing until that happens.
-2. **If ratified:** open the [§D](#d-outcome-tagged-importance-not-turn-count-importance) PR against RFC 0020 P2's plan first — it's the smallest, unblocks [§C](#c-salience-score-with-use-based-reinforcement), and lands in v0.3.0 with no scope change.
-3. **Author [§G](#g-memory-of-context-dogfood-test) before any of A–F merges.** Without the test, "did dementia get better?" is not answerable.
-4. **Communicate the scope change to draft-RFC-0023/0024/0025 authoring** — the user holds those reservations; this doc proposes that 0023 narrows, 0024 defers, 0025 is replaced.
+**Ratified 2026-05-01.** Same-PR integration: [RFC 0026](rfcs/0026-declarative-facts-tier.md) + [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) + [MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md) scaffolded; §B/§C/§D/§F tracked in [v0.3.0-plan.md MQ rows](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond); §D pinned into [`0020-pr-plan.md`](rfcs/0020-pr-plan.md); §C folded into [0008 calibration review](rfcs/0008-calibration-review.md); 0023 narrowed, 0024 deferred, 0025 superseded. PR 238 review extended OQs 6–15 + MQ-10..MQ-13.
 
-This doc stays at `🔨 Draft` until step 1 lands; on ratification it flips to `📋 Proposed` and a follow-up PR seeds the new "Declarative Facts Tier" RFC plus the v0.4.0 reflection-consolidation RFC.
+Next step: §D outcome tags. MQ-11 precedes first MQ-4 V2 run.
 
 ---
 
