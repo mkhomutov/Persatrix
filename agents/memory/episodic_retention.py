@@ -91,10 +91,11 @@ async def summarize_old_episodes(
     summarized = 0
     for row in rows:
         episode = row_to_episode(row)
-        prompt = load_snippet("episode-retention-user") + "\n"
-        prompt += (
-            f"Summary: {episode.summary}\n"
-        )
+        # ``load_snippet`` strips exactly one trailing newline (editor
+        # convention), so ``+ "\n\n"`` reproduces the original blank line
+        # between the instruction and the ``Summary:`` block byte-for-byte.
+        prompt = load_snippet("episode-retention-user") + "\n\n"
+        prompt += f"Summary: {episode.summary}\n"
         if episode.outcome:
             prompt += f"Outcome: {episode.outcome}\n"
         if episode.tags:

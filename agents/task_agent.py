@@ -55,6 +55,15 @@ class TaskAgent(BaseAgent):
             system_prompt = f"{system_prompt}\n\n{instructions}"
         # Inject workspace root so the LLM uses correct absolute paths when
         # calling file_read / file_write / shell_exec tools.
+        #
+        # NOTE: workspace-root-instructions.md is a ``str.format`` template,
+        # not a verbatim snippet — it contains the literal placeholder
+        # ``{workspace_root}``.  Any future edit to that file must keep the
+        # placeholder intact and avoid introducing literal ``{`` / ``}``
+        # outside it (escape as ``{{`` / ``}}``), or this call will raise
+        # KeyError / IndexError at runtime.  This is the only snippet on
+        # which the runtime calls ``.format`` — the other four are passed
+        # through unchanged.
         if builtin.workspace_root is not None and self.config.get("tools"):
             workspace_instructions = load_snippet("workspace-root-instructions").format(
                 workspace_root=builtin.workspace_root,

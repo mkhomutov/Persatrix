@@ -365,7 +365,7 @@ class BaseAgent(ABC):
         memory_lines = [
             f"- {entry.content}" for entry in entries
         ]
-        preamble = load_snippet("memory-preamble").rstrip("\n") + "\n" + "\n".join(memory_lines)
+        preamble = load_snippet("memory-preamble") + "\n" + "\n".join(memory_lines)
         return f"{system_prompt}\n\n{preamble}"
 
     async def _run_llm_loop(
