@@ -173,13 +173,15 @@ Findings that are out-of-scope for the current RFC cycle (or surface outside of 
 
 Issue files are not a replacement for the PR plan's review findings table — keep per-PR findings in the plan. Issue files handle the longer tail.
 
-**Creating an issue file:**
-1. Copy [`docs/issues/ISSUE-TEMPLATE.md`](issues/ISSUE-TEMPLATE.md) to `docs/issues/ISSUE-NNN-slug.md`.
-2. Fill in `id`, `severity`, `area`, `created`, and `refs` (link to the RFC or PR plan where the finding originated).
-3. Add a cross-reference inline in the source document: `> See [ISSUE-NNN](../issues/ISSUE-NNN-slug.md)`.
-4. Run `make issues` to verify the file appears in the summary.
+The tracker uses a hybrid layout: a per-issue file (`ISSUE-NNN-slug.md`) is the source of truth for each finding, and [`docs/issues/INDEX.md`](issues/INDEX.md) is auto-regenerated as the live summary table.
 
-**Closing an issue file:** delete the file and reference the closing PR in the commit message. The file remains in git history.
+**Creating an issue file:**
+1. Copy [`docs/issues/ISSUE-TEMPLATE.md`](issues/ISSUE-TEMPLATE.md) to `docs/issues/ISSUE-NNN-slug.md` (next free `NNN`).
+2. Fill `id`, `status`, `severity`, `area`, `created`, and `refs` (link to the RFC or PR plan where the finding originated). For trivial findings a one-line **Summary** is enough; the other sections are optional.
+3. Run `make issues` to regenerate [`docs/issues/INDEX.md`](issues/INDEX.md).
+4. Add a cross-reference inline in the source document. The relative path depends on the source location — see the table in [`docs/issues/README.md`](issues/README.md#cross-reference-paths).
+
+**Closing an issue file:** set `status: resolved`, fill `closed:` and `closed_pr:`, run `make issues`, and reference the issue ID in the closing PR's commit message. Resolved files stay in `docs/issues/` so future readers can recall historical decisions with `grep` instead of `git log`. A periodic sweep can prune very old resolved files.
 
 ### Artifacts
 
@@ -374,4 +376,4 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 - [ROADMAP.md](../ROADMAP.md) — Version progress, RFC tracker, merged PR history
 - [Documentation Guide](documentation-guide.md) — Documentation update conventions
 - [Consistency Checklist](docs-consistency-checklist.md) — Documentation consistency verification
-- [issues/README.md](issues/README.md) — Deferred and cross-cutting findings tracker (`make issues`)
+- [issues/README.md](issues/README.md) — Deferred and cross-cutting findings tracker (conventions); [issues/INDEX.md](issues/INDEX.md) is the live table (`make issues`)

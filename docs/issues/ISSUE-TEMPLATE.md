@@ -1,9 +1,17 @@
 ---
+# Allowed values are documented in README.md. Comments above fields
+# (not inline) so that the front-matter parser does not pick them up.
 id: ISSUE-NNN
-status: open          # open | in_progress | resolved
-severity: low         # low | medium | high
-area: ""              # internal/ package or agent subsystem
+# status: open | in_progress | resolved
+status: open
+# severity: low | medium | high | critical
+severity: low
+# area: internal/ package or agent subsystem (cost, persona, memory, grpc, ...)
+area: ""
+# created: YYYY-MM-DD when the finding was first captured
 created: YYYY-MM-DD
+# closed: YYYY-MM-DD — set only when status == resolved
+# closed_pr: closing PR number (no leading "#"), set only when resolved
 refs:
   - docs/rfcs/NNNN-rfc-title.md
   - docs/rfcs/NNNN-pr-plan.md

@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -162,15 +162,11 @@ clean: ## Remove build artifacts
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 
 # ─── Issues ─────────────────────────────────────────────
-issues: ## List open issues in docs/issues/ as a summary table
-	@echo "ID          Severity  Area        Created     File"
-	@echo "----------  --------  ----------  ----------  ----"
-	@$(foreach f,$(wildcard docs/issues/ISSUE-*.md),\
-		ID=$$(grep -m1 '^id:' $(f) | sed 's/id: *//'); \
-		SEV=$$(grep -m1 '^severity:' $(f) | sed 's/severity: *//'); \
-		AREA=$$(grep -m1 '^area:' $(f) | sed 's/area: *//' | tr -d '"'); \
-		DATE=$$(grep -m1 '^created:' $(f) | sed 's/created: *//'); \
-		printf "%-10s  %-8s  %-10s  %-10s  %s\n" "$$ID" "$$SEV" "$$AREA" "$$DATE" "$(f)";)
+issues: ## Regenerate docs/issues/INDEX.md from per-issue front-matter
+	$(PYTHON) scripts/issues.py --print
+
+issues-check: ## Fail if INDEX.md is stale or front-matter is invalid (CI)
+	$(PYTHON) scripts/issues.py --check
 
 # ─── Version ────────────────────────────────────────────
 bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])
