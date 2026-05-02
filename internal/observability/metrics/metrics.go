@@ -23,11 +23,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/observability"
 )
 
 const (
-	defaultServiceName    = "persatrix-server"
-	defaultOTLPEndpoint   = "http://localhost:4318"
 	defaultExportInterval = 60 * time.Second
 	defaultExportTimeout  = 10 * time.Second
 )
@@ -47,9 +47,9 @@ type Config struct {
 // behave the same under “OTEL_EXPORTER_OTLP_ENDPOINT“ etc.
 func NewConfigFromEnv(environment string) Config {
 	cfg := Config{
-		ServiceName:    envOrDefault("OTEL_SERVICE_NAME", defaultServiceName),
+		ServiceName:    envOrDefault("OTEL_SERVICE_NAME", observability.DefaultServiceName),
 		Environment:    environment,
-		OTLPEndpoint:   envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", defaultOTLPEndpoint),
+		OTLPEndpoint:   envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", observability.DefaultOTLPEndpoint),
 		ExportInterval: defaultExportInterval,
 		ExportTimeout:  defaultExportTimeout,
 	}
@@ -340,10 +340,10 @@ func Init(
 		logger = zap.NewNop()
 	}
 	if cfg.ServiceName == "" {
-		cfg.ServiceName = defaultServiceName
+		cfg.ServiceName = observability.DefaultServiceName
 	}
 	if cfg.OTLPEndpoint == "" {
-		cfg.OTLPEndpoint = defaultOTLPEndpoint
+		cfg.OTLPEndpoint = observability.DefaultOTLPEndpoint
 	}
 
 	exporterOpts := []otlpmetrichttp.Option{

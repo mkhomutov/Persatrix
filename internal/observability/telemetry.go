@@ -18,11 +18,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	defaultServiceName  = "persatrix-server"
-	defaultOTLPEndpoint = "http://localhost:4318"
-)
-
 // Config defines telemetry startup settings.
 type Config struct {
 	ServiceName  string
@@ -35,9 +30,9 @@ type Config struct {
 // NewConfigFromEnv builds telemetry config from OTEL_* environment variables.
 func NewConfigFromEnv(environment string) Config {
 	cfg := Config{
-		ServiceName:  envOrDefault("OTEL_SERVICE_NAME", defaultServiceName),
+		ServiceName:  envOrDefault("OTEL_SERVICE_NAME", DefaultServiceName),
 		Environment:  environment,
-		OTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", defaultOTLPEndpoint),
+		OTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", DefaultOTLPEndpoint),
 		SampleRatio:  1.0,
 	}
 
@@ -67,10 +62,10 @@ func Init(ctx context.Context, cfg Config, logger *zap.Logger) (func(context.Con
 	}
 
 	if cfg.ServiceName == "" {
-		cfg.ServiceName = defaultServiceName
+		cfg.ServiceName = DefaultServiceName
 	}
 	if cfg.OTLPEndpoint == "" {
-		cfg.OTLPEndpoint = defaultOTLPEndpoint
+		cfg.OTLPEndpoint = DefaultOTLPEndpoint
 	}
 	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
 		return nil, fmt.Errorf("invalid sample ratio %.4f (must be in [0,1])", cfg.SampleRatio)

@@ -253,9 +253,18 @@ class TestShippedSnippetsByteIdentity:
     """Regression guard: shipped snippets must match what was previously inlined.
 
     PR #211 moved four behavior-shaping strings out of agent source into
-    ``prompts/runtime/safety/``. These assertions pin each snippet to the
-    bytes the runtime saw before the move so an accidental edit to the
-    markdown file is caught by CI rather than by an LLM behavior shift.
+    ``prompts/runtime/safety/``; PR #239 moved five more (memory-preamble,
+    working-memory-compressor, interaction-summarizer,
+    workspace-root-instructions, episode-retention-user). These
+    assertions pin each snippet to the bytes the runtime saw before the
+    move so an accidental edit to the markdown file is caught by CI
+    rather than by an LLM behavior shift.
+
+    The PR #239 review (F1) caught one snippet, ``episode-retention-user``,
+    that had drifted away from byte-identity because the markdown was
+    hard-wrapped mid-sentence and the call site used ``+ "\\n"`` instead
+    of ``+ "\\n\\n"``.  Pinning all five new snippets here ensures any
+    future drift surfaces in CI on the next edit.
     """
 
     # The repo root for the production snippets — the same default
@@ -310,6 +319,71 @@ class TestShippedSnippetsByteIdentity:
         )
         assert load_snippet(
             "episode-summarizer", repo_root=self.PROD_REPO_ROOT
+        ) == expected
+
+    # ─── PR #239 additions ─────────────────────────────────────
+
+    def test_memory_preamble(self) -> None:
+        # Concatenated at agents/base.py with ``+ "\n" + "\n".join(...)``.
+        # The loader strips one trailing newline so the snippet ends at
+        # the colon, matching the original ``"Relevant memories from
+        # previous tasks:\n"`` literal byte-for-byte after concatenation.
+        expected = "Relevant memories from previous tasks:"
+        assert load_snippet(
+            "memory-preamble", repo_root=self.PROD_REPO_ROOT,
+        ) == expected
+
+    def test_working_memory_compressor(self) -> None:
+        # Used as the ``system=`` argument verbatim in
+        # agents/memory/working.py — original was a single inline string
+        # with no trailing newline, so the loader-stripped form matches.
+        expected = (
+            "Summarize the following content concisely, "
+            "preserving key information."
+        )
+        assert load_snippet(
+            "working-memory-compressor", repo_root=self.PROD_REPO_ROOT,
+        ) == expected
+
+    def test_interaction_summarizer(self) -> None:
+        # Original used three hard-wrapped lines + a blank line before
+        # ``Scope:``.  The snippet preserves the internal newlines; the
+        # call site adds ``+ "\n\n"`` for the blank line.
+        expected = (
+            "Summarize this multi-turn interaction concisely, preserving\n"
+            "key facts, decisions, and outcomes. Reply with one short\n"
+            "paragraph."
+        )
+        assert load_snippet(
+            "interaction-summarizer", repo_root=self.PROD_REPO_ROOT,
+        ) == expected
+
+    def test_workspace_root_instructions(self) -> None:
+        # This snippet is a ``str.format`` template — the literal
+        # ``{workspace_root}`` placeholder is intentional and is
+        # substituted at agents/task_agent.py.  Pinning the template
+        # form here also guards against accidental introduction of
+        # other ``{`` / ``}`` (which would raise at runtime).
+        expected = (
+            "Workspace root: {workspace_root}\n"
+            "Always use absolute paths under the workspace root when "
+            "reading or writing files."
+        )
+        assert load_snippet(
+            "workspace-root-instructions", repo_root=self.PROD_REPO_ROOT,
+        ) == expected
+
+    def test_episode_retention_user(self) -> None:
+        # PR #239 review F1: the original inline string was a single
+        # sentence followed by a blank line.  Pin the single-line form
+        # so a future editor cannot reintroduce the mid-sentence hard
+        # wrap that drifted past the loader's byte-identity guarantee.
+        expected = (
+            "Summarize the following episode concisely, "
+            "preserving key facts and outcomes."
+        )
+        assert load_snippet(
+            "episode-retention-user", repo_root=self.PROD_REPO_ROOT,
         ) == expected
 
     def test_default_repo_root_resolves_production_snippet(self) -> None:

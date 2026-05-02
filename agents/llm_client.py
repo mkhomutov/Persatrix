@@ -35,6 +35,7 @@ from .observability.spans import (
     STOP_REASON_TO_GEN_AI,
     gen_ai_attributes,
 )
+from .optimization import provider_inference
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -223,14 +224,19 @@ class LLMClient:
 # S-14: Separate exact matches from prefix matches for o-series models.
 # ``startswith("o1")`` would match "o10", "o100" etc. Instead, use exact
 # matches for bare model names and prefix matches for versioned names.
+# These defaults are overridden by config/optimization.yaml provider_inference.
 _OPENAI_EXACT_MODELS: frozenset[str] = frozenset({"o1", "o3", "o4"})
 _OPENAI_PREFIX_MODELS: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
 
 
 def _infer_provider(model: str) -> str:
-    if model.startswith("claude"):
+    rules = provider_inference()
+    anthropic_prefixes = tuple(rules.get("anthropic_prefixes", ("claude",)))
+    openai_exact = frozenset(rules.get("openai_exact", _OPENAI_EXACT_MODELS))
+    openai_prefixes = tuple(rules.get("openai_prefixes", _OPENAI_PREFIX_MODELS))
+    if model.startswith(anthropic_prefixes):
         return "anthropic"
-    if model in _OPENAI_EXACT_MODELS or model.startswith(_OPENAI_PREFIX_MODELS):
+    if model in openai_exact or model.startswith(openai_prefixes):
         return "openai"
     logger.warning(
         "Unknown model prefix %r, defaulting to openai provider", model
