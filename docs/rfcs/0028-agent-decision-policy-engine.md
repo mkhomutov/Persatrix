@@ -1,0 +1,206 @@
+# RFC 0028 - Agent Decision Policy Engine
+
+**Type**: architecture
+**Status**: 📋 Proposed
+**Author**: Maksim Khomutov
+**Date**: 2026-05-02
+**Target**: v0.4.0
+**Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0011, RFC 0020, RFC 0021
+
+---
+
+## Table of Contents
+
+- [Summary](#summary)
+- [Motivation](#motivation)
+- [Goals](#goals)
+- [Non-Goals](#non-goals)
+- [Design / Implementation](#design--implementation)
+- [Security Considerations](#security-considerations)
+- [Phased Implementation Plan](#phased-implementation-plan)
+- [Files Touched (Estimated)](#files-touched-estimated)
+- [Test Strategy](#test-strategy)
+- [Open Questions](#open-questions)
+- [Decision / Next Steps](#decision--next-steps)
+- [Related Documentation](#related-documentation)
+
+---
+
+## Summary
+
+Introduce a shared decision layer for both task agents and persona agents so action selection is explicit, auditable, and tunable. Today, decision behavior is split across prompt text, ad-hoc runtime branches, and per-feature hooks. This RFC defines a Decision Policy Engine that evaluates candidate actions at well-defined decision checkpoints and supports three operating modes: manual (rule-based), semi-automated (policy recommendation with approval gates), and automated (policy-selected actions within hard guardrails).
+
+The goal is not to replace model reasoning. The goal is to make decision-making behavior measurable, replayable, and evolvable without breaking existing autonomy controls or deny-by-default permissions.
+
+## Motivation
+
+Current agent behavior has three gaps:
+
+1. **Decision logic is implicit.** Many choices (respond, ask clarification, delegate, post to channel, wait) are hidden in prompt composition or local branches, making behavior hard to reason about.
+2. **Task agent and persona agent diverge.** Similar choices are implemented differently, which blocks shared calibration and slows feature rollout.
+3. **Low observability for decision quality.** We capture outputs and tool calls, but not a structured "why this action" record suitable for replay, tuning, or regression analysis.
+
+Without a shared decision layer, increasing autonomy risks brittle behavior and longer incident triage.
+
+## Goals
+
+1. Define a unified decision contract for task agents and persona agents.
+2. Add explicit decision checkpoints in runtime loops (pre-act, pre-tool, pre-delegate, post-outcome).
+3. Support three approaches in one architecture:
+   1. **Manual (deterministic):** rule tree and fixed scoring.
+   2. **Semi-automated:** policy proposes ranked actions; guardrails and approval gates arbitrate.
+   3. **Automated:** policy selects action directly within non-bypassable guardrails.
+4. Preserve existing autonomy semantics (`manual`, `semi-autonomous`, `autonomous`, `supervisor`) by mapping them to policy mode + approval configuration.
+5. Emit decision telemetry and audit records so behavior can be replayed and calibrated.
+
+## Non-Goals
+
+- Replacing deny-by-default permission checks from RFC 0009.
+- Replacing LLM planning prompts or memory retrieval with a new model stack.
+- Introducing cross-agent consensus or voting in v0.4.0.
+- Shipping online self-modifying policy weights in production (offline tuning only in this RFC).
+
+## Design / Implementation
+
+### A. Decision checkpoint model
+
+Add checkpoints where decisions are currently implicit:
+
+1. **Pre-act:** choose next action class (`respond`, `ask_clarification`, `tool_call`, `delegate`, `publish_channel`, `defer`).
+2. **Pre-tool:** if action includes tools, select tool strategy (single call, sequence, abort).
+3. **Pre-delegate:** evaluate whether a sub-agent delegation is necessary and allowed.
+4. **Post-outcome:** record outcome quality signal for future calibration.
+
+Each checkpoint produces a `DecisionRecord` with candidates, selected action, constraints applied, and rationale summary.
+
+### B. Policy modes (manual, semi-automated, automated)
+
+| Mode | How selection works | Human/approval path | Primary use |
+|------|----------------------|---------------------|-------------|
+| Manual | Rules + deterministic ranking only | Required for high-impact classes | Safety-first or early rollout |
+| Semi-automated | Policy ranks actions; guardrails filter; approval may be required | Required per configured action class | Default for persona and task agents in v0.4.0 |
+| Automated | Policy selects highest valid action directly | Optional, only for whitelisted low-risk classes | Mature, well-calibrated paths |
+
+All modes share the same guardrail pipeline. Automation changes who selects among valid candidates, not what is permitted.
+
+### C. Guardrail and selection pipeline
+
+At each checkpoint:
+
+1. Build candidate set from context, memory, and current task state.
+2. Apply hard constraints (permissions, autonomy, channel ACL, budget, deadlines).
+3. Score remaining candidates (rules, heuristic model, or both).
+4. Route through approval gate if action class requires it.
+5. Execute selected action and persist `DecisionRecord`.
+
+If no candidate survives constraints, fallback is `defer` plus structured reason.
+
+### D. Shared policy contract
+
+Add a Python-side interface for policy evaluation:
+
+- `DecisionContext`: normalized checkpoint input.
+- `DecisionCandidate`: action + structured metadata.
+- `DecisionOutcome`: selected action, confidence, rejected reasons.
+- `DecisionPolicy`: strategy interface with `select(context, candidates)`.
+
+Task agent and persona agent runtimes call the same interface. Persona-specific state (mood, relationship memory, autonomy posture) is carried via typed optional fields in `DecisionContext`.
+
+### E. Integration into existing plans and RFCs
+
+| Existing RFC | Integration point | Effect |
+|--------------|-------------------|--------|
+| RFC 0005 (Persona + memory) | Persona tick loop and memory-backed context shaping | Persona decisions become explicit and replayable |
+| RFC 0008 (Memory context optimization) | Candidate features use budgeted memory signals | Better decision quality under strict context budgets |
+| RFC 0009 (Security) | Guardrail stage enforces permission and audit invariants | Automation cannot bypass deny-by-default |
+| RFC 0011 (Channels + bridges) | `publish_channel` candidate class and ACL filtering | Safer channel action selection |
+| RFC 0020 (Interaction lifecycle) | Checkpoints align with interaction open/close boundaries | Per-interaction decision traces |
+| RFC 0021 (Temporal awareness) | Recency and timing features feed candidate scoring | Time-aware decisions become configurable |
+
+This RFC becomes the umbrella decision architecture for those RFC surfaces; it does not supersede them.
+
+### F. Calibration and rollout
+
+Calibration is offline-first in v0.4.0:
+
+1. Collect `DecisionRecord` telemetry in manual mode.
+2. Replay records against candidate outcomes to tune heuristics.
+3. Promote selected action classes from manual -> semi-automated -> automated based on thresholds.
+
+No production online learning loop is introduced in this RFC.
+
+## Security Considerations
+
+- **Non-bypassable constraints:** permission, budget, and autonomy checks run before policy selection in every mode.
+- **Prompt-injection resilience:** untrusted text may influence candidate scoring but cannot inject disallowed action classes.
+- **Approval gate integrity:** approvals are evaluated by runtime configuration, never by model self-assertion.
+- **Auditability:** each checkpoint emits a decision event for forensic reconstruction and policy regression debugging.
+- **Blast-radius control:** rollout is per action class and per agent, with instant fallback to manual mode.
+
+## Phased Implementation Plan
+
+### Phase 1: Decision contract and manual mode baseline
+
+1. Add decision types and policy interface in Python runtime.
+2. Instrument task agent and persona agent with pre-act checkpoints.
+3. Implement deterministic baseline policy + decision event logging.
+4. Add config schema for policy mode and per-action-class approval settings.
+
+### Phase 2: Semi-automated mode + approval routing
+
+1. Add candidate scoring policy with confidence output.
+2. Implement approval routing for high-impact classes (`delegate`, `publish_channel`, external bridge actions).
+3. Add replay harness for decision traces and regression diffs.
+4. Extend telemetry dashboards with acceptance, rejection, and fallback rates.
+
+### Phase 3: Controlled automation and calibration gates
+
+1. Enable automated mode for whitelisted low-risk classes.
+2. Define promotion criteria from semi-automated to automated per class.
+3. Add failure policy: confidence floor, forced fallback, and rollout kill-switch.
+4. Publish operator guidance for mode selection by environment.
+
+## Files Touched (Estimated)
+
+| Component | Files | Change |
+|-----------|-------|--------|
+| Python agents | `agents/decision/` (new package) | Decision types, policy interfaces, baseline policies |
+| Python agents | `agents/task_agent.py` | Inject decision checkpoints in task loop |
+| Python agents | `agents/persona_runtime/` | Inject decision checkpoints in persona lifecycle |
+| Python agents | `agents/persona.py`, `agents/base.py` | Shared runtime wiring for decision policy selection |
+| Config / schema | `config/agents.yaml`, `schemas/agent.schema.json` | Policy mode + approval routing config |
+| Observability | `agents/observability/`, `docs/observability.md` | Decision metrics and dashboards |
+| Tests | `tests/unit/python/`, `tests/integration/` | Policy, guardrail, and replay tests |
+| Docs | `docs/v0.4.0-plan.md`, `docs/rfcs/0028-pr-plan.md` | PR slicing and delivery plan |
+
+## Test Strategy
+
+- **Unit tests**: decision candidate generation, constraint filtering, policy selection, and fallback behavior.
+- **Integration tests**: task agent and persona agent produce valid `DecisionRecord` events across checkpoints.
+- **Security tests**: disallowed actions are rejected in all policy modes.
+- **Replay tests**: historical trace replay remains stable across policy changes.
+- **Manual tests**: operator-run scenarios comparing manual vs semi-automated outcomes for the same prompts.
+
+## Open Questions
+
+1. Which action classes are eligible for automated mode in v0.4.0 versus v0.5.0?
+2. Should approval routing be centralized in orchestrator policy services or remain Python-runtime local first?
+3. What confidence metric threshold is robust enough for promotion decisions across different persona types?
+4. Do we need a protobuf-level decision event schema in v0.4.0, or can we keep it runtime-local until v0.5.0?
+
+## Decision / Next Steps
+
+1. Review and accept this RFC as the canonical architecture for agent decision-making.
+2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0.
+3. Start Phase 1 in manual mode only; collect baseline telemetry before enabling semi-automated mode.
+4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work.
+
+## Related Documentation
+
+- [RFC 0005 - Persona Agent & Memory System](0005-persona-agent-memory.md)
+- [RFC 0008 - Agent Memory & Context Optimization](0008-agent-memory-context-optimization.md)
+- [RFC 0009 - Agent Identity, Security & Sandboxing](0009-security-sandboxing.md)
+- [RFC 0011 - Channels + Bridges](0011-channels-bridges.md)
+- [RFC 0020 - Interaction Lifecycle](0020-interaction-lifecycle.md)
+- [RFC 0021 - Persona Temporal Awareness](0021-persona-temporal-awareness.md)
+- [Development Workflow](../development-workflow.md)
