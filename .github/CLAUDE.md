@@ -83,8 +83,6 @@ Per-language details are in `.github/instructions/`. Key rules:
 - **Rust:** `#[cfg(test)]` unit tests inline; `cli/tests/` for CLI integration tests; mock HTTP with `mockito`.
 - **Integration tests** (`tests/integration/`) are exempt — write them after the unit layer validates the pieces.
 
-Detailed test invocations: `go test ./internal/planner -v -run TestName`, `python3 -m pytest tests/unit/python/test_agents.py::test_name -v`.
-
 ## Terminology
 
 Use the canonical terms in [`docs/ai-glossary.md`](../docs/ai-glossary.md) by

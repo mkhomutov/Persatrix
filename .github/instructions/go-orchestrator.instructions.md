@@ -16,7 +16,7 @@ description: "Go orchestrator conventions: zap logging, testify tests, deny-by-d
 
 - **Red-Green-Refactor:** Write a failing `_test.go` file before writing the implementation. Commit the failing test separately if it clarifies intent.
 - **Test file placement:** `internal/foo/bar_test.go` alongside `bar.go`. Use `package foo_test` (black-box) unless you must access unexported symbols.
-- **Stub implementation:** When activating a previously-stubbed package, write the test against the expected interface first, confirm it fails (`go test ./internal/... -run TestFoo`), then implement.
+- **Stub implementation:** When activating a previously-stubbed package, write the test against the expected interface first, confirm it fails (`go test ./internal/... -run TestFoo`), then implement. Replace the stub body in-place — do not delete and recreate the package (preserves the placeholder convention from the bullet above).
 - **Table-driven tests:** Prefer `[]struct{ name, input, want }` table tests for functions with multiple input cases.
-- **Mocks:** Use interface mocks in `internal/testutil/` rather than concrete types. Do not add real network/gRPC calls in unit tests.
+- **Mocks:** Use interface mocks in `internal/testutil/` (create the package on first use) rather than concrete types. Do not add real network/gRPC calls in unit tests.
 - **Integration tests** (`tests/integration/`) are exempt from strict TDD — write them to validate assembled pieces after unit tests pass.
