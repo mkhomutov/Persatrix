@@ -102,4 +102,32 @@ def summarization_model() -> str:
     return _DEFAULT_SUMMARIZATION_MODEL
 
 
-__all__ = ["reset_cache", "summarization_model"]
+def provider_inference() -> dict[str, list[str]]:
+    """Return the provider-inference routing rules from optimization.yaml.
+
+    Resolution order:
+
+    1. ``<active_profile>.model_routing.provider_inference``
+    2. ``default.model_routing.provider_inference``
+    3. Empty dict (caller falls back to hardcoded defaults).
+
+    The returned dict has up to three keys:
+    ``anthropic_prefixes``, ``openai_exact``, ``openai_prefixes``.
+    """
+    cfg = _load_config()
+    active = cfg.get("active_profile") or "default"
+    profiles = (active, "default") if active != "default" else ("default",)
+    for profile in profiles:
+        section = cfg.get(profile)
+        if not isinstance(section, dict):
+            continue
+        routing = section.get("model_routing")
+        if not isinstance(routing, dict):
+            continue
+        inference = routing.get("provider_inference")
+        if isinstance(inference, dict):
+            return {k: list(v) for k, v in inference.items() if isinstance(v, list)}
+    return {}
+
+
+__all__ = ["provider_inference", "reset_cache", "summarization_model"]

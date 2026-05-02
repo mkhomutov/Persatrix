@@ -91,9 +91,8 @@ async def summarize_old_episodes(
     summarized = 0
     for row in rows:
         episode = row_to_episode(row)
-        prompt = (
-            f"Summarize the following episode concisely, preserving key facts "
-            f"and outcomes.\n\n"
+        prompt = load_snippet("episode-retention-user") + "\n"
+        prompt += (
             f"Summary: {episode.summary}\n"
         )
         if episode.outcome:

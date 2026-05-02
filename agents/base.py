@@ -23,6 +23,7 @@ from .llm_client import (
 )
 from .memory import MemoryFacade, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
+from .prompt_loader import load_snippet
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
@@ -364,7 +365,7 @@ class BaseAgent(ABC):
         memory_lines = [
             f"- {entry.content}" for entry in entries
         ]
-        preamble = "Relevant memories from previous tasks:\n" + "\n".join(memory_lines)
+        preamble = load_snippet("memory-preamble").rstrip("\n") + "\n" + "\n".join(memory_lines)
         return f"{system_prompt}\n\n{preamble}"
 
     async def _run_llm_loop(

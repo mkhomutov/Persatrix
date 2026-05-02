@@ -184,9 +184,7 @@ def _build_summarization_prompt(
     the two LLM-summary call sites stay consistent.
     """
     return (
-        "Summarize this multi-turn interaction concisely, preserving\n"
-        "key facts, decisions, and outcomes. Reply with one short\n"
-        "paragraph.\n\n"
+        load_snippet("interaction-summarizer") + "\n\n"
         f"Scope: {interaction.scope}\n"
         f"Turns: {interaction.turn_count}\n"
         f"Close reason: {interaction.close_reason}\n"

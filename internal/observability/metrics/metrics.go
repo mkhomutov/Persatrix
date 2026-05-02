@@ -23,11 +23,13 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/observability"
 )
 
 const (
-	defaultServiceName    = "persatrix-server"
-	defaultOTLPEndpoint   = "http://localhost:4318"
+	defaultServiceName    = observability.DefaultServiceName
+	defaultOTLPEndpoint   = observability.DefaultOTLPEndpoint
 	defaultExportInterval = 60 * time.Second
 	defaultExportTimeout  = 10 * time.Second
 )

@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	defaultServiceName  = "persatrix-server"
-	defaultOTLPEndpoint = "http://localhost:4318"
+	defaultServiceName  = DefaultServiceName
+	defaultOTLPEndpoint = DefaultOTLPEndpoint
 )
 
 // Config defines telemetry startup settings.
