@@ -18,6 +18,7 @@ This document describes the end-to-end development lifecycle for Persatrix, from
 - [Phase 7 — Documentation & Diagrams](#phase-7--documentation--diagrams)
 - [Phase 8 — RFC Close](#phase-8--rfc-close)
 - [Status Hygiene](#status-hygiene)
+- [Issue Files](#issue-files-for-deferred-or-cross-cutting-findings)
 - [Worked Example — RFC 0005](#worked-example--rfc-0005)
 
 ---
@@ -161,6 +162,26 @@ Review findings are recorded *per PR review*, not batched at the end. Each PR se
 - The follow-up PR scope is built incrementally, not estimated from memory.
 
 > **Escape hatch**: If review findings reveal a fundamental design flaw that cannot be addressed as a follow-up, return to [Phase 2](#phase-2--rfc-authoring) to revise the RFC before continuing implementation.
+
+### Issue files for deferred or cross-cutting findings
+
+Findings that are out-of-scope for the current RFC cycle (or surface outside of a PR review) are captured as issue files in [`docs/issues/`](issues/README.md). Use an issue file when:
+
+- A finding is deferred beyond the current follow-up PR batch.
+- A finding is cross-cutting (affects multiple RFCs or components) and has no immediate home in a PR plan.
+- A finding surfaces outside PR review (e.g. during manual testing, a spike, or an AI-assisted audit).
+
+Issue files are not a replacement for the PR plan's review findings table — keep per-PR findings in the plan. Issue files handle the longer tail.
+
+The tracker uses a hybrid layout: a per-issue file (`ISSUE-NNN-slug.md`) is the source of truth for each finding, and [`docs/issues/INDEX.md`](issues/INDEX.md) is auto-regenerated as the live summary table.
+
+**Creating an issue file:**
+1. Copy [`docs/issues/ISSUE-TEMPLATE.md`](issues/ISSUE-TEMPLATE.md) to `docs/issues/ISSUE-NNN-slug.md` (next free `NNN`).
+2. Fill `id`, `status`, `severity`, `area`, `created`, and `refs` (link to the RFC or PR plan where the finding originated). For trivial findings a one-line **Summary** is enough; the other sections are optional.
+3. Run `make issues` to regenerate [`docs/issues/INDEX.md`](issues/INDEX.md).
+4. Add a cross-reference inline in the source document. The relative path depends on the source location — see the table in [`docs/issues/README.md`](issues/README.md#cross-reference-paths).
+
+**Closing an issue file:** set `status: resolved`, fill `closed:` and `closed_pr:`, run `make issues`, and reference the issue ID in the closing PR's commit message. Resolved files stay in `docs/issues/` so future readers can recall historical decisions with `grep` instead of `git log`. A periodic sweep can prune very old resolved files.
 
 ### Artifacts
 
@@ -355,3 +376,4 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 - [ROADMAP.md](../ROADMAP.md) — Version progress, RFC tracker, merged PR history
 - [Documentation Guide](documentation-guide.md) — Documentation update conventions
 - [Consistency Checklist](docs-consistency-checklist.md) — Documentation consistency verification
+- [issues/README.md](issues/README.md) — Deferred and cross-cutting findings tracker (conventions); [issues/INDEX.md](issues/INDEX.md) is the live table (`make issues`)

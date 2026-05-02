@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -160,6 +160,13 @@ clean: ## Remove build artifacts
 	cd cli && $(CARGO) clean
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+
+# ─── Issues ─────────────────────────────────────────────
+issues: ## Regenerate docs/issues/INDEX.md from per-issue front-matter
+	$(PYTHON) scripts/issues.py --print
+
+issues-check: ## Fail if INDEX.md is stale or front-matter is invalid (CI)
+	$(PYTHON) scripts/issues.py --check
 
 # ─── Version ────────────────────────────────────────────
 bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])
