@@ -53,6 +53,7 @@ Without a shared decision layer, increasing autonomy risks brittle behavior and 
 4. Preserve existing autonomy semantics (`manual`, `semi-autonomous`, `autonomous`, `supervisor`) by mapping them to policy mode + approval configuration.
 5. Emit decision telemetry and audit records so behavior can be replayed and calibrated.
 6. Define a future-compatible path for collective decisions when persona agents operate in societies.
+7. Define mandatory human-in-the-loop controls for decision classes that must never auto-execute.
 
 ## Non-Goals
 
@@ -95,6 +96,26 @@ At each checkpoint:
 5. Execute selected action and persist `DecisionRecord`.
 
 If no candidate survives constraints, fallback is `defer` plus structured reason.
+
+### C1. Human-in-the-loop decision classes (mandatory)
+
+Some decisions are non-delegable and require explicit human approval even in automated mode. This is a fail-closed control.
+
+Default mandatory human-in-the-loop classes:
+
+1. External communications crossing trust boundaries (public channels, external bridges).
+2. Security-sensitive policy changes (permission elevation, sandbox policy change).
+3. Irreversible or destructive operations (bulk delete, irreversible data mutation).
+4. High-impact organizational actions in society mode (role reassignment, escalation, sanctions).
+
+Execution rules:
+
+1. Agent or collective policy may propose an action, but cannot execute it without an approval token.
+2. Approval must be bound to action hash, actor, scope, and expiration time.
+3. Missing, invalid, or expired approval token forces `defer` with `reason=hitl_required`.
+4. Emergency override path is explicit, auditable, and restricted to authorized human operators.
+
+This section is tightly coupled with RFC 0009: deny-by-default permissions, audit integrity, and policy tamper resistance remain authoritative.
 
 ### D. Shared policy contract
 
@@ -164,6 +185,8 @@ Integration seams for this extension:
 - **Non-bypassable constraints:** permission, budget, and autonomy checks run before policy selection in every mode.
 - **Prompt-injection resilience:** untrusted text may influence candidate scoring but cannot inject disallowed action classes.
 - **Approval gate integrity:** approvals are evaluated by runtime configuration, never by model self-assertion.
+- **Mandatory HITL controls:** non-delegable classes are fail-closed; no automated bypass is allowed.
+- **Approval token security:** approval artifacts are scoped, signed, time-bounded, and replay-protected.
 - **Auditability:** each checkpoint emits a decision event for forensic reconstruction and policy regression debugging.
 - **Blast-radius control:** rollout is per action class and per agent, with instant fallback to manual mode.
 
@@ -182,6 +205,13 @@ Integration seams for this extension:
 2. Implement approval routing for high-impact classes (`delegate`, `publish_channel`, external bridge actions).
 3. Add replay harness for decision traces and regression diffs.
 4. Extend telemetry dashboards with acceptance, rejection, and fallback rates.
+
+### Phase 2a: Human-in-the-loop enforcement (security-coupled)
+
+1. Add required-HITL action class registry in configuration and schema.
+2. Implement signed, scoped, expiring approval tokens and replay checks.
+3. Enforce fail-closed runtime behavior when approval is absent or invalid.
+4. Add RFC 0009-aligned audit events: `decision.hitl_requested`, `decision.hitl_approved`, `decision.hitl_denied`, `decision.hitl_expired`.
 
 ### Phase 3: Controlled automation and calibration gates
 
@@ -226,6 +256,8 @@ Integration seams for this extension:
 4. Do we need a protobuf-level decision event schema in v0.4.0, or can we keep it runtime-local until v0.5.0?
 5. Which collective strategy should be the default for societies: simple majority, weighted majority, or role-weighted?
 6. How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
+7. Which action classes are globally non-delegable and require mandatory HITL in every environment?
+8. Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?
 
 ## Decision / Next Steps
 
@@ -234,6 +266,7 @@ Integration seams for this extension:
 3. Start Phase 1 in manual mode only; collect baseline telemetry before enabling semi-automated mode.
 4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work.
 5. Track collective decision scope as a follow-on for society support (v0.5.0+), aligned with organizations planning.
+6. Split out a security-coupled implementation checklist aligned with RFC 0009 for mandatory HITL classes.
 
 ## Related Documentation
 
