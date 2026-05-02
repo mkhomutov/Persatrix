@@ -69,6 +69,20 @@ Go: `go.uber.org/zap` structured logging; `testify` with `-race`; `fmt.Errorf("c
 Python: `X | None` types; `async def`; ruff line-length 100; `asyncio_mode = "auto"`; guard `loop.add_signal_handler()` on `sys.platform != "win32"`.  
 Rust: `clap` v4 derive; exhaustive `match` (no `_`); `tokio`.
 
+## TDD (from v0.3.0 onward)
+
+All new unit-level code follows Red-Green-Refactor:
+
+1. Write a failing test first. Confirm it fails before writing the implementation.
+2. Write the minimum implementation to make it pass. Then refactor.
+3. **Do not** write production code without a corresponding failing test (unit layer only).
+
+Per-language details are in `.github/instructions/`. Key rules:
+- **Go:** failing `_test.go` before `*.go`; table-driven tests; interface mocks in `internal/testutil/`.
+- **Python:** failing pytest in `tests/unit/python/` first; mock `LLMClient` at the boundary; no real network calls.
+- **Rust:** `#[cfg(test)]` unit tests inline; `cli/tests/` for CLI integration tests; mock HTTP with `mockito`.
+- **Integration tests** (`tests/integration/`) are exempt — write them after the unit layer validates the pieces.
+
 ## Terminology
 
 Use the canonical terms in [`docs/ai-glossary.md`](../docs/ai-glossary.md) by

@@ -58,6 +58,20 @@ Language-specific rules live in the instruction files under `.github/instruction
 
 Key patterns: `@tool(name=..., permissions=[...])` auto-generates schemas; sub-agents inherit restricted permissions; three-tier memory (Episodic/Relationship/Working); optimization profiles in `config/optimization.yaml`.
 
+## TDD (from v0.3.0 onward)
+
+All new unit-level code follows Red-Green-Refactor:
+
+1. Write a failing test first. Confirm it fails before writing the implementation.
+2. Write the minimum implementation to make it pass. Then refactor.
+3. **Do not** write production code without a corresponding failing test (unit layer only).
+
+Per-language details are in `.github/instructions/`. Key rules:
+- **Go:** failing `_test.go` before `*.go`; table-driven tests; interface mocks in `internal/testutil/`.
+- **Python:** failing pytest in `tests/unit/python/` first; mock `LLMClient` at the boundary; no real network calls.
+- **Rust:** `#[cfg(test)]` unit tests inline; `cli/tests/` for CLI integration tests; mock HTTP with `mockito`.
+- **Integration tests** (`tests/integration/`) are exempt — write them after the unit layer validates the pieces.
+
 ## Project Layout (key paths)
 
 | Path | Purpose |
