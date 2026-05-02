@@ -52,6 +52,7 @@ Without a shared decision layer, increasing autonomy risks brittle behavior and 
    3. **Automated:** policy selects action directly within non-bypassable guardrails.
 4. Preserve existing autonomy semantics (`manual`, `semi-autonomous`, `autonomous`, `supervisor`) by mapping them to policy mode + approval configuration.
 5. Emit decision telemetry and audit records so behavior can be replayed and calibrated.
+6. Define a future-compatible path for collective decisions when persona agents operate in societies.
 
 ## Non-Goals
 
@@ -129,6 +130,35 @@ Calibration is offline-first in v0.4.0:
 
 No production online learning loop is introduced in this RFC.
 
+### G. Collective decisions for agent societies (future extension)
+
+When societies are introduced (team, lab, or organization-level operation), some actions should support group-level decision policies instead of single-agent choice.
+
+The decision engine should support a second decision scope:
+
+1. **Individual scope** (v0.4.0 baseline): one agent chooses one action.
+2. **Collective scope** (v0.5.0+ extension): multiple eligible agents submit ranked candidates, then a collective policy selects the group action.
+
+Planned collective approaches:
+
+1. **Semi-automated collective mode**:
+   1. Eligible agents produce proposals and confidence.
+   2. Aggregator computes quorum outcome.
+   3. High-impact outcomes require supervisor approval.
+2. **Automated collective mode**:
+   1. Aggregator resolves by configured strategy (majority, weighted majority, role-weighted).
+   2. Guardrails still apply before execution.
+   3. Automatic execution only for whitelisted action classes.
+
+Each collective decision should emit a `CollectiveDecisionRecord` containing participating agent IDs, proposal set hash, winning option, quorum metadata, and dissent summary for replay and audit.
+
+Integration seams for this extension:
+
+- Organizations and role hierarchies (currently tracked as RFC 0012 placeholder) define eligibility and vote weight.
+- Channels and bridges (RFC 0011) define where collective outcomes are published.
+- Security and audit (RFC 0009) enforce non-bypassable permissions and forensic traceability.
+- Interaction lifecycle (RFC 0020) defines collective decision boundaries and timeout behavior.
+
 ## Security Considerations
 
 - **Non-bypassable constraints:** permission, budget, and autonomy checks run before policy selection in every mode.
@@ -160,6 +190,13 @@ No production online learning loop is introduced in this RFC.
 3. Add failure policy: confidence floor, forced fallback, and rollout kill-switch.
 4. Publish operator guidance for mode selection by environment.
 
+### Phase 4: Collective decision extension for societies (v0.5.0+)
+
+1. Add collective scope decision types and `CollectiveDecisionRecord` schema.
+2. Implement aggregation strategies (majority, weighted majority, role-weighted) behind configuration.
+3. Add quorum/timeout handling and supervisor override path.
+4. Extend replay harness and dashboards with dissent, quorum, and override metrics.
+
 ## Files Touched (Estimated)
 
 | Component | Files | Change |
@@ -187,6 +224,8 @@ No production online learning loop is introduced in this RFC.
 2. Should approval routing be centralized in orchestrator policy services or remain Python-runtime local first?
 3. What confidence metric threshold is robust enough for promotion decisions across different persona types?
 4. Do we need a protobuf-level decision event schema in v0.4.0, or can we keep it runtime-local until v0.5.0?
+5. Which collective strategy should be the default for societies: simple majority, weighted majority, or role-weighted?
+6. How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
 
 ## Decision / Next Steps
 
@@ -194,6 +233,7 @@ No production online learning loop is introduced in this RFC.
 2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0.
 3. Start Phase 1 in manual mode only; collect baseline telemetry before enabling semi-automated mode.
 4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work.
+5. Track collective decision scope as a follow-on for society support (v0.5.0+), aligned with organizations planning.
 
 ## Related Documentation
 
