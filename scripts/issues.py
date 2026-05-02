@@ -6,13 +6,14 @@ expected to start with a YAML front-matter block:
 
     ---
     id: ISSUE-007
+    summary: cost rounding drifts on long sessions   # one-line, surfaced in INDEX
     status: open            # open | in_progress | resolved
     severity: medium        # low | medium | high | critical
     area: cost
     created: 2026-05-02
     closed: 2026-05-14      # required when status == resolved
-    closed_pr: 312          # optional
-    refs:
+    closed_pr: 312          # rendered as a clickable #312 link in INDEX
+    refs:                   # documentary only — not surfaced in INDEX
       - docs/rfcs/0009-pr-plan.md
     ---
 
@@ -33,6 +34,7 @@ and Linux without WSL or GNU coreutils.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import re
 import sys
 from dataclasses import dataclass
@@ -42,6 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ISSUES_DIR = REPO_ROOT / "docs" / "issues"
 INDEX_FILE = ISSUES_DIR / "INDEX.md"
 TEMPLATE_NAME = "ISSUE-TEMPLATE.md"
+REPO_URL = "https://github.com/mkhomutov/Persatrix"
 
 ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{3}-[a-z0-9-]+\.md$")
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -65,10 +68,17 @@ class Issue:
     created: str
     closed: str
     closed_pr: str
+    summary: str
 
     @property
     def link(self) -> str:
         return f"[{self.id}]({self.path.name})"
+
+    @property
+    def closed_pr_link(self) -> str:
+        if not self.closed_pr:
+            return ""
+        return f"[#{self.closed_pr}]({REPO_URL}/pull/{self.closed_pr})"
 
 
 def _strip_inline_comment(value: str) -> str:
@@ -133,13 +143,22 @@ def collect_issues() -> list[Issue]:
                 slug=_slug_from_filename(path.name),
                 status=fm.get("status", ""),
                 severity=fm.get("severity", ""),
-                area=fm.get("area", ""),
+                area=fm.get("area", "").strip().lower(),
                 created=fm.get("created", ""),
                 closed=fm.get("closed", ""),
                 closed_pr=fm.get("closed_pr", ""),
+                summary=fm.get("summary", ""),
             )
         )
     return issues
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def validate(issues: list[Issue]) -> list[str]:
@@ -159,6 +178,10 @@ def validate(issues: list[Issue]) -> list[str]:
             errors.append(f"{loc}: invalid severity '{issue.severity}' (allowed: {sorted(ALLOWED_SEVERITY)})")
         if issue.status == "resolved" and not issue.closed:
             errors.append(f"{loc}: status=resolved requires 'closed' date")
+        if issue.created and not _is_iso_date(issue.created):
+            errors.append(f"{loc}: invalid 'created' date '{issue.created}' (expected YYYY-MM-DD)")
+        if issue.closed and not _is_iso_date(issue.closed):
+            errors.append(f"{loc}: invalid 'closed' date '{issue.closed}' (expected YYYY-MM-DD)")
     return errors
 
 
@@ -174,21 +197,18 @@ def _sort_key(i: Issue) -> tuple[int, int, str]:
     )
 
 
+_HEADER = "| ID | Status | Severity | Area | Created | Closed | Closed PR | Summary |"
+_DIVIDER = "|----|--------|----------|------|---------|--------|-----------|---------|"
+
+
 def render_table(issues: list[Issue]) -> str:
     if not issues:
-        return (
-            "| ID | Status | Severity | Area | Created | Closed | File |\n"
-            "|----|--------|----------|------|---------|--------|------|\n"
-            "| — | *(no issues)* | | | | | |\n"
-        )
-    rows = [
-        "| ID | Status | Severity | Area | Created | Closed | File |",
-        "|----|--------|----------|------|---------|--------|------|",
-    ]
+        return f"{_HEADER}\n{_DIVIDER}\n| -- | *(no issues)* | | | | | | |\n"
+    rows = [_HEADER, _DIVIDER]
     for i in sorted(issues, key=_sort_key):
         rows.append(
             f"| {i.link} | {i.status} | {i.severity} | {i.area} | {i.created} "
-            f"| {i.closed} | `{i.path.name}` |"
+            f"| {i.closed} | {i.closed_pr_link} | {i.summary} |"
         )
     return "\n".join(rows) + "\n"
 
@@ -216,6 +236,10 @@ def write_index(content: str) -> None:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument(
         "--check",

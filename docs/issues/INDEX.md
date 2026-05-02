@@ -5,7 +5,7 @@
 See [README.md](README.md) for conventions and lifecycle.
 
 <!-- BEGIN issues:auto -->
-| ID | Status | Severity | Area | Created | Closed | File |
-|----|--------|----------|------|---------|--------|------|
-| — | *(no issues)* | | | | | |
+| ID | Status | Severity | Area | Created | Closed | Closed PR | Summary |
+|----|--------|----------|------|---------|--------|-----------|---------|
+| -- | *(no issues)* | | | | | | |
 <!-- END issues:auto -->

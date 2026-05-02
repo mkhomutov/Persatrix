@@ -49,13 +49,17 @@ open ──► in_progress ──► resolved (file kept, status updated)
 | Rule | Detail |
 |------|--------|
 | Naming | `ISSUE-NNN-slug.md` — three-digit zero-padded number, lower-kebab slug |
+| `summary` | One-line description; surfaced as the Summary column in [INDEX.md](INDEX.md) so a single read answers "what is this about?" |
 | `status` | `open`, `in_progress`, `resolved` |
 | `severity` | `low`, `medium`, `high`, `critical` |
-| `area` | match `internal/` package or agent subsystem (e.g. `cost`, `persona`, `memory`, `grpc`) |
+| `area` | `internal/` package or agent subsystem (e.g. `cost`, `persona`, `memory`, `grpc`); lower-cased + stripped on read |
+| `created`, `closed` | `YYYY-MM-DD`; both validated, `closed` required when `status: resolved` |
+| `closed_pr` | Closing PR number, no leading `#`; rendered as a clickable `#NNN` link |
+| `refs` | Documentary only — not parsed into the index. Useful for human readers and `grep` |
 | Cross-references | Inline link to the issue file from any source doc — see paths below |
 | Discovery | `make issues` (writes [INDEX.md](INDEX.md)), or `grep -rn "ISSUE-" .` |
 | Closing | Set `status: resolved`, fill `closed:` and `closed_pr:`, run `make issues` |
-| Validation | `make issues-check` fails if INDEX is stale or front-matter is invalid |
+| Validation | `make issues-check` fails if INDEX is stale or front-matter is invalid; runs in CI |
 
 Issues whose fix is trivially contained within an in-progress PR do **not**
 need a file — record them directly in the PR plan's "Review findings" table.
@@ -79,8 +83,10 @@ stable handle — slugs may be renamed, IDs must not.
 
 1. Copy [ISSUE-TEMPLATE.md](ISSUE-TEMPLATE.md) to `ISSUE-NNN-slug.md`,
    choosing the next free `NNN`.
-2. Fill `id`, `status`, `severity`, `area`, `created`, `refs`.
-3. Write at minimum a **Summary** section. Other sections are optional.
+2. Fill `id`, `summary`, `status`, `severity`, `area`, `created`, `refs`.
+3. Write at minimum a **Summary** section in the body. Other sections
+   are optional. (The front-matter `summary:` is the index-friendly
+   one-liner; the body section can be longer.)
 4. Run `make issues` to update [INDEX.md](INDEX.md).
 5. Add a cross-reference from the source doc (RFC, PR plan, or code).
 
