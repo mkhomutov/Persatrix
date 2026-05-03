@@ -159,6 +159,15 @@ Some RFC numbers are reserved for previously scoped topics that do not yet have 
 
 This is why the current sequence on disk is 0001–0009 + 0013–0022 + 0026–0027 — RFC 0015 (Process Automation) was written after the 0010–0012 reservations were already in place; RFCs 0023–0025 are reserved per the memory-quality assessment in [memory-quality-roadmap.md](../memory-quality-roadmap.md). Source of truth for reservations is the [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index).
 
+### Companion discussion documents
+
+Discussion docs are not RFCs. They are the planning step between an architectural question and the RFCs that act on it. Same lifecycle and authoring discipline (status header, frontmatter, ratification date, related-documentation footer), but they do not own implementation — RFCs do. RFC reviewers may cite a ratified discussion doc by section.
+
+| Document | Spawns | Status |
+|----------|--------|--------|
+| [memory-quality-roadmap.md](../memory-quality-roadmap.md) | [RFC 0026](0026-declarative-facts-tier.md), [RFC 0027](0027-reflection-driven-consolidation.md), [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md); narrows RFC 0023; defers RFC 0024; supersedes RFC 0025 | 📋 Proposed — ratified 2026-05-01 |
+| [storage-architecture-roadmap.md](../storage-architecture-roadmap.md) | SA-1 (v0.4.0 storage-split RFC) plus SA-2/SA-3/SA-4 addenda; sets vectors-as-accelerator-only policy | 📋 Proposed |
+
 Examples:
 - `0001-persona-agent-architecture.md`
 - `0002-mesh-networking-protocol.md`
