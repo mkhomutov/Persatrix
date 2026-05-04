@@ -23,7 +23,7 @@ import grpc
 import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
-from .channel_validation import validate_channel_message_event
+from .channel_validation import parse_channel_timestamp, validate_channel_message_event
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
@@ -346,9 +346,12 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         RFC 0011 PR 4a — replaces the PR 3 ``success=False`` stub with the
         real receiver-side handler. Validates the wire-side
         ``ChannelMessageEvent`` (mentions cap, content size, channel-type
-        prefix agreement, thread_id length), resolves the target agent
+        prefix agreement, thread_id length, sender_id pattern, RFC 3339
+        timestamp, channel/message id length), resolves the target agent
         on the single-agent-per-process server (``agents/server.py``
-        currently rejects multi-agent), constructs an
+        does not enforce single-agent today; ``register_agent`` only
+        warns and overwrites — this handler enforces it for the channels
+        surface), constructs an
         ``AgentEvent(event_type=CHANNEL_MESSAGE)``, and schedules dispatch
         via ``asyncio.create_task`` with a strong-ref task set
         (``self._pending_dispatches``) so the orchestrator gets the
@@ -397,6 +400,14 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         target_agent_id = next(iter(self._agents))
 
         # ─── Build AgentEvent and schedule fire-and-forget dispatch ──────
+        # Propagate the orchestrator-authored RFC 3339 ``timestamp`` rather
+        # than re-stamping with ``time.time()`` — preserves publish-time
+        # ordering for cross-agent correlation and replay. Validation
+        # above guarantees ``parse_channel_timestamp`` succeeds; the
+        # assert pins that contract for type-checkers and future readers.
+        # PR #248 deep review M finding.
+        publish_ts = parse_channel_timestamp(request.timestamp)
+        assert publish_ts is not None  # noqa: S101 — guaranteed by validate above
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
             payload={
@@ -408,6 +419,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             sender_id=request.sender_id,
             message_id=request.message_id,
             thread_id=request.thread_id or None,
+            timestamp=publish_ts,
         )
 
         task = asyncio.create_task(

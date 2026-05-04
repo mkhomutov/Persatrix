@@ -267,3 +267,128 @@ class TestReceiveChannelMessageStrongRef:
         gate.set()
         await asyncio.wait_for(task, timeout=1.0)
         assert len(pending) == 0
+
+    async def test_dispatch_exception_does_not_crash_loop(self):
+        """`# noqa: BLE001` boundary handler must swallow + log dispatch errors.
+
+        Without this guard, a ``RuntimeError`` raised by ``dispatcher.dispatch``
+        would bubble into the asyncio loop's default exception handler as an
+        unstructured traceback. PR #248 deep review L finding (uncovered
+        boundary).
+        """
+        servicer, dispatcher = _make_servicer()
+        dispatcher.dispatch = AsyncMock(side_effect=RuntimeError("boom"))
+
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
+        )
+        # At-most-once ack on enqueue, regardless of downstream outcome.
+        assert ack.success is True
+
+        # Drain — exception must be swallowed inside the wrapper, the task
+        # must complete (not raise), and the strong-ref set must drain.
+        await _drain(servicer)
+        assert len(servicer._pending_dispatches) == 0
+
+
+# ─── Timestamp propagation + thread_id coercion ────────────
+
+
+class TestReceiveChannelMessageEventConstruction:
+    async def test_propagates_wire_timestamp(self):
+        """Receiver MUST forward the orchestrator's RFC 3339 publish-time.
+
+        Re-stamping with ``time.time()`` would lose cross-agent ordering.
+        PR #248 deep review M finding.
+        """
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(timestamp="2026-05-04T12:34:56Z"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        event = dispatcher.dispatch.await_args.args[1]
+        # 2026-05-04T12:34:56Z = 1777898096.0 Unix seconds (UTC).
+        assert event.timestamp == pytest.approx(1777898096.0, abs=1.0)
+
+    async def test_rejects_malformed_timestamp(self):
+        """Per proto contract: malformed timestamps are a drop reason."""
+        servicer, dispatcher = _make_servicer()
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(timestamp="not-a-timestamp"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        assert ack.success is False
+        assert "timestamp" in ack.error_message
+        dispatcher.dispatch.assert_not_awaited()
+
+    async def test_rejects_empty_timestamp(self):
+        servicer, dispatcher = _make_servicer()
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(timestamp=""),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        assert ack.success is False
+        assert "timestamp" in ack.error_message
+        dispatcher.dispatch.assert_not_awaited()
+
+    async def test_empty_thread_id_coerced_to_none(self):
+        """Empty wire ``thread_id`` MUST become ``event.thread_id is None``.
+
+        The ``request.thread_id or None`` coercion at the servicer
+        construction site was previously implicit-only. PR #248 deep
+        review L finding.
+        """
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(thread_id=""),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        event = dispatcher.dispatch.await_args.args[1]
+        assert event.thread_id is None
+
+
+# ─── sender_id / channel_id / message_id bounds ────────────
+
+
+class TestReceiveChannelMessageIdValidation:
+    @pytest.mark.parametrize("bad_sender", ["BAD_ID", "with space", "-leading", ""])
+    async def test_rejects_invalid_sender_id(self, bad_sender: str):
+        """`sender_id` MUST satisfy the participant-id pattern symmetrically
+        with ``mentions[i]`` — same trust boundary, stronger trust claim.
+        PR #248 deep review M finding (trust-boundary asymmetry)."""
+        servicer, dispatcher = _make_servicer()
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(sender_id=bad_sender),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        assert ack.success is False
+        assert "sender_id" in ack.error_message
+        dispatcher.dispatch.assert_not_awaited()
+
+    async def test_rejects_oversized_channel_id(self):
+        servicer, dispatcher = _make_servicer()
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(channel_id="group:" + "x" * 300),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        assert ack.success is False
+        assert "channel_id" in ack.error_message
+        dispatcher.dispatch.assert_not_awaited()
+
+    async def test_rejects_oversized_message_id(self):
+        servicer, dispatcher = _make_servicer()
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(message_id="m" * 65),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        assert ack.success is False
+        assert "message_id" in ack.error_message
+        dispatcher.dispatch.assert_not_awaited()
+
