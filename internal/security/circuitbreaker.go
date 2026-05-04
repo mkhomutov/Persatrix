@@ -156,6 +156,20 @@ func (cb *CircuitBreaker) IsQuarantined(agentID string) bool {
 	return ok
 }
 
+// HasAnyQuarantined reports whether at least one agent is currently
+// quarantined. Used by the REST/gRPC middleware to close the
+// header-omission bypass (PR #244 review H-01): when a quarantine is
+// active, anonymous (empty-X-Agent-ID) calls must be denied so a
+// quarantined caller cannot drop their header to slip past
+// IsQuarantined and re-enter via the anonymous bucket.
+//
+// O(1): just a length check under the existing mutex; no new lock.
+func (cb *CircuitBreaker) HasAnyQuarantined() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return len(cb.quarantined) > 0
+}
+
 // Unquarantine releases agentID and clears its violation history.
 // Returns true when the agent was quarantined; false on no-op.
 // `actor` is recorded on the audit event for forensics.

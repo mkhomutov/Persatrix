@@ -164,15 +164,22 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 	return allowed
 }
 
-// Reset clears the ring for agentID (next call starts from empty).
+// Reset clears the ring for agentID (next call starts from empty) and
+// purges any associated `lastEmit` throttle entry so the auxiliary map
+// cannot grow unbounded under repeated reset-then-deny cycles
+// (PR #244 review M-01 follow-up — mirrors evictTailLocked). Calling
+// Reset on an unknown agent is a no-op.
 func (rl *RateLimiter) Reset(agentID string) {
 	resolved, _ := rl.resolveAgentID(agentID)
 	rl.mu.Lock()
-	defer rl.mu.Unlock()
 	if elem, ok := rl.rings[resolved]; ok {
 		rl.lru.Remove(elem)
 		delete(rl.rings, resolved)
 	}
+	rl.mu.Unlock()
+	rl.lastEmitMu.Lock()
+	delete(rl.lastEmit, resolved)
+	rl.lastEmitMu.Unlock()
 }
 
 // TrackedAgents returns the current agent-map size. Intended for
@@ -288,17 +295,20 @@ func (r *agentRing) evictOlderThan(cutoff time.Time) {
 	if r.count == 0 {
 		return
 	}
-	cap := len(r.calls)
+	// PR #244 review L-02: was previously named `cap`, which shadowed
+	// the builtin and obscured the intent. `ringCap` reads as "the
+	// fixed capacity of the per-agent ring".
+	ringCap := len(r.calls)
 	kept := make([]time.Time, 0, r.count)
-	start := (r.head - r.count + cap) % cap
+	start := (r.head - r.count + ringCap) % ringCap
 	for i := 0; i < r.count; i++ {
-		t := r.calls[(start+i)%cap]
+		t := r.calls[(start+i)%ringCap]
 		if t.After(cutoff) {
 			kept = append(kept, t)
 		}
 	}
 	r.count = len(kept)
-	r.head = r.count % cap
+	r.head = r.count % ringCap
 	for i := 0; i < r.count; i++ {
 		r.calls[i] = kept[i]
 	}

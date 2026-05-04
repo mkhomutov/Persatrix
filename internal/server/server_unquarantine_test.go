@@ -94,3 +94,99 @@ func TestHandleUnquarantineAgent_NotQuarantined_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Contains(t, rec.Body.String(), "agent is not quarantined")
 }
+
+// PR #244 review H-02: optional shared-secret stop-gap auth on the
+// unquarantine endpoint. The endpoint undoes a security control and is
+// otherwise unauthenticated until RFC 0009 Phase 4 lands. When the
+// operator opts in by configuring a token via WithUnquarantineToken
+// (sourced from SECURITY_UNQUARANTINE_TOKEN at startup), the handler
+// requires a matching `Authorization: Bearer <token>` header. The
+// comparison uses `crypto/subtle.ConstantTimeCompare` to avoid
+// timing-side-channel leakage of the token byte-by-byte.
+//
+// The check is purely additive: when no token is configured the
+// pre-PR behaviour is preserved (TestHandleUnquarantineAgent_NoBreaker_503
+// and the integration-test happy path still pass without an auth
+// header).
+//
+// All H-02 tests below also send `X-Agent-ID: operator` because the
+// H-01 fix in the rate-limit middleware rejects anonymous calls while
+// a quarantine is open (which these tests deliberately trigger). The
+// operator identifying themselves is the intended pattern — the
+// handler already records X-Agent-ID as the audit `actor` for forensic
+// purposes.
+
+const operatorAgentID = "operator"
+
+func operatorHeaders(extra map[string]string) map[string]string {
+	h := map[string]string{security.AgentIDHeader: operatorAgentID}
+	for k, v := range extra {
+		h[k] = v
+	}
+	return h
+}
+
+// quarantineAgentForTest seeds breaker state so the success branch can
+// be exercised. Returns the agent ID used.
+func quarantineAgentForTest(t *testing.T, cb *security.CircuitBreaker, id string) {
+	t.Helper()
+	cb.RecordViolation(id, security.ViolationCapability)
+	require.True(t, cb.IsQuarantined(id), "precondition: %s must be quarantined", id)
+}
+
+func TestHandleUnquarantineAgent_TokenConfigured_MissingHeader_401(t *testing.T) {
+	cb := breakerWithThreshold(t)
+	srv, _ := testServer(t)
+	WithRateLimiter(nil, cb)(srv)
+	WithUnquarantineToken("s3cret")(srv)
+	quarantineAgentForTest(t, cb, "agent-x")
+
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPost,
+		"/api/v1/agents/agent-x/unquarantine", nil, operatorHeaders(nil))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "UNAUTHORIZED")
+	// Quarantine state must NOT be cleared on a failed auth.
+	assert.True(t, cb.IsQuarantined("agent-x"),
+		"failed auth must not release quarantine")
+}
+
+func TestHandleUnquarantineAgent_TokenConfigured_WrongToken_401(t *testing.T) {
+	cb := breakerWithThreshold(t)
+	srv, _ := testServer(t)
+	WithRateLimiter(nil, cb)(srv)
+	WithUnquarantineToken("s3cret")(srv)
+	quarantineAgentForTest(t, cb, "agent-x")
+
+	headers := operatorHeaders(map[string]string{"Authorization": "Bearer not-the-token"})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPost,
+		"/api/v1/agents/agent-x/unquarantine", nil, headers)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.True(t, cb.IsQuarantined("agent-x"))
+}
+
+func TestHandleUnquarantineAgent_TokenConfigured_CorrectToken_204(t *testing.T) {
+	cb := breakerWithThreshold(t)
+	srv, _ := testServer(t)
+	WithRateLimiter(nil, cb)(srv)
+	WithUnquarantineToken("s3cret")(srv)
+	quarantineAgentForTest(t, cb, "agent-x")
+
+	headers := operatorHeaders(map[string]string{"Authorization": "Bearer s3cret"})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPost,
+		"/api/v1/agents/agent-x/unquarantine", nil, headers)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.False(t, cb.IsQuarantined("agent-x"),
+		"correct token must release the quarantine")
+}
+
+func TestHandleUnquarantineAgent_NoTokenConfigured_NoAuthRequired(t *testing.T) {
+	// Baseline: with WithUnquarantineToken not applied, the endpoint
+	// remains open (matches pre-PR-244 behaviour). This guards against
+	// accidentally tightening behaviour when no token is configured.
+	cb := breakerWithThreshold(t)
+	srv := testServerWithBreaker(t, cb)
+	quarantineAgentForTest(t, cb, "agent-x")
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPost,
+		"/api/v1/agents/agent-x/unquarantine", nil, operatorHeaders(nil))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}

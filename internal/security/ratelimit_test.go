@@ -219,3 +219,30 @@ func TestSlidingWindow_LastEmitPurgedOnLRUEviction(t *testing.T) {
 	assert.False(t, stillThere,
 		"lastEmit entry for evicted agent-a must be purged alongside the ring (PR #244 M-02)")
 }
+
+// TestSlidingWindow_LastEmitPurgedOnReset extends the M-01 follow-up
+// from PR #244 review to the Reset() path: explicit operator-driven
+// resets must mirror the LRU-eviction cleanup, otherwise a long-running
+// orchestrator that periodically resets agents leaks one lastEmit entry
+// per reset. Inspects the private map for the same reasons as the
+// LRU-eviction test above.
+func TestSlidingWindow_LastEmitPurgedOnReset(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) {
+		c.CallsPerWindow = 1
+	})
+	require.True(t, rl.Allow("agent-a"))
+	require.False(t, rl.Allow("agent-a"))
+	rl.lastEmitMu.Lock()
+	_, hadEntry := rl.lastEmit["agent-a"]
+	rl.lastEmitMu.Unlock()
+	require.True(t, hadEntry, "precondition: lastEmit must be set after a deny")
+
+	rl.Reset("agent-a")
+
+	rl.lastEmitMu.Lock()
+	_, stillThere := rl.lastEmit["agent-a"]
+	rl.lastEmitMu.Unlock()
+	assert.False(t, stillThere,
+		"Reset must purge the lastEmit entry to avoid unbounded growth (PR #244 M-01 follow-up)")
+}

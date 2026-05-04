@@ -64,6 +64,26 @@ func doRequest(handler http.Handler, method, path string, body []byte) *httptest
 	return rec
 }
 
+// doRequestWithHeaders is doRequest plus arbitrary extra headers — used by
+// auth-related tests (e.g. PR #244 H-02 unquarantine token) where the
+// request must carry an Authorization header. Kept minimal: extends rather
+// than replaces doRequest so existing callsites stay terse.
+func doRequestWithHeaders(handler http.Handler, method, path string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+	var req *http.Request
+	if body != nil {
+		req = httptest.NewRequest(method, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
 // =============================================================================
 // failingStore — forces specific Store methods to return non-sentinel errors,
 // enabling 500 error-path coverage for workflow handlers.

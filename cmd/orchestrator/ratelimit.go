@@ -126,6 +126,23 @@ func envBoolDefault(key string, def bool) bool {
 	return b
 }
 
+// unquarantineToken reads SECURITY_UNQUARANTINE_TOKEN from the
+// environment. Returns "" when unset (the endpoint remains open, relying
+// on the documented reverse-proxy posture). A non-empty value is logged
+// at Info so operators can verify the stop-gap is active.
+//
+// Extracted from main.go to keep that file under the 500-line limit
+// (PR #244 review H-02).
+func unquarantineToken(logger *zap.Logger) string {
+	const envVar = "SECURITY_UNQUARANTINE_TOKEN"
+	tok := os.Getenv(envVar)
+	if tok != "" {
+		logger.Info("unquarantine endpoint protected by shared secret",
+			zap.String("source", envVar))
+	}
+	return tok
+}
+
 func envIntDefault(key string, def int) int {
 	v := os.Getenv(key)
 	if v == "" {

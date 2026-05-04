@@ -59,6 +59,16 @@ type Server struct {
 	// their pre-PR behaviour.
 	rateLimiter    *security.RateLimiter
 	circuitBreaker *security.CircuitBreaker
+
+	// unquarantineToken is the optional shared-secret stop-gap that
+	// gates the operator-only unquarantine endpoint until token-based
+	// auth lands in RFC 0009 Phase 4 (PR #244 review H-02). When empty,
+	// the endpoint is unauthenticated (preserves pre-PR-244 behaviour
+	// and the documented "front with an authenticating reverse proxy"
+	// posture). When set, callers must present
+	// `Authorization: Bearer <token>` and the comparison runs in
+	// constant time via crypto/subtle.
+	unquarantineToken string
 }
 
 // ServerOption configures optional Server dependencies.
@@ -126,6 +136,24 @@ func WithRateLimiter(rl *security.RateLimiter, cb *security.CircuitBreaker) Serv
 	return func(s *Server) {
 		s.rateLimiter = rl
 		s.circuitBreaker = cb
+	}
+}
+
+// WithUnquarantineToken injects an optional shared secret that gates the
+// POST /api/v1/agents/{id}/unquarantine endpoint (PR #244 review H-02).
+//
+// The endpoint undoes a security control (a circuit-breaker quarantine)
+// and is otherwise unauthenticated until token-based auth lands in
+// RFC 0009 Phase 4. Operators who cannot front the orchestrator with an
+// authenticating reverse proxy can opt into a defense-in-depth check
+// here by setting `SECURITY_UNQUARANTINE_TOKEN`; the bootstrap reads
+// the env var and applies this option in cmd/orchestrator.
+//
+// Empty token disables the check (preserves pre-PR-244 behaviour) so
+// minimal deployments and unit tests need not opt in.
+func WithUnquarantineToken(token string) ServerOption {
+	return func(s *Server) {
+		s.unquarantineToken = token
 	}
 }
 

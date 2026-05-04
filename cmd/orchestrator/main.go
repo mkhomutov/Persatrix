@@ -329,6 +329,11 @@ func main() {
 	// quarantine. Nil-safe when SECURITY_RATE_LIMIT_ENABLED=false.
 	srvOpts = append(srvOpts, server.WithRateLimiter(rateLimiter, circuitBreaker))
 
+	// PR #244 review H-02 — optional shared-secret stop-gap.
+	if tok := unquarantineToken(logger); tok != "" {
+		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
+	}
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))

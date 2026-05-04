@@ -31,8 +31,19 @@ const (
 // by omitting the header) and emit `rate_limit.unauthenticated_caller`
 // security-class audit events via the limiter.
 //
+// PR #244 review H-01 — quarantine bypass closure: when the breaker is
+// wired AND any agent is currently quarantined, anonymous calls (empty
+// X-Agent-ID) are denied with 403 / `QUARANTINE_ACTIVE`. Without this
+// check a quarantined agent could simply drop its header to bypass
+// IsQuarantined (which is keyed on the supplied ID) and re-enter via
+// the anonymous bucket. The deny only activates while a quarantine is
+// open, so under normal operation /healthz and other anonymous probes
+// continue to pass — see TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine
+// and TestRESTMiddleware_QuarantineActiveBlocksAnonymous.
+//
 // Returns 429 with `Retry-After: <window_seconds>` on rate-limit deny,
-// 403 with `agent quarantined` body on circuit-breaker deny.
+// 403 with `agent quarantined` body on circuit-breaker deny, 403 with
+// `QUARANTINE_ACTIVE` on the H-01 anonymous-deny path.
 //
 // The middleware is intentionally additive: `nil` limiter or breaker
 // is a passthrough. Callers wiring this from cmd/orchestrator must
@@ -44,9 +55,16 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			agentID := r.Header.Get(AgentIDHeader)
-			if breaker != nil && agentID != "" && breaker.IsQuarantined(agentID) {
-				writeJSONError(w, http.StatusForbidden, "QUARANTINED", "agent is quarantined")
-				return
+			if breaker != nil {
+				if agentID == "" && breaker.HasAnyQuarantined() {
+					writeJSONError(w, http.StatusForbidden, "QUARANTINE_ACTIVE",
+						"anonymous calls are denied while a quarantine is active")
+					return
+				}
+				if agentID != "" && breaker.IsQuarantined(agentID) {
+					writeJSONError(w, http.StatusForbidden, "QUARANTINED", "agent is quarantined")
+					return
+				}
 			}
 			if limiter != nil && !limiter.Allow(agentID) {
 				if breaker != nil && agentID != "" {
@@ -77,8 +95,17 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 func GRPCRateLimitInterceptor(limiter *RateLimiter, breaker *CircuitBreaker) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		agentID := agentIDFromIncoming(ctx)
-		if breaker != nil && agentID != "" && breaker.IsQuarantined(agentID) {
-			return nil, status.Error(codes.PermissionDenied, "agent is quarantined")
+		if breaker != nil {
+			if agentID == "" && breaker.HasAnyQuarantined() {
+				// PR #244 review H-01: same anonymous-deny as the REST
+				// path. PermissionDenied is the canonical mapping for
+				// quarantine-class refusals.
+				return nil, status.Error(codes.PermissionDenied,
+					"anonymous calls are denied while a quarantine is active")
+			}
+			if agentID != "" && breaker.IsQuarantined(agentID) {
+				return nil, status.Error(codes.PermissionDenied, "agent is quarantined")
+			}
 		}
 		if limiter != nil && !limiter.Allow(agentID) {
 			if breaker != nil && agentID != "" {

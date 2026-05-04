@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -287,6 +289,15 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 // reverse proxy (or restrict the route at the network layer) until
 // Phase 4 ships. Tracked alongside the broader X-Agent-ID spoofing
 // gap documented in RFC 0009 §B.
+//
+// PR #244 review H-02 — defense-in-depth stop-gap: when the operator
+// configures `SECURITY_UNQUARANTINE_TOKEN` (wired via
+// [WithUnquarantineToken]), this handler additionally requires
+// `Authorization: Bearer <token>` and rejects with 401 on missing or
+// mismatched tokens. The comparison runs in constant time
+// (crypto/subtle.ConstantTimeCompare) to avoid leaking the token
+// byte-by-byte through response timing. The check is purely additive:
+// when the token is unset, behaviour is unchanged.
 func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !resourceIDRegex.MatchString(id) {
@@ -297,6 +308,16 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 		writeError(w, "UNAVAILABLE", "circuit breaker not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// PR #244 H-02: optional shared-secret gate. Only enforced when the
+	// operator has opted in via SECURITY_UNQUARANTINE_TOKEN; an empty
+	// configured token leaves the endpoint unauthenticated (matches the
+	// pre-PR baseline + the documented reverse-proxy posture).
+	if s.unquarantineToken != "" {
+		if !validBearerToken(r.Header.Get("Authorization"), s.unquarantineToken) {
+			writeError(w, "UNAUTHORIZED", "invalid or missing unquarantine token", http.StatusUnauthorized)
+			return
+		}
+	}
 	actor := r.Header.Get(security.AgentIDHeader)
 	if actor == "" {
 		actor = "operator"
@@ -306,6 +327,31 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// validBearerToken returns true when the Authorization header carries a
+// `Bearer <token>` whose token component is byte-for-byte equal to
+// expected. The comparison is constant-time so a timing side channel
+// cannot leak the expected token. expected must be non-empty (callers
+// short-circuit when no token is configured); a zero-length expected
+// would otherwise compare equal to any zero-length supplied token.
+func validBearerToken(header, expected string) bool {
+	const prefix = "Bearer "
+	if expected == "" {
+		return false
+	}
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	supplied := header[len(prefix):]
+	// ConstantTimeCompare requires equal-length inputs to be meaningful;
+	// short-circuit unequal lengths first (this leaks length but not
+	// content, and the expected length is operator-chosen, not a
+	// per-request secret).
+	if len(supplied) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(supplied), []byte(expected)) == 1
 }
 
 func agentToResponse(a *registry.AgentInfo) agentResponse {
