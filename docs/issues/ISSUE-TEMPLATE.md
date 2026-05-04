@@ -1,7 +1,7 @@
 ---
 # Allowed values are documented in README.md. Comments above fields
 # (not inline) so that the front-matter parser does not pick them up.
-id: ISSUE-NNN
+id: ISSUE-NNNN
 # summary: one-line description, surfaced as the Summary column in INDEX.md
 summary: ""
 # status: open | in_progress | resolved

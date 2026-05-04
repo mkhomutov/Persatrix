@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -269,7 +271,89 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// agentToResponse converts a registry.AgentInfo to a wire-format agentResponse.
+// handleUnquarantineAgent handles POST /api/v1/agents/{id}/unquarantine
+// (RFC 0009 PR 2). The endpoint is operator-facing: it releases an
+// agent that has been quarantined by the [security.CircuitBreaker]
+// after sustained policy violations. Returns 404 when the agent is
+// not currently quarantined and 503 when no breaker is wired.
+//
+// `actor` is read from the standard X-Agent-ID header so the audit
+// event records who initiated the release; defaults to "operator"
+// when the header is absent.
+//
+// SECURITY (PR #244 review H-01): this endpoint has no authentication
+// or authorization in v0.3.0 because the entire REST surface is
+// unauthenticated until token validation lands in RFC 0009 Phase 4.
+// The endpoint is uniquely sensitive — it undoes a security control —
+// so deployments MUST front the orchestrator with an authenticating
+// reverse proxy (or restrict the route at the network layer) until
+// Phase 4 ships. Tracked alongside the broader X-Agent-ID spoofing
+// gap documented in RFC 0009 §B.
+//
+// PR #244 review H-02 — defense-in-depth stop-gap: when the operator
+// configures `SECURITY_UNQUARANTINE_TOKEN` (wired via
+// [WithUnquarantineToken]), this handler additionally requires
+// `Authorization: Bearer <token>` and rejects with 401 on missing or
+// mismatched tokens. The comparison runs in constant time
+// (crypto/subtle.ConstantTimeCompare) to avoid leaking the token
+// byte-by-byte through response timing. The check is purely additive:
+// when the token is unset, behaviour is unchanged.
+func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !resourceIDRegex.MatchString(id) {
+		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
+		return
+	}
+	if s.circuitBreaker == nil {
+		writeError(w, "UNAVAILABLE", "circuit breaker not configured", http.StatusServiceUnavailable)
+		return
+	}
+	// PR #244 H-02: optional shared-secret gate. Only enforced when the
+	// operator has opted in via SECURITY_UNQUARANTINE_TOKEN; an empty
+	// configured token leaves the endpoint unauthenticated (matches the
+	// pre-PR baseline + the documented reverse-proxy posture).
+	if s.unquarantineToken != "" {
+		if !validBearerToken(r.Header.Get("Authorization"), s.unquarantineToken) {
+			writeError(w, "UNAUTHORIZED", "invalid or missing unquarantine token", http.StatusUnauthorized)
+			return
+		}
+	}
+	actor := r.Header.Get(security.AgentIDHeader)
+	if actor == "" {
+		actor = "operator"
+	}
+	if !s.circuitBreaker.Unquarantine(id, actor) {
+		writeError(w, "NOT_FOUND", "agent is not quarantined", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// validBearerToken returns true when the Authorization header carries a
+// `Bearer <token>` whose token component is byte-for-byte equal to
+// expected. The comparison is constant-time so a timing side channel
+// cannot leak the expected token. expected must be non-empty (callers
+// short-circuit when no token is configured); a zero-length expected
+// would otherwise compare equal to any zero-length supplied token.
+func validBearerToken(header, expected string) bool {
+	const prefix = "Bearer "
+	if expected == "" {
+		return false
+	}
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	supplied := header[len(prefix):]
+	// ConstantTimeCompare requires equal-length inputs to be meaningful;
+	// short-circuit unequal lengths first (this leaks length but not
+	// content, and the expected length is operator-chosen, not a
+	// per-request secret).
+	if len(supplied) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(supplied), []byte(expected)) == 1
+}
+
 func agentToResponse(a *registry.AgentInfo) agentResponse {
 	resp := agentResponse{
 		ID:      a.ID,
