@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -292,4 +293,134 @@ func TestGRPCInterceptor_QuarantineActiveBlocksAnonymous(t *testing.T) {
 	st, _ := status.FromError(err)
 	assert.Equal(t, codes.PermissionDenied, st.Code(),
 		"empty x-agent-id metadata must be denied while quarantine is active")
+}
+
+// PR #244 round-2 review M-07 — bound + validate X-Agent-ID at the
+// middleware boundary.
+//
+// X-Agent-ID is self-reported and flows directly into:
+//   (a) audit log (per-event fsync for security-class events),
+//   (b) the rate-limiter ring map key (memory),
+//   (c) the breaker `violations` map key (memory).
+//
+// Without an upper bound, a single attacker can:
+//   - send a 16 KiB X-Agent-ID and amplify per-call disk writes,
+//   - send junk that bypasses the agent-ID schema enforced everywhere
+//     else (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) and create rate-limit
+//     bookkeeping for IDs the rest of the system (registry, path
+//     handlers) will reject.
+//
+// The fix rejects with 400 / `INVALID_AGENT_ID` (REST) and
+// `InvalidArgument` (gRPC) before the value reaches any sink. Empty
+// stays admitted as the "anonymous bucket" — that is the existing
+// contract and is what /healthz, probes, and pre-Phase-4 callers rely
+// on.
+
+func TestRESTMiddleware_RejectsOverlongAgentID(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk)
+	cb, _ := newTestBreaker(t, clk)
+	mw := RESTRateLimitMiddleware(rl, cb)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// 257 chars — one over the 256 cap.
+	overlong := strings.Repeat("a", MaxAgentIDLen+1)
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req.Header.Set("X-Agent-ID", overlong)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"M-07: overlong X-Agent-ID must be rejected before reaching audit/map sinks")
+	assert.Contains(t, rec.Body.String(), "INVALID_AGENT_ID")
+}
+
+func TestRESTMiddleware_RejectsMalformedAgentID(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk)
+	cb, _ := newTestBreaker(t, clk)
+	mw := RESTRateLimitMiddleware(rl, cb)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// IDs that pass the rest of the stack would never reject — these
+	// must be 400'd at the boundary instead of silently creating
+	// bookkeeping entries the registry / path handlers will discard.
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"uppercase", "Code-Writer"},
+		{"underscore", "code_writer"},
+		{"trailing dash", "writer-"},
+		{"leading dash", "-writer"},
+		{"dots", "code.writer"},
+		{"single char", "a"}, // regex requires \u22652 chars
+		{"slash", "a/b"},
+		{"newline", "a\nb"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/x", nil)
+			req.Header.Set("X-Agent-ID", tc.id)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "INVALID_AGENT_ID")
+		})
+	}
+}
+
+func TestRESTMiddleware_AcceptsEmptyAndValidAgentID(t *testing.T) {
+	// The validation must NOT regress the two admitted shapes:
+	//   - "" (anonymous bucket — see TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine)
+	//   - any value matching `^[a-z0-9][a-z0-9-]*[a-z0-9]$`
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk)
+	cb, _ := newTestBreaker(t, clk)
+	mw := RESTRateLimitMiddleware(rl, cb)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for _, id := range []string{"", "agent-a", "ab", "x9", "operator"} {
+		req := httptest.NewRequest(http.MethodPost, "/x", nil)
+		if id != "" {
+			req.Header.Set("X-Agent-ID", id)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "id=%q must be admitted", id)
+	}
+}
+
+func TestGRPCInterceptor_RejectsOverlongAgentID(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk)
+	cb, _ := newTestBreaker(t, clk)
+	interceptor := GRPCRateLimitInterceptor(rl, cb)
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	overlong := strings.Repeat("a", MaxAgentIDLen+1)
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs("x-agent-id", overlong))
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+	require.Error(t, err)
+	st, _ := status.FromError(err)
+	assert.Equal(t, codes.InvalidArgument, st.Code(),
+		"M-07: gRPC parity \u2014 overlong x-agent-id must be InvalidArgument")
+}
+
+func TestGRPCInterceptor_RejectsMalformedAgentID(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk)
+	cb, _ := newTestBreaker(t, clk)
+	interceptor := GRPCRateLimitInterceptor(rl, cb)
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs("x-agent-id", "Code-Writer"))
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+	require.Error(t, err)
+	st, _ := status.FromError(err)
+	assert.Equal(t, codes.InvalidArgument, st.Code())
 }

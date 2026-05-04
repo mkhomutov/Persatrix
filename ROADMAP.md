@@ -105,7 +105,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/executor/` | gRPC task dispatch to agents | ✅ Complete (96.1% coverage) |
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
-| `internal/security/` | Permission gates, rate limiting, audit logging | 🔲 TODO stub (v0.3.0+) |
+| `internal/security/` | Audit logger, redactor, rate limiter, circuit breaker, REST/gRPC middleware | 🚧 In progress (v0.3.0 — RFC 0009 PRs 1/1b/1c/2) |
 | `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder + log buffer + LogService | ✅ Complete (RFC 0018 + RFC 0019, shipped in v0.2.3) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 

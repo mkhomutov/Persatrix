@@ -190,3 +190,36 @@ func TestHandleUnquarantineAgent_NoTokenConfigured_NoAuthRequired(t *testing.T) 
 		"/api/v1/agents/agent-x/unquarantine", nil, operatorHeaders(nil))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
+
+// PR #244 round-2 review L-10: every other H-02 auth test seeds
+// quarantine state, which means the bearer check is always co-tested
+// with the H-01 anonymous-deny path. This test exercises the bearer
+// check in isolation: no quarantine is open, so the H-01 deny does
+// not fire and the operator does NOT need an X-Agent-ID. The 401
+// branch must therefore be reached purely on token-mismatch grounds.
+//
+// Without this, a regression that swaps the order of the H-01 check
+// and the bearer check (or makes the bearer check accidentally
+// dependent on quarantine state) would not be caught by the existing
+// suite.
+func TestHandleUnquarantineAgent_TokenConfigured_NoQuarantineSeeded_WrongToken_401(t *testing.T) {
+	cb := breakerWithThreshold(t)
+	srv, _ := testServer(t)
+	WithRateLimiter(nil, cb)(srv)
+	WithUnquarantineToken("s3cret")(srv)
+	// Deliberately do NOT seed quarantine state for any agent.
+	require.False(t, cb.IsQuarantined("agent-x"),
+		"precondition: no agent must be quarantined for this isolation test")
+	require.False(t, cb.HasAnyQuarantined(),
+		"precondition: HasAnyQuarantined must be false so the H-01 path cannot fire")
+
+	// No X-Agent-ID either \u2014 with no quarantine open, anonymous calls
+	// flow through the limiter to the handler, which reaches the
+	// bearer-check branch and 401s purely on token mismatch.
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPost,
+		"/api/v1/agents/agent-x/unquarantine", nil,
+		map[string]string{"Authorization": "Bearer not-the-token"})
+	assert.Equal(t, http.StatusUnauthorized, rec.Code,
+		"L-10: bearer check must reject wrong token even when no quarantine is open")
+	assert.Contains(t, rec.Body.String(), "UNAUTHORIZED")
+}

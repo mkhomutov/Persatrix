@@ -247,29 +247,52 @@ func (s *Server) registerRoutes() {
 // Execution order (outermost first):
 //
 //	handlerWrapper (optional, e.g. otelhttp) → recovery → requestID →
-//	logging → rate-limit + circuit-breaker → mux
+//	logging → routeMux → (rate-limit + circuit-breaker for /api/v1/*) → mux
 //
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
 // (Review finding F-01: r.WithContext creates a new *http.Request, so
 // loggingMiddleware must receive the request *after* requestID injects the ID.)
 //
-// The rate-limit/circuit-breaker layer is the innermost wrapper around
-// the mux (PR #244 review L-04/L-05), so 429/403 short-circuit responses
-// still flow back through loggingMiddleware and appear in the access log
-// with their X-Request-ID header set.
+// The rate-limit/circuit-breaker layer is mounted **only on `/api/v1/*`**
+// (PR #244 round-2 review H-03). Mounting it on the root would catch
+// `/healthz`, which Kubernetes liveness probes call without an
+// `X-Agent-ID` header — combined with the H-01 anonymous-deny that
+// fires while a quarantine is active, a single quarantined agent would
+// 403 the probe → restart the pod → drop the in-memory quarantine state
+// → re-quarantine on the next request → crashloop.
+//
+// `/healthz` therefore bypasses the limiter+breaker (rate limiting a
+// liveness probe is meaningless anyway). All other routes — including
+// future top-level endpoints — must be added under `/api/v1/` or they
+// will silently bypass the security middleware.
+//
+// The 429/403 short-circuit responses still flow back through
+// loggingMiddleware and appear in the access log with their
+// X-Request-ID header set, because both wrappers sit inside the logging
+// + requestID layers (PR #244 review L-04/L-05).
 func (s *Server) Handler() http.Handler {
 	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
-	var h http.Handler = s.mux
-	// Rate-limit + circuit-breaker wrap the mux directly so denials
-	// short-circuit before any handler-side work. Because they sit
-	// inside the logging wrapper, 429/403 responses still appear in
-	// the access log; because they sit inside requestID, the response
-	// carries an X-Request-ID header for client correlation. Nil-safe
-	// — degrades to passthrough when unwired (RFC 0009 PR 2).
+	//
+	// Path-scoped middleware mount. We need /healthz to bypass the
+	// limiter+breaker (see godoc above), but s.mux already has every
+	// route registered on it (including /healthz). The cheapest
+	// "bypass" is to construct a tiny outer mux that splits traffic:
+	//   - /healthz                     → handle directly, no security layer
+	//   - everything else (/api/v1/…)  → wrapped mux
+	// The inner /healthz registration on s.mux becomes unreachable
+	// through Handler() but is preserved so any test/integration code
+	// hitting s.mux directly (without the middleware stack) keeps
+	// working.
+	var apiH http.Handler = s.mux
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
-		h = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(h)
+		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(apiH)
 	}
+	root := http.NewServeMux()
+	root.HandleFunc("GET /healthz", s.handleHealthz)
+	root.Handle("/", apiH)
+
+	var h http.Handler = root
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)

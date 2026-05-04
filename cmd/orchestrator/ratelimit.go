@@ -127,20 +127,59 @@ func envBoolDefault(key string, def bool) bool {
 }
 
 // unquarantineToken reads SECURITY_UNQUARANTINE_TOKEN from the
-// environment. Returns "" when unset (the endpoint remains open, relying
-// on the documented reverse-proxy posture). A non-empty value is logged
-// at Info so operators can verify the stop-gap is active.
+// environment. Returns "" when unset.
+//
+// PR #244 round-2 review M-05: when the env var is unset the endpoint
+// is reachable without authentication. That is a deliberate stop-gap
+// (full identity lands in RFC 0009 Phase 4) but it inverts the project's
+// deny-by-default posture, so the operator's choice to leave the
+// endpoint open must be explicit and auditable rather than inferred
+// from configuration silence. Two signals are emitted in the unset
+// case:
+//
+//   - WARN log `security.unquarantine.unauthenticated scope=startup`
+//     so the choice surfaces in stdout / log aggregation immediately.
+//   - Security-class audit event [security.AuditUnquarantineEndpointOpen]
+//     so the choice is recorded in the tamper-evident chain alongside
+//     `rate_limit.disabled`. Per-event fsync \u2014 a crash before the next
+//     request must not erase the record.
+//
+// A non-empty value is logged at Info so operators can verify the
+// stop-gap is active.
 //
 // Extracted from main.go to keep that file under the 500-line limit
 // (PR #244 review H-02).
-func unquarantineToken(logger *zap.Logger) string {
+func unquarantineToken(logger *zap.Logger, auditor security.AuditLogger) string {
 	const envVar = "SECURITY_UNQUARANTINE_TOKEN"
 	tok := os.Getenv(envVar)
-	if tok != "" {
-		logger.Info("unquarantine endpoint protected by shared secret",
-			zap.String("source", envVar))
+	if tok == "" {
+		logger.Warn("security.unquarantine.unauthenticated scope=startup",
+			zap.String("source", envVar),
+			zap.String("posture", "endpoint reachable without bearer token \u2014 set "+envVar+" to enable shared-secret gate"),
+		)
+		emitUnquarantineEndpointOpen(logger, auditor)
+		return ""
 	}
+	logger.Info("unquarantine endpoint protected by shared secret",
+		zap.String("source", envVar))
 	return tok
+}
+
+func emitUnquarantineEndpointOpen(logger *zap.Logger, auditor security.AuditLogger) {
+	if auditor == nil {
+		return
+	}
+	if err := auditor.Emit(context.Background(), security.AuditEvent{
+		EventType: security.AuditUnquarantineEndpointOpen,
+		Action:    "startup",
+		Resource:  "unquarantine_endpoint",
+		Outcome:   "open",
+		Detail: map[string]any{
+			"source": "SECURITY_UNQUARANTINE_TOKEN",
+		},
+	}); err != nil {
+		logger.Warn("audit emit failed for unquarantine.endpoint.open", zap.Error(err))
+	}
 }
 
 func envIntDefault(key string, def int) int {

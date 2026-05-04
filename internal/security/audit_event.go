@@ -53,6 +53,14 @@ const (
 	// Circuit breaker / quarantine (PR 2)
 	AuditAgentQuarantined   AuditEventType = "agent.quarantined"
 	AuditAgentUnquarantined AuditEventType = "agent.unquarantined"
+	// AuditUnquarantineEndpointOpen is emitted at startup when the
+	// unquarantine REST endpoint is reachable without a shared-secret
+	// token (SECURITY_UNQUARANTINE_TOKEN unset). PR #244 round-2
+	// review M-05: the endpoint undoes a security control, so the
+	// operator's choice to leave it open must land in the
+	// tamper-evident chain rather than be inferred from configuration
+	// silence. Pairs with a startup WARN log.
+	AuditUnquarantineEndpointOpen AuditEventType = "unquarantine.endpoint.open"
 
 	// Audit-log lifecycle (chain-recovery — PR #232 review SF-3)
 	AuditChainBootstrap AuditEventType = "chain.bootstrap"
@@ -87,6 +95,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditRateLimitDisabled,
 		AuditAgentQuarantined,
 		AuditAgentUnquarantined,
+		AuditUnquarantineEndpointOpen,
 		AuditChainBootstrap,
 		AuditChainRestart,
 		AuditChainRecovered,
@@ -125,6 +134,7 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditRateLimitDisabled:            {},
 	AuditAgentQuarantined:             {},
 	AuditAgentUnquarantined:           {},
+	AuditUnquarantineEndpointOpen:     {},
 	AuditChainBootstrap:               {},
 	AuditChainRestart:                 {},
 	AuditChainRecovered:               {},

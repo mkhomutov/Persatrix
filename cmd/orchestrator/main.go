@@ -330,7 +330,11 @@ func main() {
 	srvOpts = append(srvOpts, server.WithRateLimiter(rateLimiter, circuitBreaker))
 
 	// PR #244 review H-02 — optional shared-secret stop-gap.
-	if tok := unquarantineToken(logger); tok != "" {
+	// PR #244 round-2 review M-05: when token is unset, unquarantineToken
+	// emits a startup WARN + `unquarantine.endpoint.open` audit event so
+	// the open-by-default posture is recorded explicitly. The auditor is
+	// passed in for that purpose; nil is safe (audit becomes a no-op).
+	if tok := unquarantineToken(logger, auditor); tok != "" {
 		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
 	}
 
