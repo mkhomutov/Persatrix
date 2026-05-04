@@ -268,27 +268,53 @@ class TestReceiveChannelMessageStrongRef:
         await asyncio.wait_for(task, timeout=1.0)
         assert len(pending) == 0
 
-    async def test_dispatch_exception_does_not_crash_loop(self):
+    async def test_dispatch_exception_does_not_crash_loop(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """`# noqa: BLE001` boundary handler must swallow + log dispatch errors.
 
         Without this guard, a ``RuntimeError`` raised by ``dispatcher.dispatch``
         would bubble into the asyncio loop's default exception handler as an
         unstructured traceback. PR #248 deep review L finding (uncovered
         boundary).
+
+        ``caplog`` assertion pins the docstring promise that exceptions are
+        "logged with traceback" and that the exception class is included in
+        the log message for SLO/error-class breakdown queries (PR #248
+        deep review L finding on exception-type annotation).
         """
+        import logging
+
         servicer, dispatcher = _make_servicer()
         dispatcher.dispatch = AsyncMock(side_effect=RuntimeError("boom"))
 
-        ack = await servicer.ReceiveChannelMessage(
-            _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
-        )
-        # At-most-once ack on enqueue, regardless of downstream outcome.
-        assert ack.success is True
+        with caplog.at_level(logging.ERROR, logger="Persatrix.agent.server"):
+            ack = await servicer.ReceiveChannelMessage(
+                _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
+            )
+            # At-most-once ack on enqueue, regardless of downstream outcome.
+            assert ack.success is True
 
-        # Drain — exception must be swallowed inside the wrapper, the task
-        # must complete (not raise), and the strong-ref set must drain.
-        await _drain(servicer)
-        assert len(servicer._pending_dispatches) == 0
+            # Drain — exception must be swallowed inside the wrapper, the task
+            # must complete (not raise), and the strong-ref set must drain.
+            await _drain(servicer)
+            assert len(servicer._pending_dispatches) == 0
+
+        # Exactly one ERROR record from the boundary handler. Asserting on
+        # the agent_id, channel_id, and exception class makes the docstring
+        # contract testable.
+        error_records = [
+            r for r in caplog.records
+            if r.levelno == logging.ERROR
+            and r.name == "Persatrix.agent.server"
+        ]
+        assert len(error_records) == 1
+        msg = error_records[0].getMessage()
+        assert "ember-owl" in msg
+        assert "group:general" in msg
+        assert "RuntimeError" in msg
+        # ``logger.exception`` attaches traceback via exc_info.
+        assert error_records[0].exc_info is not None
 
 
 # ─── Timestamp propagation + thread_id coercion ────────────

@@ -23,7 +23,8 @@ import grpc
 import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
-from .channel_validation import parse_channel_timestamp, validate_channel_message_event
+from .channel_validation import validate_channel_message_event
+from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
@@ -373,9 +374,22 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         new enum members additively.
         """
         # ─── Validation (defence-in-depth; mirrors proto/task.proto bounds) ──
-        err = validate_channel_message_event(request)
+        # Validator returns ``(error, parsed_timestamp)`` so the RFC 3339
+        # parse happens exactly once. PR #248 deep review M finding
+        # (single-source-of-truth + assert-stripped-under-O elimination).
+        err, publish_ts = validate_channel_message_event(request)
         if err is not None:
             return task_pb2.TaskAck(success=False, error_message=err)
+        if publish_ts is None:
+            # Defensive: the validator's tuple contract guarantees that a
+            # ``None`` error implies a parsed timestamp. This branch is
+            # unreachable barring an internal contract violation, but is
+            # an explicit guard rather than a bare ``assert`` so the
+            # invariant survives ``python -O`` (which strips asserts).
+            return task_pb2.TaskAck(
+                success=False,
+                error_message="internal: validator returned no timestamp",
+            )
 
         # ─── Target agent resolution (single-agent-per-process in v0.3.0) ──
         if not self._agents:
@@ -402,12 +416,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # ─── Build AgentEvent and schedule fire-and-forget dispatch ──────
         # Propagate the orchestrator-authored RFC 3339 ``timestamp`` rather
         # than re-stamping with ``time.time()`` — preserves publish-time
-        # ordering for cross-agent correlation and replay. Validation
-        # above guarantees ``parse_channel_timestamp`` succeeds; the
-        # assert pins that contract for type-checkers and future readers.
-        # PR #248 deep review M finding.
-        publish_ts = parse_channel_timestamp(request.timestamp)
-        assert publish_ts is not None  # noqa: S101 — guaranteed by validate above
+        # ordering for cross-agent correlation and replay. ``publish_ts``
+        # is the validator's parsed value; the validator's tuple-return
+        # contract pins "validation succeeded ⇒ timestamp is float" in
+        # the type system, so no runtime assert is needed (asserts are
+        # stripped under ``python -O``).
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
             payload={
@@ -431,7 +444,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         self._pending_dispatches.add(task)
         task.add_done_callback(self._pending_dispatches.discard)
 
-        del context  # unused; ack is unconditional once enqueued
+        # ``context`` is intentionally unused: the at-most-once ack is
+        # unconditional once the dispatch task is enqueued. Other
+        # rejection branches above also do not touch ``context``.
+        _ = context
         return task_pb2.TaskAck(success=True)
 
     async def _dispatch_channel_event(
@@ -444,24 +460,22 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         """
         try:
             await self._dispatcher.dispatch(target_agent_id, event)
-        except Exception:  # noqa: BLE001 — final boundary; logged with traceback
+        except Exception as exc:  # noqa: BLE001 — final boundary; logged with traceback
+            # Include ``type(exc).__name__`` so SLO dashboards can break
+            # error classes down without parsing raw tracebacks. PR #248
+            # deep review L finding.
             logger.exception(
-                "ReceiveChannelMessage dispatch failed for agent %s (channel %s)",
-                target_agent_id, event.channel_id,
+                "ReceiveChannelMessage dispatch failed for agent %s (channel %s): %s",
+                target_agent_id, event.channel_id, type(exc).__name__,
             )
-
-
-# ─── Chat Reply Extraction ────────────────────────────────────
 
 
 # Backward-compat re-export: ``_extract_chat_reply`` was previously defined
 # inline in this module and is imported by ``agents/server.py`` and by
 # ``tests/unit/python/test_extract_chat_reply.py`` as
 # ``from agents.server_servicers import _extract_chat_reply``. RFC 0011 PR 4a-i
-# extracted the implementation into ``agents/chat_reply.py`` to keep this
-# module under the 500-line review-friendly cap; the alias preserves the
-# existing import surface.
-from .chat_reply import extract_chat_reply as _extract_chat_reply  # noqa: E402
-
+# extracted the implementation into ``agents/chat_reply.py``; the import
+# now sits with the other top-of-module imports (no circular-import risk:
+# ``chat_reply`` only depends on ``persona_types``).
 __all__ = ["AgentServiceServicer", "_extract_chat_reply"]
 
