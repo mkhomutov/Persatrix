@@ -5,8 +5,8 @@ subsystem (RFC 0008 PR 5).
 Split out of ``test_memory_decay.py`` only because adding these four
 review-driven tests pushed the original file past the 500-line review
 soft-cap enforced by ``scripts/checks/file_size.py --strict``.  The
-split is also conceptually clean: this file pins findings from
-``docs/pr-reviews/pr-225-deep-review.md`` (round 1) — the original
+split is also conceptually clean: this file pins findings from the
+PR #225 deep-review report (round 1) — the original
 file pins the original behavioural contracts.
 
 Pins:

@@ -327,7 +327,7 @@ The closeout PR ships three classes of work and nothing else. Anything not in on
 
 #### Scope
 
-Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
+Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any local PR review report. Items below are populated as PRs land and reviews complete.
 
 <!-- Empty subsections below are intentional placeholders. Each is populated when the corresponding PR's review completes. The `<!-- TODO: populate after PR N review -->` markers below are added per PR #161 review so `git grep "TODO: populate after"` lists outstanding follow-up captures at any point. -->
 

@@ -130,6 +130,14 @@ type Instruments struct {
 	AuditEventsTotal         metric.Int64Counter
 	AuditChainRecoveredTotal metric.Int64Counter
 	AuditEmitLatencySeconds  metric.Float64Histogram
+
+	// Channel router fanout (RFC 0011 §C / RFC 0019 §F). One increment
+	// per per-subscriber dispatch attempt, labelled by `channel_type`
+	// (`group|dm|thread`) and `status` (`ok|error`). Sender filtering
+	// happens before the increment, so the counter reflects effective
+	// delivery attempts, not publish events. Pair with the `error`
+	// label to alert on a wedged dispatcher.
+	ChannelMessagesDelivered metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.
@@ -321,6 +329,16 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 
 	if err := registerAuditInstruments(m, i); err != nil {
 		return nil, err
+	}
+
+	if i.ChannelMessagesDelivered, err = m.Int64Counter(
+		"channel.messages.delivered",
+		metric.WithUnit("{message}"),
+		metric.WithDescription(
+			"Per-subscriber channel-router dispatch attempts, labelled by channel_type and status.",
+		),
+	); err != nil {
+		return nil, fmt.Errorf("create channel.messages.delivered: %w", err)
 	}
 	return i, nil
 }

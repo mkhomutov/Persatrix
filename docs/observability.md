@@ -356,6 +356,8 @@ Open http://localhost:16686, pick the `persatrix-server` or `persatrix-agent` se
 
 The orchestrator exposes `orchestrator.workflow.submitted/completed/failed` counters, `orchestrator.workflow.duration` and `orchestrator.step.duration` histograms, and `workflow.active` (an UpDownCounter). Agent-side metrics live under `agent.tool.*`, `agent.llm.*`, `agent.persona.*`, and the `agent.observability.{spans,logs}.dropped` back-pressure counters.
 
+The channels subsystem (RFC 0011) emits `channel.messages.delivered{channel_type, status}` — one increment per per-subscriber dispatch attempt, with `channel_type ∈ {group, dm, thread}` and `status ∈ {ok, error}`. Sender filtering and `respond: never` skips happen *before* the increment, so the counter reflects effective delivery attempts. Pair `status="error"` with `rate(channel.messages.delivered{status="error"}[5m]) > 0` to alert on a wedged dispatcher.
+
 Histogram queries surface exemplars (`--enable-feature=exemplar-storage` is on by default in the dev compose). A p99 LLM-latency spike on the `agent_llm_duration_milliseconds` histogram exposes the originating `trace_id` next to the bucket sample; clicking it opens the trace in Jaeger.
 
 ### 11.4 Correlated debugging from a trace ID

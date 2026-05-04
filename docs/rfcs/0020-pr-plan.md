@@ -248,7 +248,7 @@ Apply review findings from PRs 1–5 (the "From PR N review" pattern from [RFC 0
 
 #### Scope
 
-Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry paraphrases the finding and **must not** reference or link any `docs/pr-reviews/*.md` file.
+Review findings, grouped by source PR. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry paraphrases the finding and **must not** reference or link any local PR review report.
 
 ##### From PR 1 review
 

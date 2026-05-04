@@ -7,7 +7,6 @@ area: cmd/orchestrator
 created: 2026-05-04
 refs:
   - docs/rfcs/0009-security-sandboxing.md
-  - docs/pr-reviews/pr-244-deep-review-r3.md
 ---
 
 ## Summary

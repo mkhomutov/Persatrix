@@ -158,8 +158,6 @@ The deep review on the second-round commits classified all remaining items as **
 - [ ] File a tracking issue under RFC 0009 for the **real PII/secret scrubber** that replaces `NoopRedactor`, so the deferred work does not become "forever-deferred". — open issue before PR 1b merges
 - [ ] Net diff (876 LOC) exceeds the [BRANCHING.md](../BRANCHING.md) 500-line soft limit; acknowledged in the PR body and accepted by reviewers because the schema doc + structlog chain + redactor surface are a single atomic boundary. No action — recorded for future estimate calibration.
 
-Review report (local-only, not committed): `docs/pr-reviews/pr-164.md`.
-
 **Merged**: PR [#164](https://github.com/mkhomutov/Persatrix/pull/164) — 2026-04-22
 
 #### Follow-up: PR 1b — `feature/v023-logging-python-getlogger-swap` (descoped from this PR)
@@ -424,7 +422,7 @@ Excludes features, unrelated refactors, v0.3 mesh / A2A code. Stay under the 500
 
 #### Scope
 
-Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file. Items below are populated as PRs land and reviews complete.
+Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each follow-up entry must paraphrase the finding and **not** reference or link any local PR review report. Items below are populated as PRs land and reviews complete.
 
 <!-- Empty subsections below are intentional placeholders. Each is populated when the corresponding PR's review completes. The `<!-- TODO: populate after PR N review merges -->` markers below are added per PR #161 review so `git grep "TODO: populate after"` lists outstanding follow-up captures at any point. -->
 

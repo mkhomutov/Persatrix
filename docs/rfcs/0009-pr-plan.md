@@ -435,7 +435,7 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (master-plan Phase 4 PR 3) �
 
 #### Key implementation details
 
-This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" subsection follows the [RFC 0017 PR plan §Status by Finding](0017-pr-plan.md#status-by-finding-pr-6-implementation) pattern — paraphrase each finding (no `docs/pr-reviews/*.md` link per [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md)) and list its disposition (fixed-here / downgraded-to-issue / accepted-divergence).
+This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" subsection follows the [RFC 0017 PR plan §Status by Finding](0017-pr-plan.md#status-by-finding-pr-6-implementation) pattern — paraphrase each finding (PR review reports are local-only per [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md)) and list its disposition (fixed-here / downgraded-to-issue / accepted-divergence).
 
 #### Tests
 

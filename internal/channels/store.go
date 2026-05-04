@@ -25,6 +25,24 @@ type ChannelStore interface {
 	// For thread channels: `id` MUST be `thread:<parent-message-id>`.
 	CreateChannel(ctx context.Context, ch Channel) error
 
+	// CreateChannelWithMembers inserts a channel row AND every membership in
+	// `members` inside a single transaction. Either all rows commit, or none
+	// do — used by the REST `POST /api/v1/channels` handler so a partial
+	// failure (e.g. an invalid participant id mid-list) does not leave an
+	// orphan channel that would poison the client's natural retry with 409
+	// CONFLICT.
+	//
+	// PR #245 review (High, "non-atomic create-then-add-members"): the
+	// previous handler called CreateChannel, then looped per-member calling
+	// AddMember; an error on the second member returned 5xx with the
+	// channel already created, and the retry hit ErrChannelExists. This
+	// helper closes that window at the store boundary so handlers do not
+	// need to compose their own rollback path.
+	//
+	// Validation, cap enforcement, and `ErrChannelExists` semantics are
+	// identical to CreateChannel + AddMember called sequentially.
+	CreateChannelWithMembers(ctx context.Context, ch Channel, members []Member) error
+
 	// GetChannel returns the channel addressed by `id` or [ErrChannelNotFound].
 	GetChannel(ctx context.Context, id string) (Channel, error)
 

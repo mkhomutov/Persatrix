@@ -102,7 +102,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 #### PR #231 review follow-ups
 
-Deep review filed at `docs/pr-reviews/pr-231-review.md` (local-only). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.
+Deep review completed (local-only, not committed per [Status Hygiene rules](../development-workflow.md#status-hygiene)). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.
 
 | # | Finding | Target PR | Rationale |
 |---|---------|-----------|-----------|
@@ -152,12 +152,38 @@ Nice-to-Have items (also pinned to PR 8 unless an earlier PR's diff naturally in
 
 #### PR checklist
 
-- [ ] RFC 0009 PR 2 merged **or** startup-WARN opt-out path landed and documented in `docs/v0.3.0-plan.md`
-- [ ] `make validate` green against `config/channels.yaml`
-- [ ] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
-- [ ] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
-- [ ] PR #231 review SF-2 closed: `CreateChannel` enforces `ID == "group:" + Name` (or computes it) for `ChannelTypeGroup`
-- [ ] PR #231 review SF-4 closed: `channels.name` migrated to nullable + partial unique index on `channel_type='group'`; `GetChannel`/`ListChannels` placeholder shim removed; `user_version` bumped
+- [x] RFC 0009 PR 2 merged **or** startup-WARN opt-out path landed and documented in `docs/v0.3.0-plan.md`
+- [x] `make validate` green against `config/channels.yaml`
+- [x] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
+- [x] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
+- [x] PR #231 review SF-2 closed: `CreateChannel` enforces `ID == "group:" + Name` (or computes it) for `ChannelTypeGroup`
+- [x] PR #231 review SF-4 closed: `channels.name` migrated to nullable + partial unique index on `channel_type='group'`; `GetChannel`/`ListChannels` placeholder shim removed; `user_version` bumped
+
+> **RFC 0009 PR 2 status (PR #245)**: rate-limit middleware is wired
+> generically through `WithRateLimiter` (RFC 0009 PR 2 / PR #244 merged)
+> but the channels publish endpoint runs on the **startup-WARN
+> opt-out** path for v0.3.0 — the channels REST surface is
+> intentionally unauthenticated this release (token auth lands in
+> RFC 0009 Phase 4) and the orchestrator emits a one-shot
+> `channels: REST surface is UNAUTHENTICATED in v0.3.0 …` Warn
+> whenever the channels subsystem is enabled. See CHANGELOG entry
+> for the operator-facing trust-boundary statement.
+
+> **✅ Merged as PR #245 (2026-05-04).**
+
+#### PR #245 review follow-ups
+
+Deep review completed (local-only, not committed per [Status Hygiene rules](../development-workflow.md#status-hygiene)). No Must-Fix applied at merge time. Seven follow-up issues captured as `docs/issues/ISSUE-0009` through `ISSUE-0015` (committed in the pre-merge tidy-up):
+
+| Issue | Finding | Target PR | Severity |
+|-------|---------|-----------|---------|
+| [ISSUE-0009](../issues/ISSUE-0009-channel-fallback-warn-once-test-race.md) | `channelFallbackWarnOnce` is a package-level `sync.Once`; reassigned in tests causes latent `-race` flake once any sibling adopts `t.Parallel()`. | **PR 3 or PR 8** | Medium |
+| [ISSUE-0010](../issues/ISSUE-0010-reconcile-membership-divergence-doc-behaviour-mismatch.md) | `membershipDivergence` doc claims policy drift "is logged" but function only compares participant id sets — doc/behaviour mismatch. | **PR 8** | Low |
+| [ISSUE-0011](../issues/ISSUE-0011-publish-mentions-count-cap.md) | `handlePublishMessage` forwards `req.Mentions` without count cap — defense-in-depth gap on the unauthenticated REST surface. | **PR 4** | Low |
+| [ISSUE-0012](../issues/ISSUE-0012-channels-db-parent-dir-not-auto-created.md) | `--channels-db` default path (`data/channels.db`) parent directory not auto-created; fresh checkout silently degrades channels to 503. | **PR 3** | Low |
+| [ISSUE-0013](../issues/ISSUE-0013-channel-messages-published-counter.md) | No `channel.messages.published` counter alongside `channel.messages.delivered`; delivered/published ratio dashboard not computable. | **PR 4** | Low |
+| [ISSUE-0014](../issues/ISSUE-0014-channel-fanout-bounded-concurrency.md) | `ChannelRouter.fanout` dispatches inline per-recipient (O(N × 5s) worst-case); bounded-concurrency `errgroup` needed before PR 4 gRPC dispatcher. | **PR 4** | Low |
+| [ISSUE-0015](../issues/ISSUE-0015-list-channels-cursor-and-store-side-limit.md) | `handleListChannels` loads all rows then client-truncates; no `next_cursor` in response; silent data truncation once the channel cap is lifted. | **PR 8** | Low |
 
 ---
 

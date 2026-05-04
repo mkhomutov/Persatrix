@@ -110,63 +110,6 @@ func buildDSN(path string) string {
 	return path + "?" + q.Encode()
 }
 
-// schemaSQL is the v0.3.0 channel-store schema. It is intentionally applied
-// via `CREATE TABLE IF NOT EXISTS` rather than a migration runner because
-// PR 1 ships the first revision — there is nothing to migrate from. As soon
-// as a future PR needs an `ALTER TABLE` (column add, type change, index
-// rename, etc.) this in-place approach becomes a footgun: existing
-// production databases will silently keep the old shape.
-//
-// TODO(rfc0011-pr2+): introduce an embedded migrations runner (e.g.
-// golang-migrate or a hand-rolled `schema_version` PRAGMA + ordered .sql
-// files) before the first schema-altering PR lands. Until then, every
-// schema change in this package MUST be additive and IF-NOT-EXISTS-safe.
-const schemaSQL = `
-CREATE TABLE IF NOT EXISTS channels (
-    id           TEXT PRIMARY KEY,
-    name         TEXT NOT NULL UNIQUE,
-    channel_type TEXT NOT NULL CHECK (channel_type IN ('group', 'dm', 'thread')),
-    description  TEXT NOT NULL DEFAULT '',
-    created_at   DATETIME NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS memberships (
-    channel_id     TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    participant_id TEXT NOT NULL,
-    respond_policy TEXT NOT NULL DEFAULT 'when_mentioned'
-        CHECK (respond_policy IN ('when_mentioned', 'always', 'never')),
-    joined_at      DATETIME NOT NULL,
-    PRIMARY KEY (channel_id, participant_id)
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    sender_id  TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    timestamp  DATETIME NOT NULL,
-    thread_id  TEXT REFERENCES messages(id) ON DELETE CASCADE,
-    mentions   TEXT NOT NULL DEFAULT '[]',
-    metadata   TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_messages_thread     ON messages(thread_id) WHERE thread_id IS NOT NULL;
-`
-
-func applySchema(db *sql.DB) error {
-	if _, err := db.Exec(schemaSQL); err != nil {
-		return fmt.Errorf("channels: apply schema: %w", err)
-	}
-	// Defensive PRAGMA — DSN sets it, but a future caller wiring a
-	// pre-existing *sql.DB through a yet-to-be-added constructor should
-	// still see foreign keys enforced.
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		return fmt.Errorf("channels: enable foreign_keys: %w", err)
-	}
-	return nil
-}
-
 // sqliteStore is the concrete [ChannelStore] backed by SQLite.
 //
 // `dmMu` serialises [GetOrCreateDM] for a given canonical id so a publish-
@@ -193,8 +136,16 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	if ch.ID == "" {
 		return errors.New("channels: channel id is required")
 	}
+	// PR #245 re-review (Low/Med): the name-required and name-pattern
+	// errors used to be plain (un-wrapped) errors. writeChannelError in
+	// internal/server falls through to 500 INTERNAL for any error that
+	// does not match a known sentinel, so an operator typing
+	// `Name: "Sprint 1"` got a 500 instead of the correct 400. Wrapping
+	// with ErrInvalidChannelType (the closest existing 400-class
+	// sentinel — these ARE invalid channel attributes) reclassifies the
+	// status code without changing the human-readable message.
 	if ch.Type == ChannelTypeGroup && ch.Name == "" {
-		return errors.New("channels: group channel requires a name")
+		return fmt.Errorf("%w: group channel requires a name", ErrInvalidChannelType)
 	}
 	// PR #231 review-2 Should-Fix #1: enforce channelNamePattern at the
 	// store boundary too, not only in the loader (Config.Validate). The REST
@@ -205,8 +156,21 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	// as a placeholder (see storedName below) and are exempt — only
 	// user-declared group names are user-visible.
 	if ch.Type == ChannelTypeGroup && !channelNamePattern.MatchString(ch.Name) {
-		return fmt.Errorf("channels: group channel name %q does not match %s",
-			ch.Name, channelNamePattern.String())
+		return fmt.Errorf("%w: group channel name %q does not match %s",
+			ErrInvalidChannelType, ch.Name, channelNamePattern.String())
+	}
+	// PR #231 review SF-2: make CreateChannel the canonical-id authority for
+	// group channels. The previous implementation accepted any
+	// `(ID, Name)` pair so a REST handler could insert a row whose PK
+	// disagreed with its display name (e.g. ID=`group:foo`, Name=`bar`).
+	// Future memory and observability rows reference the canonical id; a
+	// drift here would mis-route every downstream lookup. We require the
+	// caller to supply the exact PK they intend to use rather than mutate
+	// the input — the wrapper signature stays value-receiver so a
+	// surprising in-place rewrite cannot happen at higher layers.
+	if ch.Type == ChannelTypeGroup && ch.ID != "group:"+ch.Name {
+		return fmt.Errorf("%w: group channel id %q must be \"group:\"+name (name=%q)",
+			ErrInvalidChannelType, ch.ID, ch.Name)
 	}
 	if ch.CreatedAt.IsZero() {
 		ch.CreatedAt = time.Now().UTC()
@@ -230,19 +194,21 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 		}
 	}
 
-	// `name` is UNIQUE NOT NULL — insert a deterministic placeholder for non-
-	// group channels (DM canonical id, thread parent message id) so the
-	// constraint still distinguishes rows but callers see Name="" via the
-	// scan path below.
-	storedName := ch.Name
-	if storedName == "" {
-		storedName = ch.ID
+	// SF-4 (PR 2 of RFC 0011): channels.name is now nullable. Group
+	// channels store their declared display name; DM and thread channels
+	// store NULL. Uniqueness is enforced by the partial index
+	// `ux_channels_name_group` (group rows only) — see migrateV1ToV2.
+	var nameArg any
+	if ch.Type == ChannelTypeGroup {
+		nameArg = ch.Name
+	} else {
+		nameArg = nil
 	}
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO channels (id, name, channel_type, description, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,
-		ch.ID, storedName, string(ch.Type), ch.Description, ch.CreatedAt,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -263,207 +229,124 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	return nil
 }
 
-// GetChannel implements [ChannelStore.GetChannel].
-func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, channel_type, description, created_at
-		   FROM channels WHERE id = ?`, id)
-	var ch Channel
-	var typ string
-	var name string
-	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Channel{}, fmt.Errorf("%w: %s", ErrChannelNotFound, id)
-		}
-		return Channel{}, fmt.Errorf("channels: scan channel: %w", err)
+// CreateChannelWithMembers implements [ChannelStore.CreateChannelWithMembers].
+//
+// PR #245 review (High): the REST `POST /api/v1/channels` handler used
+// to call CreateChannel followed by an N-call AddMember loop, all
+// outside any transaction. A failure mid-loop left the channel row
+// committed but with only a prefix of the requested membership; the
+// client's natural retry then hit ErrChannelExists \u2192 409 and the
+// remaining members were never added. This helper makes the bundle
+// atomic at the store boundary so handlers no longer need to compose a
+// rollback path of their own.
+//
+// Member validation runs inside the transaction so the same
+// `ErrInvalidParticipantID` / `ErrInvalidRespondPolicy` sentinels surface
+// as before \u2014 only the persistence side becomes all-or-nothing.
+func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, members []Member) error {
+	// Pre-flight validation duplicates the checks in [CreateChannel] /
+	// [AddMember] so we can fail fast before touching the database. Any
+	// future change to those rules MUST be mirrored here \u2014 the unit test
+	// TestSQLiteStore_CreateChannelWithMembers_AtomicOnPartialFailure
+	// pins the rollback contract for one concrete invalid-member case.
+	if !ch.Type.Valid() {
+		return fmt.Errorf("%w: %q", ErrInvalidChannelType, ch.Type)
 	}
-	ch.Type = ChannelType(typ)
-	if name != ch.ID { // group channels store the friendly name
-		ch.Name = name
+	if ch.ID == "" {
+		return errors.New("channels: channel id is required")
 	}
-	return ch, nil
-}
-
-// ListChannels implements [ChannelStore.ListChannels].
-func (s *sqliteStore) ListChannels(ctx context.Context) ([]Channel, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, channel_type, description, created_at
-		   FROM channels ORDER BY created_at ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("channels: list: %w", err)
+	// PR #245 re-review (Low/Med): mirror the wrapping fix from
+	// CreateChannel above so REST callers see 400 BAD_REQUEST instead of
+	// 500 INTERNAL when they submit an invalid `name`.
+	if ch.Type == ChannelTypeGroup && ch.Name == "" {
+		return fmt.Errorf("%w: group channel requires a name", ErrInvalidChannelType)
 	}
-	defer func() { _ = rows.Close() }()
-
-	out := make([]Channel, 0)
-	for rows.Next() {
-		var ch Channel
-		var typ string
-		var name string
-		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
-			return nil, fmt.Errorf("channels: scan list: %w", err)
-		}
-		ch.Type = ChannelType(typ)
-		if name != ch.ID {
-			ch.Name = name
-		}
-		out = append(out, ch)
+	if ch.Type == ChannelTypeGroup && !channelNamePattern.MatchString(ch.Name) {
+		return fmt.Errorf("%w: group channel name %q does not match %s",
+			ErrInvalidChannelType, ch.Name, channelNamePattern.String())
 	}
-	return out, rows.Err()
-}
-
-// DeleteChannel implements [ChannelStore.DeleteChannel].
-func (s *sqliteStore) DeleteChannel(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM channels WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("channels: delete: %w", err)
+	if ch.Type == ChannelTypeGroup && ch.ID != "group:"+ch.Name {
+		return fmt.Errorf("%w: group channel id %q must be \"group:\"+name (name=%q)",
+			ErrInvalidChannelType, ch.ID, ch.Name)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("channels: delete rowsaffected: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrChannelNotFound, id)
-	}
-	s.logger.Info("channels: channel deleted", zap.String("channel_id", id))
-	return nil
-}
-
-// AddMember implements [ChannelStore.AddMember].
-func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
-	if err := validateParticipantID(participantID); err != nil {
-		return err
-	}
-	if !policy.Valid() {
-		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
-	}
-	// Idempotent re-add: keep the existing joined_at and respond_policy.
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
-		channelID, participantID, string(policy), time.Now().UTC(),
-	)
-	if err != nil {
-		if isForeignKeyViolation(err) {
-			return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
-		}
-		return fmt.Errorf("channels: add member: %w", err)
-	}
-	return nil
-}
-
-// GetMembers implements [ChannelStore.GetMembers].
-func (s *sqliteStore) GetMembers(ctx context.Context, channelID string) ([]Member, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT participant_id, respond_policy, joined_at
-		   FROM memberships
-		  WHERE channel_id = ?
-		  ORDER BY joined_at ASC, participant_id ASC`, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("channels: get members: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := make([]Member, 0)
-	for rows.Next() {
-		var m Member
-		var policy string
-		if err := rows.Scan(&m.ParticipantID, &policy, &m.JoinedAt); err != nil {
-			return nil, fmt.Errorf("channels: scan member: %w", err)
-		}
-		m.RespondPolicy = RespondPolicy(policy)
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
-// GetMember implements [ChannelStore.GetMember].
-func (s *sqliteStore) GetMember(ctx context.Context, channelID, participantID string) (Member, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT participant_id, respond_policy, joined_at
-		   FROM memberships WHERE channel_id = ? AND participant_id = ?`,
-		channelID, participantID)
-	var m Member
-	var policy string
-	if err := row.Scan(&m.ParticipantID, &policy, &m.JoinedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Member{}, fmt.Errorf("%w: channel=%s participant=%s",
-				ErrNotMember, channelID, participantID)
-		}
-		return Member{}, fmt.Errorf("channels: get member: %w", err)
-	}
-	m.RespondPolicy = RespondPolicy(policy)
-	return m, nil
-}
-
-// IsMember implements [ChannelStore.IsMember].
-func (s *sqliteStore) IsMember(ctx context.Context, channelID, participantID string) (bool, error) {
-	var exists int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT 1 FROM memberships WHERE channel_id = ? AND participant_id = ?`,
-		channelID, participantID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("channels: is member: %w", err)
-	}
-	return true, nil
-}
-
-// GetOrCreateDM implements [ChannelStore.GetOrCreateDM].
-func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, error) {
-	id, err := CanonicalDMID(a, b)
-	if err != nil {
-		return Channel{}, err
+	if ch.CreatedAt.IsZero() {
+		ch.CreatedAt = time.Now().UTC()
 	}
 
-	s.dmMu.Lock()
-	defer s.dmMu.Unlock()
-
-	ch, err := s.GetChannel(ctx, id)
-	if err == nil {
-		return ch, nil
-	}
-	if !errors.Is(err, ErrChannelNotFound) {
-		return Channel{}, err
-	}
-
-	// Lexicographically sort once to mirror CanonicalDMID's ordering for the
-	// membership inserts.
-	pa, pb := a, b
-	if pa > pb {
-		pa, pb = pb, pa
-	}
-
-	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Channel{}, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at)
-		 VALUES (?, ?, ?, '', ?)`,
-		id, id, string(ChannelTypeDM), now); err != nil {
-		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
-	}
-	for _, p := range []string{pa, pb} {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
-			 VALUES (?, ?, 'always', ?)`,
-			id, p, now); err != nil {
-			return Channel{}, fmt.Errorf("channels: add dm member %s: %w", p, err)
+	if ch.Type == ChannelTypeGroup {
+		var groupCount int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(1) FROM channels WHERE channel_type = 'group'`).
+			Scan(&groupCount); err != nil {
+			return fmt.Errorf("channels: count groups: %w", err)
+		}
+		if groupCount >= s.maxChannels {
+			return fmt.Errorf("%w: cap=%d", ErrChannelCapExceeded, s.maxChannels)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return Channel{}, err
+
+	var nameArg any
+	if ch.Type == ChannelTypeGroup {
+		nameArg = ch.Name
+	} else {
+		nameArg = nil
 	}
 
-	return Channel{
-		ID:        id,
-		Type:      ChannelTypeDM,
-		CreatedAt: now,
-	}, nil
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO channels (id, name, channel_type, description, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("%w: %s", ErrChannelExists, ch.ID)
+		}
+		return fmt.Errorf("channels: insert channel: %w", err)
+	}
+
+	now := time.Now().UTC()
+	for _, m := range members {
+		if err := validateParticipantID(m.ParticipantID); err != nil {
+			return err
+		}
+		policy := m.RespondPolicy
+		if policy == "" {
+			policy = RespondWhenMentioned
+		}
+		if !policy.Valid() {
+			return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+		}
+		joinedAt := m.JoinedAt
+		if joinedAt.IsZero() {
+			joinedAt = now
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
+			ch.ID, m.ParticipantID, string(policy), joinedAt,
+		); err != nil {
+			// FK violations are unexpected here \u2014 we just inserted the
+			// parent row in the same transaction \u2014 but classify them the
+			// same way [AddMember] does for symmetry.
+			if isForeignKeyViolation(err) {
+				return fmt.Errorf("%w: %s", ErrChannelNotFound, ch.ID)
+			}
+			return fmt.Errorf("channels: add member %s: %w", m.ParticipantID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.logger.Info("channels: channel created with members",
+		zap.String("channel_id", ch.ID),
+		zap.String("channel_type", string(ch.Type)),
+		zap.Int("member_count", len(members)))
+	return nil
 }
