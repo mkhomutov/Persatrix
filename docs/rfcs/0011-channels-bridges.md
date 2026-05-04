@@ -5,7 +5,7 @@
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-25  
 **Target**: v0.3.0 (internal channels) + v0.5.0 (external bridges)  
-**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 1 input sanitization on stored channel content); RFC 0020 (Phase 3 jointly delivered — channel messages route through `InteractionTracker.add_turn` rather than per-event episodic writes; see §E)
+**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 1 input sanitization on stored channel content); RFC 0016 (chat-as-DM — [0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md)); RFC 0020 (Phase 3 jointly delivered — channel messages route through `InteractionTracker.add_turn` rather than per-event episodic writes; see §E)
 
 ---
 
@@ -86,7 +86,7 @@ A v0.2-era design intent for inter-agent messaging left several stubs and partia
 | [internal/bridges/bridges.go](../../internal/bridges/bridges.go) — stub for `BridgeManager`, per-platform bridges | **Untouched in v0.3.0.** Reserved for v0.5.0 (see Non-Goals). | Stub remains as a roadmap marker. |
 | [schemas/channel.schema.json](../../schemas/channel.schema.json) — types `group \| direct \| broadcast \| meeting`, `id`/`type`/`name` per channel, `members: "all"`, `history_visible`, `max_history_messages` | **Superseded; rewritten in place** (same path, singular `channel.schema.json`). | Vocabulary: `direct`→`dm`; `broadcast`/`meeting` dropped (reduced to membership policies in §H — broadcast = `respond: never` listeners; meeting = transient `group` with explicit membership). The JSON Schema's redundant `id` field is removed — canonical address is derived from `channel_type` + `name` (e.g., `group:planning`). The SQL `channels.id` PK column (§B) is a separate concern and is unaffected. `members: "all"` dropped (keep membership explicit/auditable). `history_visible` → per-channel default; `max_history_messages` → global per-channel cap (§B). |
 | [config/channels.yaml](../../config/channels.yaml) — placeholder using the old schema | **Rewritten to match the new schema.** | `schema_version` dropped — schema owned by the RFC, not the config file. |
-| [agents/persona_types.py](../../agents/persona_types.py) — `EventType.MESSAGE_RECEIVED`, `EventType.MENTION`, `ActionType.SEND_MESSAGE` | **Renamed/superseded.** `SEND_MESSAGE`→`SEND_CHANNEL_MESSAGE`; `MESSAGE_RECEIVED`→`CHANNEL_MESSAGE`. `MENTION` retained as a derived convenience event the gate may also emit on self-mentions; personas wanting a separate handler can register on it. | Pre-existing types had no producer beyond partial scaffolding; renaming a breaking change to unused code, accepted in v0.3. |
+| [agents/persona_types.py](../../agents/persona_types.py) — `EventType.MESSAGE_RECEIVED`, `EventType.MENTION`, `ActionType.SEND_MESSAGE` | **Renamed and unified** with the RFC 0016 chat path — see [0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md). `SEND_MESSAGE`→`SEND_CHANNEL_MESSAGE`; `MESSAGE_RECEIVED`→`CHANNEL_MESSAGE`; `MENTION` retained. | PR 4a migrates atomically. |
 | [agents/dispatch.py:212-326](../../agents/dispatch.py#L212) — `_handle_send_message` already pulls `channel_id`/`mentions`, applies `_MAX_MENTIONS_PER_ACTION` cap, logs `"channel routing not yet implemented"` | **Completed, not duplicated.** Phase 2 finishes the channel-routing branch through the new `ChannelRouter` rather than dispatching `MESSAGE_RECEIVED` directly. | Existing mentions cap, dispatcher timeout, and `no_targets` status taxonomy are preserved and apply to the new `SEND_CHANNEL_MESSAGE` handler. |
 | [agents/dispatch.py:332-411](../../agents/dispatch.py#L332) — `EventDispatcher` with `max_cascade_depth=5` and per-event `metadata["cascade_depth"]` | **Reused as a backstop.** | See §D's "Composition with `cascade_depth`". |
 
@@ -495,7 +495,7 @@ persatrix channel watch <name> [--interval N]         # poll for new messages (d
 | `reply` | Same shape as `send`, plus `(reply to <thread_id>)` annotation | Send object with `thread_id` populated |
 | `history` | One line per message: `<timestamp>  <sender_id>: <content>` (newest-first); `--limit` defaults to 50 | Array of message objects matching the §A `ChannelMessage` schema |
 
-Conventions follow `persatrix logs` and `persatrix chat` precedents (plain text for humans, structured JSON for piping). PR-plan time may refine field names; this table pins the *shape*.
+Conventions follow `persatrix logs` and `persatrix chat` precedents (plain text for humans, structured JSON for piping). PR-plan time may refine field names; this table pins the *shape*. **Chat-as-DM** (RFC 0016 unification, 2026-05-04): user–agent chats are `dm` channels under a unified wire model — [0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md); PR 4a delivers atomically.
 
 ### G. Channel Observability
 

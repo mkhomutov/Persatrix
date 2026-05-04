@@ -240,7 +240,12 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 ### PR 4: `feature/v030-rfc0011-agent-delivery` — Phase 2b: Action + Servicer + Gate
 
 **Depends on**: PR 3.
-**Estimated size**: ~500–700 lines — **expect to split** into PR 4a/4b per [Sizing Risks](#sizing-risks-and-contingent-splits). The cross-cutting `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` rename touches every persona-runtime call site that emits or consumes the old names, in addition to the new servicer, response gate (three policy branches plus thread-reply-to-self), DELETE endpoints + cascade tests, and two-agent integration test.
+**Estimated size**: ~700–900 lines (revised upward 2026-05-04 after the chat-as-DM unification — see [RFC 0011 amendment](0011-amendment-chat-as-dm.md)). **Splits into PR 4a and PR 4b** per [Sizing Risks](#sizing-risks-and-contingent-splits). The cross-cutting `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` rename now also migrates the RFC 0016 chat ingest/reply path (heavy producer of the old names since v0.2.1) and must land atomically with the new servicer to avoid a window where chat is broken on `main`.
+
+#### Scope split (PR 4a / PR 4b)
+
+- **PR 4a** (~500–600 lines): renames + `ReceiveChannelMessage` Python servicer (replaces PR 3's `success=False` stub) + `agents/dispatch.py` `SEND_CHANNEL_MESSAGE` executor + `internal/executor/dispatch.go::DispatchChannelMessage` + **chat-path migration per the [RFC 0011 amendment](0011-amendment-chat-as-dm.md)** (chat ingest emits `CHANNEL_MESSAGE` with `channel_type=dm`; chat reply extraction reformulated against `SEND_CHANNEL_MESSAGE`; `SendChatMessage` servicer rewritten as a synchronous-reply façade over `ChannelRouter.Publish` on the DM channel; DM-gate-bypass rule for synchronous chat) + PR #231 review SF-3 mentions validation in `PublishMessage`.
+- **PR 4b** (~300–400 lines): persona-runtime response gate (3 policies + thread-reply-to-self) for non-DM channels, DELETE endpoints with cascade tests, `channel.messages.gated{policy}` metric, two-agent integration test, `cascade_depth` backstop test.
 
 #### Scope (high-level)
 
