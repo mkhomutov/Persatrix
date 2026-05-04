@@ -1,7 +1,7 @@
 # RFC 0016 — Human Participant & Chat Interface
 
 **Type**: feature
-**Status**: ✅ Implemented
+**Status**: ✅ Implemented (partially superseded by the [RFC 0011 chat-as-DM amendment](0011-amendment-chat-as-dm.md), v0.3.0)
 **Author**: Maksim Khomutov
 **Date**: 2026-04-19
 **Accepted**: 2026-04-20
@@ -9,6 +9,8 @@
 **Depends on**: RFC 0005
 
 ---
+
+> **v0.3.0 Forward Compatibility (added 2026-05-04).** The [RFC 0011 chat-as-DM amendment](0011-amendment-chat-as-dm.md) is the v0.3.0 successor for the **event/action-type names** and the **"channel routing for user messages" non-goal** below. Concretely: starting in v0.3.0 PR 4a, chat ingest builds `EventType.CHANNEL_MESSAGE` (not `MESSAGE_RECEIVED`), chat replies emit `ActionType.SEND_CHANNEL_MESSAGE` (not `SEND_MESSAGE`), and the user–agent conversation is a `dm` channel `dm:<user>:<agent>` in the RFC 0011 channel store. The synchronous-reply REST/gRPC façades, the `Participant` abstraction, the `UserParticipant` storage model, and the `persatrix chat` REPL UX described in this RFC remain authoritative — only the wire types and the underlying transport are unified. Read both RFCs together for the v0.3.0+ chat path; this RFC alone is correct for v0.2.x.
 
 ## Table of Contents
 

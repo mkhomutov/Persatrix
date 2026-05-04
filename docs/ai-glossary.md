@@ -352,9 +352,31 @@ This file is referenced by both `.github/CLAUDE.md` and
   `memberships.respond_policy` column (RFC 0011 §A). Values:
   `when_mentioned` (default), `always`, `never`. Persisted at the channel
   store; the dispatch layer consults it when deciding whether to wake a
-  member on a publish.
+  member on a publish. **DM channels bypass the policy** for the
+  synchronous-reply façade described under "Chat-as-DM" — see
+  [RFC 0011 amendment](rfcs/0011-amendment-chat-as-dm.md).
 - **Example:** "Setting `respond_policy: never` on the audit-log channel
   membership silences the agent without removing visibility."
+
+### Chat-as-DM
+- **Aliases:** "chat-as-DM unification" (long form on first mention).
+- **Disallowed:** "chat channel" (ambiguous — could mean group),
+  "DM-chat bridge".
+- **Definition:** v0.3.0 unification ([RFC 0011 amendment](rfcs/0011-amendment-chat-as-dm.md), amending RFC 0016)
+  modelling every user–agent chat as a `dm` channel
+  `dm:<user>:<agent>` in the RFC 0011 channel store. The
+  `POST /api/v1/agents/{id}/chat` REST endpoint, the `SendChatMessage`
+  gRPC RPC, and the `persatrix chat` REPL are preserved as
+  synchronous-reply façades — they publish on the DM channel, await one
+  `SEND_CHANNEL_MESSAGE` reply on the same channel, and return it to the
+  caller. Eliminates the parallel chat transport that v0.2.1 introduced
+  and is the reason `EventType.MESSAGE_RECEIVED` /
+  `ActionType.SEND_MESSAGE` are renamed (not just superseded) to
+  `CHANNEL_MESSAGE` / `SEND_CHANNEL_MESSAGE` in PR 4a. Lands in PR 4a
+  atomically with the rename.
+- **Example:** "Under chat-as-DM, the chat REST handler is a thin
+  publish-and-await wrapper over `ChannelRouter.Publish` — no separate
+  ingest path."
 
 ### Persona Nickname
 - **Aliases:** —
