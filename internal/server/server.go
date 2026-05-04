@@ -216,20 +216,29 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler returns the composed HTTP handler with middleware applied.
-// Execution order (outermost first): handlerWrapper (optional, e.g. otelhttp) →
-// recovery → requestID → logging → mux.
+// Execution order (outermost first):
+//
+//	handlerWrapper (optional, e.g. otelhttp) → recovery → requestID →
+//	logging → rate-limit + circuit-breaker → mux
+//
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
 // (Review finding F-01: r.WithContext creates a new *http.Request, so
 // loggingMiddleware must receive the request *after* requestID injects the ID.)
+//
+// The rate-limit/circuit-breaker layer is the innermost wrapper around
+// the mux (PR #244 review L-04/L-05), so 429/403 short-circuit responses
+// still flow back through loggingMiddleware and appear in the access log
+// with their X-Request-ID header set.
 func (s *Server) Handler() http.Handler {
 	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
 	var h http.Handler = s.mux
-	// Rate-limit + circuit-breaker run before logging so 429/403 responses
-	// still appear in the access log; placed inside requestID so the
-	// short-circuit response carries an X-Request-ID header for client
-	// correlation. Nil-safe — degrades to passthrough when unwired
-	// (RFC 0009 PR 2).
+	// Rate-limit + circuit-breaker wrap the mux directly so denials
+	// short-circuit before any handler-side work. Because they sit
+	// inside the logging wrapper, 429/403 responses still appear in
+	// the access log; because they sit inside requestID, the response
+	// carries an X-Request-ID header for client correlation. Nil-safe
+	// — degrades to passthrough when unwired (RFC 0009 PR 2).
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
 		h = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(h)
 	}
