@@ -169,6 +169,22 @@ Nice-to-Have items (also pinned to PR 8 unless an earlier PR's diff naturally in
 > whenever the channels subsystem is enabled. See CHANGELOG entry
 > for the operator-facing trust-boundary statement.
 
+> **✅ Merged as PR #245 (2026-05-04).**
+
+#### PR #245 review follow-ups
+
+Deep review filed at `docs/pr-reviews/pr-245-review.md` (local-only). No Must-Fix applied at merge time. Seven follow-up issues captured as `docs/issues/ISSUE-0009` through `ISSUE-0015` (committed in the pre-merge tidy-up):
+
+| Issue | Finding | Target PR | Severity |
+|-------|---------|-----------|---------|
+| [ISSUE-0009](../issues/ISSUE-0009-channel-fallback-warn-once-test-race.md) | `channelFallbackWarnOnce` is a package-level `sync.Once`; reassigned in tests causes latent `-race` flake once any sibling adopts `t.Parallel()`. | **PR 3 or PR 8** | Medium |
+| [ISSUE-0010](../issues/ISSUE-0010-reconcile-membership-divergence-doc-behaviour-mismatch.md) | `membershipDivergence` doc claims policy drift "is logged" but function only compares participant id sets — doc/behaviour mismatch. | **PR 8** | Low |
+| [ISSUE-0011](../issues/ISSUE-0011-publish-mentions-count-cap.md) | `handlePublishMessage` forwards `req.Mentions` without count cap — defense-in-depth gap on the unauthenticated REST surface. | **PR 4** | Low |
+| [ISSUE-0012](../issues/ISSUE-0012-channels-db-parent-dir-not-auto-created.md) | `--channels-db` default path (`data/channels.db`) parent directory not auto-created; fresh checkout silently degrades channels to 503. | **PR 3** | Low |
+| [ISSUE-0013](../issues/ISSUE-0013-channel-messages-published-counter.md) | No `channel.messages.published` counter alongside `channel.messages.delivered`; delivered/published ratio dashboard not computable. | **PR 4** | Low |
+| [ISSUE-0014](../issues/ISSUE-0014-channel-fanout-bounded-concurrency.md) | `ChannelRouter.fanout` dispatches inline per-recipient (O(N × 5s) worst-case); bounded-concurrency `errgroup` needed before PR 4 gRPC dispatcher. | **PR 4** | Low |
+| [ISSUE-0015](../issues/ISSUE-0015-list-channels-cursor-and-store-side-limit.md) | `handleListChannels` loads all rows then client-truncates; no `next_cursor` in response; silent data truncation once the channel cap is lifted. | **PR 8** | Low |
+
 ---
 
 ### PR 3: `feature/v030-rfc0011-proto-regen` — Phase 2a: Proto + RPC
