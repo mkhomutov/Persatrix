@@ -217,8 +217,23 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### PR checklist
 
-- [ ] `make proto` is the only path used to regenerate; the `proto-python` target now auto-rewrites absolute imports to relative form (Makefile fixup added in PR 3 review; ISSUE-0016 ✅ resolved)
-- [ ] Old `ChannelService`-related code deleted in the same commit as the proto edit (no "deprecation window" — the surface had no producer)
+- [x] `make proto` is the only path used to regenerate; the `proto-python` target now auto-rewrites absolute imports to relative form (Makefile fixup added in PR 3 review; ISSUE-0016 ✅ resolved)
+- [x] Old `ChannelService`-related code deleted in the same commit as the proto edit (no "deprecation window" — the surface had no producer)
+
+> **✅ Merged as PR #246 (2026-05-04).**
+
+#### PR #246 review follow-ups
+
+Deep review completed (local-only, not committed per [Status Hygiene rules](../development-workflow.md#status-hygiene)). One Must-Fix applied inline (H-1); no blocking findings at merge. Six follow-up issues captured in `docs/issues/`:
+
+| Issue | Finding | Target PR | Severity |
+|-------|---------|-----------|----------|
+| [ISSUE-0018](../issues/ISSUE-0018-channel-message-event-receiver-bounds-enforcement.md) | `ChannelMessageEvent` wire bounds (content 4 000 chars, `mentions[]` 10 entries, `thread_id` 128 chars, `channel_type` membership) documented in proto comments only; receiver enforcement is PR 4's single gate. | **PR 4** | Medium |
+| [ISSUE-0019](../issues/ISSUE-0019-taskack-reuse-policy-comment.md) | `TaskAck` named generically but used by exactly one RPC; proto reuse-policy comment needed to prevent scope-creep coupling. | **PR 8** | Low |
+| [ISSUE-0020](../issues/ISSUE-0020-channel-type-proto-enum.md) | `ChannelMessageEvent.channel_type` is a closed string set `{group, dm, thread}`; promote to proto enum to eliminate per-receiver re-validation. Companion to ISSUE-0018. | **PR 8** | Low |
+| [ISSUE-0021](../issues/ISSUE-0021-channel-message-event-roundtrip-test.md) | No round-trip serialization test for `ChannelMessageEvent`; field-number renumber accidents would survive CI. | **PR 4** | Low |
+| [ISSUE-0022](../issues/ISSUE-0022-chatresponse-timestamp-format-divergence-comment.md) | `ChannelMessageEvent.timestamp` (int64 epoch) diverges from `ChatResponse`/`TaskProgress` (RFC 3339 string); cross-reference comment needed to prevent future regressions. | **PR 8** | Low |
+| [ISSUE-0023](../issues/ISSUE-0023-ci-gate-make-proto-no-diff.md) | No CI gate for `make proto && git diff --exit-code`; blocked on ISSUE-0016 (✅ resolved) + ISSUE-0017 for the gate to pass cleanly. | **PR 8** | Low |
 
 ---
 
