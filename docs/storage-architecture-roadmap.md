@@ -3,7 +3,7 @@
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-03
-**Target**: scope-shaping for the v0.4.0 storage layer; sets the personal/society storage boundary policy and the vectors-as-accelerator-only policy. Spawns one v0.4.0 RFC; folds smaller items into existing RFCs.
+**Target**: scope-shaping for the v0.4.0 storage layer; sets the personal/society storage boundary and the vectors-as-accelerator-only policy. Spawns one v0.4.0 RFC; folds smaller items into existing RFCs.
 **Companion to**: [Memory Quality Roadmap](memory-quality-roadmap.md), [v0.3.0 plan](v0.3.0-plan.md), [ROADMAP.md §v0.4.0](../ROADMAP.md#v040--agent-organizations)
 
 ---
@@ -30,44 +30,40 @@
 
 Persatrix's storage layer is being asked to do increasingly different things across versions. Today (v0.2.3 shipped, v0.3.0 in implementation), every memory tier is a table in a single per-agent `memory.db` SQLite file. That model is correct for v0.2's per-agent private memory, but the roadmap is asking it to do more:
 
-- **v0.3.0** introduces multi-agent channels ([RFC 0011](rfcs/0011-channels-bridges.md)) and shared memory pools ([RFC 0008 §H](rfcs/0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory)) — *first time agents share state*.
-- **v0.4.0** introduces organizational topologies (RFC 0012), sub-agent spawning (RFC 0010), the Skill Registry ([RFC 0014](rfcs/0014-agent-skill-registry-lifecycle.md)), and the Decision Policy Engine (RFC 0028, currently on its own feature branch) — *first time the society itself has structure*.
-- **v0.5.0** introduces external bridges and the full compliance & privacy layer ([RFC 0013](rfcs/0013-legal-ethical-compliance.md)) — *first time external user data enters at volume and right-to-erasure must be enforceable*.
-- **v0.6.0** introduces the distributed mesh — *first time storage is not co-located with the agent*.
+- **v0.3.0** — multi-agent channels ([RFC 0011](rfcs/0011-channels-bridges.md)) and shared memory pools ([RFC 0008 §H](rfcs/0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory)): *first time agents share state*.
+- **v0.4.0** — organizational topologies (RFC 0012), sub-agent spawning (RFC 0010), the Skill Registry ([RFC 0014](rfcs/0014-agent-skill-registry-lifecycle.md)), and the Decision Policy Engine (RFC 0028): *first time the society itself has structure*.
+- **v0.5.0** — external bridges and full compliance & privacy ([RFC 0013](rfcs/0013-legal-ethical-compliance.md)): *first time external user data enters at volume and right-to-erasure must be enforceable*.
+- **v0.6.0+** (when the distributed mesh lands; not yet promised on [ROADMAP.md](../ROADMAP.md)): *first time storage is not co-located with the agent*.
 
 Without a policy decision now about *where the personal/society boundary lives*, each of those RFCs will independently pick "another table in `memory.db`," and the cost of carving the society state out grows with every PR that lands.
 
-This doc captures the architectural assessment, recommends a personal/society storage split, and stages the work into one focused v0.4.0 RFC plus a small set of addenda to existing RFCs. It is **not an RFC** — it is the planning step between the architectural question and the RFCs that act on it. Same shape and role as [memory-quality-roadmap.md](memory-quality-roadmap.md).
+This doc captures the architectural assessment, recommends a personal/society storage split, and stages the work into one focused v0.4.0 RFC plus addenda to existing RFCs. It is **not an RFC** — it is the planning step between the architectural question and the RFCs that act on it. Same shape and role as [memory-quality-roadmap.md](memory-quality-roadmap.md).
 
 ## Scope and non-goals
 
 **In scope.** Storage substrate choice (SQLite / Postgres / Mongo / vectors); the personal/society boundary; tier vocabulary; semantic-memory naming; vector-deployment policy; sequencing across v0.3.x, v0.4.0, and v0.5.0.
 
-**Out of scope.** Editing accepted RFCs ([0005](rfcs/0005-persona-agent-memory.md), [0008](rfcs/0008-agent-memory-context-optimization.md), [0017](rfcs/0017-persona-memory-injection-budget.md), [0020](rfcs/0020-interaction-lifecycle.md), [0026](rfcs/0026-declarative-facts-tier.md)). Authoring the v0.4.0 storage-split RFC itself. Selecting Postgres extensions (`pgvector` vs alternatives) — that lives in the spawned RFC. Mesh / distributed storage (v0.6.0).
+**Out of scope.** Editing accepted RFCs (0005, 0008, 0017, 0020, 0026). Authoring the v0.4.0 storage-split RFC itself. Selecting Postgres extensions (`pgvector` vs alternatives) — that lives in the spawned RFC. Mesh / distributed storage (v0.6.0).
 
 ---
 
 ## Where Persatrix is now and where it is going
 
-Today, grounded in code: one per-agent `memory.db` SQLite file holds episodic + relationship + notes ([docs/diagrams/memory-architecture.md](diagrams/memory-architecture.md)); episodic uses FTS5 lexical recall ([agents/memory/episodic.py](../agents/memory/episodic.py)); working memory is volatile in Python ([agents/memory/working.py](../agents/memory/working.py)); shared-pool scaffolding exists ([agents/memory/shared_pool.py](../agents/memory/shared_pool.py)) but is per-agent in physical layout; migrations are forward-only ([agents/memory/migrations.py](../agents/memory/migrations.py)). [RFC 0017](rfcs/0017-persona-memory-injection-budget.md) caps per-event memory injection; [RFC 0020](rfcs/0020-interaction-lifecycle.md) collapses per-message episodes into per-interaction summaries; [RFC 0026](rfcs/0026-declarative-facts-tier.md) adds a `facts` table; [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) consolidates via reflection. RFC 0028 will add `DecisionRecord`s on every checkpoint — yet another consumer of the same SQLite file.
-
-The trajectory of *what storage must do*:
+Today, grounded in code: one per-agent `memory.db` SQLite file holds episodic + relationship + notes ([docs/diagrams/memory-architecture.md](diagrams/memory-architecture.md)); episodic uses FTS5 lexical recall ([agents/memory/episodic.py](../agents/memory/episodic.py)); working memory is volatile in Python ([agents/memory/working.py](../agents/memory/working.py)); shared-pool scaffolding exists ([agents/memory/shared_pool.py](../agents/memory/shared_pool.py)) but is per-agent in physical layout; migrations are forward-only ([agents/memory/migrations.py](../agents/memory/migrations.py)). [RFC 0017](rfcs/0017-persona-memory-injection-budget.md) caps per-event memory injection; [RFC 0020](rfcs/0020-interaction-lifecycle.md) collapses per-message episodes into per-interaction summaries; [RFC 0026](rfcs/0026-declarative-facts-tier.md) adds a `facts` table; [RFC 0027](rfcs/0027-reflection-driven-consolidation.md) consolidates via reflection. RFC 0028 will add `DecisionRecord`s on every checkpoint — yet another consumer of the same SQLite file.The trajectory of *what storage must do* (v0.2 line is current observed state; v0.3+ are projected):
 
 ```
-v0.2: per-agent private memory                     → SQLite is perfect
-v0.3: + agent-to-agent channels + shared pools     → SQLite starts straining
-v0.4: + org graph + decision audit + skill grants  → SQLite is the wrong shape
-v0.5: + erasure + consent + compliance audit       → SQLite + erasure is a fight
-v0.6: + multi-node                                 → SQLite is no longer an option
+v0.2: per-agent private memory                     → SQLite is perfect           (observed)
+v0.3: + agent-to-agent channels + shared pools     → SQLite starts straining     (projected)
+v0.4: + org graph + decision audit + skill grants  → SQLite is the wrong shape   (projected)
+v0.5: + erasure + consent + compliance audit       → SQLite + erasure is a fight (projected)
+v0.6: + multi-node                                 → SQLite is no longer an option (projected)
 ```
 
 Plan the v0.3/v0.4 storage split now, even if v0.3 still ships entirely against SQLite. The longer the "everything in `memory.db`" assumption persists, the more expensive the carve-out gets.
 
----
-
 ## The dementia bar reframed in storage terms
 
-The user-facing quality bar (from [Memory Quality Roadmap](memory-quality-roadmap.md#quality-bar--the-dementia-test)) is "natural and better than human." The roadmap names the failure mode: prose hides facts, sharp interaction boundaries reset working memory, recall is relevance-only and not salience-weighted. Translated into storage requirements:
+The user-facing quality bar (from [Memory Quality Roadmap](memory-quality-roadmap.md#quality-bar--the-dementia-test)) is "natural and better than human." Translated into storage requirements:
 
 | Quality property | Storage implication |
 |------------------|---------------------|
@@ -89,7 +85,7 @@ None of those say "vector database." All say "the right *shape* of data, written
 
 ### SQLite — keep for personal memory
 
-A persona reads its own memory in tight loops on every tick. Embedded SQLite is microseconds; any network DB is milliseconds — and at the tick rates the v0.2.x cost-leak fix already had to defend against ([RFC 0017 §F](rfcs/0017-persona-memory-injection-budget.md)), even single-digit-millisecond round trips matter. One file per agent is a natural ownership boundary: backups, snapshots, "delete this agent" become `rm`. FTS5 is good enough for recall over interaction-summary corpora (RFC 0024's deferral is the recognition of this). Operational cost is zero — Persatrix runs from a terminal as a hobbyist project as well as a system; asking the user to provision Postgres for a single agent is a tax we shouldn't levy.
+A persona reads its own memory in tight loops on every tick. Embedded SQLite is microseconds; any network DB is milliseconds — and at the tick rates the v0.2.x cost-leak fix (the empty-tick short-circuit) already had to defend against ([RFC 0017 §F](rfcs/0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit)), even single-digit-millisecond round trips matter. One file per agent is a natural ownership boundary: backups, snapshots, "delete this agent" become `rm`. FTS5 is good enough for recall over interaction-summary corpora. Operational cost is zero — asking the user to provision Postgres for a single agent is a tax we shouldn't levy.
 
 ### Postgres — add for society state
 
@@ -97,7 +93,7 @@ The moment v0.3.0 ships channels, agents share state. The moment v0.4.0 ships or
 
 | Society capability | Why SQLite struggles | Why Postgres fits |
 |--------------------|---------------------|-------------------|
-| Multi-agent channels ([RFC 0011](rfcs/0011-channels-bridges.md)) | Single-writer model + file locking under fan-out | Concurrent writers, NOTIFY/LISTEN |
+| Multi-agent channels ([RFC 0011](rfcs/0011-channels-bridges.md)) | WAL still serializes writers; fan-out from N channels contends on the single writer | Concurrent writers, NOTIFY/LISTEN |
 | Org topology (v0.4 RFC 0012) | Recursive CTE polish needed | Recursive CTEs first-class |
 | Decision audit (RFC 0028) | Single-writer bottleneck on append + replay | Partitioned tables + logical decoding |
 | HITL approval queue (RFC 0028) | Cross-agent state with TTLs | Row-level locking, advisory locks |
@@ -109,7 +105,7 @@ The moment v0.3.0 ships channels, agents share state. The moment v0.4.0 ships or
 
 ### MongoDB — explicitly not
 
-Data shape is wrong (fact tuples, graph edges, audit chains — none benefit from documents); joins matter for v0.4 organizational queries; transactional story is weaker than Postgres for the audit chain; no team-familiarity payoff (the codebase is SQL-idiomatic throughout). Mongo would be a reasonable choice for raw transcript storage — but Postgres + JSONB covers that 90% of the way at much lower architectural cost.
+Data shape is wrong (fact tuples, graph edges, audit chains — none benefit from documents); joins matter for v0.4 organizational queries; transactional story is weaker than Postgres for the audit chain; the codebase is SQL-idiomatic throughout. Postgres + JSONB covers raw transcript storage at much lower architectural cost.
 
 ### Vector DBs (Pinecone / Weaviate / Qdrant) — deferred
 
@@ -128,12 +124,13 @@ Today's tiers (working / episodic / relationship / notes) describe the *physical
 | **Facts** | Subject-indexed declarative truth | Persistent, retraction only | SQLite | [RFC 0026](rfcs/0026-declarative-facts-tier.md) |
 | **Bonds** | Per-pair relationship state | Persistent, slow decay | SQLite | Relationship |
 | **Commitments** | Time-bound promises | Persistent, lifecycle-managed | SQLite | [RFC 0021 P2](rfcs/0021-persona-temporal-awareness.md) |
-| **Identity** | Self-model; only persona writes | Persistent | SQLite | `subject="self"` slice of facts ([RFC 0026 §C.4](rfcs/0026-declarative-facts-tier.md)) |
 | **Notes** | Agent-discretion prose | Persistent | SQLite | Notes (unchanged) |
 | **Procedural** | Extracted patterns | Persistent | Postgres (society-shared) | [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md) |
-| **Shared world** | Cross-agent facts and channels | Persistent, multi-writer | Postgres | RFC 0008 §H + RFC 0011 |
+| **Shared world** | Cross-agent facts and channels | Persistent, multi-writer | Postgres | [RFC 0008 §H](rfcs/0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) + RFC 0011 |
 
-Why the rename matters: "scratchpad" signals it's allowed to be lossy but should *bridge one interaction-close boundary* (today's "working" is purely volatile — [root cause #2](memory-quality-roadmap.md#root-causes-of-the-dementia-feel) waiting to happen); "bonds" prevents collision with the relational *database*; "identity" promoted to a tier forces the design to think about who can write to it (only the persona, never an extractor reading user input); "procedural" carved out for [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md) lands in the society store from day one. The rename is **vocabulary, not behavior** — pure docs change. Tracked as [SA-2](#recommended-sequencing).
+The **Facts** row includes a `subject = "self"` slice that serves as the persona's self-model; whether that slice deserves promotion to a separate **Identity** tier or remains a view-with-write-ACL over Facts is [OQ #4](#open-questions). The doc currently treats it as the latter — one tier, one row class — to avoid pre-empting the OQ.
+
+Why the rename matters: "scratchpad" signals it's allowed to be lossy but should *bridge one interaction-close boundary* (today's "working" is purely volatile — [root cause #2](memory-quality-roadmap.md#root-causes-of-the-dementia-feel) waiting to happen); "bonds" prevents collision with the relational *database*; the `subject="self"` slice of Facts forces the design to think about who can write to it (only the persona, never an extractor reading user input — see [OQ #4](#open-questions)); "procedural" carved out for [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md) lands in the society store from day one. The rename is **vocabulary, not behavior**. Tracked as [SA-2](#recommended-sequencing).
 
 ---
 
@@ -143,13 +140,13 @@ Why the rename matters: "scratchpad" signals it's allowed to be lossy but should
 
 ### The cognitive-science kind — already happening, name it explicitly
 
-[RFC 0026](rfcs/0026-declarative-facts-tier.md)'s `(subject, predicate, object, certainty, asserted_at)` *is* semantic memory in the cognitive sense. The docs should name it that way. Cognitive psychology distinguishes:
+[RFC 0026](rfcs/0026-declarative-facts-tier.md)'s `(subject, predicate, object, certainty, asserted_at)` *is* semantic memory in the cognitive sense. The docs should name it that way:
 
 - **Episodic** — autobiographical events → `episodes` table ([RFC 0020](rfcs/0020-interaction-lifecycle.md))
 - **Semantic** — context-free knowledge → `facts` table ([RFC 0026](rfcs/0026-declarative-facts-tier.md))
 - **Procedural** — how to do things → patterns extracted by [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md)
 
-Adopting that vocabulary makes the system easier to reason about and exposes a gap: Persatrix has no procedural memory tier today, and RFC 0015 is v0.5.0. A v0.4 placeholder — even just "extracted recipes can be hand-authored as YAML" — closes the loop early.
+Adopting that vocabulary exposes a gap: Persatrix has no procedural memory tier today, and RFC 0015 is v0.5.0. A v0.4 placeholder — even just "extracted recipes can be hand-authored as YAML" — closes the loop early.
 
 ### The vector-embedding kind — accelerator, not tier
 
@@ -157,9 +154,9 @@ Deploy embeddings *only when measurement shows BM25 missing relevant episodes th
 
 > **Vectors-as-accelerator-only**: vector indexes never own facts. They are recall accelerators on top of stores that already hold the truth in structured form. If a fact only exists as a high-similarity hit, it does not exist.
 
-This matters because: (1) [RFC 0013](rfcs/0013-legal-ethical-compliance.md) erasure must guarantee deletion, and selectively deleting from vector indexes is hard (re-indexing pressure, IVF rebuild) — if facts live in `facts` and the vector is just an index, deletion is unambiguous; (2) RFC 0028's `DecisionRecord` replay needs determinism, and embeddings drift across model upgrades — keep them off the load-bearing path; (3) embedding every event in a busy channel is not cheap. Tracked as [SA-3](#recommended-sequencing).
+This matters because: (1) [RFC 0013](rfcs/0013-legal-ethical-compliance.md) erasure must guarantee deletion, and selectively deleting from vector indexes is hard — if facts live in `facts` and the vector is just an index, deletion is unambiguous; (2) RFC 0028's `DecisionRecord` replay needs determinism, and embeddings drift across model upgrades — keep them off the load-bearing path; (3) embedding every event in a busy channel is not cheap. Tracked as [SA-3](#recommended-sequencing).
 
-One place vectors *would* be load-bearing earlier: **subject canonicalization for facts**. [RFC 0026 §C](rfcs/0026-declarative-facts-tier.md) punts on entity resolution. For non-trivial cases ("Bob" / "Robert" / "rob@example.com" / "Bob Chen"), case-and-whitespace normalization will fail. A small embedding-based subject-resolution pass at fact-write time — with a confidence threshold and an "ask for confirmation" fallback — addresses that without putting vectors on the read path. Worth raising as an OQ on RFC 0026.
+One place vectors *would* be load-bearing earlier: **subject canonicalization for facts**. [RFC 0026 §C](rfcs/0026-declarative-facts-tier.md) punts on entity resolution. For non-trivial cases ("Bob" / "Robert" / "rob@example.com"), case-and-whitespace normalization will fail. A small embedding-based subject-resolution pass at fact-write time — with a confidence threshold and an "ask for confirmation" fallback — addresses that without putting vectors on the read path. Worth raising as an OQ on RFC 0026.
 
 ---
 
@@ -172,12 +169,13 @@ One place vectors *would* be load-bearing earlier: **subject canonicalization fo
 │   Scratchpad (RAM)  ──── snapshot ───►  agent-{id}/scratch.db   │
 │                                                                  │
 │   agent-{id}/episodes.db    (FTS5;  decay)                      │
-│   agent-{id}/facts.db       (subject-indexed; retraction chain) │
+│   agent-{id}/facts.db       (subject-indexed; retraction chain; │
+│                              includes subject="self" slice)     │
 │   agent-{id}/bonds.db       (per-pair trust + texture)          │
 │   agent-{id}/commitments.db (time-bound; lifecycle)             │
-│   agent-{id}/identity.db    (self-only writes)                  │
 │   agent-{id}/notes.db       (agent-authored prose)              │
-│   agent-{id}/audit.jsonl    (append-only; never compacted)      │
+│   agent-{id}/action-log.jsonl  (per-agent action chain;         │
+│                                 backend pinned by OQ #3)        │
 └──────────────────────────────────────────────────────────────────┘
                                │
                                │  publish via narrowed capability tokens
@@ -201,7 +199,7 @@ One place vectors *would* be load-bearing earlier: **subject canonicalization fo
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Key invariants: per-agent files are an **ownership boundary** (`rm -rf agent-{id}/`); the society Postgres is the **only place agents talk to each other through** (no agent reads another's SQLite directly); vectors live in **exactly one place** (society Postgres + `pgvector`) when they exist at all; the personal/society boundary is the **same** boundary that capability tokens (RFC 0009 P4) and HITL gates (RFC 0028 §C1) enforce. This diagram is the **target** for the v0.4.0 storage-split RFC — not a v0.3.0 commitment.
+Key invariants: per-agent files are an **ownership boundary** (`rm -rf agent-{id}/`); the society Postgres is the **only place agents talk to each other through** (no agent reads another's SQLite directly); vectors live in **exactly one place** (society Postgres + `pgvector`) when they exist at all; the personal/society boundary is the **same** boundary that capability tokens ([RFC 0009 Phase 4](rfcs/0009-security-sandboxing.md#phase-4-agent-identity-tokens--hitl-gates)) and HITL gates ([RFC 0028 §H](rfcs/0028-agent-decision-policy-engine.md#h-mandatory-human-in-the-loop-decision-classes)) enforce. There are deliberately **two audit streams**: a per-agent action chain (the `action-log.jsonl` per agent) for that agent's own outbound actions, and a society-wide `audit_chain` table in Postgres for cross-agent events; [OQ #3](#open-questions) governs only the per-agent stream's backend (JSONL vs SQLite append-only). This diagram is the **target** for the v0.4.0 storage-split RFC — not a v0.3.0 commitment.
 
 ---
 
@@ -222,7 +220,7 @@ SA = Storage Architecture.
 | SA-9 | Forgetting as first-class (generalization, trauma-locking, embarrassment-decay) | speculative; needs forcing function | v0.5+ | 🔮 Deferred |
 | SA-10 | Personality as memory-shaping function | speculative; needs forcing function | v0.5+ | 🔮 Deferred |
 
-**Ordering**: SA-1 is load-bearing; it should land *before* RFC 0028 implementation begins or RFC 0010 schema is settled, otherwise both will bake in "another table in `memory.db`" assumptions SA-1 has to undo. SA-2/SA-3/SA-4 are independent and can ship as small PRs in v0.3.x without blocking. SA-5 is gated on a real benchmark — measure first. SA-6 may already be in [RFC 0020 P3](rfcs/0020-interaction-lifecycle.md) scope. SA-8 should be raised as an OQ on RFC 0010 when it's authored.
+**Ordering**: SA-1 is load-bearing; it should land *before* RFC 0028 implementation begins or RFC 0010 schema is settled, otherwise both will bake in "another table in `memory.db`" assumptions SA-1 has to undo. SA-2/SA-3/SA-4 are independent and can ship as small PRs in v0.3.x. SA-5 is gated on a real benchmark. SA-6 may already be in [RFC 0020 P3](rfcs/0020-interaction-lifecycle.md) scope. SA-8 should be raised as an OQ on RFC 0010 when authored.
 
 The throughline: **draw the personal/society storage boundary now, on paper, before v0.4.0 implementation forces it on us in code**.
 
@@ -230,11 +228,11 @@ The throughline: **draw the personal/society storage boundary now, on paper, bef
 
 ## Risks
 
-1. **Adds Postgres as a hard dependency for v0.4.0+.** Today's "run it from a terminal" experience would degrade. Mitigation: ship a `--single-agent` mode that skips Postgres entirely; enable society features only when Postgres is configured. Single-agent must be a first-class experience, not deprecated.
-2. **One-file-per-tier multiplies SQLite connection management.** Mitigation: a thin `MemoryStore` facade holds the per-tier connections; callers don't see the file split. SA-5 is gated on contention measurement, not assumed.
-3. **Migration cost from current `memory.db` is real.** The schema isn't just rows; it's accumulated agent state. Mitigation: a one-shot `persatrix memory migrate` command; old `memory.db` keeps working in read-only fallback for a deprecation window.
-4. **"Vectors-as-accelerator-only" is a discipline that can erode.** Future contributors will be tempted to short-circuit. Mitigation: encode the rule in the `MemoryStore` API surface — `recall_by_similarity()` returns row IDs, never content; if no row exists, the embedding is stale and gets purged.
-5. **Counterfactual reasoning in this doc has no real cost data behind it.** Specifically, "SQLite starts straining at v0.3 channel volumes" is intuition, not benchmark. Mitigation: SA-1's PR plan opens with a benchmark step; if SQLite holds at realistic society scale, Postgres can defer to v0.5.0 (mesh-driven anyway).
+1. **Adds Postgres as a hard dependency for v0.4.0+.** Today's "run it from a terminal" experience would degrade. Mitigation: ship a `--single-agent` mode that skips Postgres entirely; enable society features only when Postgres is configured. Single-agent must remain a first-class experience.
+2. **One-file-per-tier multiplies SQLite connection management.** Mitigation: a thin `MemoryStore` facade holds the per-tier connections; callers don't see the file split. SA-5 is gated on contention measurement.
+3. **Migration cost from current `memory.db` is real.** Mitigation: a one-shot `persatrix memory migrate` command; old `memory.db` keeps working in read-only fallback for a deprecation window.
+4. **"Vectors-as-accelerator-only" is a discipline that can erode.** Mitigation: encode the rule in the `MemoryStore` API surface — `recall_by_similarity()` returns row IDs, never content. (Risks #2 and #4 share one facade: `MemoryStore` is a single class that owns both per-tier connection management and the no-content-from-vectors invariant.)
+5. **Counterfactual reasoning here has no real cost data.** Specifically, "SQLite starts straining at v0.3 channel volumes" is intuition, not benchmark. Mitigation: SA-1's PR plan opens with a benchmark step; if SQLite holds at realistic society scale, Postgres can defer to v0.5.0.
 
 ---
 
@@ -242,10 +240,10 @@ The throughline: **draw the personal/society storage boundary now, on paper, bef
 
 1. **At what scale does SQLite actually break for channels?** Worth benchmarking before committing to Postgres for v0.4.0. Specifically: 10 agents writing to one channel at 1 msg/sec each — does WAL mode hold? If yes, SA-1 narrows to "design the split, defer the migration."
 2. **Per-tier file split (SA-5) vs one-file-per-agent with separate tables.** Both work; the choice is locking-granularity gains vs connection-management cost. Decide inside SA-1's RFC.
-3. **Audit log: JSONL (cheap, replayable, slow to query) or SQLite append-only table (queryable, harder to tail)?** [RFC 0009](rfcs/0009-security-sandboxing.md) has likely thought about this; resolve as part of SA-1 / SA-7 prep.
+3. **Action log: JSONL (cheap, replayable, slow to query) or SQLite append-only table (queryable, harder to tail)?** [RFC 0009](rfcs/0009-security-sandboxing.md) has likely thought about this; resolve as part of SA-1 / SA-7 prep. Governs the per-agent stream only; the society `audit_chain` table is fixed at Postgres.
 4. **Does "identity" deserve a separate tier, or is it a `subject="self"` view over `facts.db` with a write ACL?** Lean toward view-with-ACL; the question is whether the ACL is enforceable inside SQLite or needs Python-layer mediation. Resolve in SA-2.
 5. **Procedural memory — really part of the memory system, or the skill registry ([RFC 0014](rfcs/0014-agent-skill-registry-lifecycle.md)) by another name?** Probably the latter. If so, the tier collapses into RFC 0014's catalogue; flag during SA-2.
-6. **Where do raw LLM transcripts live?** Today they're transient. For RFC 0028 replay and RFC 0013 right-to-erasure they probably need to land somewhere — Postgres? S3? Not addressed in any current RFC; surface during SA-1.
+6. **Where do raw LLM transcripts live?** Today they're transient. For RFC 0028 replay and RFC 0013 right-to-erasure they probably need to land somewhere — Postgres? S3? Surface during SA-1.
 
 ---
 
@@ -259,8 +257,9 @@ On ratification, the maintainer is expected to:
 2. Open SA-1 (the v0.4.0 storage-split RFC) before RFC 0028 implementation begins, so `DecisionRecord` schema lands in the right store.
 3. Add cross-reference rows to the [v0.3.0 plan §Memory Quality Follow-Ups](v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) for SA-2/SA-3/SA-4.
 4. Update [ROADMAP.md §v0.4.0](../ROADMAP.md#v040--agent-organizations) to list SA-1 as a v0.4.0 dependency for RFC 0010 / RFC 0028 / RFC 0012.
+5. Surface SA-6 as an Open Question on the [RFC 0020](rfcs/0020-interaction-lifecycle.md) Phase 3 PR plan, and SA-8 as an Open Question on the RFC 0010 design when it is authored — both are tracked here but need an owner in their respective RFCs.
 
-If the maintainer wants to push back on any of SA-1 through SA-10, the discussion lives here, not in the spawned RFCs. RFC reviewers can cite this doc by section.
+If the maintainer wants to push back on any of SA-1 through SA-10, the discussion lives here. RFC reviewers can cite this doc by section.
 
 ---
 
@@ -268,7 +267,7 @@ If the maintainer wants to push back on any of SA-1 through SA-10, the discussio
 
 - [Memory Quality Roadmap](memory-quality-roadmap.md) — companion discussion doc; precedent for this one's shape.
 - [RFC 0005](rfcs/0005-persona-agent-memory.md), [RFC 0008](rfcs/0008-agent-memory-context-optimization.md), [RFC 0008 Calibration Review](rfcs/0008-calibration-review.md) (landing point for SA-4), [RFC 0009](rfcs/0009-security-sandboxing.md), [RFC 0011](rfcs/0011-channels-bridges.md) (primary v0.3.0 motivator for SA-1), [RFC 0013](rfcs/0013-legal-ethical-compliance.md), [RFC 0017](rfcs/0017-persona-memory-injection-budget.md), [RFC 0020](rfcs/0020-interaction-lifecycle.md), [RFC 0026](rfcs/0026-declarative-facts-tier.md), [RFC 0027](rfcs/0027-reflection-driven-consolidation.md).
-- RFC 0028 (Agent Decision Policy Engine — currently on `feature/v04-rfc0028-agent-decision-policy-engine`, not yet merged to `main`; `DecisionRecord` is the third major event-stream consumer; SA-1 should land before its implementation).
-- [v0.3.0 plan](v0.3.0-plan.md) — current milestone; SA-2/SA-3/SA-4 fold here.
+- RFC 0028 (Agent Decision Policy Engine — on `feature/v04-rfc0028-agent-decision-policy-engine`; `DecisionRecord` is the third major event-stream consumer; SA-1 should land before its implementation).
+- [v0.3.0 plan](v0.3.0-plan.md) — SA-2/SA-3/SA-4 fold here.
 - [ROADMAP.md §v0.4.0](../ROADMAP.md#v040--agent-organizations) — version target for SA-1.
 - [docs/rfcs/README.md](rfcs/README.md) — RFC process and lifecycle.
