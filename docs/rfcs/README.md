@@ -157,7 +157,7 @@ Some RFC numbers are reserved for previously scoped topics that do not yet have 
 | 0024 | Episodic Vector Recall — deferred; gated on [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) data showing BM25 misses on multi-turn summaries | v0.3.x or v0.4.0 |
 | 0025 | Thematic Episode Clustering — superseded by [RFC 0027 — Reflection-Driven Consolidation](0027-reflection-driven-consolidation.md) per the [memory-quality roadmap](../memory-quality-roadmap.md#e-reflection-driven-consolidation-not-llm-clustering); slot retained for historical record | superseded |
 
-This is why the current sequence on disk is 0001–0009 + 0013–0022 + 0026–0027 — RFC 0015 (Process Automation) was written after the 0010–0012 reservations were already in place; RFCs 0023–0025 are reserved per the memory-quality assessment in [memory-quality-roadmap.md](../memory-quality-roadmap.md). Source of truth for reservations is the [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index).
+This is why the current sequence on disk is 0001–0009 + 0013–0022 + 0026–0028 — RFC 0015 (Process Automation) was written after the 0010–0012 reservations were already in place; RFCs 0023–0025 are reserved per the memory-quality assessment in [memory-quality-roadmap.md](../memory-quality-roadmap.md). Source of truth for reservations is the [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index).
 
 Examples:
 - `0001-persona-agent-architecture.md`
