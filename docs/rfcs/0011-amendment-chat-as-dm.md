@@ -13,7 +13,7 @@
 
 ## Context
 
-RFC 0011's [§Relationship to Existing Scaffolding](0011-channels-bridges.md#design--implementation) renamed `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` on the stated premise that *"pre-existing types had no producer beyond partial scaffolding."* That premise was true at RFC authoring time but is now stale: RFC 0016 (shipped in v0.2.1) made these the heavy producer/consumer for the chat ingest/reply path. Concrete v0.2.1 producers on `main` include [agents/server_servicers.py](../../agents/server_servicers.py) `SendChatMessage` (builds `MESSAGE_RECEIVED`) and [agents/persona.py](../../agents/persona.py) (emits `SEND_MESSAGE` for chat replies).
+RFC 0011's [§Relationship to Existing Scaffolding](0011-channels-bridges.md#relationship-to-existing-scaffolding) renamed `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` on the stated premise that *"pre-existing types had no producer beyond partial scaffolding."* That premise was true at RFC authoring time but is now stale: RFC 0016 (shipped in v0.2.1) made these the heavy producer/consumer for the chat ingest/reply path. Concrete v0.2.1 producers on `main` include [agents/server_servicers.py](../../agents/server_servicers.py) `SendChatMessage` (builds `MESSAGE_RECEIVED`) and [agents/persona.py](../../agents/persona.py) (emits `SEND_MESSAGE` for chat replies).
 
 A blind rename across PR 4a/4b would create a window where chat REST/gRPC and the `persatrix chat` REPL are broken on `main`. This amendment pins a unified design so the rename + chat-path migration land atomically in PR 4a.
 
@@ -34,6 +34,8 @@ A user–agent chat is a `dm` channel between a `UserParticipant` and a persona 
 ### DM gate-bypass
 
 The RFC 0011 §D response gate is implicitly `always` for the non-sender on DM channels: the user implicitly mentions the agent by addressing the DM, and the chat caller is blocked waiting for a reply. The `respond` policy on a DM-channel membership is therefore not consulted. Group-channel gating semantics in §D are unchanged.
+
+**Security note.** DM creation is the access-control checkpoint: `ChannelStore.GetOrCreateDM(user_id, agent_id)` MUST enforce that the requesting user is permitted to address the agent. Per-publish gating is bypassed by design, so the auth check cannot live on the publish path — it must be enforced at DM-channel creation time and is therefore PR 4a's responsibility, not a future-PR concern.
 
 ### What stays in RFC 0016
 
