@@ -278,6 +278,15 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 // `actor` is read from the standard X-Agent-ID header so the audit
 // event records who initiated the release; defaults to "operator"
 // when the header is absent.
+//
+// SECURITY (PR #244 review H-01): this endpoint has no authentication
+// or authorization in v0.3.0 because the entire REST surface is
+// unauthenticated until token validation lands in RFC 0009 Phase 4.
+// The endpoint is uniquely sensitive — it undoes a security control —
+// so deployments MUST front the orchestrator with an authenticating
+// reverse proxy (or restrict the route at the network layer) until
+// Phase 4 ships. Tracked alongside the broader X-Agent-ID spoofing
+// gap documented in RFC 0009 §B.
 func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !resourceIDRegex.MatchString(id) {
@@ -298,6 +307,7 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
 func agentToResponse(a *registry.AgentInfo) agentResponse {
 	resp := agentResponse{
 		ID:      a.ID,

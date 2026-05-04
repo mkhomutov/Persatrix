@@ -120,7 +120,7 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 	cutoff := now.Add(-time.Duration(rl.cfg.WindowSeconds) * time.Second)
 
 	rl.mu.Lock()
-	ring, evicted := rl.touchRingLocked(resolved, now)
+	ring, evicted := rl.touchRingLocked(resolved)
 	ring.evictOlderThan(cutoff)
 	allowed := ring.count < rl.cfg.CallsPerWindow
 	if allowed {
@@ -195,7 +195,12 @@ func (rl *RateLimiter) resolveAgentID(id string) (string, bool) {
 // touch. Returns the ring plus any agent IDs that were evicted; the
 // caller emits the audit events after releasing rl.mu so a slow audit
 // sink cannot stall the hot path.
-func (rl *RateLimiter) touchRingLocked(agentID string, now time.Time) (*agentRing, []string) {
+//
+// PR #244 review L-01: the previous signature took a `now time.Time`
+// argument that was never used inside the function (eviction is
+// position-driven via the LRU list, not time-driven). Dropped to
+// remove the dead `_ = now` suppressor.
+func (rl *RateLimiter) touchRingLocked(agentID string) (*agentRing, []string) {
 	if elem, ok := rl.rings[agentID]; ok {
 		rl.lru.MoveToFront(elem)
 		return elem.Value.(*agentRing), nil
@@ -214,12 +219,17 @@ func (rl *RateLimiter) touchRingLocked(agentID string, now time.Time) (*agentRin
 			break
 		}
 	}
-	_ = now
 	return ring, evicted
 }
 
 // evictTailLocked drops the LRU tail and returns the evicted agent ID
 // (or "" when the LRU is empty). Caller holds rl.mu.
+//
+// PR #244 review M-02: also purges the corresponding `lastEmit` entry
+// so the violation-throttle map cannot grow unbounded after the LRU
+// ring map evicts the agent. lastEmitMu is acquired AFTER the caller's
+// rl.mu is held; no other code path holds lastEmitMu and then
+// attempts rl.mu, so the nested-lock order is safe.
 func (rl *RateLimiter) evictTailLocked() string {
 	tail := rl.lru.Back()
 	if tail == nil {
@@ -228,6 +238,9 @@ func (rl *RateLimiter) evictTailLocked() string {
 	victim := tail.Value.(*agentRing)
 	rl.lru.Remove(tail)
 	delete(rl.rings, victim.agentID)
+	rl.lastEmitMu.Lock()
+	delete(rl.lastEmit, victim.agentID)
+	rl.lastEmitMu.Unlock()
 	return victim.agentID
 }
 

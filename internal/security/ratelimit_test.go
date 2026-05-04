@@ -184,3 +184,38 @@ func TestSlidingWindow_UnauthenticatedCallerEmitsAudit(t *testing.T) {
 	rl.Allow("") // empty id -> treated as unauthenticated, still rate-limited per anonymous bucket
 	assert.GreaterOrEqual(t, auditor.countByType(AuditRateLimitUnauthenticatedCall), 1)
 }
+
+// TestSlidingWindow_LastEmitPurgedOnLRUEviction guards PR #244 review
+// M-02: when the LRU ring map evicts an agent, the auxiliary `lastEmit`
+// throttle map must drop the same key so it cannot grow without bound
+// under self-reported X-Agent-ID flooding. Same-package access is used
+// to inspect the private map directly — there is no public accessor and
+// adding one purely for tests would widen the API surface unnecessarily.
+func TestSlidingWindow_LastEmitPurgedOnLRUEviction(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) {
+		c.MaxTrackedAgents = 4
+		c.CallsPerWindow = 1 // first call admitted; second triggers a deny + lastEmit write
+	})
+	// Force agent-a to be denied so its lastEmit entry is recorded.
+	require.True(t, rl.Allow("agent-a"))
+	require.False(t, rl.Allow("agent-a"))
+	rl.lastEmitMu.Lock()
+	_, hadEntry := rl.lastEmit["agent-a"]
+	rl.lastEmitMu.Unlock()
+	require.True(t, hadEntry, "precondition: agent-a should have a lastEmit entry after a deny")
+
+	// Push the cardinality past MaxTrackedAgents so agent-a is the
+	// oldest-touched and gets evicted from the LRU ring map.
+	for i := 0; i < 6; i++ {
+		clk.Advance(time.Millisecond)
+		rl.Allow(fmt.Sprintf("filler-%02d", i))
+	}
+	assert.LessOrEqual(t, rl.TrackedAgents(), 4, "ring map must respect MaxTrackedAgents")
+
+	rl.lastEmitMu.Lock()
+	_, stillThere := rl.lastEmit["agent-a"]
+	rl.lastEmitMu.Unlock()
+	assert.False(t, stillThere,
+		"lastEmit entry for evicted agent-a must be purged alongside the ring (PR #244 M-02)")
+}

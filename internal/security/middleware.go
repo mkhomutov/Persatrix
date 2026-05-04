@@ -66,6 +66,14 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 // `PermissionDenied` for quarantine, `ResourceExhausted` for rate
 // limit (so clients can distinguish a transient back-off from a
 // terminal break).
+//
+// On rate-limit deny the interceptor sets a `retry-after-seconds`
+// gRPC trailer (PR #244 review M-04) so clients have parity with the
+// REST `Retry-After` header and can back off intelligently.
+//
+// NOTE: only unary RPCs are covered. A streaming interceptor is not
+// wired here; if a streaming RPC is added before Phase 4 it will
+// bypass the limiter. Tracked as PR #244 review NTH-01.
 func GRPCRateLimitInterceptor(limiter *RateLimiter, breaker *CircuitBreaker) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		agentID := agentIDFromIncoming(ctx)
@@ -76,6 +84,9 @@ func GRPCRateLimitInterceptor(limiter *RateLimiter, breaker *CircuitBreaker) grp
 			if breaker != nil && agentID != "" {
 				breaker.RecordViolation(agentID, ViolationRateLimit)
 			}
+			_ = grpc.SetHeader(ctx, metadata.Pairs(
+				"retry-after-seconds", strconv.Itoa(limiter.cfg.WindowSeconds),
+			))
 			return nil, status.Error(codes.ResourceExhausted, "rate limit exceeded")
 		}
 		return handler(ctx, req)

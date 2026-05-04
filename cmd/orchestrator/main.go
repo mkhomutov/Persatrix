@@ -379,6 +379,11 @@ func main() {
 			// quarantine on the LogService gRPC surface. Maps deny
 			// outcomes to ResourceExhausted / PermissionDenied; nil-safe
 			// when SECURITY_RATE_LIMIT_ENABLED=false.
+			//
+			// TODO(rfc0009-phase4): wire grpc.StreamInterceptor when a
+			// streaming RPC is added. Today only unary calls are
+			// rate-limited; a future streaming surface would bypass the
+			// limiter (PR #244 review NTH-01).
 			grpc.UnaryInterceptor(security.GRPCRateLimitInterceptor(rateLimiter, circuitBreaker)),
 		)
 		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))

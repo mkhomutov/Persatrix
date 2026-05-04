@@ -8,7 +8,6 @@ import (
 	"context"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -117,7 +116,10 @@ func envBoolDefault(key string, def bool) bool {
 	if v == "" {
 		return def
 	}
-	b, err := strconv.ParseBool(strings.ToLower(v))
+	// strconv.ParseBool already accepts mixed-case forms ("True",
+	// "FALSE", etc.); the previous strings.ToLower call was redundant.
+	// (PR #244 review L-03.)
+	b, err := strconv.ParseBool(v)
 	if err != nil {
 		return def
 	}

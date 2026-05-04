@@ -23,6 +23,13 @@ const (
 
 // ThresholdRule defines the count + rolling window after which an agent
 // is quarantined for a given [ViolationType].
+//
+// Window must be > 0 in production. A zero-duration Window means every
+// previously recorded violation is immediately considered expired, so
+// the rolling counter resets to 1 on every call and the breaker can
+// never open. Tests intentionally use Window: 0 to suppress the
+// breaker; production callers should treat 0 as a configuration error.
+// (PR #244 review L-04.)
 type ThresholdRule struct {
 	Count  int
 	Window time.Duration
@@ -113,6 +120,14 @@ func (cb *CircuitBreaker) RecordViolation(agentID string, vt ViolationType) {
 	shouldOpen := len(kept) >= rule.Count
 	if shouldOpen {
 		cb.quarantined[agentID] = quarantineEntry{since: now, reason: vt}
+		// PR #244 review M-03 (partial): clear the per-agent violation
+		// history when the breaker opens so the entry does not linger
+		// after a future Unquarantine restores the agent. A full LRU/TTL
+		// over `violations` is deferred — it would require a new config
+		// knob and the practical bound (distinct violators within any
+		// active window) is much smaller than the rate-limiter
+		// cardinality this guards against.
+		delete(cb.violations, agentID)
 	}
 	cb.mu.Unlock()
 

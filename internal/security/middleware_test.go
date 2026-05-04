@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,4 +124,74 @@ func TestMiddleware_DenyRecordsBreakerViolation(t *testing.T) {
 	}
 	assert.True(t, cb.IsQuarantined("agent-a"),
 		"two rate-limit denials should open the breaker")
+}
+
+// fakeServerTransportStream is the minimal [grpc.ServerTransportStream]
+// needed for `grpc.SetHeader` to succeed inside a unit test. The real
+// stream is owned by the gRPC runtime; tests construct one and attach it
+// to the context via [grpc.NewContextWithServerTransportStream].
+type fakeServerTransportStream struct {
+	grpc.ServerTransportStream
+	mu     sync.Mutex
+	header metadata.MD
+}
+
+func (f *fakeServerTransportStream) Method() string { return "" }
+
+func (f *fakeServerTransportStream) SetHeader(md metadata.MD) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.header == nil {
+		f.header = metadata.MD{}
+	}
+	for k, v := range md {
+		f.header[k] = append(f.header[k], v...)
+	}
+	return nil
+}
+
+func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error { return f.SetHeader(md) }
+func (f *fakeServerTransportStream) SetTrailer(md metadata.MD) error { return nil }
+
+func (f *fakeServerTransportStream) get(key string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.header.Get(key)
+}
+
+// TestGRPCInterceptor_RetryAfterHeaderOnRateLimit guards PR #244 review
+// M-04: gRPC `ResourceExhausted` responses must carry a
+// `retry-after-seconds` header in parity with the REST `Retry-After`
+// response header so clients can back off intelligently.
+func TestGRPCInterceptor_RetryAfterHeaderOnRateLimit(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) {
+		c.CallsPerWindow = 1
+		c.WindowSeconds = 42 // distinctive value to assert against
+	})
+	cb, _ := newTestBreaker(t, clk)
+	interceptor := GRPCRateLimitInterceptor(rl, cb)
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+
+	stream := &fakeServerTransportStream{}
+	ctx := grpc.NewContextWithServerTransportStream(
+		metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs("x-agent-id", "agent-a")),
+		stream,
+	)
+	info := &grpc.UnaryServerInfo{FullMethod: "/svc/M"}
+
+	// First call admitted.
+	_, err := interceptor(ctx, nil, info, handler)
+	require.NoError(t, err)
+	// Second call denied — must set the retry-after-seconds header.
+	_, err = interceptor(ctx, nil, info, handler)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.ResourceExhausted, st.Code())
+
+	got := stream.get("retry-after-seconds")
+	require.Len(t, got, 1, "retry-after-seconds header must be set on rate-limit deny")
+	assert.Equal(t, "42", got[0])
 }

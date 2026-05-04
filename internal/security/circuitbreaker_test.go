@@ -92,3 +92,23 @@ func TestCircuitBreaker_Unquarantine(t *testing.T) {
 	cb.RecordViolation("a", ViolationCapability)
 	assert.False(t, cb.IsQuarantined("a"))
 }
+
+// TestCircuitBreaker_ViolationsClearedOnQuarantine guards PR #244 review
+// M-03 (partial): when the breaker opens, the per-agent entry in the
+// `violations` map must be removed so the historical timestamps do not
+// linger across the agent's lifetime. Without this, a long-running
+// orchestrator accumulates one stale entry per ever-quarantined agent.
+// Same-package access is used to inspect the private map.
+func TestCircuitBreaker_ViolationsClearedOnQuarantine(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cb, _ := newTestBreaker(t, clk)
+	for i := 0; i < 3; i++ {
+		cb.RecordViolation("a", ViolationCapability)
+	}
+	require.True(t, cb.IsQuarantined("a"))
+	cb.mu.Lock()
+	_, present := cb.violations["a"]
+	cb.mu.Unlock()
+	assert.False(t, present,
+		"violations entry for quarantined agent must be cleared (PR #244 M-03)")
+}
