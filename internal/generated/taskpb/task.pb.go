@@ -696,16 +696,27 @@ func (x *ChatResponse) GetReplyStatus() string {
 // without parsing. Orchestrator MUST validate agreement with the prefix
 // on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
 // mismatch as malformed rather than pick one source.
+// TODO(rfc0011-pr-4): wire receiver-side `channel_type` ↔ `channel_id`
+// prefix-agreement enforcement in `ReceiveChannelMessage` once the real
+// handler lands; the stub in PR 3 cannot enforce this because it does
+// not inspect the request.
 type ChannelMessageEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	ChannelType   string                 `protobuf:"bytes,3,opt,name=channel_type,json=channelType,proto3" json:"channel_type,omitempty"` // "group" | "dm" | "thread"
-	SenderId      string                 `protobuf:"bytes,4,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
-	Content       string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
-	Timestamp     string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`               // RFC 3339
-	ThreadId      string                 `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"` // empty string if not a reply
-	Mentions      []string               `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	MessageId   string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	ChannelId   string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	ChannelType string                 `protobuf:"bytes,3,opt,name=channel_type,json=channelType,proto3" json:"channel_type,omitempty"` // "group" | "dm" | "thread"
+	SenderId    string                 `protobuf:"bytes,4,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	Content     string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	// RFC 3339 string (NOT Unix epoch like ChatResponse.timestamp /
+	// TaskProgress.timestamp). Chosen because the value is forwarded
+	// verbatim to the channel store's `messages.created_at` column
+	// (SQLite TEXT/DATETIME, RFC 0011 §A) — using `int64` here would
+	// force a server-side format conversion on every publish purely to
+	// satisfy the wire shape. Receivers MUST treat malformed timestamps
+	// as a drop reason. See PR #246 deep review finding M4.
+	Timestamp     string   `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ThreadId      string   `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"` // empty string if not a reply
+	Mentions      []string `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
