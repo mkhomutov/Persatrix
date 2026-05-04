@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io/fs"
+	"os"
 	"path/filepath"
 
 	"go.uber.org/zap"
@@ -70,6 +71,19 @@ func initChannels(
 		// PR #245 review (Nice): use the package const rather than the
 		// magic 50 — keeps the default in one place if it ever moves.
 		maxCh = channels.DefaultMaxChannels
+	}
+	// ISSUE-0012 (PR #245 review Low; PR #246 finding L1): ensure the parent
+	// directory exists before handing the path to SQLite. On a fresh checkout,
+	// data/ is gitignored and may not exist; without this, sqlite.Open returns
+	// "unable to open database file" and all seven channel REST endpoints
+	// silently degrade to 503. Skip MkdirAll for ":memory:" (in-process store
+	// used in tests) to avoid creating a literal directory named ".".
+	if dbPath != ":memory:" {
+		if mkErr := os.MkdirAll(filepath.Dir(dbPath), 0o755); mkErr != nil {
+			logger.Warn("channels: cannot create db directory; channel endpoints will return 503",
+				zap.String("path", dbPath), zap.Error(mkErr))
+			return nil, noop, nil
+		}
 	}
 	chanStore, sErr := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
 		MaxChannels: maxCh,

@@ -45,6 +45,20 @@ const (
 // sufficient to alert ops without flooding the publish hot path.
 var channelFallbackWarnOnce sync.Once
 
+// TestingResetChannelFallbackWarnOnce resets the package-level guard to its
+// zero state. It is exported for use in test-setup functions only; production
+// code must never call it.
+//
+// Direct assignment (channelFallbackWarnOnce = sync.Once{}) in test files is
+// a data race whenever any test in the package runs with t.Parallel(), because
+// the assignment is not protected by a lock while the guard's Do path may be
+// executing concurrently. Calling this function from a single-goroutine
+// TestXxx setup site (before any goroutines are launched) is safe by Go's
+// test execution model. ISSUE-0009 / PR #246 finding M2.
+func TestingResetChannelFallbackWarnOnce() {
+	channelFallbackWarnOnce = sync.Once{}
+}
+
 // handleCreateChannel handles POST /api/v1/channels.
 //
 // Only group channels are creatable here (RFC 0011 §C). The server
