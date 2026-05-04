@@ -13,11 +13,11 @@ This README documents the conventions only.
 | Role | File | Notes |
 |------|------|-------|
 | **Live table** | [INDEX.md](INDEX.md) | Auto-generated. One row per issue: id, status, severity, area, dates. Read this first. |
-| **Long-form per-issue** | `ISSUE-NNN-slug.md` | Optional. Create only when the finding needs Context / Impact / Notes beyond a one-line summary. |
+| **Long-form per-issue** | `ISSUE-NNNN-slug.md` | Optional. Create only when the finding needs Context / Impact / Notes beyond a one-line summary. |
 | **Conventions (this file)** | `README.md` | Lifecycle, allowed values, naming. |
 | **Template** | [ISSUE-TEMPLATE.md](ISSUE-TEMPLATE.md) | Copy when creating a long-form file. |
 
-Every issue has a `ISSUE-NNN-slug.md` file (the generator reads
+Every issue has a `ISSUE-NNNN-slug.md` file (the generator reads
 front-matter from these files only — `INDEX.md` is regenerated, never
 hand-edited). Files can be very short: front-matter + a one-line
 Summary is fine for trivial findings. The Context / Impact / Notes
@@ -40,7 +40,7 @@ open ──► in_progress ──► resolved (file kept, status updated)
   readers (and AI agents) recall historical decisions with `grep` instead
   of `git log`.
 - A periodic sweep can delete very old resolved files; their content
-  remains in git history (`git log -- docs/issues/ISSUE-NNN-*.md`).
+  remains in git history (`git log -- docs/issues/ISSUE-NNNN-*.md`).
 
 ---
 
@@ -48,7 +48,7 @@ open ──► in_progress ──► resolved (file kept, status updated)
 
 | Rule | Detail |
 |------|--------|
-| Naming | `ISSUE-NNN-slug.md` — three-digit zero-padded number, lower-kebab slug |
+| Naming | `ISSUE-NNNN-slug.md` — four-digit zero-padded number, lower-kebab slug |
 | `summary` | One-line description; surfaced as the Summary column in [INDEX.md](INDEX.md) so a single read answers "what is this about?" |
 | `status` | `open`, `in_progress`, `resolved` |
 | `severity` | `low`, `medium`, `high`, `critical` |
@@ -70,19 +70,19 @@ The relative path depends on where the source document lives:
 
 | Source location | Link to write |
 |-----------------|---------------|
-| `docs/rfcs/0009-pr-plan.md` (one level deep) | `> See [ISSUE-007](../issues/ISSUE-007-cost-rounding-drift.md)` |
-| `docs/development-workflow.md` (sibling of `issues/`) | `> See [ISSUE-007](issues/ISSUE-007-cost-rounding-drift.md)` |
-| Code or top-level docs | Use the repo-root-relative path: `docs/issues/ISSUE-007-cost-rounding-drift.md` |
+| `docs/rfcs/0009-pr-plan.md` (one level deep) | `> See [ISSUE-0007](../issues/ISSUE-0007-cost-rounding-drift.md)` |
+| `docs/development-workflow.md` (sibling of `issues/`) | `> See [ISSUE-0007](issues/ISSUE-0007-cost-rounding-drift.md)` |
+| Code or top-level docs | Use the repo-root-relative path: `docs/issues/ISSUE-0007-cost-rounding-drift.md` |
 
-GitHub renders all three correctly. The ID itself (`ISSUE-007`) is the
+GitHub renders all three correctly. The ID itself (`ISSUE-0007`) is the
 stable handle — slugs may be renamed, IDs must not.
 
 ---
 
 ## Creating an issue
 
-1. Copy [ISSUE-TEMPLATE.md](ISSUE-TEMPLATE.md) to `ISSUE-NNN-slug.md`,
-   choosing the next free `NNN`.
+1. Copy [ISSUE-TEMPLATE.md](ISSUE-TEMPLATE.md) to `ISSUE-NNNN-slug.md`,
+   choosing the next free `NNNN`.
 2. Fill `id`, `summary`, `status`, `severity`, `area`, `created`, `refs`.
 3. Write at minimum a **Summary** section in the body. Other sections
    are optional. (The front-matter `summary:` is the index-friendly
@@ -95,4 +95,4 @@ stable handle — slugs may be renamed, IDs must not.
 1. Set `status: resolved`, add `closed: YYYY-MM-DD` and
    `closed_pr: <number>`.
 2. Run `make issues` to update [INDEX.md](INDEX.md).
-3. Reference `ISSUE-NNN` in the closing PR's commit message.
+3. Reference `ISSUE-NNNN` in the closing PR's commit message.

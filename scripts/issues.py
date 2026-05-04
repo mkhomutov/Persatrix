@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Regenerate ``docs/issues/INDEX.md`` from per-issue front-matter.
 
-Each issue file under ``docs/issues/`` named ``ISSUE-NNN-<slug>.md`` is
+Each issue file under ``docs/issues/`` named ``ISSUE-NNNN-<slug>.md`` is
 expected to start with a YAML front-matter block:
 
     ---
-    id: ISSUE-007
+    id: ISSUE-0007
     summary: cost rounding drifts on long sessions   # one-line, surfaced in INDEX
     status: open            # open | in_progress | resolved
     severity: medium        # low | medium | high | critical
@@ -46,7 +46,7 @@ INDEX_FILE = ISSUES_DIR / "INDEX.md"
 TEMPLATE_NAME = "ISSUE-TEMPLATE.md"
 REPO_URL = "https://github.com/mkhomutov/Persatrix"
 
-ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{3}-[a-z0-9-]+\.md$")
+ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{4}-[a-z0-9-]+\.md$")
 FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 SCALAR_LINE_RE = re.compile(r"^([A-Za-z_][\w-]*)\s*:\s*(.*?)\s*$")
 
@@ -131,7 +131,7 @@ def collect_issues() -> list[Issue]:
             continue
         if not ISSUE_FILE_PATTERN.match(path.name):
             print(
-                f"warning: {path.name} does not match ISSUE-NNN-slug.md naming",
+                f"warning: {path.name} does not match ISSUE-NNNN-slug.md naming",
                 file=sys.stderr,
             )
             continue

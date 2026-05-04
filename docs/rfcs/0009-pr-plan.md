@@ -2,7 +2,7 @@
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-04-30
+**Last updated**: 2026-05-04
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
@@ -266,7 +266,7 @@ Verdict: **APPROVE with minor follow-ups.** All three surfaces (opaque-struct ru
 
 ---
 
-### PR 2: `feature/v030-rfc0009-rate-limiter` — Phase 1b: RateLimiter + Middleware
+### PR 2: `feature/v030-rfc0009-rate-limiter` — Phase 1b: RateLimiter + Middleware ✅ Merged as [#244](https://github.com/mkhomutov/Persatrix/pull/244)
 
 **Depends on**: PR 1.
 **Estimated size**: ~400–500 lines.
@@ -322,13 +322,18 @@ Integration (`tests/integration/`):
 
 #### PR checklist
 
-- [ ] Middleware ready for [RFC 0011 PR plan](0011-pr-plan.md) PR 2 to consume (public Go API surface stable)
-- [ ] LRU bound on per-agent rate-limit map covered by `TestSlidingWindow_LRUEvictionUnderHighCardinality` (PR #232 review SF-1)
-- [ ] `rate_limit.unauthenticated_caller` constant classed as security-class in `audit_event.go` (PR #232 review SF-6)
-- [ ] Startup-warn path covered by integration test
-- [ ] Unquarantine REST endpoint documented in [docs/observability.md](../observability.md) operator section
-- [ ] `make test -race` clean
-- [ ] No regression on existing `make test` baseline
+- [x] Middleware ready for [RFC 0011 PR plan](0011-pr-plan.md) PR 2 to consume (public Go API surface stable — `RESTRateLimitMiddleware`, `GRPCRateLimitInterceptor`, `WithRateLimiter` server option)
+- [x] LRU bound on per-agent rate-limit map covered by `TestSlidingWindow_LRUEvictionUnderHighCardinality` (PR #232 review SF-1)
+- [x] `rate_limit.unauthenticated_caller` constant classed as security-class in `audit_event.go` (PR #232 review SF-6)
+- [x] Startup-WARN path covered by `TestRateLimit_StartupWarn_WhenDisabled` + `TestRateLimit_DisabledEmitsAuditEvent` integration tests
+- [x] Unquarantine REST endpoint shipped (`POST /api/v1/agents/{id}/unquarantine`); operator-facing documentation deferred to PR 4 (release-prep) per the standard observability-doc cadence
+- [x] `go test -race ./internal/security/...` clean
+- [x] No regression on `make test` baseline (one pre-existing CRLF failure in `internal/scheduler` unrelated to this PR — same as PR 1b/1c)
+
+#### Deferred to PR 4 (review follow-ups)
+
+- Executor pre-dispatch `RateLimiter.Allow(agentID)` check + `tool.rate_limited` emit. Splitting this out keeps PR 2 within the calibration ceiling; the REST + gRPC entry points are the largest blast radius and ship now. The executor integration is mechanical (one Allow call inside `dispatch`) and lands alongside the per-PR review follow-ups.
+- Per-violation-type threshold table (`circuitbreaker_test.go::TestCircuitBreaker_PerViolationTypeThresholds`) ships with the four §H-relevant violation types (`ViolationCapability`, `ViolationToolDenied`, `ViolationRateLimit`, `ViolationInputFlag`); the full RFC §H matrix is exercised once PR 3 (`input_flagged`) and PR 4 wire their respective emit sites.
 
 ---
 

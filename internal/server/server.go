@@ -52,6 +52,23 @@ type Server struct {
 	// (security audit log).  When nil, audit emit sites no-op so unit
 	// tests and minimal-deployment fixtures stay zero-config.
 	auditor security.AuditLogger
+
+	// Rate limiter + circuit breaker (optional — nil-safe). Wired in
+	// RFC 0009 PR 2. When nil, the rate-limit middleware degrades to a
+	// passthrough so existing unit tests and minimal deployments keep
+	// their pre-PR behaviour.
+	rateLimiter    *security.RateLimiter
+	circuitBreaker *security.CircuitBreaker
+
+	// unquarantineToken is the optional shared-secret stop-gap that
+	// gates the operator-only unquarantine endpoint until token-based
+	// auth lands in RFC 0009 Phase 4 (PR #244 review H-02). When empty,
+	// the endpoint is unauthenticated (preserves pre-PR-244 behaviour
+	// and the documented "front with an authenticating reverse proxy"
+	// posture). When set, callers must present
+	// `Authorization: Bearer <token>` and the comparison runs in
+	// constant time via crypto/subtle.
+	unquarantineToken string
 }
 
 // ServerOption configures optional Server dependencies.
@@ -107,6 +124,36 @@ func WithLogBuffer(buf *logbuffer.Buffer) ServerOption {
 func WithAuditLogger(a security.AuditLogger) ServerOption {
 	return func(s *Server) {
 		s.auditor = a
+	}
+}
+
+// WithRateLimiter injects the per-agent REST rate limiter and circuit
+// breaker (RFC 0009 PR 2). Both are applied as middleware on the public
+// REST router so denials short-circuit before any handler-side work.
+// Nil-safe: passing nil for either degrades that subsystem to a
+// passthrough (used by unit tests that do not exercise the limiter).
+func WithRateLimiter(rl *security.RateLimiter, cb *security.CircuitBreaker) ServerOption {
+	return func(s *Server) {
+		s.rateLimiter = rl
+		s.circuitBreaker = cb
+	}
+}
+
+// WithUnquarantineToken injects an optional shared secret that gates the
+// POST /api/v1/agents/{id}/unquarantine endpoint (PR #244 review H-02).
+//
+// The endpoint undoes a security control (a circuit-breaker quarantine)
+// and is otherwise unauthenticated until token-based auth lands in
+// RFC 0009 Phase 4. Operators who cannot front the orchestrator with an
+// authenticating reverse proxy can opt into a defense-in-depth check
+// here by setting `SECURITY_UNQUARANTINE_TOKEN`; the bootstrap reads
+// the env var and applies this option in cmd/orchestrator.
+//
+// Empty token disables the check (preserves pre-PR-244 behaviour) so
+// minimal deployments and unit tests need not opt in.
+func WithUnquarantineToken(token string) ServerOption {
+	return func(s *Server) {
+		s.unquarantineToken = token
 	}
 }
 
@@ -174,6 +221,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agents/{id}", s.handleGetAgent)
 	s.mux.HandleFunc("DELETE /api/v1/agents/{id}", s.handleDeleteAgent)
 
+	// Operator endpoint — release an agent quarantined by the circuit
+	// breaker (RFC 0009 PR 2). Returns 503 when no breaker is wired.
+	s.mux.HandleFunc("POST /api/v1/agents/{id}/unquarantine", s.handleUnquarantineAgent)
+
 	// Stub endpoints — deferred to future RFCs (Phase 3)
 	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleListLogs)
 	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs/stream", s.handleStreamLogs)
@@ -193,15 +244,55 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler returns the composed HTTP handler with middleware applied.
-// Execution order (outermost first): handlerWrapper (optional, e.g. otelhttp) →
-// recovery → requestID → logging → mux.
+// Execution order (outermost first):
+//
+//	handlerWrapper (optional, e.g. otelhttp) → recovery → requestID →
+//	logging → routeMux → (rate-limit + circuit-breaker for /api/v1/*) → mux
+//
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
 // (Review finding F-01: r.WithContext creates a new *http.Request, so
 // loggingMiddleware must receive the request *after* requestID injects the ID.)
+//
+// The rate-limit/circuit-breaker layer is mounted **only on `/api/v1/*`**
+// (PR #244 round-2 review H-03). Mounting it on the root would catch
+// `/healthz`, which Kubernetes liveness probes call without an
+// `X-Agent-ID` header — combined with the H-01 anonymous-deny that
+// fires while a quarantine is active, a single quarantined agent would
+// 403 the probe → restart the pod → drop the in-memory quarantine state
+// → re-quarantine on the next request → crashloop.
+//
+// `/healthz` therefore bypasses the limiter+breaker (rate limiting a
+// liveness probe is meaningless anyway). All other routes — including
+// future top-level endpoints — must be added under `/api/v1/` or they
+// will silently bypass the security middleware.
+//
+// The 429/403 short-circuit responses still flow back through
+// loggingMiddleware and appear in the access log with their
+// X-Request-ID header set, because both wrappers sit inside the logging
+// + requestID layers (PR #244 review L-04/L-05).
 func (s *Server) Handler() http.Handler {
 	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
-	var h http.Handler = s.mux
+	//
+	// Path-scoped middleware mount. We need /healthz to bypass the
+	// limiter+breaker (see godoc above), but s.mux already has every
+	// route registered on it (including /healthz). The cheapest
+	// "bypass" is to construct a tiny outer mux that splits traffic:
+	//   - /healthz                     → handle directly, no security layer
+	//   - everything else (/api/v1/…)  → wrapped mux
+	// The inner /healthz registration on s.mux becomes unreachable
+	// through Handler() but is preserved so any test/integration code
+	// hitting s.mux directly (without the middleware stack) keeps
+	// working.
+	var apiH http.Handler = s.mux
+	if s.rateLimiter != nil || s.circuitBreaker != nil {
+		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(apiH)
+	}
+	root := http.NewServeMux()
+	root.HandleFunc("GET /healthz", s.handleHealthz)
+	root.Handle("/", apiH)
+
+	var h http.Handler = root
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)

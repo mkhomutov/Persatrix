@@ -47,6 +47,20 @@ const (
 	// Rate limiting (PR 2)
 	AuditRateLimitViolated            AuditEventType = "rate_limit.violated"
 	AuditRateLimitUnauthenticatedCall AuditEventType = "rate_limit.unauthenticated_caller"
+	AuditRateLimitAgentEvicted        AuditEventType = "rate_limit.agent_evicted"
+	AuditRateLimitDisabled            AuditEventType = "rate_limit.disabled"
+
+	// Circuit breaker / quarantine (PR 2)
+	AuditAgentQuarantined   AuditEventType = "agent.quarantined"
+	AuditAgentUnquarantined AuditEventType = "agent.unquarantined"
+	// AuditUnquarantineEndpointOpen is emitted at startup when the
+	// unquarantine REST endpoint is reachable without a shared-secret
+	// token (SECURITY_UNQUARANTINE_TOKEN unset). PR #244 round-2
+	// review M-05: the endpoint undoes a security control, so the
+	// operator's choice to leave it open must land in the
+	// tamper-evident chain rather than be inferred from configuration
+	// silence. Pairs with a startup WARN log.
+	AuditUnquarantineEndpointOpen AuditEventType = "unquarantine.endpoint.open"
 
 	// Audit-log lifecycle (chain-recovery — PR #232 review SF-3)
 	AuditChainBootstrap AuditEventType = "chain.bootstrap"
@@ -77,6 +91,11 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditHITLRejected,
 		AuditRateLimitViolated,
 		AuditRateLimitUnauthenticatedCall,
+		AuditRateLimitAgentEvicted,
+		AuditRateLimitDisabled,
+		AuditAgentQuarantined,
+		AuditAgentUnquarantined,
+		AuditUnquarantineEndpointOpen,
 		AuditChainBootstrap,
 		AuditChainRestart,
 		AuditChainRecovered,
@@ -112,6 +131,10 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditHITLRejected:                 {},
 	AuditRateLimitViolated:            {},
 	AuditRateLimitUnauthenticatedCall: {},
+	AuditRateLimitDisabled:            {},
+	AuditAgentQuarantined:             {},
+	AuditAgentUnquarantined:           {},
+	AuditUnquarantineEndpointOpen:     {},
 	AuditChainBootstrap:               {},
 	AuditChainRestart:                 {},
 	AuditChainRecovered:               {},
@@ -121,11 +144,12 @@ var securityEvents = map[AuditEventType]struct{}{
 // Closed-set: any event type missing from BOTH securityEvents AND this map
 // causes `TestEveryAuditEventType_HasSeverityClassification` to fail.
 var telemetryEvents = map[AuditEventType]struct{}{
-	AuditAgentRegistered: {},
-	AuditToolInvoked:     {},
-	AuditToolArgInvalid:  {},
-	AuditMemoryRead:      {},
-	AuditMemoryWrite:     {},
+	AuditAgentRegistered:       {},
+	AuditToolInvoked:           {},
+	AuditToolArgInvalid:        {},
+	AuditMemoryRead:            {},
+	AuditMemoryWrite:           {},
+	AuditRateLimitAgentEvicted: {},
 }
 
 // IsSecurityEvent reports whether t requires per-event fsync (vs batched flush).
