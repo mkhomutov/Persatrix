@@ -1010,8 +1010,7 @@ Persatrix/
 │   ├── telemetry/              # OTEL instrumentation, exporters
 │   └── cost/                   # token counting, budget enforcement
 ├── proto/                      # Protobuf definitions
-│   ├── task.proto              # TaskMessage (orchestrator ↔ agent)
-│   └── agent_message.proto     # (v0.2) AgentMessage (agent ↔ agent)
+│   └── task.proto              # AgentService (orchestrator ↔ agent): tasks, chat, channel delivery
 ├── agents/                     # Python agent implementations
 │   ├── base.py                 # BaseAgent ABC
 │   ├── persona.py              # (v0.2) PersonaAgent base class

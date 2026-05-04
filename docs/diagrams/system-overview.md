@@ -77,8 +77,8 @@ graph LR
 
 - **CLI ↔ Orchestrator**: REST + Server-Sent Events over HTTP/JSON. No gRPC
   leaks across this boundary.
-- **Orchestrator ↔ Agents**: gRPC/protobuf (`proto/task.proto`,
-  `proto/agent_message.proto`). The orchestrator never calls LLMs directly.
+- **Orchestrator ↔ Agents**: gRPC/protobuf (`proto/task.proto`). The
+  orchestrator never calls LLMs directly.
 - **Agents ↔ External**: LLM providers (HTTPS) and MCP servers (stdio or HTTP).
   Both are initiated by the agent runtime, never by the orchestrator.
 

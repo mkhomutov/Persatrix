@@ -4,8 +4,19 @@
 **Feature Area**: Persona
 **Version**: 1.0
 **Created**: 2026-04-18
-**Last Updated**: 2026-04-18
-**Status**: Active
+**Last Updated**: 2026-05-04
+**Status**: Deprecated (RFC 0011 PR 3)
+
+---
+
+> **DEPRECATED (2026-05-04, RFC 0011 PR 3, PR #246):** This manual test
+> targets `ChannelService.SendMessage` in `proto/agent_message.proto`, which
+> has been removed. The agent-side delivery surface is now
+> `AgentService.ReceiveChannelMessage` + `ChannelMessageEvent` in
+> [proto/task.proto](../../proto/task.proto). Do not execute the steps below
+> against current builds — `grpcurl` will fail with `Method not found`.
+> A replacement MT exercising `ReceiveChannelMessage` will land alongside
+> RFC 0011 PR 4 (the real handler). See PR #246 deep review (Should-fix #2).
 
 ---
 
