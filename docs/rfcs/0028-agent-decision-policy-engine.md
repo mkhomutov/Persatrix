@@ -4,8 +4,9 @@
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-02
-**Target**: v0.4.0
-**Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0011, RFC 0020, RFC 0021
+**Target**: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
+**Depends on**: RFC 0005, RFC 0009
+**Integrates with**: RFC 0008, RFC 0011, RFC 0020, RFC 0021 (recommended sequencing, not hard gates)
 
 ---
 
@@ -69,11 +70,11 @@ Without a shared decision layer, increasing autonomy risks brittle behavior and 
 Add checkpoints where decisions are currently implicit:
 
 1. **Pre-act:** choose next action class (`respond`, `ask_clarification`, `tool_call`, `delegate`, `publish_channel`, `defer`).
-2. **Pre-tool:** if action includes tools, select tool strategy (single call, sequence, abort).
-3. **Pre-delegate:** evaluate whether a sub-agent delegation is necessary and allowed.
+2. **Pre-tool:** runs only when pre-act selected `tool_call`; selects tool strategy (single call, sequence, abort). Always sequenced after pre-act in the same tick.
+3. **Pre-delegate:** runs only when pre-act selected `delegate`; evaluates whether a sub-agent delegation is necessary and allowed.
 4. **Post-outcome:** record outcome quality signal for future calibration.
 
-Each checkpoint produces a `DecisionRecord` with candidates, selected action, constraints applied, and rationale summary.
+Checkpoints are strictly sequential within a tick: `pre-act → (pre-tool | pre-delegate) → execute → post-outcome`. Each checkpoint produces a `DecisionRecord` with candidates, selected action, constraints applied, and rationale summary.
 
 ### B. Policy modes (manual, semi-automated, automated)
 
@@ -97,7 +98,7 @@ At each checkpoint:
 
 If no candidate survives constraints, fallback is `defer` plus structured reason.
 
-### C1. Human-in-the-loop decision classes (mandatory)
+### H. Mandatory human-in-the-loop decision classes
 
 Some decisions are non-delegable and require explicit human approval even in automated mode. This is a fail-closed control.
 
@@ -127,6 +128,13 @@ Add a Python-side interface for policy evaluation:
 - `DecisionPolicy`: strategy interface with `select(context, candidates)`.
 
 Task agent and persona agent runtimes call the same interface. Persona-specific state (mood, relationship memory, autonomy posture) is carried via typed optional fields in `DecisionContext`.
+
+**Persistence and replay backend.** `DecisionRecord` instances are persisted via two coordinated sinks:
+
+1. OpenTelemetry spans (one per checkpoint) under the existing RFC 0019 tracer, carrying selected action, candidate count, and confidence as span attributes for live observability.
+2. A dedicated audit-log stream (`agents/observability/decision_log.py`) appending the full record (candidate set, scores, rejected reasons, rationale) for forensic replay. This is the source of truth for the Phase 2 replay harness; OTEL is sampled and not authoritative.
+
+No new protobuf message is introduced in v0.4.0 (resolves OQ #4); a protobuf schema may be promoted later if cross-process replay or collective scope (Phase 4) requires it.
 
 ### E. Integration into existing plans and RFCs
 
@@ -209,7 +217,7 @@ Integration seams for this extension:
 ### Phase 2a: Human-in-the-loop enforcement (security-coupled)
 
 1. Add required-HITL action class registry in configuration and schema.
-2. Implement signed, scoped, expiring approval tokens and replay checks.
+2. Implement signed, scoped, expiring approval tokens and replay checks. **Issuer:** the orchestrator security service (Go-side, RFC 0009 §H) is the sole token authority; agents only consume and verify tokens. Tokens are signed with the same audit-key material used for RFC 0009 audit-log integrity, scoped to `(action_hash, actor_id, scope, expires_at, nonce)`, and replay-protected by the orchestrator-side nonce store.
 3. Enforce fail-closed runtime behavior when approval is absent or invalid.
 4. Add RFC 0009-aligned audit events: `decision.hitl_requested`, `decision.hitl_approved`, `decision.hitl_denied`, `decision.hitl_expired`.
 
@@ -236,9 +244,10 @@ Integration seams for this extension:
 | Python agents | `agents/persona_runtime/` | Inject decision checkpoints in persona lifecycle |
 | Python agents | `agents/persona.py`, `agents/base.py` | Shared runtime wiring for decision policy selection |
 | Config / schema | `config/agents.yaml`, `schemas/agent.schema.json` | Policy mode + approval routing config |
-| Observability | `agents/observability/`, `docs/observability.md` | Decision metrics and dashboards |
+| Observability | `agents/observability/`, `docs/observability.md` | Decision metrics, dashboards, decision audit log |
 | Tests | `tests/unit/python/`, `tests/integration/` | Policy, guardrail, and replay tests |
-| Docs | `docs/v0.4.0-plan.md`, `docs/rfcs/0028-pr-plan.md` | PR slicing and delivery plan |
+| Glossary | `docs/ai-glossary.md` | Add canonical entries (see Decision / Next Steps) |
+| Docs | `docs/v0.4.0-plan.md` (new), `docs/rfcs/0028-pr-plan.md` (new) | PR slicing and delivery plan |
 
 ## Test Strategy
 
@@ -250,21 +259,21 @@ Integration seams for this extension:
 
 ## Open Questions
 
-1. Which action classes are eligible for automated mode in v0.4.0 versus v0.5.0?
-2. Should approval routing be centralized in orchestrator policy services or remain Python-runtime local first?
-3. What confidence metric threshold is robust enough for promotion decisions across different persona types?
-4. Do we need a protobuf-level decision event schema in v0.4.0, or can we keep it runtime-local until v0.5.0?
-5. Which collective strategy should be the default for societies: simple majority, weighted majority, or role-weighted?
-6. How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
-7. Which action classes are globally non-delegable and require mandatory HITL in every environment?
-8. Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?
+1. *(Phase 3)* Which action classes are eligible for automated mode in v0.4.0 versus v0.5.0?
+2. *(Phase 2)* Should approval routing be centralized in orchestrator policy services or remain Python-runtime local first?
+3. *(Phase 3)* What confidence metric threshold is robust enough for promotion decisions across different persona types?
+4. ~~*(Phase 1)* Do we need a protobuf-level decision event schema in v0.4.0, or can we keep it runtime-local until v0.5.0?~~ **Resolved:** runtime-local in v0.4.0 — see Section D (Persistence and replay backend). Protobuf is deferred to v0.5.0 if Phase 4 collective scope requires cross-process replay.
+5. *(Phase 4 / v0.5.0+)* Which collective strategy should be the default for societies: simple majority, weighted majority, or role-weighted?
+6. *(Phase 4 / v0.5.0+)* How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
+7. *(Phase 2a)* Which action classes are globally non-delegable and require mandatory HITL in every environment?
+8. *(Phase 2a)* ~~Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?~~ **Resolved:** yes — see Phase 2a step 2.
 
 ## Decision / Next Steps
 
 1. Review and accept this RFC as the canonical architecture for agent decision-making.
-2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0.
+2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0. PR 1 (Phase 1 contract + types) must include canonical glossary entries in `docs/ai-glossary.md` for: *Decision Policy Engine*, *decision checkpoint*, *DecisionRecord*, *human-in-the-loop / HITL*, *approval token*, *agent society*, *collective scope*, *individual scope*.
 3. Start Phase 1 in manual mode only; collect baseline telemetry before enabling semi-automated mode.
-4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work.
+4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work. Recommended (not hard-gated) sequencing: land RFC 0008/0011/0020/0021 surfaces before promoting checkpoints from manual to semi-automated.
 5. Track collective decision scope as a follow-on for society support (v0.5.0+), aligned with organizations planning.
 6. Split out a security-coupled implementation checklist aligned with RFC 0009 for mandatory HITL classes.
 
