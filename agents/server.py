@@ -3,7 +3,8 @@ Persatrix Agent gRPC Server.
 
 Runs a single agent in a process, exposing it via gRPC for the orchestrator
 to communicate with. Implements AgentServiceServicer (ExecuteTask, HealthCheck,
-ExecuteTaskStream) from the generated protobuf stubs.
+ExecuteTaskStream, SendChatMessage, ReceiveChannelMessage) from the generated
+protobuf stubs.
 """
 
 import argparse
@@ -19,7 +20,7 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .base import BaseAgent
 from .dispatch import EventDispatcher
-from .generated import agent_message_pb2_grpc, task_pb2_grpc
+from .generated import task_pb2_grpc
 from .memory import SharedPoolRegistry
 from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.log_shipper import (
@@ -41,7 +42,6 @@ from .server_persona import (
 )
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
-    ChannelServiceServicer,
     _extract_chat_reply,
 )
 from .tick import TickScheduler
@@ -131,10 +131,6 @@ class AgentServer:
         self._server = grpc.aio.server(interceptors=[LoggingMetadataInterceptor()])
         servicer = AgentServiceServicer(self.agents, self._dispatcher)
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, self._server)
-        channel_servicer = ChannelServiceServicer(self.agents, self._dispatcher)
-        agent_message_pb2_grpc.add_ChannelServiceServicer_to_server(
-            channel_servicer, self._server
-        )
 
         bind_address = f"{self.host}:{self.port}"
         # TODO(security): enable TLS for production gRPC

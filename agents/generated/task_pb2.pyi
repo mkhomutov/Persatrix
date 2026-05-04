@@ -127,3 +127,36 @@ class ChatResponse(Message):
         agent_display_name: str = ...,
         reply_status: str = ...,
     ) -> None: ...
+
+class ChannelMessageEvent(Message):
+    message_id: str
+    channel_id: str
+    channel_type: str
+    sender_id: str
+    content: str
+    timestamp: str
+    thread_id: str
+    mentions: list[str]
+    def __init__(
+        self,
+        *,
+        message_id: str = ...,
+        channel_id: str = ...,
+        channel_type: str = ...,
+        sender_id: str = ...,
+        content: str = ...,
+        timestamp: str = ...,
+        thread_id: str = ...,
+        mentions: list[str] | None = ...,
+    ) -> None: ...
+
+class TaskAck(Message):
+    success: bool
+    error_message: str
+    def __init__(
+        self,
+        *,
+        success: bool = ...,
+        error_message: str = ...,
+    ) -> None: ...
+

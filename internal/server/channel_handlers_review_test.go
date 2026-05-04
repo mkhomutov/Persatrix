@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -216,11 +215,12 @@ func channelTestServerNoRouter(t *testing.T) (*Server, *observer.ObservedLogs) {
 // The "exactly once" property is the contract this test pins.
 //
 // NOTE: shares the package-level channelFallbackWarnOnce with other
-// tests in this package — this test resets it explicitly so order is
-// not significant.
+// tests in this package — this test resets it via the exported helper
+// TestingResetChannelFallbackWarnOnce so test-setup does not race with
+// the guard's Do path if a sibling test adds t.Parallel() (ISSUE-0009).
 func TestChannels_PublishMessage_RouterNilFallback_LogsWarnOnce(t *testing.T) {
-	channelFallbackWarnOnce = sync.Once{}
-	t.Cleanup(func() { channelFallbackWarnOnce = sync.Once{} })
+	TestingResetChannelFallbackWarnOnce()
+	t.Cleanup(TestingResetChannelFallbackWarnOnce)
 
 	srv, recorded := channelTestServerNoRouter(t)
 
@@ -253,8 +253,8 @@ func TestChannels_PublishMessage_RouterNilFallback_LogsWarnOnce(t *testing.T) {
 // router becomes mandatory), this test should be deleted alongside the
 // fallback branch.
 func TestChannels_PublishMessage_RouterNilFallback_SkipsChannelTypeCheck(t *testing.T) {
-	channelFallbackWarnOnce = sync.Once{}
-	t.Cleanup(func() { channelFallbackWarnOnce = sync.Once{} })
+	TestingResetChannelFallbackWarnOnce()
+	t.Cleanup(TestingResetChannelFallbackWarnOnce)
 
 	srv, _ := channelTestServerNoRouter(t)
 

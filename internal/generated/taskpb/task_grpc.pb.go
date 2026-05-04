@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_ExecuteTask_FullMethodName       = "/persatrix.v1.AgentService/ExecuteTask"
-	AgentService_ExecuteTaskStream_FullMethodName = "/persatrix.v1.AgentService/ExecuteTaskStream"
-	AgentService_HealthCheck_FullMethodName       = "/persatrix.v1.AgentService/HealthCheck"
-	AgentService_SendChatMessage_FullMethodName   = "/persatrix.v1.AgentService/SendChatMessage"
+	AgentService_ExecuteTask_FullMethodName           = "/persatrix.v1.AgentService/ExecuteTask"
+	AgentService_ExecuteTaskStream_FullMethodName     = "/persatrix.v1.AgentService/ExecuteTaskStream"
+	AgentService_HealthCheck_FullMethodName           = "/persatrix.v1.AgentService/HealthCheck"
+	AgentService_SendChatMessage_FullMethodName       = "/persatrix.v1.AgentService/SendChatMessage"
+	AgentService_ReceiveChannelMessage_FullMethodName = "/persatrix.v1.AgentService/ReceiveChannelMessage"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -37,6 +38,8 @@ type AgentServiceClient interface {
 	HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error)
 	// Send a chat message to the agent and return a synchronous reply.
 	SendChatMessage(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (*ChatResponse, error)
+	// Deliver a channel message event to a subscribed agent (RFC 0011 §C).
+	ReceiveChannelMessage(ctx context.Context, in *ChannelMessageEvent, opts ...grpc.CallOption) (*TaskAck, error)
 }
 
 type agentServiceClient struct {
@@ -96,6 +99,16 @@ func (c *agentServiceClient) SendChatMessage(ctx context.Context, in *ChatReques
 	return out, nil
 }
 
+func (c *agentServiceClient) ReceiveChannelMessage(ctx context.Context, in *ChannelMessageEvent, opts ...grpc.CallOption) (*TaskAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TaskAck)
+	err := c.cc.Invoke(ctx, AgentService_ReceiveChannelMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -108,6 +121,8 @@ type AgentServiceServer interface {
 	HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
 	// Send a chat message to the agent and return a synchronous reply.
 	SendChatMessage(context.Context, *ChatRequest) (*ChatResponse, error)
+	// Deliver a channel message event to a subscribed agent (RFC 0011 §C).
+	ReceiveChannelMessage(context.Context, *ChannelMessageEvent) (*TaskAck, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -129,6 +144,9 @@ func (UnimplementedAgentServiceServer) HealthCheck(context.Context, *HealthCheck
 }
 func (UnimplementedAgentServiceServer) SendChatMessage(context.Context, *ChatRequest) (*ChatResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendChatMessage not implemented")
+}
+func (UnimplementedAgentServiceServer) ReceiveChannelMessage(context.Context, *ChannelMessageEvent) (*TaskAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReceiveChannelMessage not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -216,6 +234,24 @@ func _AgentService_SendChatMessage_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_ReceiveChannelMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChannelMessageEvent)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReceiveChannelMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReceiveChannelMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReceiveChannelMessage(ctx, req.(*ChannelMessageEvent))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -234,6 +270,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendChatMessage",
 			Handler:    _AgentService_SendChatMessage_Handler,
+		},
+		{
+			MethodName: "ReceiveChannelMessage",
+			Handler:    _AgentService_ReceiveChannelMessage_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -56,6 +56,11 @@ class AgentServiceStub(object):
                 request_serializer=task__pb2.ChatRequest.SerializeToString,
                 response_deserializer=task__pb2.ChatResponse.FromString,
                 _registered_method=True)
+        self.ReceiveChannelMessage = channel.unary_unary(
+                '/persatrix.v1.AgentService/ReceiveChannelMessage',
+                request_serializer=task__pb2.ChannelMessageEvent.SerializeToString,
+                response_deserializer=task__pb2.TaskAck.FromString,
+                _registered_method=True)
 
 
 class AgentServiceServicer(object):
@@ -91,6 +96,13 @@ class AgentServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReceiveChannelMessage(self, request, context):
+        """Deliver a channel message event to a subscribed agent (RFC 0011 §C).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -113,6 +125,11 @@ def add_AgentServiceServicer_to_server(servicer, server):
                     servicer.SendChatMessage,
                     request_deserializer=task__pb2.ChatRequest.FromString,
                     response_serializer=task__pb2.ChatResponse.SerializeToString,
+            ),
+            'ReceiveChannelMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReceiveChannelMessage,
+                    request_deserializer=task__pb2.ChannelMessageEvent.FromString,
+                    response_serializer=task__pb2.TaskAck.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -225,6 +242,33 @@ class AgentService(object):
             '/persatrix.v1.AgentService/SendChatMessage',
             task__pb2.ChatRequest.SerializeToString,
             task__pb2.ChatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReceiveChannelMessage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/persatrix.v1.AgentService/ReceiveChannelMessage',
+            task__pb2.ChannelMessageEvent.SerializeToString,
+            task__pb2.TaskAck.FromString,
             options,
             channel_credentials,
             insecure,

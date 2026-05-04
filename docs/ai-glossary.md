@@ -303,6 +303,48 @@ This file is referenced by both `.github/CLAUDE.md` and
     when the parent is pruned.
 - **Example:** "The Channel Type `dm` is exempt from the named-group cap."
 
+### ChannelMessageEvent
+- **Aliases:** —
+- **Disallowed:** "channel event", "channel msg" (when meaning the wire type)
+- **Definition:** The protobuf message defined in
+  [`proto/task.proto`](../proto/task.proto) that carries a single channel
+  publish from the orchestrator to one subscribed agent over the
+  `AgentService.ReceiveChannelMessage` RPC (RFC 0011 §C). Field shape:
+  `message_id`, `channel_id`, `channel_type` (`group | dm | thread`,
+  duplicated from the `channel_id` prefix for log/metric ergonomics — the
+  orchestrator MUST validate agreement on publish), `sender_id`, `content`,
+  `timestamp` (RFC 3339), `thread_id` (empty string when not a reply),
+  `mentions`. Introduced in v0.3.0 (PR #246).
+- **Example:** "Each `ChannelMessageEvent` carries the `channel_type` so
+  observability counters need not parse the `channel_id` prefix."
+
+### TaskAck
+- **Aliases:** —
+- **Disallowed:** "ack", "delivery ack" (when meaning the wire type)
+- **Definition:** The minimal protobuf ack message
+  (`{ bool success, string error_message }`) defined in
+  [`proto/task.proto`](../proto/task.proto) and returned by fire-and-acknowledge
+  RPCs such as `AgentService.ReceiveChannelMessage`. v0.3.0 uses
+  at-most-once delivery semantics: `success=false` signals the agent
+  rejected or could not process the event and the orchestrator does **not**
+  retry in this release. Introduced in v0.3.0 (PR #246).
+- **Example:** "The PR-3 stub returns `TaskAck(success=False)` so the wire
+  format is exercised without falsely claiming delivery."
+
+### ReceiveChannelMessage
+- **Aliases:** —
+- **Disallowed:** "deliver channel message" (when meaning the RPC),
+  "channel deliver"
+- **Definition:** The `AgentService` gRPC RPC defined in
+  [`proto/task.proto`](../proto/task.proto) that the orchestrator calls to
+  hand a `ChannelMessageEvent` to one subscribed agent and receive a
+  `TaskAck`. Stub-only in PR #246 (RFC 0011 PR 3); the real handler —
+  constructing an `AgentEvent(event_type=CHANNEL_MESSAGE)` and dispatching
+  through `EventDispatcher` — lands in RFC 0011 PR 4 alongside the
+  orchestrator-side `DispatchChannelMessage` action.
+- **Example:** "Each subscriber on a publish receives one
+  `ReceiveChannelMessage` invocation."
+
 ### Respond Policy
 - **Aliases:** —
 - **Disallowed:** "response mode", "trigger mode"

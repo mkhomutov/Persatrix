@@ -35,6 +35,15 @@ proto-python: ## Generate Python gRPC stubs from protobuf definitions
 	@mkdir -p $(PROTO_PY_OUT)
 	$(PYTHON) -m grpc_tools.protoc --python_out=$(PROTO_PY_OUT) --grpc_python_out=$(PROTO_PY_OUT) \
 		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto
+	@# grpc_tools.protoc emits top-level 'import X_pb2' which fails at runtime
+	@# when the package is installed as persatrix_agents.generated.* (agents/generated/
+	@# is not on sys.path). Rewrite to 'from . import X_pb2' so the stubs work in
+	@# the installed layout. ISSUE-0016 / PR #246 finding M1.
+	@$(PYTHON) -c "\
+import re, pathlib; \
+[f.write_text(re.sub(r'^import (\\w+_pb2\\b)', r'from . import \\1', \
+  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8') \
+ for f in pathlib.Path('$(PROTO_PY_OUT)').glob('*_pb2_grpc.py')]"
 	@echo "✓ Python protobuf stubs generated"
 
 # ─── Build ──────────────────────────────────────────────

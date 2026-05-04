@@ -201,33 +201,23 @@ Agent ember-owl idle (10 ticks), skipping LLM tick
 
 ### Step 6: Wake the Agent and Confirm Short-Circuit Disengages
 
-**Action** *(optional; requires `ANTHROPIC_API_KEY`)*: Send an inbound message to the agent and
-confirm the short-circuit yields to a real LLM call:
+> **Status (RFC 0011 PR 3, 2026-05-04):** **Skipped — pending RFC 0011 PR 4.**
+>
+> The `persatrix.v1.ChannelService/SendMessage` RPC and `proto/agent_message.proto`
+> were removed in PR #246 (RFC 0011 PR 3). The replacement surface
+> `AgentService/ReceiveChannelMessage` (defined in `proto/task.proto`) is a stub
+> that returns `TaskAck(success=False, error_message="ReceiveChannelMessage handler
+> not yet implemented (RFC 0011 PR 4)")` and does **not** dispatch through
+> `EventDispatcher` yet. Until PR 4 wires the orchestrator-side
+> `DispatchChannelMessage` action and renames `MESSAGE_RECEIVED` →
+> `CHANNEL_MESSAGE`, this step cannot exercise the short-circuit-disengage path.
+>
+> Re-enable when PR 4 lands; the new procedure should call
+> `persatrix.v1.AgentService/ReceiveChannelMessage` against the persona agent's
+> gRPC port and assert `success=true` plus the LLM-call evidence below.
 
-```bash
-grpcurl -plaintext \
-  -import-path proto/ \
-  -proto agent_message.proto \
-  -d '{
-    "message_id": "test-msg-mt-persona-003",
-    "channel_id": "general",
-    "sender_id": "tester",
-    "type": "TEXT",
-    "content": "What is your current focus?"
-  }' \
-  localhost:50054 \
-  persatrix.v1.ChannelService/SendMessage
-```
-
-> The persona agent's gRPC port is configurable. If the default differs from `50054`, confirm
-> the actual port in the agent's startup log (consistent with
-> [MT-PERSONA-002](MT-PERSONA-002.md)).
-
-**Expected Result**: A `MESSAGE_RECEIVED` event flows through `_on_event_inner`; the
-short-circuit guard does **not** fire (event is not a TICK). The LLM is invoked normally.
-
-**Verification**:
-- [ ] `"delivered": true` in the gRPC response
+**Verification (deferred — do not check on this run)**:
+- [ ] `success: true` in the `TaskAck` response
 - [ ] At least one new `api.anthropic.com` entry appears in the log after the
       message is sent
 - [ ] No new `empty_context_tick` log between message receipt and reply
@@ -255,7 +245,7 @@ short-circuit guard does **not** fire (event is not a TICK). The LLM is invoked 
 | 3 | ≥ 1 `"empty-context tick suppressed"` log entries during the wait window | ☐ |
 | 4 | Zero LLM HTTP calls during the empty-context window | ☐ |
 | 5 | Idle-skip log appears after 10 short-circuited ticks | ☐ |
-| 6 | (Optional) Inbound message bypasses short-circuit; LLM call observed | ☐ |
+| 6 | (Optional) Inbound message bypasses short-circuit; LLM call observed | ☐ N/A — deferred to RFC 0011 PR 4 |
 | 7 | Graceful shutdown | ☐ |
 
 ---

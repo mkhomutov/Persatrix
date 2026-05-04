@@ -6,6 +6,39 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 PR 3 — Proto + RPC for channel-message delivery.** Adds
+  `ChannelMessageEvent` + `ReceiveChannelMessage` (returning a new minimal
+  `TaskAck`) to `proto/task.proto` per RFC 0011 §C. The `channel_type`
+  string field on the event duplicates the prefix encoded in `channel_id`
+  ("group:" / "dm:" / "thread:") so log/metric attributes do not have to
+  re-parse the address; the orchestrator's `ChannelRouter` (PR 2) already
+  validates agreement on publish, and receivers should drop on mismatch
+  as malformed. The Python `AgentServiceServicer` gains a stub
+  `ReceiveChannelMessage` that returns
+  `TaskAck(success=false, error_message="…RFC 0011 PR 4")` — fail-closed
+  so the eventual orchestrator dispatcher cannot mistake the stub
+  response for a real ack (PR #246 deep review H1). The real handler
+  (build `AgentEvent(event_type=CHANNEL_MESSAGE)` and dispatch through
+  `EventDispatcher`) lands in PR 4 alongside the orchestrator-side
+  `DispatchChannelMessage` action and the `MESSAGE_RECEIVED` →
+  `CHANNEL_MESSAGE` event-type rename.
+
+### Removed
+
+- **v0.2-era `ChannelService` proto surface.** Deletes
+  `proto/agent_message.proto` (`ChannelService.SendMessage` +
+  `ChannelService.Subscribe(stream)`, `AgentMessage`, `MessageType`,
+  `Visibility`, `Attachment`), the matching `ChannelServiceServicer` in
+  `agents/server_servicers.py`, its registration in `agents/server.py`,
+  and `tests/unit/python/test_server_channel.py`. The surface had no
+  producer wired anywhere in the codebase — server-streaming `Subscribe`
+  was incompatible with the orchestrator-mediated dispatch model adopted
+  in RFC 0011 §C, and `MessageType` / `Visibility` were never read by a
+  consumer. The new agent-side delivery path is `AgentService.ReceiveChannelMessage`
+  on `proto/task.proto` (this PR). Generated stubs `agents/generated/agent_message_pb2*`
+  and `internal/generated/msgpb/` are removed in the same commit so CI
+  never sees a missing-import window.
+
 - **RFC 0011 PR 2 — Channels REST surface + router + config reconciliation.**
   Wires `internal/channels` (PR 1) into the orchestrator: new `ChannelRouter`
   publishes through the store with `channel_type` cross-validation and
