@@ -110,63 +110,6 @@ func buildDSN(path string) string {
 	return path + "?" + q.Encode()
 }
 
-// schemaSQL is the v0.3.0 channel-store schema. It is intentionally applied
-// via `CREATE TABLE IF NOT EXISTS` rather than a migration runner because
-// PR 1 ships the first revision — there is nothing to migrate from. As soon
-// as a future PR needs an `ALTER TABLE` (column add, type change, index
-// rename, etc.) this in-place approach becomes a footgun: existing
-// production databases will silently keep the old shape.
-//
-// TODO(rfc0011-pr2+): introduce an embedded migrations runner (e.g.
-// golang-migrate or a hand-rolled `schema_version` PRAGMA + ordered .sql
-// files) before the first schema-altering PR lands. Until then, every
-// schema change in this package MUST be additive and IF-NOT-EXISTS-safe.
-const schemaSQL = `
-CREATE TABLE IF NOT EXISTS channels (
-    id           TEXT PRIMARY KEY,
-    name         TEXT NOT NULL UNIQUE,
-    channel_type TEXT NOT NULL CHECK (channel_type IN ('group', 'dm', 'thread')),
-    description  TEXT NOT NULL DEFAULT '',
-    created_at   DATETIME NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS memberships (
-    channel_id     TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    participant_id TEXT NOT NULL,
-    respond_policy TEXT NOT NULL DEFAULT 'when_mentioned'
-        CHECK (respond_policy IN ('when_mentioned', 'always', 'never')),
-    joined_at      DATETIME NOT NULL,
-    PRIMARY KEY (channel_id, participant_id)
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    sender_id  TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    timestamp  DATETIME NOT NULL,
-    thread_id  TEXT REFERENCES messages(id) ON DELETE CASCADE,
-    mentions   TEXT NOT NULL DEFAULT '[]',
-    metadata   TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_messages_thread     ON messages(thread_id) WHERE thread_id IS NOT NULL;
-`
-
-func applySchema(db *sql.DB) error {
-	if _, err := db.Exec(schemaSQL); err != nil {
-		return fmt.Errorf("channels: apply schema: %w", err)
-	}
-	// Defensive PRAGMA — DSN sets it, but a future caller wiring a
-	// pre-existing *sql.DB through a yet-to-be-added constructor should
-	// still see foreign keys enforced.
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		return fmt.Errorf("channels: enable foreign_keys: %w", err)
-	}
-	return nil
-}
-
 // sqliteStore is the concrete [ChannelStore] backed by SQLite.
 //
 // `dmMu` serialises [GetOrCreateDM] for a given canonical id so a publish-
@@ -208,6 +151,19 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 		return fmt.Errorf("channels: group channel name %q does not match %s",
 			ch.Name, channelNamePattern.String())
 	}
+	// PR #231 review SF-2: make CreateChannel the canonical-id authority for
+	// group channels. The previous implementation accepted any
+	// `(ID, Name)` pair so a REST handler could insert a row whose PK
+	// disagreed with its display name (e.g. ID=`group:foo`, Name=`bar`).
+	// Future memory and observability rows reference the canonical id; a
+	// drift here would mis-route every downstream lookup. We require the
+	// caller to supply the exact PK they intend to use rather than mutate
+	// the input — the wrapper signature stays value-receiver so a
+	// surprising in-place rewrite cannot happen at higher layers.
+	if ch.Type == ChannelTypeGroup && ch.ID != "group:"+ch.Name {
+		return fmt.Errorf("%w: group channel id %q must be \"group:\"+name (name=%q)",
+			ErrInvalidChannelType, ch.ID, ch.Name)
+	}
 	if ch.CreatedAt.IsZero() {
 		ch.CreatedAt = time.Now().UTC()
 	}
@@ -230,19 +186,21 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 		}
 	}
 
-	// `name` is UNIQUE NOT NULL — insert a deterministic placeholder for non-
-	// group channels (DM canonical id, thread parent message id) so the
-	// constraint still distinguishes rows but callers see Name="" via the
-	// scan path below.
-	storedName := ch.Name
-	if storedName == "" {
-		storedName = ch.ID
+	// SF-4 (PR 2 of RFC 0011): channels.name is now nullable. Group
+	// channels store their declared display name; DM and thread channels
+	// store NULL. Uniqueness is enforced by the partial index
+	// `ux_channels_name_group` (group rows only) — see migrateV1ToV2.
+	var nameArg any
+	if ch.Type == ChannelTypeGroup {
+		nameArg = ch.Name
+	} else {
+		nameArg = nil
 	}
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO channels (id, name, channel_type, description, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,
-		ch.ID, storedName, string(ch.Type), ch.Description, ch.CreatedAt,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -270,7 +228,8 @@ func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error
 		   FROM channels WHERE id = ?`, id)
 	var ch Channel
 	var typ string
-	var name string
+	// SF-4: name is nullable post-v2 — DM/thread rows hold NULL.
+	var name sql.NullString
 	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Channel{}, fmt.Errorf("%w: %s", ErrChannelNotFound, id)
@@ -278,8 +237,8 @@ func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error
 		return Channel{}, fmt.Errorf("channels: scan channel: %w", err)
 	}
 	ch.Type = ChannelType(typ)
-	if name != ch.ID { // group channels store the friendly name
-		ch.Name = name
+	if name.Valid {
+		ch.Name = name.String
 	}
 	return ch, nil
 }
@@ -298,13 +257,13 @@ func (s *sqliteStore) ListChannels(ctx context.Context) ([]Channel, error) {
 	for rows.Next() {
 		var ch Channel
 		var typ string
-		var name string
+		var name sql.NullString
 		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
 			return nil, fmt.Errorf("channels: scan list: %w", err)
 		}
 		ch.Type = ChannelType(typ)
-		if name != ch.ID {
-			ch.Name = name
+		if name.Valid {
+			ch.Name = name.String
 		}
 		out = append(out, ch)
 	}
@@ -445,8 +404,8 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO channels (id, name, channel_type, description, created_at)
-		 VALUES (?, ?, ?, '', ?)`,
-		id, id, string(ChannelTypeDM), now); err != nil {
+		 VALUES (?, NULL, ?, '', ?)`,
+		id, string(ChannelTypeDM), now); err != nil {
 		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
 	}
 	for _, p := range []string{pa, pb} {

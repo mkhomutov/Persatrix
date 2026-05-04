@@ -338,6 +338,14 @@ func main() {
 		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
 	}
 
+	// RFC 0011 PR 2 — channels subsystem (see channels.go).
+	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, orchMetrics, logger)
+	if chanErr != nil {
+		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
+	}
+	defer chanCleanup()
+	srvOpts = append(srvOpts, chanOpts...)
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))

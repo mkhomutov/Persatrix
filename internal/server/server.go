@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
@@ -69,6 +70,15 @@ type Server struct {
 	// `Authorization: Bearer <token>` and the comparison runs in
 	// constant time via crypto/subtle.
 	unquarantineToken string
+
+	// Channel components (RFC 0011 PR 2 — optional, nil-safe).
+	// channelStore is the persistence boundary; channelRouter wraps it
+	// with publish-side fanout + channel_type cross-validation. When
+	// either is nil, the channel REST endpoints return 503 UNAVAILABLE
+	// — preserves zero-config behaviour for unit tests and for
+	// deployments that have not opted into the channels subsystem.
+	channelStore  channels.ChannelStore
+	channelRouter *channels.ChannelRouter
 }
 
 // ServerOption configures optional Server dependencies.
@@ -157,6 +167,18 @@ func WithUnquarantineToken(token string) ServerOption {
 	}
 }
 
+// WithChannels injects the channel store and (optionally) the channel
+// router used by the RFC 0011 §C REST endpoints. Pass nil for the
+// router when the caller only wants direct-store reads (history/list)
+// without publish-side fanout — the publish handler then writes through
+// the store directly. Production callers always wire both.
+func WithChannels(store channels.ChannelStore, router *channels.ChannelRouter) ServerOption {
+	return func(s *Server) {
+		s.channelStore = store
+		s.channelRouter = router
+	}
+}
+
 // New validates that workflowsDir is accessible and returns a configured Server.
 // Returns an error if the workflows directory is missing, inaccessible, or not a directory.
 func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger, opts ...ServerOption) (*Server, error) {
@@ -236,6 +258,17 @@ func (s *Server) registerRoutes() {
 	// TODO(v0.2): per-IP or per-session rate limiting — chat accepts unauthenticated
 	// traffic and has no request-rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
+
+	// Channels endpoints (RFC 0011 §C, PR 2). DELETE channel + remove
+	// member are deferred to PR 4 alongside the response gate that
+	// needs to react to membership removal.
+	s.mux.HandleFunc("POST /api/v1/channels", s.handleCreateChannel)
+	s.mux.HandleFunc("GET /api/v1/channels", s.handleListChannels)
+	s.mux.HandleFunc("GET /api/v1/channels/{id}", s.handleGetChannel)
+	s.mux.HandleFunc("POST /api/v1/channels/{id}/messages", s.handlePublishMessage)
+	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages", s.handleGetChannelHistory)
+	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages/{msg_id}/thread", s.handleGetThread)
+	s.mux.HandleFunc("POST /api/v1/channels/{id}/members", s.handleAddChannelMember)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
