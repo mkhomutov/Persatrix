@@ -4,7 +4,10 @@ Persatrix Agent gRPC Servicers.
 Contains gRPC servicer implementations used by AgentServer:
 - AgentServiceServicer: ExecuteTask, HealthCheck, ExecuteTaskStream,
   SendChatMessage, ReceiveChannelMessage
-- _extract_chat_reply: helper for extracting chat replies from agent actions
+
+Chat-reply extraction (``_extract_chat_reply``) lives in
+``agents/chat_reply.py`` since RFC 0011 PR 4a-i and is re-exported
+here for backward compatibility with existing import sites.
 """
 
 # ruff: noqa: N802
@@ -12,18 +15,19 @@ Contains gRPC servicer implementations used by AgentServer:
 import asyncio
 import json
 import logging
-import re
 import time
 import uuid
+from typing import Any
 
 import grpc
 import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
+from .channel_validation import validate_channel_message_event
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
-from .persona_types import ActionType, AgentAction, AgentEvent, EventType
+from .persona_types import AgentEvent, EventType
 
 logger = logging.getLogger("Persatrix.agent.server")
 
@@ -35,13 +39,22 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
     """gRPC servicer.
 
     Methods: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage,
-    ReceiveChannelMessage (PR-3 stub — see method docstring; real handler
-    lands in RFC 0011 PR 4).
+    ReceiveChannelMessage (real handler — RFC 0011 PR 4a; chat-path
+    rename to ``CHANNEL_MESSAGE`` and the ``SEND_CHANNEL_MESSAGE`` executor
+    land in a follow-up PR alongside the chat migration).
     """
 
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):
         self._agents = agents
         self._dispatcher = dispatcher or EventDispatcher()
+        # RFC 0011 PR 4a — strong-ref anchor for fire-and-forget channel
+        # dispatch tasks. Python 3.11+ garbage-collects asyncio tasks held
+        # only by weak references in the event loop, so a bare
+        # ``asyncio.create_task(...)`` without a strong-ref anchor can be
+        # collected mid-flight, dropping the dispatch silently. Tasks add
+        # themselves to this set on creation and a done_callback discards
+        # them on completion. PR #246 deep review Should-Fix #2.
+        self._pending_dispatches: set[asyncio.Task[Any]] = set()
 
     async def ExecuteTask(
         self,
@@ -328,123 +341,115 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request: task_pb2.ChannelMessageEvent,
         context: grpc.aio.ServicerContext,
     ) -> task_pb2.TaskAck:
-        """Stub for RFC 0011 PR 3 — Phase 2a wires the proto only.
+        """Receive a channel message and dispatch it to the local agent.
 
-        Real handler (construct ``AgentEvent(event_type=CHANNEL_MESSAGE)``,
-        dispatch through ``EventDispatcher``, observe metrics) lands in
-        RFC 0011 PR 4 alongside the orchestrator-side ``DispatchChannelMessage``
-        action and the ``MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` event-type
-        rename.
+        RFC 0011 PR 4a — replaces the PR 3 ``success=False`` stub with the
+        real receiver-side handler. Validates the wire-side
+        ``ChannelMessageEvent`` (mentions cap, content size, channel-type
+        prefix agreement, thread_id length), resolves the target agent
+        on the single-agent-per-process server (``agents/server.py``
+        currently rejects multi-agent), constructs an
+        ``AgentEvent(event_type=CHANNEL_MESSAGE)``, and schedules dispatch
+        via ``asyncio.create_task`` with a strong-ref task set
+        (``self._pending_dispatches``) so the orchestrator gets the
+        at-most-once ``TaskAck`` on enqueue rather than after
+        agent processing completes.
 
-        The stub returns ``TaskAck(success=False)`` rather than ``True`` so the
-        wire format is exercised end-to-end (the orchestrator's eventual
-        dispatcher serialises a real ``ChannelMessageEvent`` and deserialises a
-        real ``TaskAck``) WITHOUT the response being indistinguishable from a
-        successful delivery. Per the at-most-once semantics declared on
-        ``TaskAck``, ``success=false`` means "the agent did not process this
-        event"; the orchestrator does not retry, but the failure surfaces in
-        logs/metrics rather than being silently absorbed. See PR #246 deep
-        review finding H1.
+        Validation failures return ``TaskAck(success=False, error_message=...)``
+        with a taxonomised reason so operators reading the wire trace can
+        locate the failure class. The orchestrator does not retry in v0.3.0
+        per ``TaskAck`` semantics.
 
-        TODO(rfc0011-pr-4): when the real handler lands, fan-out to
-        ``EventDispatcher`` MUST hold strong references to any spawned
-        ``asyncio.Task`` objects (e.g. via a ``set[asyncio.Task]`` plus
-        ``task.add_done_callback(self._pending_dispatches.discard)``).
-        Python 3.11+ garbage-collects tasks held only by weak references
-        in the event loop, so a fire-and-forget ``asyncio.create_task(...)``
-        without a strong-ref anchor can be collected mid-flight. This
-        pattern was originally introduced in PR #101 on the now-deleted
-        ``ChannelServiceServicer`` and is recorded here so the dispatcher
-        author in PR 4 does not have to re-derive it. PR #246 deep review
-        Should-Fix #2.
+        The response gate (``respond: when_mentioned``/``always``/``never``)
+        and the ``SEND_CHANNEL_MESSAGE`` executor land in PR 4b. The
+        ``EventType.MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` and
+        ``ActionType.SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` hard renames
+        land atomically with the chat-path migration in a follow-up PR
+        (chat is the heavy producer of the old names; renaming without
+        migrating chat would leave ``main`` broken). PR 4a only adds the
+        new enum members additively.
         """
-        del request, context  # unused until PR 4
-        return task_pb2.TaskAck(
-            success=False,
-            error_message="ReceiveChannelMessage handler not yet implemented (RFC 0011 PR 4)",
+        # ─── Validation (defence-in-depth; mirrors proto/task.proto bounds) ──
+        err = validate_channel_message_event(request)
+        if err is not None:
+            return task_pb2.TaskAck(success=False, error_message=err)
+
+        # ─── Target agent resolution (single-agent-per-process in v0.3.0) ──
+        if not self._agents:
+            return task_pb2.TaskAck(
+                success=False,
+                error_message="no agents registered on this server",
+            )
+        if len(self._agents) > 1:
+            # `ChannelMessageEvent` carries no recipient_id; multi-agent
+            # disambiguation requires an additive proto field landing
+            # alongside the chat-path migration. Until then a multi-agent
+            # server cannot route channel messages unambiguously and MUST
+            # reject rather than broadcast.
+            return task_pb2.TaskAck(
+                success=False,
+                error_message=(
+                    "multi-agent server: ChannelMessageEvent has no "
+                    "recipient_id field; deferred to RFC 0011 PR 4 "
+                    "chat-path migration"
+                ),
+            )
+        target_agent_id = next(iter(self._agents))
+
+        # ─── Build AgentEvent and schedule fire-and-forget dispatch ──────
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={
+                "content": request.content,
+                "channel_type": request.channel_type,
+                "mentions": list(request.mentions),
+            },
+            channel_id=request.channel_id,
+            sender_id=request.sender_id,
+            message_id=request.message_id,
+            thread_id=request.thread_id or None,
         )
+
+        task = asyncio.create_task(
+            self._dispatch_channel_event(target_agent_id, event),
+            name=f"channel-dispatch:{request.message_id}",
+        )
+        # Strong-ref anchor (PR #246 deep review Should-Fix #2): without
+        # this the task can be GC'd mid-flight on Python 3.11+.
+        self._pending_dispatches.add(task)
+        task.add_done_callback(self._pending_dispatches.discard)
+
+        del context  # unused; ack is unconditional once enqueued
+        return task_pb2.TaskAck(success=True)
+
+    async def _dispatch_channel_event(
+        self, target_agent_id: str, event: AgentEvent,
+    ) -> None:
+        """Run dispatch and log any exception (no retry in v0.3.0).
+
+        Wrapped so the fire-and-forget task never propagates a bare
+        exception into the asyncio event loop's default handler.
+        """
+        try:
+            await self._dispatcher.dispatch(target_agent_id, event)
+        except Exception:  # noqa: BLE001 — final boundary; logged with traceback
+            logger.exception(
+                "ReceiveChannelMessage dispatch failed for agent %s (channel %s)",
+                target_agent_id, event.channel_id,
+            )
 
 
 # ─── Chat Reply Extraction ────────────────────────────────────
 
 
-def _extract_chat_reply(
-    actions: list[AgentAction],
-    user_id: str,
-) -> tuple[str, str]:
-    """Extract a chat reply text from a list of agent actions.
+# Backward-compat re-export: ``_extract_chat_reply`` was previously defined
+# inline in this module and is imported by ``agents/server.py`` and by
+# ``tests/unit/python/test_extract_chat_reply.py`` as
+# ``from agents.server_servicers import _extract_chat_reply``. RFC 0011 PR 4a-i
+# extracted the implementation into ``agents/chat_reply.py`` to keep this
+# module under the 500-line review-friendly cap; the alias preserves the
+# existing import surface.
+from .chat_reply import extract_chat_reply as _extract_chat_reply  # noqa: E402
 
-    Priority (OQ 5):
-    1. ``SEND_MESSAGE`` whose ``mentions`` list contains ``user_id``.
-    2. Any ``SEND_MESSAGE`` action.
-    3. ``COMPLETE_TASK`` result payload.
-    4. Empty string (reply_status="empty").
+__all__ = ["AgentServiceServicer", "_extract_chat_reply"]
 
-    Returns ``(reply_text, reply_status)`` where ``reply_status`` is one of
-    ``"ok"``, ``"empty"``.
-    """
-    def _sanitize_reply(text: str) -> str:
-        """Strip internal delimiter tags that should never be visible to users.
-
-        The persona runtime wraps user messages in ``<|user_message …|>`` /
-        ``<|/user_message|>`` delimiters for prompt-injection mitigation.
-        If the LLM echoes these back in its response, strip them so the
-        raw markup never reaches the end user.
-        """
-        # Primary precise sweep: known ``user_message`` delimiter shapes.
-        cleaned = re.sub(
-            r"<\|/?user_message[^|]*\|>",
-            "",
-            text,
-        )
-        # Defense-in-depth: strip any other ``<|…|>`` token-like fragments
-        # that might slip through if the runtime adds new delimiter names
-        # (e.g. ``<|system|>``, ``<|assistant|>``) or if the LLM hallucinates
-        # one.  Allows inner pipes (e.g. ``user_id="a|b"``) by using a
-        # non-greedy body bounded to 128 chars to avoid catastrophically
-        # eating real reply content that happens to contain ``|>``.
-        cleaned = re.sub(
-            r"<\|/?[a-zA-Z_].{0,128}?\|>",
-            "",
-            cleaned,
-        )
-        # Fallback: strip a torn opening fragment at the very end of the
-        # string (no closing ``|>``), which can happen if the LLM cuts off
-        # mid-tag.  Anchored to end-of-string so we don't touch legitimate
-        # ``<|`` substrings elsewhere in the reply.
-        cleaned = re.sub(
-            r"<\|/?[a-zA-Z_][^|>\s]{0,64}\Z",
-            "",
-            cleaned,
-        )
-        return cleaned.strip()
-
-    send_messages = [
-        a for a in actions if a.action_type == ActionType.SEND_MESSAGE
-    ]
-
-    # Priority 1: user-targeted SEND_MESSAGE
-    if user_id:
-        for action in send_messages:
-            mentions = action.payload.get("mentions", [])
-            if user_id in mentions:
-                return _sanitize_reply(action.payload.get("content", "")), "ok"
-
-    # Priority 2: any SEND_MESSAGE
-    if send_messages:
-        return _sanitize_reply(send_messages[0].payload.get("content", "")), "ok"
-
-    # Priority 3: COMPLETE_TASK result
-    complete = next(
-        (a for a in actions if a.action_type == ActionType.COMPLETE_TASK), None
-    )
-    if complete is not None:
-        result = complete.payload.get("result", "")
-        return _sanitize_reply(result), "ok"
-
-    # Priority 4: empty — only warn when the agent returned actions but
-    # none were reply-extractable; an empty action list is expected for
-    # agents that legitimately produce no reply (review fix: log noise).
-    if actions:
-        logger.warning("SendChatMessage: no reply action found in agent response")
-    return "", "empty"

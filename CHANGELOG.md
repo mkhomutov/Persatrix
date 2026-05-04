@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 PR 4a — `ReceiveChannelMessage` real handler + additive
+  enums.** Replaces the PR 3 `TaskAck(success=False)` stub on
+  `AgentServiceServicer.ReceiveChannelMessage` with a real receiver-side
+  handler: validates the wire-side `ChannelMessageEvent` (mentions cap,
+  participant-id pattern, content/thread-id length, channel_type ↔
+  channel_id prefix agreement) defensively against the cleartext gRPC
+  transport, resolves the target agent on the single-agent-per-process
+  server, builds an `AgentEvent(event_type=CHANNEL_MESSAGE)`, and
+  schedules dispatch via `asyncio.create_task` with a strong-ref task
+  set (`self._pending_dispatches`) so Python 3.11+ does not GC the task
+  mid-flight (PR #246 deep review Should-Fix #2). Returns
+  `TaskAck(success=True)` on enqueue (at-most-once contract; the
+  orchestrator does not retry). Adds two new enum members **additively**
+  alongside the v0.2 names: `EventType.CHANNEL_MESSAGE` and
+  `ActionType.SEND_CHANNEL_MESSAGE`. Promotes `thread_id` to a top-level
+  `AgentEvent` field per RFC 0011 §D so the response gate (PR 4b) can
+  branch on thread context without a payload lookup.
+
+  The hard renames `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and
+  `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE`, the
+  `SEND_CHANNEL_MESSAGE` dispatch executor in `agents/dispatch.py`, the
+  orchestrator-side `internal/executor/dispatch.go::DispatchChannelMessage`,
+  the persona-runtime response gate, the DELETE endpoints, and the
+  chat-path migration per the RFC 0011 chat-as-DM amendment land in
+  follow-up PRs (chat is the heavy producer of the old enum names;
+  renaming without migrating chat would leave `main` broken).
+
 - **RFC 0011 PR 3 — Proto + RPC for channel-message delivery.** Adds
   `ChannelMessageEvent` + `ReceiveChannelMessage` (returning a new minimal
   `TaskAck`) to `proto/task.proto` per RFC 0011 §C. The `channel_type`
