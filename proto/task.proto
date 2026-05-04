@@ -18,6 +18,9 @@ service AgentService {
 
   // Send a chat message to the agent and return a synchronous reply.
   rpc SendChatMessage(ChatRequest) returns (ChatResponse);
+
+  // Deliver a channel message event to a subscribed agent (RFC 0011 §C).
+  rpc ReceiveChannelMessage(ChannelMessageEvent) returns (TaskAck);
 }
 
 message TaskRequest {
@@ -95,4 +98,31 @@ message ChatResponse {
   int64 timestamp = 4;            // Unix epoch seconds
   string agent_display_name = 5;  // populated by orchestrator from Registry
   string reply_status = 6;        // "ok" | "empty" | "error"
+}
+
+// ─── Channel Message Delivery (orchestrator → subscribed agent) ────
+// RFC 0011 §C. Carries a single channel message to one subscriber.
+// `channel_type` duplicates the prefix encoded in `channel_id`
+// ("group:" / "dm:" / "thread:") and is carried separately for
+// log/observability ergonomics — counters and span attributes use it
+// without parsing. Orchestrator MUST validate agreement with the prefix
+// on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
+// mismatch as malformed rather than pick one source.
+message ChannelMessageEvent {
+  string message_id = 1;
+  string channel_id = 2;
+  string channel_type = 3;        // "group" | "dm" | "thread"
+  string sender_id = 4;
+  string content = 5;
+  string timestamp = 6;           // RFC 3339
+  string thread_id = 7;           // empty string if not a reply
+  repeated string mentions = 8;
+}
+
+// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
+// At-most-once delivery in v0.3.0 — `success=false` signals the agent rejected
+// or could not process the event; the orchestrator does not retry in this release.
+message TaskAck {
+  bool success = 1;
+  string error_message = 2;       // populated when success == false
 }

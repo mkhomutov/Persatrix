@@ -24,7 +24,7 @@ is reset (woken) on receipt of the message.
 ## Related Documentation
 
 **Feature Documentation**:
-- [proto/agent_message.proto](../../proto/agent_message.proto) — `ChannelService`, `AgentMessage`
+- `proto/agent_message.proto` (deleted in RFC 0011 PR 3) — historical `ChannelService` / `AgentMessage` surface; superseded by `AgentService.ReceiveChannelMessage` + `ChannelMessageEvent` in [proto/task.proto](../../proto/task.proto).
 - [docs/rfcs/0005-persona-agent-memory.md](../rfcs/0005-persona-agent-memory.md)
 
 **Related Automated Tests**:

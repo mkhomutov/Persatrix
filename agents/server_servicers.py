@@ -2,8 +2,8 @@
 Persatrix Agent gRPC Servicers.
 
 Contains gRPC servicer implementations used by AgentServer:
-- AgentServiceServicer: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage
-- ChannelServiceServicer: inbound AgentMessage routing
+- AgentServiceServicer: ExecuteTask, HealthCheck, ExecuteTaskStream,
+  SendChatMessage, ReceiveChannelMessage
 - _extract_chat_reply: helper for extracting chat replies from agent actions
 """
 
@@ -21,7 +21,7 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .dispatch import EventDispatcher
-from .generated import agent_message_pb2, agent_message_pb2_grpc, task_pb2, task_pb2_grpc
+from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_types import ActionType, AgentAction, AgentEvent, EventType
 
@@ -318,6 +318,23 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             reply_status=reply_status,
         )
 
+    async def ReceiveChannelMessage(
+        self,
+        request: task_pb2.ChannelMessageEvent,
+        context: grpc.aio.ServicerContext,
+    ) -> task_pb2.TaskAck:
+        """Stub for RFC 0011 PR 3 — Phase 2a wires the proto only.
+
+        Real handler (construct ``AgentEvent(event_type=CHANNEL_MESSAGE)``,
+        dispatch through ``EventDispatcher``, observe metrics) lands in
+        RFC 0011 PR 4 alongside the orchestrator-side ``DispatchChannelMessage``
+        action and the ``MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` event-type
+        rename. Returning ``success=True`` lets the orchestrator's eventual
+        dispatcher exercise the wire format end-to-end without a real consumer.
+        """
+        del request, context  # unused until PR 4
+        return task_pb2.TaskAck(success=True)
+
 
 # ─── Chat Reply Extraction ────────────────────────────────────
 
@@ -402,84 +419,3 @@ def _extract_chat_reply(
     if actions:
         logger.warning("SendChatMessage: no reply action found in agent response")
     return "", "empty"
-
-
-# ─── ChannelServiceServicer ──────────────────────────────────
-
-
-class ChannelServiceServicer(agent_message_pb2_grpc.ChannelServiceServicer):
-    """Receives inbound AgentMessage and routes it to persona agents.
-
-    Routes to agents listed in ``mentions``; if empty, broadcasts to all
-    agents on this server. Returns delivered=True as soon as the event is
-    queued — LLM processing happens asynchronously via the EventDispatcher.
-    """
-
-    def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher) -> None:
-        self._agents = agents
-        self._dispatcher = dispatcher
-        # PR #101 review: Python 3.11+ asyncio docs warn that the event loop
-        # only holds weak references to tasks, so a fire-and-forget
-        # ``asyncio.create_task(...)`` can be garbage-collected mid-flight if
-        # the caller does not retain a strong reference. SendMessage returns
-        # immediately after queueing, which is exactly that hazard. Keep a
-        # strong-ref set and drop tasks via a done-callback once they finish.
-        self._pending_dispatches: set[asyncio.Task] = set()
-
-    async def SendMessage(
-        self,
-        request: agent_message_pb2.AgentMessage,
-        context: grpc.aio.ServicerContext,
-    ) -> agent_message_pb2.SendMessageResponse:
-        targets = list(request.mentions) if request.mentions else list(self._agents.keys())
-        if not targets:
-            return agent_message_pb2.SendMessageResponse(
-                message_id=request.message_id,
-                delivered=False,
-            )
-        event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
-            payload={"content": request.content, "channel_id": request.channel_id},
-            channel_id=request.channel_id or None,
-            sender_id=request.sender_id or None,
-            message_id=request.message_id or None,
-        )
-        for target_id in targets:
-            task = asyncio.create_task(
-                self._dispatch_and_log(target_id, event),
-                name=f"channel-dispatch-{target_id}-{request.message_id or 'anon'}",
-            )
-            self._pending_dispatches.add(task)
-            task.add_done_callback(self._pending_dispatches.discard)
-        return agent_message_pb2.SendMessageResponse(
-            message_id=request.message_id,
-            delivered=True,
-        )
-
-    async def _dispatch_and_log(self, target_id: str, event: AgentEvent) -> None:
-        """Wrapper around ``EventDispatcher.dispatch`` that logs failures.
-
-        PR #101 review: fire-and-forget ``create_task`` surfaces exceptions only
-        as ``Task exception was never retrieved`` warnings at GC time, which is
-        easy to miss in production logs. Wrapping in a try/except at the task
-        boundary ensures dispatch failures are recorded with enough context to
-        correlate them back to the inbound message.
-        """
-        try:
-            await self._dispatcher.dispatch(target_id, event)
-        except Exception:
-            logger.exception(
-                "Channel dispatch to agent %s failed (message_id=%s, sender=%s)",
-                target_id,
-                event.message_id,
-                event.sender_id,
-            )
-
-    async def Subscribe(
-        self,
-        request: agent_message_pb2.SubscribeRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> None:
-        # TODO(v0.3): implement server-side streaming channel subscriptions
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Channel subscriptions not yet implemented")

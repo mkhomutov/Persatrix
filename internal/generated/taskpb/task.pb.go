@@ -688,6 +688,169 @@ func (x *ChatResponse) GetReplyStatus() string {
 	return ""
 }
 
+// ─── Channel Message Delivery (orchestrator → subscribed agent) ────
+// RFC 0011 §C. Carries a single channel message to one subscriber.
+// `channel_type` duplicates the prefix encoded in `channel_id`
+// ("group:" / "dm:" / "thread:") and is carried separately for
+// log/observability ergonomics — counters and span attributes use it
+// without parsing. Orchestrator MUST validate agreement with the prefix
+// on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
+// mismatch as malformed rather than pick one source.
+type ChannelMessageEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	ChannelType   string                 `protobuf:"bytes,3,opt,name=channel_type,json=channelType,proto3" json:"channel_type,omitempty"` // "group" | "dm" | "thread"
+	SenderId      string                 `protobuf:"bytes,4,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	Content       string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	Timestamp     string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`               // RFC 3339
+	ThreadId      string                 `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"` // empty string if not a reply
+	Mentions      []string               `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChannelMessageEvent) Reset() {
+	*x = ChannelMessageEvent{}
+	mi := &file_task_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChannelMessageEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChannelMessageEvent) ProtoMessage() {}
+
+func (x *ChannelMessageEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChannelMessageEvent.ProtoReflect.Descriptor instead.
+func (*ChannelMessageEvent) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ChannelMessageEvent) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetChannelType() string {
+	if x != nil {
+		return x.ChannelType
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetSenderId() string {
+	if x != nil {
+		return x.SenderId
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetMentions() []string {
+	if x != nil {
+		return x.Mentions
+	}
+	return nil
+}
+
+// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
+// At-most-once delivery in v0.3.0 — `success=false` signals the agent rejected
+// or could not process the event; the orchestrator does not retry in this release.
+type TaskAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"` // populated when success == false
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskAck) Reset() {
+	*x = TaskAck{}
+	mi := &file_task_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskAck) ProtoMessage() {}
+
+func (x *TaskAck) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskAck.ProtoReflect.Descriptor instead.
+func (*TaskAck) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TaskAck) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *TaskAck) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
 var File_task_proto protoreflect.FileDescriptor
 
 const file_task_proto_rawDesc = "" +
@@ -746,7 +909,21 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus*^\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x84\x02\n" +
+	"\x13ChannelMessageEvent\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x02 \x01(\tR\tchannelId\x12!\n" +
+	"\fchannel_type\x18\x03 \x01(\tR\vchannelType\x12\x1b\n" +
+	"\tsender_id\x18\x04 \x01(\tR\bsenderId\x12\x18\n" +
+	"\acontent\x18\x05 \x01(\tR\acontent\x12\x1c\n" +
+	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12\x1b\n" +
+	"\tthread_id\x18\a \x01(\tR\bthreadId\x12\x1a\n" +
+	"\bmentions\x18\b \x03(\tR\bmentions\"H\n" +
+	"\aTaskAck\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*^\n" +
 	"\n" +
 	"TaskStatus\x12\v\n" +
 	"\aPENDING\x10\x00\x12\v\n" +
@@ -759,12 +936,13 @@ const file_task_proto_rawDesc = "" +
 	"\fHealthStatus\x12\v\n" +
 	"\aUNKNOWN\x10\x00\x12\v\n" +
 	"\aSERVING\x10\x01\x12\x0f\n" +
-	"\vNOT_SERVING\x10\x022\xc0\x02\n" +
+	"\vNOT_SERVING\x10\x022\x93\x03\n" +
 	"\fAgentService\x12D\n" +
 	"\vExecuteTask\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskResponse\x12L\n" +
 	"\x11ExecuteTaskStream\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskProgress0\x01\x12R\n" +
 	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponse\x12H\n" +
-	"\x0fSendChatMessage\x12\x19.persatrix.v1.ChatRequest\x1a\x1a.persatrix.v1.ChatResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
+	"\x0fSendChatMessage\x12\x19.persatrix.v1.ChatRequest\x1a\x1a.persatrix.v1.ChatResponse\x12Q\n" +
+	"\x15ReceiveChannelMessage\x12!.persatrix.v1.ChannelMessageEvent\x1a\x15.persatrix.v1.TaskAckB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
 
 var (
 	file_task_proto_rawDescOnce sync.Once
@@ -779,7 +957,7 @@ func file_task_proto_rawDescGZIP() []byte {
 }
 
 var file_task_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_task_proto_goTypes = []any{
 	(TaskStatus)(0),             // 0: persatrix.v1.TaskStatus
 	(HealthStatus)(0),           // 1: persatrix.v1.HealthStatus
@@ -791,26 +969,30 @@ var file_task_proto_goTypes = []any{
 	(*HealthCheckResponse)(nil), // 7: persatrix.v1.HealthCheckResponse
 	(*ChatRequest)(nil),         // 8: persatrix.v1.ChatRequest
 	(*ChatResponse)(nil),        // 9: persatrix.v1.ChatResponse
-	nil,                         // 10: persatrix.v1.TaskRequest.ContextEntry
-	nil,                         // 11: persatrix.v1.TaskResponse.MetadataEntry
+	(*ChannelMessageEvent)(nil), // 10: persatrix.v1.ChannelMessageEvent
+	(*TaskAck)(nil),             // 11: persatrix.v1.TaskAck
+	nil,                         // 12: persatrix.v1.TaskRequest.ContextEntry
+	nil,                         // 13: persatrix.v1.TaskResponse.MetadataEntry
 }
 var file_task_proto_depIdxs = []int32{
-	10, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
+	12, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
 	3,  // 1: persatrix.v1.TaskRequest.config:type_name -> persatrix.v1.TaskConfig
 	0,  // 2: persatrix.v1.TaskResponse.status:type_name -> persatrix.v1.TaskStatus
-	11, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
+	13, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
 	0,  // 4: persatrix.v1.TaskProgress.status:type_name -> persatrix.v1.TaskStatus
 	1,  // 5: persatrix.v1.HealthCheckResponse.status:type_name -> persatrix.v1.HealthStatus
 	2,  // 6: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
 	2,  // 7: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
 	6,  // 8: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
 	8,  // 9: persatrix.v1.AgentService.SendChatMessage:input_type -> persatrix.v1.ChatRequest
-	4,  // 10: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
-	5,  // 11: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
-	7,  // 12: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
-	9,  // 13: persatrix.v1.AgentService.SendChatMessage:output_type -> persatrix.v1.ChatResponse
-	10, // [10:14] is the sub-list for method output_type
-	6,  // [6:10] is the sub-list for method input_type
+	10, // 10: persatrix.v1.AgentService.ReceiveChannelMessage:input_type -> persatrix.v1.ChannelMessageEvent
+	4,  // 11: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
+	5,  // 12: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
+	7,  // 13: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
+	9,  // 14: persatrix.v1.AgentService.SendChatMessage:output_type -> persatrix.v1.ChatResponse
+	11, // 15: persatrix.v1.AgentService.ReceiveChannelMessage:output_type -> persatrix.v1.TaskAck
+	11, // [11:16] is the sub-list for method output_type
+	6,  // [6:11] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -827,7 +1009,7 @@ func file_task_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_task_proto_rawDesc), len(file_task_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
