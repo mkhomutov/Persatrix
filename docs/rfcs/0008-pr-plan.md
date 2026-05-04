@@ -666,7 +666,7 @@ Round-2 review (post round-1 fix commit) verified that S1, S2, and S4-doc are la
 | Mi1 | Minor | `_escape_like` order-of-operation correctness is implicit in `_LIKE_META_CHARS = ("\\", "%", "_")` tuple ordering — the backslash MUST be escaped first, otherwise the backslashes inserted by the subsequent `%` / `_` substitutions would themselves be re-escaped. A plausible alphabetical-cleanup reordering would silently break every escape-paired LIKE clause. Pinned by a one-line `assert _escape_like("a%b\\c_d") == "a\\%b\\\\c\\_d"` in `test_memory_decay_review_pins.py` (round-2 fix). | ✅ Applied in PR |
 | Mi2 | Minor (stylistic) | `MemoryFacade.retrieve_procedures` re-iterates the `entries` list to fan out the stale-alert log; the underlying `recall_procedures` already iterates row-by-row. Moving the warn-log emission into `recall_procedures` would save one Python pass and would close round-1 L4 (`now=` ergonomics asymmetry) at the same time. Counter-argument: the round-1 split intentionally placed the structured log in the mixin ("mixin owns *facade* concerns"). Stylistic call, not correctness. | Defer to PR 6 (bundle with L4) |
 | Mi3 | Minor (defensive) | `EvictionPass.__init__` accepts `lambda_per_day` / `c_min` kwargs but does not validate them; the facade calls `validate_decay_params` at construction so misconfigured `agents.yaml` is caught at startup, but a direct instantiation (future test or periodic-task script) with `lambda_per_day=-1` would silently raise inside `compute_decayed_confidence` on the first scan. Reviewer notes "Hard to trip in production; cheap to close." Not applied in PR 5: the facade already validates at the system boundary; per the project's implementation-discipline rule ("Don't add error handling for scenarios that can't happen. Only validate at system boundaries"), duplicating validation in an internal class for a hypothetical direct-construction path is over-engineering. If a periodic-task script ever instantiates `EvictionPass` directly, hoist the validation into `decay.py` as `validate_decay_constants(lambda_per_day, c_min)` then. | Won't fix (facade is the boundary) |
-| N1 | Nit | Verified that no committed doc references `docs/pr-reviews/pr-225-deep-review.md` by path; status hygiene intact. | ✅ Verified |
+| N1 | Nit | Verified that no committed doc references the PR #225 deep-review report by path; status hygiene intact. | ✅ Verified |
 | N2 | Nit | `EvictionStats.procedural_evicted: int = 0` default is a backward-compat shim for older tests that constructed `EvictionStats` without naming the new field; every code path inside `EvictionPass.run()` now passes it explicitly. Default could be removed so the field becomes required-positional, matching `ttl_evicted` / `cap_evicted`. Not applied in PR 5: removal is a downstream-test cleanup, not a PR-5 contract issue. | Defer to PR 6 (bundle with L1/L2 cleanups) |
 | CHANGELOG-r2 | Status hygiene | Round-1 fix commit had no CHANGELOG bullet. Round 2 added a sub-paragraph under the existing PR 5 entry citing the round-1 fix scope (S1 / S2 / S4-doc) per the PR #223 round-fix convention. | ✅ Applied in PR |
 
@@ -884,7 +884,7 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 #### Key implementation details
 
 - The 30-day calibration review is the **gate** for flipping RFC 0008 to `✅ Implemented`. If the metrics indicate the shipped defaults need adjustment (e.g. `memory_utilization_ratio` consistently > 0.95 → `episodic_cap` too low; consistently < 0.2 → too high), the retune ships in this PR as a `config/agents.yaml` default change. The retune is a one-line change per parameter; no code changes expected.
-- Review-follow-up findings from PR 1–5 deep reviews are summarized inline here per the project convention. The committed text must not contain any `docs/pr-reviews/` path (those reports are local-only per [Status Hygiene rules](../development-workflow.md#status-hygiene)); each finding is restated in full so the merged history is self-contained.
+- Review-follow-up findings from PR 1–5 deep reviews are summarized inline here per the project convention. The committed text must not link to local-only PR review reports (per [Status Hygiene rules](../development-workflow.md#status-hygiene)); each finding is restated in full so the merged history is self-contained.
 
 #### Tests
 
@@ -903,7 +903,7 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 - [ ] U+2424 sentinel encoding note added to `_log_safety` docstring (PR 3a R4 L6)
 - [ ] ROADMAP.md RFC 0008 row → `✅ Implemented`
 - [ ] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
-- [ ] No reference to `docs/pr-reviews/` files in this committed plan
+- [ ] No link to local-only PR review reports in this committed plan
 - [ ] Plan-self-review: every cross-RFC pin in this plan ([RFC 0007 PR plan](0007-pr-plan.md) PR 3, [RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) still resolves and is reciprocated by the counterpart plan before the RFC flips to `✅ Implemented`
 
 ---

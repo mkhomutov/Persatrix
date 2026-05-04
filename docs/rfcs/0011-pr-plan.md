@@ -102,7 +102,7 @@ PR 8 (Review follow-ups + RFC partial-close — internal scope only; external br
 
 #### PR #231 review follow-ups
 
-Deep review filed at `docs/pr-reviews/pr-231-review.md` (local-only). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.
+Deep review completed (local-only, not committed per [Status Hygiene rules](../development-workflow.md#status-hygiene)). No Must-Fix; the four Should-Fix items below are dispatched to the PRs where the fix is cheapest, before downstream consumers freeze the contract.
 
 | # | Finding | Target PR | Rationale |
 |---|---------|-----------|-----------|
@@ -173,7 +173,7 @@ Nice-to-Have items (also pinned to PR 8 unless an earlier PR's diff naturally in
 
 #### PR #245 review follow-ups
 
-Deep review filed at `docs/pr-reviews/pr-245-review.md` (local-only). No Must-Fix applied at merge time. Seven follow-up issues captured as `docs/issues/ISSUE-0009` through `ISSUE-0015` (committed in the pre-merge tidy-up):
+Deep review completed (local-only, not committed per [Status Hygiene rules](../development-workflow.md#status-hygiene)). No Must-Fix applied at merge time. Seven follow-up issues captured as `docs/issues/ISSUE-0009` through `ISSUE-0015` (committed in the pre-merge tidy-up):
 
 | Issue | Finding | Target PR | Severity |
 |-------|---------|-----------|---------|

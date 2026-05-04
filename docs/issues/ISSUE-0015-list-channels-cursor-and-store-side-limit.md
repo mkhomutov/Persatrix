@@ -7,7 +7,6 @@ area: internal/server
 created: 2026-05-04
 refs:
   - docs/rfcs/0011-channels.md
-  - docs/pr-reviews/pr-245-review.md
 ---
 
 ## Summary

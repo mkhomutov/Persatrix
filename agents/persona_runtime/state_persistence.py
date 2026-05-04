@@ -328,8 +328,8 @@ class _StatePersistenceMixin:
         :data:`SUMMARY_PENDING_TEXT` so the row exists before any LLM
         call and the janitor can sweep it on crash recovery.  Phase 2
         (background): :func:`finalize_closed_interaction` summarises
-        and ``UPDATE``s outside the lock.  See
-        ``docs/pr-reviews/pr-229-review.md`` Must-Fix #1 + Should-Fix #1.
+        and ``UPDATE``s outside the lock.  See PR #229 deep-review
+        Must-Fix #1 + Should-Fix #1.
         """
         if interaction.turn_count == 0 or self._llm_client is None:
             return  # idle no-turn scope, or test bootstrap path.

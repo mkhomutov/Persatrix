@@ -295,7 +295,7 @@ Five required cases (a)–(e) above, each as a separate test function. Plus:
 
 #### Scope
 
-Review findings from PRs 1–5, grouped by component. Items below are populated as PRs are reviewed. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry must paraphrase the finding and **not** reference or link any `docs/pr-reviews/*.md` file.
+Review findings from PRs 1–5, grouped by component. Items below are populated as PRs are reviewed. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry must paraphrase the finding and **not** reference or link any local PR review report.
 
 ##### From PR 1 review
 

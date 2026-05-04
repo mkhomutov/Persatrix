@@ -100,7 +100,9 @@ default in outputs, edits, plans, and reviews.
 
 Before and after every task, verify consistency across RFC files, PR plans, and ROADMAP.md. Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene).
 
-PR review reports (`docs/pr-reviews/`) are local-only — never reference them in committed documents.
+## Local-only files
+
+**Local-only files MUST NEVER be referenced** in any committed file (docs, code, comments, tests, commit messages, PR descriptions, or issue refs). "Local-only" means any path ignored by `.gitignore` — notably `docs/pr-reviews/` (PR review reports) and any other gitignored artifact. If a finding from a local review needs to be recorded, paraphrase the finding inline; do not link the source file by path or filename.
 
 ## Documentation
 

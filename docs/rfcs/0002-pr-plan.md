@@ -81,7 +81,7 @@ Each PR is independently mergeable and leaves the codebase in a compilable, test
 
 #### Post-merge review findings (PR #14)
 
-PR #14 was submitted as 1,453 lines (654 implementation + 799 tests), exceeding the 500-line limit. Size waiver justified: PRs 1+2 were combined because handler integration tests require the scaffold, and 55% of lines are tests. Single-package, single-author scope. Full review: `docs/pr-reviews/pr-14-deep-review-round2.md` (not committed).
+PR #14 was submitted as 1,453 lines (654 implementation + 799 tests), exceeding the 500-line limit. Size waiver justified: PRs 1+2 were combined because handler integration tests require the scaffold, and 55% of lines are tests. Single-package, single-author scope.
 
 The PR went through 5 rounds of review fixes (commits `3783703` through `efae02d`) addressing all must-fix and should-fix findings from the initial deep review.
 
@@ -202,7 +202,7 @@ Original plan for workflow handlers was combined into PR #14. See above.
 
 #### Post-merge review findings (PR #16)
 
-PR #16 was submitted as ~550 lines (141 implementation + 50 types + 10 routes + 350 tests). Actual size: 458 lines of meaningful change. Full review: `docs/pr-reviews/pr-016-deep-review.md` (not committed).
+PR #16 was submitted as ~550 lines (141 implementation + 50 types + 10 routes + 350 tests). Actual size: 458 lines of meaningful change.
 
 The PR went through 1 round of review fixes (commit `address PR #16 review findings`) addressing all medium-severity findings from the initial deep review.
 
@@ -290,7 +290,7 @@ The PR went through 1 round of review fixes (commit `address PR #16 review findi
 
 #### Post-merge review findings (PR #17)
 
-PR #17 was submitted as 440 lines (77 implementation + 363 tests). Full review: `docs/pr-reviews/pr-17-deep-review.md` (not committed).
+PR #17 was submitted as 440 lines (77 implementation + 363 tests).
 
 The PR went through 1 round of review fixes (commit `5691916`) addressing high and medium findings from the initial deep review.
 
