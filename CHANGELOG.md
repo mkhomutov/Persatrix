@@ -14,9 +14,12 @@ All notable changes to this project will be documented in this file.
   re-parse the address; the orchestrator's `ChannelRouter` (PR 2) already
   validates agreement on publish, and receivers should drop on mismatch
   as malformed. The Python `AgentServiceServicer` gains a stub
-  `ReceiveChannelMessage` that returns `TaskAck(success=True)` — the real
-  handler (build `AgentEvent(event_type=CHANNEL_MESSAGE)` and dispatch
-  through `EventDispatcher`) lands in PR 4 alongside the orchestrator-side
+  `ReceiveChannelMessage` that returns
+  `TaskAck(success=false, error_message="…RFC 0011 PR 4")` — fail-closed
+  so the eventual orchestrator dispatcher cannot mistake the stub
+  response for a real ack (PR #246 deep review H1). The real handler
+  (build `AgentEvent(event_type=CHANNEL_MESSAGE)` and dispatch through
+  `EventDispatcher`) lands in PR 4 alongside the orchestrator-side
   `DispatchChannelMessage` action and the `MESSAGE_RECEIVED` →
   `CHANNEL_MESSAGE` event-type rename.
 

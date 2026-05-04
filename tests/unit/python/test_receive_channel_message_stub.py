@@ -29,6 +29,8 @@ from unittest.mock import MagicMock
 
 import grpc
 
+import pytest
+
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher
 from agents.generated import task_pb2
@@ -91,3 +93,22 @@ class TestReceiveChannelMessageStub:
 
         assert ack.error_message, "error_message must be populated when success=False"
         assert "PR 4" in ack.error_message or "0011" in ack.error_message
+
+
+class TestV02ChannelSurfaceRemoved:
+    """Guard that the deleted v0.2 ``ChannelService`` surface stays unreachable.
+
+    Catches a ``make proto`` regen accident that quietly resurrects the orphan
+    stubs (the corresponding ``.proto`` file no longer exists, so the only way
+    the modules come back is a hand-edit or a stale generator cache). Adjacent
+    to but not subsumed by ISSUE-0023's broader ``make proto && git diff
+    --exit-code`` CI gate. PR #246 deep review Should-Fix #2.
+    """
+
+    def test_agent_message_pb2_unimportable(self):
+        with pytest.raises(ModuleNotFoundError):
+            import agents.generated.agent_message_pb2  # noqa: F401
+
+    def test_agent_message_pb2_grpc_unimportable(self):
+        with pytest.raises(ModuleNotFoundError):
+            import agents.generated.agent_message_pb2_grpc  # noqa: F401
