@@ -108,13 +108,24 @@ message ChatResponse {
 // without parsing. Orchestrator MUST validate agreement with the prefix
 // on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
 // mismatch as malformed rather than pick one source.
+// TODO(rfc0011-pr-4): wire receiver-side `channel_type` ↔ `channel_id`
+// prefix-agreement enforcement in `ReceiveChannelMessage` once the real
+// handler lands; the stub in PR 3 cannot enforce this because it does
+// not inspect the request.
 message ChannelMessageEvent {
   string message_id = 1;
   string channel_id = 2;
   string channel_type = 3;        // "group" | "dm" | "thread"
   string sender_id = 4;
   string content = 5;
-  string timestamp = 6;           // RFC 3339
+  // RFC 3339 string (NOT Unix epoch like ChatResponse.timestamp /
+  // TaskProgress.timestamp). Chosen because the value is forwarded
+  // verbatim to the channel store's `messages.created_at` column
+  // (SQLite TEXT/DATETIME, RFC 0011 §A) — using `int64` here would
+  // force a server-side format conversion on every publish purely to
+  // satisfy the wire shape. Receivers MUST treat malformed timestamps
+  // as a drop reason. See PR #246 deep review finding M4.
+  string timestamp = 6;
   string thread_id = 7;           // empty string if not a reply
   repeated string mentions = 8;
 }

@@ -35,7 +35,8 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
     """gRPC servicer.
 
     Methods: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage,
-    ReceiveChannelMessage.
+    ReceiveChannelMessage (PR-3 stub — see method docstring; real handler
+    lands in RFC 0011 PR 4).
     """
 
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):

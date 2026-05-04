@@ -203,16 +203,16 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 #### Key implementation details
 
 - `ChannelMessageEvent` field shape matches the [RFC §C proto block](0011-channels-bridges.md#c-message-routing-and-delivery) exactly — `channel_type` carried as a string (no proto enum per [OQ #10](0011-channels-bridges.md#open-questions)); `thread_id` is the empty string when not a reply (proto-3 default rather than `oneof`).
-- `ReceiveChannelMessage` returns the existing `TaskAck` — no new ack message added.
+- `ReceiveChannelMessage` returns a new minimal `TaskAck { bool success, string error_message }` introduced in this PR (the v0.2-era `agent_message.proto` carried a different `MessageAck`; no pre-existing `TaskAck` symbol existed). v0.3.0 uses at-most-once delivery semantics — `success=false` means the agent did not process the event and the orchestrator does not retry.
 - Delete order: (1) regenerate stubs against the new `proto/`; (2) drop the v0.2 servicer registration in `agents/server.py` (L41 import + L133–134 `add_*Servicer_to_server` call per RFC §Files Touched); (3) delete `agents/server_servicers.py::ChannelServiceServicer`; (4) delete `tests/unit/python/test_server_channel.py` in the same commit so CI never sees a missing-import failure window.
-- This PR ships **no** new servicer logic — `AgentServiceServicer.ReceiveChannelMessage` is a stub returning `TaskAck(success=True)`. Real handler lands in PR 4.
+- This PR ships **no** new servicer logic — `AgentServiceServicer.ReceiveChannelMessage` is a stub returning `TaskAck(success=False, error_message="ReceiveChannelMessage handler not yet implemented (RFC 0011 PR 4)")`. Real handler lands in PR 4. (Original plan said `success=True`; revised after PR #246 deep review finding H1 — see [agents/server_servicers.py](../../agents/server_servicers.py) `ReceiveChannelMessage` docstring.)
 - Generated-file regeneration runs through `make proto` with no manual edits; review diff is restricted to `proto/` + the generated trees.
 
 #### Tests
 
 - `make proto` regenerates without diff drift (re-running produces no further changes).
 - `pytest agents/tests/` and `go test ./...` green after the deletes — confirms no surviving import paths reference `ChannelServiceServicer` or `agent_message.proto`'s `ChannelService`.
-- Unit: stub `ReceiveChannelMessage` returns `TaskAck(success=True)` and increments no metrics (real wiring is PR 4).
+- Unit: stub `ReceiveChannelMessage` returns `TaskAck(success=False, error_message=...)` and increments no metrics (real wiring is PR 4). Covered by [tests/unit/python/test_receive_channel_message_stub.py](../../tests/unit/python/test_receive_channel_message_stub.py).
 - Lint: `ruff` + `mypy` clean; no orphaned imports in `agents/server.py` / `agents/server_servicers.py`.
 
 #### PR checklist
