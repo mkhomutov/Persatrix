@@ -173,10 +173,10 @@ Findings that are out-of-scope for the current RFC cycle (or surface outside of 
 
 Issue files are not a replacement for the PR plan's review findings table — keep per-PR findings in the plan. Issue files handle the longer tail.
 
-The tracker uses a hybrid layout: a per-issue file (`ISSUE-NNN-slug.md`) is the source of truth for each finding, and [`docs/issues/INDEX.md`](issues/INDEX.md) is auto-regenerated as the live summary table.
+The tracker uses a hybrid layout: a per-issue file (`ISSUE-NNNN-slug.md`) is the source of truth for each finding, and [`docs/issues/INDEX.md`](issues/INDEX.md) is auto-regenerated as the live summary table.
 
 **Creating an issue file:**
-1. Copy [`docs/issues/ISSUE-TEMPLATE.md`](issues/ISSUE-TEMPLATE.md) to `docs/issues/ISSUE-NNN-slug.md` (next free `NNN`).
+1. Copy [`docs/issues/ISSUE-TEMPLATE.md`](issues/ISSUE-TEMPLATE.md) to `docs/issues/ISSUE-NNNN-slug.md` (next free `NNNN`).
 2. Fill `id`, `status`, `severity`, `area`, `created`, and `refs` (link to the RFC or PR plan where the finding originated). For trivial findings a one-line **Summary** is enough; the other sections are optional.
 3. Run `make issues` to regenerate [`docs/issues/INDEX.md`](issues/INDEX.md).
 4. Add a cross-reference inline in the source document. The relative path depends on the source location — see the table in [`docs/issues/README.md`](issues/README.md#cross-reference-paths).
