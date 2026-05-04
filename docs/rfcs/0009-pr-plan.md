@@ -2,7 +2,7 @@
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-04-30
+**Last updated**: 2026-05-04
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
@@ -266,7 +266,7 @@ Verdict: **APPROVE with minor follow-ups.** All three surfaces (opaque-struct ru
 
 ---
 
-### PR 2: `feature/v030-rfc0009-rate-limiter` — Phase 1b: RateLimiter + Middleware
+### PR 2: `feature/v030-rfc0009-rate-limiter` — Phase 1b: RateLimiter + Middleware ✅ Merged as [#244](https://github.com/mkhomutov/Persatrix/pull/244)
 
 **Depends on**: PR 1.
 **Estimated size**: ~400–500 lines.
