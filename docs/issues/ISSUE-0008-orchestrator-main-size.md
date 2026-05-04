@@ -4,7 +4,7 @@ summary: cmd/orchestrator/main.go exceeds 500-line review-friendly cap
 status: open
 severity: low
 area: cmd/orchestrator
-created: 2025-01-18
+created: 2026-05-04
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md

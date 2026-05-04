@@ -135,7 +135,41 @@ func applyMigration(db *sql.DB, target int) error {
 // table, rename. Existing FKs (memberships → channels, messages → channels)
 // reference channels(id) so the rebuild does not require re-pointing
 // children — `ON DELETE CASCADE` on the children remains intact.
+//
+// PR #245 review (High): per the SQLite "Making Other Kinds of Table
+// Schema Changes" guide (https://sqlite.org/lang_altertable.html §7),
+// `PRAGMA foreign_keys=OFF` MUST be set *outside* the transaction before
+// the rebuild and restored after. The PRAGMA is a no-op inside a
+// transaction; running the rebuild with FK enforcement on relies on
+// undocumented driver behaviour for the `RENAME TO channels` step to
+// re-bind child FKs (memberships, messages → channels.id). The earlier
+// implementation worked on modernc.org/sqlite today but is fragile
+// against driver changes. The companion regression test
+// TestSQLiteStore_Migration_V1ToV2_PreservesChildRows pins this contract
+// with seeded membership + message rows.
+//
+// We capture the previous foreign_keys value so a connection that
+// arrived with FK off (an unusual but legal configuration) is left as
+// it was found.
 func migrateV1ToV2(db *sql.DB) error {
+	var prevFK int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&prevFK); err != nil {
+		return fmt.Errorf("channels: read foreign_keys: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("channels: disable foreign_keys for rebuild: %w", err)
+	}
+	// Restore the previous PRAGMA value unconditionally — even on the
+	// failure path the connection must not leak with FK enforcement
+	// silently disabled.
+	defer func() {
+		restore := "ON"
+		if prevFK == 0 {
+			restore = "OFF"
+		}
+		_, _ = db.Exec(`PRAGMA foreign_keys = ` + restore)
+	}()
+
 	tx, err := db.Begin()
 	if err != nil {
 		return err

@@ -153,9 +153,14 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 // worker pool.
 //
 // Detaches the request context (`context.WithoutCancel`) so a client
-// disconnect mid-fanout does not silently drop later subscribers. Adds
-// a soft 5s deadline so a wedged dispatcher cannot block the publish
-// handler indefinitely.
+// disconnect mid-fanout does not silently drop later subscribers.
+//
+// PR #245 review (Med): each recipient gets its own 5s deadline rather
+// than sharing one across the whole loop. With the PR-4 gRPC dispatcher
+// a slow first recipient could otherwise starve later recipients of
+// their full timeout budget. Per-call deadlines keep publish latency
+// bounded by O(N × 5s) worst case (acceptable while fanout remains
+// inline) but eliminate intra-publish starvation.
 func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct ChannelType) {
 	members, err := r.store.GetMembers(ctx, msg.ChannelID)
 	if err != nil {
@@ -165,8 +170,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		return
 	}
 
-	dispatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
+	detached := context.WithoutCancel(ctx)
 
 	for _, m := range members {
 		if m.ParticipantID == msg.SenderID {
@@ -180,7 +184,9 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			// knowledge and saves a wasted gRPC call.
 			continue
 		}
+		dispatchCtx, cancel := context.WithTimeout(detached, 5*time.Second)
 		err := r.dispatcher.Dispatch(dispatchCtx, m.ParticipantID, msg)
+		cancel()
 		status := "ok"
 		if err != nil {
 			status = "error"
@@ -190,7 +196,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 				zap.Error(err))
 		}
 		if r.metrics != nil && r.metrics.MessagesDelivered != nil {
-			r.metrics.MessagesDelivered.Add(dispatchCtx, 1, metric.WithAttributes(
+			r.metrics.MessagesDelivered.Add(detached, 1, metric.WithAttributes(
 				attribute.String("channel_type", string(ct)),
 				attribute.String("status", status),
 			))

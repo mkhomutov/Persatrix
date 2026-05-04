@@ -7,7 +7,6 @@
 package server
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -68,20 +67,28 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		Type:        channels.ChannelTypeGroup,
 		Description: req.Description,
 	}
-	if err := s.channelStore.CreateChannel(r.Context(), ch); err != nil {
-		s.writeChannelError(w, err)
-		return
-	}
 
+	// PR #245 review (High): the previous implementation called
+	// CreateChannel followed by an N-call AddMember loop with no
+	// transaction. A failure mid-loop left an orphan channel that
+	// poisoned the client's natural retry with 409 CONFLICT. The store's
+	// CreateChannelWithMembers helper makes the bundle atomic so we no
+	// longer need handler-side rollback. Member translation stays here
+	// because the wire shape (channelMemberRequest) is server-local.
+	members := make([]channels.Member, 0, len(req.Members))
 	for _, m := range req.Members {
 		policy := channels.RespondWhenMentioned
 		if m.Respond != "" {
 			policy = channels.RespondPolicy(m.Respond)
 		}
-		if err := s.channelStore.AddMember(r.Context(), canonicalID, m.ID, policy); err != nil {
-			s.writeChannelError(w, err)
-			return
-		}
+		members = append(members, channels.Member{
+			ParticipantID: m.ID,
+			RespondPolicy: policy,
+		})
+	}
+	if err := s.channelStore.CreateChannelWithMembers(r.Context(), ch, members); err != nil {
+		s.writeChannelError(w, err)
+		return
 	}
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)
@@ -101,7 +108,11 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
 		return
 	}
-	limit := parseLimit(r, channelDefaultListLimit)
+	limit, err := parseLimit(r, channelDefaultListLimit)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
 	chs, err := s.channelStore.ListChannels(r.Context())
 	if err != nil {
 		s.logger.Error("channels: list failed", zap.Error(err))
@@ -212,7 +223,11 @@ func (s *Server) handleGetChannelHistory(w http.ResponseWriter, r *http.Request)
 		s.writeChannelError(w, err)
 		return
 	}
-	limit := parseLimit(r, channelDefaultHistoryLimit)
+	limit, err := parseLimit(r, channelDefaultHistoryLimit)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
 	before, err := parseBefore(r)
 	if err != nil {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
@@ -244,7 +259,11 @@ func (s *Server) handleGetThread(w http.ResponseWriter, r *http.Request) {
 		s.writeChannelError(w, err)
 		return
 	}
-	limit := parseLimit(r, channelDefaultThreadLimit)
+	limit, err := parseLimit(r, channelDefaultThreadLimit)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
 	msgs, err := s.channelStore.GetThread(r.Context(), msgID, limit)
 	if err != nil {
 		s.logger.Error("channels: thread failed",
@@ -359,19 +378,31 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 	}
 }
 
-func parseLimit(r *http.Request, fallback int) int {
+// parseLimit parses the optional `?limit=` query parameter, returning
+// `fallback` when absent. PR #245 review (Low): a non-empty malformed
+// value (`abc`, `-5`, `0`) used to be silently coerced to the fallback.
+// That hides client bugs and conflicts with the parseBefore convention
+// just below (which errors loudly on a malformed `?before=`). We now
+// return an error so the caller can surface 400 BAD_REQUEST. Values
+// above [channelMaxLimit] are still capped silently — that is the
+// documented contract (the cap exists to bound allocation, not to
+// signal a client bug).
+func parseLimit(r *http.Request, fallback int) (int, error) {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	v, err := strconv.Atoi(raw)
-	if err != nil || v <= 0 {
-		return fallback
+	if err != nil {
+		return 0, fmt.Errorf("limit must be a positive integer: %s", raw)
+	}
+	if v <= 0 {
+		return 0, fmt.Errorf("limit must be a positive integer: %d", v)
 	}
 	if v > channelMaxLimit {
-		return channelMaxLimit
+		return channelMaxLimit, nil
 	}
-	return v
+	return v, nil
 }
 
 // parseBefore parses the optional `before` cursor as RFC 3339. Returns
@@ -390,10 +421,3 @@ func parseBefore(r *http.Request) (time.Time, error) {
 	}
 	return t.UTC(), nil
 }
-
-// channelStoreContextKey is reserved for a future request-scoped store
-// override (e.g., per-tenant routing). Declared here so the type stays
-// internal to the package.
-type channelStoreContextKey struct{}
-
-var _ context.Context = context.Background() // package-uses-context guard for linters

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"io/fs"
 	"path/filepath"
 
 	"go.uber.org/zap"
@@ -46,15 +48,28 @@ func initChannels(
 	channelsCfgPath := filepath.Join(cfgDir, "channels.yaml")
 	chanCfg, cfgErr := channels.LoadConfig(channelsCfgPath)
 	if cfgErr != nil {
-		logger.Warn("channels: config load failed; channel endpoints will return 503",
-			zap.String("path", channelsCfgPath),
-			zap.Error(cfgErr))
+		// PR #245 review (Low): distinguish "config absent" (a perfectly
+		// valid disabled-channels deployment) from "config malformed"
+		// (an operator bug we want to be loud about). The previous
+		// implementation logged both at Warn with the same message, so
+		// an operator who fat-fingered channels.yaml saw the same line
+		// as one who simply hadn't created the file.
+		if errors.Is(cfgErr, fs.ErrNotExist) {
+			logger.Info("channels: channels.yaml not present; channel endpoints will return 503",
+				zap.String("path", channelsCfgPath))
+		} else {
+			logger.Warn("channels: config load failed; channel endpoints will return 503",
+				zap.String("path", channelsCfgPath),
+				zap.Error(cfgErr))
+		}
 		return nil, noop, nil
 	}
 
 	maxCh := chanCfg.MaxChannels
 	if maxCh <= 0 {
-		maxCh = 50
+		// PR #245 review (Nice): use the package const rather than the
+		// magic 50 — keeps the default in one place if it ever moves.
+		maxCh = channels.DefaultMaxChannels
 	}
 	chanStore, sErr := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
 		MaxChannels: maxCh,

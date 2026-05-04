@@ -221,6 +221,125 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	return nil
 }
 
+// CreateChannelWithMembers implements [ChannelStore.CreateChannelWithMembers].
+//
+// PR #245 review (High): the REST `POST /api/v1/channels` handler used
+// to call CreateChannel followed by an N-call AddMember loop, all
+// outside any transaction. A failure mid-loop left the channel row
+// committed but with only a prefix of the requested membership; the
+// client's natural retry then hit ErrChannelExists \u2192 409 and the
+// remaining members were never added. This helper makes the bundle
+// atomic at the store boundary so handlers no longer need to compose a
+// rollback path of their own.
+//
+// Member validation runs inside the transaction so the same
+// `ErrInvalidParticipantID` / `ErrInvalidRespondPolicy` sentinels surface
+// as before \u2014 only the persistence side becomes all-or-nothing.
+func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, members []Member) error {
+	// Pre-flight validation duplicates the checks in [CreateChannel] /
+	// [AddMember] so we can fail fast before touching the database. Any
+	// future change to those rules MUST be mirrored here \u2014 the unit test
+	// TestSQLiteStore_CreateChannelWithMembers_AtomicOnPartialFailure
+	// pins the rollback contract for one concrete invalid-member case.
+	if !ch.Type.Valid() {
+		return fmt.Errorf("%w: %q", ErrInvalidChannelType, ch.Type)
+	}
+	if ch.ID == "" {
+		return errors.New("channels: channel id is required")
+	}
+	if ch.Type == ChannelTypeGroup && ch.Name == "" {
+		return errors.New("channels: group channel requires a name")
+	}
+	if ch.Type == ChannelTypeGroup && !channelNamePattern.MatchString(ch.Name) {
+		return fmt.Errorf("channels: group channel name %q does not match %s",
+			ch.Name, channelNamePattern.String())
+	}
+	if ch.Type == ChannelTypeGroup && ch.ID != "group:"+ch.Name {
+		return fmt.Errorf("%w: group channel id %q must be \"group:\"+name (name=%q)",
+			ErrInvalidChannelType, ch.ID, ch.Name)
+	}
+	if ch.CreatedAt.IsZero() {
+		ch.CreatedAt = time.Now().UTC()
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if ch.Type == ChannelTypeGroup {
+		var groupCount int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(1) FROM channels WHERE channel_type = 'group'`).
+			Scan(&groupCount); err != nil {
+			return fmt.Errorf("channels: count groups: %w", err)
+		}
+		if groupCount >= s.maxChannels {
+			return fmt.Errorf("%w: cap=%d", ErrChannelCapExceeded, s.maxChannels)
+		}
+	}
+
+	var nameArg any
+	if ch.Type == ChannelTypeGroup {
+		nameArg = ch.Name
+	} else {
+		nameArg = nil
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO channels (id, name, channel_type, description, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("%w: %s", ErrChannelExists, ch.ID)
+		}
+		return fmt.Errorf("channels: insert channel: %w", err)
+	}
+
+	now := time.Now().UTC()
+	for _, m := range members {
+		if err := validateParticipantID(m.ParticipantID); err != nil {
+			return err
+		}
+		policy := m.RespondPolicy
+		if policy == "" {
+			policy = RespondWhenMentioned
+		}
+		if !policy.Valid() {
+			return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+		}
+		joinedAt := m.JoinedAt
+		if joinedAt.IsZero() {
+			joinedAt = now
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
+			ch.ID, m.ParticipantID, string(policy), joinedAt,
+		); err != nil {
+			// FK violations are unexpected here \u2014 we just inserted the
+			// parent row in the same transaction \u2014 but classify them the
+			// same way [AddMember] does for symmetry.
+			if isForeignKeyViolation(err) {
+				return fmt.Errorf("%w: %s", ErrChannelNotFound, ch.ID)
+			}
+			return fmt.Errorf("channels: add member %s: %w", m.ParticipantID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.logger.Info("channels: channel created with members",
+		zap.String("channel_id", ch.ID),
+		zap.String("channel_type", string(ch.Type)),
+		zap.Int("member_count", len(members)))
+	return nil
+}
+
 // GetChannel implements [ChannelStore.GetChannel].
 func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error) {
 	row := s.db.QueryRowContext(ctx,
