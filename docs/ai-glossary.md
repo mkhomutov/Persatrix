@@ -333,6 +333,46 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Definition:** GitHub's assistant. Configured via `.github/copilot-instructions.md`.
 - **Example:** "Copilot reads the same project guidelines as Claude Code."
 
+## Storage Architecture Roadmap
+
+Terms introduced by [docs/storage-architecture-roadmap.md](storage-architecture-roadmap.md). Glossary entries are stable; per-tier names (Scratchpad, Bonds, etc.) become physical store names when SA-1's RFC adopts them.
+
+### Personal/Society Storage Boundary
+- **Aliases:** "the storage split", "personal/society split"
+- **Disallowed:** "agent/world split", "private/shared boundary"
+- **Definition:** The architectural rule that data with one logical writer and one logical owner (a single agent's memory) lives in per-agent SQLite, while data requiring cross-agent consistency or external query (the *society state*) lives in shared Postgres. Established by [storage-architecture-roadmap.md](storage-architecture-roadmap.md) (SA-1) for v0.4.0.
+- **Example:** "Channel messages cross the personal/society storage boundary into Postgres; per-agent episodes do not."
+
+### Society State
+- **Aliases:** —
+- **Disallowed:** "shared state", "global state", "world state"
+- **Definition:** Cross-agent persistent state that no single agent owns: channels, org topology, decision audit, HITL approvals, shared facts, procedural patterns, the audit chain. Backed by Postgres in the SA-1 target picture. Distinct from a single agent's personal memory.
+- **Example:** "The decision audit chain is society state and lives in the society Postgres."
+
+### Vectors-as-Accelerator-Only
+- **Aliases:** —
+- **Disallowed:** "vectors as primary store", "vector-first recall"
+- **Definition:** The policy that vector indexes never own facts; they are recall accelerators on top of structured stores that already hold the truth. If a fact only exists as a high-similarity hit, it does not exist. Established by [storage-architecture-roadmap.md](storage-architecture-roadmap.md) (SA-3); enforced via `MemoryStore.recall_by_similarity()` returning row IDs only.
+- **Example:** "RFC 0024 is vectors-as-accelerator-only: deletions in `facts.db` are authoritative; the vector index is purged on next rebuild."
+
+### Scratchpad (memory tier)
+- **Aliases:** —
+- **Disallowed:** "working memory" (when meaning the bridged tier; see Memory)
+- **Definition:** The proposed v0.4 successor name for the working-memory tier: volatile in-RAM context with a small SQLite snapshot that bridges across exactly one prior interaction-close boundary. Replaces today's purely-volatile working memory ([memory-quality-roadmap.md §B](memory-quality-roadmap.md#b-continuity-bridge-across-interaction-close)). Tracked as SA-2.
+- **Example:** "The Scratchpad survives interaction close once; after the next close it is overwritten."
+
+### Bonds (memory tier)
+- **Aliases:** —
+- **Disallowed:** "relationship table" (when meaning the tier), "rapport store"
+- **Definition:** The proposed v0.4 successor name for the relationship-memory tier; per-pair trust and interaction texture. Renamed from "relationship" to avoid collision with the relational *database*. Tracked as SA-2.
+- **Example:** "Bonds decay slowly between interactions; trust deltas land here at interaction close."
+
+### Procedural Memory
+- **Aliases:** —
+- **Disallowed:** "skill memory" (when meaning the tier; see Skill)
+- **Definition:** A society-shared memory tier holding extracted patterns of *how to do things*, populated by [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md). Distinct from declarative facts and from skills in the Skill Registry; the open question of whether it collapses into RFC 0014's catalogue is tracked in SA-2 ([storage-architecture-roadmap.md OQ #5](storage-architecture-roadmap.md#open-questions)).
+- **Example:** "Procedural memory holds the recipe for `triage-a-bug-report`; skills register the tool capability that runs it."
+
 ## RFC 0008 — Context Budget & Packaging
 
 Terms introduced by [RFC 0008](rfcs/0008-agent-memory-context-optimization.md)
