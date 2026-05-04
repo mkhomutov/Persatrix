@@ -32,7 +32,11 @@ logger = logging.getLogger("Persatrix.agent.server")
 
 
 class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
-    """gRPC servicer: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage."""
+    """gRPC servicer.
+
+    Methods: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage,
+    ReceiveChannelMessage.
+    """
 
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):
         self._agents = agents
@@ -329,11 +333,23 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         dispatch through ``EventDispatcher``, observe metrics) lands in
         RFC 0011 PR 4 alongside the orchestrator-side ``DispatchChannelMessage``
         action and the ``MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` event-type
-        rename. Returning ``success=True`` lets the orchestrator's eventual
-        dispatcher exercise the wire format end-to-end without a real consumer.
+        rename.
+
+        The stub returns ``TaskAck(success=False)`` rather than ``True`` so the
+        wire format is exercised end-to-end (the orchestrator's eventual
+        dispatcher serialises a real ``ChannelMessageEvent`` and deserialises a
+        real ``TaskAck``) WITHOUT the response being indistinguishable from a
+        successful delivery. Per the at-most-once semantics declared on
+        ``TaskAck``, ``success=false`` means "the agent did not process this
+        event"; the orchestrator does not retry, but the failure surfaces in
+        logs/metrics rather than being silently absorbed. See PR #246 deep
+        review finding H1.
         """
         del request, context  # unused until PR 4
-        return task_pb2.TaskAck(success=True)
+        return task_pb2.TaskAck(
+            success=False,
+            error_message="ReceiveChannelMessage handler not yet implemented (RFC 0011 PR 4)",
+        )
 
 
 # ─── Chat Reply Extraction ────────────────────────────────────

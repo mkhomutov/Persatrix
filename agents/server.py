@@ -3,7 +3,8 @@ Persatrix Agent gRPC Server.
 
 Runs a single agent in a process, exposing it via gRPC for the orchestrator
 to communicate with. Implements AgentServiceServicer (ExecuteTask, HealthCheck,
-ExecuteTaskStream) from the generated protobuf stubs.
+ExecuteTaskStream, SendChatMessage, ReceiveChannelMessage) from the generated
+protobuf stubs.
 """
 
 import argparse
