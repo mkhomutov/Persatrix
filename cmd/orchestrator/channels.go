@@ -107,5 +107,20 @@ func initChannels(
 		zap.Int("declared_channels", len(chanCfg.Channels)),
 		zap.Int("max_channels", maxCh),
 	)
+	// PR #245 re-review (Must-Fix #1): v0.3.0 ships the channels REST
+	// surface unauthenticated — `sender_id` is body-trusted, and any
+	// HTTP-reachable client can publish as any registered participant
+	// or add themselves to any channel. Token-based auth lands in
+	// RFC 0009 Phase 4. Until then operators MUST front the
+	// orchestrator with an authenticating reverse proxy, bind the
+	// listener to 127.0.0.1, or firewall the port. This Warn fires
+	// once at startup so the trust boundary is impossible to miss in
+	// the operator's first log scrape — it is intentionally not
+	// suppressible from config (an opt-out would defeat the warning's
+	// purpose). Removed when auth lands.
+	logger.Warn("channels: REST surface is UNAUTHENTICATED in v0.3.0 — sender_id is body-trusted; firewall the port or front with an authenticating reverse proxy. Auth lands in RFC 0009 Phase 4.",
+		zap.String("rfc", "0011"),
+		zap.String("auth_eta", "RFC 0009 Phase 4"),
+	)
 	return []server.ServerOption{server.WithChannels(chanStore, router)}, cleanup, nil
 }

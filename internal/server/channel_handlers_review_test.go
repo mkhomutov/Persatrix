@@ -126,3 +126,38 @@ func TestChannels_CreateChannel_AtomicOnInvalidMember(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, retryRec.Code,
 		"retry after rolled-back create must succeed (no 409)")
 }
+
+// TestChannels_CreateChannel_InvalidName_400 pins PR #245 re-review
+// finding (Low/Med): a `name` value that fails channelNamePattern at
+// the store boundary used to surface as 500 INTERNAL because the
+// store's name-pattern error did not wrap any of the typed sentinels
+// that writeChannelError understands. The store wrapping fix
+// reclassifies it as ErrInvalidChannelType so the user-visible status
+// is the correct 400 BAD_REQUEST.
+//
+// Cases cover the three failure shapes operators are likely to type:
+// uppercase letters, embedded whitespace, and path-traversal-style
+// punctuation. All three must surface as 400 with a message naming
+// the offending value (no internal sentinel leak).
+func TestChannels_CreateChannel_InvalidName_400(t *testing.T) {
+	cases := []struct {
+		name    string
+		reqName string
+	}{
+		{"uppercase", "Planning"},
+		{"whitespace", "sprint 1"},
+		{"path-traversal", "evil/../path"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, _ := channelTestServer(t)
+			body, _ := json.Marshal(createChannelRequest{
+				Name:    c.reqName,
+				Members: []channelMemberRequest{{ID: "alice"}},
+			})
+			rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", body)
+			assert.Equal(t, http.StatusBadRequest, rec.Code,
+				"invalid name %q must surface as 400, not 500", c.reqName)
+		})
+	}
+}

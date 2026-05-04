@@ -242,3 +242,41 @@ func TestChannelRouter_ReconcileConfig_LoudFailureOnDivergence(t *testing.T) {
 	assert.Contains(t, err.Error(), "intruder", "extra-store member should appear")
 	assert.Contains(t, err.Error(), "bob", "missing-from-store member should appear")
 }
+
+// TestChannelRouter_ReconcileConfig_AtomicOnInvalidMember pins PR #245
+// re-review finding (Med): the missing-channel arm of ReconcileConfig
+// must adopt the same atomic CreateChannelWithMembers helper that the
+// REST handler now uses. Without atomicity, a reconcile that fails
+// mid-loop on an invalid declared member leaves the channel row
+// committed with only a prefix of the declared membership; the next
+// startup then trips ErrConfigStoreMembershipDivergence and requires
+// manual operator cleanup.
+//
+// We exercise the failure path by constructing a Config whose second
+// member carries an invalid participant ID (contains the reserved `:`
+// character). Config.Validate would normally reject this at load time,
+// but ReconcileConfig accepts a *Config directly so the path is
+// reachable when callers compose the struct programmatically — and
+// future loaders may relax their pre-checks. The contract pinned here
+// is that on partial-failure, no orphan channel row survives.
+func TestChannelRouter_ReconcileConfig_AtomicOnInvalidMember(t *testing.T) {
+	router, _, store := newRouterTest(t)
+	ctx := context.Background()
+
+	cfg := &Config{
+		MaxChannels: 50,
+		Channels: []ChannelConfig{{
+			Name: "planning",
+			Members: []MemberConfig{
+				{ID: "alice", RespondPolicy: RespondAlways},
+				{ID: "bad:id", RespondPolicy: RespondAlways}, // invalid → triggers rollback
+			},
+		}},
+	}
+	err := router.ReconcileConfig(ctx, cfg)
+	require.Error(t, err, "invalid member must surface as a reconcile failure")
+
+	_, getErr := store.GetChannel(ctx, "group:planning")
+	assert.ErrorIs(t, getErr, ErrChannelNotFound,
+		"failed reconcile must not leak an orphan channel row")
+}

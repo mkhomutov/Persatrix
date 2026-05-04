@@ -242,7 +242,7 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 	}
 	for _, decl := range cfg.Channels {
 		canonicalID := decl.CanonicalID()
-		existing, err := r.store.GetChannel(ctx, canonicalID)
+		_, err := r.store.GetChannel(ctx, canonicalID)
 		switch {
 		case err == nil:
 			// Channel already in store — verify membership parity.
@@ -256,21 +256,31 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 			}
 			r.logger.Debug("channels: config channel present in store",
 				zap.String("channel_id", canonicalID))
-			_ = existing
 		case errors.Is(err, ErrChannelNotFound):
-			if err := r.store.CreateChannel(ctx, Channel{
+			// PR #245 re-review (Med): the previous implementation called
+			// CreateChannel followed by an N-call AddMember loop. A failure
+			// mid-loop (transient store error or an invalid declared
+			// member that bypassed Config.Validate) left the channel row
+			// committed with only a prefix of the declared membership;
+			// the next startup then tripped
+			// ErrConfigStoreMembershipDivergence and required manual
+			// operator cleanup. The handler-side fix already adopted
+			// CreateChannelWithMembers for atomicity (PR #245 review High);
+			// reconcile is now consistent with that contract.
+			members := make([]Member, 0, len(decl.Members))
+			for _, m := range decl.Members {
+				members = append(members, Member{
+					ParticipantID: m.ID,
+					RespondPolicy: m.RespondPolicy,
+				})
+			}
+			if err := r.store.CreateChannelWithMembers(ctx, Channel{
 				ID:          canonicalID,
 				Name:        decl.Name,
 				Type:        ChannelTypeGroup,
 				Description: decl.Description,
-			}); err != nil {
+			}, members); err != nil {
 				return fmt.Errorf("channels: reconcile create %s: %w", canonicalID, err)
-			}
-			for _, m := range decl.Members {
-				if err := r.store.AddMember(ctx, canonicalID, m.ID, m.RespondPolicy); err != nil {
-					return fmt.Errorf("channels: reconcile add member %s/%s: %w",
-						canonicalID, m.ID, err)
-				}
 			}
 		default:
 			return fmt.Errorf("channels: reconcile lookup %s: %w", canonicalID, err)

@@ -6,6 +6,48 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 PR 2 — Channels REST surface + router + config reconciliation.**
+  Wires `internal/channels` (PR 1) into the orchestrator: new `ChannelRouter`
+  publishes through the store with `channel_type` cross-validation and
+  per-recipient fanout (the gRPC dispatcher remains a `NoopDispatcher` until
+  PR 4); REST endpoints land at `POST /api/v1/channels`,
+  `GET /api/v1/channels`, `GET /api/v1/channels/{id}`,
+  `POST /api/v1/channels/{id}/messages`,
+  `GET /api/v1/channels/{id}/messages`,
+  `GET /api/v1/channels/{id}/messages/{msg_id}/thread`, and
+  `POST /api/v1/channels/{id}/members`; startup reconciles
+  `config/channels.yaml` against the live store under §B coexistence rules
+  (loud-fail on membership divergence). New env-overridable flag
+  `--channels-db` (default `data/channels.db`) selects the SQLite path; a
+  new `cmd/orchestrator/channels.go` extraction keeps `main.go` from
+  growing past the 500-line review-friendly cap (ISSUE-0008). Schema
+  migrates to **v2** automatically on first open: `channels.name` becomes
+  nullable (DM/thread channels store NULL) and a partial unique index
+  `ux_channels_name_group` enforces uniqueness only over group rows; the
+  rebuild runs the SQLite "12-step" sequence with `PRAGMA foreign_keys=OFF`
+  so existing membership and message rows survive intact. `ChannelStore`
+  grows one method (`CreateChannelWithMembers`) so handler-side create
+  bundles are atomic at the store boundary; the new
+  `internal/channels/sqlite_pr2_review_test.go` pins both the migration
+  child-row contract and the rollback contract. PR #245 re-review applied:
+  the `ReconcileConfig` missing-channel arm now uses the same atomic
+  `CreateChannelWithMembers` helper (no more orphan rows on partial
+  failure); the store's `name`-required and `name`-pattern errors are
+  wrapped with `ErrInvalidChannelType` so REST callers see 400 instead of
+  500 on bad input.
+
+  **Security — UNAUTHENTICATED in v0.3.0.** The channels REST endpoints
+  ship without authentication this release. `sender_id` is body-trusted,
+  and any HTTP-reachable client can publish as any registered participant
+  or add themselves to any channel (including `group:`-prefixed channels
+  declared in `config/channels.yaml`). Token-based auth lands in RFC 0009
+  Phase 4. Until then operators MUST: (1) bind the orchestrator listener
+  to `127.0.0.1`, (2) front it with an authenticating reverse proxy, or
+  (3) firewall the port. The orchestrator emits a one-shot
+  `channels: REST surface is UNAUTHENTICATED in v0.3.0 …` Warn at startup
+  whenever the channels subsystem is enabled so the trust boundary is
+  surfaced in the first log scrape (PR #245 re-review Must-Fix #1).
+
 - **RFC 0009 PR 1b — Audit wiring + default redactor + chmod self-heal.**
   Wires the PR 1 `AuditLogger` + `SecretRedactor` into orchestrator hot
   paths so security-relevant lifecycle events become forensically
