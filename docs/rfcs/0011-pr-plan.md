@@ -152,12 +152,22 @@ Nice-to-Have items (also pinned to PR 8 unless an earlier PR's diff naturally in
 
 #### PR checklist
 
-- [ ] RFC 0009 PR 2 merged **or** startup-WARN opt-out path landed and documented in `docs/v0.3.0-plan.md`
-- [ ] `make validate` green against `config/channels.yaml`
-- [ ] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
-- [ ] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
-- [ ] PR #231 review SF-2 closed: `CreateChannel` enforces `ID == "group:" + Name` (or computes it) for `ChannelTypeGroup`
-- [ ] PR #231 review SF-4 closed: `channels.name` migrated to nullable + partial unique index on `channel_type='group'`; `GetChannel`/`ListChannels` placeholder shim removed; `user_version` bumped
+- [x] RFC 0009 PR 2 merged **or** startup-WARN opt-out path landed and documented in `docs/v0.3.0-plan.md`
+- [x] `make validate` green against `config/channels.yaml`
+- [x] All Phase 1 manual smoke (`curl` create/publish/history) documented in PR description
+- [x] New metrics (`channel.messages.delivered{status}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
+- [x] PR #231 review SF-2 closed: `CreateChannel` enforces `ID == "group:" + Name` (or computes it) for `ChannelTypeGroup`
+- [x] PR #231 review SF-4 closed: `channels.name` migrated to nullable + partial unique index on `channel_type='group'`; `GetChannel`/`ListChannels` placeholder shim removed; `user_version` bumped
+
+> **RFC 0009 PR 2 status (PR #245)**: rate-limit middleware is wired
+> generically through `WithRateLimiter` (RFC 0009 PR 2 / PR #244 merged)
+> but the channels publish endpoint runs on the **startup-WARN
+> opt-out** path for v0.3.0 — the channels REST surface is
+> intentionally unauthenticated this release (token auth lands in
+> RFC 0009 Phase 4) and the orchestrator emits a one-shot
+> `channels: REST surface is UNAUTHENTICATED in v0.3.0 …` Warn
+> whenever the channels subsystem is enabled. See CHANGELOG entry
+> for the operator-facing trust-boundary statement.
 
 ---
 

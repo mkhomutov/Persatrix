@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,11 +27,23 @@ import (
 // `max_channels` cap is 50 by default) and small enough that one page
 // fits comfortably in a single TCP segment.
 const (
-	channelDefaultListLimit    = 100
+	// channelDefaultListLimit is intentionally aligned with
+	// channels.DefaultMaxChannels (the global named-group cap) so the
+	// default page size never exceeds the maximum number of channels
+	// the store can hold. PR #245 review (round 3) Nice-to-Have #3.
+	channelDefaultListLimit    = channels.DefaultMaxChannels
 	channelDefaultHistoryLimit = 50
 	channelDefaultThreadLimit  = 100
 	channelMaxLimit            = 1000
 )
+
+// channelFallbackWarnOnce guards the once-per-process Warn emitted by
+// handlePublishMessage when no router is wired (test-fixture path; see
+// PR #245 review round 3 Should-Fix #3). Package-level so handler
+// instances created across multiple Server constructors share the
+// guard — a single misconfiguration warning per process lifetime is
+// sufficient to alert ops without flooding the publish hot path.
+var channelFallbackWarnOnce sync.Once
 
 // handleCreateChannel handles POST /api/v1/channels.
 //
@@ -156,7 +169,9 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 // Routes through [ChannelRouter.Publish] when a router was injected, so
 // channel_type cross-validation and fanout fire. Falls back to a direct
 // store write when the router is unset (test fixtures only — production
-// always wires the router).
+// always wires the router). The fallback path emits a once-per-process
+// Warn ([channelFallbackWarnOnce]) so a forgotten WithChannels(store,
+// router) wiring is observable without flooding the publish hot path.
 func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil {
 		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
@@ -194,6 +209,16 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 	if s.channelRouter != nil {
 		pubErr = s.channelRouter.Publish(r.Context(), msg, req.ChannelType)
 	} else {
+		// PR #245 review (round 3) Should-Fix #3: signpost the
+		// router-nil fallback once per process. The fallback path
+		// silently bypasses channel_type cross-validation and the
+		// channel.messages.delivered metric — both contracts that
+		// production callers rely on. Emitting once (sync.Once) keeps
+		// the publish hot path log-noise-free while still surfacing
+		// the misconfiguration to ops at first traffic.
+		channelFallbackWarnOnce.Do(func() {
+			s.logger.Warn("channels: publish via router-nil fallback (channel_type validation and delivery metric skipped); wire WithChannels(store, router) in production")
+		})
 		pubErr = s.channelStore.PublishMessage(r.Context(), msg)
 	}
 	if pubErr != nil {

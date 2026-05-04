@@ -48,6 +48,17 @@ All notable changes to this project will be documented in this file.
   whenever the channels subsystem is enabled so the trust boundary is
   surfaced in the first log scrape (PR #245 re-review Must-Fix #1).
 
+  PR #245 deep review (round 3) applied: (a) the publish handler's
+  router-nil fallback path now emits a once-per-process `Warn`
+  signposting that channel_type cross-validation and the
+  `channel.messages.delivered` metric are skipped — production
+  callers always wire the router via `WithChannels(store, router)`,
+  but a forgotten wiring is now observable on first publish instead
+  of silently degrading (Should-Fix #3); (b) the default REST list
+  page size (`channelDefaultListLimit`) is aligned with
+  `channels.DefaultMaxChannels` so the page size never exceeds the
+  global channel cap (Nice-to-Have #3).
+
 - **RFC 0009 PR 1b — Audit wiring + default redactor + chmod self-heal.**
   Wires the PR 1 `AuditLogger` + `SecretRedactor` into orchestrator hot
   paths so security-relevant lifecycle events become forensically

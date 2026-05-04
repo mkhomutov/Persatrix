@@ -3,10 +3,19 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 // PR #245 review fix-ups — handler-layer hardening.
@@ -160,4 +169,110 @@ func TestChannels_CreateChannel_InvalidName_400(t *testing.T) {
 				"invalid name %q must surface as 400, not 500", c.reqName)
 		})
 	}
+}
+
+// channelTestServerNoRouter wires the channel store WITHOUT a router so
+// the publish handler exercises the direct-store fallback path.
+// Returns the observer alongside the server so the test can assert log
+// emission. The contract being pinned is the once-per-process Warn
+// added in PR #245 review (round 3) Should-Fix #3.
+func channelTestServerNoRouter(t *testing.T) (*Server, *observer.ObservedLogs) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "channels.db")
+	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
+		MaxChannels: 50,
+		Logger:      zap.NewNop(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	core, recorded := observer.New(zap.WarnLevel)
+	logger := zap.New(core)
+
+	wfDir := t.TempDir()
+	srv, err := New("127.0.0.1:0", wfDir,
+		state.NewInMemoryStore(logger),
+		registry.NewInMemoryRegistry(logger),
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannels(store, nil), // intentionally nil router → fallback path
+	)
+	require.NoError(t, err)
+	return srv, recorded
+}
+
+// TestChannels_PublishMessage_RouterNilFallback_LogsWarnOnce pins
+// PR #245 review (round 3) Should-Fix #3. The router-nil branch in
+// handlePublishMessage previously bypassed channel_type cross-validation
+// and the channel.messages.delivered metric without any log line, so a
+// production misconfiguration (forgetting to wire the router via
+// WithChannels) would silently degrade observability AND skip a
+// validation step. The fix emits a once-per-process Warn so:
+//
+//   - the misconfiguration is visible in ops logs at startup-traffic
+//     time without needing to scrape metrics;
+//   - publish remains a hot path (per-request Warn would flood logs).
+//
+// The "exactly once" property is the contract this test pins.
+//
+// NOTE: shares the package-level channelFallbackWarnOnce with other
+// tests in this package — this test resets it explicitly so order is
+// not significant.
+func TestChannels_PublishMessage_RouterNilFallback_LogsWarnOnce(t *testing.T) {
+	channelFallbackWarnOnce = sync.Once{}
+	t.Cleanup(func() { channelFallbackWarnOnce = sync.Once{} })
+
+	srv, recorded := channelTestServerNoRouter(t)
+
+	// Bootstrap a channel directly via the store (no router needed; the
+	// publish path is what we're exercising).
+	require.NoError(t, srv.channelStore.CreateChannelWithMembers(t.Context(),
+		channels.Channel{ID: "group:planning", Name: "planning", Type: channels.ChannelTypeGroup},
+		[]channels.Member{{ParticipantID: "alice", RespondPolicy: channels.RespondAlways}}))
+
+	pubBody, _ := json.Marshal(publishMessageRequest{SenderID: "alice", Content: "hi"})
+	for i := 0; i < 3; i++ {
+		rec := doRequest(srv.Handler(), http.MethodPost,
+			"/api/v1/channels/group:planning/messages", pubBody)
+		require.Equal(t, http.StatusCreated, rec.Code,
+			"publish #%d via fallback must succeed: body=%s", i+1, rec.Body.String())
+	}
+
+	warnings := recorded.FilterMessageSnippet("router-nil fallback").All()
+	assert.Len(t, warnings, 1,
+		"router-nil fallback Warn must fire exactly once across multiple publishes")
+}
+
+// TestChannels_PublishMessage_RouterNilFallback_SkipsChannelTypeCheck
+// documents the residual gap that the Warn signposts: the fallback
+// path does NOT cross-validate channel_type. We pin the current
+// behaviour so a future refactor (e.g. moving the cross-check into the
+// store) does not silently change it without an explicit test update.
+//
+// When PR-4 lands the gRPC dispatcher and removes the fallback (the
+// router becomes mandatory), this test should be deleted alongside the
+// fallback branch.
+func TestChannels_PublishMessage_RouterNilFallback_SkipsChannelTypeCheck(t *testing.T) {
+	channelFallbackWarnOnce = sync.Once{}
+	t.Cleanup(func() { channelFallbackWarnOnce = sync.Once{} })
+
+	srv, _ := channelTestServerNoRouter(t)
+
+	require.NoError(t, srv.channelStore.CreateChannelWithMembers(t.Context(),
+		channels.Channel{ID: "group:planning", Name: "planning", Type: channels.ChannelTypeGroup},
+		[]channels.Member{{ParticipantID: "alice", RespondPolicy: channels.RespondAlways}}))
+
+	// channel_type=dm against a group channel — the router would 400.
+	// The fallback path skips this validation by design (writes directly
+	// to the store), so the publish succeeds. The Warn above is the
+	// signpost for this trade-off.
+	body, _ := json.Marshal(publishMessageRequest{
+		SenderID:    "alice",
+		Content:     "x",
+		ChannelType: "dm",
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost,
+		"/api/v1/channels/group:planning/messages", body)
+	assert.Equal(t, http.StatusCreated, rec.Code,
+		"fallback path skips channel_type validation by design (Warn signposts)")
 }
