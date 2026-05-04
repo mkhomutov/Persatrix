@@ -52,6 +52,13 @@ type Server struct {
 	// (security audit log).  When nil, audit emit sites no-op so unit
 	// tests and minimal-deployment fixtures stay zero-config.
 	auditor security.AuditLogger
+
+	// Rate limiter + circuit breaker (optional — nil-safe). Wired in
+	// RFC 0009 PR 2. When nil, the rate-limit middleware degrades to a
+	// passthrough so existing unit tests and minimal deployments keep
+	// their pre-PR behaviour.
+	rateLimiter    *security.RateLimiter
+	circuitBreaker *security.CircuitBreaker
 }
 
 // ServerOption configures optional Server dependencies.
@@ -107,6 +114,18 @@ func WithLogBuffer(buf *logbuffer.Buffer) ServerOption {
 func WithAuditLogger(a security.AuditLogger) ServerOption {
 	return func(s *Server) {
 		s.auditor = a
+	}
+}
+
+// WithRateLimiter injects the per-agent REST rate limiter and circuit
+// breaker (RFC 0009 PR 2). Both are applied as middleware on the public
+// REST router so denials short-circuit before any handler-side work.
+// Nil-safe: passing nil for either degrades that subsystem to a
+// passthrough (used by unit tests that do not exercise the limiter).
+func WithRateLimiter(rl *security.RateLimiter, cb *security.CircuitBreaker) ServerOption {
+	return func(s *Server) {
+		s.rateLimiter = rl
+		s.circuitBreaker = cb
 	}
 }
 
@@ -174,6 +193,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agents/{id}", s.handleGetAgent)
 	s.mux.HandleFunc("DELETE /api/v1/agents/{id}", s.handleDeleteAgent)
 
+	// Operator endpoint — release an agent quarantined by the circuit
+	// breaker (RFC 0009 PR 2). Returns 503 when no breaker is wired.
+	s.mux.HandleFunc("POST /api/v1/agents/{id}/unquarantine", s.handleUnquarantineAgent)
+
 	// Stub endpoints — deferred to future RFCs (Phase 3)
 	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs", s.handleListLogs)
 	s.mux.HandleFunc("GET /api/v1/executions/{id}/logs/stream", s.handleStreamLogs)
@@ -202,6 +225,14 @@ func (s *Server) registerRoutes() {
 func (s *Server) Handler() http.Handler {
 	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
 	var h http.Handler = s.mux
+	// Rate-limit + circuit-breaker run before logging so 429/403 responses
+	// still appear in the access log; placed inside requestID so the
+	// short-circuit response carries an X-Request-ID header for client
+	// correlation. Nil-safe — degrades to passthrough when unwired
+	// (RFC 0009 PR 2).
+	if s.rateLimiter != nil || s.circuitBreaker != nil {
+		h = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(h)
+	}
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)

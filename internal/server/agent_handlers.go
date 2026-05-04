@@ -269,7 +269,35 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// agentToResponse converts a registry.AgentInfo to a wire-format agentResponse.
+// handleUnquarantineAgent handles POST /api/v1/agents/{id}/unquarantine
+// (RFC 0009 PR 2). The endpoint is operator-facing: it releases an
+// agent that has been quarantined by the [security.CircuitBreaker]
+// after sustained policy violations. Returns 404 when the agent is
+// not currently quarantined and 503 when no breaker is wired.
+//
+// `actor` is read from the standard X-Agent-ID header so the audit
+// event records who initiated the release; defaults to "operator"
+// when the header is absent.
+func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !resourceIDRegex.MatchString(id) {
+		writeError(w, "BAD_REQUEST", "invalid agent ID format", http.StatusBadRequest)
+		return
+	}
+	if s.circuitBreaker == nil {
+		writeError(w, "UNAVAILABLE", "circuit breaker not configured", http.StatusServiceUnavailable)
+		return
+	}
+	actor := r.Header.Get(security.AgentIDHeader)
+	if actor == "" {
+		actor = "operator"
+	}
+	if !s.circuitBreaker.Unquarantine(id, actor) {
+		writeError(w, "NOT_FOUND", "agent is not quarantined", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 func agentToResponse(a *registry.AgentInfo) agentResponse {
 	resp := agentResponse{
 		ID:      a.ID,

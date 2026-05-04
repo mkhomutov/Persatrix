@@ -31,6 +31,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/scheduler"
+	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
@@ -224,6 +225,10 @@ func main() {
 		logger.Info("audit logger initialized", zap.String("path", auditor.Path()))
 	}
 	// 5. Initialize resilience (circuit breakers)
+	rateLimiter, circuitBreaker, err := initRateLimiter(logger, auditor)
+	if err != nil {
+		logger.Fatal("failed to initialize rate limiter", zap.Error(err))
+	}
 
 	// 6. Initialize agent registry
 	reg := registry.NewInMemoryRegistry(logger)
@@ -320,6 +325,10 @@ func main() {
 	// Nil-safe when audit is disabled (OBSERVABILITY_AUDIT_PATH=off).
 	srvOpts = append(srvOpts, server.WithAuditLogger(auditor))
 
+	// RFC 0009 PR 2 — per-agent REST rate limit + circuit-breaker
+	// quarantine. Nil-safe when SECURITY_RATE_LIMIT_ENABLED=false.
+	srvOpts = append(srvOpts, server.WithRateLimiter(rateLimiter, circuitBreaker))
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
@@ -366,6 +375,11 @@ func main() {
 				MinTime:             30 * time.Second,
 				PermitWithoutStream: false,
 			}),
+			// RFC 0009 PR 2 — per-agent rate limit + circuit-breaker
+			// quarantine on the LogService gRPC surface. Maps deny
+			// outcomes to ResourceExhausted / PermissionDenied; nil-safe
+			// when SECURITY_RATE_LIMIT_ENABLED=false.
+			grpc.UnaryInterceptor(security.GRPCRateLimitInterceptor(rateLimiter, circuitBreaker)),
 		)
 		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))
 		defer grpcServer.GracefulStop()
