@@ -345,6 +345,18 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         event"; the orchestrator does not retry, but the failure surfaces in
         logs/metrics rather than being silently absorbed. See PR #246 deep
         review finding H1.
+
+        TODO(rfc0011-pr-4): when the real handler lands, fan-out to
+        ``EventDispatcher`` MUST hold strong references to any spawned
+        ``asyncio.Task`` objects (e.g. via a ``set[asyncio.Task]`` plus
+        ``task.add_done_callback(self._pending_dispatches.discard)``).
+        Python 3.11+ garbage-collects tasks held only by weak references
+        in the event loop, so a fire-and-forget ``asyncio.create_task(...)``
+        without a strong-ref anchor can be collected mid-flight. This
+        pattern was originally introduced in PR #101 on the now-deleted
+        ``ChannelServiceServicer`` and is recorded here so the dispatcher
+        author in PR 4 does not have to re-derive it. PR #246 deep review
+        Should-Fix #2.
         """
         del request, context  # unused until PR 4
         return task_pb2.TaskAck(

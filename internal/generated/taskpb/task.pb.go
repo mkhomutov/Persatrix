@@ -694,8 +694,10 @@ func (x *ChatResponse) GetReplyStatus() string {
 // ("group:" / "dm:" / "thread:") and is carried separately for
 // log/observability ergonomics — counters and span attributes use it
 // without parsing. Orchestrator MUST validate agreement with the prefix
-// on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
-// mismatch as malformed rather than pick one source.
+// on publish (Phase 2 `ChannelRouter`); receivers MUST drop on mismatch
+// as malformed rather than pick one source (deny-by-default per
+// `.github/copilot-instructions.md`; PR #246 deep review security
+// finding — tightened from prior "SHOULD").
 // TODO(rfc0011-pr-4): wire receiver-side `channel_type` ↔ `channel_id`
 // prefix-agreement enforcement in `ReceiveChannelMessage` once the real
 // handler lands; the stub in PR 3 cannot enforce this because it does
@@ -705,8 +707,17 @@ type ChannelMessageEvent struct {
 	MessageId   string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	ChannelId   string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	ChannelType string                 `protobuf:"bytes,3,opt,name=channel_type,json=channelType,proto3" json:"channel_type,omitempty"` // "group" | "dm" | "thread"
-	SenderId    string                 `protobuf:"bytes,4,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
-	Content     string                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	// Orchestrator-authoritative: populated from the orchestrator's
+	// authenticated agent registry on publish. Receivers MUST NOT trust
+	// this field over a non-mTLS transport; in v0.3.0 the gRPC port is
+	// cleartext and assumed local-only (see `agents/server.py` TLS TODO).
+	// PR #246 deep review security finding (sender-spoofing trust boundary).
+	SenderId string `protobuf:"bytes,4,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	// Free-form user/agent text. Max 4000 chars enforced server-side
+	// (mirrors `ChatRequest.message`); receivers MUST reject longer
+	// payloads. May contain PII — handlers MUST NOT log `content` at
+	// INFO/DEBUG without redaction. PR #246 deep review M1.
+	Content string `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
 	// RFC 3339 string (NOT Unix epoch like ChatResponse.timestamp /
 	// TaskProgress.timestamp). Chosen because the value is forwarded
 	// verbatim to the channel store's `messages.created_at` column
@@ -714,8 +725,16 @@ type ChannelMessageEvent struct {
 	// force a server-side format conversion on every publish purely to
 	// satisfy the wire shape. Receivers MUST treat malformed timestamps
 	// as a drop reason. See PR #246 deep review finding M4.
-	Timestamp     string   `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	ThreadId      string   `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"` // empty string if not a reply
+	Timestamp string `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Empty string if not a reply. Max 128 chars when set (mirrors
+	// `ChatRequest.session_id` bound). PR #246 deep review M1.
+	ThreadId string `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	// Max 10 entries per event (mirrors `_MAX_MENTIONS_PER_ACTION` in
+	// `agents/dispatch.py`); each entry is an agent_id constrained by
+	// the canonical pattern `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. Receivers
+	// MUST reject over-cap or pattern-violating entries to bound fan-out
+	// cost and preserve ID hygiene. Tracked at REST boundary by
+	// `docs/issues/ISSUE-0011`. PR #246 deep review M1.
 	Mentions      []string `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

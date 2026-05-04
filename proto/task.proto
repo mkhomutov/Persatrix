@@ -106,8 +106,10 @@ message ChatResponse {
 // ("group:" / "dm:" / "thread:") and is carried separately for
 // log/observability ergonomics — counters and span attributes use it
 // without parsing. Orchestrator MUST validate agreement with the prefix
-// on publish (Phase 2 `ChannelRouter`); receivers SHOULD drop on
-// mismatch as malformed rather than pick one source.
+// on publish (Phase 2 `ChannelRouter`); receivers MUST drop on mismatch
+// as malformed rather than pick one source (deny-by-default per
+// `.github/copilot-instructions.md`; PR #246 deep review security
+// finding — tightened from prior "SHOULD").
 // TODO(rfc0011-pr-4): wire receiver-side `channel_type` ↔ `channel_id`
 // prefix-agreement enforcement in `ReceiveChannelMessage` once the real
 // handler lands; the stub in PR 3 cannot enforce this because it does
@@ -116,7 +118,16 @@ message ChannelMessageEvent {
   string message_id = 1;
   string channel_id = 2;
   string channel_type = 3;        // "group" | "dm" | "thread"
+  // Orchestrator-authoritative: populated from the orchestrator's
+  // authenticated agent registry on publish. Receivers MUST NOT trust
+  // this field over a non-mTLS transport; in v0.3.0 the gRPC port is
+  // cleartext and assumed local-only (see `agents/server.py` TLS TODO).
+  // PR #246 deep review security finding (sender-spoofing trust boundary).
   string sender_id = 4;
+  // Free-form user/agent text. Max 4000 chars enforced server-side
+  // (mirrors `ChatRequest.message`); receivers MUST reject longer
+  // payloads. May contain PII — handlers MUST NOT log `content` at
+  // INFO/DEBUG without redaction. PR #246 deep review M1.
   string content = 5;
   // RFC 3339 string (NOT Unix epoch like ChatResponse.timestamp /
   // TaskProgress.timestamp). Chosen because the value is forwarded
@@ -126,7 +137,15 @@ message ChannelMessageEvent {
   // satisfy the wire shape. Receivers MUST treat malformed timestamps
   // as a drop reason. See PR #246 deep review finding M4.
   string timestamp = 6;
-  string thread_id = 7;           // empty string if not a reply
+  // Empty string if not a reply. Max 128 chars when set (mirrors
+  // `ChatRequest.session_id` bound). PR #246 deep review M1.
+  string thread_id = 7;
+  // Max 10 entries per event (mirrors `_MAX_MENTIONS_PER_ACTION` in
+  // `agents/dispatch.py`); each entry is an agent_id constrained by
+  // the canonical pattern `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. Receivers
+  // MUST reject over-cap or pattern-violating entries to bound fan-out
+  // cost and preserve ID hygiene. Tracked at REST boundary by
+  // `docs/issues/ISSUE-0011`. PR #246 deep review M1.
   repeated string mentions = 8;
 }
 
