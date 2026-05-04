@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0009
 summary: channelFallbackWarnOnce package-level sync.Once is reassigned from tests; latent -race flake
-status: open
+status: resolved
 severity: medium
 area: internal/server
 created: 2026-05-04
+closed: 2026-05-04
+closed_pr: 246
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md

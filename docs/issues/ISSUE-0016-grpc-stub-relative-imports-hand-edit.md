@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0016
 summary: agents/generated/*_pb2_grpc.py imports must be hand-patched to relative form after every `make proto` regen
-status: open
+status: resolved
 severity: low
 area: build/proto
 created: 2026-05-04
+closed: 2026-05-04
+closed_pr: 246
 refs:
   - docs/rfcs/0011-pr-plan.md
 ---

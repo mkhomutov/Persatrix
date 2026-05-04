@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0012
 summary: --channels-db default lands on data/channels.db but parent dir is not ensured; fresh checkout silently degrades to 503
-status: open
+status: resolved
 severity: low
 area: cmd/orchestrator
 created: 2026-05-04
+closed: 2026-05-04
+closed_pr: 246
 refs:
   - docs/rfcs/0011-channels.md
 ---

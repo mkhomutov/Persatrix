@@ -17,6 +17,10 @@
 > against current builds — `grpcurl` will fail with `Method not found`.
 > A replacement MT exercising `ReceiveChannelMessage` will land alongside
 > RFC 0011 PR 4 (the real handler). See PR #246 deep review (Should-fix #2).
+>
+> **Replacement**: `MT-CHANNEL-001` (to be created in RFC 0011 PR 4). See
+> PR 4 checklist item "MT-CHANNEL-001 created and covers ReceiveChannelMessage
+> stub → real handler transition".
 
 ---
 

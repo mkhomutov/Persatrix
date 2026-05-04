@@ -177,10 +177,10 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 | Issue | Finding | Target PR | Severity |
 |-------|---------|-----------|---------|
-| [ISSUE-0009](../issues/ISSUE-0009-channel-fallback-warn-once-test-race.md) | `channelFallbackWarnOnce` is a package-level `sync.Once`; reassigned in tests causes latent `-race` flake once any sibling adopts `t.Parallel()`. | **PR 3 or PR 8** | Medium |
+| [ISSUE-0009](../issues/ISSUE-0009-channel-fallback-warn-once-test-race.md) | `channelFallbackWarnOnce` is a package-level `sync.Once`; reassigned in tests causes latent `-race` flake once any sibling adopts `t.Parallel()`. | ~~**PR 3 or PR 8**~~ ✅ **Resolved PR 3 (#246)** | Medium |
 | [ISSUE-0010](../issues/ISSUE-0010-reconcile-membership-divergence-doc-behaviour-mismatch.md) | `membershipDivergence` doc claims policy drift "is logged" but function only compares participant id sets — doc/behaviour mismatch. | **PR 8** | Low |
 | [ISSUE-0011](../issues/ISSUE-0011-publish-mentions-count-cap.md) | `handlePublishMessage` forwards `req.Mentions` without count cap — defense-in-depth gap on the unauthenticated REST surface. | **PR 4** | Low |
-| [ISSUE-0012](../issues/ISSUE-0012-channels-db-parent-dir-not-auto-created.md) | `--channels-db` default path (`data/channels.db`) parent directory not auto-created; fresh checkout silently degrades channels to 503. | **PR 3** | Low |
+| [ISSUE-0012](../issues/ISSUE-0012-channels-db-parent-dir-not-auto-created.md) | `--channels-db` default path (`data/channels.db`) parent directory not auto-created; fresh checkout silently degrades channels to 503. | ~~**PR 3**~~ ✅ **Resolved PR 3 (#246)** | Low |
 | [ISSUE-0013](../issues/ISSUE-0013-channel-messages-published-counter.md) | No `channel.messages.published` counter alongside `channel.messages.delivered`; delivered/published ratio dashboard not computable. | **PR 4** | Low |
 | [ISSUE-0014](../issues/ISSUE-0014-channel-fanout-bounded-concurrency.md) | `ChannelRouter.fanout` dispatches inline per-recipient (O(N × 5s) worst-case); bounded-concurrency `errgroup` needed before PR 4 gRPC dispatcher. | **PR 4** | Low |
 | [ISSUE-0015](../issues/ISSUE-0015-list-channels-cursor-and-store-side-limit.md) | `handleListChannels` loads all rows then client-truncates; no `next_cursor` in response; silent data truncation once the channel cap is lifted. | **PR 8** | Low |
@@ -217,7 +217,7 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### PR checklist
 
-- [ ] `make proto` is the only path used to regenerate; manual edits to `internal/generated/` or `agents/generated/` rejected in review
+- [ ] `make proto` is the only path used to regenerate; the `proto-python` target now auto-rewrites absolute imports to relative form (Makefile fixup added in PR 3 review; ISSUE-0016 ✅ resolved)
 - [ ] Old `ChannelService`-related code deleted in the same commit as the proto edit (no "deprecation window" — the surface had no producer)
 
 ---
