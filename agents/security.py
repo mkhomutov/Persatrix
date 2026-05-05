@@ -14,7 +14,10 @@ cross the Go boundary, so a Go-only sanitizer would miss them.
 
 Pattern parity is enforced by `tests/unit/python/test_pattern_parity.py`
 which re-runs the `cmd/genpatterns` generator and diffs against the
-checked-in `agents/security_patterns.py`.
+checked-in `agents/security_patterns.py` and `agents/security_enums.py`.
+The enum constants imported below are codegen'd from the Go closed sets
+(`AllContextSources`, `AllSanitizerActions`); adding a new source or
+action means bumping the Go enum and re-running the generator.
 """
 
 from __future__ import annotations
@@ -24,51 +27,46 @@ import re
 from dataclasses import dataclass, field
 from typing import Final
 
+from .security_enums import (
+    CONTEXT_SOURCE_AGENT_OUTPUT,
+    CONTEXT_SOURCE_CHANNEL_MESSAGE,
+    CONTEXT_SOURCE_EXTERNAL,
+    CONTEXT_SOURCE_INTERNAL,
+    CONTEXT_SOURCE_USER,
+    KNOWN_CONTEXT_SOURCES,
+    KNOWN_SANITIZER_ACTIONS,
+    SANITIZER_ACTION_PASSTHROUGH,
+    SANITIZER_ACTION_QUARANTINE,
+)
 from .security_patterns import COMPILED_PATTERNS
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Closed-set ContextSource constants ───────────────────────────────
-#
-# These mirror the Go-side `internal/security/context_source.go`. The
-# strings are written verbatim into the audit log's `Detail.source`
-# field on both sides, so renaming silently breaks operator alerts.
-# Adding a new source: bump the Go enum, regenerate, and add the constant
-# here in the same PR.
-
-CONTEXT_SOURCE_INTERNAL: Final[str] = "internal"
-CONTEXT_SOURCE_EXTERNAL: Final[str] = "external"
-CONTEXT_SOURCE_AGENT_OUTPUT: Final[str] = "agent_output"
-CONTEXT_SOURCE_USER: Final[str] = "user"
-CONTEXT_SOURCE_CHANNEL_MESSAGE: Final[str] = "channel_message"
-
-KNOWN_CONTEXT_SOURCES: Final[frozenset[str]] = frozenset({
-    CONTEXT_SOURCE_INTERNAL,
-    CONTEXT_SOURCE_EXTERNAL,
-    CONTEXT_SOURCE_AGENT_OUTPUT,
-    CONTEXT_SOURCE_USER,
-    CONTEXT_SOURCE_CHANNEL_MESSAGE,
-})
-
-
-# ─── SanitizerAction enum ─────────────────────────────────────────────
-#
-# v0.3.0 default is passthrough: flagged content reaches the agent
-# wrapped by an `<external_data flagged="true">` envelope, and the
-# persona system prompt is responsible for not following the embedded
-# directive. Operators running deployments that ingest from genuinely
-# untrusted bridges may opt into quarantine instead — see
-# `prompts/system/external_data_handling.txt` for the agent-visible
-# `tool_result_quarantined` error contract.
-
-SANITIZER_ACTION_PASSTHROUGH: Final[str] = "passthrough"
-SANITIZER_ACTION_QUARANTINE: Final[str] = "quarantine"
-
-_KNOWN_ACTIONS: Final[frozenset[str]] = frozenset({
-    SANITIZER_ACTION_PASSTHROUGH,
-    SANITIZER_ACTION_QUARANTINE,
-})
+# Re-export the closed-set enum names so callers continue to import from
+# `agents.security` without needing to know the constants are codegen'd
+# next door. The actual values live in `agents/security_enums.py`, which
+# `cmd/genpatterns` rewrites from the Go canonical sources — see the
+# generator's module docstring and `test_pattern_parity.py`.
+__all__ = (
+    "CONTEXT_SOURCE_AGENT_OUTPUT",
+    "CONTEXT_SOURCE_CHANNEL_MESSAGE",
+    "CONTEXT_SOURCE_EXTERNAL",
+    "CONTEXT_SOURCE_INTERNAL",
+    "CONTEXT_SOURCE_USER",
+    "KNOWN_CONTEXT_SOURCES",
+    "KNOWN_SANITIZER_ACTIONS",
+    "SANITIZER_ACTION_PASSTHROUGH",
+    "SANITIZER_ACTION_QUARANTINE",
+    "ContextItem",
+    "EXTERNAL_TOOL_SOURCES",
+    "SanitizedInput",
+    "external_source_for_tool",
+    "maybe_wrap_tool_content",
+    "sanitize",
+    "sanitize_and_wrap",
+    "wrap_external",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,15 +119,11 @@ def sanitize(
     `KNOWN_CONTEXT_SOURCES` or `action` is not a known action — caller
     bugs surface as test failures rather than silent unmarked content.
     """
-    if source not in KNOWN_CONTEXT_SOURCES:
-        raise ValueError(
-            f"unknown ContextSource {source!r}; valid: "
-            f"{sorted(KNOWN_CONTEXT_SOURCES)}"
-        )
-    if action not in _KNOWN_ACTIONS:
+    _validate_source(source)
+    if action not in KNOWN_SANITIZER_ACTIONS:
         raise ValueError(
             f"unknown SanitizerAction {action!r}; valid: "
-            f"{sorted(_KNOWN_ACTIONS)}"
+            f"{sorted(KNOWN_SANITIZER_ACTIONS)}"
         )
 
     flags = _match_all(content)
@@ -229,11 +223,7 @@ def wrap_external(
         ...content...
         </external_data>
     """
-    if source not in KNOWN_CONTEXT_SOURCES:
-        raise ValueError(
-            f"unknown ContextSource {source!r}; valid: "
-            f"{sorted(KNOWN_CONTEXT_SOURCES)}"
-        )
+    _validate_source(source)
     flagged_str = "true" if flagged else "false"
     sanitized_str = "true" if sanitized else "false"
     # Escape by rewriting the leading `<` of every match to `<\`. This
@@ -277,6 +267,21 @@ def sanitize_and_wrap(
 
 
 # ─── Internals ────────────────────────────────────────────────────────
+
+
+def _validate_source(source: str) -> None:
+    """Raise ValueError if `source` is not a member of `KNOWN_CONTEXT_SOURCES`.
+
+    Shared validation for the public `sanitize` and `wrap_external` entry
+    points so the closed-set check has a single error-message form on both
+    paths. The error message lists the valid values to make caller-side
+    typos diagnosable from the traceback alone.
+    """
+    if source not in KNOWN_CONTEXT_SOURCES:
+        raise ValueError(
+            f"unknown ContextSource {source!r}; valid: "
+            f"{sorted(KNOWN_CONTEXT_SOURCES)}"
+        )
 
 
 def _match_all(content: str) -> list[str]:
