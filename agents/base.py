@@ -24,6 +24,7 @@ from .llm_client import (
 from .memory import MemoryFacade, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
 from .prompt_loader import load_snippet
+from .security import maybe_wrap_tool_content
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
@@ -237,10 +238,7 @@ class BaseAgent(ABC):
         ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
-        """Execute tool calls sequentially, returning LLM-facing results.
-
-        # TODO(v0.2): parallel tool execution with conflict detection
-        """
+        """Execute tool calls sequentially, returning LLM-facing results."""
         results: list[LLMToolResult] = []
         for call in tool_calls:
             tool_def = get_tool(call.name)
@@ -256,13 +254,13 @@ class BaseAgent(ABC):
             try:
                 result = await tool_def.func(**call.input)
                 if result.success:
-                    # PR-review SF4: Use JSON for dict/list data so the LLM
-                    # sees {"key": true} instead of Python repr {'key': True}.
+                    # SF4: JSON for dict/list so the LLM sees {"k": true} not Python repr.
                     content = (
                         json.dumps(result.data)
                         if isinstance(result.data, (dict, list))
                         else str(result.data)
                     )
+                    content = maybe_wrap_tool_content(call.name, content)
                 else:
                     error_msg = result.error or "Tool failed"
                     # Include error_type when the @tool wrapper captured an

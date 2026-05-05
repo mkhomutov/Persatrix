@@ -40,3 +40,36 @@ audit:
 #     # an attacker spamming distinct fake IDs can grow the map without
 #     # bound; the LRU cap below is the v0.3.0 mitigation.
 #     max_tracked_agents: 1000
+
+# RFC 0009 PR 3 — input sanitiser (prompt-injection defense-in-depth).
+#
+# The sanitiser runs over content tagged ContextSourceExternal /
+# ContextSourceChannelMessage / ContextSourceAgentOutput before that
+# content reaches the LLM. Detection patterns live in
+# internal/security/sanitize_patterns.go (Go) and the byte-identical
+# mirror agents/security_patterns.py (Python). Pattern parity is
+# guaranteed by `make generate-sanitizer-patterns-check`.
+#
+# `action` controls what happens on flag:
+#
+#   passthrough (default): content reaches the agent inside an
+#       <external_data flagged="true"> envelope. The persona system
+#       prompt instructs the LLM not to follow embedded directives.
+#       Audit event input.flagged still fires.
+#
+#   quarantine: content is dropped; the agent receives the structured
+#       error tool_result_quarantined with the matched flag list.
+#       Production deployments ingesting from genuinely untrusted
+#       bridges (Slack, Discord, email — v0.5.0) should opt into this.
+#
+# Override via env: SECURITY_SANITIZER_ACTION=quarantine
+#
+# TODO(rfc0009 follow-up): runtime wiring deferred. Today this key is
+# documentation-only — neither the Go orchestrator nor the Python
+# `maybe_wrap_tool_content` helper consults it at startup. A deploy that
+# sets SECURITY_SANITIZER_ACTION=quarantine currently still runs in
+# passthrough mode. The audit-config loader that picks this up lands in
+# the same follow-up that pipes Python tool-result flag events to the
+# Go-side audit chain. Tracked: PR #253 deep-review F5/F6.
+security:
+  sanitizer_action: "passthrough"
