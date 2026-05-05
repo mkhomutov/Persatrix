@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 
-from .channel_publisher import ChannelPublisher
+from .channel_publisher import (
+    DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+    ChannelPublisher,
+)
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
     ActionType,
@@ -45,9 +48,16 @@ _MAX_MENTIONS_PER_ACTION = 10
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
 # Per-publish HTTP timeout (seconds) for the REST channels publish path.
-# 10s tolerates cold-start TLS handshakes once mTLS lands (RFC 0009 Phase 4)
-# without making a stuck orchestrator block the executor for a full minute.
-_DEFAULT_PUBLISH_HTTP_TIMEOUT: float = 10.0
+#
+# Defense-in-depth ceiling that wraps any :class:`ChannelPublisher` impl
+# (the HTTP one already self-times via :class:`aiohttp.ClientTimeout`,
+# but Protocol allows non-HTTP implementations that may not).
+#
+# PR #250 review (Should-Fix #1): aliased to the publisher's
+# :data:`DEFAULT_PUBLISH_TIMEOUT_SECONDS` so both timers always agree —
+# raising the ceiling for RFC 0009 Phase 4 mTLS cold starts is a
+# one-line change in :mod:`agents.channel_publisher`.
+_DEFAULT_PUBLISH_HTTP_TIMEOUT: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS
 
 
 class ActionExecutor:

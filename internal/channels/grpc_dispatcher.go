@@ -128,7 +128,7 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID stri
 	defer conn.Close()
 
 	client := taskpb.NewAgentServiceClient(conn)
-	event := channelMessageToProto(msg)
+	event := d.channelMessageToProto(msg)
 	if _, err := client.ReceiveChannelMessage(ctx, event); err != nil {
 		return fmt.Errorf("ReceiveChannelMessage to %s: %w", participantID, err)
 	}
@@ -143,10 +143,23 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID stri
 // added as a struct field — keeping [ChannelMessage] free of a denormalized
 // type column matches what the SQLite store persists. The router has already
 // validated the prefix once on the publish path, so an unknown prefix at
-// dispatch time is a programmer error and surfaces as an empty string (the
-// receiver's proto-bound validation will reject it).
-func channelMessageToProto(msg ChannelMessage) *taskpb.ChannelMessageEvent {
-	ct, _ := channelTypeFromID(msg.ChannelID)
+// dispatch time is a programmer error.
+//
+// PR #250 review (Medium #4): a translation-time Warn surfaces that
+// programmer error at the sender's logs the moment it happens, rather
+// than letting an empty `ChannelType` ride the wire to the receiver
+// where the origin is opaque. The contract — empty string on unknown
+// prefix — is preserved so the receiver's proto-bound validation still
+// rejects the message.
+func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage) *taskpb.ChannelMessageEvent {
+	ct, ctErr := channelTypeFromID(msg.ChannelID)
+	if ctErr != nil {
+		d.logger.Warn("channels: unknown channel_id prefix at dispatch translation; sending empty ChannelType (router prefix validation regression?)",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("message_id", msg.ID),
+			zap.Error(ctErr),
+		)
+	}
 	ts := msg.Timestamp
 	if ts.IsZero() {
 		ts = time.Now().UTC()

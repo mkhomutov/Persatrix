@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -169,7 +171,8 @@ func TestChannelMessageToProto_ZeroTimestampDefaultsToNow(t *testing.T) {
 		ID: "m-1", ChannelID: "dm:a:b", SenderID: "a",
 	}
 	before := time.Now().UTC().Add(-1 * time.Second)
-	ev := channelMessageToProto(msg)
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	ev := d.channelMessageToProto(msg)
 	after := time.Now().UTC().Add(1 * time.Second)
 
 	parsed, err := time.Parse(time.RFC3339Nano, ev.Timestamp)
@@ -177,4 +180,61 @@ func TestChannelMessageToProto_ZeroTimestampDefaultsToNow(t *testing.T) {
 	assert.True(t, parsed.After(before) && parsed.Before(after),
 		"zero Timestamp must be replaced with now() at the dispatch boundary")
 	assert.Equal(t, "dm", ev.ChannelType)
+}
+
+// TestGRPCMessageDispatcher_UnknownChannelPrefixLogsWarn covers PR #250
+// review (Medium #4). Before the fix, channelMessageToProto silently
+// discarded the channelTypeFromID error and shipped an empty
+// ChannelType on the wire — a regression in router-side prefix
+// validation would surface only at the receiver, where the
+// programmer-error origin is opaque. The dispatcher now warns at the
+// translation site so an unexpected prefix is visible in the sender's
+// logs at the moment of dispatch.
+//
+// The router validates channel prefixes on the publish path, so this
+// branch should never fire in production. The Warn exists to flag
+// regressions in that contract loudly rather than letting them ride to
+// the receiver as an empty string.
+func TestGRPCMessageDispatcher_UnknownChannelPrefixLogsWarn(t *testing.T) {
+	core, recorded := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	d := &GRPCMessageDispatcher{logger: logger}
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID:        "m-1",
+		ChannelID: "unknown-prefix:foo", // not group: / dm: / thread:
+		SenderID:  "agent-a",
+	})
+
+	assert.Empty(t, ev.ChannelType,
+		"contract preserved: unknown prefix still yields empty ChannelType")
+
+	logs := recorded.FilterMessageSnippet("unknown channel_id prefix").All()
+	require.Len(t, logs, 1,
+		"unknown channel id prefix must produce exactly one Warn at the "+
+			"dispatch translation site (saw %d entries)", len(logs))
+	assert.Equal(t, zapcore.WarnLevel, logs[0].Level)
+
+	fields := logs[0].ContextMap()
+	assert.Equal(t, "unknown-prefix:foo", fields["channel_id"],
+		"channel_id field must be present so operators can locate the offender")
+	assert.Equal(t, "m-1", fields["message_id"])
+}
+
+// TestGRPCMessageDispatcher_KnownChannelPrefixDoesNotLog is the
+// negative case: a well-formed channel id (the production path) must
+// NOT produce a warn log. Without this guard, a future refactor that
+// drops the type check could leave the warn firing on every dispatch —
+// silent log noise that operators learn to ignore.
+func TestGRPCMessageDispatcher_KnownChannelPrefixDoesNotLog(t *testing.T) {
+	core, recorded := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+
+	d := &GRPCMessageDispatcher{logger: logger}
+	_ = d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+	})
+
+	assert.Equal(t, 0, recorded.Len(),
+		"happy-path translation must be silent at Warn level")
 }

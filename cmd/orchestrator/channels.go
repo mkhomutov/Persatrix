@@ -116,10 +116,7 @@ func initChannels(
 			MessagesDelivered: orchMetrics.ChannelMessagesDelivered,
 		}
 	}
-	var dispatcher channels.MessageDispatcher = channels.NoopDispatcher{}
-	if reg != nil {
-		dispatcher = channels.NewGRPCMessageDispatcher(reg, logger)
-	}
+	dispatcher := selectChannelDispatcher(reg, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
 	if rErr := router.ReconcileConfig(context.Background(), chanCfg); rErr != nil {
 		// Loud-fail per RFC 0011 §B; the caller (main) will `Fatal`.
@@ -150,4 +147,25 @@ func initChannels(
 		zap.String("auth_eta", "RFC 0009 Phase 4"),
 	)
 	return []server.ServerOption{server.WithChannels(chanStore, router)}, cleanup, nil
+}
+
+// selectChannelDispatcher picks the per-recipient [channels.MessageDispatcher]
+// based on whether the orchestrator has a live agent registry.
+//
+// Extracted from [initChannels] (PR #250 review Should-Fix #2) so the
+// branch is independently testable without standing up a full router +
+// store + membership scenario just to verify the type swap.
+//
+//   - reg == nil → [channels.NoopDispatcher]: channels-disabled
+//     deployments and the existing tests that exercise the router-only
+//     paths (member lookups + persistence) without spinning up agents.
+//   - reg != nil → [*channels.GRPCMessageDispatcher]: production wiring
+//     (PR 4a-ii-β-1) that turns each per-recipient `Dispatch` into an
+//     `AgentService.ReceiveChannelMessage` gRPC call against the
+//     address the recipient registered under.
+func selectChannelDispatcher(reg registry.Registry, logger *zap.Logger) channels.MessageDispatcher {
+	if reg == nil {
+		return channels.NoopDispatcher{}
+	}
+	return channels.NewGRPCMessageDispatcher(reg, logger)
 }

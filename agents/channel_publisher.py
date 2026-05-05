@@ -15,7 +15,28 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ChannelPublisher", "HTTPChannelPublisher"]
+# Single source of truth for the REST publish timeout (seconds).
+#
+# PR #250 review (Should-Fix #1): the previous implementation hard-coded
+# ``aiohttp.ClientTimeout(total=10)`` here *and* wrapped the publish call
+# in ``asyncio.wait_for(timeout=10.0)`` from
+# :mod:`agents.action_executor`. Two unrelated 10-second timers tuned to
+# the same value but maintained in two places — a tuning footgun for the
+# RFC 0009 Phase 4 mTLS cold-start work which will need to raise the
+# ceiling. This constant is the one place to change it; the executor's
+# ``asyncio.wait_for`` (defense-in-depth ceiling, also covers non-HTTP
+# :class:`ChannelPublisher` Protocol implementations) imports and reuses
+# this value.
+#
+# 10 s tolerates a TLS handshake + a slow orchestrator without making a
+# stuck server block the executor for a full minute.
+DEFAULT_PUBLISH_TIMEOUT_SECONDS: float = 10.0
+
+__all__ = [
+    "ChannelPublisher",
+    "HTTPChannelPublisher",
+    "DEFAULT_PUBLISH_TIMEOUT_SECONDS",
+]
 
 
 @runtime_checkable
@@ -62,9 +83,15 @@ class HTTPChannelPublisher:
         *,
         orchestrator_url: str,
         session: aiohttp.ClientSession,
+        timeout: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ) -> None:
         self._base = orchestrator_url.rstrip("/")
         self._session = session
+        # Stored so ``publish`` can hand it to :class:`aiohttp.ClientTimeout`
+        # on every call. Per-instance (rather than per-call) because the
+        # publisher is constructed once at server startup and the timeout
+        # is a deployment knob, not a per-message decision.
+        self._timeout = timeout
 
     async def publish(
         self,
@@ -91,7 +118,9 @@ class HTTPChannelPublisher:
             payload["mentions"] = mentions
 
         async with self._session.post(
-            url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
+            url,
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as resp:
             if resp.status >= 400:
                 # Read body to surface structured orchestrator error

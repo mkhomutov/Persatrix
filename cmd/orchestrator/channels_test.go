@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // TestInitChannels_CreatesParentDirectory is the Red step for ISSUE-0012
@@ -75,4 +78,64 @@ func TestInitChannels_SkipsMkdirAllForMemoryPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, opts,
 		":memory: path must open the in-process store without a MkdirAll call")
+}
+
+// TestSelectChannelDispatcher_NilRegistryReturnsNoop is one half of the
+// PR #250 review (Should-Fix #2) coverage gap fix. The new conditional
+// in initChannels — `if reg != nil { dispatcher = NewGRPCMessageDispatcher(...) }`
+// — had zero direct coverage; both existing initChannels tests pass
+// `nil` and only confirm the noop fallback compiles.
+//
+// Extracting the dispatcher selection into selectChannelDispatcher makes
+// the branch independently testable without standing up a full router +
+// store + membership scenario just to prove the wiring picks the right
+// type.
+func TestSelectChannelDispatcher_NilRegistryReturnsNoop(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	d := selectChannelDispatcher(nil, logger)
+
+	_, ok := d.(channels.NoopDispatcher)
+	assert.True(t, ok,
+		"nil registry must yield NoopDispatcher (channels-disabled deployments / tests)")
+}
+
+// TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC is the other
+// half — the production path. Without this, the only assurance that
+// initChannels actually swaps in the gRPC dispatcher (and not, say, the
+// noop one with the registry parameter silently dropped) was a code
+// review of the boolean.
+func TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	reg := registry.NewInMemoryRegistry(logger)
+
+	d := selectChannelDispatcher(reg, logger)
+
+	_, ok := d.(*channels.GRPCMessageDispatcher)
+	assert.True(t, ok,
+		"non-nil registry must yield *GRPCMessageDispatcher (production path); "+
+			"got %T", d)
+}
+
+// TestInitChannels_NonNilRegistryWiresGRPCDispatcher is a smoke check
+// that the full initChannels path still succeeds with a non-nil
+// registry. The fine-grained type check lives in
+// TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC; this test
+// guards against a regression where the registry parameter would be
+// silently dropped on the way to selectChannelDispatcher.
+func TestInitChannels_NonNilRegistryWiresGRPCDispatcher(t *testing.T) {
+	cfgDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cfgDir, "channels.yaml"),
+		[]byte("max_channels: 50\n"),
+		0o644,
+	))
+
+	logger := zaptest.NewLogger(t)
+	reg := registry.NewInMemoryRegistry(logger)
+	opts, cleanup, err := initChannels(cfgDir, ":memory:", nil, reg, logger)
+	t.Cleanup(cleanup)
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, opts,
+		"initChannels must succeed with a non-nil registry (production wiring)")
 }
