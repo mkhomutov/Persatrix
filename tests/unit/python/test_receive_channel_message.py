@@ -71,6 +71,12 @@ def _channel_event(**overrides: Any) -> task_pb2.ChannelMessageEvent:
         "timestamp": "2026-05-04T00:00:00Z",
         "thread_id": "",
         "mentions": [],
+        # RFC 0011 PR 4b additions: validator now requires
+        # ``respond_policy``. Default to ``always`` so the existing
+        # cases keep passing; gate-specific tests live in
+        # ``test_response_gate.py``.
+        "respond_policy": "always",
+        "thread_parent_sender_id": "",
     }
     fields.update(overrides)
     return task_pb2.ChannelMessageEvent(**fields)

@@ -113,6 +113,22 @@ class _Instruments:
             unit="{event}",
             description="Persona events dispatched to an agent.",
         )
+        # RFC 0011 PR 4b: response-gate suppression counter. Increments
+        # once per CHANNEL_MESSAGE dispatch the gate suppresses. Carries
+        # a ``policy`` attribute (``when_mentioned``/``always``) so
+        # operators can spot a stuck-on-mute agent (huge ``always``
+        # gate counts → wrong policy on the membership) or surface the
+        # natural baseline (``when_mentioned`` events that did not
+        # mention the recipient). ``never`` policies are filtered
+        # upstream of dispatch and never reach the gate.
+        self.channel_messages_gated: Counter = meter.create_counter(
+            name="channel.messages.gated",
+            unit="{message}",
+            description=(
+                "Channel messages suppressed by the response gate before "
+                "reaching the LLM. Attributes: agent.id, policy."
+            ),
+        )
         self.spans_dropped: Counter = meter.create_counter(
             name="agent.observability.spans.dropped",
             unit="{span}",
@@ -413,6 +429,11 @@ def llm_duration_attrs(
 
 def event_attrs(*, agent_id: str, event_type: str) -> dict[str, str]:
     return {"agent.id": agent_id, "event.type": event_type}
+
+
+def gate_attrs(*, agent_id: str, policy: str) -> dict[str, str]:
+    """Attribute set for the ``channel.messages.gated`` counter (RFC 0011 PR 4b)."""
+    return {"agent.id": agent_id, "policy": policy}
 
 
 def tick_attrs(*, agent_id: str) -> dict[str, str]:

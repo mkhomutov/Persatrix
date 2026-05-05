@@ -358,6 +358,8 @@ The orchestrator exposes `orchestrator.workflow.submitted/completed/failed` coun
 
 The channels subsystem (RFC 0011) emits `channel.messages.delivered{channel_type, status}` — one increment per per-subscriber dispatch attempt, with `channel_type ∈ {group, dm, thread}` and `status ∈ {ok, error}`. Sender filtering and `respond: never` skips happen *before* the increment, so the counter reflects effective delivery attempts. Pair `status="error"` with `rate(channel.messages.delivered{status="error"}[5m]) > 0` to alert on a wedged dispatcher.
 
+The agent-side response gate (RFC 0011 PR 4b) emits `channel.messages.gated{agent.id, policy}` — one increment per `CHANNEL_MESSAGE` the gate suppresses before the LLM call. `policy ∈ {when_mentioned, always}` (`never` is filtered upstream of dispatch). A high `policy="always"` count signals a wrong policy on the membership; the `when_mentioned` baseline tracks natural channel chatter the agent ignored. Pair with `channel.messages.delivered` to compute the dispatched-vs-responded ratio per agent.
+
 Histogram queries surface exemplars (`--enable-feature=exemplar-storage` is on by default in the dev compose). A p99 LLM-latency spike on the `agent_llm_duration_milliseconds` histogram exposes the originating `trace_id` next to the bucket sample; clicking it opens the trace in Jaeger.
 
 ### 11.4 Correlated debugging from a trace ID

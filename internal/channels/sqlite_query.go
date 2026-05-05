@@ -82,6 +82,40 @@ func (s *sqliteStore) DeleteChannel(ctx context.Context, id string) error {
 	return nil
 }
 
+// RemoveMember implements [ChannelStore.RemoveMember].
+//
+// First verifies the channel exists so callers can distinguish a
+// missing channel from a missing membership (404 vs 404 with the
+// REST handler's message reflecting the actual cause). Then removes
+// the membership row; the participant's prior messages are preserved
+// per RFC 0011 §C — `messages.sender_id` carries the historical value
+// after removal.
+func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID string) error {
+	if _, err := s.GetChannel(ctx, channelID); err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM memberships WHERE channel_id = ? AND participant_id = ?`,
+		channelID, participantID,
+	)
+	if err != nil {
+		return fmt.Errorf("channels: remove member: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("channels: remove member rowsaffected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: channel=%s participant=%s",
+			ErrNotMember, channelID, participantID)
+	}
+	s.logger.Info("channels: member removed",
+		zap.String("channel_id", channelID),
+		zap.String("participant_id", participantID),
+	)
+	return nil
+}
+
 // AddMember implements [ChannelStore.AddMember].
 func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
 	if err := validateParticipantID(participantID); err != nil {

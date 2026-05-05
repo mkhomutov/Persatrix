@@ -66,6 +66,11 @@ _CHANNEL_MAX_MENTIONS = 10
 # attacker-controlled string length. PR #248 deep review M/L findings.
 _CHANNEL_ID_MAX_CHARS = 256
 _CHANNEL_MESSAGE_ID_MAX_CHARS = 64
+# RFC 0011 PR 4b: closed vocabulary for the per-recipient response policy
+# carried on the wire. The orchestrator filters `respond: never` members
+# upstream of dispatch (see ``internal/channels/router.go::fanout``), so a
+# `never` value reaching the receiver is malformed and rejected.
+_CHANNEL_RESPOND_POLICIES = {"when_mentioned", "always"}
 # Canonical participant-ID pattern (matches ``^[a-z0-9][a-z0-9-]*[a-z0-9]$``
 # from ``.github/copilot-instructions.md``); pinned here rather than imported
 # from a Go-side validator because the receiver runs in Python with no
@@ -165,6 +170,30 @@ def validate_channel_message_event(
     if publish_ts is None:
         return (
             f"timestamp is not a valid RFC 3339 string: {_safe_repr(request.timestamp)}"
+        ), None
+
+    # RFC 0011 PR 4b: per-recipient ``respond_policy`` MUST be one of the
+    # closed vocabulary that the response gate understands. ``never`` is
+    # rejected here — the orchestrator filters those members upstream of
+    # dispatch, so its presence on the wire signals malformed routing.
+    # An empty string is rejected too: the gate requires the policy and
+    # would otherwise have to fail-closed on a missing dimension.
+    if request.respond_policy not in _CHANNEL_RESPOND_POLICIES:
+        return (
+            f"respond_policy {_safe_repr(request.respond_policy)} is not one of "
+            f"{sorted(_CHANNEL_RESPOND_POLICIES)}"
+        ), None
+
+    # Optional ``thread_parent_sender_id``: empty for non-thread events
+    # (and benign for thread events when the parent has been pruned).
+    # When non-empty it MUST be a valid participant id — same trust
+    # boundary as ``sender_id`` and ``mentions[]``.
+    if request.thread_parent_sender_id and not _CHANNEL_PARTICIPANT_ID_RE.match(
+        request.thread_parent_sender_id,
+    ):
+        return (
+            f"thread_parent_sender_id is not a valid participant id: "
+            f"{_safe_repr(request.thread_parent_sender_id)}"
         ), None
 
     return None, publish_ts

@@ -259,16 +259,17 @@ func (s *Server) registerRoutes() {
 	// traffic and has no request-rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
 
-	// Channels endpoints (RFC 0011 §C, PR 2). DELETE channel + remove
-	// member are deferred to PR 4 alongside the response gate that
-	// needs to react to membership removal.
+	// Channels endpoints (RFC 0011 §C). DELETE handlers landed in PR 4b
+	// alongside the response gate; full §C surface is now implemented.
 	s.mux.HandleFunc("POST /api/v1/channels", s.handleCreateChannel)
 	s.mux.HandleFunc("GET /api/v1/channels", s.handleListChannels)
 	s.mux.HandleFunc("GET /api/v1/channels/{id}", s.handleGetChannel)
+	s.mux.HandleFunc("DELETE /api/v1/channels/{id}", s.handleDeleteChannel)
 	s.mux.HandleFunc("POST /api/v1/channels/{id}/messages", s.handlePublishMessage)
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages", s.handleGetChannelHistory)
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages/{msg_id}/thread", s.handleGetThread)
 	s.mux.HandleFunc("POST /api/v1/channels/{id}/members", s.handleAddChannelMember)
+	s.mux.HandleFunc("DELETE /api/v1/channels/{id}/members/{participant_id}", s.handleDeleteChannelMember)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)

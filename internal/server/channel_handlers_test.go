@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,6 +247,123 @@ func TestChannels_ListChannels(t *testing.T) {
 	var resp listChannelsResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Len(t, resp.Channels, 2)
+}
+
+// ─── DELETE endpoints (RFC 0011 PR 4b) ─────────────────────────────────
+
+// TestChannels_DeleteChannel_CascadesMembershipsAndMessages pins the
+// RFC 0011 §B "Channel-deletion cascade" contract: deleting a channel
+// removes its memberships and messages in one transaction. The test
+// publishes messages, then deletes, then verifies that no orphan rows
+// survive — even when the channel had threads (the FK-cascade case
+// the schema migration runner specifically calls out).
+func TestChannels_DeleteChannel_CascadesMembershipsAndMessages(t *testing.T) {
+	srv, store := channelTestServer(t)
+
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name: "planning",
+		Members: []channelMemberRequest{
+			{ID: "alice", Respond: "always"},
+			{ID: "bob"},
+		},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	// Publish a parent + thread reply so cascade across the thread_id FK
+	// is covered.
+	parentBody, _ := json.Marshal(publishMessageRequest{SenderID: "alice", Content: "parent"})
+	parentRec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", parentBody)
+	require.Equal(t, http.StatusCreated, parentRec.Code)
+	var parent channelMessageResponse
+	require.NoError(t, json.Unmarshal(parentRec.Body.Bytes(), &parent))
+
+	replyBody, _ := json.Marshal(publishMessageRequest{
+		SenderID: "bob", Content: "reply", ThreadID: parent.ID,
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", replyBody).Code)
+
+	// Delete the channel.
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/channels/group:planning", nil)
+	require.Equal(t, http.StatusNoContent, rec.Code, "body=%s", rec.Body.String())
+
+	// Channel and its members + messages must all be gone.
+	_, err := store.GetChannel(t.Context(), "group:planning")
+	assert.ErrorIs(t, err, channels.ErrChannelNotFound)
+	hist, hErr := store.GetHistory(t.Context(), "group:planning", 50, time.Time{})
+	require.NoError(t, hErr)
+	assert.Empty(t, hist, "messages must cascade-delete with the channel")
+}
+
+// TestChannels_DeleteChannel_NotFound pins the 404 path.
+func TestChannels_DeleteChannel_NotFound(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete, "/api/v1/channels/group:nope", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestChannels_DeleteMember_PreservesPriorMessages pins the §C contract
+// that removing a participant does NOT delete that participant's prior
+// messages: `messages.sender_id` retains the historical value.
+func TestChannels_DeleteMember_PreservesPriorMessages(t *testing.T) {
+	srv, store := channelTestServer(t)
+
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name: "planning",
+		Members: []channelMemberRequest{
+			{ID: "alice", Respond: "always"},
+			{ID: "bob", Respond: "always"},
+		},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	// Bob says something while still a member.
+	bobMsg, _ := json.Marshal(publishMessageRequest{SenderID: "bob", Content: "history"})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", bobMsg).Code)
+
+	// Remove bob.
+	rec := doRequest(srv.Handler(), http.MethodDelete,
+		"/api/v1/channels/group:planning/members/bob", nil)
+	require.Equal(t, http.StatusNoContent, rec.Code, "body=%s", rec.Body.String())
+
+	// Bob is gone from the membership list, but his prior message persists.
+	members, err := store.GetMembers(t.Context(), "group:planning")
+	require.NoError(t, err)
+	for _, m := range members {
+		assert.NotEqual(t, "bob", m.ParticipantID, "bob should be removed")
+	}
+	hist, hErr := store.GetHistory(t.Context(), "group:planning", 50, time.Time{})
+	require.NoError(t, hErr)
+	require.Len(t, hist, 1, "bob's prior message must persist after removal")
+	assert.Equal(t, "bob", hist[0].SenderID)
+}
+
+// TestChannels_DeleteMember_404OnUnknownChannel pins the cleaner of the
+// two 404 paths: an unknown channel id surfaces ErrChannelNotFound from
+// the store rather than ErrNotMember.
+func TestChannels_DeleteMember_404OnUnknownChannel(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	rec := doRequest(srv.Handler(), http.MethodDelete,
+		"/api/v1/channels/group:nope/members/alice", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestChannels_DeleteMember_404OnUnknownMember pins the second 404 path:
+// an existing channel + a non-member participant returns 404 (ErrNotMember).
+func TestChannels_DeleteMember_404OnUnknownMember(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name: "planning", Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	rec := doRequest(srv.Handler(), http.MethodDelete,
+		"/api/v1/channels/group:planning/members/ghost", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 // TestChannels_Endpoints_503WhenStoreUnset pins the nil-safe degradation

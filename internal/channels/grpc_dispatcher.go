@@ -96,7 +96,8 @@ func NewGRPCMessageDispatcher(resolver AgentResolver, logger *zap.Logger) *GRPCM
 }
 
 // Dispatch implements [MessageDispatcher].
-func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID string, msg ChannelMessage) error {
+func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+	participantID := env.Recipient.ParticipantID
 	agent, err := d.resolver.Get(ctx, participantID)
 	if err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
@@ -143,7 +144,7 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID stri
 	}()
 
 	client := taskpb.NewAgentServiceClient(conn)
-	event := d.channelMessageToProto(msg)
+	event := d.channelMessageToProto(msg, env)
 	if _, err := client.ReceiveChannelMessage(ctx, event); err != nil {
 		return fmt.Errorf("ReceiveChannelMessage to %s: %w", participantID, err)
 	}
@@ -166,7 +167,14 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID stri
 // where the origin is opaque. The contract — empty string on unknown
 // prefix — is preserved so the receiver's proto-bound validation still
 // rejects the message.
-func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage) *taskpb.ChannelMessageEvent {
+//
+// RFC 0011 PR 4b: `respond_policy` and `thread_parent_sender_id` are
+// pulled from the [DispatchEnvelope] so the receiver's response gate
+// can decide pre-LLM without a secondary REST roundtrip. The router
+// guarantees `env.Recipient.RespondPolicy` is one of [RespondAlways] or
+// [RespondWhenMentioned] — `respond: never` members are filtered out
+// upstream of [MessageDispatcher.Dispatch].
+func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env DispatchEnvelope) *taskpb.ChannelMessageEvent {
 	ct, ctErr := channelTypeFromID(msg.ChannelID)
 	if ctErr != nil {
 		d.logger.Warn("channels: unknown channel_id prefix at dispatch translation; sending empty ChannelType (router prefix validation regression?)",
@@ -180,13 +188,15 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage) *taskp
 		ts = time.Now().UTC()
 	}
 	return &taskpb.ChannelMessageEvent{
-		MessageId:   msg.ID,
-		ChannelId:   msg.ChannelID,
-		ChannelType: string(ct),
-		SenderId:    msg.SenderID,
-		Content:     msg.Content,
-		Timestamp:   ts.UTC().Format(time.RFC3339Nano),
-		ThreadId:    msg.ThreadID,
-		Mentions:    msg.Mentions,
+		MessageId:            msg.ID,
+		ChannelId:            msg.ChannelID,
+		ChannelType:          string(ct),
+		SenderId:             msg.SenderID,
+		Content:              msg.Content,
+		Timestamp:            ts.UTC().Format(time.RFC3339Nano),
+		ThreadId:             msg.ThreadID,
+		Mentions:             msg.Mentions,
+		RespondPolicy:        string(env.Recipient.RespondPolicy),
+		ThreadParentSenderId: env.ThreadParentSenderID,
 	}
 }

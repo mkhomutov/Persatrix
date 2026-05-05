@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
+from ..observability.metrics import gate_attrs, try_get_instruments
 from ..persona_types import (
     ActionType,
     AgentAction,
@@ -23,7 +24,9 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
+from ..response_gate import evaluate_response_gate
 from ..tools.registry import ToolDefinition, get_tool, list_tools
+from .action_validation import validate_action_payload
 
 if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
@@ -34,16 +37,6 @@ __all__ = ["_ActionLoopMixin"]
 
 
 # ─── Constants ─────────────────────────────────────────────
-
-# Hard upper bounds for LLM-provided SPAWN_SUB_AGENT resource fields.
-# Applied in _validate_action_payload() before the payload reaches
-# ActionExecutor.  The action is not yet wired (returns 'not_implemented'),
-# but caps are enforced at validation time so the boundary is in place
-# when execution is wired in a future RFC.
-# (PR review: SPAWN_SUB_AGENT resource fields not bounded at validation time.)
-_MAX_SUB_AGENT_TOKENS: int = 100_000
-_MAX_SUB_AGENT_TIMEOUT_SECONDS: int = 3_600   # 1 hour
-_MAX_SUB_AGENT_LLM_CALLS: int = 50
 
 # Persona-runtime fallback limits for LLM calls and output tokens.
 # These intentionally differ from the task-agent defaults in defaults.py
@@ -171,86 +164,6 @@ class _ActionLoopMixin:
 
         return results
 
-    # Agent ID format shared with server.py — cross-component contract.
-    _AGENT_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
-
-    def _validate_action_payload(self, action: AgentAction) -> AgentAction:
-        """Validate LLM-generated action payloads, replacing invalid ones with DO_NOTHING.
-
-        Enforces required fields per action type to prevent malformed LLM output
-        from reaching downstream execution (PR #54 review: unvalidated payloads).
-        """
-        p = action.payload
-        match action.action_type:
-            case ActionType.DELEGATE:
-                agent_id = p.get("agent_id")
-                if not isinstance(agent_id, str) or not self._AGENT_ID_RE.match(agent_id):
-                    logger.warning(
-                        "DELEGATE action has invalid agent_id %r, replacing with DO_NOTHING",
-                        agent_id,
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-                if not isinstance(p.get("task"), str) or not p["task"].strip():
-                    logger.warning(
-                        "DELEGATE action missing non-empty 'task', replacing with DO_NOTHING",
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-            case ActionType.SEND_CHANNEL_MESSAGE:
-                if not isinstance(p.get("channel_id"), str) or not p["channel_id"].strip():
-                    logger.warning(
-                        "SEND_CHANNEL_MESSAGE missing non-empty 'channel_id',"
-                        " replacing with DO_NOTHING",
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-                if not isinstance(p.get("content"), str) or not p["content"].strip():
-                    logger.warning(
-                        "SEND_CHANNEL_MESSAGE missing non-empty 'content',"
-                        " replacing with DO_NOTHING",
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-            case ActionType.SPAWN_SUB_AGENT:
-                if not isinstance(p.get("role"), str) or not p["role"].strip():
-                    logger.warning(
-                        "SPAWN_SUB_AGENT missing non-empty 'role',"
-                        " replacing with DO_NOTHING",
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-                if not isinstance(p.get("task"), str) or not p["task"].strip():
-                    logger.warning(
-                        "SPAWN_SUB_AGENT missing non-empty 'task',"
-                        " replacing with DO_NOTHING",
-                    )
-                    return AgentAction(ActionType.DO_NOTHING, {})
-                # Cap numeric resource fields to guard against LLM-generated
-                # payloads with unbounded values (e.g. max_tokens: 500000).
-                # Uses module-level hard caps; config-driven limits are a v0.3
-                # concern once SPAWN_SUB_AGENT execution is wired.
-                # (PR review: SPAWN_SUB_AGENT resource fields not bounded.)
-                for field_name, cap in (
-                    ("max_tokens", _MAX_SUB_AGENT_TOKENS),
-                    ("timeout_seconds", _MAX_SUB_AGENT_TIMEOUT_SECONDS),
-                    ("max_llm_calls", _MAX_SUB_AGENT_LLM_CALLS),
-                ):
-                    if field_name in p:
-                        try:
-                            val = int(p[field_name])
-                        except (TypeError, ValueError):
-                            logger.warning(
-                                "SPAWN_SUB_AGENT %s is not numeric (%r), removing",
-                                field_name, p[field_name],
-                            )
-                            del p[field_name]
-                            continue
-                        if val > cap:
-                            logger.warning(
-                                "SPAWN_SUB_AGENT %s %d exceeds cap %d, clamping",
-                                field_name, val, cap,
-                            )
-                            p[field_name] = cap
-            case _:
-                pass  # COMPLETE_TASK, DO_NOTHING, approvals — no payload constraints
-        return action
-
     def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
         """Parse LLM response text into AgentAction list.
 
@@ -294,7 +207,7 @@ class _ActionLoopMixin:
                 # Validate payload per action type (PR #54 review: unvalidated
                 # LLM output). Full ActionExecutor validation deferred to PR 5b;
                 # this enforces required-field constraints at parse time.
-                validated = self._validate_action_payload(AgentAction(
+                validated = validate_action_payload(AgentAction(
                     action_type=action_type,
                     payload=raw.get("payload", {}),
                 ))
@@ -328,6 +241,17 @@ class _ActionLoopMixin:
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": "Agent config missing required 'model' field"},
             )]
+
+        # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
+        decision = evaluate_response_gate(event, agent_id=self.agent_id)
+        if not decision.respond:
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.channel_messages_gated.add(1, attributes=gate_attrs(
+                    agent_id=self.agent_id,
+                    policy=decision.policy or "unknown",
+                ))
+            return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # 0. Format event once and inject memory context.
         # _format_event() is pure; computing it here avoids a redundant call
