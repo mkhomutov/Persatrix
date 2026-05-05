@@ -231,6 +231,17 @@ class TestReceiveChannelMessageAgentResolution:
         await _drain(servicer)
         assert ack.success is False
         assert "multi" in ack.error_message.lower() or "recipient" in ack.error_message.lower()
+        # PR #248 deep review Low: the rejection message is a wire-trace
+        # taxonomy element. Pin the **specific** follow-up PR pointer
+        # (4a-ii) rather than the obsolete "PR 4 chat-path migration"
+        # phrasing — the original PR 4 was split 2026-05-04 into
+        # 4a-i / 4a-ii / 4b, and the additive ``recipient_id`` field
+        # lands in 4a-ii (see docs/rfcs/0011-pr-plan.md line 248). A
+        # stale pointer here would mis-route operators tracing a
+        # rejected ack back to the responsible slice.
+        assert "4a-ii" in ack.error_message
+        # Negative-pin: the obsolete pointer must NOT reappear.
+        assert "PR 4 chat-path" not in ack.error_message
         dispatcher.dispatch.assert_not_awaited()
 
 

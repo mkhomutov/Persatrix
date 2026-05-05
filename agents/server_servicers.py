@@ -404,15 +404,15 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         if len(self._agents) > 1:
             # `ChannelMessageEvent` carries no recipient_id; multi-agent
             # disambiguation requires an additive proto field landing
-            # alongside the chat-path migration. Until then a multi-agent
+            # alongside the chat-path migration in RFC 0011 PR 4a-ii
+            # (see docs/rfcs/0011-pr-plan.md). Until then a multi-agent
             # server cannot route channel messages unambiguously and MUST
             # reject rather than broadcast.
             return task_pb2.TaskAck(
                 success=False,
                 error_message=(
                     "multi-agent server: ChannelMessageEvent has no "
-                    "recipient_id field; deferred to RFC 0011 PR 4 "
-                    "chat-path migration"
+                    "recipient_id field; deferred to RFC 0011 PR 4a-ii"
                 ),
             )
         target_agent_id = next(iter(self._agents))
