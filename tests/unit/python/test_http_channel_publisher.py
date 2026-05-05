@@ -119,6 +119,64 @@ class TestHTTPChannelPublisher:
         # No double-slash before /api.
         assert captured[0]["path"] == "/api/v1/channels/group:planning/messages"
 
+    async def test_channel_id_is_url_encoded(self):
+        """``channel_id`` is LLM-supplied and MUST be percent-encoded into the URL.
+
+        PR #250 review (Must-Fix #1, OWASP A03): ``channel_id`` flows from
+        the LLM action payload (``action.payload["channel_id"]``) directly
+        into the publish URL.  An unencoded ``../admin`` would resolve to
+        an unintended path on the orchestrator side; ``?`` would smuggle
+        a query string; ``#`` would be silently truncated client-side
+        (fragments are not sent), losing data without an error.  The
+        orchestrator's ``validateChannelID`` does reject such IDs once the
+        request lands, but the malformed path *gets sent* and is recorded
+        in access logs and metrics — defense in depth says encode at the
+        boundary.
+
+        We assert against the URL the publisher hands to ``session.post``
+        rather than against an aiohttp loopback server because aiohttp's
+        path-routing decodes ``%2F`` back to ``/``, which would split the
+        ``{channel_id}`` segment in the route and mask a regression.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        # Minimal session double: ``post`` is an async ctx mgr returning
+        # a response with status<400 so ``publish`` returns cleanly and
+        # we can inspect the URL it built.
+        resp = MagicMock()
+        resp.status = 201
+        resp.text = AsyncMock(return_value="")
+
+        post_ctx = MagicMock()
+        post_ctx.__aenter__ = AsyncMock(return_value=resp)
+        post_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=post_ctx)
+
+        pub = HTTPChannelPublisher(
+            orchestrator_url="http://orch.example",
+            session=session,  # type: ignore[arg-type]
+        )
+        # Every char below is URL-reserved; a raw f-string interpolation
+        # would let ``/`` add path components, ``?`` start a query, and
+        # ``#`` silently drop the rest of the URL on the wire.
+        await pub.publish(
+            channel_id="../admin?x=1#frag space",
+            sender_id="agent-a",
+            content="hi",
+            mentions=[],
+        )
+        url = session.post.call_args.args[0]
+        assert url == (
+            "http://orch.example/api/v1/channels/"
+            "..%2Fadmin%3Fx%3D1%23frag%20space"
+            "/messages"
+        ), (
+            "channel_id must be percent-encoded with safe='' so reserved "
+            f"characters cannot escape the path segment; got url={url!r}"
+        )
+
 
 class TestPublishTimeout:
     """Regression tests for PR #250 review (Should-Fix #1).

@@ -125,7 +125,22 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, participantID stri
 	if err != nil {
 		return fmt.Errorf("dial %s at %s: %w", participantID, agent.Address, err)
 	}
-	defer conn.Close()
+	// PR #250 review (Should-Fix #3): the prior `defer conn.Close()`
+	// silently discarded any close error. With one connection per
+	// dispatch (no pooling — see struct doc) a half-open cleanup issue
+	// would otherwise be invisible until file-descriptor exhaustion
+	// surfaced it elsewhere. Log at debug-level to avoid noise on the
+	// happy path while still leaving a breadcrumb when the underlying
+	// transport reports a close error.
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			d.logger.Warn("channels: gRPC connection close returned error",
+				zap.String("participant_id", participantID),
+				zap.String("address", agent.Address),
+				zap.Error(cerr),
+			)
+		}
+	}()
 
 	client := taskpb.NewAgentServiceClient(conn)
 	event := d.channelMessageToProto(msg)

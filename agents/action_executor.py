@@ -202,6 +202,21 @@ class ActionExecutor:
         content = action.payload.get("content", "")
         mentions = action.payload.get("mentions", [])
 
+        # PR #250 review (Must-Fix #2): the LLM payload is untyped — if the
+        # model emits ``"mentions": "agent-b"`` (str) or ``{...}`` (dict),
+        # the original ``len(mentions)`` / ``mentions[:N]`` / ``list(mentions)``
+        # chain silently corrupts the wire payload (string → per-char list,
+        # dict → list-of-keys, int → TypeError mid-handler). Coerce to []
+        # at the boundary and log a WARNING so the prompt regression is
+        # visible to operators rather than masquerading as ghost mentions.
+        if not isinstance(mentions, list):
+            logger.warning(
+                "Agent %s SEND_CHANNEL_MESSAGE mentions is not a list "
+                "(got %s); coercing to [] — check prompt/persona output schema",
+                sender_id, type(mentions).__name__,
+            )
+            mentions = []
+
         if len(mentions) > _MAX_MENTIONS_PER_ACTION:
             logger.warning(
                 "Agent %s SEND_CHANNEL_MESSAGE mentions list truncated from %d to %d",

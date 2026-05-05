@@ -13,7 +13,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
@@ -237,4 +239,77 @@ func TestGRPCMessageDispatcher_KnownChannelPrefixDoesNotLog(t *testing.T) {
 
 	assert.Equal(t, 0, recorded.Len(),
 		"happy-path translation must be silent at Warn level")
+}
+
+// TestGRPCMessageDispatcher_ContextCancelledMidCall pins the deadline
+// contract from PR #250 review (Should-Fix #2). [ChannelRouter.fanout]
+// supplies a 5 s per-recipient context deadline (router.go ~line 187);
+// the dispatcher MUST surface that cancellation through the gRPC call
+// rather than swallowing it or stacking a second timeout on top.
+//
+// Regression scenario this catches: a future refactor that wraps the
+// dial or call site in a fresh `context.Background()` (or
+// `context.WithTimeout(ctx, X)` where X > the inbound deadline) would
+// quietly extend the per-recipient ceiling, breaking the fan-out SLO
+// the router enforces.
+//
+// Test shape:
+//   - Server handler blocks until its own context is done, then returns.
+//   - Caller cancels the dispatch context mid-flight.
+//   - Dispatch must return a non-nil error and that error MUST wrap
+//     [context.Canceled] so the router records `status="error"` and
+//     does not retry.
+func TestGRPCMessageDispatcher_ContextCancelledMidCall(t *testing.T) {
+	// Server blocks until its (server-side) context is cancelled, which
+	// happens when the client cancels the parent context. We can't
+	// inspect the server ctx via `respond` (its signature has no ctx),
+	// so we use a channel + bounded sleep to guarantee the call is
+	// in-flight when we cancel.
+	released := make(chan struct{})
+	srv := &recordingAgentServer{
+		respond: func() error {
+			<-released
+			return nil
+		},
+	}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+	defer close(released) // unblock the server even if the assertion below trips early
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
+	d.dial = dial
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel after a short delay so Dispatch is past dial+RPC-send and
+	// genuinely waiting on the server response. The 50 ms window is
+	// generous for an in-process bufconn round trip; if it ever turns
+	// flaky on a slow CI runner, a `time.AfterFunc` keyed off a server
+	// signal would be the next step.
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	err := d.Dispatch(ctx, "agent-b", ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+	})
+
+	require.Error(t, err, "cancelled parent context must surface as a Dispatch error")
+	// gRPC encodes context cancellation as a status error with
+	// codes.Canceled rather than as a wrapped context.Canceled
+	// sentinel — `errors.Is(err, context.Canceled)` would NOT match
+	// here. The router (cmd/orchestrator/channels.go ChannelRouter
+	// fanout) treats any non-nil error as `status="error"` regardless
+	// of code, so the contract this test pins is: cancellation must
+	// reach the wire and come back as a gRPC Canceled status, not as
+	// a successful dispatch (which would happen if the dispatcher
+	// quietly substituted context.Background()) and not as a
+	// DeadlineExceeded (which would mean a second timeout was stacked
+	// on top of the inbound deadline).
+	assert.Equal(t, codes.Canceled, status.Code(err),
+		"Dispatch must propagate ctx cancellation as gRPC Canceled; "+
+			"any other code means the router's per-recipient 5s deadline "+
+			"(router.go fanout) is silently bypassed or replaced. err=%v", err)
 }

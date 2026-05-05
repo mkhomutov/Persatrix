@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Protocol, runtime_checkable
+from urllib.parse import quote
 
 import aiohttp
 
@@ -109,7 +110,17 @@ class HTTPChannelPublisher:
             # except-clause records ``status="failed"``.
             raise ValueError("channel_id is required for REST publish")
 
-        url = f"{self._base}/api/v1/channels/{channel_id}/messages"
+        # PR #250 review (Must-Fix #1, OWASP A03 — URL/path injection):
+        # ``channel_id`` originates from ``action.payload`` on the LLM
+        # side. Without ``quote(safe="")`` an interpolated ``/``, ``?``,
+        # ``#`` or whitespace would escape the intended path segment
+        # (extra path components, smuggled query string, silent fragment
+        # truncation). The orchestrator's ``validateChannelID`` rejects
+        # malformed values once they land, but the malformed request
+        # still ships and is recorded in access logs/metrics — encode
+        # at the boundary so a hallucinated id can never produce a
+        # surprising URL on the wire.
+        url = f"{self._base}/api/v1/channels/{quote(channel_id, safe='')}/messages"
         payload: dict[str, Any] = {
             "sender_id": sender_id,
             "content": content,
