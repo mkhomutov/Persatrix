@@ -32,10 +32,12 @@ __all__ = [
 class EventType(Enum):
     TASK_ASSIGNED = "task_assigned"
     # RFC 0011 PR 4a-ii-α (2026-05-05): hard rename — the canonical channels
-    # event type. Was ``CHANNEL_MESSAGE = "message_received"`` until the
-    # additive PR 4a-i (PR #248); the chat ingest path migrated atomically
-    # in PR 4a-ii-α so the old name and string value are gone. New code
-    # uses ``CHANNEL_MESSAGE`` exclusively.
+    # event type. Was ``MESSAGE_RECEIVED = "message_received"`` until the
+    # additive PR 4a-i (PR #248) introduced ``CHANNEL_MESSAGE`` alongside
+    # it; the chat ingest path migrated atomically in PR 4a-ii-α so the old
+    # name and string value are gone. New code uses ``CHANNEL_MESSAGE``
+    # exclusively. (PR #249 deep-review Should-Fix #1: history note fixed —
+    # the prior wording inverted the legacy/canonical names.)
     CHANNEL_MESSAGE = "channel_message"
     MENTION = "mention"
     SUB_AGENT_COMPLETED = "sub_agent_completed"
@@ -74,11 +76,14 @@ class AgentEvent:
 
 class ActionType(Enum):
     # RFC 0011 PR 4a-ii-α (2026-05-05): hard rename — the canonical channels
-    # send action. Was ``SEND_CHANNEL_MESSAGE = "send_message"`` until the additive
-    # PR 4a-i (PR #248); the chat reply extraction migrated atomically in
-    # PR 4a-ii-α so the old name and string value are gone. The dispatch
-    # executor (`_handle_send_channel_message`) and reply extractor scan
-    # for ``SEND_CHANNEL_MESSAGE`` exclusively.
+    # send action. Was ``SEND_MESSAGE = "send_message"`` until the additive
+    # PR 4a-i (PR #248) introduced ``SEND_CHANNEL_MESSAGE`` alongside it;
+    # the chat reply extraction migrated atomically in PR 4a-ii-α so the
+    # old name and string value are gone. The dispatch executor
+    # (`_handle_send_channel_message`) and reply extractor scan for
+    # ``SEND_CHANNEL_MESSAGE`` exclusively. (PR #249 deep-review Should-Fix
+    # #1: history note fixed — the prior wording inverted the legacy and
+    # canonical names.)
     SEND_CHANNEL_MESSAGE = "send_channel_message"
     COMPLETE_TASK = "complete_task"
     DELEGATE = "delegate"

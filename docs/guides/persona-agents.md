@@ -474,8 +474,10 @@ threading and session-scoped memory queries are deferred to v0.3.0
 
 ### Relationship memory evolution
 
-User messages are processed by the persona runtime as `MESSAGE_RECEIVED`
-events with `participant_type: "user"` in the event metadata. The
+User messages are processed by the persona runtime as `CHANNEL_MESSAGE`
+events with `participant_type: "user"` in the event metadata (the event
+name was `MESSAGE_RECEIVED` prior to RFC 0011 PR 4a-ii-α; the
+`participant_type` metadata path is unchanged under either name). The
 relationship memory tier (§2) treats the user as a first-class participant
 thanks to the v0.2.1 generalization — `RelationshipMemory` now keys on
 `(participant_id, participant_type)` pairs rather than agent-only entity

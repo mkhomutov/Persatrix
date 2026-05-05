@@ -40,9 +40,37 @@ from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_runtime.state_persistence import _StatePersistenceMixin
-from agents.persona_types import AgentEvent, EventType
+from agents.persona_types import ActionType, AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
+
+
+# ─── Wire-string pin (PR #249 deep-review Nice-to-Have #4) ──
+#
+# RFC 0011 PR 4a-ii-α changed the on-the-wire string values of the
+# canonical chat enum members from ``"message_received"`` /
+# ``"send_message"`` (legacy) to ``"channel_message"`` /
+# ``"send_channel_message"``. The string values flow into:
+#
+#   * ``AgentEvent`` JSON serialisation (cross-process boundaries planned
+#     for PR 4a-ii-β);
+#   * the action-type field that ``chat_reply._extract_chat_reply`` keys
+#     on when scanning persisted action sequences;
+#   * episodic-memory rows whose ``event_type`` column stores the value.
+#
+# Any accidental rename of the enum value (e.g. a refactor that touches
+# the right-hand side of the enum line) would silently break routing
+# without triggering any of the existing structural assertions, since
+# every other test references the symbol by name. Pinning the literal
+# value here turns such a regression into an immediate test failure.
+
+
+class TestEnumWireStringValues:
+    def test_channel_message_value_is_stable(self):
+        assert EventType.CHANNEL_MESSAGE.value == "channel_message"
+
+    def test_send_channel_message_value_is_stable(self):
+        assert ActionType.SEND_CHANNEL_MESSAGE.value == "send_channel_message"
 
 
 # ─── High: routing table includes CHANNEL_MESSAGE ──────────
