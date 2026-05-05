@@ -63,5 +63,13 @@ audit:
 #       bridges (Slack, Discord, email — v0.5.0) should opt into this.
 #
 # Override via env: SECURITY_SANITIZER_ACTION=quarantine
+#
+# TODO(rfc0009 follow-up): runtime wiring deferred. Today this key is
+# documentation-only — neither the Go orchestrator nor the Python
+# `maybe_wrap_tool_content` helper consults it at startup. A deploy that
+# sets SECURITY_SANITIZER_ACTION=quarantine currently still runs in
+# passthrough mode. The audit-config loader that picks this up lands in
+# the same follow-up that pipes Python tool-result flag events to the
+# Go-side audit chain. Tracked: PR #253 deep-review F5/F6.
 security:
   sanitizer_action: "passthrough"

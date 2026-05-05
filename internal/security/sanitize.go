@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // InputSanitizer detects prompt-injection patterns in inbound content
@@ -35,6 +37,12 @@ type InputSanitizer struct {
 	auditor  AuditLogger
 	action   SanitizerAction
 	now      func() time.Time
+	// logger receives a WARN line whenever auditor.Emit returns an
+	// error. Optional — when nil, audit-sink failures are silently
+	// dropped (the original v0.3.0 behaviour). PR #253 deep-review F3
+	// added the option so on-call sees prompt-injection signals
+	// vanishing rather than losing audit-chain entries without trace.
+	logger *zap.Logger
 }
 
 // SanitizerOption configures an [InputSanitizer]. The zero-arg constructor
@@ -74,6 +82,22 @@ func WithSanitizerClock(now func() time.Time) SanitizerOption {
 		if now != nil {
 			s.now = now
 		}
+	}
+}
+
+// WithSanitizerLogger injects a zap logger that receives a WARN line
+// whenever the configured auditor's Emit returns an error. The
+// sanitizer's emit policy is best-effort by design (a sink failure must
+// not turn detection into a synchronous dependency on the audit
+// pipeline) — the logger surfaces the drop so on-call can correlate
+// missing audit-chain entries with sink health rather than silently
+// losing prompt-injection signals.
+//
+// Pass nil (or omit the option) to keep the original silent-drop
+// behaviour. PR #253 deep-review F3.
+func WithSanitizerLogger(l *zap.Logger) SanitizerOption {
+	return func(s *InputSanitizer) {
+		s.logger = l
 	}
 }
 
@@ -161,10 +185,21 @@ func (s *InputSanitizer) Sanitize(ctx context.Context, input string, source Cont
 			},
 		}
 		// Best-effort emit: a sink failure must not turn sanitisation into
-		// a hard dependency on the audit pipeline. The caller's structured
-		// logger surfaces the failure if desired; here we just don't
-		// propagate it back to the LLM-facing path.
-		_ = s.auditor.Emit(ctx, ev)
+		// a hard dependency on the audit pipeline. We don't propagate the
+		// error back to the LLM-facing path. Where a logger has been
+		// injected (WithSanitizerLogger), the failure surfaces at WARN so
+		// on-call can correlate missing audit-chain entries with sink
+		// health — without it, prompt-injection signals could vanish
+		// without trace if the chain breaks (disk full, fsync stall,
+		// append handle invalidated by external rename).
+		if emitErr := s.auditor.Emit(ctx, ev); emitErr != nil && s.logger != nil {
+			s.logger.Warn(
+				"sanitize: audit emit failed",
+				zap.Error(emitErr),
+				zap.String("event_type", string(AuditInputFlagged)),
+				zap.String("source", string(source)),
+			)
+		}
 	}
 
 	return out, nil

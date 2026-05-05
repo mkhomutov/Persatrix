@@ -30,9 +30,13 @@ const (
 	ContextSourceAgentOutput ContextSource = "agent_output"
 
 	// ContextSourceUser — content typed by a human user via REST/CLI/chat.
-	// Sanitised but not flagged by default — humans intentionally writing
-	// "ignore previous instructions" to test the agent should not show up
-	// as an attack signal.
+	// Sanitised under the same pattern set as every other source; the
+	// `user` source value is the distinguishing tag in audit Detail so
+	// operators can filter `flag=instruction_override AND source!=user`
+	// at query time to suppress test-prompt noise. The earlier "not
+	// flagged by default" wording was a doc/impl drift — the
+	// implementation has always applied uniform detection (PR #253 deep-
+	// review F2; pinned by `TestUserSourceContent_IsFlagged`).
 	ContextSourceUser ContextSource = "user"
 
 	// ContextSourceChannelMessage — content posted to an RFC 0011 internal

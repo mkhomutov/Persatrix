@@ -39,6 +39,21 @@ type Pattern struct {
 //
 // All patterns are case-insensitive (`(?i)` prefix). Bounded `.{0,N}` in the
 // exfiltration patterns prevents catastrophic backtracking on long inputs.
+//
+// Cross-language regex constraints (Go RE2 ↔ Python `re`):
+//
+//   - No backreferences (\1, \2, ...): unsupported by RE2; the generator
+//     would compile this Go side and produce a Python pattern that no
+//     longer means the same thing.
+//   - No lookaround ((?=...), (?!...), (?<=...), (?<!...)): unsupported
+//     by RE2.
+//   - No POSIX character classes ([[:alpha:]]): RE2-only; Python `re`
+//     would not parse them.
+//   - Named groups (?P<name>...) are fine — both engines support them.
+//
+// PR #253 deep-review F7 — `cmd/genpatterns` cannot detect a Python-only
+// construct because the Go side already refused to compile it; this
+// constraint comment is the design-review backstop.
 var DefaultPatterns = []Pattern{
 	{
 		Name:        "instruction_override",
