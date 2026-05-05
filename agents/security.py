@@ -158,13 +158,35 @@ def sanitize(
     )
 
 
-# Match `</external_data>` close tags in body content for escape. The
-# match is case-insensitive because LLMs may parse tags loosely; a
-# literal-string replace would let an attacker bypass via
-# `</External_Data>`. PR #253 deep-review F1 — same class of fix as
-# PR #120 F-2 for the `<|user_message|>` delimiter.
-_EXTERNAL_DATA_CLOSE_TAG_RE: Final[re.Pattern[str]] = re.compile(
-    r"</external_data>", re.IGNORECASE,
+# Match `<external_data>` open AND close tags in body content for
+# escape. We escape both arms because:
+#
+#   - A literal close tag mid-body lets an attacker terminate the
+#     envelope early, making the trailing payload appear "outside" the
+#     envelope to the LLM (PR #253 deep-review F1, fixed initially as
+#     close-only).
+#   - A literal open tag mid-body lets an attacker mint a fake nested
+#     envelope. The structural-separation contract (only one parseable
+#     close) still holds, but an LLM that gives weight to the inner
+#     attributes (`source="internal"`, `flagged="false"`) could read
+#     the nested block as orchestrator-trusted scaffolding — exactly
+#     the trust frame this envelope exists to deny (PR #253 deep-review
+#     M1; symmetric to F1 on the open-tag arm).
+#
+# Whitespace tolerance (`<\s*/?\s*external_data\b`) covers lenient
+# parsers that recognise `</external_data >`, `< /external_data>`,
+# `</external_data\n>` and similar variants — strict matching would
+# leave a covert-bypass channel for any tokeniser more permissive than
+# `re` (PR #253 deep-review L1).
+#
+# `\b` after `external_data` prevents `external_database` etc. from
+# matching. `[^>]*` after the tag name allows attributes on opens
+# (e.g. `source="x"`) without spilling past the closing `>`.
+#
+# Same class of fix as PR #120 F-2 for the `<|user_message|>` delimiter.
+_EXTERNAL_DATA_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<\s*/?\s*external_data\b[^>]*>",
+    re.IGNORECASE,
 )
 
 
@@ -183,13 +205,21 @@ def wrap_external(
     forwarding to downstream tools. RFC 0009 §C pins the attribute order:
     source, flagged, sanitized.
 
-    Body content has any literal `</external_data>` close tag escaped to
-    `<\\/external_data>` (case-insensitive) before splicing — without this
-    an attacker controlling the body could inject a fake close tag and
-    have the trailing payload appear "outside the envelope" to the LLM,
-    breaking the structural-separation contract that this envelope
-    exists to enforce. The escaped form is forensically preserved so an
-    operator inspecting the audit log can still see what was attempted.
+    Body content has any literal `<external_data>` open OR close tag
+    escaped (leading `<` rewritten to `<\\`, case-insensitive,
+    whitespace-tolerant) before splicing. Without this an attacker
+    controlling the body could:
+
+      - inject a fake close tag and have the trailing payload appear
+        "outside the envelope" to the LLM, breaking the
+        structural-separation contract that this envelope exists to
+        enforce (PR #253 deep-review F1); or
+      - inject a fake open tag and mint a nested envelope whose
+        attributes claim trust the outer envelope denies (PR #253
+        deep-review M1).
+
+    The escaped form is forensically preserved so an operator
+    inspecting the audit log can still see what was attempted.
 
     Raises ValueError if `source` is not a member of
     `KNOWN_CONTEXT_SOURCES`. The format is:
@@ -206,8 +236,13 @@ def wrap_external(
         )
     flagged_str = "true" if flagged else "false"
     sanitized_str = "true" if sanitized else "false"
-    safe_content = _EXTERNAL_DATA_CLOSE_TAG_RE.sub(
-        r"<\\/external_data>", content,
+    # Escape by rewriting the leading `<` of every match to `<\`. This
+    # preserves the original tag form (case, whitespace, attributes) so
+    # forensic review still sees what the attacker tried to inject,
+    # while breaking the tag at its first character so no LLM tokeniser
+    # we know of will recognise it as a tag.
+    safe_content = _EXTERNAL_DATA_TAG_RE.sub(
+        lambda m: "<\\" + m.group(0)[1:], content,
     )
     return (
         f'<external_data source="{source}" flagged="{flagged_str}" '
