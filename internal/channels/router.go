@@ -88,6 +88,12 @@ type ChannelRouter struct {
 	dispatcher MessageDispatcher
 	logger     *zap.Logger
 	metrics    *RouterMetrics
+
+	// waiter is the chat-as-DM publish-and-await correlation table
+	// (RFC 0011 PR 4a-ii-β-2). Always non-nil — initialised in
+	// [NewChannelRouter] — so the publish hot path can call
+	// `Notify` unconditionally without a nil check.
+	waiter *replyWaiter
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -106,6 +112,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		dispatcher: dispatcher,
 		logger:     logger,
 		metrics:    metrics,
+		waiter:     newReplyWaiter(),
 	}
 }
 
@@ -141,8 +148,75 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 		return err
 	}
 
+	// Resolve any chat-as-DM waiter parked for this (channel, sender)
+	// pair before fanout (RFC 0011 PR 4a-ii-β-2). Notify is a non-
+	// blocking buffered send and a no-op when no waiter is registered,
+	// so the hot path stays cheap when no chat is in flight.
+	r.waiter.Notify(msg)
+
 	r.fanout(ctx, msg, derivedType)
 	return nil
+}
+
+// ErrChatTimeout is returned by [PublishAndAwait] when no matching
+// reply arrives within the caller's timeout. The inbound message is
+// still persisted (the user's turn is not lost just because the agent
+// failed to reply).
+var ErrChatTimeout = errors.New("channels: chat reply timed out")
+
+// PublishAndAwait powers the chat-as-DM façade (RFC 0011 amendment).
+// The chat REST handler calls this with the user's inbound
+// CHANNEL_MESSAGE; the call returns when the agent's reply
+// (`SEND_CHANNEL_MESSAGE` published from `awaitFromAgentID` on the same
+// DM channel) arrives, or when `timeout` elapses.
+//
+// Sequence:
+//
+//  1. Register a waiter for `(msg.ChannelID, awaitFromAgentID)` BEFORE
+//     publishing — closes the race where the agent replies faster than
+//     the handler can install the waiter.
+//  2. Call [Publish] (persistence + fanout via gRPC). The agent's
+//     `ReceiveChannelMessage` is invoked downstream.
+//  3. Block on the waiter chan until either:
+//     - the agent's REST publish satisfies the waiter (happy path), or
+//     - `timeout` elapses (`ErrChatTimeout`), or
+//     - the caller's context is cancelled (e.g. client disconnect).
+//
+// On any non-happy-path exit, the waiter is removed via the deferred
+// cancel so a late-arriving reply does not leak into a future chat.
+//
+// Auth: this entry point assumes the caller (HTTP handler) has already
+// validated the user is permitted to address the agent. The DM-creation
+// boundary in [ChannelStore.GetOrCreateDM] is the canonical access
+// check (see [RFC 0011 amendment §"DM gate-bypass"]); the response gate
+// is implicitly `always` for DM channels and is therefore not consulted
+// here.
+func (r *ChannelRouter) PublishAndAwait(
+	ctx context.Context,
+	msg ChannelMessage,
+	awaitFromAgentID string,
+	timeout time.Duration,
+) (ChannelMessage, error) {
+	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, awaitFromAgentID)
+	if err != nil {
+		return ChannelMessage{}, fmt.Errorf("channels: PublishAndAwait register: %w", err)
+	}
+	defer cancel()
+
+	if err := r.Publish(ctx, msg, ""); err != nil {
+		return ChannelMessage{}, err
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case reply := <-replyCh:
+		return reply, nil
+	case <-timer.C:
+		return ChannelMessage{}, ErrChatTimeout
+	case <-ctx.Done():
+		return ChannelMessage{}, ctx.Err()
+	}
 }
 
 // fanout looks up subscribers, filters the sender, and dispatches. Runs
