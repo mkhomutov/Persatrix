@@ -6,6 +6,44 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 PR 4a-ii-β-1 — real Go gRPC `MessageDispatcher` +
+  Python REST publish rewire.** Replaces the `NoopDispatcher{}`
+  placeholder in `cmd/orchestrator/channels.go` with a registry-aware
+  `GRPCMessageDispatcher` (`internal/channels/grpc_dispatcher.go`)
+  that resolves the target agent through an `AgentResolver` Protocol
+  seam, dials with insecure transport credentials (in-cluster
+  traffic; mTLS deferred to RFC 0009 Phase 4), and invokes
+  `AgentService.ReceiveChannelMessage`. At-most-once / best-effort:
+  `ErrAgentNotFound` warns and returns `nil`; non-`Healthy` or empty
+  `Address` returns `ErrAgentNotReady`. `ChannelType` is derived
+  from the channel-id prefix; `Timestamp` is formatted as
+  RFC3339Nano (defaulting to `now()` when zero). `initChannels` now
+  accepts a `registry.Registry` and selects `GRPCMessageDispatcher`
+  when non-nil (`NoopDispatcher` is the test/no-registry fallback).
+
+  On the Python side, `_handle_send_channel_message` is rewired
+  from the in-process `EventDispatcher` cascade to
+  `POST /api/v1/channels/{id}/messages` via a new
+  `HTTPChannelPublisher` (`agents/channel_publisher.py`, 10s
+  timeout, raises on ≥400) when `channel_id` is set and a
+  `ChannelPublisher` is wired. The in-process cascade is preserved
+  as the fallback for the chat-reply path until the chat-as-DM
+  façade lands in PR 4a-ii-β-2. `agents/server.py` wires the
+  `HTTPChannelPublisher` onto the dispatcher alongside the shared
+  `aiohttp.ClientSession` in `start()`.
+
+  To keep both modules under the project file-size limit,
+  `ActionExecutor` is extracted from `agents/dispatch.py` to
+  `agents/action_executor.py` and re-exported unchanged from
+  `agents/dispatch.py` (no behavior change for downstream
+  importers). Eight follow-up issues are captured (ISSUE-0024
+  through ISSUE-0032 in `docs/issues/INDEX.md`) covering the
+  cross-process integration test, conditional `HTTPChannelPublisher`
+  wiring, send-channel-message result-dict asymmetry,
+  `selectChannelDispatcher` test gap, gRPC connection pooling,
+  RPC-error test gap, nil-registry startup-log gap, and channel
+  publish OTEL spans. (PR #250.)
+
 - **RFC 0011 PR 4a-ii-α — hard rename
   `MESSAGE_RECEIVED`/`SEND_MESSAGE` → `CHANNEL_MESSAGE`/`SEND_CHANNEL_MESSAGE`
   + SF-3 mentions validation.** Drops the v0.2 enum aliases now that
