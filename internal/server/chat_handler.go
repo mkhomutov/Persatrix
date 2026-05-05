@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -23,7 +24,7 @@ import (
 // has no constant for it. We emit it from the chat handler when
 // `PublishAndAwait` returns `context.Canceled` so a client
 // disconnect mid-flight is not conflated with a 5xx server fault in
-// dashboards and alert rules. PR #251 review "Should fix #1".
+// dashboards and alert rules.
 const statusClientClosedRequest = 499
 
 // chatMaxMessageLength is the maximum allowed message length in characters.
@@ -44,6 +45,27 @@ const (
 )
 
 var chatHandlerTracer = otel.Tracer("persatrix/server/chat")
+
+// chatLocalFallbackWarnOnce guards the once-per-process Warn emitted
+// by [Server.handleChat] when a chat request omits `user_id` and
+// falls back to the shared `"local"` pseudo-user. The hazard the Warn
+// signposts (cross-talk via a shared `dm:<agent>:local` channel) is
+// structural, not per-request — gating the line behind sync.Once
+// prevents the warn from flooding logs at chat QPS while preserving
+// the visibility intent. Mirrors the `channelFallbackWarnOnce`
+// precedent established by PR #245 review round 3 Should-Fix #3 and
+// hardened for test isolation in ISSUE-0009 / PR #246.
+var chatLocalFallbackWarnOnce sync.Once
+
+// TestingResetChatLocalFallbackWarnOnce resets the package-level
+// guard to its zero state. Exported for use in test setup only;
+// production code must never call it. Direct assignment from test
+// files is a data race when any sibling test runs with t.Parallel()
+// (see ISSUE-0009 for the full rationale on why a helper, not direct
+// assignment, is the safe pattern).
+func TestingResetChatLocalFallbackWarnOnce() {
+	chatLocalFallbackWarnOnce = sync.Once{}
+}
 
 // handleChat handles POST /api/v1/agents/{id}/chat as a synchronous-reply
 // façade over the channels subsystem (RFC 0011 PR 4a-ii-β-2 — chat-as-DM
@@ -117,7 +139,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// no canonical DM peer without it. Default to "local" to preserve the
 	// `persatrix chat` REPL behaviour where no auth is configured.
 	//
-	// WARNING (PR #251 review): the `"local"` fallback is a SHARED
+	// WARNING: the `"local"` fallback is a SHARED
 	// pseudo-user. In any deployment where >1 unauthenticated caller can
 	// hit this endpoint, all such callers transparently share the same
 	// canonical DM (`dm:<agent>:local`) and therefore the same persisted
@@ -129,10 +151,24 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	userID := req.UserID
 	if userID == "" {
 		userID = "local"
-		s.logger.Warn("chat: empty user_id; using shared 'local' fallback (cross-talk hazard, RFC 0009 Phase 4)",
-			zap.String("agent_id", agentID),
-		)
+		chatLocalFallbackWarnOnce.Do(func() {
+			s.logger.Warn("chat: empty user_id; using shared 'local' fallback (cross-talk hazard, RFC 0009 Phase 4)",
+				zap.String("agent_id", agentID),
+			)
+		})
 	}
+
+	// Attach `agent.id` and `user.id` to the span now that both are
+	// resolved. Without these, traces of chat failures cannot be
+	// filtered per-agent or per-user — the very dimensions an
+	// operator reaches for first when triaging a chat regression.
+	// `agent.id` is the validated path value; `user.id` reflects the
+	// post-fallback value (`"local"` when omitted) so the span
+	// matches the log line emitted above.
+	span.SetAttributes(
+		attribute.String("agent.id", agentID),
+		attribute.String("user.id", userID),
+	)
 
 	if s.channelStore == nil || s.channelRouter == nil {
 		s.logger.Error("chat: channels subsystem not configured")
@@ -162,8 +198,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	dm, err := s.channelStore.GetOrCreateDM(ctx, userID, agentID)
 	if err != nil {
-		// PR #251 deep-review M-1: discriminate validation errors
-		// from server-side I/O errors. Pre-fix behaviour mapped EVERY
+		// Discriminate validation errors from server-side I/O errors.
+		// Pre-fix behaviour mapped EVERY
 		// `GetOrCreateDM` error to 400 BAD_REQUEST, which silently
 		// converted transient SQLite failures (lock contention,
 		// disk-full, closed handle, BeginTx/Commit faults) into a
@@ -215,8 +251,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.NewString()
 	}
 
-	// PR #251 review (M-2/M-3): propagate `session_id` and
-	// `participant_type` into ChannelMessage.Metadata so the wire
+	// Propagate `session_id` and `participant_type` into
+	// ChannelMessage.Metadata so the wire
 	// fields are not silently inert. RFC 0011 amendment §Mapping
 	// retains `metadata["participant_type"]`; we use the same key
 	// for `session_id` to keep one conversation-segmentation
@@ -253,8 +289,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error("chat: ErrInvalidChannelType on DM publish", zap.String("dm", dm.ID), zap.Error(err))
 			writeError(w, "INTERNAL", "internal server error", http.StatusInternalServerError)
 		case errors.Is(err, channels.ErrChannelNotFound):
-			// PR #251 review M-3: the DM was deleted between
-			// `GetOrCreateDM` and `PublishAndAwait`'s inner `Publish`
+			// The DM was deleted between `GetOrCreateDM` and
+			// `PublishAndAwait`'s inner `Publish`
 			// (e.g. via `DELETE /api/v1/channels/{id}` from another
 			// caller). 404 is the correct semantic — the resource
 			// addressed by the publish disappeared — and gives the
@@ -262,8 +298,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			// 500.
 			writeError(w, "NOT_FOUND", "chat channel disappeared", http.StatusNotFound)
 		case errors.Is(err, channels.ErrWaiterAlreadyRegistered):
-			// PR #251 review "Should fix #2": another chat for the
-			// same `(user, agent)` DM is already in flight. The
+			// Another chat for the same `(user, agent)` DM is already
+			// in flight. The
 			// `replyWaiter` keys on `(channelID, awaitFromAgentID)`,
 			// so two concurrent chat requests for the same DM
 			// collide deterministically. 409 Conflict is the
@@ -274,8 +310,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 				zap.String("agent_id", agentID), zap.String("user_id", userID))
 			writeError(w, "CONFLICT", "another chat is in flight for this DM; retry shortly", http.StatusConflict)
 		case errors.Is(err, context.Canceled):
-			// PR #251 review "Should fix #1": client disconnected
-			// before the agent replied. This is not a server fault;
+			// Client disconnected before the agent replied. This is
+			// not a server fault;
 			// log at Info (not Error) so it does not poison alert
 			// rules built on the 5xx error log line, and emit the
 			// nginx-style 499 status. The response bytes likely
@@ -304,8 +340,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		displayName = agentID
 	}
 
-	// PR #251 review (L-1): defensive guard against a reply whose
-	// Timestamp was never stamped by the publisher. `time.Time{}.Unix()`
+	// Defensive guard against a reply whose Timestamp was never
+	// stamped by the publisher. `time.Time{}.Unix()`
 	// returns -62135596800 (year 1754); substitute the current wall
 	// clock so the client never observes a junk negative epoch second.
 	replyTimestamp := reply.Timestamp

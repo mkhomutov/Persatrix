@@ -146,6 +146,21 @@ func initChannels(
 		zap.String("rfc", "0011"),
 		zap.String("auth_eta", "RFC 0009 Phase 4"),
 	)
+	// The chat-as-DM façade (RFC 0011 PR 4a-ii-β-2) parks
+	// `replyWaiter` entries in an **in-process** correlation table.
+	// If the orchestrator is ever horizontally scaled and the
+	// agent's REST publish lands on a different replica than the
+	// one that called `PublishAndAwait`, the waiter on the origin
+	// replica never fires and the chat times out. v0.3.0 ships
+	// single-replica so this is not a release blocker, but a
+	// startup-time WARN gives operators a fighting chance to spot
+	// the limitation BEFORE topology changes start dropping chats
+	// silently — far cheaper than discovering it from a flood of
+	// 504s after a deployment.
+	logger.Warn("chat: in-process reply waiter is single-replica only — horizontal scale will time out chats until a cross-process correlation primitive lands",
+		zap.String("rfc", "0011"),
+		zap.String("scope", "PublishAndAwait"),
+	)
 	return []server.ServerOption{server.WithChannels(chanStore, router)}, cleanup, nil
 }
 

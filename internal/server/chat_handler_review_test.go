@@ -4,17 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
-// chat_handler_review_test.go — findings from the PR #251 deep review
-// that require their own test file to keep chat_handler_test.go under
-// the 500-line project limit.  All fixtures (chatTestServer,
+// chat_handler_review_test.go — additional chat-handler edge cases
+// (concurrent DM, client cancel, DB error vs. validation error) split
+// out to keep chat_handler_test.go under the 500-line project limit.
+// All fixtures (chatTestServer,
 // registerHealthyAgent, doRequest) live in chat_handler_test.go and
 // server_helpers_test.go and are visible here within package server.
 
@@ -27,8 +36,7 @@ import (
 // is part of the chat-as-DM contract — RFC 0011 amendment §"Single
 // in-flight chat per DM"). Pre-fix behaviour: the wrapped error fell
 // through the `default:` branch and produced a 500 INTERNAL with no
-// actionable signal for the caller. PR #251 review finding
-// "Should fix #2".
+// actionable signal for the caller.
 func TestHandleChat_ConcurrentSameDMReturns409(t *testing.T) {
 	srv, reg, _, _ := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
@@ -74,7 +82,7 @@ func TestHandleChat_ConcurrentSameDMReturns409(t *testing.T) {
 //
 // The handler MUST map this to 499 ("Client Closed Request" — the
 // nginx-style non-standard code Go has no const for) and log at
-// Info, not Error. PR #251 review finding "Should fix #1".
+// Info, not Error.
 func TestHandleChat_ContextCanceledReturnsClientClosed(t *testing.T) {
 	srv, reg, _, _ := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
@@ -115,7 +123,7 @@ func TestHandleChat_ContextCanceledReturnsClientClosed(t *testing.T) {
 // simulated here — the DB handle being closed underneath the
 // handler) surfaces as 500 INTERNAL, NOT 400 BAD_REQUEST.
 //
-// Pre-fix behaviour (PR #251 deep-review finding M-1): the handler
+// Pre-fix behaviour: the handler
 // mapped EVERY error from `GetOrCreateDM` to
 // `400 BAD_REQUEST: invalid participant id`. That conflates two
 // disjoint failure classes:
@@ -153,7 +161,7 @@ func TestHandleChat_GetOrCreateDM_DBErrorReturns500(t *testing.T) {
 }
 
 // TestHandleChat_GetOrCreateDM_ValidationErrorStillReturns400 pins
-// the other half of the M-1 fix: the validation path
+// the other half of the discrimination fix: the validation path
 // (`ErrInvalidParticipantID` from `CanonicalDMID`) MUST keep its 400
 // envelope. Complements `TestHandleChat_InvalidUserIDRejected`
 // (which exercises the colon-in-id case) by exercising the
@@ -170,4 +178,80 @@ func TestHandleChat_GetOrCreateDM_ValidationErrorStillReturns400(t *testing.T) {
 	assert.Equal(t, 400, rec.Code,
 		"validation error from GetOrCreateDM must remain 400")
 	assert.Contains(t, rec.Body.String(), "invalid participant id")
+}
+
+// chatTestServerWithObserver wires the chat-as-DM stack against a
+// zap observer logger so tests can assert log emission counts. Mirrors
+// `chatTestServer` but swaps the nop logger for a recording one. The
+// observer is filtered to WarnLevel because the only log line under
+// test (the `"local"` fallback Warn) is emitted at that level.
+func chatTestServerWithObserver(t *testing.T) (*Server, *registry.InMemoryRegistry, *observer.ObservedLogs) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "channels.db")
+	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
+		MaxChannels: 50,
+		Logger:      zap.NewNop(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	router := channels.NewChannelRouter(store, channels.NoopDispatcher{}, zap.NewNop(), nil)
+
+	core, recorded := observer.New(zap.WarnLevel)
+	logger := zap.New(core)
+	wfDir := t.TempDir()
+	reg := registry.NewInMemoryRegistry(logger)
+	srv, err := New("127.0.0.1:0", wfDir,
+		state.NewInMemoryStore(logger),
+		reg,
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannels(store, router),
+	)
+	require.NoError(t, err)
+	return srv, reg, recorded
+}
+
+// TestHandleChat_LocalFallback_WarnsOncePerProcess pins the
+// once-per-process semantics of the `"local"` user_id fallback Warn.
+//
+// Pre-fix behaviour emitted a Warn on EVERY chat request that omitted
+// `user_id`. The cross-talk hazard the Warn signposts is structural
+// (single shared `dm:<agent>:local` for all anonymous callers) — it
+// does not change between requests. At even modest chat QPS the
+// per-request Warn floods the operator's log scrape and drowns out
+// the genuinely actionable lines (the structural cross-talk hazard
+// is a one-time configuration signal, not a per-request event).
+//
+// The fix gates the Warn behind a package-level `sync.Once`, matching
+// the established `channelFallbackWarnOnce` precedent in
+// channel_handlers.go (PR #245 review round 3 Should-Fix #3, also
+// hardened by ISSUE-0009 / PR #246 for test-isolation safety).
+//
+// This test issues three back-to-back chat requests with empty
+// `user_id` and asserts the matching Warn appears exactly once in the
+// recorded logs. Each request will hit the registry-not-healthy 503
+// path (no agent registered) but that is downstream of the fallback
+// Warn — the Warn must fire (or, after the second request, must NOT
+// fire again) regardless of the eventual handler outcome.
+func TestHandleChat_LocalFallback_WarnsOncePerProcess(t *testing.T) {
+	TestingResetChatLocalFallbackWarnOnce()
+	t.Cleanup(TestingResetChatLocalFallbackWarnOnce)
+
+	srv, reg, recorded := chatTestServerWithObserver(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// Use a 1s timeout so each request returns promptly (the noop
+	// dispatcher means no agent reply will ever arrive; the request
+	// will time out, but the fallback Warn fires long before that on
+	// the first call).
+	body, _ := json.Marshal(chatRequest{
+		Message: "Hi", TimeoutSeconds: 1, // UserID intentionally empty
+	})
+	for i := 0; i < 3; i++ {
+		_ = doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	}
+
+	warnings := recorded.FilterMessageSnippet("'local' fallback").All()
+	assert.Len(t, warnings, 1,
+		"local fallback Warn must fire exactly once across multiple chat requests; got %d", len(warnings))
 }

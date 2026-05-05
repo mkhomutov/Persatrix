@@ -37,16 +37,15 @@ var ErrWaiterAlreadyRegistered = errors.New("channels: reply waiter already regi
 //     stale `Notify` after `cancel` cannot panic; the
 //     `existing == ch` guard in `cancel` exists to prevent
 //     **map clobbering** when `Notify` has already removed the entry
-//     and a fresh registration on the same key has slotted in
-//     (PR #251 review L-3 — doc accuracy).
+//     and a fresh registration on the same key has slotted in.
 //
 // Concurrency: all operations are protected by a single mutex. The
 // expected QPS is bounded by chat-request rate (a single DM is
 // caller-side serialised), so contention is not a concern; if it ever
 // becomes one, sharding by channelID is a drop-in change.
 //
-// Scaling constraint (PR #251 review "Should fix #5"): the table is
-// **in-process**. If the orchestrator is ever horizontally scaled and
+// Scaling constraint: the table is **in-process**. If the orchestrator
+// is ever horizontally scaled and
 // the agent's REST publish lands on a different replica than the one
 // that called [ChannelRouter.PublishAndAwait], the waiter on the
 // origin replica never fires and the chat times out. v0.3.0 ships
@@ -104,7 +103,7 @@ func (w *replyWaiter) Register(channelID, senderID string) (<-chan ChannelMessag
 // publish hot path: the lookup is O(1) and the send is non-blocking
 // because the chan is buffered.
 //
-// Single-shot semantics (PR #251 review M-4): the waiter is removed
+// Single-shot semantics: the waiter is removed
 // from the table on the first matching publish. Subsequent matching
 // publishes for the same `(channelID, senderID)` key (e.g. an agent
 // emitting `tool_call → tool_result → final_answer` as separate
@@ -114,6 +113,7 @@ func (w *replyWaiter) Register(channelID, senderID string) (<-chan ChannelMessag
 // message. Callers that need multi-message reply semantics must
 // either fold the messages agent-side into a single publish or wait
 // on the persisted history rather than the in-process waiter.
+// Tracked as `docs/issues/ISSUE-0033` for v0.4 follow-up.
 func (w *replyWaiter) Notify(msg ChannelMessage) bool {
 	key := waiterKey{channelID: msg.ChannelID, senderID: msg.SenderID}
 	w.mu.Lock()

@@ -328,8 +328,8 @@ func TestHandleChat_TimeoutClamp(t *testing.T) {
 
 // TestHandleChat_TimeoutClamp_LowerBound pins that non-positive
 // caller-supplied timeouts (0 or negative) fall through to the default
-// rather than collapsing the wait window to zero. PR #251 review
-// finding: only the upper clamp was previously exercised; this closes
+// rather than collapsing the wait window to zero. Only the upper
+// clamp was previously exercised; this closes
 // the lower-edge gap so a future regression that propagates `<= 0`
 // into `time.Duration` (instant timeout) is caught.
 func TestHandleChat_TimeoutClamp_LowerBound(t *testing.T) {
@@ -358,7 +358,7 @@ func TestHandleChat_TimeoutClamp_LowerBound(t *testing.T) {
 // `session_id` and `participant_type` request fields are carried into
 // the inbound `ChannelMessage.Metadata` map under the keys named in the
 // RFC 0011 amendment §Mapping table. Without this, the wire fields are
-// silently inert (PR #251 review finding M-2/M-3): callers that rely
+// silently inert: callers that rely
 // on `session_id` to segment threads, or on `participant_type` to
 // distinguish human vs. bridge senders, observe no effect.
 func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
@@ -401,7 +401,7 @@ func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 // zero value: `Time{}.Unix()` is a large negative number (year 1754),
 // which would render as a nonsense client-visible timestamp. The
 // handler must substitute `time.Now().UTC()` so the response carries
-// a sane positive epoch second. PR #251 review finding L-1.
+// a sane positive epoch second.
 func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
 	srv, reg, router, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
@@ -440,7 +440,7 @@ func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
 // `tool_call → tool_result → final_answer` plugin pattern), only the
 // first message satisfies the waiter and is returned to the caller.
 // Subsequent messages are persisted to the DM history but not
-// delivered to the chat response. PR #251 review finding M-4.
+// delivered to the chat response.
 func TestHandleChat_MultiMessageReplyReturnsFirst(t *testing.T) {
 	srv, reg, router, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")

@@ -161,7 +161,7 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 	// keyed by the user's id (e.g. echo-back semantics) MUST account
 	// for the fact that the inbound publish itself fires Notify before
 	// any subscriber receives — install the waiter on the OTHER
-	// participant's id, never on the publisher's. PR #251 review L-1.
+	// participant's id, never on the publisher's.
 	r.waiter.Notify(msg)
 
 	r.fanout(ctx, msg, derivedType)
@@ -202,8 +202,8 @@ var ErrChatTimeout = errors.New("channels: chat reply timed out")
 // is implicitly `always` for DM channels and is therefore not consulted
 // here.
 //
-// Scaling constraint (PR #251 review "Should fix #5"): correlation is
-// **in-process** via [replyWaiter]. Horizontal-scale rollouts require
+// Scaling constraint: correlation is **in-process** via [replyWaiter].
+// Horizontal-scale rollouts require
 // a cross-process replacement before chat can survive the topology —
 // see the `replyWaiter` doc-string for the full rationale.
 func (r *ChannelRouter) PublishAndAwait(
@@ -212,6 +212,24 @@ func (r *ChannelRouter) PublishAndAwait(
 	awaitFromAgentID string,
 	timeout time.Duration,
 ) (ChannelMessage, error) {
+	// Defense-in-depth: reject the self-reply trap before any store
+	// mutation. If `msg.SenderID == awaitFromAgentID`, the inbound
+	// publish would satisfy its own waiter via `Publish` → `Notify`
+	// (which keys on `(channelID, senderID)`) and the call would
+	// return the caller's inbound message AS the "reply".
+	// `ChannelStore.GetOrCreateDM` already blocks `user == agent`
+	// upstream of the chat handler today, but `PublishAndAwait` is
+	// part of this package's public surface and may gain other
+	// callers (workflow steps, integration tests). Reusing the
+	// existing `ErrInvalidParticipantID` sentinel gives the chat
+	// handler's existing `errors.Is` arm the right 400 mapping for
+	// free, without inventing a new error class.
+	if msg.SenderID == awaitFromAgentID {
+		return ChannelMessage{}, fmt.Errorf(
+			"%w: PublishAndAwait requires sender_id (%q) to differ from awaitFromAgentID",
+			ErrInvalidParticipantID, msg.SenderID,
+		)
+	}
 	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, awaitFromAgentID)
 	if err != nil {
 		return ChannelMessage{}, fmt.Errorf("channels: PublishAndAwait register: %w", err)

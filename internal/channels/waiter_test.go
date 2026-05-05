@@ -142,8 +142,8 @@ func TestReplyWaiter_ConcurrentDistinctKeys(t *testing.T) {
 // `(channelID, senderID)` key with interleaved Register / Notify /
 // cancel goroutines and asserts (a) no panic from a stale `cancel`
 // clobbering a fresh registration, (b) no leaked map entries when
-// the dust settles. PR #251 review L-2: the identity-equality guard
-// in `cancel` (`if existing == ch`) is the defence; without a
+// the dust settles. The identity-equality guard in `cancel`
+// (`if existing == ch`) is the defence; without a
 // stress test it was unverified that a Notify-then-fresh-Register
 // interleave on the same key cannot cross-fire or leak.
 //
