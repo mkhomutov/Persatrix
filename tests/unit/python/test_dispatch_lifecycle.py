@@ -170,7 +170,7 @@ class TestEventActionMemoryCycle:
 
         events = [
             AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
+                event_type=EventType.CHANNEL_MESSAGE,
                 payload={"content": f"msg-{i}"},
                 sender_id="test",
             )
@@ -188,17 +188,17 @@ class TestEventActionMemoryCycle:
         await agent.close_memory()
 
 
-# ─── F-5b-4: Per-dispatch timeout in SEND_MESSAGE ──────────
+# ─── F-5b-4: Per-dispatch timeout in SEND_CHANNEL_MESSAGE ──────────
 
 
 class TestPerDispatchTimeout:
-    """F-5b-4: _handle_send_message wraps dispatch with asyncio.wait_for."""
+    """F-5b-4: _handle_send_channel_message wraps dispatch with asyncio.wait_for."""
 
     async def test_dispatch_timeout_logged_not_raised(self):
         """A dispatch timeout is caught gracefully — sender is not blocked.
 
         We mock the dispatcher to raise TimeoutError (what asyncio.wait_for
-        raises) to verify the except clause in _handle_send_message.
+        raises) to verify the except clause in _handle_send_channel_message.
         """
         agent = await _make_agent()
         dispatcher = EventDispatcher(agents={"ember-owl": agent})
@@ -211,7 +211,7 @@ class TestPerDispatchTimeout:
         dispatcher.dispatch = _raise_timeout  # type: ignore[assignment]
 
         action = AgentAction(
-            action_type=ActionType.SEND_MESSAGE,
+            action_type=ActionType.SEND_CHANNEL_MESSAGE,
             payload={
                 "content": "Hello",
                 "mentions": ["ember-owl"],

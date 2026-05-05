@@ -4,10 +4,10 @@ PR #248 deep-review findings (High + Medium tier) addressed here:
 
 - **High** — ``_StatePersistenceMixin._MULTI_TURN_EVENT_TYPES`` must list
   ``CHANNEL_MESSAGE`` so dispatched channel events take the multi-turn
-  episode path alongside ``MESSAGE_RECEIVED`` instead of falling through
-  the legacy fallback (which logs a "Event type … is not classified"
-  warning per event). The PR-215 review comment above the frozenset
-  explicitly anticipated this gap when a new ``EventType`` lands.
+  episode path instead of falling through the legacy fallback (which logs
+  a "Event type … is not classified" warning per event). The PR-215
+  review comment above the frozenset explicitly anticipated this gap when
+  a new ``EventType`` lands.
 
 - **Medium** — ``prompt_assembly._format_event`` must produce a
   ``<|user_message|>``-wrapped, sender-attributed string for
@@ -17,13 +17,18 @@ PR #248 deep-review findings (High + Medium tier) addressed here:
 
 - **Medium** — ``action_loop`` must use ``payload["content"]`` (not the
   formatted ``user_message``) as the FTS5 ``memory_query`` for
-  ``CHANNEL_MESSAGE``, mirroring the ``MESSAGE_RECEIVED`` branch. Without
-  this fix the memory query is contaminated with delimiter / JSON
-  punctuation that produces zero useful keyword matches.
+  ``CHANNEL_MESSAGE``. Without this fix the memory query is contaminated
+  with delimiter / JSON punctuation that produces zero useful keyword
+  matches.
 
-These are dormancy tests (PR 4a-i ships the receiver but no producer
-yet); they pin the behavior so the moment PR 4a-ii / PR 4b wires a
-producer, the runtime path is correct.
+These tests were authored against the pre-RFC 0011 PR 4a-ii-α enum pair
+(``MESSAGE_RECEIVED`` + ``CHANNEL_MESSAGE``), where each assertion
+guarded the new ``CHANNEL_MESSAGE`` arm against the regressing parity
+with the existing ``MESSAGE_RECEIVED`` arm. After the hard rename
+collapsed both members into ``CHANNEL_MESSAGE``, the two-branch
+symmetry narration was rewritten to single-branch wording (PR #249
+deep-review Low); the assertions themselves are unchanged and still pin
+the runtime path.
 """
 
 from __future__ import annotations
@@ -35,9 +40,37 @@ from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_runtime.state_persistence import _StatePersistenceMixin
-from agents.persona_types import AgentEvent, EventType
+from agents.persona_types import ActionType, AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
+
+
+# ─── Wire-string pin (PR #249 deep-review Nice-to-Have #4) ──
+#
+# RFC 0011 PR 4a-ii-α changed the on-the-wire string values of the
+# canonical chat enum members from ``"message_received"`` /
+# ``"send_message"`` (legacy) to ``"channel_message"`` /
+# ``"send_channel_message"``. The string values flow into:
+#
+#   * ``AgentEvent`` JSON serialisation (cross-process boundaries planned
+#     for PR 4a-ii-β);
+#   * the action-type field that ``chat_reply._extract_chat_reply`` keys
+#     on when scanning persisted action sequences;
+#   * episodic-memory rows whose ``event_type`` column stores the value.
+#
+# Any accidental rename of the enum value (e.g. a refactor that touches
+# the right-hand side of the enum line) would silently break routing
+# without triggering any of the existing structural assertions, since
+# every other test references the symbol by name. Pinning the literal
+# value here turns such a regression into an immediate test failure.
+
+
+class TestEnumWireStringValues:
+    def test_channel_message_value_is_stable(self):
+        assert EventType.CHANNEL_MESSAGE.value == "channel_message"
+
+    def test_send_channel_message_value_is_stable(self):
+        assert ActionType.SEND_CHANNEL_MESSAGE.value == "send_channel_message"
 
 
 # ─── High: routing table includes CHANNEL_MESSAGE ──────────
@@ -108,8 +141,8 @@ class TestFormatEventChannelMessage:
 
     async def test_agent_sender_uses_attributed_form(self):
         """A channel message from another agent (non-user) takes the
-        plain ``Message from <sender>:`` form, mirroring the
-        ``MESSAGE_RECEIVED`` branch's ``sender_type != "user"`` path.
+        plain ``Message from <sender>:`` form (the ``sender_type !=
+        "user"`` branch of ``_format_event`` for ``CHANNEL_MESSAGE``).
         """
         agent = await _make_agent()
         event = AgentEvent(
@@ -125,9 +158,9 @@ class TestFormatEventChannelMessage:
         assert "ack" in msg
 
     async def test_sanitizes_delimiter_injection_attempt(self):
-        """Symmetry with the ``MESSAGE_RECEIVED`` PR #120 F-2 fix: an
-        attacker-controlled body containing ``<|`` / ``|>`` MUST be
-        escaped before injection into the LLM prompt.
+        """Per the PR #120 F-2 fix, an attacker-controlled body
+        containing ``<|`` / ``|>`` MUST be escaped before injection
+        into the LLM prompt.
         """
         agent = await _make_agent()
         event = AgentEvent(
@@ -154,8 +187,9 @@ class TestChannelMessageMemoryQuery:
 
         Using the formatted ``_format_event`` output would feed FTS5 the
         ``<|user_message …|>`` wrapper tokens and produce no useful
-        keyword matches — the same bug the existing MESSAGE_RECEIVED
-        branch was added to fix. PR #248 deep-review M finding.
+        keyword matches — the FTS5-vs-delimiters bug originally fixed for
+        ``MESSAGE_RECEIVED`` and now consolidated onto ``CHANNEL_MESSAGE``
+        by RFC 0011 PR 4a-ii-α. PR #248 deep-review M finding.
         """
         agent = await _make_agent()
 

@@ -68,26 +68,26 @@ def _make_servicer(
 class TestExtractChatReply:
 
     def test_user_targeted_send_message_wins(self):
-        """SEND_MESSAGE with user_id in mentions is highest priority."""
+        """SEND_CHANNEL_MESSAGE with user_id in mentions is highest priority."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "to other", "mentions": ["iron-fox"]}),
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "to user", "mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "to other", "mentions": ["iron-fox"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "to user", "mentions": ["local"]}),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "to user"
         assert status == "ok"
 
     def test_fallback_to_any_send_message(self):
-        """Any SEND_MESSAGE wins when no user-targeted one exists."""
+        """Any SEND_CHANNEL_MESSAGE wins when no user-targeted one exists."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "general", "mentions": ["iron-fox"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "general", "mentions": ["iron-fox"]}),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "general"
         assert status == "ok"
 
     def test_fallback_to_complete_task(self):
-        """COMPLETE_TASK result used when no SEND_MESSAGE exists."""
+        """COMPLETE_TASK result used when no SEND_CHANNEL_MESSAGE exists."""
         actions = [
             AgentAction(ActionType.COMPLETE_TASK, {"result": "task done"}),
         ]
@@ -105,10 +105,10 @@ class TestExtractChatReply:
         assert status == "empty"
 
     def test_send_message_preferred_over_complete_task(self):
-        """SEND_MESSAGE beats COMPLETE_TASK regardless of order."""
+        """SEND_CHANNEL_MESSAGE beats COMPLETE_TASK regardless of order."""
         actions = [
             AgentAction(ActionType.COMPLETE_TASK, {"result": "task result"}),
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "message", "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "message", "mentions": []}),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "message"
@@ -120,9 +120,9 @@ class TestExtractChatReply:
         assert status == "empty"
 
     def test_user_id_empty_skips_user_targeted_priority(self):
-        """Empty user_id falls through to any SEND_MESSAGE priority."""
+        """Empty user_id falls through to any SEND_CHANNEL_MESSAGE priority."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "broadcast", "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "broadcast", "mentions": []}),
         ]
         reply, status = _extract_chat_reply(actions, "")
         assert reply == "broadcast"
@@ -142,7 +142,7 @@ class TestChatServicerFollowUps:
         and metadata["session_id"].
         (PR 6 review fix: PR 3 finding #1 / test gap #9.)
         """
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -192,12 +192,12 @@ class TestChatServicerFollowUps:
         assert resp.reply_status == "error"
 
     def test_extract_reply_send_message_missing_content(self):
-        """SEND_MESSAGE with no 'content' key falls back to empty string via .get().
+        """SEND_CHANNEL_MESSAGE with no 'content' key falls back to empty string via .get().
 
         (PR 6 review fix: PR 3 test gap #11.)
         """
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"mentions": ["local"]}),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == ""
@@ -219,10 +219,10 @@ class TestChatServicerFollowUps:
         assert "No, I do not have internet access." in reply
 
     def test_extract_reply_strips_delimiters_from_send_message(self):
-        """Delimiter tags stripped from SEND_MESSAGE content too."""
+        """Delimiter tags stripped from SEND_CHANNEL_MESSAGE content too."""
         content = '<|user_message user_id="local"|>\nhi\n<|/user_message|>\nHello!'
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "content": content,
                 "channel_id": "ch-1",
                 "mentions": ["local"],
@@ -248,7 +248,7 @@ class TestSanitizeReplyEdgeCases:
     def test_clean_text_unchanged(self):
         """Text without any delimiter tags passes through untouched."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "Just a normal reply.", "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "Just a normal reply.", "mentions": []}),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "Just a normal reply."
@@ -257,7 +257,7 @@ class TestSanitizeReplyEdgeCases:
     def test_only_tags_returns_empty(self):
         """Reply consisting solely of delimiter tags becomes empty string."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "content": '<|user_message|>\n<|/user_message|>',
                 "mentions": [],
             }),
@@ -275,7 +275,7 @@ class TestSanitizeReplyEdgeCases:
             'Answer two.'
         )
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": raw, "mentions": []}),
         ]
         reply, _ = _extract_chat_reply(actions, "local")
         assert "<|user_message" not in reply
@@ -297,7 +297,7 @@ class TestSanitizeReplyEdgeCases:
         """Lone opening tag (without closing) is still stripped."""
         raw = '<|user_message|>\nSome leaked prefix\nActual reply here'
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": raw, "mentions": []}),
         ]
         reply, _ = _extract_chat_reply(actions, "local")
         assert "<|user_message" not in reply
@@ -307,7 +307,7 @@ class TestSanitizeReplyEdgeCases:
         """Lone closing tag (without opening) is still stripped."""
         raw = 'Actual reply<|/user_message|>'
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": raw, "mentions": []}),
         ]
         reply, _ = _extract_chat_reply(actions, "local")
         assert "<|/user_message" not in reply
@@ -317,7 +317,7 @@ class TestSanitizeReplyEdgeCases:
         """End-to-end: tags in dispatch output are stripped in ChatResponse."""
         raw = '<|user_message|>\ndo you recall?\n<|/user_message|>\nYes I do!'
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "content": raw,
                 "mentions": ["local"],
             }),
@@ -337,7 +337,7 @@ class TestSanitizeReplyEdgeCases:
         """A torn opening fragment with no closing ``|>`` at end-of-string is stripped."""
         raw = "Real reply text.\n<|user_mess"
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": raw, "mentions": []}),
         ]
         reply, _ = _extract_chat_reply(actions, "local")
         assert reply == "Real reply text."
@@ -347,7 +347,7 @@ class TestSanitizeReplyEdgeCases:
         """Tag whose attribute value contains a pipe (e.g. ``user_id="a|b"``) is stripped."""
         raw = '<|user_message user_id="a|b"|>\nhi\n<|/user_message|>\nHello!'
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": raw, "mentions": []}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": raw, "mentions": []}),
         ]
         reply, _ = _extract_chat_reply(actions, "local")
         assert "<|user_message" not in reply

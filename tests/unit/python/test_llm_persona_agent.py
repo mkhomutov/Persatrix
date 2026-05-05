@@ -42,7 +42,7 @@ class TestLLMPersonaAgent:
     async def test_on_event_returns_actions(self):
         agent = await self._make_agent()
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "How's the sprint going?"},
             sender_id="iron-fox",
         )
@@ -115,7 +115,7 @@ class TestLLMPersonaAgent:
     async def test_format_event_message_received(self):
         agent = await self._make_agent()
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello Sarah"},
             sender_id="mike",
         )
@@ -158,7 +158,7 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent(llm_client=client)
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Sprint status?"},
             sender_id="mike",
         )
@@ -171,7 +171,7 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent()
         assert agent._state.energy == 1.0
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             sender_id="test",
         )
@@ -231,13 +231,13 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent()
         response = LLMResponse(
             text=json.dumps([
-                {"action_type": "send_message", "payload": {"channel_id": "general", "content": "hi"}},
+                {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": "hi"}},
                 {"action_type": "complete_task", "payload": {"result": "done"}},
             ]),
         )
         actions = agent._parse_actions(response)
         assert len(actions) == 2
-        assert actions[0].action_type == ActionType.SEND_MESSAGE
+        assert actions[0].action_type == ActionType.SEND_CHANNEL_MESSAGE
         assert actions[1].action_type == ActionType.COMPLETE_TASK
 
     async def test_parse_actions_json_code_block(self):
@@ -279,7 +279,7 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent(llm_client=client)
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
         )
         actions = await agent.on_event(event)
@@ -296,7 +296,7 @@ class TestLLMPersonaAgent:
         agent._llm_client = None
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
         )
         actions = await agent.on_event(event)
@@ -327,12 +327,12 @@ class TestLLMPersonaAgent:
         agent._on_event_inner = _tracking_inner  # type: ignore[assignment]
 
         e1 = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "first", "label": "1"},
             sender_id="a",
         )
         e2 = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "second", "label": "2"},
             sender_id="b",
         )

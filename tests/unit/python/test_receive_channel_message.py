@@ -23,11 +23,9 @@ and DO NOT enqueue; ``error_message`` is taxonomised so operators reading
 wire traces can locate the failure class.
 
 Hard renames of ``EventType.MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` and
-``ActionType.SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` are deferred to a
-follow-up PR that lands atomically with the chat-path migration per the
-RFC 0011 amendment (chat is the heavy producer of the old names; renaming
-without migrating chat would leave ``main`` broken). This PR adds the new
-enum members additively and keeps the old names intact.
+``ActionType.SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` landed in PR 4a-ii-α
+(RFC 0011, v0.3.0). PR 4a added the new enum members additively; PR 4a-ii-α
+removed the old names atomically with the chat-path migration.
 """
 
 from __future__ import annotations

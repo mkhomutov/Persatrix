@@ -202,7 +202,7 @@ class TestMaxLLMCallsExhaustion:
         await agent.initialize_memory()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             sender_id="test",
         )
@@ -240,7 +240,7 @@ class TestPersonaDefaultFallbackLimits:
         await agent.initialize_memory()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hello"},
             sender_id="test",
         )
@@ -261,7 +261,7 @@ class TestPersonaDefaultFallbackLimits:
         await agent.initialize_memory()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hello"},
             sender_id="test",
         )
@@ -294,7 +294,7 @@ class TestConvenienceMethods:
     async def test_message_action(self):
         agent = await self._make_agent()
         action = agent.message("ch-1", "Hello team", mentions=["mike"])
-        assert action.action_type == ActionType.SEND_MESSAGE
+        assert action.action_type == ActionType.SEND_CHANNEL_MESSAGE
         assert action.payload["channel_id"] == "ch-1"
         assert action.payload["content"] == "Hello team"
         assert action.payload["type"] == "TEXT"

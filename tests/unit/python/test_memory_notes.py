@@ -16,7 +16,7 @@ class TestNoteInjectionBehavior:
     """Tests for note injection behavior after RFC 0017 PR 4.
 
     PR 4 removes the ``should_fall_back`` recency-note fallback that was
-    triggered by empty-notes + MESSAGE_RECEIVED + no-episodes.  The
+    triggered by empty-notes + CHANNEL_MESSAGE + no-episodes.  The
     min_score threshold on recall/recall_notes is now the only filter;
     low-signal queries produce empty results and no section injection.
 
@@ -49,7 +49,7 @@ class TestNoteInjectionBehavior:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
         )
         with patch.object(agent, "_format_event", return_value="hi"):
@@ -101,7 +101,7 @@ class TestNoteInjectionBehavior:
         await agent.initialize_memory()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hello"},
         )
         with patch.object(agent, "_format_event", return_value="hello"):
@@ -133,7 +133,7 @@ class TestNoteInjectionBehavior:
             )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "greetings"},
         )
         with patch.object(agent, "_format_event", return_value="greetings"):
@@ -149,7 +149,7 @@ class TestNoteInjectionBehavior:
     async def test_recency_fallback_skipped_for_non_message_events(self):
         """TICK event with no keyword-overlapping notes → no section.
 
-        Pre-PR 4 this was guaranteed by the MESSAGE_RECEIVED gate inside
+        Pre-PR 4 this was guaranteed by the CHANNEL_MESSAGE gate inside
         ``should_fall_back``.  Post-PR 4 the gate is gone: ``recall_notes``
         is invoked for TICK as well, but the seeded note has no token
         overlap with the TICK query, so FTS5 returns no results above
@@ -216,7 +216,7 @@ class TestNoteInjectionBehavior:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "pottery glaze"},
         )
         with patch.object(

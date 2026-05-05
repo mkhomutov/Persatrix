@@ -205,14 +205,14 @@ class TestTickShortCircuit:
         """(e) Non-TICK event with memory_admitted_tokens == 0 → LLM call still issued.
 
         The short-circuit must only fire on TICK events.  A low-keyword
-        MESSAGE_RECEIVED that admits zero memory tokens must still invoke
+        CHANNEL_MESSAGE that admits zero memory tokens must still invoke
         the LLM (the user is waiting for a reply).
         """
         client = _make_client()
         agent = await _make_agent(client=client)
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
         )
 

@@ -213,9 +213,9 @@ class PersonaAgent(BaseAgent):
         message_type: str = "TEXT",
         mentions: list[str] | None = None,
     ) -> AgentAction:
-        """Create a SEND_MESSAGE action."""
+        """Create a SEND_CHANNEL_MESSAGE action."""
         return AgentAction(
-            action_type=ActionType.SEND_MESSAGE,
+            action_type=ActionType.SEND_CHANNEL_MESSAGE,
             payload={
                 "channel_id": channel_id,
                 "content": content,

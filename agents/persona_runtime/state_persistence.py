@@ -77,9 +77,8 @@ class _StatePersistenceMixin:
     # choice about which set it belongs to (rather than silently
     # routing through the tracker as a ``tick``-scoped row).
     _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset({
-        EventType.MESSAGE_RECEIVED,
+        EventType.CHANNEL_MESSAGE,
         EventType.MENTION,
-        EventType.CHANNEL_MESSAGE,  # RFC 0011 PR 4a-i (PR #248 review High).
     })
     _SINGLE_TURN_EVENT_TYPES: frozenset[EventType] = frozenset({
         EventType.TICK,
@@ -289,7 +288,7 @@ class _StatePersistenceMixin:
         # ``Turn`` dataclass docstring repeats the constraint.  An
         # earlier draft stashed the full ``ctx`` (which carries
         # ``event.payload`` — i.e. the message body for
-        # ``MESSAGE_RECEIVED`` / ``MENTION``) on the turn, so the
+        # ``CHANNEL_MESSAGE`` / ``MENTION``) on the turn, so the
         # closed-interaction ``context_json`` ended up embedding every
         # message body for the lifetime of the row.  PR 4's LLM
         # summariser only needs the per-turn structural envelope plus

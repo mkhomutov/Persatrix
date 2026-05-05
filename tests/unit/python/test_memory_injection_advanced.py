@@ -55,7 +55,7 @@ class TestInjectMemoryContextAdvanced:
         await agent._relationship_memory._db.commit()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="iron-fox",
         )
@@ -229,7 +229,7 @@ class TestInjectMemoryContextAdvanced:
 
         # Event 1: message from alice — relationship section added.
         sender_event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="alice",
         )
@@ -269,7 +269,7 @@ class TestInjectMemoryContextAdvanced:
 
         # Event 1: MESSAGE — FTS5 finds the episode; episodic_recall added.
         msg_event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "architecture"},
         )
         with patch.object(agent, "_format_event", return_value="architecture"):
@@ -342,7 +342,7 @@ class TestInjectMemoryContextAdvanced:
 
         Validates the full path:
         1. Agent records an interaction with other_participant_type="user"
-        2. A user sends MESSAGE_RECEIVED with sender_participant_type="user"
+        2. A user sends CHANNEL_MESSAGE with sender_participant_type="user"
         3. _inject_memory_context() queries the user relationship
         4. The relationship section labels the sender as "(Human user)"
 
@@ -365,7 +365,7 @@ class TestInjectMemoryContextAdvanced:
 
         # Simulate a user message with sender_participant_type in metadata.
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello from user"},
             sender_id="user-alice",
             metadata={"sender_participant_type": "user"},
@@ -399,7 +399,7 @@ class TestInjectMemoryContextAdvanced:
 
         # No metadata at all — should default to "agent" lookup.
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="iron-fox",
         )

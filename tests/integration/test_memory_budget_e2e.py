@@ -144,7 +144,7 @@ def _make_mixin_with_real_episodic(
     *,
     rel: _FakeRelSummary | None = None,
     sender_id: str | None = None,
-    event_type: str = "MESSAGE_RECEIVED",
+    event_type: str = "CHANNEL_MESSAGE",
     content: str = "hello",
 ) -> tuple[_ConcreteMemoryMixin, Any]:
     """Wire a real EpisodicMemory into the mixin; mock relationship memory."""
@@ -174,8 +174,8 @@ class TestMemoryBudgetE2EFourEventStream:
 
     Event sequence:
       1. TICK          — autonomous heartbeat; expect ~0 admitted tokens
-      2. MESSAGE_RECEIVED("hi")  — low-signal greeting; expect ~0 admitted tokens
-      3. MESSAGE_RECEIVED(substantive query with keywords from seeded episodes)
+      2. CHANNEL_MESSAGE("hi")  — low-signal greeting; expect ~0 admitted tokens
+      3. CHANNEL_MESSAGE(substantive query with keywords from seeded episodes)
                        — high-signal; expect non-zero admitted tokens ≤ budget
       4. TICK          — autonomous heartbeat again; expect ~0 admitted tokens
 
@@ -191,8 +191,8 @@ class TestMemoryBudgetE2EFourEventStream:
         """Token budget ≤ _MEMORY_BUDGET_TOKENS at every event step."""
         events_and_types = [
             ("TICK", ""),
-            ("MESSAGE_RECEIVED", "hi"),
-            ("MESSAGE_RECEIVED", "telescope aperture astrophotography optics"),
+            ("CHANNEL_MESSAGE", "hi"),
+            ("CHANNEL_MESSAGE", "telescope aperture astrophotography optics"),
             ("TICK", ""),
         ]
         for et, content in events_and_types:
@@ -230,7 +230,7 @@ class TestMemoryBudgetE2EFourEventStream:
                 "Requires SQLite FTS5: LIKE fallback ignores min_score "
                 "(RFC 0017 §C) so zero-admission cannot be guaranteed.",
             )
-        for et, content in [("TICK", ""), ("MESSAGE_RECEIVED", "hi")]:
+        for et, content in [("TICK", ""), ("CHANNEL_MESSAGE", "hi")]:
             mixin, event = _make_mixin_with_real_episodic(
                 seeded_episodic, event_type=et, content=content,
             )
@@ -253,7 +253,7 @@ class TestMemoryBudgetE2EFourEventStream:
         """
         mixin, event = _make_mixin_with_real_episodic(
             seeded_episodic,
-            event_type="MESSAGE_RECEIVED",
+            event_type="CHANNEL_MESSAGE",
             content="telescope aperture astrophotography optics",
         )
         result = await mixin._inject_memory_context(event)
@@ -280,7 +280,7 @@ class TestMemoryBudgetE2EFourEventStream:
         """
         mixin, event = _make_mixin_with_real_episodic(
             seeded_episodic,
-            event_type="MESSAGE_RECEIVED",
+            event_type="CHANNEL_MESSAGE",
             content="telescope aperture astrophotography optics",
         )
         await mixin._inject_memory_context(event)
@@ -335,16 +335,16 @@ class TestMemoryBudgetE2EFourEventStream:
     async def test_no_recency_fallback_for_low_signal_message(
         self, seeded_episodic: EpisodicMemory,
     ) -> None:
-        """Low-signal MESSAGE_RECEIVED: no recency fallback; memory sections absent.
+        """Low-signal CHANNEL_MESSAGE: no recency fallback; memory sections absent.
 
         The should_fall_back path (PR 2) triggered a recall_notes("", limit=3)
-        fallback for empty-notes + empty-episodes + MESSAGE_RECEIVED.  That
+        fallback for empty-notes + empty-episodes + CHANNEL_MESSAGE.  That
         fallback is deleted in PR 4; low-signal messages must leave all sections
         absent rather than injecting unrelated recent notes.
         """
         mixin, event = _make_mixin_with_real_episodic(
             seeded_episodic,
-            event_type="MESSAGE_RECEIVED",
+            event_type="CHANNEL_MESSAGE",
             content="hi",
         )
         await mixin._inject_memory_context(event)
@@ -373,7 +373,7 @@ class TestMinScoreWiredIntoRecallCalls:
         mixin._relationship_memory.get_relationship_summary.return_value = None
 
         event = MagicMock()
-        event.event_type = EventType.MESSAGE_RECEIVED
+        event.event_type = EventType.CHANNEL_MESSAGE
         event.sender_id = None
         event.metadata = {}
         event.payload = {"content": "some query"}
@@ -400,7 +400,7 @@ class TestMinScoreWiredIntoRecallCalls:
         mixin._relationship_memory.get_relationship_summary.return_value = None
 
         event = MagicMock()
-        event.event_type = EventType.MESSAGE_RECEIVED
+        event.event_type = EventType.CHANNEL_MESSAGE
         event.sender_id = None
         event.metadata = {}
         event.payload = {"content": "some query"}

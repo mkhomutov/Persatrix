@@ -42,7 +42,7 @@ class TestEventTimeout:
         await agent.initialize_memory()
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hello"},
         )
         actions = await agent.on_event(event)

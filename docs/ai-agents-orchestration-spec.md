@@ -777,7 +777,7 @@ from enum import Enum
 # ─── Events that a persona agent can receive ───────────
 class EventType(Enum):
     TASK_ASSIGNED = "task_assigned"         # workflow step assigned to this agent
-    MESSAGE_RECEIVED = "message_received"   # channel/DM message addressed to this agent
+    CHANNEL_MESSAGE = "channel_message"     # channel/DM message addressed to this agent
     MENTION = "mention"                     # @mentioned in a channel
     SUB_AGENT_COMPLETED = "sub_agent_completed"
     APPROVAL_REQUESTED = "approval_requested"
@@ -793,7 +793,7 @@ class AgentEvent:
 
 # ─── Actions that a persona agent can take ─────────────
 class ActionType(Enum):
-    SEND_MESSAGE = "send_message"           # post to a channel or DM
+    SEND_CHANNEL_MESSAGE = "send_channel_message"  # post to a channel or DM
     COMPLETE_TASK = "complete_task"          # finish assigned task with result
     DELEGATE = "delegate"                   # ask another persona agent for help
     SPAWN_SUB_AGENT = "spawn_sub_agent"     # create ephemeral sub-agent

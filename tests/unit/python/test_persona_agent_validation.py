@@ -284,7 +284,7 @@ class TestHandleWithoutCompleteTask:
         from agents.llm_client import LLMResponse
 
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_message", "payload": {"content": "hi", "channel_id": "ch-1"}},
+            {"action_type": "send_channel_message", "payload": {"content": "hi", "channel_id": "ch-1"}},
             {"action_type": "do_nothing", "payload": {}},
         ]))
         client = _make_client([response])
@@ -298,5 +298,5 @@ class TestHandleWithoutCompleteTask:
         output = await agent.handle(_task("do something"))
         assert output.status == TaskStatus.FAILED
         assert "No COMPLETE_TASK action taken" in output.result
-        assert "send_message" in output.result
+        assert "send_channel_message" in output.result
         await agent.close_memory()

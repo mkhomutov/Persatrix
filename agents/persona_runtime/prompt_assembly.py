@@ -247,7 +247,7 @@ class _PromptAssemblyMixin:
                 if isinstance(task, TaskInput):
                     return f"You have been assigned a task:\n\n{task.payload}"
                 return f"You have been assigned a task:\n\n{event.payload}"
-            case EventType.MESSAGE_RECEIVED | EventType.CHANNEL_MESSAGE:
+            case EventType.CHANNEL_MESSAGE:
                 # SECURITY: sender_id and content originate from the
                 # dispatcher today (trusted).  When external bridges
                 # (Slack, Discord, email) are added in v0.2+, these
@@ -255,15 +255,19 @@ class _PromptAssemblyMixin:
                 # and length-cap before injecting into the LLM prompt
                 # to mitigate prompt injection risks.
                 #
-                # ``CHANNEL_MESSAGE`` (RFC 0011 PR 4a-i) shares the same
-                # delimiter / sanitisation discipline as ``MESSAGE_RECEIVED``
-                # — both carry a sender_id + content payload and both can
-                # originate from a user-typed message on the channels
-                # surface.  Without this case the event fell through to
-                # ``case _:`` and reached the LLM as a raw json.dumps blob,
-                # leaking brace/quote tokens and bypassing the PR #120 F-2
-                # delimiter-injection mitigation.  PR #248 deep review
-                # Medium finding.
+                # User-typed channel messages are wrapped in XML-style
+                # ``<|user_message|>`` delimiters with the PR #120 F-2
+                # delimiter-injection sanitisation below, so a body
+                # containing literal ``<|`` / ``|>`` cannot close the
+                # block early and impersonate system instructions.
+                # Without this case the event would fall through to
+                # ``case _:`` and reach the LLM as a raw json.dumps
+                # blob, leaking brace/quote tokens (PR #248 deep review
+                # Medium; PR #249 deep-review Low cleaned up the
+                # historical two-branch ``MESSAGE_RECEIVED`` /
+                # ``CHANNEL_MESSAGE`` symmetry comment after the
+                # RFC 0011 PR 4a-ii-α hard rename collapsed both
+                # enum members into ``CHANNEL_MESSAGE``).
                 sender = event.sender_id or "unknown"
                 content = event.payload.get("content", "")
                 # Wrap user participant messages in XML-style delimiters

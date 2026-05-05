@@ -96,7 +96,7 @@ class TestTwoPhaseWrite:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 3)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -166,7 +166,7 @@ class TestSummarisationFailureModes:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 3)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -182,7 +182,7 @@ class TestSummarisationFailureModes:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 3)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": True},

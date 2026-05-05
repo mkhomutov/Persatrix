@@ -25,8 +25,8 @@ def extract_chat_reply(
     """Extract a chat reply text from a list of agent actions.
 
     Priority (OQ 5):
-    1. ``SEND_MESSAGE`` whose ``mentions`` list contains ``user_id``.
-    2. Any ``SEND_MESSAGE`` action.
+    1. ``SEND_CHANNEL_MESSAGE`` whose ``mentions`` list contains ``user_id``.
+    2. Any ``SEND_CHANNEL_MESSAGE`` action.
     3. ``COMPLETE_TASK`` result payload.
     4. Empty string (reply_status="empty").
 
@@ -70,17 +70,17 @@ def extract_chat_reply(
         return cleaned.strip()
 
     send_messages = [
-        a for a in actions if a.action_type == ActionType.SEND_MESSAGE
+        a for a in actions if a.action_type == ActionType.SEND_CHANNEL_MESSAGE
     ]
 
-    # Priority 1: user-targeted SEND_MESSAGE
+    # Priority 1: user-targeted SEND_CHANNEL_MESSAGE
     if user_id:
         for action in send_messages:
             mentions = action.payload.get("mentions", [])
             if user_id in mentions:
                 return _sanitize_reply(action.payload.get("content", "")), "ok"
 
-    # Priority 2: any SEND_MESSAGE
+    # Priority 2: any SEND_CHANNEL_MESSAGE
     if send_messages:
         return _sanitize_reply(send_messages[0].payload.get("content", "")), "ok"
 

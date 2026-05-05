@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 PR 4a-ii-α — hard rename
+  `MESSAGE_RECEIVED`/`SEND_MESSAGE` → `CHANNEL_MESSAGE`/`SEND_CHANNEL_MESSAGE`
+  + SF-3 mentions validation.** Drops the v0.2 enum aliases now that
+  PR 4a-ii-α has migrated every Python producer (chat ingest,
+  persona-runtime response gate, dispatch executor, action validators,
+  prompt assembly, state persistence, memory routing, all unit and
+  integration tests, glossary + spec docs) onto the canonical channel
+  vocabulary. The cross-process REST/gRPC rewire lands in PR 4a-ii-β
+  per the α/β split documented in `docs/rfcs/0011-pr-plan.md`.
+
+  **Behaviour change visible to downstream consumers:** the
+  `ActionExecutor` result dict for channel sends now carries
+  `"action_type": "send_channel_message"` (previously
+  `"send_message"`). Any log scraper, evaluator, or telemetry pipeline
+  that grepped on the v0.2 literal must be updated. The
+  `EventType.MESSAGE_RECEIVED` and `ActionType.SEND_MESSAGE` enum names
+  no longer resolve and any out-of-tree producer must move to the new
+  members. (PR #249.)
+
+  Also closes PR #231 review SF-3: `sqliteStore.PublishMessage` now
+  validates every entry in `msg.Mentions` through the same
+  `validateParticipantID` check the sender goes through, before
+  `BeginTx`. The error wraps the offending index
+  (`mentions[%d]: %w`) so callers can identify the bad value while
+  preserving `errors.Is(err, ErrInvalidParticipantID)` for the
+  Router's 422 mapping.
+
 - **PR #248 deep-review follow-ups — `CHANNEL_MESSAGE` runtime
   integration + receiver hardening.** Closes the High/Medium/Low
   findings on top of the PR 4a-i scope:

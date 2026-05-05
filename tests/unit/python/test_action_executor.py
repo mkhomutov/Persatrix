@@ -193,7 +193,7 @@ class TestActionExecutor:
     async def test_send_message_no_dispatcher(self):
         executor = ActionExecutor(dispatcher=None)
         results = await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello!",
                 "mentions": ["iron-fox"],
@@ -202,13 +202,13 @@ class TestActionExecutor:
         assert results[0]["status"] == "no_dispatcher"
 
     async def test_send_message_with_dispatcher(self):
-        """SEND_MESSAGE dispatches to mentioned agents via EventDispatcher."""
+        """SEND_CHANNEL_MESSAGE dispatches to mentioned agents via EventDispatcher."""
         agent = await _make_agent(config={**_PERSONA_CONFIG_2})
         dispatcher = EventDispatcher(agents={"iron-fox": agent})
         executor = ActionExecutor(dispatcher=dispatcher)
 
         results = await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey Mike!",
                 "mentions": ["iron-fox"],
@@ -219,14 +219,14 @@ class TestActionExecutor:
         await agent.close_memory()
 
     async def test_send_message_no_mentions(self):
-        """SEND_MESSAGE with no mentions returns 'no_targets' status.
+        """SEND_CHANNEL_MESSAGE with no mentions returns 'no_targets' status.
 
         An empty mentions list is a no-op, not a failure.  (F-60-R2-2.)
         """
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
         results = await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello team!",
                 "mentions": [],
@@ -236,7 +236,7 @@ class TestActionExecutor:
         assert results[0]["status"] == "no_targets"
 
     async def test_send_message_channel_no_mentions_warns(self, caplog):
-        """SEND_MESSAGE with channel_id but no mentions logs WARNING and
+        """SEND_CHANNEL_MESSAGE with channel_id but no mentions logs WARNING and
         returns 'no_targets' status.
 
         A message targeting a channel with no explicit mentions is almost
@@ -249,7 +249,7 @@ class TestActionExecutor:
         executor = ActionExecutor(dispatcher=dispatcher)
         with caplog.at_level(logging.WARNING):
             results = await executor.execute("ember-owl", [
-                AgentAction(ActionType.SEND_MESSAGE, {
+                AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                     "channel_id": "general",
                     "content": "Hello team!",
                     "mentions": [],
@@ -264,7 +264,7 @@ class TestActionExecutor:
         )
 
     async def test_send_message_no_channel_no_mentions_debug(self, caplog):
-        """SEND_MESSAGE with no channel_id and no mentions returns 'no_targets'.
+        """SEND_CHANNEL_MESSAGE with no channel_id and no mentions returns 'no_targets'.
 
         No channel_id means the LLM didn't intend channel routing — a
         plain debug log is sufficient (no operator-visible warning).
@@ -274,7 +274,7 @@ class TestActionExecutor:
         executor = ActionExecutor(dispatcher=dispatcher)
         with caplog.at_level(logging.DEBUG):
             results = await executor.execute("ember-owl", [
-                AgentAction(ActionType.SEND_MESSAGE, {
+                AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                     "content": "Hello!",
                     "mentions": [],
                 }),
@@ -286,9 +286,9 @@ class TestActionExecutor:
         """A failed dispatch to one mention does not skip remaining mentions.
 
         execute() promises "Non-fatal failures are logged but do not
-        propagate."  The try/except inside _handle_send_message() ensures
+        propagate."  The try/except inside _handle_send_channel_message() ensures
         that a failure dispatching to one target still attempts the rest.
-        (Review finding: _handle_send_message exception propagation.)
+        (Review finding: _handle_send_channel_message exception propagation.)
         """
         agent_ok = await _make_agent(config={**_PERSONA_CONFIG_2})
         dispatcher = EventDispatcher(agents={"iron-fox": agent_ok})
@@ -311,7 +311,7 @@ class TestActionExecutor:
         executor = ActionExecutor(dispatcher=dispatcher)
 
         results = await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey everyone!",
                 "mentions": ["bad-agent", "iron-fox"],
@@ -325,7 +325,7 @@ class TestActionExecutor:
         await agent_ok.close_memory()
 
     async def test_send_message_mentions_truncated(self):
-        """SEND_MESSAGE with >10 mentions is truncated to prevent resource exhaustion.
+        """SEND_CHANNEL_MESSAGE with >10 mentions is truncated to prevent resource exhaustion.
 
         An LLM-generated payload with many mentions would trigger N
         synchronous dispatches, each with an LLM call.  With cascade
@@ -341,7 +341,7 @@ class TestActionExecutor:
         many_mentions[0] = "iron-fox"  # one valid target
 
         results = await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hello!",
                 "mentions": many_mentions,
@@ -356,7 +356,7 @@ class TestActionExecutor:
 
         Verifies the critical path: executor receives a cascade_depth from
         its caller (the dispatcher) and passes it through to
-        _handle_send_message() so that child SEND_MESSAGE events inherit
+        _handle_send_channel_message() so that child SEND_CHANNEL_MESSAGE events inherit
         the correct depth for cascade limiting.
         (PR #55 review: add test for cascade_depth propagation through executor.)
         """
@@ -378,14 +378,14 @@ class TestActionExecutor:
         dispatcher.dispatch = _tracking_dispatch  # type: ignore[assignment]
 
         await executor.execute("ember-owl", [
-            AgentAction(ActionType.SEND_MESSAGE, {
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "general",
                 "content": "Hey!",
                 "mentions": ["iron-fox"],
             }),
         ], cascade_depth=3)
 
-        # _handle_send_message() should create an event with cascade_depth=3
+        # _handle_send_channel_message() should create an event with cascade_depth=3
         # (the depth it received from execute()), and the dispatcher will
         # then increment it to 4 internally.
         assert len(received_depths) == 1
@@ -393,10 +393,10 @@ class TestActionExecutor:
         await agent.close_memory()
 
     async def test_send_message_missing_channel_id(self):
-        """SEND_MESSAGE with no channel_id defaults to empty string.
+        """SEND_CHANNEL_MESSAGE with no channel_id defaults to empty string.
 
         Verifies the ``action.payload.get("channel_id", "")`` path at
-        dispatch.py _handle_send_message() when channel_id is absent.
+        dispatch.py _handle_send_channel_message() when channel_id is absent.
         (F-64-DR2-08: missing channel_id path untested.)
         """
         agent = await _make_agent()
@@ -404,7 +404,7 @@ class TestActionExecutor:
         executor = ActionExecutor(dispatcher=dispatcher)
 
         action = AgentAction(
-            action_type=ActionType.SEND_MESSAGE,
+            action_type=ActionType.SEND_CHANNEL_MESSAGE,
             payload={
                 "content": "No channel",
                 "mentions": ["ember-owl"],

@@ -40,7 +40,7 @@ def _make_mixin(
     episodes: list[_FakeEpisode] | None = None,
     notes: list[_FakeNote] | None = None,
     sender_id: str | None = None,
-    event_type: str = "MESSAGE_RECEIVED",
+    event_type: str = "CHANNEL_MESSAGE",
 ) -> tuple[_ConcreteMemoryMixin, Any]:
     """Return a wired _MemoryContextMixin instance and a matching fake event."""
     from agents.memory.working import WorkingMemory
@@ -160,14 +160,14 @@ class TestInjectMemoryContextTickBehavior:
     async def test_no_recency_fallback_when_notes_empty(self) -> None:
         """should_fall_back removed (PR 4): recall_notes called exactly once.
 
-        Previously, empty notes + MESSAGE_RECEIVED + no episodes triggered a
+        Previously, empty notes + CHANNEL_MESSAGE + no episodes triggered a
         second recall_notes("", limit=3) fallback.  That path is deleted; the
         min_score threshold is the only filter.
         """
         mixin, event = _make_mixin(
             episodes=[],
             notes=[],
-            event_type="MESSAGE_RECEIVED",
+            event_type="CHANNEL_MESSAGE",
         )
 
         await mixin._inject_memory_context(event)
@@ -182,7 +182,7 @@ class TestInjectMemoryContextTickBehavior:
         mixin, event = _make_mixin(
             episodes=episodes,
             notes=[],
-            event_type="MESSAGE_RECEIVED",
+            event_type="CHANNEL_MESSAGE",
         )
 
         await mixin._inject_memory_context(event)

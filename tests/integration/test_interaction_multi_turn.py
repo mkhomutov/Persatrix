@@ -138,13 +138,13 @@ class TestMultiTurnAggregation:
     """RFC 0020 PR 3 \u00a7\"Multi-Turn for Human-Chat + DM\"."""
 
     async def test_ten_turn_session_collapses_into_one_interaction(self):
-        """Ten ``MESSAGE_RECEIVED`` turns from the same peer aggregate."""
+        """Ten ``CHANNEL_MESSAGE`` turns from the same peer aggregate."""
         agent = await _make_agent()
         peer = "iron-fox"
 
         for i in range(10):
             await agent.on_event(AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
+                event_type=EventType.CHANNEL_MESSAGE,
                 payload={"content": f"turn {i}"},
                 sender_id=peer,
             ))
@@ -166,7 +166,7 @@ class TestMultiTurnAggregation:
         # surface lands in a follow-up; the runtime accepts the marker
         # today so PR 5 / channel hooks can emit it).
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "thanks, bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -213,7 +213,7 @@ class TestMultiTurnAggregation:
 
         # First turn opens the interaction.
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hello"},
             sender_id=peer,
         ))
@@ -248,7 +248,7 @@ class TestMultiTurnAggregation:
 
         # The next turn opens a fresh interaction.
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "are you still there?"},
             sender_id=peer,
         ))
@@ -276,7 +276,7 @@ class TestMultiTurnAggregation:
         agent = await _make_agent()
         # Inbound A receives from B.
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "ping"},
             sender_id=b,
         ))
@@ -346,14 +346,14 @@ class TestSessionEndMetadataTruthiness:
         scope = scope_for_dm(agent.agent_id, peer)
 
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
             sender_id=peer,
         ))
         assert agent._interaction_tracker.open_scopes() == [scope]
 
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": flag_value},
@@ -380,12 +380,12 @@ class TestSessionEndMetadataTruthiness:
         scope = scope_for_dm(agent.agent_id, peer)
 
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
             sender_id=peer,
         ))
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "still here"},
             sender_id=peer,
             metadata={"chat_end": flag_value},
@@ -401,12 +401,12 @@ class TestSessionEndMetadataTruthiness:
         peer = "iron-fox"
 
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
             sender_id=peer,
         ))
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"session_end": True},
@@ -436,12 +436,12 @@ async def test_closed_interaction_context_does_not_embed_message_body():
     secret_body = "super-secret-message-body-xyzzy"
 
     await agent.on_event(AgentEvent(
-        event_type=EventType.MESSAGE_RECEIVED,
+        event_type=EventType.CHANNEL_MESSAGE,
         payload={"content": secret_body},
         sender_id=peer,
     ))
     await agent.on_event(AgentEvent(
-        event_type=EventType.MESSAGE_RECEIVED,
+        event_type=EventType.CHANNEL_MESSAGE,
         payload={"content": "bye"},
         sender_id=peer,
         metadata={"chat_end": True},

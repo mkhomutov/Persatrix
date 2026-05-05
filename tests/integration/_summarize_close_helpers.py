@@ -152,7 +152,7 @@ async def send_n_turns(
 ) -> None:
     for i in range(n):
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": f"turn {i}"},
             sender_id=peer,
         ))

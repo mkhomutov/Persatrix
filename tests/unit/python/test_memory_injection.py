@@ -67,7 +67,7 @@ class TestInjectMemoryContext:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="iron-fox",
         )
@@ -108,7 +108,7 @@ class TestInjectMemoryContext:
         agent._episodic_memory.recall_notes = AsyncMock(side_effect=RuntimeError("db locked"))
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             sender_id="iron-fox",
         )
@@ -141,7 +141,7 @@ class TestInjectMemoryContext:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             sender_id="iron-fox",
         )
@@ -216,7 +216,7 @@ class TestInjectMemoryContext:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="iron-fox",
         )
@@ -305,7 +305,7 @@ class TestInjectMemoryContext:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hello"},
             sender_id="iron-fox",
         )
