@@ -45,6 +45,11 @@ def _event(**overrides: object) -> task_pb2.ChannelMessageEvent:
         "timestamp": "2026-05-04T00:00:00Z",
         "thread_id": "",
         "mentions": [],
+        # RFC 0011 PR 4b: per-recipient policy is required by the
+        # validator. Default to ``always`` so existing tests keep
+        # passing; cases that exercise the policy field override.
+        "respond_policy": "always",
+        "thread_parent_sender_id": "",
     }
     fields.update(overrides)
     return task_pb2.ChannelMessageEvent(**fields)
@@ -179,3 +184,63 @@ class TestParseChannelTimestamp:
         # Symmetry guard: a non-UTC offset is valid RFC 3339; only the
         # missing-offset case is rejected.
         assert parse_channel_timestamp("2026-05-04T00:00:00-05:00") is not None
+
+
+# ─── RFC 0011 PR 4b: respond_policy + thread_parent_sender_id ───
+
+
+class TestRespondPolicyValidation:
+    """Validator must enforce the closed vocabulary for ``respond_policy``.
+
+    The policy field is per-recipient; the orchestrator filters
+    ``RespondNever`` upstream of dispatch, so a ``never`` reaching the
+    receiver is malformed routing. An empty string is also malformed —
+    the gate requires the field and would otherwise have to fail-closed
+    on a missing dimension.
+    """
+
+    def test_accepts_when_mentioned(self):
+        err, _ = validate_channel_message_event(_event(respond_policy="when_mentioned"))
+        assert err is None
+
+    def test_accepts_always(self):
+        err, _ = validate_channel_message_event(_event(respond_policy="always"))
+        assert err is None
+
+    def test_rejects_never(self):
+        # ``never`` MUST NOT reach the receiver — orchestrator filters
+        # it upstream. If it shows up, treat as malformed.
+        err, _ = validate_channel_message_event(_event(respond_policy="never"))
+        assert err is not None
+        assert "respond_policy" in err
+
+    def test_rejects_empty(self):
+        err, _ = validate_channel_message_event(_event(respond_policy=""))
+        assert err is not None
+        assert "respond_policy" in err
+
+    def test_rejects_unknown(self):
+        err, _ = validate_channel_message_event(_event(respond_policy="weekly"))
+        assert err is not None
+        # Must not leak full attacker-controlled field on the wire.
+        assert "weekly" in err  # still present (short token)
+        assert len(err) < 200
+
+
+class TestThreadParentSenderIDValidation:
+    """``thread_parent_sender_id`` is optional; when set it must be a valid id."""
+
+    def test_accepts_empty(self):
+        # Empty is the proto-3 default for non-thread events.
+        err, _ = validate_channel_message_event(_event(thread_parent_sender_id=""))
+        assert err is None
+
+    def test_accepts_valid_participant_id(self):
+        err, _ = validate_channel_message_event(_event(thread_parent_sender_id="iron-fox"))
+        assert err is None
+
+    def test_rejects_invalid_participant_id(self):
+        # Reserved colon — same trust boundary as ``sender_id``.
+        err, _ = validate_channel_message_event(_event(thread_parent_sender_id="bad:id"))
+        assert err is not None
+        assert "thread_parent_sender_id" in err

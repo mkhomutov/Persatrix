@@ -137,6 +137,9 @@ class ChannelMessageEvent(Message):
     timestamp: str
     thread_id: str
     mentions: list[str]
+    # RFC 0011 PR 4b additive fields — see proto/task.proto.
+    respond_policy: str
+    thread_parent_sender_id: str
     def __init__(
         self,
         *,
@@ -148,6 +151,8 @@ class ChannelMessageEvent(Message):
         timestamp: str = ...,
         thread_id: str = ...,
         mentions: list[str] | None = ...,
+        respond_policy: str = ...,
+        thread_parent_sender_id: str = ...,
     ) -> None: ...
 
 class TaskAck(Message):

@@ -99,6 +99,13 @@ type ChannelStore interface {
 	// [ErrChannelNotFound] when the id does not exist.
 	DeleteChannel(ctx context.Context, id string) error
 
+	// RemoveMember deletes the `(channelID, participantID)` membership
+	// row. The participant's prior messages are preserved — `messages.sender_id`
+	// retains the historical value per RFC 0011 §C endpoint table. Returns
+	// [ErrChannelNotFound] when the channel does not exist and [ErrNotMember]
+	// when the participant is not a member of the channel.
+	RemoveMember(ctx context.Context, channelID, participantID string) error
+
 	// Close releases any resources held by the store.
 	Close() error
 }

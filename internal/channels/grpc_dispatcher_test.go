@@ -106,7 +106,11 @@ func TestGRPCMessageDispatcher_HappyPath(t *testing.T) {
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 		Content: "hi", Timestamp: ts, Mentions: []string{"agent-b"},
 	}
-	require.NoError(t, d.Dispatch(context.Background(), "agent-b", msg))
+	env := DispatchEnvelope{
+		Recipient:            Member{ParticipantID: "agent-b", RespondPolicy: RespondWhenMentioned},
+		ThreadParentSenderID: "",
+	}
+	require.NoError(t, d.Dispatch(context.Background(), env, msg))
 
 	require.NotNil(t, srv.gotEvent)
 	assert.Equal(t, "m-1", srv.gotEvent.MessageId)
@@ -116,6 +120,37 @@ func TestGRPCMessageDispatcher_HappyPath(t *testing.T) {
 	assert.Equal(t, "hi", srv.gotEvent.Content)
 	assert.Equal(t, ts.Format(time.RFC3339Nano), srv.gotEvent.Timestamp)
 	assert.Equal(t, []string{"agent-b"}, srv.gotEvent.Mentions)
+	assert.Equal(t, "when_mentioned", srv.gotEvent.RespondPolicy,
+		"PR 4b: per-recipient respond_policy must traverse the wire so the gate fires receiver-side")
+	assert.Empty(t, srv.gotEvent.ThreadParentSenderId,
+		"non-thread event leaves thread_parent_sender_id empty")
+}
+
+func TestGRPCMessageDispatcher_ThreadParentSenderIDPropagated(t *testing.T) {
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
+	d.dial = dial
+
+	msg := ChannelMessage{
+		ID: "reply-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "thread reply", Timestamp: time.Now().UTC(), ThreadID: "parent-1",
+	}
+	env := DispatchEnvelope{
+		Recipient:            Member{ParticipantID: "agent-b", RespondPolicy: RespondWhenMentioned},
+		ThreadParentSenderID: "agent-b",
+	}
+	require.NoError(t, d.Dispatch(context.Background(), env, msg))
+
+	require.NotNil(t, srv.gotEvent)
+	assert.Equal(t, "parent-1", srv.gotEvent.ThreadId)
+	assert.Equal(t, "agent-b", srv.gotEvent.ThreadParentSenderId,
+		"thread_parent_sender_id MUST flow through so the receiver gate can fire thread-reply-to-self")
 }
 
 func TestGRPCMessageDispatcher_UnknownParticipantIsNoop(t *testing.T) {
@@ -125,7 +160,9 @@ func TestGRPCMessageDispatcher_UnknownParticipantIsNoop(t *testing.T) {
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
 
-	err := d.Dispatch(context.Background(), "ghost", ChannelMessage{
+	err := d.Dispatch(context.Background(), DispatchEnvelope{
+		Recipient: Member{ParticipantID: "ghost", RespondPolicy: RespondWhenMentioned},
+	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 	})
 	assert.NoError(t, err, "unknown participant must be silently dropped")
@@ -137,7 +174,9 @@ func TestGRPCMessageDispatcher_DegradedAgentReturnsError(t *testing.T) {
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
 
-	err := d.Dispatch(context.Background(), "agent-b", ChannelMessage{
+	err := d.Dispatch(context.Background(), DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 	})
 	require.Error(t, err)
@@ -150,7 +189,9 @@ func TestGRPCMessageDispatcher_EmptyAddressReturnsError(t *testing.T) {
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
 
-	err := d.Dispatch(context.Background(), "agent-b", ChannelMessage{
+	err := d.Dispatch(context.Background(), DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 	})
 	require.Error(t, err)
@@ -161,7 +202,9 @@ func TestGRPCMessageDispatcher_ResolverErrorPropagates(t *testing.T) {
 	resolver := &stubResolver{err: errors.New("boom")}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
 
-	err := d.Dispatch(context.Background(), "agent-b", ChannelMessage{
+	err := d.Dispatch(context.Background(), DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 	})
 	require.Error(t, err)
@@ -174,7 +217,9 @@ func TestChannelMessageToProto_ZeroTimestampDefaultsToNow(t *testing.T) {
 	}
 	before := time.Now().UTC().Add(-1 * time.Second)
 	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
-	ev := d.channelMessageToProto(msg)
+	ev := d.channelMessageToProto(msg, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways},
+	})
 	after := time.Now().UTC().Add(1 * time.Second)
 
 	parsed, err := time.Parse(time.RFC3339Nano, ev.Timestamp)
@@ -206,6 +251,8 @@ func TestGRPCMessageDispatcher_UnknownChannelPrefixLogsWarn(t *testing.T) {
 		ID:        "m-1",
 		ChannelID: "unknown-prefix:foo", // not group: / dm: / thread:
 		SenderID:  "agent-a",
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
 	})
 
 	assert.Empty(t, ev.ChannelType,
@@ -235,6 +282,8 @@ func TestGRPCMessageDispatcher_KnownChannelPrefixDoesNotLog(t *testing.T) {
 	d := &GRPCMessageDispatcher{logger: logger}
 	_ = d.channelMessageToProto(ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
 	})
 
 	assert.Equal(t, 0, recorded.Len(),
@@ -291,7 +340,9 @@ func TestGRPCMessageDispatcher_ContextCancelledMidCall(t *testing.T) {
 	// signal would be the next step.
 	time.AfterFunc(50*time.Millisecond, cancel)
 
-	err := d.Dispatch(ctx, "agent-b", ChannelMessage{
+	err := d.Dispatch(ctx, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 		Content: "hi", Timestamp: time.Now().UTC(),
 	})

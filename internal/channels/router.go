@@ -12,6 +12,38 @@ import (
 	"go.uber.org/zap"
 )
 
+// DispatchEnvelope bundles the per-recipient inputs the dispatcher needs
+// to render a [taskpb.ChannelMessageEvent] without the router exposing the
+// raw proto type to the channels package boundary. The envelope is built
+// once per-recipient inside [ChannelRouter.fanout]:
+//
+//   - `Recipient` carries the per-recipient `RespondPolicy` so the
+//     receiver-side response gate can decide pre-LLM (RFC 0011 PR 4b).
+//   - `ThreadParentSenderID` is pre-resolved once per publish in
+//     [ChannelRouter.Publish] so a thread-heavy channel pays one
+//     `GetMessage` lookup per publish, not one per recipient (RFC 0011
+//     PR plan §PR 4 — "amortizes the lookup across fanout").
+//
+// Adding fields here is an additive change to the dispatcher contract
+// and does not require touching every test seam — both fields default
+// to their zero values when unset.
+type DispatchEnvelope struct {
+	// Recipient is the membership row of the agent receiving this
+	// dispatch. The router has already filtered the sender and any
+	// `RespondNever` entries upstream of [MessageDispatcher.Dispatch],
+	// so `Recipient.RespondPolicy` is always one of [RespondAlways]
+	// or [RespondWhenMentioned].
+	Recipient Member
+
+	// ThreadParentSenderID is the sender id of the message addressed
+	// by [ChannelMessage.ThreadID], pre-resolved by the router. Empty
+	// for non-thread events. The empty-string default for proto3
+	// strings is preserved on the wire so receivers can branch on
+	// `thread_id != "" && thread_parent_sender_id != ""` without a
+	// secondary lookup.
+	ThreadParentSenderID string
+}
+
 // MessageDispatcher is the gRPC seam through which the [ChannelRouter]
 // fans a published message out to every subscriber other than the sender.
 //
@@ -28,11 +60,12 @@ import (
 // `channel.messages.delivered{status="error"}` counter and logged at warn,
 // but do not surface to the publisher.
 type MessageDispatcher interface {
-	// Dispatch delivers msg to participantID. The router has already
-	// filtered the sender out of the recipient list and validated
-	// `channel_type` against the `channel_id` prefix. Returns an error if
-	// the dispatch could not be enqueued; the caller logs and counts.
-	Dispatch(ctx context.Context, participantID string, msg ChannelMessage) error
+	// Dispatch delivers msg to env.Recipient. The router has already
+	// filtered the sender out of the recipient list, dropped any
+	// `RespondNever` members, and validated `channel_type` against the
+	// `channel_id` prefix. Returns an error if the dispatch could not
+	// be enqueued; the caller logs and counts.
+	Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error
 }
 
 // NoopDispatcher is the v0.3.0-PR-2 placeholder: it counts the calls and
@@ -43,7 +76,7 @@ type MessageDispatcher interface {
 type NoopDispatcher struct{}
 
 // Dispatch implements [MessageDispatcher] by no-op.
-func (NoopDispatcher) Dispatch(_ context.Context, _ string, _ ChannelMessage) error {
+func (NoopDispatcher) Dispatch(_ context.Context, _ DispatchEnvelope, _ ChannelMessage) error {
 	return nil
 }
 
@@ -148,6 +181,16 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 		return err
 	}
 
+	// RFC 0011 PR 4b: pre-resolve `thread_parent_sender_id` once per
+	// publish so a thread-heavy channel pays one [ChannelStore.GetMessage]
+	// lookup per publish, not one per recipient. Empty for non-thread
+	// events. A lookup miss (parent pruned by the per-channel cap before
+	// the reply lands) is logged at debug and surfaces as an empty
+	// string on the wire — receivers branch on
+	// `thread_id != "" && thread_parent_sender_id != ""` so the empty
+	// string is a benign signal rather than an error.
+	threadParentSenderID := r.resolveThreadParentSenderID(ctx, msg)
+
 	// Resolve any chat-as-DM waiter parked for this (channel, sender)
 	// pair before fanout (RFC 0011 PR 4a-ii-β-2). Notify is a non-
 	// blocking buffered send and a no-op when no waiter is registered,
@@ -164,8 +207,27 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 	// participant's id, never on the publisher's.
 	r.waiter.Notify(msg)
 
-	r.fanout(ctx, msg, derivedType)
+	r.fanout(ctx, msg, derivedType, threadParentSenderID)
 	return nil
+}
+
+// resolveThreadParentSenderID looks up the `sender_id` of the message
+// addressed by `msg.ThreadID`. Returns "" for non-thread events or when
+// the parent has been pruned. Empty is benign for the receiver gate.
+func (r *ChannelRouter) resolveThreadParentSenderID(ctx context.Context, msg ChannelMessage) string {
+	if msg.ThreadID == "" {
+		return ""
+	}
+	parent, err := r.store.GetMessage(ctx, msg.ThreadID)
+	if err != nil {
+		r.logger.Debug("channels: thread parent lookup failed; gate will not fire thread-reply-to-self",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("thread_id", msg.ThreadID),
+			zap.Error(err),
+		)
+		return ""
+	}
+	return parent.SenderID
 }
 
 // ErrChatTimeout is returned by [PublishAndAwait] when no matching
@@ -268,7 +330,7 @@ func (r *ChannelRouter) PublishAndAwait(
 // their full timeout budget. Per-call deadlines keep publish latency
 // bounded by O(N × 5s) worst case (acceptable while fanout remains
 // inline) but eliminate intra-publish starvation.
-func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct ChannelType) {
+func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string) {
 	members, err := r.store.GetMembers(ctx, msg.ChannelID)
 	if err != nil {
 		r.logger.Warn("channels: fanout member lookup failed",
@@ -286,13 +348,16 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		if m.RespondPolicy == RespondNever {
 			// `respond: never` participants do not receive dispatches in
 			// the v0.3.0 contract — they read history on demand. The
-			// response gate (PR 4) is the canonical enforcement point;
+			// response gate (PR 4b) is the canonical enforcement point;
 			// short-circuiting here keeps the dispatcher free of policy
 			// knowledge and saves a wasted gRPC call.
 			continue
 		}
 		dispatchCtx, cancel := context.WithTimeout(detached, 5*time.Second)
-		err := r.dispatcher.Dispatch(dispatchCtx, m.ParticipantID, msg)
+		err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
+			Recipient:            m,
+			ThreadParentSenderID: threadParentSenderID,
+		}, msg)
 		cancel()
 		status := "ok"
 		if err != nil {

@@ -736,9 +736,27 @@ type ChannelMessageEvent struct {
 	// MUST reject over-cap or pattern-violating entries to bound fan-out
 	// cost and preserve ID hygiene. Tracked at REST boundary by
 	// `docs/issues/ISSUE-0011`. PR #246 deep review M1.
-	Mentions      []string `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Mentions []string `protobuf:"bytes,8,rep,name=mentions,proto3" json:"mentions,omitempty"`
+	// RFC 0011 PR 4b: per-recipient response policy carried so the
+	// agent-side gate can decide pre-LLM whether to suppress without an
+	// extra REST roundtrip. Values: "when_mentioned" | "always". The
+	// orchestrator MUST NOT dispatch to a `respond: never` member at all
+	// (filtered upstream in `ChannelRouter.fanout`); receivers therefore
+	// MUST treat `respond_policy="never"` on the wire as malformed.
+	// Empty is also malformed — every dispatch must carry the recipient's
+	// policy. The string vocabulary mirrors `internal/channels.RespondPolicy`.
+	RespondPolicy string `protobuf:"bytes,9,opt,name=respond_policy,json=respondPolicy,proto3" json:"respond_policy,omitempty"`
+	// RFC 0011 PR 4b: orchestrator-pre-resolved sender id of the
+	// `thread_id` parent message, when this event is a thread reply.
+	// Empty for non-thread events or when the parent has been pruned. The
+	// response gate uses `agent_id == thread_parent_sender_id` as the
+	// thread-reply-to-self trigger for `when_mentioned` policy without
+	// requiring the receiver to look the parent up. Pre-resolved once per
+	// publish in `ChannelRouter.Publish` (see RFC 0011 PR plan §PR 4 key
+	// implementation details — "amortizes the lookup across fanout").
+	ThreadParentSenderId string `protobuf:"bytes,10,opt,name=thread_parent_sender_id,json=threadParentSenderId,proto3" json:"thread_parent_sender_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -825,6 +843,20 @@ func (x *ChannelMessageEvent) GetMentions() []string {
 		return x.Mentions
 	}
 	return nil
+}
+
+func (x *ChannelMessageEvent) GetRespondPolicy() string {
+	if x != nil {
+		return x.RespondPolicy
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetThreadParentSenderId() string {
+	if x != nil {
+		return x.ThreadParentSenderId
+	}
+	return ""
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
@@ -940,7 +972,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x84\x02\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xe2\x02\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -951,7 +983,10 @@ const file_task_proto_rawDesc = "" +
 	"\acontent\x18\x05 \x01(\tR\acontent\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12\x1b\n" +
 	"\tthread_id\x18\a \x01(\tR\bthreadId\x12\x1a\n" +
-	"\bmentions\x18\b \x03(\tR\bmentions\"H\n" +
+	"\bmentions\x18\b \x03(\tR\bmentions\x12%\n" +
+	"\x0erespond_policy\x18\t \x01(\tR\rrespondPolicy\x125\n" +
+	"\x17thread_parent_sender_id\x18\n" +
+	" \x01(\tR\x14threadParentSenderId\"H\n" +
 	"\aTaskAck\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*^\n" +

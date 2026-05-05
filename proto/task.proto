@@ -148,6 +148,24 @@ message ChannelMessageEvent {
   // cost and preserve ID hygiene. Tracked at REST boundary by
   // `docs/issues/ISSUE-0011`. PR #246 deep review M1.
   repeated string mentions = 8;
+  // RFC 0011 PR 4b: per-recipient response policy carried so the
+  // agent-side gate can decide pre-LLM whether to suppress without an
+  // extra REST roundtrip. Values: "when_mentioned" | "always". The
+  // orchestrator MUST NOT dispatch to a `respond: never` member at all
+  // (filtered upstream in `ChannelRouter.fanout`); receivers therefore
+  // MUST treat `respond_policy="never"` on the wire as malformed.
+  // Empty is also malformed — every dispatch must carry the recipient's
+  // policy. The string vocabulary mirrors `internal/channels.RespondPolicy`.
+  string respond_policy = 9;
+  // RFC 0011 PR 4b: orchestrator-pre-resolved sender id of the
+  // `thread_id` parent message, when this event is a thread reply.
+  // Empty for non-thread events or when the parent has been pruned. The
+  // response gate uses `agent_id == thread_parent_sender_id` as the
+  // thread-reply-to-self trigger for `when_mentioned` policy without
+  // requiring the receiver to look the parent up. Pre-resolved once per
+  // publish in `ChannelRouter.Publish` (see RFC 0011 PR plan §PR 4 key
+  // implementation details — "amortizes the lookup across fanout").
+  string thread_parent_sender_id = 10;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).

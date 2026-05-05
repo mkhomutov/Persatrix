@@ -440,6 +440,9 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 "content": request.content,
                 "channel_type": request.channel_type,
                 "mentions": list(request.mentions),
+                # RFC 0011 PR 4b: gate inputs — see agents/response_gate.py.
+                "respond_policy": request.respond_policy,
+                "thread_parent_sender_id": request.thread_parent_sender_id,
             },
             channel_id=request.channel_id,
             sender_id=request.sender_id,
@@ -483,16 +486,8 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
 
 
-# Backward-compat re-export: ``_extract_chat_reply`` was previously defined
-# inline in this module and is imported by ``agents/server.py`` and by
-# ``tests/unit/python/test_extract_chat_reply.py`` as
-# ``from agents.server_servicers import _extract_chat_reply``. RFC 0011 PR 4a-i
-# extracted the implementation into ``agents/chat_reply.py``; the import
-# now sits with the other top-of-module imports (no circular-import risk:
-# ``chat_reply`` only depends on ``persona_types``).
-#
-# ``_extract_chat_reply`` is intentionally absent from ``__all__`` — its
-# leading underscore marks it module-private; explicit-name imports still
-# work. PR #248 deep review hygiene fix.
+# ``_extract_chat_reply`` is re-exported (PR 4a-i) for back-compat with
+# ``agents/server.py`` and ``tests/unit/python/test_extract_chat_reply.py``.
+# Module-private (leading underscore) and absent from ``__all__``.
 __all__ = ["AgentServiceServicer"]
 

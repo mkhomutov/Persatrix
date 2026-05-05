@@ -22,18 +22,22 @@ type recordingDispatcher struct {
 }
 
 type dispatchCall struct {
-	participantID string
-	channelID     string
-	senderID      string
+	participantID        string
+	channelID            string
+	senderID             string
+	respondPolicy        RespondPolicy
+	threadParentSenderID string
 }
 
-func (d *recordingDispatcher) Dispatch(_ context.Context, participantID string, msg ChannelMessage) error {
+func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, dispatchCall{
-		participantID: participantID,
-		channelID:     msg.ChannelID,
-		senderID:      msg.SenderID,
+		participantID:        env.Recipient.ParticipantID,
+		channelID:            msg.ChannelID,
+		senderID:             msg.SenderID,
+		respondPolicy:        env.Recipient.RespondPolicy,
+		threadParentSenderID: env.ThreadParentSenderID,
 	})
 	return d.err
 }
