@@ -239,11 +239,14 @@ class TestActionExecutor:
         """SEND_CHANNEL_MESSAGE with channel_id but no mentions logs WARNING and
         returns 'no_targets' status.
 
-        A message targeting a channel with no explicit mentions is almost
-        certainly an LLM error — channel routing is not yet implemented,
-        so the message is silently dropped.  The WARNING log makes this
-        visible to operators.
-        (PR #55 review: silent message drop when channel_id set without mentions.)
+        A message targeting a channel with no explicit mentions and no
+        REST publisher wired (e.g. a unit-test fixture or pre-publisher
+        startup window) is silently dropped.  The WARNING log makes the
+        drop visible to operators so the missing publisher wiring is
+        diagnosable from the first occurrence.
+        (PR #55 review: silent message drop when channel_id set without mentions.
+        Updated for RFC 0011 PR 4a-ii-β-1 — REST routing now exists; this
+        path is the publisher-unwired fallback.)
         """
         dispatcher = EventDispatcher()
         executor = ActionExecutor(dispatcher=dispatcher)
@@ -258,7 +261,7 @@ class TestActionExecutor:
         assert results[0]["dispatched_to"] == 0
         assert results[0]["status"] == "no_targets"
         assert any(
-            "channel routing not yet implemented" in r.message
+            "no REST publisher configured" in r.message
             and r.levelno == logging.WARNING
             for r in caplog.records
         )

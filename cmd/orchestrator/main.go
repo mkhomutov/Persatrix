@@ -339,7 +339,7 @@ func main() {
 	}
 
 	// RFC 0011 PR 2 — channels subsystem (see channels.go).
-	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, orchMetrics, logger)
+	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, orchMetrics, reg, logger)
 	if chanErr != nil {
 		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
 	}

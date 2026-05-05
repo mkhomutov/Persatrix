@@ -40,6 +40,7 @@ __all__ = [
     "render_behavior",
     # Re-exported from dispatch
     "ActionExecutor",
+    "ChannelPublisher",
     "EventDispatcher",
     # Re-exported from tick
     "TickScheduler",
@@ -60,7 +61,7 @@ from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 # persona_runtime).  Once all internal consumers have migrated, emit
 # DeprecationWarning and eventually remove the re-export block.
 # (PR #64 review: should fix.)
-from .dispatch import ActionExecutor, EventDispatcher  # noqa: F401
+from .dispatch import ActionExecutor, ChannelPublisher, EventDispatcher  # noqa: F401
 from .llm_client import LLMClient
 from .memory.episodic import EpisodicMemory
 from .memory.relationship import RelationshipMemory

@@ -12,6 +12,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/channels"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
+	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/server"
 )
 
@@ -23,12 +24,19 @@ var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for
 // initChannels brings the RFC 0011 channels subsystem online.
 //
 // Loads `<configDir>/channels.yaml`, opens the SQLite-backed store at
-// `dbPath`, builds the router with a [channels.NoopDispatcher] (the
-// gRPC-backed dispatcher lands in PR 4), and reconciles config-vs-store
+// `dbPath`, builds the router with the registry-aware
+// [channels.GRPCMessageDispatcher] (PR 4a-ii-β-1; replaced the PR-2
+// [channels.NoopDispatcher] placeholder), and reconciles config-vs-store
 // membership at startup. A loud reconcile failure (per RFC 0011 §B
 // coexistence rules) is reported via the returned error so the caller
 // can `Fatal` — operators must reconcile by editing channels.yaml or
-// `DELETE /api/v1/channels/{id}` (deferred to PR 4).
+// `DELETE /api/v1/channels/{id}` (deferred to PR 4b).
+//
+// `reg` is the orchestrator's agent registry, consulted per-recipient by
+// the dispatcher to translate participant IDs into dialable gRPC
+// addresses. Nil disables cross-process delivery (the router falls back
+// to [channels.NoopDispatcher] so member lookups + persistence still
+// work for tests / channels-disabled deployments).
 //
 // Returns:
 //
@@ -43,6 +51,7 @@ var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for
 func initChannels(
 	cfgDir, dbPath string,
 	orchMetrics *obsmetrics.Instruments,
+	reg registry.Registry,
 	logger *zap.Logger,
 ) (opts []server.ServerOption, cleanup func(), err error) {
 	noop := func() {}
@@ -107,7 +116,8 @@ func initChannels(
 			MessagesDelivered: orchMetrics.ChannelMessagesDelivered,
 		}
 	}
-	router := channels.NewChannelRouter(chanStore, channels.NoopDispatcher{}, logger, routerMetrics)
+	dispatcher := selectChannelDispatcher(reg, logger)
+	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
 	if rErr := router.ReconcileConfig(context.Background(), chanCfg); rErr != nil {
 		// Loud-fail per RFC 0011 §B; the caller (main) will `Fatal`.
 		// Run the cleanup ourselves first so the half-opened store does
@@ -137,4 +147,25 @@ func initChannels(
 		zap.String("auth_eta", "RFC 0009 Phase 4"),
 	)
 	return []server.ServerOption{server.WithChannels(chanStore, router)}, cleanup, nil
+}
+
+// selectChannelDispatcher picks the per-recipient [channels.MessageDispatcher]
+// based on whether the orchestrator has a live agent registry.
+//
+// Extracted from [initChannels] (PR #250 review Should-Fix #2) so the
+// branch is independently testable without standing up a full router +
+// store + membership scenario just to verify the type swap.
+//
+//   - reg == nil → [channels.NoopDispatcher]: channels-disabled
+//     deployments and the existing tests that exercise the router-only
+//     paths (member lookups + persistence) without spinning up agents.
+//   - reg != nil → [*channels.GRPCMessageDispatcher]: production wiring
+//     (PR 4a-ii-β-1) that turns each per-recipient `Dispatch` into an
+//     `AgentService.ReceiveChannelMessage` gRPC call against the
+//     address the recipient registered under.
+func selectChannelDispatcher(reg registry.Registry, logger *zap.Logger) channels.MessageDispatcher {
+	if reg == nil {
+		return channels.NoopDispatcher{}
+	}
+	return channels.NewGRPCMessageDispatcher(reg, logger)
 }
