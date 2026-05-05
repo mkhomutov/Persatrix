@@ -126,7 +126,8 @@ class _Instruments:
             unit="{message}",
             description=(
                 "Channel messages suppressed by the response gate before "
-                "reaching the LLM. Attributes: agent.id, policy."
+                "reaching the LLM. Attributes: channel_id, policy "
+                "(RFC 0011 §D — subscriber_id excluded for cardinality)."
             ),
         )
         self.spans_dropped: Counter = meter.create_counter(
@@ -431,9 +432,19 @@ def event_attrs(*, agent_id: str, event_type: str) -> dict[str, str]:
     return {"agent.id": agent_id, "event.type": event_type}
 
 
-def gate_attrs(*, agent_id: str, policy: str) -> dict[str, str]:
-    """Attribute set for the ``channel.messages.gated`` counter (RFC 0011 PR 4b)."""
-    return {"agent.id": agent_id, "policy": policy}
+def gate_attrs(*, channel_id: str, policy: str) -> dict[str, str]:
+    """Attribute set for the ``channel.messages.gated`` counter (RFC 0011 PR 4b).
+
+    Labels match the RFC 0011 §D specification exactly: ``channel_id``
+    and ``policy``. ``subscriber_id`` (the agent id) is deliberately
+    **not** a label — cardinality scales as members × channels × policies
+    (~30,000 series at N=200) and the agent identity is already carried
+    by the OTLP resource attribute ``service.instance.id`` (set from
+    ``PERSATRIX_AGENT_ID`` at ``init_metrics`` time). Per-subscriber
+    drill-down lives in the publish/delivery spans (RFC 0011 §G), not on
+    the gate counter.
+    """
+    return {"channel_id": channel_id, "policy": policy}
 
 
 def tick_attrs(*, agent_id: str) -> dict[str, str]:

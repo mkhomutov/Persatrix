@@ -7,10 +7,16 @@ per-membership ``respond_policy`` declared in
 ``schemas/channel.schema.json``.
 
 The decision is made **pre-LLM, pre-memory-recall** in
-:meth:`agents.persona_runtime._ActionLoopMixin._on_event_inner`, so a
-suppressed message costs zero LLM tokens and zero retrieval round-trips.
-Memory **ingestion** still runs in PR 5 — the gate's contract is "do
-not respond", not "do not remember".
+:meth:`agents.persona_runtime._ActionLoopMixin._on_event_inner` — but
+**after** the LLM-client / model-config fail-fast checks at the top of
+that method. The ordering is intentional (PR #252 review Q-1): a
+misconfigured agent surfaces the misconfig to its caller as a
+``COMPLETE_TASK("…")`` result, instead of silently swallowing channel
+chatter and leaving an operator to wonder for hours why the agent has
+gone quiet. A suppressed (gated) message still costs zero LLM tokens
+and zero retrieval round-trips — the gate runs before
+``_inject_memory_context``. Memory **ingestion** still runs in PR 5 —
+the gate's contract is "do not respond", not "do not remember".
 
 Policies (RFC 0011 §D table):
 
@@ -55,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "POLICY_ALWAYS",
+    "POLICY_DEFENSE_IN_DEPTH",
     "POLICY_NEVER",
     "POLICY_WHEN_MENTIONED",
     "GateDecision",
@@ -67,6 +74,21 @@ __all__ = [
 POLICY_WHEN_MENTIONED: Final[str] = "when_mentioned"
 POLICY_ALWAYS: Final[str] = "always"
 POLICY_NEVER: Final[str] = "never"
+# PR #252 review N-2: a synthetic policy value used on the
+# ``channel.messages.gated`` counter for self-sender suppressions —
+# both the DM self-sender and the non-DM defense-in-depth re-check.
+# These fires are **routing artifacts**, not user-policy outcomes
+# (the orchestrator's ``ChannelRouter`` already filters the sender on
+# fanout; the gate re-checks because the cleartext gRPC port cannot be
+# trusted to carry a non-spoofed ``sender_id``). Labelling them with
+# the configured wire policy (e.g. ``always`` for DMs, or whatever was
+# on the membership for groups) would conflate two very different
+# operational signals and trick an operator looking at a high
+# ``policy=always`` count into chasing a phantom membership-config bug
+# when the real cause is the router handing self-messages back to the
+# gate. Keeping a distinct label preserves the diagnostic signal
+# without polluting the user-policy buckets.
+POLICY_DEFENSE_IN_DEPTH: Final[str] = "defense_in_depth"
 
 _DM_CHANNEL_PREFIX: Final[str] = "dm:"
 
@@ -132,17 +154,24 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
     # an operator who hand-edits a DM membership row.
     if channel_id.startswith(_DM_CHANNEL_PREFIX):
         if event.sender_id == agent_id:
+            # See POLICY_DEFENSE_IN_DEPTH for the labeling rationale.
             return GateDecision(
-                respond=False, policy=POLICY_ALWAYS, reason="dm_self_sender",
+                respond=False,
+                policy=POLICY_DEFENSE_IN_DEPTH,
+                reason="dm_self_sender",
             )
         return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="dm")
 
     # Sender-side filter (defence in depth). The router already drops
     # the sender on fanout; the gate re-checks because the cleartext
     # gRPC port cannot be trusted to carry a non-spoofed ``sender_id``.
+    # The configured wire policy is intentionally **not** used as the
+    # metric label here — see POLICY_DEFENSE_IN_DEPTH.
     if event.sender_id == agent_id:
         return GateDecision(
-            respond=False, policy=policy or POLICY_ALWAYS, reason="self_sender",
+            respond=False,
+            policy=POLICY_DEFENSE_IN_DEPTH,
+            reason="self_sender",
         )
 
     if policy == POLICY_NEVER:

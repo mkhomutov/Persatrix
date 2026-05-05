@@ -243,12 +243,23 @@ class _ActionLoopMixin:
             )]
 
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
+        # Gate runs *after* the LLM-client / model-config checks above on
+        # purpose: a misconfigured agent surfaces the misconfig as a
+        # COMPLETE_TASK("…") result rather than silently swallowing
+        # channel traffic. Reordering would cost an operator hours of
+        # "why is this agent quiet?" — see Q-1 in the PR #252 review.
         decision = evaluate_response_gate(event, agent_id=self.agent_id)
         if not decision.respond:
             inst = try_get_instruments()
             if inst is not None:
+                # RFC 0011 §D label set: ``{channel_id, policy}``. The
+                # legacy SendChatMessage path (deferred for cleanup in
+                # ISSUE-0035) builds CHANNEL_MESSAGE events with no
+                # channel_id; the gate exits early before this branch
+                # runs for those, so an empty channel_id should not
+                # reach this site in practice.
                 inst.channel_messages_gated.add(1, attributes=gate_attrs(
-                    agent_id=self.agent_id,
+                    channel_id=event.channel_id or "",
                     policy=decision.policy or "unknown",
                 ))
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]

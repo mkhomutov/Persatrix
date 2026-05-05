@@ -24,6 +24,7 @@ import pytest
 from agents.persona_types import AgentEvent, EventType
 from agents.response_gate import (
     POLICY_ALWAYS,
+    POLICY_DEFENSE_IN_DEPTH,
     POLICY_NEVER,
     POLICY_WHEN_MENTIONED,
     evaluate_response_gate,
@@ -134,10 +135,31 @@ class TestAlways:
         # Defense in depth: the orchestrator already filters the sender
         # in fanout, but the gate re-checks because the cleartext gRPC
         # transport cannot be trusted to carry a non-spoofed sender_id.
+        # The decision carries ``policy=defense_in_depth`` (not the
+        # configured ``always``) so the ``channel.messages.gated``
+        # counter cleanly separates user-policy suppressions from
+        # router-malfunction suppressions — see PR #252 review N-2.
         evt = _channel_event(respond_policy="always", sender_id="bob")
         d = evaluate_response_gate(evt, agent_id="bob")
         assert d.respond is False
         assert d.reason == "self_sender"
+        assert d.policy == POLICY_DEFENSE_IN_DEPTH
+
+    def test_when_mentioned_does_not_respond_to_own_message(self):
+        # Same defense-in-depth path but starting from a different
+        # configured policy; the decision still carries
+        # ``policy=defense_in_depth`` regardless of the wire policy
+        # because the suppression is a routing artifact, not a
+        # user-policy outcome.
+        evt = _channel_event(
+            respond_policy="when_mentioned",
+            sender_id="bob",
+            mentions=["bob"],
+        )
+        d = evaluate_response_gate(evt, agent_id="bob")
+        assert d.respond is False
+        assert d.reason == "self_sender"
+        assert d.policy == POLICY_DEFENSE_IN_DEPTH
 
 
 # ─── never policy ──────────────────────────────────────────────────
@@ -178,7 +200,10 @@ class TestDMOverride:
 
     def test_dm_does_not_respond_to_own_message(self):
         # A self-message in a DM should still suppress (defense in
-        # depth — the router already filters the sender).
+        # depth — the router already filters the sender). The decision
+        # carries ``policy=defense_in_depth`` so this fire is not
+        # mis-attributed to the DM's natural ``always`` policy on the
+        # ``channel.messages.gated`` counter (PR #252 review N-2).
         evt = _channel_event(
             channel_id="dm:alice:bob",
             respond_policy="always",
@@ -187,6 +212,7 @@ class TestDMOverride:
         d = evaluate_response_gate(evt, agent_id="bob")
         assert d.respond is False
         assert d.reason == "dm_self_sender"
+        assert d.policy == POLICY_DEFENSE_IN_DEPTH
 
 
 # ─── Non-CHANNEL_MESSAGE event types ───────────────────────────────

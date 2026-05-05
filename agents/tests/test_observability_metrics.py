@@ -219,3 +219,21 @@ class TestAttributeHelpers:
     def test_llm_token_attrs_literal(self) -> None:
         a = pmetrics.llm_token_attrs(agent_id="x", request_model="m", token_type="input")
         assert a["gen_ai.token.type"] == "input"
+
+    def test_gate_attrs_shape_matches_rfc_0011_section_d(self) -> None:
+        # RFC 0011 §D explicitly specifies the ``channel.messages.gated``
+        # label set as ``{channel_id, policy}`` and excludes
+        # ``subscriber_id`` for cardinality reasons (members × channels ×
+        # policies ~30,000 series at N=200). The agent identity is
+        # carried by the OTLP resource (``service.instance.id`` set from
+        # ``PERSATRIX_AGENT_ID``) so dropping the explicit per-record
+        # label does not lose information — it just stops duplicating it
+        # at the metric attribute layer where the cardinality cost is
+        # paid.
+        a = pmetrics.gate_attrs(channel_id="group:planning", policy="when_mentioned")
+        assert a == {"channel_id": "group:planning", "policy": "when_mentioned"}
+        assert "agent.id" not in a, (
+            "RFC 0011 §D excludes subscriber_id (agent.id) from the "
+            "channel.messages.gated label set; per-subscriber drill-down "
+            "lives in OTEL spans, not metric attributes."
+        )

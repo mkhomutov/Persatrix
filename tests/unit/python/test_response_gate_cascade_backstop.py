@@ -21,18 +21,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from agents.dispatch import EventDispatcher
 from agents.persona_types import AgentEvent, EventType
-from agents.tools.registry import clear_registry
-
-
-@pytest.fixture(autouse=True)
-def _clean_registry():
-    clear_registry()
-    yield
-    clear_registry()
 
 
 def _stub_agent_with_on_event() -> MagicMock:

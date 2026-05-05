@@ -84,17 +84,29 @@ func (s *sqliteStore) DeleteChannel(ctx context.Context, id string) error {
 
 // RemoveMember implements [ChannelStore.RemoveMember].
 //
-// First verifies the channel exists so callers can distinguish a
-// missing channel from a missing membership (404 vs 404 with the
-// REST handler's message reflecting the actual cause). Then removes
-// the membership row; the participant's prior messages are preserved
-// per RFC 0011 §C — `messages.sender_id` carries the historical value
-// after removal.
+// Disambiguates the two 404 causes (channel-not-found vs
+// membership-not-found) so REST callers see the right cause string,
+// while preserving the participant's prior messages per RFC 0011 §C
+// (`messages.sender_id` carries the historical value after removal).
+//
+// The function runs in a single transaction with a DELETE-then-check
+// ordering. The DELETE upgrades the deferred tx to a writer lock,
+// which serializes the subsequent existence check against any
+// concurrent `DeleteChannel`. The earlier
+// `GetChannel`-then-`DELETE` shape left a TOCTOU window where a
+// concurrent channel deletion would surface as `ErrNotMember`
+// ("membership not found") instead of the more accurate
+// `ErrChannelNotFound` — both surface as 404 to REST, but the error
+// string is what an operator reads first when triaging. PR #252
+// review N-1.
 func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID string) error {
-	if _, err := s.GetChannel(ctx, channelID); err != nil {
-		return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("channels: remove member begin tx: %w", err)
 	}
-	res, err := s.db.ExecContext(ctx,
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM memberships WHERE channel_id = ? AND participant_id = ?`,
 		channelID, participantID,
 	)
@@ -105,9 +117,27 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 	if err != nil {
 		return fmt.Errorf("channels: remove member rowsaffected: %w", err)
 	}
+
 	if n == 0 {
+		// Disambiguate inside the same tx so the writer lock acquired
+		// by the DELETE blocks any concurrent DeleteChannel from
+		// racing the existence check.
+		var present int
+		err := tx.QueryRowContext(ctx,
+			`SELECT 1 FROM channels WHERE id = ?`, channelID,
+		).Scan(&present)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
+		}
+		if err != nil {
+			return fmt.Errorf("channels: remove member existence check: %w", err)
+		}
 		return fmt.Errorf("%w: channel=%s participant=%s",
 			ErrNotMember, channelID, participantID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("channels: remove member commit: %w", err)
 	}
 	s.logger.Info("channels: member removed",
 		zap.String("channel_id", channelID),
