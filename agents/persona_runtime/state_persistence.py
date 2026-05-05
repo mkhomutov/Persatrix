@@ -72,17 +72,14 @@ class _StatePersistenceMixin:
     _pending_summarize_tasks: set[asyncio.Task[None]]
 
     # RFC 0020 §G event-type routing.  Both sets are *positive lists* —
-    # the prior implementation used a single multi-turn deny-list
-    # ("everything else is single-turn") which would have silently
-    # routed any new ``EventType`` (e.g. an RFC 0011 channel event added
-    # later) through the tracker as a ``tick``-scoped row.  PR-215
-    # review (Should-Fix #2) flagged that as a latent correctness bug:
-    # adding a new ``EventType`` should require a conscious choice
-    # about which set it belongs to.  Unknown event types now hit the
-    # legacy path with a warning so the maintainer notices.
+    # PR-215 review (Should-Fix #2): unknown event types hit the legacy
+    # path with a warning so a new ``EventType`` requires a conscious
+    # choice about which set it belongs to (rather than silently
+    # routing through the tracker as a ``tick``-scoped row).
     _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset({
         EventType.MESSAGE_RECEIVED,
         EventType.MENTION,
+        EventType.CHANNEL_MESSAGE,  # RFC 0011 PR 4a-i (PR #248 review High).
     })
     _SINGLE_TURN_EVENT_TYPES: frozenset[EventType] = frozenset({
         EventType.TICK,

@@ -33,6 +33,10 @@ from .persona_types import AgentEvent, EventType
 logger = logging.getLogger("Persatrix.agent.server")
 
 
+# Cap on in-flight ``ReceiveChannelMessage`` dispatches. PR #248 review Low.
+_MAX_PENDING_DISPATCHES: int = 1000
+
+
 # ─── AgentServiceServicer ───────────────────────────────────
 
 
@@ -413,6 +417,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
         target_agent_id = next(iter(self._agents))
 
+        # Backpressure: bounded queue, after validation + agent resolution
+        # so cheap rejects run first. PR #248 deep review Low finding.
+        if len(self._pending_dispatches) >= _MAX_PENDING_DISPATCHES:
+            return task_pb2.TaskAck(
+                success=False,
+                error_message=(
+                    f"receiver overloaded: {_MAX_PENDING_DISPATCHES} "
+                    f"dispatches pending (cleartext-port backpressure)"
+                ),
+            )
+
         # ─── Build AgentEvent and schedule fire-and-forget dispatch ──────
         # Propagate the orchestrator-authored RFC 3339 ``timestamp`` rather
         # than re-stamping with ``time.time()`` — preserves publish-time
@@ -477,5 +492,9 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 # extracted the implementation into ``agents/chat_reply.py``; the import
 # now sits with the other top-of-module imports (no circular-import risk:
 # ``chat_reply`` only depends on ``persona_types``).
-__all__ = ["AgentServiceServicer", "_extract_chat_reply"]
+#
+# ``_extract_chat_reply`` is intentionally absent from ``__all__`` — its
+# leading underscore marks it module-private; explicit-name imports still
+# work. PR #248 deep review hygiene fix.
+__all__ = ["AgentServiceServicer"]
 

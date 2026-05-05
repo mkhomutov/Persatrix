@@ -157,3 +157,25 @@ class TestParseChannelTimestamp:
 
     def test_rejects_garbage(self):
         assert parse_channel_timestamp("not-a-timestamp") is None
+
+    # ─── Naive (no-offset) RFC 3339 rejection (PR #248 NTH) ──
+    #
+    # RFC 3339 §5.6 requires every ``date-time`` to carry a ``time-offset``
+    # (either ``Z`` or ``±HH:MM``). A naive string like
+    # ``"2026-05-04T00:00:00"`` has no offset; ``datetime.fromisoformat``
+    # parses it as a *naive* ``datetime`` and ``.timestamp()`` then converts
+    # via the *host* timezone — silently shifting the publish timestamp by
+    # whatever the receiver's TZ happens to be. The proto contract is
+    # RFC 3339 (with offset), so receivers MUST reject naive input rather
+    # than admitting host-TZ-dependent values.
+    def test_rejects_naive_no_offset(self):
+        assert parse_channel_timestamp("2026-05-04T00:00:00") is None
+
+    def test_rejects_naive_with_fractional_seconds(self):
+        # Fractional-seconds form must still require the offset.
+        assert parse_channel_timestamp("2026-05-04T00:00:00.123") is None
+
+    def test_accepts_negative_offset(self):
+        # Symmetry guard: a non-UTC offset is valid RFC 3339; only the
+        # missing-offset case is rejected.
+        assert parse_channel_timestamp("2026-05-04T00:00:00-05:00") is not None

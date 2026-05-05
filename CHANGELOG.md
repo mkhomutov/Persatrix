@@ -6,6 +6,54 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **PR #248 deep-review follow-ups — `CHANNEL_MESSAGE` runtime
+  integration + receiver hardening.** Closes the High/Medium/Low
+  findings on top of the PR 4a-i scope:
+
+  - **Persona-runtime routing for the new enum** (PR #248 deep review
+    High + Medium): `EventType.CHANNEL_MESSAGE` now sits in
+    `_StatePersistenceMixin._MULTI_TURN_EVENT_TYPES` (alongside
+    `MESSAGE_RECEIVED` / `MENTION`) so dispatched channel events take
+    the multi-turn episode path instead of falling through the legacy
+    "not classified" warning fallback PR-215 added; `_format_event`
+    treats `CHANNEL_MESSAGE` exactly like `MESSAGE_RECEIVED`
+    (`<|user_message|>` delimiter wrap with PR #120 F-2 sanitisation)
+    so the LLM sees a sender-attributed prompt rather than a raw
+    `json.dumps(payload)` blob; `action_loop` extracts
+    `payload["content"]` (not the wrapped form) for the FTS5
+    `memory_query` so recall is not contaminated with delimiter tokens.
+    Dormant until a producer wires `ReceiveChannelMessage` end-to-end
+    (PR 4a-ii / PR 4b), but pinned by tests now so the path is correct
+    the moment it activates.
+  - **Bounded `_pending_dispatches` queue** (PR #248 deep review Low):
+    new `_MAX_PENDING_DISPATCHES = 1000` cap on the strong-ref
+    fire-and-forget set in `AgentServiceServicer`. Once full,
+    `ReceiveChannelMessage` returns
+    `TaskAck(success=False, error_message="receiver overloaded …")`
+    so the orchestrator's existing per-ack failure path becomes the
+    backpressure signal — closes a slow-burn DoS surface on the
+    cleartext gRPC port symmetric with the validator's other bounds
+    work.
+  - **Naive RFC 3339 timestamp rejection** (PR #248 deep review NTH):
+    `parse_channel_timestamp` now returns `None` for inputs lacking a
+    `time-offset` (e.g. `"2026-05-04T00:00:00"`). `datetime.fromisoformat`
+    parses such values as *naive* datetimes and the subsequent
+    `.timestamp()` then converts via the *host* timezone, silently
+    shifting the publish time by however many hours the receiver is
+    offset from UTC. RFC 3339 §5.6 mandates the offset; the validator
+    now enforces the contract.
+  - **`__all__` hygiene**: removes `_extract_chat_reply` (a
+    single-leading-underscore, module-private name) from
+    `agents.server_servicers.__all__`. Direct imports continue to work
+    (the back-compat shim is unchanged); only `from … import *` no
+    longer pulls a name that advertises itself as private.
+  - **Unicode content-cap pinning** (PR #248 deep review NTH): new
+    tests pin that the validator's "4000 character" content cap means
+    4000 *codepoints*, not 4000 wire bytes — accepts `"🦊" * 4000`
+    (16 KB UTF-8) and rejects `"🦊" * 4001`, so a future "switch to
+    bytes" refactor surfaces as a hard test failure rather than
+    silently halving the effective limit for non-ASCII traffic.
+
 - **RFC 0011 PR 4a — `ReceiveChannelMessage` real handler + additive
   enums.** Replaces the PR 3 `TaskAck(success=False)` stub on
   `AgentServiceServicer.ReceiveChannelMessage` with a real receiver-side

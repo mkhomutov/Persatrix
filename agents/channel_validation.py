@@ -176,13 +176,27 @@ def parse_channel_timestamp(value: str) -> float | None:
     Accepts the trailing ``Z`` UTC marker (proto example
     ``"2026-05-04T00:00:00Z"``) which ``datetime.fromisoformat`` only
     handles natively from Python 3.11+. Empty input is invalid.
+
+    RFC 3339 §5.6 mandates a ``time-offset`` (``Z`` or ``±HH:MM``) on every
+    ``date-time``. A naive string like ``"2026-05-04T00:00:00"`` parses
+    successfully via ``datetime.fromisoformat`` but produces a *naive*
+    ``datetime``; the subsequent ``.timestamp()`` call then converts via
+    the *host* timezone, silently shifting the publish time by however
+    many hours the receiver is offset from UTC. Receivers MUST reject
+    naive input rather than admit a host-TZ-dependent value. PR #248
+    deep review nice-to-have finding.
     """
     if not value:
         return None
+    # ``Z`` → ``+00:00`` for cross-version compatibility; 3.11+ accepts
+    # ``Z`` directly but the explicit substitution is cheap and clear.
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
-        # ``Z`` → ``+00:00`` for cross-version compatibility; 3.11+ accepts
-        # ``Z`` directly but the explicit substitution is cheap and clear.
-        normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-        return datetime.fromisoformat(normalized).timestamp()
+        parsed = datetime.fromisoformat(normalized)
     except (ValueError, TypeError):
         return None
+    # Reject naive datetimes: an RFC 3339 ``date-time`` MUST carry an
+    # offset, so a naive parse means the input violated the contract.
+    if parsed.tzinfo is None:
+        return None
+    return parsed.timestamp()
