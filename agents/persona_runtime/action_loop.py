@@ -25,6 +25,7 @@ from ..persona_types import (
     PersonaState,
 )
 from ..response_gate import evaluate_response_gate
+from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_validation import validate_action_payload
 
@@ -143,6 +144,8 @@ class _ActionLoopMixin:
                         if isinstance(result.data, (dict, list))
                         else str(result.data)
                     )
+                    # RFC 0009 PR 3: external-data tools wrapped here.
+                    content = maybe_wrap_tool_content(call.name, content)
                 else:
                     error_msg = result.error or "Tool failed"
                     if result.error_type:

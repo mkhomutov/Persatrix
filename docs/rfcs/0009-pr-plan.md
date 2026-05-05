@@ -342,6 +342,8 @@ Integration (`tests/integration/`):
 **Depends on**: PR 2.
 **Estimated size**: ~450–500 lines (Go sanitizer + Python wrapper + tool wiring + tests). At the calibration ceiling; if Python-side prompt template changes balloon, split out a follow-up PR.
 
+> **Status**: 🔀 PR open — Go `InputSanitizer` (sanitize.go + context_source.go + sanitize_action.go + sanitize_patterns.go) lands with closed-set ContextSource (incl. `channel_message` per OQ #7) + dedup/sorted Flags + best-effort audit emission of `input.flagged`. Python mirror (`agents/security.py` — ContextItem, wrap_external, sanitize, sanitize_and_wrap) consumes the generated `agents/security_patterns.py` produced by `cmd/genpatterns` (Go is the canonical authority). Pattern parity is enforced by `make generate-sanitizer-patterns-check` and `tests/unit/python/test_pattern_parity.py` (re-runs the generator and diffs). LLM-content boundary in `BaseAgent._execute_tools` and `persona_runtime/action_loop.py::_execute_tools` wraps `http_request` / `file_read` results in `<external_data>` envelopes via the closed-set `EXTERNAL_TOOL_SOURCES` map (no new ToolDefinition field — honours plan guidance). Persona system prompt unconditionally appends the `external-data-handling` snippet so the LLM understands the envelope on the first call. `_provenance` sidecar deferred to a follow-up — `persona_runtime/__init__.py` is at the 500-line file cap and the cleaner integration is to land the sidecar in PR 4 (close-out) or as a stand-alone follow-up.
+
 #### Scope
 
 | File | Change |

@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python clean test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -75,6 +75,22 @@ run-agent: ## Run a Python agent process (AGENT=coder PORT=50051)
 
 generate-persona-nickname: ## Generate nickname-style persona id/name pairs (COUNT=1 SEED=)
 	$(PYTHON) scripts/persona_nickname_generator.py --count $(or $(COUNT),1) $(if $(SEED),--seed $(SEED),)
+
+generate-sanitizer-patterns: ## Regenerate agents/security_patterns.py from internal/security/sanitize_patterns.go (RFC 0009 PR 3)
+	@echo "→ Regenerating agents/security_patterns.py from Go canonical source..."
+	@go run ./cmd/genpatterns -out agents/security_patterns.py
+	@echo "✓ agents/security_patterns.py regenerated"
+
+generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py is stale relative to the Go source
+	@echo "→ Checking agents/security_patterns.py is in sync with the Go source..."
+	@go run ./cmd/genpatterns -out agents/security_patterns.py.check
+	@if ! diff -q agents/security_patterns.py agents/security_patterns.py.check >/dev/null 2>&1; then \
+		echo "✗ agents/security_patterns.py is stale; run: make generate-sanitizer-patterns"; \
+		rm -f agents/security_patterns.py.check; \
+		exit 1; \
+	fi
+	@rm -f agents/security_patterns.py.check
+	@echo "✓ agents/security_patterns.py is in sync"
 
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests

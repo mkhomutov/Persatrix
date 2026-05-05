@@ -231,6 +231,14 @@ class _PromptAssemblyMixin:
         # arrive in this session (OQ 14b).
         rendered.append(load_snippet("user-message-delimiters"))
 
+        # External-data envelope contract (RFC 0009 PR 3): unconditional
+        # so the LLM understands `<external_data>` wrapping the moment
+        # an external-source tool returns a result. Loading conditionally
+        # would create a window where the first http_request / file_read
+        # call before the snippet was ever rendered would arrive without
+        # the prompt instructions.
+        rendered.append(load_snippet("external-data-handling"))
+
         # Memory-tool usage nudge — without this the LLM often responds
         # conversationally ("Got it, I'll remember that") instead of
         # actually calling the store_note / recall_notes tools.
