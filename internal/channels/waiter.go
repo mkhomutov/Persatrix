@@ -44,6 +44,16 @@ var ErrWaiterAlreadyRegistered = errors.New("channels: reply waiter already regi
 // expected QPS is bounded by chat-request rate (a single DM is
 // caller-side serialised), so contention is not a concern; if it ever
 // becomes one, sharding by channelID is a drop-in change.
+//
+// Scaling constraint (PR #251 review "Should fix #5"): the table is
+// **in-process**. If the orchestrator is ever horizontally scaled and
+// the agent's REST publish lands on a different replica than the one
+// that called [ChannelRouter.PublishAndAwait], the waiter on the
+// origin replica never fires and the chat times out. v0.3.0 ships
+// single-replica so this is not a release blocker, but a future
+// horizontal-scale rollout MUST replace this table with a
+// cross-process correlation primitive (e.g. Redis pub/sub keyed on
+// the inbound message id) before chat can survive the topology.
 type replyWaiter struct {
 	mu      sync.Mutex
 	waiters map[waiterKey]chan ChannelMessage

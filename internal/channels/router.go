@@ -191,6 +191,11 @@ var ErrChatTimeout = errors.New("channels: chat reply timed out")
 // check (see [RFC 0011 amendment §"DM gate-bypass"]); the response gate
 // is implicitly `always` for DM channels and is therefore not consulted
 // here.
+//
+// Scaling constraint (PR #251 review "Should fix #5"): correlation is
+// **in-process** via [replyWaiter]. Horizontal-scale rollouts require
+// a cross-process replacement before chat can survive the topology —
+// see the `replyWaiter` doc-string for the full rationale.
 func (r *ChannelRouter) PublishAndAwait(
 	ctx context.Context,
 	msg ChannelMessage,

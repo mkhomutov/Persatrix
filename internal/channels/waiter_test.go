@@ -137,3 +137,60 @@ func TestReplyWaiter_ConcurrentDistinctKeys(t *testing.T) {
 		// expected
 	}
 }
+
+// TestReplyWaiter_ConcurrentSameKeyStressNoLeak hammers the
+// `(channelID, senderID)` key with interleaved Register / Notify /
+// cancel goroutines and asserts (a) no panic from a stale `cancel`
+// clobbering a fresh registration, (b) no leaked map entries when
+// the dust settles. PR #251 review L-2: the identity-equality guard
+// in `cancel` (`if existing == ch`) is the defence; without a
+// stress test it was unverified that a Notify-then-fresh-Register
+// interleave on the same key cannot cross-fire or leak.
+//
+// The test runs many short Register→cancel cycles in parallel with
+// independent Notify calls. After all goroutines finish, the
+// waiter map must be empty — a leaked entry would mean either
+// `cancel` failed to delete its own slot (regression) or `Notify`
+// removed an entry but the next `Register` re-leaked it.
+func TestReplyWaiter_ConcurrentSameKeyStressNoLeak(t *testing.T) {
+	w := newReplyWaiter()
+	const (
+		workers    = 16
+		iterations = 500
+	)
+	channelID := "dm:user:agent-x"
+	senderID := "agent-x"
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_, cancel, err := w.Register(channelID, senderID)
+				if err != nil {
+					// Concurrent worker holds the slot; back off
+					// briefly. Either we'll get the slot on retry
+					// or our peer will release it. Either way the
+					// next iteration is the unit of work, not this
+					// one — so just continue.
+					continue
+				}
+				// 50/50 mix of Notify-vs-cancel-resolves the
+				// waiter. Both must be safe.
+				if j%2 == 0 {
+					w.Notify(ChannelMessage{ChannelID: channelID, SenderID: senderID, ID: "stress"})
+				}
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Final invariant: no leaked entries. A leak here is the loud
+	// signal that the identity-equality guard regressed.
+	w.mu.Lock()
+	leaked := len(w.waiters)
+	w.mu.Unlock()
+	assert.Equal(t, 0, leaked, "waiter map must be empty after all stress workers finish")
+}

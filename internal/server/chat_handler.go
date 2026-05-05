@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -15,6 +16,15 @@ import (
 	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
+
+// statusClientClosedRequest is the non-standard 499 status code used
+// (originally by nginx) to signal that the client closed the
+// connection before the server finished processing. The Go stdlib
+// has no constant for it. We emit it from the chat handler when
+// `PublishAndAwait` returns `context.Canceled` so a client
+// disconnect mid-flight is not conflated with a 5xx server fault in
+// dashboards and alert rules. PR #251 review "Should fix #1".
+const statusClientClosedRequest = 499
 
 // chatMaxMessageLength is the maximum allowed message length in characters.
 // (PR #123 review finding F-04: removed misleading configurability claim —
@@ -214,6 +224,45 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, channels.ErrInvalidChannelType):
 			s.logger.Error("chat: ErrInvalidChannelType on DM publish", zap.String("dm", dm.ID), zap.Error(err))
 			writeError(w, "INTERNAL", "internal server error", http.StatusInternalServerError)
+		case errors.Is(err, channels.ErrChannelNotFound):
+			// PR #251 review M-3: the DM was deleted between
+			// `GetOrCreateDM` and `PublishAndAwait`'s inner `Publish`
+			// (e.g. via `DELETE /api/v1/channels/{id}` from another
+			// caller). 404 is the correct semantic — the resource
+			// addressed by the publish disappeared — and gives the
+			// caller an actionable retry signal rather than an opaque
+			// 500.
+			writeError(w, "NOT_FOUND", "chat channel disappeared", http.StatusNotFound)
+		case errors.Is(err, channels.ErrWaiterAlreadyRegistered):
+			// PR #251 review "Should fix #2": another chat for the
+			// same `(user, agent)` DM is already in flight. The
+			// `replyWaiter` keys on `(channelID, awaitFromAgentID)`,
+			// so two concurrent chat requests for the same DM
+			// collide deterministically. 409 Conflict is the
+			// canonical surface for "your request is well-formed but
+			// the resource state forbids it right now"; clients can
+			// safely retry once the prior turn completes.
+			s.logger.Info("chat: concurrent chat on same DM rejected",
+				zap.String("agent_id", agentID), zap.String("user_id", userID))
+			writeError(w, "CONFLICT", "another chat is in flight for this DM; retry shortly", http.StatusConflict)
+		case errors.Is(err, context.Canceled):
+			// PR #251 review "Should fix #1": client disconnected
+			// before the agent replied. This is not a server fault;
+			// log at Info (not Error) so it does not poison alert
+			// rules built on the 5xx error log line, and emit the
+			// nginx-style 499 status. The response bytes likely
+			// never reach the caller — they have already gone — but
+			// `httptest` recorders still capture them, which is what
+			// makes this path testable.
+			s.logger.Info("chat: client cancelled request before reply",
+				zap.String("agent_id", agentID), zap.String("user_id", userID))
+			writeError(w, "CLIENT_CLOSED_REQUEST", "client closed request", statusClientClosedRequest)
+		case errors.Is(err, context.DeadlineExceeded):
+			// Caller's own deadline (e.g. an upstream proxy timeout)
+			// fired before our `chatMaxTimeout` clamp. Same envelope
+			// as `ErrChatTimeout` — the user observation is
+			// indistinguishable.
+			writeError(w, "DEADLINE_EXCEEDED", "request deadline exceeded", http.StatusGatewayTimeout)
 		default:
 			s.logger.Error("chat: PublishAndAwait failed",
 				zap.String("agent_id", agentID), zap.String("user_id", userID), zap.Error(err))
