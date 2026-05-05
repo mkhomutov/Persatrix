@@ -51,6 +51,17 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	if err := validateParticipantID(msg.SenderID); err != nil {
 		return err
 	}
+	// PR #231 review SF-3 (RFC 0011 PR 4a-ii-α): every mention id must
+	// pass the same registration-time check the sender went through, so
+	// the response gate (PR 4b) cannot trigger on junk values that slipped
+	// past the wire-side mentions cap. Validation runs before transaction
+	// open — the rejection has no rollback cost and the caller (`Router`)
+	// surfaces it as 422 at the REST boundary.
+	for i, mention := range msg.Mentions {
+		if err := validateParticipantID(mention); err != nil {
+			return fmt.Errorf("mentions[%d]: %w", i, err)
+		}
+	}
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now().UTC()
 	}

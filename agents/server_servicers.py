@@ -177,7 +177,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
     ) -> task_pb2.ChatResponse:
         """Handle a synchronous chat message from a human participant.
 
-        Builds a MESSAGE_RECEIVED AgentEvent, dispatches it with
+        Builds a CHANNEL_MESSAGE AgentEvent, dispatches it with
         ``execute_actions=False`` to extract the reply before firing
         side-effects, then executes remaining actions. Records the
         interaction in relationship memory (OQ 11). (RFC 0016, PR 3)
@@ -265,7 +265,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={
                 "content": request.message,
                 "user_id": user_id,
@@ -305,8 +305,8 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 reply_status="error",
             )
 
-        # Extract reply with priority: user-targeted SEND_MESSAGE → any
-        # SEND_MESSAGE → COMPLETE_TASK → empty (OQ 5).
+        # Extract reply with priority: user-targeted SEND_CHANNEL_MESSAGE → any
+        # SEND_CHANNEL_MESSAGE → COMPLETE_TASK → empty (OQ 5).
         reply, reply_status = _extract_chat_reply(actions, user_id)
 
         # Execute remaining actions (side-effects) after reply is secured.
@@ -369,13 +369,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         per ``TaskAck`` semantics.
 
         The response gate (``respond: when_mentioned``/``always``/``never``)
-        and the ``SEND_CHANNEL_MESSAGE`` executor land in PR 4b. The
-        ``EventType.MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` and
-        ``ActionType.SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` hard renames
-        land atomically with the chat-path migration in a follow-up PR
-        (chat is the heavy producer of the old names; renaming without
-        migrating chat would leave ``main`` broken). PR 4a only adds the
-        new enum members additively.
+        lands in PR 4b. The hard renames
+        ``EventType.CHANNEL_MESSAGE`` → ``CHANNEL_MESSAGE`` and
+        ``ActionType.SEND_CHANNEL_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` landed in
+        PR 4a-ii-α along with the chat-path migration; PR 4a only added
+        the new enum members additively.
         """
         # ─── Validation (defence-in-depth; mirrors proto/task.proto bounds) ──
         # Validator returns ``(error, parsed_timestamp)`` so the RFC 3339

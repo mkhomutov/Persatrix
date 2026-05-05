@@ -54,7 +54,7 @@ def _make_mixin(
     notes: list[_FakeNote] | None = None,
     rel: _FakeRelSummary | None = None,
     sender_id: str | None = None,
-    event_type: str = "MESSAGE_RECEIVED",
+    event_type: str = "CHANNEL_MESSAGE",
 ) -> tuple[_ConcreteMemoryMixin, Any]:
     """Return a wired _MemoryContextMixin instance and a matching fake event."""
     from agents.memory.working import WorkingMemory

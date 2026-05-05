@@ -4,7 +4,7 @@ PR #248 deep-review findings (High + Medium tier) addressed here:
 
 - **High** — ``_StatePersistenceMixin._MULTI_TURN_EVENT_TYPES`` must list
   ``CHANNEL_MESSAGE`` so dispatched channel events take the multi-turn
-  episode path alongside ``MESSAGE_RECEIVED`` instead of falling through
+  episode path alongside ``CHANNEL_MESSAGE`` instead of falling through
   the legacy fallback (which logs a "Event type … is not classified"
   warning per event). The PR-215 review comment above the frozenset
   explicitly anticipated this gap when a new ``EventType`` lands.
@@ -17,7 +17,7 @@ PR #248 deep-review findings (High + Medium tier) addressed here:
 
 - **Medium** — ``action_loop`` must use ``payload["content"]`` (not the
   formatted ``user_message``) as the FTS5 ``memory_query`` for
-  ``CHANNEL_MESSAGE``, mirroring the ``MESSAGE_RECEIVED`` branch. Without
+  ``CHANNEL_MESSAGE``, mirroring the ``CHANNEL_MESSAGE`` branch. Without
   this fix the memory query is contaminated with delimiter / JSON
   punctuation that produces zero useful keyword matches.
 
@@ -109,7 +109,7 @@ class TestFormatEventChannelMessage:
     async def test_agent_sender_uses_attributed_form(self):
         """A channel message from another agent (non-user) takes the
         plain ``Message from <sender>:`` form, mirroring the
-        ``MESSAGE_RECEIVED`` branch's ``sender_type != "user"`` path.
+        ``CHANNEL_MESSAGE`` branch's ``sender_type != "user"`` path.
         """
         agent = await _make_agent()
         event = AgentEvent(
@@ -125,7 +125,7 @@ class TestFormatEventChannelMessage:
         assert "ack" in msg
 
     async def test_sanitizes_delimiter_injection_attempt(self):
-        """Symmetry with the ``MESSAGE_RECEIVED`` PR #120 F-2 fix: an
+        """Symmetry with the ``CHANNEL_MESSAGE`` PR #120 F-2 fix: an
         attacker-controlled body containing ``<|`` / ``|>`` MUST be
         escaped before injection into the LLM prompt.
         """
@@ -154,7 +154,7 @@ class TestChannelMessageMemoryQuery:
 
         Using the formatted ``_format_event`` output would feed FTS5 the
         ``<|user_message …|>`` wrapper tokens and produce no useful
-        keyword matches — the same bug the existing MESSAGE_RECEIVED
+        keyword matches — the same bug the existing CHANNEL_MESSAGE
         branch was added to fix. PR #248 deep-review M finding.
         """
         agent = await _make_agent()

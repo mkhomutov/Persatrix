@@ -62,7 +62,7 @@ class TestSummarisationOnClose:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 10)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "thanks, bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -83,7 +83,7 @@ class TestSummarisationOnClose:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 4)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -107,7 +107,7 @@ class TestRecordInteractionMove:
         peer = "iron-fox"
         await send_n_turns(agent, peer, 10)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "thanks, bye"},
             sender_id=peer,
             metadata={"chat_end": True},
@@ -135,7 +135,7 @@ class TestAutoReflectCounter:
         before = await agent._episodic_memory.get_interaction_count()
         await send_n_turns(agent, peer, 5)
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "bye"},
             sender_id=peer,
             metadata={"chat_end": True},

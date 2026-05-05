@@ -112,7 +112,7 @@ class TestEventDispatcher:
         dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hi Sarah"},
             sender_id="iron-fox",
         )
@@ -123,7 +123,7 @@ class TestEventDispatcher:
     async def test_dispatch_to_unknown_agent(self):
         dispatcher = EventDispatcher()
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Hi"},
         )
         actions = await dispatcher.dispatch("nonexistent", event)
@@ -138,7 +138,7 @@ class TestEventDispatcher:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             metadata={"cascade_depth": 3},  # Already at limit
         )
@@ -152,7 +152,7 @@ class TestEventDispatcher:
         dispatcher = EventDispatcher(agents={"ember-owl": agent})
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
         )
         assert event.metadata.get("cascade_depth", 0) == 0
@@ -172,7 +172,7 @@ class TestEventDispatcher:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             metadata={"cascade_depth": 2},
         )
@@ -186,7 +186,7 @@ class TestEventDispatcher:
         dispatcher.register_agent("ember-owl", agent)
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
         )
         actions = await dispatcher.dispatch("ember-owl", event)
@@ -205,7 +205,7 @@ class TestEventDispatcher:
         scheduler._idle_count = 15
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "urgent"},
         )
         await dispatcher.dispatch("ember-owl", event)
@@ -229,7 +229,7 @@ class TestEventDispatcher:
         )
 
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "Talking to myself"},
             sender_id="ember-owl",
         )
@@ -248,7 +248,7 @@ class TestEventDispatcher:
 
         original_payload = {"content": "test", "mutable_key": "original"}
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload=original_payload,
         )
         await dispatcher.dispatch("ember-owl", event)
@@ -276,7 +276,7 @@ class TestEventDispatcher:
             "nested_dict": nested_dict,
         }
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload=original_payload,
         )
         await dispatcher.dispatch("ember-owl", event)
@@ -304,7 +304,7 @@ class TestEventDispatcher:
         inner_meta = {"trace_ids": ["t1", "t2"]}
         original_metadata = {"cascade_depth": 0, "tracing": inner_meta}
         event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "test"},
             metadata=original_metadata,
         )

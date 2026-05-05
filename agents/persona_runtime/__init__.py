@@ -205,7 +205,7 @@ class _LLMPersonaAgent(
         # ``add_turn`` and ``close`` in one shot from
         # ``_on_event_inner`` so each emits a closed-interaction episode
         # with ``turn_count=1``.  Multi-turn paths
-        # (``MESSAGE_RECEIVED`` / ``MENTION``) accumulate turns under a
+        # (``CHANNEL_MESSAGE`` / ``MENTION``) accumulate turns under a
         # DM- or thread-keyed scope and persist a single episode on
         # close (PR 3); close fires either via session-end metadata
         # (``chat_end`` / ``session_end``) or via the

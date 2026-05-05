@@ -124,7 +124,7 @@ class TestEventTriggersTickLink:
             await dispatcher.dispatch(
                 "linked-agent",
                 AgentEvent(
-                    event_type=EventType.MESSAGE_RECEIVED,
+                    event_type=EventType.CHANNEL_MESSAGE,
                     payload={"text": "hi"},
                     sender_id="other",
                 ),
@@ -168,7 +168,7 @@ class TestEventTriggersTickLink:
         await dispatcher.dispatch(
             "linked-agent",
             AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
+                event_type=EventType.CHANNEL_MESSAGE,
                 payload={"text": "hi"},
                 sender_id="other",
             ),
@@ -214,7 +214,7 @@ class TestEventSpanPhases:
         agent = await _make_agent()
         await agent.on_event(
             AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
+                event_type=EventType.CHANNEL_MESSAGE,
                 payload={"text": "phase-test"},
                 sender_id="other",
             ),

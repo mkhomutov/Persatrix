@@ -31,13 +31,11 @@ __all__ = [
 
 class EventType(Enum):
     TASK_ASSIGNED = "task_assigned"
-    MESSAGE_RECEIVED = "message_received"
-    # RFC 0011 PR 4a: additive — the canonical channels event type. The hard
-    # rename ``MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` lands atomically with
-    # the chat-path migration in a follow-up PR (chat is the heavy producer
-    # of the old name; renaming without migrating chat would leave ``main``
-    # broken). Until then both members coexist: chat ingest emits the old
-    # name, ``ReceiveChannelMessage`` emits the new one.
+    # RFC 0011 PR 4a-ii-α (2026-05-05): hard rename — the canonical channels
+    # event type. Was ``CHANNEL_MESSAGE = "message_received"`` until the
+    # additive PR 4a-i (PR #248); the chat ingest path migrated atomically
+    # in PR 4a-ii-α so the old name and string value are gone. New code
+    # uses ``CHANNEL_MESSAGE`` exclusively.
     CHANNEL_MESSAGE = "channel_message"
     MENTION = "mention"
     SUB_AGENT_COMPLETED = "sub_agent_completed"
@@ -75,12 +73,12 @@ class AgentEvent:
 
 
 class ActionType(Enum):
-    SEND_MESSAGE = "send_message"
-    # RFC 0011 PR 4a: additive — the canonical channels send action. The
-    # hard rename ``SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` lands atomically
-    # with the chat-path migration in a follow-up PR. The dispatch executor
-    # for this action arrives in PR 4b; the enum member ships now so PR 4a's
-    # response gate plumbing has the canonical symbol available.
+    # RFC 0011 PR 4a-ii-α (2026-05-05): hard rename — the canonical channels
+    # send action. Was ``SEND_CHANNEL_MESSAGE = "send_message"`` until the additive
+    # PR 4a-i (PR #248); the chat reply extraction migrated atomically in
+    # PR 4a-ii-α so the old name and string value are gone. The dispatch
+    # executor (`_handle_send_channel_message`) and reply extractor scan
+    # for ``SEND_CHANNEL_MESSAGE`` exclusively.
     SEND_CHANNEL_MESSAGE = "send_channel_message"
     COMPLETE_TASK = "complete_task"
     DELEGATE = "delegate"

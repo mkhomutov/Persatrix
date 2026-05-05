@@ -32,18 +32,18 @@ _tracer = trace.get_tracer(__name__)
 
 __all__ = ["ActionExecutor", "EventDispatcher"]
 
-# Maximum mentions per SEND_MESSAGE action to prevent resource exhaustion
+# Maximum mentions per SEND_CHANNEL_MESSAGE action to prevent resource exhaustion
 # from LLM-generated payloads.  Each mention triggers a synchronous dispatch
 # (per-agent lock + LLM call); with cascade fan-out worst case is N^D.
 # (PR #55 review: unbounded mentions list → resource exhaustion.)
 _MAX_MENTIONS_PER_ACTION = 10
 
-# Default per-dispatch timeout (seconds) for SEND_MESSAGE cascades.
+# Default per-dispatch timeout (seconds) for SEND_CHANNEL_MESSAGE cascades.
 # Prevents a hung target agent from blocking the sender indefinitely.
 # Separate from _DEFAULT_EVENT_TIMEOUT: bounds a single hop, not full event.
 # TODO(v0.3): make configurable via config["dispatch_timeout"].
 # Hard-coded here as a partial fix for F-5b-4 (PR #55 review: no per-dispatch
-# timeout in _handle_send_message()); making it configurable requires the v0.3
+# timeout in _handle_send_channel_message()); making it configurable requires the v0.3
 # dispatch config schema and is tracked as a deferred item in the PR 7b section
 # of docs/rfcs/0005-pr-plan.md.
 # (PR #60 review: hard-coded 60s dispatch timeout.)
@@ -56,7 +56,7 @@ _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 class ActionExecutor:
     """Executes ``AgentAction`` lists produced by persona agents.
 
-    Handles each action type exhaustively. ``SEND_MESSAGE`` dispatches
+    Handles each action type exhaustively. ``SEND_CHANNEL_MESSAGE`` dispatches
     through the ``EventDispatcher`` (if provided) to the target agent.
     ``DELEGATE`` and ``SPAWN_SUB_AGENT`` are TODO stubs for future RFCs.
     """
@@ -81,9 +81,9 @@ class ActionExecutor:
 
         Args:
             cascade_depth: Current cascade depth from the parent dispatch.
-                Propagated to child dispatches via SEND_MESSAGE so the
+                Propagated to child dispatches via SEND_CHANNEL_MESSAGE so the
                 cascade depth limit is enforced across the full event chain.
-                (PR #55 review: SEND_MESSAGE child events bypassed cascade limit.)
+                (PR #55 review: SEND_CHANNEL_MESSAGE child events bypassed cascade limit.)
         """
         results: list[dict[str, Any]] = []
         for action in actions:
@@ -104,16 +104,16 @@ class ActionExecutor:
         (str).  The status contract:
 
         * ``"completed"`` — COMPLETE_TASK executed successfully.
-        * ``"dispatched"`` — SEND_MESSAGE routed to at least one target.
-        * ``"failed"`` — SEND_MESSAGE attempted but all dispatches failed.
-        * ``"no_targets"`` — SEND_MESSAGE had no mentioned targets (no-op).
-        * ``"no_dispatcher"`` — SEND_MESSAGE with no EventDispatcher configured.
+        * ``"dispatched"`` — SEND_CHANNEL_MESSAGE routed to at least one target.
+        * ``"failed"`` — SEND_CHANNEL_MESSAGE attempted but all dispatches failed.
+        * ``"no_targets"`` — SEND_CHANNEL_MESSAGE had no mentioned targets (no-op).
+        * ``"no_dispatcher"`` — SEND_CHANNEL_MESSAGE with no EventDispatcher configured.
         * ``"skipped"`` — USE_TOOL appeared as a final action (should not happen).
         * ``"ok"`` — DO_NOTHING.
         * ``"not_implemented"`` — DELEGATE, SPAWN_SUB_AGENT, or approval actions.
         * ``"unhandled"`` — Unknown ActionType (defensive catch-all).
 
-        SEND_MESSAGE dicts also include ``dispatched_to`` (int).
+        SEND_CHANNEL_MESSAGE dicts also include ``dispatched_to`` (int).
         (PR #60 review: document status contract for downstream consumers.)
         """
         match action.action_type:
@@ -123,8 +123,8 @@ class ActionExecutor:
                     "status": "completed",
                     "result": action.payload.get("result", ""),
                 }
-            case ActionType.SEND_MESSAGE:
-                return await self._handle_send_message(
+            case ActionType.SEND_CHANNEL_MESSAGE:
+                return await self._handle_send_channel_message(
                     agent_id, action, cascade_depth=cascade_depth,
                 )
             case ActionType.USE_TOOL:
@@ -209,20 +209,20 @@ class ActionExecutor:
                 )
                 return {"action_type": action.action_type.value, "status": "unhandled"}
 
-    async def _handle_send_message(
+    async def _handle_send_channel_message(
         self,
         sender_id: str,
         action: AgentAction,
         *,
         cascade_depth: int = 0,
     ) -> dict[str, Any]:
-        """Route SEND_MESSAGE to the EventDispatcher as a MESSAGE_RECEIVED event."""
+        """Route SEND_CHANNEL_MESSAGE to the EventDispatcher as a CHANNEL_MESSAGE event."""
         if self._dispatcher is None:
             logger.warning(
                 "Agent %s sent message but no dispatcher configured",
                 sender_id,
             )
-            return {"action_type": "send_message", "status": "no_dispatcher"}
+            return {"action_type": "send_channel_message", "status": "no_dispatcher"}
 
         target_channel = action.payload.get("channel_id", "")
         content = action.payload.get("content", "")
@@ -236,14 +236,14 @@ class ActionExecutor:
         # (PR #55 review: unbounded mentions list → resource exhaustion.)
         if len(mentions) > _MAX_MENTIONS_PER_ACTION:
             logger.warning(
-                "Agent %s SEND_MESSAGE mentions list truncated from %d to %d",
+                "Agent %s SEND_CHANNEL_MESSAGE mentions list truncated from %d to %d",
                 sender_id,
                 len(mentions),
                 _MAX_MENTIONS_PER_ACTION,
             )
             mentions = mentions[:_MAX_MENTIONS_PER_ACTION]
 
-        # Route to mentioned agents as MESSAGE_RECEIVED events.
+        # Route to mentioned agents as CHANNEL_MESSAGE events.
         # Log at WARNING when channel_id is present but mentions is empty —
         # this almost certainly means the LLM intended to route to a channel
         # (not yet implemented), so the message is silently lost.  WARNING
@@ -258,18 +258,18 @@ class ActionExecutor:
         if not mentions:
             if target_channel:
                 logger.warning(
-                    "Agent %s SEND_MESSAGE to channel %s has no mentions — "
+                    "Agent %s SEND_CHANNEL_MESSAGE to channel %s has no mentions — "
                     "message not routed (channel routing not yet implemented)",
                     sender_id,
                     target_channel,
                 )
             else:
                 logger.debug(
-                    "Agent %s SEND_MESSAGE has no mentions, message not routed",
+                    "Agent %s SEND_CHANNEL_MESSAGE has no mentions, message not routed",
                     sender_id,
                 )
             return {
-                "action_type": "send_message",
+                "action_type": "send_channel_message",
                 "status": "no_targets",
                 "dispatched_to": 0,
             }
@@ -278,11 +278,11 @@ class ActionExecutor:
             try:
                 # Propagate cascade_depth so that cross-agent message
                 # chains are bounded by the dispatcher's max_cascade_depth.
-                # Without this, each SEND_MESSAGE would restart at depth 0,
+                # Without this, each SEND_CHANNEL_MESSAGE would restart at depth 0,
                 # bypassing the cascade limit entirely.
-                # (PR #55 review: cascade depth not propagated through SEND_MESSAGE.)
+                # (PR #55 review: cascade depth not propagated through SEND_CHANNEL_MESSAGE.)
                 event = AgentEvent(
-                    event_type=EventType.MESSAGE_RECEIVED,
+                    event_type=EventType.CHANNEL_MESSAGE,
                     payload={
                         "content": content,
                         "channel_id": target_channel,
@@ -299,7 +299,7 @@ class ActionExecutor:
             except TimeoutError:
                 # Per-dispatch timeout prevents a hung target agent from
                 # blocking the sender indefinitely.
-                # (F-5b-4: per-dispatch timeout in _handle_send_message.)
+                # (F-5b-4: per-dispatch timeout in _handle_send_channel_message.)
                 logger.warning(
                     "Dispatch from %s to %s timed out after %.0fs",
                     sender_id, target_id, _DEFAULT_DISPATCH_TIMEOUT,
@@ -309,7 +309,7 @@ class ActionExecutor:
                 # do not propagate."  Without this guard a single failed
                 # dispatch would skip remaining mentions and propagate
                 # the exception up to the executor loop.
-                # (Review finding: _handle_send_message exception propagation.)
+                # (Review finding: _handle_send_channel_message exception propagation.)
                 logger.warning(
                     "Failed to dispatch message from %s to %s",
                     sender_id, target_id, exc_info=True,
@@ -320,7 +320,7 @@ class ActionExecutor:
         # (F-60-6: status "dispatched" with dispatched_to=0 is misleading.)
         status = "dispatched" if dispatched > 0 else "failed"
         return {
-            "action_type": "send_message",
+            "action_type": "send_channel_message",
             "status": status,
             "dispatched_to": dispatched,
         }
@@ -477,7 +477,7 @@ class EventDispatcher:
         actions = await agent.on_event(event)
 
         # Execute resulting actions, propagating cascade depth so that
-        # SEND_MESSAGE actions inherit the current depth for child dispatches.
+        # SEND_CHANNEL_MESSAGE actions inherit the current depth for child dispatches.
         # Skipped when execute_actions=False so callers (e.g. SendChatMessage
         # servicer) can inspect actions before firing side-effects. (OQ 7)
         if execute_actions:

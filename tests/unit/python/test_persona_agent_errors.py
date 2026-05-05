@@ -204,7 +204,7 @@ class TestMissingModelConfig:
 class TestActionPayloadValidation:
     """Verify _validate_action_payload() rejects malformed LLM-generated payloads.
 
-    PR #54 review Must-Fix #1: DELEGATE, SEND_MESSAGE, SPAWN_SUB_AGENT payloads
+    PR #54 review Must-Fix #1: DELEGATE, SEND_CHANNEL_MESSAGE, SPAWN_SUB_AGENT payloads
     must contain required fields. Invalid payloads are replaced with DO_NOTHING.
     """
 
@@ -268,15 +268,15 @@ class TestActionPayloadValidation:
     async def test_send_message_valid(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_message", "payload": {"channel_id": "general", "content": "hello"}},
+            {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": "hello"}},
         ]))
         actions = agent._parse_actions(response)
-        assert actions[0].action_type == ActionType.SEND_MESSAGE
+        assert actions[0].action_type == ActionType.SEND_CHANNEL_MESSAGE
 
     async def test_send_message_missing_channel_id(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_message", "payload": {"content": "hello"}},
+            {"action_type": "send_channel_message", "payload": {"content": "hello"}},
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING
@@ -284,7 +284,7 @@ class TestActionPayloadValidation:
     async def test_send_message_missing_content(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_message", "payload": {"channel_id": "general"}},
+            {"action_type": "send_channel_message", "payload": {"channel_id": "general"}},
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING
@@ -292,7 +292,7 @@ class TestActionPayloadValidation:
     async def test_send_message_empty_content(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_message", "payload": {"channel_id": "general", "content": ""}},
+            {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": ""}},
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING

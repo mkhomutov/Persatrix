@@ -21,7 +21,7 @@ What "parity" means here:
   the event-type label (``"tick"`` for ``EventType.TICK``,
   ``"task_assigned"`` for ``EventType.TASK_ASSIGNED``, etc., per
   PR-215 review Should-Fix #1).
-  Multi-turn paths (``MESSAGE_RECEIVED`` / ``MENTION``) are deferred to
+  Multi-turn paths (``CHANNEL_MESSAGE`` / ``MENTION``) are deferred to
   PR 3 and continue to land with NULL interaction columns; that legacy
   shape is asserted here to keep the PR 3 boundary explicit.
 """
@@ -215,7 +215,7 @@ class TestSingleTurnParity:
     async def test_multi_turn_events_aggregate_into_open_interaction(self):
         """Multi-turn paths (PR 3) accumulate in the open interaction.
 
-        After PR 3 wires multi-turn aggregation, ``MESSAGE_RECEIVED``
+        After PR 3 wires multi-turn aggregation, ``CHANNEL_MESSAGE``
         and ``MENTION`` no longer write a per-event row — they call
         ``InteractionTracker.add_turn`` and stay open until session end
         or idle-gap closes the interaction.  This test pins that
@@ -226,11 +226,11 @@ class TestSingleTurnParity:
         parity test" gate from the RFC 0020 PR plan.
 
         PR-215 review nice-to-have #4: ``MENTION`` is exercised here
-        alongside ``MESSAGE_RECEIVED`` so the symmetry of the
+        alongside ``CHANNEL_MESSAGE`` so the symmetry of the
         ``_MULTI_TURN_EVENT_TYPES`` deny-list is enforced explicitly.
         """
         for event_type, payload, sender in (
-            (EventType.MESSAGE_RECEIVED, {"content": "Quick question."}, "iron-fox"),
+            (EventType.CHANNEL_MESSAGE, {"content": "Quick question."}, "iron-fox"),
             (EventType.MENTION, {"content": "@parity-persona ping"}, "iron-fox"),
         ):
             agent = await _make_agent()
@@ -250,9 +250,9 @@ class TestSingleTurnParity:
             assert open_scopes[0].startswith("dm:")
 
     async def test_mixed_event_stream_preserves_per_event_count(self):
-        """A mixed stream (TICK + TASK_ASSIGNED + MESSAGE_RECEIVED) yields
+        """A mixed stream (TICK + TASK_ASSIGNED + CHANNEL_MESSAGE) yields
         three episodes — one per single-turn event — with the
-        ``MESSAGE_RECEIVED`` turn aggregated into an open interaction
+        ``CHANNEL_MESSAGE`` turn aggregated into an open interaction
         that persists no episode until close (RFC 0020 PR 3).
 
         Pre-PR-3 behaviour produced four episodes (the multi-turn event
@@ -271,7 +271,7 @@ class TestSingleTurnParity:
             payload={"task": "noop"},
         ))
         await agent.on_event(AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "hi"},
             sender_id="peer-agent",
         ))
@@ -281,7 +281,7 @@ class TestSingleTurnParity:
         assert len(episodes) == 3
 
         # Every persisted row must be a closed single-turn interaction;
-        # the multi-turn ``MESSAGE_RECEIVED`` turn is held in the open
+        # the multi-turn ``CHANNEL_MESSAGE`` turn is held in the open
         # interaction and would only land on close.
         single_turn = [e for e in episodes if e["interaction_id"] is not None]
         assert len(single_turn) == 3

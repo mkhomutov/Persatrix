@@ -247,7 +247,7 @@ class _PromptAssemblyMixin:
                 if isinstance(task, TaskInput):
                     return f"You have been assigned a task:\n\n{task.payload}"
                 return f"You have been assigned a task:\n\n{event.payload}"
-            case EventType.MESSAGE_RECEIVED | EventType.CHANNEL_MESSAGE:
+            case EventType.CHANNEL_MESSAGE:
                 # SECURITY: sender_id and content originate from the
                 # dispatcher today (trusted).  When external bridges
                 # (Slack, Discord, email) are added in v0.2+, these
@@ -256,7 +256,7 @@ class _PromptAssemblyMixin:
                 # to mitigate prompt injection risks.
                 #
                 # ``CHANNEL_MESSAGE`` (RFC 0011 PR 4a-i) shares the same
-                # delimiter / sanitisation discipline as ``MESSAGE_RECEIVED``
+                # delimiter / sanitisation discipline as ``CHANNEL_MESSAGE``
                 # — both carry a sender_id + content payload and both can
                 # originate from a user-typed message on the channels
                 # surface.  Without this case the event fell through to

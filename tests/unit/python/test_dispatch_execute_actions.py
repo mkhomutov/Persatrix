@@ -45,7 +45,7 @@ def _make_dispatcher(
 
 def _chat_event() -> AgentEvent:
     return AgentEvent(
-        event_type=EventType.MESSAGE_RECEIVED,
+        event_type=EventType.CHANNEL_MESSAGE,
         payload={"content": "hello"},
     )
 
@@ -57,7 +57,7 @@ class TestExecuteActionsFlag:
 
     async def test_execute_actions_false_returns_actions_without_executing(self):
         """dispatch(execute_actions=False) returns actions but does not call executor."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]})]
         dispatcher, _ = _make_dispatcher("ember-owl", actions)
 
         # Patch executor.execute so we can assert it was NOT called.
@@ -96,21 +96,21 @@ class TestExecuteActionsFlag:
 
     async def test_execute_actions_false_child_dispatches_still_use_default_true(self):
         """execute_actions=False is a per-call override; child dispatches default to True."""
-        # A SEND_MESSAGE action from agent A would trigger a child dispatch to B
-        # via ActionExecutor._handle_send_message().  That child dispatch should
+        # A SEND_CHANNEL_MESSAGE action from agent A would trigger a child dispatch to B
+        # via ActionExecutor._handle_send_channel_message().  That child dispatch should
         # call agent B's on_event AND execute actions normally.
         #
         # This test verifies that execute_actions=False does NOT propagate to
         # child dispatches — the flag is purely per-call. (OQ 7)
         agent_b = _make_mock_agent([AgentAction(ActionType.DO_NOTHING, {})])
         agent_a = _make_mock_agent([
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["iron-fox"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["iron-fox"]}),
         ])
 
         dispatcher = EventDispatcher(agents={"ember-owl": agent_a, "iron-fox": agent_b})
 
         # With execute_actions=False, executor is NOT called at the top level,
-        # so the SEND_MESSAGE is never routed — agent_b.on_event stays uncalled.
+        # so the SEND_CHANNEL_MESSAGE is never routed — agent_b.on_event stays uncalled.
         executor_mock = AsyncMock(return_value=[])
         dispatcher._executor.execute = executor_mock
 
@@ -120,7 +120,7 @@ class TestExecuteActionsFlag:
 
         # Action list returned unchanged
         assert len(result) == 1
-        assert result[0].action_type == ActionType.SEND_MESSAGE
+        assert result[0].action_type == ActionType.SEND_CHANNEL_MESSAGE
         # Executor was NOT called (no routing happened)
         executor_mock.assert_not_called()
         # agent_b never received anything
@@ -140,7 +140,7 @@ class TestExecuteActionsFlag:
         dispatcher, agent = _make_dispatcher("ember-owl", actions)
 
         deep_event = AgentEvent(
-            event_type=EventType.MESSAGE_RECEIVED,
+            event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "deep"},
             metadata={"cascade_depth": 10},  # beyond default 5
         )

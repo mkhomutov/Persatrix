@@ -68,7 +68,7 @@ class TestChatEndpointIntegration:
         """gRPC client → agent servicer → mock dispatcher → reply."""
         actions = [
             AgentAction(
-                action_type=ActionType.SEND_MESSAGE,
+                action_type=ActionType.SEND_CHANNEL_MESSAGE,
                 payload={"content": "Hello, human!", "target": "all"},
             ),
         ]
@@ -132,7 +132,7 @@ class TestChatEndpointIntegration:
         """Second message with same session_id continues conversation."""
         actions = [
             AgentAction(
-                action_type=ActionType.SEND_MESSAGE,
+                action_type=ActionType.SEND_CHANNEL_MESSAGE,
                 payload={"content": "reply", "target": "all"},
             ),
         ]

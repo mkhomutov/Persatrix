@@ -71,9 +71,9 @@ def _make_servicer(
 class TestSendChatMessage:
 
     async def test_basic_reply(self):
-        """Happy path: returns reply from SEND_MESSAGE action."""
+        """Happy path: returns reply from SEND_CHANNEL_MESSAGE action."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi there", "mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi there", "mentions": ["local"]}),
         ]
         servicer = _make_servicer(actions)
         context = _mock_context()
@@ -98,7 +98,7 @@ class TestSendChatMessage:
 
     async def test_session_id_generated_when_empty(self):
         """A UUID session_id is generated when request has empty session_id."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hello", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hello", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -111,7 +111,7 @@ class TestSendChatMessage:
 
     async def test_session_id_reused_when_provided(self):
         """Existing session_id is echoed back unchanged."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -123,7 +123,7 @@ class TestSendChatMessage:
 
     async def test_participant_type_defaults_to_user(self):
         """Empty participant_type field defaults to 'user'."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "ok", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "ok", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -193,7 +193,7 @@ class TestSendChatMessage:
     async def test_timestamp_populated(self):
         """Response timestamp is a recent Unix epoch value."""
         before = int(time.time())
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -204,7 +204,7 @@ class TestSendChatMessage:
 
     async def test_agent_display_name_empty(self):
         """agent_display_name is empty string (orchestrator fills it)."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -215,7 +215,7 @@ class TestSendChatMessage:
     async def test_executor_called_after_reply_extraction(self):
         """Side-effect actions are executed via executor after reply is secured."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "hello", "mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hello", "mentions": ["local"]}),
             AgentAction(ActionType.DO_NOTHING, {}),
         ]
         servicer = _make_servicer(actions)
@@ -229,7 +229,7 @@ class TestSendChatMessage:
 
     async def test_timeout_clamped_to_max(self):
         """timeout_seconds > 300 is clamped to 300."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -249,7 +249,7 @@ class TestSendChatMessage:
 
     async def test_timeout_clamped_to_min(self):
         """timeout_seconds=0 defaults to 30, which is >= 1."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -270,7 +270,7 @@ class TestSendChatMessage:
     async def test_executor_failure_still_returns_reply(self):
         """Reply is returned even when executor.execute() raises (two-phase guarantee)."""
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "safe reply", "mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "safe reply", "mentions": ["local"]}),
         ]
         servicer = _make_servicer(actions)
         servicer._dispatcher.executor.execute = AsyncMock(
@@ -297,7 +297,7 @@ class TestSendChatMessage:
         chat session.
         """
         actions = [
-            AgentAction(ActionType.SEND_MESSAGE, {"content": "hi", "mentions": ["local"]}),
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]}),
         ]
         agent = _StubAgent(agent_id="ember-owl", config={"model": "test"})
         memory = MagicMock()
@@ -369,7 +369,7 @@ class TestSendChatMessage:
         'use minimum' rather than rejecting, since the clamp guarantees a
         safe positive timeout.  (Review finding: document this edge case.)
         """
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "ok", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "ok", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -390,7 +390,7 @@ class TestSendChatMessage:
 
     async def test_empty_message_still_dispatches(self):
         """Empty message string is dispatched normally (agent decides reply)."""
-        actions = [AgentAction(ActionType.SEND_MESSAGE, {"content": "ok", "mentions": []})]
+        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "ok", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 

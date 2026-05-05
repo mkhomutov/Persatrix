@@ -208,7 +208,7 @@ class TestEventActionMemoryCycle:
         try:
             dispatcher = EventDispatcher(agents={"agent-a": agent})
             event = AgentEvent(
-                event_type=EventType.MESSAGE_RECEIVED,
+                event_type=EventType.CHANNEL_MESSAGE,
                 payload={"content": "Hello"},
                 sender_id="external",
             )
@@ -235,7 +235,7 @@ class TestCrossAgentRouting:
             responses=[
                 LLMResponse(
                     text=(
-                        '```json\n[{"action_type": "send_message", '
+                        '```json\n[{"action_type": "send_channel_message", '
                         '"payload": {"content": "Hi B!", "mentions": ["agent-b"], '
                         '"channel_id": "general"}}]\n```'
                     ),
@@ -270,8 +270,8 @@ class TestCrossAgentRouting:
             )
             actions = await dispatcher.dispatch("agent-a", event)
 
-            # Agent A should have returned SEND_MESSAGE
-            assert any(a.action_type == ActionType.SEND_MESSAGE for a in actions)
+            # Agent A should have returned SEND_CHANNEL_MESSAGE
+            assert any(a.action_type == ActionType.SEND_CHANNEL_MESSAGE for a in actions)
 
             # Agent B should have been called via the dispatcher cascade
             # (on_event is called by ActionExecutor → EventDispatcher)
@@ -292,7 +292,7 @@ class TestCrossAgentRouting:
         # Each agent always replies mentioning the other
         reply_a = LLMResponse(
             text=(
-                '```json\n[{"action_type": "send_message", '
+                '```json\n[{"action_type": "send_channel_message", '
                 '"payload": {"content": "Reply from A", "mentions": ["agent-b"], '
                 '"channel_id": "general"}}]\n```'
             ),
@@ -301,7 +301,7 @@ class TestCrossAgentRouting:
         )
         reply_b = LLMResponse(
             text=(
-                '```json\n[{"action_type": "send_message", '
+                '```json\n[{"action_type": "send_channel_message", '
                 '"payload": {"content": "Reply from B", "mentions": ["agent-a"], '
                 '"channel_id": "general"}}]\n```'
             ),
