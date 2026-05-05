@@ -7,14 +7,14 @@ area: build/proto
 created: 2026-05-04
 refs:
   - proto/task.proto
-  - tests/unit/python/test_receive_channel_message_stub.py
+  - tests/unit/python/test_receive_channel_message.py
 ---
 
 ## Summary
 
 PR #246 added `ChannelMessageEvent` (8 fields) and `TaskAck` (2 fields)
 to `proto/task.proto`. The accompanying test
-[tests/unit/python/test_receive_channel_message_stub.py](../../tests/unit/python/test_receive_channel_message_stub.py)
+[tests/unit/python/test_receive_channel_message.py](../../tests/unit/python/test_receive_channel_message.py)
 pins the stub's `success=False` contract but does not exercise
 serialization. Neither Python nor Go verifies that an event constructed
 with all eight fields populated serializes and deserializes to an equal

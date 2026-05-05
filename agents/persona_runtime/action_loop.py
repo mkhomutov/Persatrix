@@ -339,8 +339,12 @@ class _ActionLoopMixin:
         # delimiters for prompt injection mitigation — these delimiters break
         # FTS5 full-text search queries and produce no useful keyword matches.
         # (Bug: FTS5 receives '<|user_message user_id="..."|>...<|/user_message|>'
-        # instead of the actual message text.)
-        if event.event_type == EventType.MESSAGE_RECEIVED:
+        # instead of the actual message text.) CHANNEL_MESSAGE shares the
+        # same wrapped-prompt treatment — PR #248 deep review Medium.
+        if event.event_type in (
+            EventType.MESSAGE_RECEIVED,
+            EventType.CHANNEL_MESSAGE,
+        ):
             memory_query = event.payload.get("content", "")
         else:
             memory_query = user_message

@@ -32,6 +32,13 @@ __all__ = [
 class EventType(Enum):
     TASK_ASSIGNED = "task_assigned"
     MESSAGE_RECEIVED = "message_received"
+    # RFC 0011 PR 4a: additive — the canonical channels event type. The hard
+    # rename ``MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` lands atomically with
+    # the chat-path migration in a follow-up PR (chat is the heavy producer
+    # of the old name; renaming without migrating chat would leave ``main``
+    # broken). Until then both members coexist: chat ingest emits the old
+    # name, ``ReceiveChannelMessage`` emits the new one.
+    CHANNEL_MESSAGE = "channel_message"
     MENTION = "mention"
     SUB_AGENT_COMPLETED = "sub_agent_completed"
     APPROVAL_REQUESTED = "approval_requested"
@@ -50,6 +57,11 @@ class AgentEvent:
     channel_id: str | None = None
     sender_id: str | None = None
     message_id: str | None = None
+    # RFC 0011 §D additive extension: top-level thread parent id (None for
+    # non-threaded events). Promoted from ``payload`` so the response gate
+    # in PR 4b can branch on thread context without a payload lookup. Stays
+    # additive — existing callers default to None and need no change.
+    thread_id: str | None = None
     # default_factory=time.time ensures each event gets the current timestamp
     # rather than a sentinel 0.0 that callers might forget to override.
     timestamp: float = field(default_factory=time.time)
@@ -64,6 +76,12 @@ class AgentEvent:
 
 class ActionType(Enum):
     SEND_MESSAGE = "send_message"
+    # RFC 0011 PR 4a: additive — the canonical channels send action. The
+    # hard rename ``SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` lands atomically
+    # with the chat-path migration in a follow-up PR. The dispatch executor
+    # for this action arrives in PR 4b; the enum member ships now so PR 4a's
+    # response gate plumbing has the canonical symbol available.
+    SEND_CHANNEL_MESSAGE = "send_channel_message"
     COMPLETE_TASK = "complete_task"
     DELEGATE = "delegate"
     SPAWN_SUB_AGENT = "spawn_sub_agent"

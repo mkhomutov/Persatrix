@@ -444,6 +444,7 @@ class EventDispatcher:
             channel_id=event.channel_id,
             sender_id=event.sender_id,
             message_id=event.message_id,
+            thread_id=event.thread_id,
             timestamp=event.timestamp,
             metadata={**copy.deepcopy(event.metadata), "cascade_depth": depth + 1},
         )
