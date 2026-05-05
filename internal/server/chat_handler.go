@@ -106,9 +106,22 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// empty user_id by populating sender_id=nil; under chat-as-DM there is
 	// no canonical DM peer without it. Default to "local" to preserve the
 	// `persatrix chat` REPL behaviour where no auth is configured.
+	//
+	// WARNING (PR #251 review): the `"local"` fallback is a SHARED
+	// pseudo-user. In any deployment where >1 unauthenticated caller can
+	// hit this endpoint, all such callers transparently share the same
+	// canonical DM (`dm:<agent>:local`) and therefore the same persisted
+	// chat history. This is acceptable only for single-user development
+	// (the `persatrix chat` REPL); the v0.3.0 release notes call this
+	// out as a known limitation. The proper fix lands with RFC 0009
+	// Phase 4 auth — see TODO(security) above. Until then we log a
+	// per-request warning so the cross-talk hazard is visible in logs.
 	userID := req.UserID
 	if userID == "" {
 		userID = "local"
+		s.logger.Warn("chat: empty user_id; using shared 'local' fallback (cross-talk hazard, RFC 0009 Phase 4)",
+			zap.String("agent_id", agentID),
+		)
 	}
 
 	if s.channelStore == nil || s.channelRouter == nil {
@@ -164,6 +177,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.NewString()
 	}
 
+	// PR #251 review (M-2/M-3): propagate `session_id` and
+	// `participant_type` into ChannelMessage.Metadata so the wire
+	// fields are not silently inert. RFC 0011 amendment §Mapping
+	// retains `metadata["participant_type"]`; we use the same key
+	// for `session_id` to keep one conversation-segmentation
+	// vocabulary across the chat and channels surfaces.
+	metadata := map[string]any{
+		"session_id": sessionID,
+	}
+	if req.ParticipantType != "" {
+		metadata["participant_type"] = req.ParticipantType
+	}
+
 	inbound := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: dm.ID,
@@ -171,6 +197,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Content:   req.Message,
 		Mentions:  []string{agentID},
 		Timestamp: time.Now().UTC(),
+		Metadata:  metadata,
 	}
 
 	reply, err := s.channelRouter.PublishAndAwait(ctx, inbound, agentID, timeout)
@@ -200,11 +227,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		displayName = agentID
 	}
 
+	// PR #251 review (L-1): defensive guard against a reply whose
+	// Timestamp was never stamped by the publisher. `time.Time{}.Unix()`
+	// returns -62135596800 (year 1754); substitute the current wall
+	// clock so the client never observes a junk negative epoch second.
+	replyTimestamp := reply.Timestamp
+	if replyTimestamp.IsZero() {
+		replyTimestamp = time.Now().UTC()
+	}
+
 	resp := chatResponse{
 		Reply:            reply.Content,
 		SessionID:        sessionID,
 		AgentID:          agentID,
-		Timestamp:        reply.Timestamp.Unix(),
+		Timestamp:        replyTimestamp.Unix(),
 		AgentDisplayName: displayName,
 		ReplyStatus:      "ok",
 	}

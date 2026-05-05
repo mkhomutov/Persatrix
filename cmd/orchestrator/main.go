@@ -295,6 +295,18 @@ func main() {
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
 	// RFC 0016 PR 4: Initialize chat executor for human→agent chat dispatch.
+	//
+	// TODO(post-PR-251): the chat REST handler now routes through the
+	// channels DM publish-and-await path (RFC 0011 PR 4a-ii-β-2) and
+	// no longer consults the gRPC chat executor at runtime. The wiring
+	// stays in place for one release window so that callers upgrading
+	// only the orchestrator binary do not see a sudden surface change
+	// (e.g. missing `WithChatExecutor` option triggering a nil
+	// dereference in any downstream test fixture). Remove this
+	// construction together with `executor.GRPCChatExecutor`,
+	// `server.WithChatExecutor`, and the corresponding gRPC
+	// `SendChatMessage` proto entry once the v0.3.0 upgrade window
+	// closes (tracked in the RFC 0011 follow-up plan).
 	chatExec := executor.NewGRPCChatExecutor(reg, logger,
 		// Inject the otelgrpc client-side stats handler for chat gRPC calls.
 		executor.WithChatDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),

@@ -32,8 +32,13 @@ var ErrWaiterAlreadyRegistered = errors.New("channels: reply waiter already regi
 //     calls `Notify` after the store commit — matching waiter is
 //     resolved and removed.
 //  4. The handler always calls `cancel()` (defer) to remove the entry
-//     even on timeout / context cancellation; subsequent Notify calls
-//     for the cancelled key are no-ops (no closed-channel panic).
+//     even on timeout / context cancellation. The chan is never
+//     closed (cap-1 buffered, single-shot send in `Notify`), so a
+//     stale `Notify` after `cancel` cannot panic; the
+//     `existing == ch` guard in `cancel` exists to prevent
+//     **map clobbering** when `Notify` has already removed the entry
+//     and a fresh registration on the same key has slotted in
+//     (PR #251 review L-3 — doc accuracy).
 //
 // Concurrency: all operations are protected by a single mutex. The
 // expected QPS is bounded by chat-request rate (a single DM is
@@ -88,6 +93,17 @@ func (w *replyWaiter) Register(channelID, senderID string) (<-chan ChannelMessag
 // Returns true when a waiter was satisfied. Safe to call from the
 // publish hot path: the lookup is O(1) and the send is non-blocking
 // because the chan is buffered.
+//
+// Single-shot semantics (PR #251 review M-4): the waiter is removed
+// from the table on the first matching publish. Subsequent matching
+// publishes for the same `(channelID, senderID)` key (e.g. an agent
+// emitting `tool_call → tool_result → final_answer` as separate
+// `SEND_CHANNEL_MESSAGE`s in response to one chat turn) are still
+// persisted by the caller via the store, but they do not satisfy any
+// waiter and the chat caller therefore receives only the first
+// message. Callers that need multi-message reply semantics must
+// either fold the messages agent-side into a single publish or wait
+// on the persisted history rather than the in-process waiter.
 func (w *replyWaiter) Notify(msg ChannelMessage) bool {
 	key := waiterKey{channelID: msg.ChannelID, senderID: msg.SenderID}
 	w.mu.Lock()

@@ -325,3 +325,169 @@ func TestHandleChat_TimeoutClamp(t *testing.T) {
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	require.Equal(t, 200, rec.Code, "clamp must not break the happy path")
 }
+
+// TestHandleChat_TimeoutClamp_LowerBound pins that non-positive
+// caller-supplied timeouts (0 or negative) fall through to the default
+// rather than collapsing the wait window to zero. PR #251 review
+// finding: only the upper clamp was previously exercised; this closes
+// the lower-edge gap so a future regression that propagates `<= 0`
+// into `time.Duration` (instant timeout) is caught.
+func TestHandleChat_TimeoutClamp_LowerBound(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		timeoutSeconds int32
+	}{
+		{"zero", 0},
+		{"negative", -5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, reg, router, store := chatTestServer(t)
+			registerHealthyAgent(t, reg, "agent-x", "Agent X")
+			publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 10*time.Millisecond)
+
+			body, _ := json.Marshal(chatRequest{
+				Message: "Hi", UserID: "alice", TimeoutSeconds: tc.timeoutSeconds,
+			})
+			rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+			require.Equal(t, 200, rec.Code, "non-positive timeout must use the default, not 0s")
+		})
+	}
+}
+
+// TestHandleChat_PropagatesSessionAndParticipantMetadata pins that the
+// `session_id` and `participant_type` request fields are carried into
+// the inbound `ChannelMessage.Metadata` map under the keys named in the
+// RFC 0011 amendment §Mapping table. Without this, the wire fields are
+// silently inert (PR #251 review finding M-2/M-3): callers that rely
+// on `session_id` to segment threads, or on `participant_type` to
+// distinguish human vs. bridge senders, observe no effect.
+func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 20*time.Millisecond)
+
+	body, _ := json.Marshal(chatRequest{
+		Message:         "Hi",
+		UserID:          "alice",
+		SessionID:       "sess-xyz",
+		ParticipantType: "human",
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+	require.NoError(t, err)
+	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, hist, 2)
+
+	// History is returned newest-first or oldest-first depending on
+	// the store; locate the inbound by sender to be order-agnostic.
+	var inbound *channels.ChannelMessage
+	for i := range hist {
+		if hist[i].SenderID == "alice" {
+			inbound = &hist[i]
+			break
+		}
+	}
+	require.NotNil(t, inbound, "inbound message must persist")
+	require.NotNil(t, inbound.Metadata, "metadata must be populated")
+	assert.Equal(t, "sess-xyz", inbound.Metadata["session_id"], "session_id must be propagated to metadata")
+	assert.Equal(t, "human", inbound.Metadata["participant_type"], "participant_type must be propagated to metadata")
+}
+
+// TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix pins the
+// defensive guard against a reply whose `Timestamp` is the time.Time
+// zero value: `Time{}.Unix()` is a large negative number (year 1754),
+// which would render as a nonsense client-visible timestamp. The
+// handler must substitute `time.Now().UTC()` so the response carries
+// a sane positive epoch second. PR #251 review finding L-1.
+func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// Publish a reply with explicit zero timestamp.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			t.Errorf("GetOrCreateDM failed: %v", err)
+			return
+		}
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "ok",
+			Timestamp: time.Time{}, // zero value
+		}, "")
+	}()
+
+	before := time.Now().Add(-time.Second).Unix()
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	var resp chatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Greater(t, resp.Timestamp, before,
+		"zero-valued reply timestamp must be replaced with current time, not surface as a negative epoch second")
+}
+
+// TestHandleChat_MultiMessageReplyReturnsFirst pins the single-shot
+// semantics of `replyWaiter`: when an agent publishes multiple
+// `SEND_CHANNEL_MESSAGE`s in response to a single chat turn (e.g. a
+// `tool_call → tool_result → final_answer` plugin pattern), only the
+// first message satisfies the waiter and is returned to the caller.
+// Subsequent messages are persisted to the DM history but not
+// delivered to the chat response. PR #251 review finding M-4.
+func TestHandleChat_MultiMessageReplyReturnsFirst(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// Publish two replies in quick succession.
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			t.Errorf("GetOrCreateDM failed: %v", err)
+			return
+		}
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "first",
+			Timestamp: time.Now().UTC(),
+		}, "")
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "second",
+			Timestamp: time.Now().UTC(),
+		}, "")
+	}()
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	var resp chatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "first", resp.Reply, "single-shot waiter must surface the first reply")
+
+	// Allow the second publish to complete before snapshotting.
+	require.Eventually(t, func() bool {
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			return false
+		}
+		hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+		if err != nil {
+			return false
+		}
+		// inbound + first + second = 3
+		return len(hist) == 3
+	}, 2*time.Second, 20*time.Millisecond, "all three messages must persist to the DM")
+}
