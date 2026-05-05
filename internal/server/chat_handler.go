@@ -162,13 +162,41 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	dm, err := s.channelStore.GetOrCreateDM(ctx, userID, agentID)
 	if err != nil {
-		// `GetOrCreateDM` rejects same-id, colon, whitespace, empty
-		// participant ids. Treat all as 400 — caller-supplied id
-		// hygiene problems, not server faults.
-		s.logger.Warn("chat: GetOrCreateDM rejected request",
-			zap.String("user_id", userID), zap.String("agent_id", agentID), zap.Error(err),
-		)
-		writeError(w, "BAD_REQUEST", "invalid participant id", http.StatusBadRequest)
+		// PR #251 deep-review M-1: discriminate validation errors
+		// from server-side I/O errors. Pre-fix behaviour mapped EVERY
+		// `GetOrCreateDM` error to 400 BAD_REQUEST, which silently
+		// converted transient SQLite failures (lock contention,
+		// disk-full, closed handle, BeginTx/Commit faults) into a
+		// "fix your input" envelope — wrong actionable signal,
+		// poisoned 4xx/5xx ratios, hidden outages.
+		//
+		// Discrimination rules (in order):
+		//
+		//  1. `context.Canceled` — caller went away mid-call. Same
+		//     499 mapping the `PublishAndAwait` branch uses below;
+		//     keeps the client-disconnect classification consistent
+		//     across all I/O steps in the handler.
+		//  2. `ErrInvalidParticipantID` — caller-supplied id-hygiene
+		//     problem (empty / colon / whitespace / same-as-agent).
+		//     400 BAD_REQUEST is correct.
+		//  3. anything else — server-side fault. 500 INTERNAL,
+		//     log at Error so the line shows up in dashboards.
+		switch {
+		case errors.Is(err, context.Canceled):
+			s.logger.Info("chat: client cancelled before DM resolve",
+				zap.String("agent_id", agentID), zap.String("user_id", userID))
+			writeError(w, "CLIENT_CLOSED_REQUEST", "client closed request", statusClientClosedRequest)
+		case errors.Is(err, channels.ErrInvalidParticipantID):
+			s.logger.Warn("chat: GetOrCreateDM rejected request",
+				zap.String("user_id", userID), zap.String("agent_id", agentID), zap.Error(err),
+			)
+			writeError(w, "BAD_REQUEST", "invalid participant id", http.StatusBadRequest)
+		default:
+			s.logger.Error("chat: GetOrCreateDM failed",
+				zap.String("user_id", userID), zap.String("agent_id", agentID), zap.Error(err),
+			)
+			writeError(w, "INTERNAL", "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 

@@ -152,6 +152,16 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 	// pair before fanout (RFC 0011 PR 4a-ii-β-2). Notify is a non-
 	// blocking buffered send and a no-op when no waiter is registered,
 	// so the hot path stays cheap when no chat is in flight.
+	//
+	// Notify runs on EVERY publish — keyed by `(channelID, senderID)`.
+	// The chat handler registers waiters keyed by
+	// `(dm.ID, awaitFromAgentID)`, so an inbound user→agent publish
+	// (sender = user) cannot satisfy the waiter parked for the agent's
+	// reply (sender = agent). Future callers that install a waiter
+	// keyed by the user's id (e.g. echo-back semantics) MUST account
+	// for the fact that the inbound publish itself fires Notify before
+	// any subscriber receives — install the waiter on the OTHER
+	// participant's id, never on the publisher's. PR #251 review L-1.
 	r.waiter.Notify(msg)
 
 	r.fanout(ctx, msg, derivedType)
