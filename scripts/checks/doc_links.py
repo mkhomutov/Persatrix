@@ -81,6 +81,12 @@ def _collect_md_files(repo_root: Path) -> list[Path]:
 
     root_files = set(repo_root.glob("*.md"))
     root_files.update(repo_root.glob("*/*.md"))
+    # Always exclude .git/ — it is not part of the working tree and may
+    # contain stale markdown artifacts (e.g. PR_BODY.md) whose relative links
+    # resolve against the .git/ directory rather than the repo root, producing
+    # spurious "broken link" failures. (PR #251 review-fix follow-up.)
+    git_dir = os.path.normcase(str((repo_root / ".git").resolve())) + os.sep
+    root_files = {f for f in root_files if not os.path.normcase(str(f.resolve())).startswith(git_dir)}
     if docs_dir.is_dir():
         docs_resolved = os.path.normcase(str(docs_dir.resolve()))
         root_files = {

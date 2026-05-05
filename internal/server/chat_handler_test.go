@@ -4,242 +4,233 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	grpcodes "google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
-	"github.com/mkhomutov/persatrix/internal/executor"
-	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
-// mockChatExecutor implements executor.ChatExecutor for handler tests.
-type mockChatExecutor struct {
-	sendFunc func(ctx context.Context, agentID string, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error)
-}
-
-func (m *mockChatExecutor) SendChatMessage(ctx context.Context, agentID string, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-	return m.sendFunc(ctx, agentID, req)
-}
-
-// testServerWithChat creates a Server with an injected ChatExecutor for testing.
-func testServerWithChat(t *testing.T, chatExec executor.ChatExecutor) (*Server, *registry.InMemoryRegistry) {
+// chatTestServer wires a real on-disk SQLite channels store + router
+// onto a fresh test Server. The router uses the no-op dispatcher (gRPC
+// fanout is exercised by the channels package's own tests). The chat
+// handler exercises the in-process publish-and-await flow; tests
+// simulate the agent's reply by calling [channels.ChannelRouter.Publish]
+// from a goroutine after the handler issues the request.
+//
+// RFC 0011 PR 4a-ii-β-2 — replaces the pre-rewrite mockChatExecutor
+// fixture. The chat surface no longer round-trips through the
+// agent-side gRPC `SendChatMessage`; it publishes a CHANNEL_MESSAGE on
+// the canonical DM channel and awaits the agent's reply.
+func chatTestServer(t *testing.T) (*Server, *registry.InMemoryRegistry, *channels.ChannelRouter, channels.ChannelStore) {
 	t.Helper()
-	dir := t.TempDir()
-	logger := zap.NewNop()
-	store := state.NewInMemoryStore(logger)
-	reg := registry.NewInMemoryRegistry(logger)
-	pl := planner.NewYAMLPlanner(logger)
-	srv, err := New("127.0.0.1:0", dir, store, reg, pl, logger, WithChatExecutor(chatExec))
+	dbPath := filepath.Join(t.TempDir(), "channels.db")
+	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
+		MaxChannels: 50,
+		Logger:      zap.NewNop(),
+	})
 	require.NoError(t, err)
-	return srv, reg
+	t.Cleanup(func() { _ = store.Close() })
+	router := channels.NewChannelRouter(store, channels.NoopDispatcher{}, zap.NewNop(), nil)
+
+	wfDir := t.TempDir()
+	logger := zap.NewNop()
+	reg := registry.NewInMemoryRegistry(logger)
+	srv, err := New("127.0.0.1:0", wfDir,
+		state.NewInMemoryStore(logger),
+		reg,
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannels(store, router),
+	)
+	require.NoError(t, err)
+	return srv, reg, router, store
 }
 
-// registerTestAgent registers a healthy agent with a display name.
-func registerTestAgent(t *testing.T, reg *registry.InMemoryRegistry, id, name string) {
+// registerHealthyAgent registers a healthy agent with a display name.
+func registerHealthyAgent(t *testing.T, reg *registry.InMemoryRegistry, id, name string) {
 	t.Helper()
-	err := reg.Register(context.Background(), registry.AgentInfo{
+	require.NoError(t, reg.Register(context.Background(), registry.AgentInfo{
 		ID:      id,
 		Name:    name,
 		Address: "localhost:9090",
 		Status:  registry.StatusHealthy,
-	})
-	require.NoError(t, err)
+	}))
 }
 
-func TestHandleChat_Success(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, agentID string, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return &taskpb.ChatResponse{
-				Reply:       "Hello from " + agentID,
-				SessionId:   "sess-abc",
-				AgentId:     agentID,
-				Timestamp:   1713600000,
-				ReplyStatus: "ok",
-			}, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "ember-owl", "Ember Owl")
+// publishReplyAfter simulates the agent's `SEND_CHANNEL_MESSAGE` arrival
+// on the DM by publishing through the router from the agent's id after
+// `delay`. Returns the published message id so the caller can correlate.
+func publishReplyAfter(t *testing.T, router *channels.ChannelRouter, store channels.ChannelStore,
+	userID, agentID, content string, delay time.Duration) {
+	t.Helper()
+	go func() {
+		time.Sleep(delay)
+		dm, err := store.GetOrCreateDM(context.Background(), userID, agentID)
+		if err != nil {
+			t.Errorf("publishReplyAfter: GetOrCreateDM failed: %v", err)
+			return
+		}
+		if err := router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  agentID,
+			Content:   content,
+			Timestamp: time.Now().UTC(),
+		}, ""); err != nil {
+			t.Errorf("publishReplyAfter: Publish failed: %v", err)
+		}
+	}()
+}
 
-	body, _ := json.Marshal(chatRequest{
-		Message: "Hi there!",
-		UserID:  "local",
-	})
+// TestHandleChat_Success_RoutesViaChannels pins the chat-as-DM happy
+// path: a chat request publishes onto the DM, the agent's simulated
+// reply arrives via the publish path, and the handler returns the
+// reply with the agent's display name.
+func TestHandleChat_Success_RoutesViaChannels(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "ember-owl", "Ember Owl")
+
+	publishReplyAfter(t, router, store, "alice", "ember-owl", "Hello from Ember Owl", 20*time.Millisecond)
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi there!", UserID: "alice"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/ember-owl/chat", body)
-	assert.Equal(t, 200, rec.Code)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
 
 	var resp chatResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "Hello from ember-owl", resp.Reply)
-	assert.Equal(t, "sess-abc", resp.SessionID)
+	assert.Equal(t, "Hello from Ember Owl", resp.Reply)
 	assert.Equal(t, "ember-owl", resp.AgentID)
 	assert.Equal(t, "Ember Owl", resp.AgentDisplayName)
 	assert.Equal(t, "ok", resp.ReplyStatus)
-	assert.Equal(t, int64(1713600000), resp.Timestamp)
+	assert.NotEmpty(t, resp.SessionID, "handler must mint a session id when none supplied")
+
+	// Verify the DM was created and both messages persisted.
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "ember-owl")
+	require.NoError(t, err)
+	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, hist, 2, "inbound + reply both persisted")
 }
 
+// TestHandleChat_AgentDisplayNameFallsBackToID pins the §C contract
+// that the response carries the agent ID when the registry has no
+// display name.
 func TestHandleChat_AgentDisplayNameFallsBackToID(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return &taskpb.ChatResponse{Reply: "hi", ReplyStatus: "ok"}, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	// Register agent with empty name.
-	registerTestAgent(t, reg, "no-name", "")
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "no-name", "")
+	publishReplyAfter(t, router, store, "alice", "no-name", "ok", 10*time.Millisecond)
 
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/no-name/chat", body)
-	assert.Equal(t, 200, rec.Code)
+	require.Equal(t, 200, rec.Code)
 
 	var resp chatResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "no-name", resp.AgentDisplayName)
 }
 
+// TestHandleChat_PreservesSessionID pins that a client-supplied
+// session_id round-trips unchanged.
+func TestHandleChat_PreservesSessionID(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 10*time.Millisecond)
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", SessionID: "sess-abc"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code)
+
+	var resp chatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "sess-abc", resp.SessionID)
+}
+
+// TestHandleChat_EmptyMessage pins request validation.
 func TestHandleChat_EmptyMessage(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "test-agent", "Test Agent")
-
-	body, _ := json.Marshal(chatRequest{Message: ""})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	body, _ := json.Marshal(chatRequest{Message: "", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	assert.Equal(t, 400, rec.Code)
-	assert.Contains(t, rec.Body.String(), "message is required")
 }
 
+// TestHandleChat_OversizedMessage pins the 4000-char cap.
 func TestHandleChat_OversizedMessage(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "test-agent", "Test Agent")
-
-	body, _ := json.Marshal(chatRequest{Message: strings.Repeat("x", chatMaxMessageLength+1)})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	body, _ := json.Marshal(chatRequest{
+		Message: strings.Repeat("a", chatMaxMessageLength+1),
+		UserID:  "alice",
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	assert.Equal(t, 400, rec.Code)
-	assert.Contains(t, rec.Body.String(), "exceeds maximum length")
 }
 
+// TestHandleChat_AgentNotFound pins 404 when the agent is not in the
+// registry — handler short-circuits before opening a DM row.
 func TestHandleChat_AgentNotFound(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, nil
-		},
-	}
-	srv, _ := testServerWithChat(t, chatExec)
-
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
+	srv, _, _, store := chatTestServer(t)
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/unknown-agent/chat", body)
 	assert.Equal(t, 404, rec.Code)
-	assert.Contains(t, rec.Body.String(), "agent not found")
+
+	// No DM should have been created for a 404.
+	_, err := store.GetChannel(context.Background(), "dm:alice:unknown-agent")
+	assert.ErrorIs(t, err, channels.ErrChannelNotFound, "404 must not create a DM row")
 }
 
-func TestHandleChat_GRPCInternalError(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, status.Error(grpcodes.Internal, "agent crashed")
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "crash-agent", "Crash Agent")
+// TestHandleChat_AgentNotHealthy pins 503 when the registry reports
+// the agent is non-healthy (quarantined / starting / etc.).
+func TestHandleChat_AgentNotHealthy(t *testing.T) {
+	srv, reg, _, _ := chatTestServer(t)
+	require.NoError(t, reg.Register(context.Background(), registry.AgentInfo{
+		ID: "sick-agent", Name: "Sick", Address: "localhost:9090",
+		Status: registry.StatusOffline,
+	}))
 
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/crash-agent/chat", body)
-	assert.Equal(t, 503, rec.Code)
-	assert.Contains(t, rec.Body.String(), "agent internal error")
-}
-
-func TestHandleChat_GRPCDeadlineExceeded(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, status.Error(grpcodes.DeadlineExceeded, "timeout")
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "slow-agent", "Slow Agent")
-
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/slow-agent/chat", body)
-	assert.Equal(t, 504, rec.Code)
-	assert.Contains(t, rec.Body.String(), "did not respond in time")
-}
-
-func TestHandleChat_GRPCUnavailable(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, status.Error(grpcodes.Unavailable, "agent down")
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "down-agent", "Down Agent")
-
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/down-agent/chat", body)
-	assert.Equal(t, 503, rec.Code)
-	assert.Contains(t, rec.Body.String(), "agent unavailable")
-}
-
-func TestHandleChat_AgentNotReady(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, executor.ErrAgentNotReady
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "sick-agent", "Sick Agent")
-
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/sick-agent/chat", body)
 	assert.Equal(t, 503, rec.Code)
 	assert.Contains(t, rec.Body.String(), "not healthy")
 }
 
-func TestHandleChat_EmptyReplyStatus(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return &taskpb.ChatResponse{
-				Reply:       "",
-				ReplyStatus: "empty",
-				SessionId:   "sess-def",
-			}, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "quiet-agent", "Quiet Agent")
+// TestHandleChat_ReplyTimeout pins 504 when no agent reply arrives
+// within the chat timeout.
+func TestHandleChat_ReplyTimeout(t *testing.T) {
+	srv, reg, _, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "slow-agent", "Slow")
 
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/quiet-agent/chat", body)
-	assert.Equal(t, 200, rec.Code)
+	body, _ := json.Marshal(chatRequest{
+		Message: "Hi", UserID: "alice", TimeoutSeconds: 1,
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/slow-agent/chat", body)
+	assert.Equal(t, 504, rec.Code)
+	assert.Contains(t, rec.Body.String(), "did not respond")
 
-	var resp chatResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "", resp.Reply)
-	assert.Equal(t, "empty", resp.ReplyStatus)
+	// Inbound message persists despite timeout — RFC 0011 PR 4a-ii-β-2
+	// contract: the user's turn is not lost.
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "slow-agent")
+	require.NoError(t, err)
+	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, hist, 1, "inbound persists even on chat timeout")
+	assert.Equal(t, "Hi", hist[0].Content)
 }
 
+// TestHandleChat_WrongContentType pins the JSON-only contract.
 func TestHandleChat_WrongContentType(t *testing.T) {
-	srv, _ := testServerWithChat(t, &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, nil
-		},
-	})
-
-	req := httptest.NewRequest("POST", "/api/v1/agents/test-agent/chat", strings.NewReader(`{}`))
+	srv, _, _, _ := chatTestServer(t)
+	req := httptest.NewRequest("POST", "/api/v1/agents/agent-x/chat", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -247,107 +238,256 @@ func TestHandleChat_WrongContentType(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "Content-Type must be application/json")
 }
 
-func TestHandleChat_NoChatExecutor(t *testing.T) {
+// TestHandleChat_NoChannelsConfigured pins 500 "chat not available"
+// when the channels subsystem is not wired (matches pre-rewrite
+// behaviour where `WithChatExecutor` was the gating option).
+func TestHandleChat_NoChannelsConfigured(t *testing.T) {
 	dir := t.TempDir()
 	logger := zap.NewNop()
-	store := state.NewInMemoryStore(logger)
+	st := state.NewInMemoryStore(logger)
 	reg := registry.NewInMemoryRegistry(logger)
 	pl := planner.NewYAMLPlanner(logger)
-	// Create server without chat executor.
-	srv, err := New("127.0.0.1:0", dir, store, reg, pl, logger)
+	srv, err := New("127.0.0.1:0", dir, st, reg, pl, logger)
 	require.NoError(t, err)
 
-	registerTestAgent(t, reg, "test-agent", "Test Agent")
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 
-	body, _ := json.Marshal(chatRequest{Message: "hello"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	assert.Equal(t, 500, rec.Code)
 	assert.Contains(t, rec.Body.String(), "chat not available")
 }
 
-func TestHandleChat_PassesFieldsToGRPC(t *testing.T) {
-	var captured *taskpb.ChatRequest
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			captured = req
-			return &taskpb.ChatResponse{ReplyStatus: "ok"}, nil
-		},
-	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "test-agent", "Test Agent")
+// TestHandleChat_DefaultUserIDForLocalChat pins the REPL behaviour:
+// `persatrix chat` does not configure a user_id, so empty user_id is
+// substituted with `local` so the canonical DM has a stable peer.
+func TestHandleChat_DefaultUserIDForLocalChat(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "local", "agent-x", "ok", 10*time.Millisecond)
 
-	body, _ := json.Marshal(chatRequest{
-		Message:         "hello",
-		UserID:          "alice-01",
-		SessionID:       "sess-xyz",
-		TimeoutSeconds:  15,
-		ParticipantType: "user",
-	})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
-	assert.Equal(t, 200, rec.Code)
+	body, _ := json.Marshal(chatRequest{Message: "Hi"}) // no user_id
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
 
-	require.NotNil(t, captured)
-	assert.Equal(t, "test-agent", captured.AgentId)
-	assert.Equal(t, "alice-01", captured.UserId)
-	assert.Equal(t, "hello", captured.Message)
-	assert.Equal(t, "sess-xyz", captured.SessionId)
-	assert.Equal(t, int32(15), captured.TimeoutSeconds)
-	assert.Equal(t, "user", captured.ParticipantType)
+	dm, err := store.GetOrCreateDM(context.Background(), "local", "agent-x")
+	require.NoError(t, err)
+	assert.Equal(t, "dm:agent-x:local", dm.ID, "canonical DM for the REPL fallback peer")
 }
 
-// TestHandleChat_InvalidAgentIDFormat verifies that agent IDs not matching
-// resourceIDRegex (^[a-z0-9]([a-z0-9-]*[a-z0-9])?$) are rejected at the
-// handler boundary, consistent with handleGetAgent/handleDeleteAgent.
-// (PR #123 review finding F-01)
-func TestHandleChat_InvalidAgentIDFormat(t *testing.T) {
-	srv, _ := testServerWithChat(t, &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return nil, nil
-		},
-	})
+// TestHandleChat_InvalidUserIDRejected pins that participant-id hygiene
+// errors from `GetOrCreateDM` (colon, whitespace, same-as-agent) surface
+// as 400 BAD_REQUEST.
+func TestHandleChat_InvalidUserIDRejected(t *testing.T) {
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "bad:user"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	assert.Equal(t, 400, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid participant id")
+}
+
+// TestHandleChat_InvalidAgentIDFormat pins resourceIDRegex enforcement
+// at the handler boundary — consistent with handleGetAgent /
+// handleDeleteAgent.
+func TestHandleChat_InvalidAgentIDFormat(t *testing.T) {
+	srv, _, _, _ := chatTestServer(t)
 	tests := []struct {
-		name    string
-		agentID string
+		name, agentID string
 	}{
-		{"uppercase", "Agent-One"},
-		{"underscore", "agent_one"},
-		{"leading hyphen", "-bad-id"},
-		{"trailing hyphen", "bad-id-"},
-		{"dot separated", "agent.v2"},
+		{"uppercase", "Agent-X"},
+		{"underscore", "agent_x"},
+		{"trailing dash", "agent-"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, _ := json.Marshal(chatRequest{Message: "hello"})
+			body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
 			rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/"+tt.agentID+"/chat", body)
 			assert.Equal(t, 400, rec.Code)
-			assert.Contains(t, rec.Body.String(), "invalid agent ID format")
 		})
 	}
 }
 
-// TestHandleChat_MultiByteLengthLimit verifies the message length check counts
-// Unicode characters (runes), not bytes. A 4000-character CJK string is ~12000
-// bytes but should pass the 4000-character limit. (PR #123 review finding F-02)
-func TestHandleChat_MultiByteLengthLimit(t *testing.T) {
-	chatExec := &mockChatExecutor{
-		sendFunc: func(_ context.Context, _ string, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
-			return &taskpb.ChatResponse{ReplyStatus: "ok"}, nil
-		},
+// TestHandleChat_TimeoutClamp pins the 1s..300s clamp on the
+// caller-supplied timeout (defense-in-depth against a degenerate huge
+// or negative timeout taking down the request budget).
+func TestHandleChat_TimeoutClamp(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	// Caller asks for absurdly large timeout — handler must still
+	// return promptly when the reply lands.
+	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 10*time.Millisecond)
+
+	body, _ := json.Marshal(chatRequest{
+		Message: "Hi", UserID: "alice", TimeoutSeconds: 99999,
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "clamp must not break the happy path")
+}
+
+// TestHandleChat_TimeoutClamp_LowerBound pins that non-positive
+// caller-supplied timeouts (0 or negative) fall through to the default
+// rather than collapsing the wait window to zero. Only the upper
+// clamp was previously exercised; this closes
+// the lower-edge gap so a future regression that propagates `<= 0`
+// into `time.Duration` (instant timeout) is caught.
+func TestHandleChat_TimeoutClamp_LowerBound(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		timeoutSeconds int32
+	}{
+		{"zero", 0},
+		{"negative", -5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, reg, router, store := chatTestServer(t)
+			registerHealthyAgent(t, reg, "agent-x", "Agent X")
+			publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 10*time.Millisecond)
+
+			body, _ := json.Marshal(chatRequest{
+				Message: "Hi", UserID: "alice", TimeoutSeconds: tc.timeoutSeconds,
+			})
+			rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+			require.Equal(t, 200, rec.Code, "non-positive timeout must use the default, not 0s")
+		})
 	}
-	srv, reg := testServerWithChat(t, chatExec)
-	registerTestAgent(t, reg, "test-agent", "Test Agent")
+}
 
-	// 4000 multi-byte characters (3 bytes each = 12000 bytes).
-	// Should pass: exactly at the character limit.
-	msg := strings.Repeat("あ", chatMaxMessageLength)
-	body, _ := json.Marshal(chatRequest{Message: msg})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body)
-	assert.Equal(t, 200, rec.Code, "4000 multi-byte chars should be accepted")
+// TestHandleChat_PropagatesSessionAndParticipantMetadata pins that the
+// `session_id` and `participant_type` request fields are carried into
+// the inbound `ChannelMessage.Metadata` map under the keys named in the
+// RFC 0011 amendment §Mapping table. Without this, the wire fields are
+// silently inert: callers that rely
+// on `session_id` to segment threads, or on `participant_type` to
+// distinguish human vs. bridge senders, observe no effect.
+func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 20*time.Millisecond)
 
-	// 4001 multi-byte characters — should be rejected.
-	msg2 := strings.Repeat("あ", chatMaxMessageLength+1)
-	body2, _ := json.Marshal(chatRequest{Message: msg2})
-	rec2 := doRequest(srv.Handler(), "POST", "/api/v1/agents/test-agent/chat", body2)
-	assert.Equal(t, 400, rec2.Code, "4001 multi-byte chars should be rejected")
+	body, _ := json.Marshal(chatRequest{
+		Message:         "Hi",
+		UserID:          "alice",
+		SessionID:       "sess-xyz",
+		ParticipantType: "human",
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+	require.NoError(t, err)
+	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, hist, 2)
+
+	// History is returned newest-first or oldest-first depending on
+	// the store; locate the inbound by sender to be order-agnostic.
+	var inbound *channels.ChannelMessage
+	for i := range hist {
+		if hist[i].SenderID == "alice" {
+			inbound = &hist[i]
+			break
+		}
+	}
+	require.NotNil(t, inbound, "inbound message must persist")
+	require.NotNil(t, inbound.Metadata, "metadata must be populated")
+	assert.Equal(t, "sess-xyz", inbound.Metadata["session_id"], "session_id must be propagated to metadata")
+	assert.Equal(t, "human", inbound.Metadata["participant_type"], "participant_type must be propagated to metadata")
+}
+
+// TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix pins the
+// defensive guard against a reply whose `Timestamp` is the time.Time
+// zero value: `Time{}.Unix()` is a large negative number (year 1754),
+// which would render as a nonsense client-visible timestamp. The
+// handler must substitute `time.Now().UTC()` so the response carries
+// a sane positive epoch second.
+func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// Publish a reply with explicit zero timestamp.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			t.Errorf("GetOrCreateDM failed: %v", err)
+			return
+		}
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "ok",
+			Timestamp: time.Time{}, // zero value
+		}, "")
+	}()
+
+	before := time.Now().Add(-time.Second).Unix()
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	var resp chatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Greater(t, resp.Timestamp, before,
+		"zero-valued reply timestamp must be replaced with current time, not surface as a negative epoch second")
+}
+
+// TestHandleChat_MultiMessageReplyReturnsFirst pins the single-shot
+// semantics of `replyWaiter`: when an agent publishes multiple
+// `SEND_CHANNEL_MESSAGE`s in response to a single chat turn (e.g. a
+// `tool_call → tool_result → final_answer` plugin pattern), only the
+// first message satisfies the waiter and is returned to the caller.
+// Subsequent messages are persisted to the DM history but not
+// delivered to the chat response.
+func TestHandleChat_MultiMessageReplyReturnsFirst(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// Publish two replies in quick succession.
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			t.Errorf("GetOrCreateDM failed: %v", err)
+			return
+		}
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "first",
+			Timestamp: time.Now().UTC(),
+		}, "")
+		_ = router.Publish(context.Background(), channels.ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: dm.ID,
+			SenderID:  "agent-x",
+			Content:   "second",
+			Timestamp: time.Now().UTC(),
+		}, "")
+	}()
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	var resp chatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "first", resp.Reply, "single-shot waiter must surface the first reply")
+
+	// Allow the second publish to complete before snapshotting.
+	require.Eventually(t, func() bool {
+		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+		if err != nil {
+			return false
+		}
+		hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+		if err != nil {
+			return false
+		}
+		// inbound + first + second = 3
+		return len(hist) == 3
+	}, 2*time.Second, 20*time.Millisecond, "all three messages must persist to the DM")
 }

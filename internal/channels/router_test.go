@@ -280,3 +280,186 @@ func TestChannelRouter_ReconcileConfig_AtomicOnInvalidMember(t *testing.T) {
 	assert.ErrorIs(t, getErr, ErrChannelNotFound,
 		"failed reconcile must not leak an orphan channel row")
 }
+
+// ─── PublishAndAwait — chat-as-DM façade (RFC 0011 PR 4a-ii-β-2) ───
+
+// TestChannelRouter_PublishAndAwait_ReturnsAgentReply pins the
+// happy-path contract: the chat handler publishes the user's inbound
+// CHANNEL_MESSAGE, the agent's `_handle_send_channel_message` POSTs the
+// reply through the same router, and `PublishAndAwait` returns the
+// reply message synchronously. Simulates the agent reply by invoking
+// `Publish` from a goroutine after the awaiter is registered.
+func TestChannelRouter_PublishAndAwait_ReturnsAgentReply(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	// DM channel: user `alice-user` and agent `agent-x`.
+	dm, err := store.GetOrCreateDM(ctx, "alice-user", "agent-x")
+	require.NoError(t, err)
+
+	inbound := ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice-user", Content: "hi",
+	}
+	reply := ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "agent-x", Content: "hello back",
+	}
+
+	// Simulate the agent's REST publish landing ~10ms after our publish.
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_ = router.Publish(ctx, reply, "")
+	}()
+
+	got, err := router.PublishAndAwait(ctx, inbound, "agent-x", time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, reply.ID, got.ID)
+	assert.Equal(t, "hello back", got.Content)
+}
+
+// TestChannelRouter_PublishAndAwait_TimesOut pins the deadline contract:
+// if no matching reply arrives within `timeout`, returns
+// [ErrChatTimeout] and the inbound message is still persisted (the
+// user's turn is not lost just because the agent failed to reply).
+func TestChannelRouter_PublishAndAwait_TimesOut(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	dm, err := store.GetOrCreateDM(ctx, "alice-user", "agent-x")
+	require.NoError(t, err)
+
+	inbound := ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice-user", Content: "hi",
+	}
+	_, err = router.PublishAndAwait(ctx, inbound, "agent-x", 50*time.Millisecond)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrChatTimeout)
+
+	// Inbound persisted despite timeout.
+	hist, hErr := store.GetHistory(ctx, dm.ID, 10, time.Time{})
+	require.NoError(t, hErr)
+	require.Len(t, hist, 1, "inbound message must persist even on chat timeout")
+	assert.Equal(t, inbound.ID, hist[0].ID)
+}
+
+// TestChannelRouter_PublishAndAwait_PublishErrorPropagates pins that a
+// publish-side failure (channel-type mismatch, non-member, etc.)
+// surfaces to the chat handler instead of being swallowed by the
+// timeout — the caller can map it to a 4xx response.
+func TestChannelRouter_PublishAndAwait_PublishErrorPropagates(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	// Unknown channel id prefix triggers ErrInvalidChannelType before
+	// the store is touched.
+	_, err := router.PublishAndAwait(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: "broadcast:unknown", SenderID: "alice-user", Content: "x",
+	}, "agent-x", time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidChannelType)
+	assert.NotErrorIs(t, err, ErrChatTimeout)
+}
+
+// TestChannelRouter_PublishAndAwait_IgnoresNonMatchingReply pins that a
+// publish from a different sender on the same DM does not satisfy the
+// waiter (e.g. an echo of the user's own message via a future
+// retransmit path). Only a `SEND_CHANNEL_MESSAGE` originating from the
+// awaited agent ID resolves the waiter.
+func TestChannelRouter_PublishAndAwait_IgnoresNonMatchingReply(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	dm, err := store.GetOrCreateDM(ctx, "alice-user", "agent-x")
+	require.NoError(t, err)
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		// Wrong sender — must not satisfy the waiter.
+		_ = router.Publish(ctx, ChannelMessage{
+			ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice-user", Content: "echo",
+		}, "")
+	}()
+
+	_, err = router.PublishAndAwait(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice-user", Content: "hi",
+	}, "agent-x", 100*time.Millisecond)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrChatTimeout, "wrong-sender publish must not resolve waiter")
+}
+
+// TestChannelRouter_PublishAndAwait_ContextCancelReturnsError pins that
+// a cancelled caller context (e.g. client disconnect) tears down the
+// waiter promptly without leaking it past the call.
+func TestChannelRouter_PublishAndAwait_ContextCancelReturnsError(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	parent := context.Background()
+
+	dm, err := store.GetOrCreateDM(parent, "alice-user", "agent-x")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(parent)
+	cancel() // cancel before the call
+	_, err = router.PublishAndAwait(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice-user", Content: "hi",
+	}, "agent-x", time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// TestChannelRouter_PublishAndAwait_RejectsSelfReply pins the
+// defense-in-depth guard against `awaitFromAgentID == msg.SenderID`.
+//
+// Why a separate guard, given that `ChannelStore.GetOrCreateDM` already
+// rejects `user == agent` upstream? `PublishAndAwait` is now part of
+// the channels package's public surface and will likely gain other
+// callers (workflow steps that "ask an agent and wait", future
+// scheduler probes, integration tests). If any of them passes the same
+// id for sender and awaited-from, the inbound publish would satisfy
+// its OWN waiter via the `Publish` → `Notify` path (Notify keys on
+// `(channelID, senderID)`) and the call would return the caller's
+// inbound message AS the "reply" — silent self-reply with no error.
+//
+// The fix returns `ErrInvalidParticipantID` BEFORE Register/Publish
+// run, so:
+//
+//   - no waiter slot is consumed (no risk of leaking a never-resolved
+//     entry in the table);
+//   - no message is persisted (consistent with other early-validation
+//     errors in this package);
+//   - the chat handler's existing `errors.Is(err,
+//     channels.ErrInvalidParticipantID)` arm in [server/chat_handler.go]
+//     maps the failure to 400 BAD_REQUEST — the right envelope, since
+//     the failure is a caller-side id-hygiene problem, not server I/O.
+func TestChannelRouter_PublishAndAwait_RejectsSelfReply(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	// Use a real DM so the failure cannot be confused with any
+	// channel-existence or membership check; the only thing that
+	// should make this call fail is the self-reply guard.
+	dm, err := store.GetOrCreateDM(ctx, "alice-user", "agent-x")
+	require.NoError(t, err)
+
+	// Sender == awaitFromAgentID. The guard MUST fire before any
+	// store mutation.
+	_, err = router.PublishAndAwait(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "agent-x", Content: "hi",
+	}, "agent-x", time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidParticipantID,
+		"self-reply must surface as ErrInvalidParticipantID so the chat handler's existing arm maps it to 400")
+
+	// Defense-in-depth: nothing should have been persisted on the DM,
+	// because the guard must run BEFORE the inner Publish call. A
+	// stray persisted row would mean the guard was placed downstream
+	// of the store commit and is therefore not actually preventing
+	// the silent self-reply path.
+	hist, hErr := store.GetHistory(ctx, dm.ID, 10, time.Time{})
+	require.NoError(t, hErr)
+	assert.Empty(t, hist, "self-reply guard must short-circuit before the inner Publish persists")
+}
