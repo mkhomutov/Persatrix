@@ -19,6 +19,7 @@ import grpc.aio
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .base import BaseAgent
+from .channel_publisher import HTTPChannelPublisher
 from .dispatch import EventDispatcher
 from .generated import task_pb2_grpc
 from .memory import SharedPoolRegistry
@@ -185,8 +186,13 @@ class AgentServer:
                 )
 
         # Deep-review D4: shared aiohttp session for self-registration and
-        # http_request tool (via builtin.http_session).
+        # http_request tool (via builtin.http_session). RFC 0011 PR 4a-ii-β-1
+        # wires the REST channel publisher onto it (chat-reply path keeps
+        # using the in-process cascade until PR 4a-ii-β-2).
         self._session = aiohttp.ClientSession()
+        self._dispatcher.set_channel_publisher(HTTPChannelPublisher(
+            orchestrator_url=self.orchestrator_url, session=self._session,
+        ))
 
         # RFC 0018 PR 5 — start the log shipper after the structlog chain
         # is configured (configure_logging runs in main()) so the tail
