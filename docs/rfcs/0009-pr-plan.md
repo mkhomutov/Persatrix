@@ -337,12 +337,12 @@ Integration (`tests/integration/`):
 
 ---
 
-### PR 3: `feature/v030-rfc0009-input-sanitizer` — Phase 2: InputSanitizer + Provenance
+### PR 3: `feature/v030-rfc0009-input-sanitizer` — Phase 2: InputSanitizer + Provenance ✅ Merged as [#253](https://github.com/mkhomutov/Persatrix/pull/253)
 
 **Depends on**: PR 2.
 **Estimated size**: ~450–500 lines (Go sanitizer + Python wrapper + tool wiring + tests). At the calibration ceiling; if Python-side prompt template changes balloon, split out a follow-up PR.
 
-> **Status**: 🔀 PR open — Go `InputSanitizer` (sanitize.go + context_source.go + sanitize_action.go + sanitize_patterns.go) lands with closed-set ContextSource (incl. `channel_message` per OQ #7) + dedup/sorted Flags + best-effort audit emission of `input.flagged`. Python mirror (`agents/security.py` — ContextItem, wrap_external, sanitize, sanitize_and_wrap) consumes the generated `agents/security_patterns.py` produced by `cmd/genpatterns` (Go is the canonical authority). Pattern parity is enforced by `make generate-sanitizer-patterns-check` and `tests/unit/python/test_pattern_parity.py` (re-runs the generator and diffs). LLM-content boundary in `BaseAgent._execute_tools` and `persona_runtime/action_loop.py::_execute_tools` wraps `http_request` / `file_read` results in `<external_data>` envelopes via the closed-set `EXTERNAL_TOOL_SOURCES` map (no new ToolDefinition field — honours plan guidance). Persona system prompt unconditionally appends the `external-data-handling` snippet so the LLM understands the envelope on the first call. `_provenance` sidecar deferred to a follow-up — `persona_runtime/__init__.py` is at the 500-line file cap and the cleaner integration is to land the sidecar in PR 4 (close-out) or as a stand-alone follow-up.
+> **Status**: ✅ Merged as PR #253 (2026-05-05). Go `InputSanitizer` (sanitize.go + context_source.go + sanitize_action.go + sanitize_patterns.go) lands with closed-set ContextSource (incl. `channel_message` per OQ #7) + dedup/sorted Flags + best-effort audit emission of `input.flagged`. Python mirror (`agents/security.py` — ContextItem, wrap_external, sanitize, sanitize_and_wrap) consumes the generated `agents/security_patterns.py` produced by `cmd/genpatterns` (Go is the canonical authority). Pattern parity is enforced by `make generate-sanitizer-patterns-check` and `tests/unit/python/test_pattern_parity.py` (re-runs the generator and diffs). LLM-content boundary in `BaseAgent._execute_tools` and `persona_runtime/action_loop.py::_execute_tools` wraps `http_request` / `file_read` results in `<external_data>` envelopes via the closed-set `EXTERNAL_TOOL_SOURCES` map (no new ToolDefinition field — honours plan guidance). Persona system prompt unconditionally appends the `external-data-handling` snippet so the LLM understands the envelope on the first call. `_provenance` sidecar deferred to PR 4 (close-out) — `persona_runtime/__init__.py` is at the 500-line file cap. Deep review (HEAD `31d1278`) produced 8 findings (F1 High, F2/F3/M1 Medium, F4/F5/F7/L1 Low); all fixed inline before merge — see Review follow-ups below.
 
 #### Scope
 
@@ -411,11 +411,39 @@ Integration (`tests/integration/`):
 
 #### PR checklist
 
-- [ ] Sanitizer ready for [RFC 0011 PR plan](0011-pr-plan.md) PR 5 to consume (`channel_message` source tagging surface stable)
-- [ ] No regression on existing tool tests (assert all `tests/unit/python/test_tool_*.py` green)
-- [ ] Pattern parity CI check active — `make generate-sanitizer-patterns` produces no diff
-- [ ] System-prompt fragment reviewed by maintainer (subjective; copy lives in `prompts/system/external_data_handling.txt`)
-- [ ] `make test` + `make lint` clean
+- [x] Sanitizer ready for [RFC 0011 PR plan](0011-pr-plan.md) PR 5 to consume (`channel_message` source tagging surface stable)
+- [x] No regression on existing tool tests (assert all `tests/unit/python/test_tool_*.py` green)
+- [x] Pattern parity CI check active — `make generate-sanitizer-patterns` produces no diff
+- [x] System-prompt fragment reviewed by maintainer (subjective; copy lives in `prompts/runtime/safety/external-data-handling.md`)
+- [x] `make test` + `make lint` clean
+
+> **✅ Merged as PR #253 (2026-05-05).**
+
+#### Review follow-ups (PR #253 deep review — HEAD `31d1278`)
+
+Verdict: **APPROVE with all findings fixed inline.** 8 findings total (F1 High, F2/F3/M1 Medium, F4/F5/F7/L1 Low); all resolved before merge. No items deferred.
+
+- **Fixed in HEAD (F1 — High)**:
+  - `wrap_external` did not escape literal `</external_data>` close tags in attacker-controlled body content — a malicious tool result could terminate the outer envelope prematurely, exposing subsequent content outside the trust frame. Escape rewrites `<` to `<\` on all matching tags. Regression tests: `TestWrapExternalCloseTagEscape` (3 cases: literal close, case-variation, clean body unaffected).
+
+- **Fixed in HEAD (F2, F3 — Medium)**:
+  - **F2** — `ContextSourceUser` docstring claimed "not flagged by default" but detection has always been applied uniformly across all sources; the source value is a distinguishing audit-trail tag only. Doc corrected; `TestUserSourceContent_IsFlagged` added on Go and Python sides to pin the contract.
+  - **F3** — `WithSanitizerLogger` option added. When `auditor.Emit` returns an error the drop is now surfaced at WARN level (with `event_type` and `source`) via the injected logger. Best-effort policy preserved (no error propagated to callers; logger is optional).
+
+- **Fixed in HEAD (M1 — Medium)**:
+  - Symmetric arm of F1: body content containing a literal `<external_data …>` open tag could mint a fake nested envelope whose `source="internal"` attribute claims a trust level the outer envelope is designed to deny. Open and close tags now share `_EXTERNAL_DATA_TAG_RE` (`<\s*/?\s*external_data\b[^>]*>`, case-insensitive). `\b` after `external_data` prevents over-matching `<external_database>`. Tests: `TestWrapExternalOpenTagEscape` (4 cases: open-tag, nested envelope, case-insensitivity, `\b` guard).
+
+- **Fixed in HEAD (L1 — Low)**:
+  - Tag-escape regex relaxed to whitespace-tolerant form. Strict matching missed `</external_data >`, `< /external_data>`, `</external_data\n>` and similar lenient variants that some LLM tokenisers recognise as tag boundaries. `_EXTERNAL_DATA_TAG_RE` now matches all variants. Tests: `TestWrapExternalLenientTagEscape` (4 cases).
+
+- **Fixed in HEAD (F4, F5, F7 — Low)**:
+  - **F4** — Dead `deduplicate_flags` helper and unused `Iterable` import removed from `agents/security.py`.
+  - **F5** — Inline `# DOCUMENTATION ONLY — runtime config is env-driven` comment added to `config/observability/audit.yaml` above `security.sanitizer_action`, matching the PR #234 N-2 convention.
+  - **F7** — Cross-language regex-constraint comment added above `DefaultPatterns` in `internal/security/sanitize_patterns.go`: no backreferences, no lookahead/lookbehind, no POSIX classes (Go's `regexp` package rejects them at compile time, preventing detection at the generator stage).
+
+- **Accepted divergences** (no PR action):
+  - Detection applies uniformly across all `ContextSource` values in v0.3.0; per-source pattern suppression is deferred to v0.4.0 alongside the Phase 4 identity-token work. Operators distinguish sources via the `source` field on `input.flagged` audit events.
+  - `_provenance` sidecar deferred to PR 4 — `persona_runtime/__init__.py` is at the 500-line file cap. Audit trail via `input.flagged` events provides equivalent provenance signal at the security layer for v0.3.0.
 
 ---
 
