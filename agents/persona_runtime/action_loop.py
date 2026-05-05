@@ -339,12 +339,12 @@ class _ActionLoopMixin:
         # delimiters for prompt injection mitigation — these delimiters break
         # FTS5 full-text search queries and produce no useful keyword matches.
         # (Bug: FTS5 receives '<|user_message user_id="..."|>...<|/user_message|>'
-        # instead of the actual message text.) CHANNEL_MESSAGE shares the
-        # same wrapped-prompt treatment — PR #248 deep review Medium.
-        if event.event_type in (
-            EventType.CHANNEL_MESSAGE,
-            EventType.CHANNEL_MESSAGE,
-        ):
+        # instead of the actual message text.) PR #248 deep review Medium.
+        # PR #249 deep-review Low: collapsed the historical
+        # ``(MESSAGE_RECEIVED, CHANNEL_MESSAGE)`` tuple to a single identity
+        # check after the RFC 0011 PR 4a-ii-α hard rename merged the two
+        # enum members into ``CHANNEL_MESSAGE``.
+        if event.event_type is EventType.CHANNEL_MESSAGE:
             memory_query = event.payload.get("content", "")
         else:
             memory_query = user_message
