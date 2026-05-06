@@ -14,7 +14,51 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MemoryBudget"]
+__all__ = [
+    "MemoryBudget",
+    # Budget and per-tier constants consumed by memory_context.py.
+    # Defined here because they govern MemoryBudget.try_add() call sites
+    # — keeping them co-located makes tuning self-contained.
+    "MEMORY_BUDGET_TOKENS",
+    "MIN_TOKENS_RELATIONSHIP",
+    "MIN_TOKENS_EPISODIC",
+    "MIN_TOKENS_NOTES",
+    "REL_NOTES_INTERIM_CHARS",
+    "MAX_EPISODE_SUMMARY_CHARS",
+    "MAX_NOTE_CONTENT_CHARS",
+]
+
+
+# ─── Budget and per-tier token limits ─────────────────────
+
+# Total token budget for all memory tiers injected per event.
+# RFC 0017 §B / OQ1 resolution: 1500 tokens balances detail vs. prompt size.
+# Retune by changing this single constant; no API changes required.
+MEMORY_BUDGET_TOKENS: int = 1500
+
+# Per-call min_tokens floors for the MemoryBudget allocator.
+# Each tier specifies the minimum token count a truncated item must have
+# to be admitted rather than dropped.  Relationship context uses a higher
+# floor (64) because a partially-truncated header line without notes is
+# nearly useless; notes use a lower floor (24) to allow even short snippets.
+MIN_TOKENS_RELATIONSHIP: int = 64
+MIN_TOKENS_EPISODIC: int = 32
+MIN_TOKENS_NOTES: int = 24
+
+# Interim per-field cap on ``rel.notes`` (chars).  The pre-RFC-0017 code
+# used 300 chars as an interim mitigation against prompt injection from
+# peer-authored relationship notes.  After the allocate-loop rewrite the
+# only remaining bound is the per-block budget, which is far larger than
+# the original cap.  Restore a per-field bound here so the prompt-injection
+# surface for ``rel.notes`` does not silently expand.
+# 400 chars (~100 tokens) matches the original cap with mild headroom.
+# (PR #146 review finding: prompt-injection surface regression.)
+REL_NOTES_INTERIM_CHARS: int = 400
+
+# Per-field char caps applied before the budget loop.  Prevents individual
+# items from dominating the prompt even when the token budget is generous.
+MAX_EPISODE_SUMMARY_CHARS: int = 200
+MAX_NOTE_CONTENT_CHARS: int = 500
 
 
 # ─── Internal token helpers ────────────────────────────────

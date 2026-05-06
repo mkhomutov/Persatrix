@@ -184,6 +184,15 @@ class TestShippedPersonaSectionsByteIdentity:
             "current-state", repo_root=self.PROD_REPO_ROOT
         ) == "Current state:\n{state}"
 
+    def test_now_anchor(self) -> None:
+        # RFC 0021 PR 2: now-anchor template carries a single placeholder
+        # the composer fills with the rendered current-time line.  Pinned
+        # here so an accidental edit (e.g. dropping the trailing newline
+        # or renaming the placeholder) fails CI before a deploy.
+        assert load_persona_section(
+            "now-anchor", repo_root=self.PROD_REPO_ROOT
+        ) == "{now_anchor}"
+
     def test_default_repo_root_resolves_production_section(self) -> None:
         # The default anchor must locate the shipped section.  Mirror
         # the snippet test — clear the cache first so we exercise the

@@ -152,6 +152,20 @@ async def get_relationship_summary(
         for r in interaction_rows
     ]
 
+    # RFC 0021 PR 2: cadence rendering needs the relationship's first
+    # interaction timestamp.  We fetch ``MIN(created_at)`` here rather
+    # than carrying a column on ``relationships`` to keep RFC 0021 §E's
+    # "no schema change" promise — this is one extra indexed lookup per
+    # summary, on the same connection we already hold.
+    async with db.execute(
+        "SELECT MIN(created_at) FROM interactions "
+        "WHERE participant_id = ? AND participant_type = ? "
+        "AND other_participant_id = ? AND other_participant_type = ?",
+        (agent_id, participant_type, other_id, other_participant_type),
+    ) as cursor:
+        first_row = await cursor.fetchone()
+    first_interaction_at = first_row[0] if first_row is not None else None
+
     return RelationshipSummary(
         other_participant_id=other_id,
         other_participant_type=other_participant_type,
@@ -160,6 +174,7 @@ async def get_relationship_summary(
         last_interaction_at=last_interaction_at,
         notes=notes,
         recent_interactions=recent,
+        first_interaction_at=first_interaction_at,
     )
 
 

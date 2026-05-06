@@ -12,8 +12,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.clock import WallClock
+from agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS as _MEMORY_BUDGET_TOKENS
 from agents.persona_runtime.memory_context import (
-    _MEMORY_BUDGET_TOKENS,
     MemoryInjectionResult,
     _MemoryContextMixin,
 )
@@ -25,6 +26,12 @@ from agents.persona_runtime.memory_context import (
 class _FakeEpisode:
     summary: str
     id: str = "ep-0001"
+    # RFC 0021 PR 2: temporal fields accessed by recency rendering.
+    # created_at mirrors the DB NOT NULL column — always set in production.
+    created_at: float = 0.0
+    closed_at: float | None = None
+    started_at: float | None = None
+    turn_count: int | None = None
 
 
 @dataclass
@@ -46,6 +53,9 @@ class _FakeRelSummary:
     # (PR #146 re-review: trust branch unreachable with the prior 0.5 default.)
     trust_score: float = 0.7
     notes: str = ""
+    # RFC 0021 PR 2: temporal fields accessed by recency + cadence rendering.
+    last_interaction_at: float | None = None
+    first_interaction_at: float | None = None
 
 
 def _make_mixin(
@@ -63,6 +73,9 @@ def _make_mixin(
     mixin = _ConcreteMemoryMixin()
     mixin.agent_id = "test-agent"
     mixin._working_memory = WorkingMemory(max_tokens=8192)
+    # RFC 0021 PR 2: temporal seam required by _MemoryContextMixin._inject_memory_context.
+    mixin._clock = WallClock()
+    mixin._timezone = "UTC"
 
     # Wire episodic memory mock.
     mixin._episodic_memory = AsyncMock()
@@ -144,7 +157,7 @@ class TestInjectMemoryContextTierOrdering:
 
         # 100 tokens ≈ enough for the relationship block (~17 tokens) plus
         # at most 1–2 episode lines (~32 tokens each after token-truncation).
-        monkeypatch.setattr(mc, "_MEMORY_BUDGET_TOKENS", 100)
+        monkeypatch.setattr(mc, "MEMORY_BUDGET_TOKENS", 100)
 
         rel = _FakeRelSummary(
             other_participant_id="alice",
@@ -189,7 +202,7 @@ class TestInjectMemoryContextTierOrdering:
         # Lift the ``rel.notes`` security cap to exercise budget-allocation ordering.
         from agents.persona_runtime import memory_context as mc
 
-        monkeypatch.setattr(mc, "_REL_NOTES_INTERIM_CHARS", 1_000_000)
+        monkeypatch.setattr(mc, "REL_NOTES_INTERIM_CHARS", 1_000_000)
 
         # Build a relationship block that is itself very large.
         big_notes = "relationship detail word " * 600  # ~2400 tokens > budget
@@ -233,7 +246,7 @@ class TestInjectMemoryContextTierOrdering:
 
         # Notes well above the cap but small enough that the relationship
         # tier comfortably fits in the budget.
-        long_notes = "x" * (mc._REL_NOTES_INTERIM_CHARS * 3)
+        long_notes = "x" * (mc.REL_NOTES_INTERIM_CHARS * 3)
         rel = _FakeRelSummary(
             other_participant_id="carol",
             interaction_count=2,
@@ -260,9 +273,9 @@ class TestInjectMemoryContextTierOrdering:
         # _truncate_with_ellipsis appends "..." (3 chars) after the cap;
         # zero-space input means the full slice is used (no word-boundary
         # backtrack), so the payload is exactly cap + 3.
-        assert len(notes_payload) <= mc._REL_NOTES_INTERIM_CHARS + 3, (
+        assert len(notes_payload) <= mc.REL_NOTES_INTERIM_CHARS + 3, (
             f"Notes payload {len(notes_payload)} chars exceeds cap "
-            f"{mc._REL_NOTES_INTERIM_CHARS} + ellipsis"
+            f"{mc.REL_NOTES_INTERIM_CHARS} + ellipsis"
         )
         assert notes_payload.endswith("..."), (
             "Truncated notes should end with '...' to match episodic/notes "
@@ -433,7 +446,7 @@ class TestZeroBudgetIntegration:
     ) -> None:
         import agents.persona_runtime.memory_context as mc
 
-        monkeypatch.setattr(mc, "_MEMORY_BUDGET_TOKENS", 0)
+        monkeypatch.setattr(mc, "MEMORY_BUDGET_TOKENS", 0)
         episodes = [_FakeEpisode(summary="historical context")]
         notes = [_FakeNote(topic="t", content="note content")]
         rel = _FakeRelSummary(

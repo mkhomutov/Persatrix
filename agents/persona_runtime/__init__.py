@@ -44,6 +44,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 from opentelemetry import trace
 from opentelemetry.trace import Link, Status, StatusCode
 
+from ..clock import Clock, resolve_persona_clock
 from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import InteractionTracker
@@ -186,6 +187,7 @@ class _LLMPersonaAgent(
         relationship_memory: RelationshipMemory,
         working_memory: WorkingMemory,
         memory_tools: list[ToolDefinition],
+        clock: Clock | None = None,
     ) -> None:
         super().__init__(agent_id, config)
         self._llm_client = llm_client
@@ -193,6 +195,7 @@ class _LLMPersonaAgent(
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
         self._memory_tools = memory_tools
+        self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(
             episodic=episodic_memory,
             relationship=relationship_memory,
@@ -493,8 +496,3 @@ class _LLMPersonaAgent(
                     now_monotonic, JANITOR_INTERVAL_SEC, self.agent_id,
                 )
                 return actions
-
-    # handle() is inherited from PersonaAgent — no override needed.
-    # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
-    # calls self.on_event(), which dispatches to _on_event_inner()
-    # via polymorphism.
