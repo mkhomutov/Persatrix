@@ -44,7 +44,7 @@ from .boundary_detectors import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     import aiosqlite
 
@@ -124,19 +124,75 @@ _DEFAULT_CLOCK: Clock = time.time
 
 SCOPE_TICK: str = "tick"
 
+# Per RFC 0020 §G — scope strings carry the channel-type prefix from
+# RFC 0020 §D. The helpers are idempotent: an input that already begins
+# with the canonical prefix is returned unchanged so callers can pass
+# either the bare key (``"planning"``) or the wire-side channel id
+# (``"group:planning"``) without re-deriving the prefix at every site.
+# PR 5 is the first call site to consume the wire-side form.
+_GROUP_PREFIX: str = "group:"
+_THREAD_PREFIX: str = "thread:"
+_DM_PREFIX: str = "dm:"
+
 
 def scope_for_dm(local_agent_id: str, peer_id: str) -> str:
     """DM scope: deterministic, symmetric in the two participants."""
     a, b = sorted((local_agent_id, peer_id))
-    return f"dm:{a}:{b}"
+    return f"{_DM_PREFIX}{a}:{b}"
 
 
-def scope_for_thread(thread_id: str) -> str:
-    return f"thread:{thread_id}"
+def scope_for_thread(thread_id_or_scope: str) -> str:
+    """Thread scope (idempotent in the ``thread:`` prefix)."""
+    if thread_id_or_scope.startswith(_THREAD_PREFIX):
+        return thread_id_or_scope
+    return f"{_THREAD_PREFIX}{thread_id_or_scope}"
 
 
-def scope_for_group(channel_name: str) -> str:
-    return f"group:{channel_name}"
+def scope_for_group(channel_id_or_name: str) -> str:
+    """Group scope (idempotent in the ``group:`` prefix)."""
+    if channel_id_or_name.startswith(_GROUP_PREFIX):
+        return channel_id_or_name
+    return f"{_GROUP_PREFIX}{channel_id_or_name}"
+
+
+# ─── Channel-event scope routing (RFC 0020 PR 5) ─────────────
+
+
+def scope_for_channel_event(
+    local_agent_id: str,
+    *,
+    channel_id: str | None,
+    sender_id: str | None,
+    thread_id: str | None,
+    channel_type: str | None,
+    on_unknown: Callable[[str, str], None] | None = None,
+) -> str | None:
+    """Resolve InteractionTracker scope for a CHANNEL_MESSAGE event (RFC 0020 §G).
+
+    Discriminator order: thread_id → channel_type ("dm"/"group"/"thread")
+    → channel_id prefix → sender_id (legacy chat). Returns ``None`` for
+    an under-populated event (no channel_id and no sender_id). When the
+    channel-type discriminator is missing **and** the prefix is unknown,
+    invokes ``on_unknown(raw_channel_type, channel_id)`` and returns a
+    thread-shape fallback so the row lands somewhere deterministic.
+    """
+    if thread_id:
+        return scope_for_thread(thread_id)
+    raw = channel_type or ""
+    norm = raw.strip().lower() if isinstance(raw, str) else ""
+    if channel_id:
+        if norm == "dm" or channel_id.startswith(_DM_PREFIX):
+            return scope_for_dm(local_agent_id, sender_id) if sender_id else None
+        if norm == "group" or channel_id.startswith(_GROUP_PREFIX):
+            return scope_for_group(channel_id)
+        if norm == "thread" or channel_id.startswith(_THREAD_PREFIX):
+            return scope_for_thread(channel_id)
+        if on_unknown is not None:
+            on_unknown(raw, channel_id)
+        return scope_for_thread(channel_id)
+    if sender_id:
+        return scope_for_dm(local_agent_id, sender_id)
+    return None
 
 
 # ─── Data model ─────────────────────────────────────────────
@@ -433,6 +489,7 @@ __all__ = [
     "SUMMARY_UNAVAILABLE_TEXT",
     "Turn",
     "cleanup_closing_interactions",
+    "scope_for_channel_event",
     "scope_for_dm",
     "scope_for_group",
     "scope_for_thread",

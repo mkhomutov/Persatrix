@@ -32,6 +32,7 @@ from .facade_procedural import (
     ProceduralFacadeMixin,
     validate_decay_params,
 )
+from .interactions import SUMMARY_PENDING_TEXT
 from .shared_pool import SharedPoolRegistry
 from .shared_pool_facade import SharedPoolFacadeMixin
 from .working import estimate_tokens
@@ -283,6 +284,9 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         )
         out: list[MemoryEntry] = []
         for ep in episodes:
+            # RFC 0020 PR 5 defense-in-depth: hide unfinalised closing rows.
+            if ep.summary == SUMMARY_PENDING_TEXT:
+                continue
             ep_tags = frozenset(ep.tags or ())
             # AND semantics — required tags must all appear on the entry.
             if required_tags and not required_tags.issubset(ep_tags):

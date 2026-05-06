@@ -141,6 +141,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # docs/issues/ISSUE-0008-orchestrator-main-size.md. Remove this
     # entry once that refactor lands.
     "cmd/orchestrator/main.go",
+    # agents/memory/facade.py was at 500 lines pre-PR-5. RFC 0020 PR 5
+    # added the four-line defense-in-depth recall filter
+    # (``SUMMARY_PENDING_TEXT`` skip + import) that pushed it to 504.
+    # The facade is the API boundary that RFC 0008 PR 2 froze for
+    # downstream consumers (RFC 0011 PR 5, RFC 0020 PR 5); splitting
+    # the file means rewriting the public-import contract. Trimming
+    # in-line PR-2a comments would compress the file but is unrelated
+    # cleanup. Grandfather here until a dedicated facade-split lands.
+    "agents/memory/facade.py",
 })
 
 

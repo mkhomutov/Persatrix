@@ -26,8 +26,7 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
-    scope_for_dm,
-    scope_for_thread,
+    scope_for_channel_event,
 )
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
@@ -197,23 +196,20 @@ class _StatePersistenceMixin:
     })
 
     def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
-        """Compute the InteractionTracker scope for a multi-turn event.
-
-        Returns ``None`` when the event carries neither a ``channel_id``
-        nor a ``sender_id`` — callers fall back to the legacy NULL-
-        interaction shape so an under-populated event does not leak
-        into a half-keyed scope.
-
-        Channel-aware routing (group / thread distinction) lands jointly
-        with RFC 0011 P3 in PR 5; for PR 3 the runtime treats every
-        ``channel_id`` as a thread scope so existing chat traffic
-        aggregates correctly.
-        """
-        if event.channel_id:
-            return scope_for_thread(event.channel_id)
-        if event.sender_id:
-            return scope_for_dm(self.agent_id, event.sender_id)
-        return None
+        """RFC 0020 §G scope routing — see :func:`scope_for_channel_event`."""
+        payload = event.payload or {}
+        return scope_for_channel_event(
+            self.agent_id,
+            channel_id=event.channel_id,
+            sender_id=event.sender_id,
+            thread_id=event.thread_id,
+            channel_type=payload.get("channel_type"),
+            on_unknown=lambda raw, cid: logger.warning(
+                "Agent %s: CHANNEL_MESSAGE has unrecognised channel_type=%r "
+                "and unknown channel_id prefix %r; falling back to thread scope",
+                self.agent_id, raw, cid,
+            ),
+        )
 
     def _is_session_end_event(self, event: AgentEvent) -> bool:
         """Strict-truthy check for session-end metadata flags.

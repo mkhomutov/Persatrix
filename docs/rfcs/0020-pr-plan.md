@@ -216,26 +216,32 @@ PR 7 (RFC close)
 | File | Change |
 |------|--------|
 | `agents/persona_runtime/__init__.py` | `CHANNEL_MESSAGE` event handler routes each turn to `InteractionTracker.add_turn` with the scope derived per RFC 0020 §G. |
-| `agents/memory/episodic.py` | `MemoryFacade.retrieve_relevant` filters out non-`closed` rows (defense in depth). |
-| `agents/memory/interactions.py` | Per-channel scoping rules (DM = pair, thread = thread, group = rolling per-channel-per-agent). |
-| `tests/integration/test_channel_interaction_scoping.py` | **New** — six-participant `#planning` channel with a 15-message exchange produces one episode per agent. |
+| `agents/memory/facade.py` | `MemoryFacade.retrieve_relevant` filters out rows whose summary is the `SUMMARY_PENDING_TEXT` sentinel (defense in depth — the two-phase close path can race the recall caller). |
+| `agents/memory/interactions.py` | Per-channel scope helpers idempotent in the prefix (accept either the bare key or the wire-side channel id) so callers don't have to strip `group:` / `thread:` at every site. |
+| `agents/persona_runtime/state_persistence.py` | `_scope_for_multi_turn_event` discriminates DM / thread / group via `payload.channel_type` (with channel-id-prefix fallback) and `event.thread_id`. PR 3 thread-only fallback removed. |
+| `tests/integration/test_channel_interaction_scoping.py` | **New** — scope-discrimination matrix + six-agent / 15-message acceptance: one episode per agent on close, not 15 per-message episodes. |
+| `tests/unit/python/test_memory_facade.py` | Defense-in-depth recall regression: `[summary pending]` row filtered, `[interaction summary unavailable]` row preserved. |
 
 #### Key implementation details
 
 - **Joint delivery** with [RFC 0011 PR plan §PR 5](0011-pr-plan.md#pr-sequence) — both PRs land in the same merge window. If pairing slips, RFC 0011 P3 ships per-event episodic writes and this PR backfills in v0.3.x (documented as accepted divergence in both RFCs).
-- Thread archive + channel-leave events fire `StructuralCloseDetector`.
+- Thread archive + channel-leave structural-close hooks ride the existing `StructuralCloseDetector` path; channel-side wiring (calling `Interaction.structural_close_reason = REASON_STRUCTURAL` on archive / leave) lands in RFC 0011 PR 5 — this RFC's tracker side already supports it.
+- Scope helpers are now idempotent: `scope_for_group("group:planning") == scope_for_group("planning") == "group:planning"`. PR 3 callers passing the bare name continue to work; PR 5 callers pass the wire-side channel id.
 
 #### Tests
 
-- Six-participant channel produces N episodes (one per agent), each summarizing that agent's view.
-- Thread archive closes the open thread interaction immediately.
-- Channel-leave closes the leaving agent's interaction.
+- Group / DM / thread channel types route to their canonical scope builder.
+- `event.thread_id` set takes precedence over `channel_type` (a thread reply inside a group rolls under the thread, not the parent channel).
+- Channel-id-prefix fallback when `channel_type` is missing (legacy chat path).
+- Six-agent group-channel acceptance: one closed-interaction episode per agent on `chat_end`.
+- DM and group scopes for the same peer remain isolated.
+- Defense-in-depth filter drops `SUMMARY_PENDING_TEXT` from `retrieve_relevant` results; `SUMMARY_UNAVAILABLE_TEXT` (janitor fallback) is preserved.
 
 #### PR checklist
 
-- [ ] Joint with RFC 0011 PR 5 — both PRs reference each other's PR number
-- [ ] Channel-scoping integration test green
-- [ ] No regression on PR 4's summarization tests
+- [x] Joint with RFC 0011 PR 5 — both PRs reference each other's PR number
+- [x] Channel-scoping integration test green
+- [x] No regression on PR 4's summarization tests
 
 ---
 
