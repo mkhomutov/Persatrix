@@ -67,12 +67,12 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/ -v` passes
-- [ ] `ruff check agents/` clean
-- [ ] `mypy agents/` clean
-- [ ] No persona-runtime files touched
-- [ ] ROADMAP.md row for RFC 0021 → `🚧 Implementing` on this PR opening
-- [ ] Master Progress Overview row 3 → 🔄 In progress
+- [x] `pytest tests/unit/python/ -v` passes
+- [x] `ruff check agents/` clean
+- [x] `mypy agents/` clean
+- [x] No persona-runtime files touched
+- [x] ROADMAP.md row for RFC 0021 → `🚧 Implementing` on this PR opening
+- [x] Master Progress Overview row 3 → 🔄 In progress
 
 ---
 

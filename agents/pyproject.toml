@@ -29,6 +29,12 @@ dependencies = [
     "structlog>=24.1.0,<26",
     "jsonschema>=4.23.0,<5",
     "aiosqlite>=0.19.0,<1",
+    # RFC 0021 P1 — agents/temporal/ and agents/clock.py read named
+    # IANA zones via ``zoneinfo.ZoneInfo``.  Linux/macOS ship a system
+    # tz database; Windows does not, so ``tzdata`` is required there
+    # for any non-UTC zone to resolve.  Pinned for every platform so
+    # the install closure does not branch on host OS.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
