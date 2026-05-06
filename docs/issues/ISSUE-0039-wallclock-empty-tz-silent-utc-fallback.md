@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0039
 summary: "WallClock(tz=\"\") silently falls back to UTC via `tz or DEFAULT_TIMEZONE`; behavior unpinned by tests"
-status: open
+status: resolved
 severity: low
 area: agents
 created: 2026-05-06
+closed: 2026-05-06
+closed_pr: 261
 refs:
   - agents/clock.py
   - tests/unit/python/test_clock.py

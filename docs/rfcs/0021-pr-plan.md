@@ -119,10 +119,10 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/ -v` passes
-- [ ] Token-cost assertion green
-- [ ] No regression on RFC 0017 working-memory bound
-- [ ] `persona.timezone` defaults to `UTC` when absent
+- [x] `pytest tests/integration/ -v` passes
+- [x] Token-cost assertion green
+- [x] No regression on RFC 0017 working-memory bound
+- [x] `persona.timezone` defaults to `UTC` when absent
 
 ---
 
@@ -141,11 +141,21 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
+#### Review follow-ups landed
+
+| Finding | Source | Resolution |
+|---------|--------|------------|
+| ISSUE-0037 — `FrozenClock.set` vs. `advance` asymmetry | PR #256 review M1 | Doc-only — `FrozenClock.set` docstring documents the re-anchoring contract and instructs callers to construct a fresh `FrozenClock` for an unrelated test phase rather than rewinding mid-phase. |
+| ISSUE-0038 — `pytest.raises(Exception)` too broad in clock/rendering bad-tz tests | PR #256 review M2 | Tightened to `zoneinfo.ZoneInfoNotFoundError` in both `test_clock.py` and `test_temporal_rendering.py`. |
+| ISSUE-0039 — `WallClock(tz="")` silent UTC fallback unpinned | PR #256 review M3 | New regression test pins the `tz=""` → `DEFAULT_TIMEZONE` contract so RFC 0021 PR 2's schema work surfaces any future drift loudly. |
+| ISSUE-0040 — `agents.clock.Clock` vs. `agents.memory.interactions.Clock` naming collision | PR #256 review M4 | Cross-reference docstring on the tracker-side `Clock` Protocol mirrors the existing note in `agents/clock.py`. |
+| ISSUE-0041 — `Clock.now()` return-type doc nit in `0021-pr-plan.md` | PR #256 deep-review doc nit | Already addressed in #258; this PR closes the issue file. |
+
 #### PR checklist
 
-- [ ] All deferred review findings addressed or downgraded
-- [ ] `make test` passes; `make lint` clean
-- [ ] RFC 0021 status reflects partial-implementation reality
+- [x] All deferred review findings addressed or downgraded
+- [x] `make test` passes; `make lint` clean
+- [x] RFC 0021 status reflects partial-implementation reality
 
 ---
 

@@ -98,6 +98,18 @@ class FrozenClock:
         self._t += float(seconds)
 
     def set(self, at: float) -> None:
+        """Replace the pinned epoch — for explicit re-anchoring only.
+
+        Use ``advance`` for forward stepping within a single test phase;
+        the monotonicity guard there is what protects rendering-layer
+        boundary tests from being silently masked by a clock rewind.
+        ``set`` is intentionally unguarded so a fresh test phase can
+        start from a different epoch (e.g. resetting around a DST
+        transition or to align with a fixture instant); using ``set``
+        mid-phase to walk time backward bypasses the same guarantee.
+        Construct a new ``FrozenClock`` for an unrelated test phase
+        rather than rewinding an existing instance.
+        """
         self._t = float(at)
 
 

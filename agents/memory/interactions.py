@@ -94,7 +94,19 @@ SUMMARY_UNAVAILABLE_TEXT: str = "[interaction summary unavailable]"
 # surface honest; reintroduce only if a future caller actually needs
 # a structural check.
 class Clock(Protocol):
-    """Zero-arg callable returning a wall-clock float (seconds)."""
+    """Zero-arg callable returning a wall-clock float (seconds).
+
+    Naming-collision note: :class:`agents.clock.Clock` (added in
+    RFC 0021 P1 PR 1) is a *different* Protocol on the same name —
+    that one exposes ``now()`` and ``now_iso()`` methods, not a bare
+    ``__call__``. The two are scheduled to be aliased in a follow-up
+    so ``time.time`` keeps satisfying this Protocol while the canonical
+    surface lives in :mod:`agents.clock`. Until that alias lands, do
+    not import ``Clock`` from the wrong module — a misimport is
+    mypy-clean (the two Protocols are structurally distinct) and only
+    fails at the call site. See :mod:`agents.clock` module docstring
+    for the full plan.
+    """
 
     def __call__(self) -> float: ...
 

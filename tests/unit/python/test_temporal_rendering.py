@@ -20,6 +20,8 @@ Reference instant for cross-test math:
 
 from __future__ import annotations
 
+import zoneinfo
+
 import pytest
 
 from agents.temporal.rendering import (
@@ -220,7 +222,10 @@ class TestFormatRelativeTimezone:
         )
 
     def test_invalid_timezone_raises(self) -> None:
-        with pytest.raises(Exception):
+        # Pin the specific exception so a refactor that breaks the
+        # import or the attribute access in an unrelated way cannot
+        # satisfy the assertion. ISSUE-0038.
+        with pytest.raises(zoneinfo.ZoneInfoNotFoundError):
             format_relative(NOW - 60, NOW, tz="Not/A_Real_Zone")
 
 
