@@ -3,9 +3,9 @@
 **Type**: feature  
 **Status**: 📋 Proposed  
 **Author**: Maksim Khomutov  
-**Date**: 2026-04-15  
-**Target**: v0.3.0  
-**Depends on**: RFC 0001, RFC 0003, RFC 0006, RFC 0008
+**Date**: 2026-04-15 (retargeted from v0.3.0 to v0.4.0 on 2026-05-06)  
+**Target**: v0.4.0  
+**Depends on**: RFC 0001, RFC 0003, RFC 0006, RFC 0008 (RFC 0008 ships fully in v0.3.0; dep satisfied at v0.4.0-start)
 
 ---
 
@@ -341,13 +341,14 @@ For v1 implementations, `fail` should remain the default until `pause` has an op
 
 ## Decision / Next Steps
 
-**Status (2026-05-06)**: RFC accepted; prerequisites met (RFC 0006 Phases 1 + 3 shipped in v0.2.0; RFC 0008 PR 1 per-step context budget merged). PR plan ([0007-pr-plan.md](0007-pr-plan.md)) exists but is still **🔨 Scaffold** — every PR row has Key Implementation Details *(TBD)* and Tests *(TBD)*. Implementation cannot start until the scaffold is fleshed out.
+**Status (2026-05-06)**: RFC accepted; prerequisites met (RFC 0006 Phases 1 + 3 shipped in v0.2.0; RFC 0008 PR 1 per-step context budget merged). **Retargeted from v0.3.0 to v0.4.0 on 2026-05-06** — workflow control flow pairs with v0.4.0's sub-agent spawning (RFC 0010) and skill registry (RFC 0014); see [ROADMAP §v0.4.0 Why RFC 0007 lands in v0.4.0](../../ROADMAP.md#v040--agent-organizations). PR plan ([0007-pr-plan.md](0007-pr-plan.md)) exists but is still **🔨 Scaffold** — every PR row has Key Implementation Details *(TBD)* and Tests *(TBD)*. Implementation cannot start until the scaffold is fleshed out.
 
 **Required before PR 1 opens**:
 
 1. Resolve the six **Open Questions** above (loop variable scoping, parallel inner steps, for-each failure handling, condition evaluation caching, loop state persistence, expression language extensibility). Resolutions land inline in this RFC and in the corresponding PR-row design notes.
 2. Fill in "Key Implementation Details" + "Tests" for PRs 1–5 in [0007-pr-plan.md](0007-pr-plan.md); pin estimated sizes against §Files Touched and the 1.7× calibration factor.
-3. Decide `pause` mode disposition (ship behind flag in v0.3.0 vs. defer to v0.3.x).
+3. Decide `pause` mode disposition (ship behind flag vs. defer beyond v0.4.0).
+4. Re-anchor the [0007-pr-plan.md](0007-pr-plan.md) Master-plan link to the v0.4.0 master plan once that document opens.
 
 **Phasing**: Phase 1 (conditions) → Phase 2 (loops) → Phase 3 (for-each). Phase 2 reuses RFC 0006 Phase 3's budget enforcement; Phase 3 can follow independently of Phase 2.
 

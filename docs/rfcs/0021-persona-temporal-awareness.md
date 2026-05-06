@@ -552,7 +552,7 @@ No proto changes. No Go orchestrator changes (the temporal layer is agent-local)
 
 ## Decision / Next Steps
 
-This RFC formalizes the temporal substrate that has been implicitly missing across the persona stack. Phase 1 is small enough to land within v0.3.0 alongside RFC 0020 without disturbing the planned RFC 0007 / 0008 / 0011 chain. Phases 2–4 belong to v0.4.0, where they pair naturally with the organizational and skill-registry work — agents that can plan are also agents that can hold roles and own deliverables.
+This RFC formalizes the temporal substrate that has been implicitly missing across the persona stack. Phase 1 is small enough to land within v0.3.0 alongside RFC 0020 without disturbing the planned RFC 0008 / 0011 chain. Phases 2–4 belong to v0.4.0, where they pair naturally with the organizational and skill-registry work (alongside RFC 0007's retargeted control-flow work) — agents that can plan are also agents that can hold roles and own deliverables.
 
 **Required before Phase 1 implementation begins**:
 

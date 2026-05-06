@@ -9,6 +9,8 @@
 **Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
 > **Status**: ✅ Ready — every PR row has a fleshed-out scope table, key-implementation-detail block, tests block, and PR checklist. Cross-RFC sequencing pins (PR 1 → RFC 0007 PR 3; PR 2 → RFC 0011 PR 5 + RFC 0020 PR 4) are unchanged and the 6-PR count is preserved so downstream PR plans stay valid.
+>
+> **Note (2026-05-06)**: RFC 0007 was retargeted from v0.3.0 to v0.4.0. The PR 1 → RFC 0007 PR 3 ordering pin is logically intact (PR 1 must merge before RFC 0007 PR 3 opens), it now spans v0.3.0 → v0.4.0. PR 1 has already merged as part of v0.3.0, so the prerequisite is satisfied at v0.4.0-start.
 
 ---
 
