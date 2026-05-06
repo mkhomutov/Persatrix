@@ -55,3 +55,17 @@ func ParseSanitizerAction(s string) (SanitizerAction, bool) {
 		return SanitizerActionPassthrough, false
 	}
 }
+
+// AllSanitizerActions returns every defined [SanitizerAction] in declaration
+// order. Used by `cmd/genpatterns` to emit the Python mirror of the action
+// enum so the closed set stays Go↔Python in sync without hand-duplication.
+//
+// Ordering matches the iota declaration above and is part of the generator
+// contract — reordering forces a Python regeneration but does not change
+// behaviour.
+func AllSanitizerActions() []SanitizerAction {
+	return []SanitizerAction{
+		SanitizerActionPassthrough,
+		SanitizerActionQuarantine,
+	}
+}

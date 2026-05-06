@@ -76,21 +76,30 @@ run-agent: ## Run a Python agent process (AGENT=coder PORT=50051)
 generate-persona-nickname: ## Generate nickname-style persona id/name pairs (COUNT=1 SEED=)
 	$(PYTHON) scripts/persona_nickname_generator.py --count $(or $(COUNT),1) $(if $(SEED),--seed $(SEED),)
 
-generate-sanitizer-patterns: ## Regenerate agents/security_patterns.py from internal/security/sanitize_patterns.go (RFC 0009 PR 3)
-	@echo "→ Regenerating agents/security_patterns.py from Go canonical source..."
-	@go run ./cmd/genpatterns -out agents/security_patterns.py
-	@echo "✓ agents/security_patterns.py regenerated"
+generate-sanitizer-patterns: ## Regenerate agents/security_patterns.py + agents/security_enums.py from the Go canonical sources (RFC 0009 PR 3 + #254)
+	@echo "→ Regenerating agents/security_patterns.py + agents/security_enums.py from Go canonical sources..."
+	@go run ./cmd/genpatterns \
+		-out agents/security_patterns.py \
+		-enums-out agents/security_enums.py
+	@echo "✓ agents/security_patterns.py + agents/security_enums.py regenerated"
 
-generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py is stale relative to the Go source
-	@echo "→ Checking agents/security_patterns.py is in sync with the Go source..."
-	@go run ./cmd/genpatterns -out agents/security_patterns.py.check
-	@if ! diff -q agents/security_patterns.py agents/security_patterns.py.check >/dev/null 2>&1; then \
+generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py or agents/security_enums.py is stale relative to the Go source
+	@echo "→ Checking generated security mirrors are in sync with the Go source..."
+	@go run ./cmd/genpatterns \
+		-out agents/security_patterns.py.check \
+		-enums-out agents/security_enums.py.check
+	@stale=0; \
+	if ! diff -q agents/security_patterns.py agents/security_patterns.py.check >/dev/null 2>&1; then \
 		echo "✗ agents/security_patterns.py is stale; run: make generate-sanitizer-patterns"; \
-		rm -f agents/security_patterns.py.check; \
-		exit 1; \
-	fi
-	@rm -f agents/security_patterns.py.check
-	@echo "✓ agents/security_patterns.py is in sync"
+		stale=1; \
+	fi; \
+	if ! diff -q agents/security_enums.py agents/security_enums.py.check >/dev/null 2>&1; then \
+		echo "✗ agents/security_enums.py is stale; run: make generate-sanitizer-patterns"; \
+		stale=1; \
+	fi; \
+	rm -f agents/security_patterns.py.check agents/security_enums.py.check; \
+	if [ $$stale -ne 0 ]; then exit 1; fi
+	@echo "✓ agents/security_patterns.py + agents/security_enums.py are in sync"
 
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-integration ## Run all tests
