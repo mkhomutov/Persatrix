@@ -52,7 +52,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 🚧 Implementing |
-| [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 📋 Proposed |
+| [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 🚧 Implementing |
 | [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | ✅ Implemented |
 | 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)) | v0.3.x | Reserved (narrowed) |
 | 0024 | Episodic Vector Recall — deferred, gated on [MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md) data | v0.3.x or v0.4.0 | Reserved (deferred) |
