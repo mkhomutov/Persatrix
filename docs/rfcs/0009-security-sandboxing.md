@@ -1,7 +1,7 @@
 # RFC 0009 — Agent Identity, Security & Sandboxing
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: 🚧 Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-15  
 **Target**: v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4)  
@@ -591,20 +591,14 @@ These arose from RFCs 0008, 0011, and 0020 landing or partly landing during v0.3
 
 ## Decision / Next Steps
 
-Decision: Propose this RFC for review as a foundational v0.2 security layer. Implementation should begin after RFC 0006 Phase 1 (execution limits) is merged, since rate limiting and budget enforcement share enforcement points in the executor.
+**Status (2026-05-06)**: RFC accepted and 🚧 Implementing. PR plan ([0009-pr-plan.md](0009-pr-plan.md)) ratified. v0.3.0 ships **Phases 1–2 only**; Phases 3–4 deferred to v0.4.0. **3 of 4 v0.3.0 PRs merged**: PR 1 (#233) AuditLogger + SecretRedactor + PR 1b (#234) deep-review follow-ups + PR 1c (#236) audit-hardening; PR 2 (#244) per-agent RateLimiter + CircuitBreaker + REST/gRPC middleware; PR 3 (#253) InputSanitizer + ContextItem + `<external_data>` envelope. PR 4 (close-out + `⚠️ Partially Implemented` flip) pending.
 
-Sequencing relative to other v0.2 RFCs:
+**Phase 4 sequencing — accepted divergence**: Phase 4 (agent identity + HITL) was originally recommended *before* RFC 0011 (Channels + Bridges), as channel inputs are high-trust injection vectors. v0.3.0 ships RFC 0011 internal channels without Phase 4. The divergence is compensated by:
+- Channels REST surface emits a startup-WARN trust-boundary notice ([0011-pr-plan.md PR 2](0011-pr-plan.md)).
+- v0.3.0 release notes call out Phases 3–4 as deferred and document the unauthenticated REST surface.
+- Phase 4 reopens this sequencing question for v0.4.0 — production multi-tenant deployments should not enable channels until Phase 4 lands.
 
-- Phase 1 (audit + rate limiting) can land concurrently with RFC 0006.
-- Phase 2 (input sanitization) should land before RFC 0010 (Sub-Agent Spawning), as spawned agents are a prompt injection amplification surface.
-- Phase 3 (tool validation + resource limits) is a prerequisite for production sub-agent use.
-- Phase 4 (agent identity + HITL) is recommended before RFC 0011 (Channels + Bridges), as channel inputs are high-trust injection vectors.
-
-Next steps:
-
-1. Accept RFC 0009 and create a PR plan file.
-2. Begin Phase 1 implementation alongside RFC 0006 Phase 1.
-3. Open Question 1 (proto change for token delivery) must be resolved before Phase 4 begins.
+**Genuinely-deferred Open Questions**: OQ #1 (proto token field) and OQ #4 (revocation list) remain open and gate Phase 4. See §Open Questions § "Genuinely open".
 
 ## Related Documentation
 

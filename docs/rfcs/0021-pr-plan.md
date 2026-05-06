@@ -23,6 +23,18 @@ This plan splits Phase 1 into **3 PRs**. Each stays well under the [BRANCHING.md
 
 ---
 
+## Resolved Open Questions
+
+[RFC 0021 §Decision/Next Steps](0021-persona-temporal-awareness.md#decision--next-steps) requires OQ #1, #2, and #8 be resolved in this companion document before Phase 1 implementation begins. Resolutions:
+
+| OQ | Question | Resolution | Where landed |
+|----|----------|------------|--------------|
+| **#1** | Today / HH:MM threshold for recency rendering | **Duration-driven buckets only in v0.3.0.** `format_relative` ships seven past-tense buckets (`just now` / `N min ago` / `N hours ago` / `yesterday` / `N days ago` / `last week` / `N weeks ago` / `N months ago` / `over a year ago`) and the symmetric future buckets. Calendar-aware alternatives (`today, HH:MM`, `last <weekday>`, `calendar-tomorrow`) are deferred to PR 2 follow-ups — RFC 0021 §D lists them as "or" forms and the duration form is sufficient for the prompt-shape contract PR 2 lands. | PR 1 ([agents/temporal/rendering.py](../../agents/temporal/rendering.py) module docstring + bucket boundaries) |
+| **#2** | `reminder_horizon_sec` default | **Not in scope for Phase 1.** Reminders ship in Phase 3 (v0.4.0) with the REMINDER event. Default value to be pinned then. | Deferred to v0.4.0 — out of scope for this plan |
+| **#8** | Timezone display format in the now-anchor | **Persona-local time, no TZ name in v0.3.0.** `Clock` exposes epoch seconds; the tz-aware `datetime` is computed inside the rendering layer using `persona.timezone` (default `UTC`). The now-anchor block (PR 2) shows local wall-clock + part-of-day word; explicit TZ-name disambiguation (e.g., "14:30 Tokyo") is a v0.4.0 follow-up if cross-tz operator deployments justify it. | PR 1 (`format_part_of_day` bands) + PR 2 (now-anchor format — pinned when PR 2 opens) |
+
+---
+
 ## Dependency Graph
 
 ```
@@ -54,7 +66,7 @@ PR 3 (Review follow-ups + RFC close — Phase 1 scope only)
 
 #### Key implementation details
 
-- `Clock.now()` returns a `datetime` with timezone — no naive `datetime` in this RFC's surface.
+- `Clock.now()` returns a `float` (seconds since epoch, UTC) per RFC 0021 §B — naive `datetime` is never exposed; rendering helpers convert to a tz-aware `datetime` internally via the persona's configured timezone (defaults to `UTC`).
 - `format_relative` thresholds match RFC 0021 §D (verbatim) and produce strings like `"3 minutes ago"`, `"2 hours ago"`, `"yesterday"`, `"3 days ago"`, `"last month"`.
 - No persona-runtime wiring in this PR — that is PR 2.
 

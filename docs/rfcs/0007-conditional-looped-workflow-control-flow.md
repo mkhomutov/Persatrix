@@ -341,11 +341,15 @@ For v1 implementations, `fail` should remain the default until `pause` has an op
 
 ## Decision / Next Steps
 
-1. Review and accept this RFC after RFC 0006 is accepted.
-2. Create PR plan once RFC 0006 implementation is underway.
-3. Phase 1 (conditions) can begin after RFC 0006 Phase 1 lands.
-4. Phase 2 (loops) requires RFC 0006 Phase 3 (budget enforcement).
-5. Phase 3 (for-each) can follow independently.
+**Status (2026-05-06)**: RFC accepted; prerequisites met (RFC 0006 Phases 1 + 3 shipped in v0.2.0; RFC 0008 PR 1 per-step context budget merged). PR plan ([0007-pr-plan.md](0007-pr-plan.md)) exists but is still **🔨 Scaffold** — every PR row has Key Implementation Details *(TBD)* and Tests *(TBD)*. Implementation cannot start until the scaffold is fleshed out.
+
+**Required before PR 1 opens**:
+
+1. Resolve the six **Open Questions** above (loop variable scoping, parallel inner steps, for-each failure handling, condition evaluation caching, loop state persistence, expression language extensibility). Resolutions land inline in this RFC and in the corresponding PR-row design notes.
+2. Fill in "Key Implementation Details" + "Tests" for PRs 1–5 in [0007-pr-plan.md](0007-pr-plan.md); pin estimated sizes against §Files Touched and the 1.7× calibration factor.
+3. Decide `pause` mode disposition (ship behind flag in v0.3.0 vs. defer to v0.3.x).
+
+**Phasing**: Phase 1 (conditions) → Phase 2 (loops) → Phase 3 (for-each). Phase 2 reuses RFC 0006 Phase 3's budget enforcement; Phase 3 can follow independently of Phase 2.
 
 ---
 

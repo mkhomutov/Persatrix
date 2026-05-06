@@ -1,7 +1,7 @@
 # RFC 0011 — Channels & Internal Agent Messaging
 
 **Type**: feature  
-**Status**: � Implementing  
+**Status**: 🚧 Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-25  
 **Target**: v0.3.0 (internal channels) + v0.5.0 (external bridges)  
@@ -672,11 +672,11 @@ Guidance, not protocol. The three `respond` policies compose into channel-level 
 
 ## Decision / Next Steps
 
-1. Review and accept this RFC.
-2. RFC 0008 Phase 1 (context budget foundation) must be underway before RFC 0011 Phase 3 begins. Phases 1 and 2 of RFC 0011 can proceed independently.
-3. RFC 0009 Phases 1–2 (audit logging, rate limiting, input sanitization) run concurrently and are integrated at Phase 1 (REST endpoint rate limiting) and Phase 3 (input sanitization on stored content).
-4. RFC 0007 (Conditional & Looped Workflow Control Flow) runs as a parallel workstream and is not a prerequisite for any RFC 0011 phase.
-5. Create PR implementation plan after acceptance.
+**Status (2026-05-06)**: Accepted; PR plan ([0011-pr-plan.md](0011-pr-plan.md)) + chat-as-DM amendment ([0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md)) ratified. **4 of 8 canonical PRs merged** — PR 1 (#231), PR 2 (#245), PR 3 (#246), PR 4 (#248–#252, agent-delivery split).
+
+**Next critical-path PR**: PR 5 (channel-recall + memory-bound history), jointly delivered with [RFC 0020 PR 5](0020-pr-plan.md). Owns the OQ #8 on-startup catch-up fetch deliverable.
+
+**RFC 0009 Phase 4 deferral**: Phase 4 was originally recommended before RFC 0011 ships, but is deferred to v0.4.0. v0.3.0 compensates with a startup-WARN trust-boundary notice on the channels REST surface; PR 7 revisits when Phase 4 lands.
 
 ---
 

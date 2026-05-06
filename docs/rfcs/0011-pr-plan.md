@@ -287,11 +287,13 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### PR checklist
 
-- [ ] Two-agent integration test (one agent on `when_mentioned`, no mention → `channel.messages.gated` increments)
-- [ ] Self-mention through `MENTION` derived event verified or explicitly deferred
-- [ ] `cascade_depth` backstop test green (drop happens upstream of the gate, regardless of policy)
-- [ ] New metrics (`channel.messages.gated{policy}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests
-- [ ] PR #231 review SF-3 closed: `PublishMessage` validates every `msg.Mentions` entry via `validateParticipantID`; regression test covers invalid id rejection + JSON-special-character round-trip
+- [x] Two-agent integration test (one agent on `when_mentioned`, no mention → `channel.messages.gated` increments) — landed in PR 4b (#252)
+- [x] Self-mention through `MENTION` derived event verified or explicitly deferred — addressed in PR 4a-i (#248) via `_format_event` mention handling
+- [x] `cascade_depth` backstop test green (drop happens upstream of the gate, regardless of policy) — landed in PR 4b (#252)
+- [x] New metrics (`channel.messages.gated{policy}`) registered in [docs/observability.md](../observability.md) and any dashboard manifests — landed in PR 4b (#252)
+- [x] PR #231 review SF-3 closed: `PublishMessage` validates every `msg.Mentions` entry via `validateParticipantID`; regression test covers invalid id rejection + JSON-special-character round-trip — closed in PR 4a-ii-α (#249)
+
+> **PR 4 split status (2026-05-06)**: All sub-PRs merged — 4a-i (#248) `ReceiveChannelMessage` real handler + additive enums; 4a-ii-α (#249) hard rename `MESSAGE_RECEIVED`/`SEND_MESSAGE` → `CHANNEL_MESSAGE`/`SEND_CHANNEL_MESSAGE` + SF-3 mentions validation; 4a-ii-β-1 (#250) Go gRPC `MessageDispatcher` + Python `HTTPChannelPublisher`; 4a-ii-β-2 (#251) chat-as-DM rewrite (`replyWaiter` + `ChannelRouter.PublishAndAwait`); 4b (#252) response gate + DELETE endpoints. Canonical PR 4 (agent-delivery scope) is **closed**.
 
 ---
 
@@ -307,6 +309,7 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 - Channel-history tier added to the `MemoryBudget` greedy fill (no change to `MemoryBudget` itself).
 - Relationship memory: channel interactions increment count + influence trust score (per-interaction, not per-message — RFC 0020 contract).
 - `InputSanitizer.Sanitize()` applied to inbound channel message content on the ingest path before it reaches `InteractionTracker.add_turn` and before storage — closes the integration anticipated by [RFC 0009 PR plan](0009-pr-plan.md) PR 3 and the [RFC 0011 §Security Considerations](0011-channels-bridges.md#security-considerations) mitigation.
+- **On-startup catch-up fetch** (resolves [RFC 0011 OQ #8](0011-channels-bridges.md#open-questions)): on persona-runtime boot, each subscribed channel is queried for the last 50 messages (`GET /api/v1/channels/{id}/messages?limit=50`); messages newer than the agent's `last_seen_at` per channel are replayed through the same `CHANNEL_MESSAGE` ingest path (sanitization + `InteractionTracker.add_turn`) but **without** triggering an outbound `SEND_CHANNEL_MESSAGE` (replay-mode flag bypasses the response gate). Best-effort — failure to reach the REST surface logs WARN and continues; watermark + per-tick recovery deferred until operational data justifies (RFC OQ #8).
 
 #### Key implementation details
 
@@ -337,6 +340,8 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 - [ ] Channel-ingest path applies `InputSanitizer.Sanitize()` per [RFC 0009 PR plan](0009-pr-plan.md) PR 3; sanitization audit event fires on every inbound message
 - [ ] No per-event `store_episode` call from the channel handler (regression guard against the duplicate-summary problem)
 - [ ] Cross-RFC priority order in the persona-runtime caller matches [RFC §E](0011-channels-bridges.md#e-memory-integration) and [RFC 0021 §J](0021-persona-temporal-awareness.md#j-token-budget-integration) verbatim
+- [ ] On-startup catch-up fetch implemented (last-50-per-channel REST query, replay-mode flag suppresses outbound `SEND_CHANNEL_MESSAGE`); resolves [RFC 0011 OQ #8](0011-channels-bridges.md#open-questions)
+- [ ] Catch-up fetch integration test: agent restarts mid-conversation, fetches recent messages, replays through ingest, **no** outbound responses to replayed messages
 
 ---
 

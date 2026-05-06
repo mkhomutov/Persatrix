@@ -357,15 +357,13 @@ No proto changes. No Go orchestrator changes (interaction lifecycle is agent-loc
 
 ## Decision / Next Steps
 
-This RFC is a prerequisite for the v0.3.0 user-facing promise to land cleanly. Without it, channels (RFC 0011) ship with the per-message episode model and produce the shredded-memory failure mode described in Motivation.
+**Status (2026-05-06)**: RFC accepted; PR plan ([0020-pr-plan.md](0020-pr-plan.md)) ratified. **4 of 7 PRs merged**: PR 1 (#214) `InteractionTracker` + episodes schema v5; PR 2 (#215) TICK + tool-only events route through tracker; PR 3 (#216) multi-turn aggregation for human-chat + DM; PR 4 (#229) summarize-on-close + closing-state janitor + `record_interaction` on close.
 
-**Required before implementation begins**:
+**Open Question resolutions**:
+- **OQ #1 / OQ #3** were resolved in [0020-pr-plan.md](0020-pr-plan.md) before PR 1 opened (per the original Decision sequence).
+- **OQ #6 (outcome tagging for trust deltas)** — the resolution moved out of the RFC 0020 Phase 2 PR plan and is now owned by the **MQ-1 carve-out PR** ([memory-quality-roadmap.md](../memory-quality-roadmap.md) → MQ-1; v0.3.x carve-out off this PR plan). The outcome-tagged importance write lands after PR 7 (RFC close) so the close-out can flip cleanly without waiting on the MQ work.
 
-1. Resolve Open Questions 1, 3, and 6 in a PR-plan companion document.
-2. Confirm with RFC 0008 author (same author) that §D's Context Packaging pipeline composes with interaction-bounded inputs without further changes — the current expectation is yes, and this is recorded as a no-op for RFC 0008.
-3. Add this RFC to ROADMAP.md's RFC Master Index and the v0.3.0 dependency chain (RFC 0020 sits before RFC 0011 Phase 3, parallel with RFC 0008 Phase 1).
-
-**Phasing into v0.3.0**: Phase 1 ships independently of channels and is the lowest-risk piece. Phase 2 lands before any RFC 0011 work that touches memory. Phase 3 is RFC 0011 Phase 3's prerequisite and lands jointly.
+**Next critical-path PR**: PR 5 (channel-recall via interaction-bounded reads), jointly delivered with **RFC 0011 PR 5** — channel messages flow through `InteractionTracker.add_turn` rather than per-event episodic writes (see §E and [0011-pr-plan.md PR 5](0011-pr-plan.md)). Both PRs unblocked as of 2026-05-06.
 
 ## Related Documentation
 
