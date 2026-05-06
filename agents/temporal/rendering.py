@@ -174,16 +174,22 @@ def format_part_of_day(hour: int) -> str:
 def format_now_anchor(epoch: float, tz: str | ZoneInfo = "UTC") -> str:
     """Render the now-anchor line for the system prompt (RFC 0021 §C).
 
-    Three pieces of information packed into one line:
+    Two pieces of information packed into one line:
     1. ISO-8601 absolute time (with numeric offset — disambiguates the
        wall-clock instant without forcing the LLM to do offset arithmetic).
     2. Day-of-week + coarse part-of-day ("Saturday afternoon") — the
        English form humans actually use.
 
-    Per the OQ #8 resolution in ``docs/rfcs/0021-pr-plan.md``, v0.3.0
-    omits the timezone abbreviation/IANA name from the human form; the
-    numeric offset already disambiguates and the abbreviation question
-    (PT vs. PDT, ``UTC`` vs. ``Etc/UTC``) is deferred to v0.4.0.
+    A third element — timezone abbreviation/IANA name in the human form
+    (``"… Saturday afternoon, PT"``) — is deferred to v0.4.0 per the
+    OQ #8 resolution in ``docs/rfcs/0021-pr-plan.md``: the numeric
+    offset on element 1 already disambiguates the wall-clock instant,
+    and the abbreviation question (PT vs. PDT, ``UTC`` vs. ``Etc/UTC``)
+    is not worth resolving inline for v0.3.0.  The phase-2 RFC follow-up
+    that adds calendar-aware buckets ("today, HH:MM", "last <weekday>")
+    is the natural place to revisit it.
+    (PR #260 review L-1: prior docstring enumerated two pieces but
+    claimed three.)
     """
     zone = _resolve_tz(tz)
     dt = datetime.fromtimestamp(int(epoch), tz=zone)
@@ -214,11 +220,22 @@ def format_cadence(
         return None
     if first_interaction_at is None or last_interaction_at is None:
         return None
-    # Lifetime is measured against ``now`` rather than
-    # ``last_interaction_at`` so a relationship that has gone quiet
-    # falls toward "sparse" instead of staying frozen at its historical
-    # rate.  Clamp to ``last - first`` minimum so a single same-second
-    # burst at registration time still bucket-divides.
+    # Lifetime is the larger of (relationship age = ``now - first``) and
+    # (first-to-last span = ``last - first``).
+    #
+    # In the common case ``last <= now`` so ``now - first`` wins: a
+    # relationship that has gone quiet falls toward "sparse" instead of
+    # staying frozen at its historical rate.  When ``first == last``
+    # (single same-second burst at registration), ``now - first`` is
+    # still positive so the bucket math has a non-zero divisor.
+    #
+    # The ``max`` is also clock-skew tolerant: if ``last > now`` (host
+    # clock skew, restored snapshot, or a FrozenClock advanced past
+    # stored data), the historical ``last - first`` term wins so the
+    # bucket holds at the historical rate until ``now`` catches up,
+    # rather than reporting a misleadingly long lifetime.
+    # (PR #260 review M-2: prior comment did not cover the ``last > now``
+    # branch.)
     lifetime = max(now - first_interaction_at, last_interaction_at - first_interaction_at)
     if lifetime <= 0:
         return None

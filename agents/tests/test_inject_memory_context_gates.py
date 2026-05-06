@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.clock import WallClock
 from agents.persona_runtime.memory_context import (
     MemoryInjectionResult,
     _MemoryContextMixin,
@@ -27,6 +28,11 @@ from agents.persona_runtime.memory_context import (
 class _FakeEpisode:
     summary: str
     id: str = "ep-0001"
+    # RFC 0021 PR 2: temporal fields accessed by recency rendering.
+    created_at: float = 0.0
+    closed_at: float | None = None
+    started_at: float | None = None
+    turn_count: int | None = None
 
 
 @dataclass
@@ -49,6 +55,9 @@ def _make_mixin(
     mixin = _ConcreteMemoryMixin()
     mixin.agent_id = "test-agent"
     mixin._working_memory = WorkingMemory(max_tokens=8192)
+    # RFC 0021 PR 2: temporal seam required by _MemoryContextMixin._inject_memory_context.
+    mixin._clock = WallClock()
+    mixin._timezone = "UTC"
 
     mixin._episodic_memory = AsyncMock()
     mixin._episodic_memory.recall.return_value = episodes or []

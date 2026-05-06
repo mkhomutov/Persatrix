@@ -27,10 +27,8 @@ from agents.memory.episodic import (
     EpisodicMemory,
 )
 from agents.memory.working import WorkingMemory
-from agents.persona_runtime.memory_context import (
-    _MEMORY_BUDGET_TOKENS,
-    _MemoryContextMixin,
-)
+from agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS as _MEMORY_BUDGET_TOKENS
+from agents.persona_runtime.memory_context import _MemoryContextMixin
 from agents.persona_types import EventType
 
 

@@ -23,7 +23,17 @@ from ..temporal.rendering import (
     format_duration,
     format_relative,
 )
-from .memory_budget import MemoryBudget, _truncate_to_token_limit
+from .memory_budget import (
+    MAX_EPISODE_SUMMARY_CHARS,
+    MAX_NOTE_CONTENT_CHARS,
+    MEMORY_BUDGET_TOKENS,
+    MIN_TOKENS_EPISODIC,
+    MIN_TOKENS_NOTES,
+    MIN_TOKENS_RELATIONSHIP,
+    REL_NOTES_INTERIM_CHARS,
+    MemoryBudget,
+    _truncate_to_token_limit,
+)
 
 if TYPE_CHECKING:
     # ``from __future__ import annotations`` makes every annotation in this
@@ -45,43 +55,10 @@ __all__ = [
 
 
 # ─── Constants ─────────────────────────────────────────────
-
-# Total token budget for all memory tiers injected per event.
-# RFC 0017 §B / OQ1 resolution: 1500 tokens balances detail vs. prompt size.
-# Retune by changing this single constant; no API changes required.
-_MEMORY_BUDGET_TOKENS: int = 1500
-
-# Per-call min_tokens floors for the MemoryBudget allocator.
-# Each tier specifies the minimum token count a truncated item must have
-# to be admitted rather than dropped.  Relationship context uses a higher
-# floor (64) because a partially-truncated header line without notes is
-# nearly useless; notes use a lower floor (24) to allow even short snippets.
-_MIN_TOKENS_RELATIONSHIP: int = 64
-_MIN_TOKENS_EPISODIC: int = 32
-_MIN_TOKENS_NOTES: int = 24
-
-# Interim per-field cap on ``rel.notes`` (chars).  The pre-RFC-0017 code
-# used ``_MAX_RELATIONSHIP_NOTES_CHARS = 300`` as an interim mitigation
-# against prompt injection from peer-authored relationship notes.  After
-# the allocate-loop rewrite the only remaining bound on the relationship
-# block is the per-block budget (~1500 tokens ≈ 6000 chars), which is far
-# larger than the original notes cap.  Restore a per-field bound here so
-# the prompt-injection surface for ``rel.notes`` does not silently expand
-# from ~300 chars to ~6000 chars when the budget order favours this tier.
-# 400 chars (~100 tokens at 4 chars/token) matches the original interim
-# limit with mild headroom; the TODO(v0.3) note below tracks full
-# sanitisation once A2A allows external agents.
-# (PR #146 review finding: prompt-injection surface regression.)
-_REL_NOTES_INTERIM_CHARS: int = 400
-
-# Per-field char caps applied before the budget loop.  Prevents individual
-# items from dominating the prompt even when the token budget is generous.
-# Episode summaries beyond 200 chars rarely add recall value and can crowd
-# out other tiers.  Note content can be up to 10KB (_MAX_NOTE_CONTENT_BYTES);
-# capping at 500 chars keeps injected notes skimmable.
-# (PR #146 / F-60-R2-3: word-boundary truncation with ellipsis.)
-_MAX_EPISODE_SUMMARY_CHARS: int = 200
-_MAX_NOTE_CONTENT_CHARS: int = 500
+# Budget totals and per-tier token floors live in memory_budget.py so
+# tuning stays co-located with MemoryBudget.try_add() call sites.
+# The names are re-imported above (MEMORY_BUDGET_TOKENS, MIN_TOKENS_*,
+# REL_NOTES_INTERIM_CHARS, MAX_EPISODE_SUMMARY_CHARS, MAX_NOTE_CONTENT_CHARS).
 
 # Trust score defaults for relationship context filtering.
 # A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
@@ -104,7 +81,7 @@ class MemoryInjectionResult:
 
     Attributes:
         memory_admitted_tokens: Total tokens admitted across all tiers for
-            this event.  Equals ``_MEMORY_BUDGET_TOKENS - budget.remaining``
+            this event.  Equals ``MEMORY_BUDGET_TOKENS - budget.remaining``
             after the allocate-loop.  Used by PR 5's empty-context TICK
             short-circuit to decide whether to suppress the LLM call.
     """
@@ -236,7 +213,7 @@ class _MemoryContextMixin:
 
         Returns:
             :class:`MemoryInjectionResult` with ``memory_admitted_tokens``
-            equal to ``_MEMORY_BUDGET_TOKENS - budget.remaining`` after the
+            equal to ``MEMORY_BUDGET_TOKENS - budget.remaining`` after the
             allocate-loop.  PR 5 uses this value for the empty-context TICK
             short-circuit.  Callers that ignore the return value are
             unaffected.
@@ -344,7 +321,7 @@ class _MemoryContextMixin:
         # Process tiers in fixed priority order (relationship=8 → episodic=7
         # → notes=6).  Higher-priority tiers consume the budget first.
         # RFC 0017 §B / OQ4.
-        budget = MemoryBudget(total_tokens=_MEMORY_BUDGET_TOKENS)
+        budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
         _inst = try_get_instruments()
@@ -366,15 +343,16 @@ class _MemoryContextMixin:
                 rel_lines.append(f"  Trust: {rel.trust_score:.2f}")
             rel_lines.append(f"  Interactions: {rel.interaction_count}")
             # RFC 0021 §E: last-seen recency + cadence (pre-computed).
+            # ``rendered_last_seen`` defers the counter increment to the
+            # post-admission branch below so the metric reflects what
+            # actually reached the prompt (PR #260 review M-1).
+            rendered_last_seen = False
             if rel.last_interaction_at is not None:
                 last_seen = format_relative(
                     rel.last_interaction_at, now, self._timezone,
                 )
                 rel_lines.append(f"  Last seen: {last_seen}")
-                if _inst is not None:
-                    _inst.temporal_recency_rendered.add(
-                        1, attributes={"agent.id": _agent_attr, "source": "relationship"},
-                    )
+                rendered_last_seen = True
             cadence = format_cadence(
                 rel.interaction_count, rel.first_interaction_at,
                 rel.last_interaction_at, now,
@@ -398,11 +376,11 @@ class _MemoryContextMixin:
                 # all three tiers).
                 # (PR #146 re-review: truncation-style consistency.)
                 capped_notes = _truncate_with_ellipsis(
-                    rel.notes, _REL_NOTES_INTERIM_CHARS,
+                    rel.notes, REL_NOTES_INTERIM_CHARS,
                 )
                 rel_lines.append(f"  Notes: {capped_notes}")
             rel_text = "\n".join(rel_lines)
-            admitted_rel = budget.try_add(rel_text, min_tokens=_MIN_TOKENS_RELATIONSHIP)
+            admitted_rel = budget.try_add(rel_text, min_tokens=MIN_TOKENS_RELATIONSHIP)
             if admitted_rel is not None:
                 self._working_memory.add_section(ContextSection(
                     name="relationship_context",
@@ -418,13 +396,25 @@ class _MemoryContextMixin:
                     token_count=estimate_tokens(admitted_rel, accurate=True),
                     compressible=True,
                 ))
+                # PR #260 review M-1: increment after admission so the
+                # counter reflects what reached the prompt rather than
+                # what we attempted to render.  Truncation at the budget
+                # floor (`MIN_TOKENS_RELATIONSHIP=64`) snips from the
+                # end; the ``Last seen`` line sits near the front of
+                # ``rel_lines`` (after header, trust, interactions) so
+                # it survives in the 64-token-truncated form for any
+                # realistic field sizes.
+                if rendered_last_seen and _inst is not None:
+                    _inst.temporal_recency_rendered.add(
+                        1, attributes={"agent.id": _agent_attr, "source": "relationship"},
+                    )
 
         # Episodic tier (priority 7).
         if episodes:
             ep_items: list[str] = []
             for ep in episodes:
                 summary = _truncate_with_ellipsis(
-                    ep.summary, _MAX_EPISODE_SUMMARY_CHARS,
+                    ep.summary, MAX_EPISODE_SUMMARY_CHARS,
                 )
                 # RFC 0021 §D: recency (+ duration on multi-turn rows) prefix.
                 anchor_ts = ep.closed_at if ep.closed_at is not None else ep.created_at
@@ -438,15 +428,23 @@ class _MemoryContextMixin:
                 else:
                     prefix = f"[{tag}]"
                 admitted = budget.try_add(
-                    f"- {prefix} {summary}", min_tokens=_MIN_TOKENS_EPISODIC,
+                    f"- {prefix} {summary}", min_tokens=MIN_TOKENS_EPISODIC,
                 )
                 if admitted is not None:
                     ep_items.append(admitted)
-            if _inst is not None and episodes:
-                _inst.temporal_recency_rendered.add(
-                    len(episodes),
-                    attributes={"agent.id": _agent_attr, "source": "episode"},
-                )
+                    # PR #260 review M-1: count one per admitted item
+                    # rather than ``len(episodes)`` after the loop.  The
+                    # recall set may include items the budget drops; the
+                    # counter description ("Recency tags rendered onto
+                    # recalled episodes…") implies actual renders, not
+                    # attempts.  Operators correlating this metric
+                    # against admitted token totals would otherwise see
+                    # a phantom delta whenever the budget tightens.
+                    if _inst is not None:
+                        _inst.temporal_recency_rendered.add(
+                            1,
+                            attributes={"agent.id": _agent_attr, "source": "episode"},
+                        )
             if ep_items:
                 # NB: the ``"Relevant past episodes:\n"`` header is added
                 # AFTER the per-item budget loop and is not itself charged
@@ -472,11 +470,11 @@ class _MemoryContextMixin:
             note_items: list[str] = []
             for note in notes:
                 content = _truncate_with_ellipsis(
-                    note.content, _MAX_NOTE_CONTENT_CHARS,
+                    note.content, MAX_NOTE_CONTENT_CHARS,
                 )
                 admitted = budget.try_add(
                     f"- [{note.topic}] {content}",
-                    min_tokens=_MIN_TOKENS_NOTES,
+                    min_tokens=MIN_TOKENS_NOTES,
                 )
                 if admitted is not None:
                     note_items.append(admitted)
@@ -492,7 +490,7 @@ class _MemoryContextMixin:
                     compressible=True,
                 ))
 
-        memory_admitted_tokens = _MEMORY_BUDGET_TOKENS - budget.remaining
+        memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
         # Consumed by ``_ActionLoopMixin._on_event_inner`` for the RFC 0017
         # §F empty-context TICK short-circuit (PR 5): a zero value, combined
         # with no active goal and no pending turn, suppresses the LLM call

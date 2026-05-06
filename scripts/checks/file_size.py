@@ -141,16 +141,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # docs/issues/ISSUE-0008-orchestrator-main-size.md. Remove this
     # entry once that refactor lands.
     "cmd/orchestrator/main.go",
-    # agents/persona_runtime/__init__.py has been at the 500-line cap
-    # since v0.2; it is the central wiring point for `_LLMPersonaAgent`
-    # and accumulates per-RFC initialization (RFC 0019 § I tick-span
-    # links, RFC 0020 PR 2/3 InteractionTracker + idle-timeout coercion,
-    # RFC 0020 PR 4 janitor cooldown + bg summary task set, RFC 0021
-    # PR 2 temporal seam). The constructor's per-RFC blocks are already
-    # at minimum overhead; splitting the wiring into a dedicated
-    # `_RuntimeWiringMixin` is tracked as a follow-up cleanup. Remove
-    # this entry once that refactor lands.
-    "agents/persona_runtime/__init__.py",
 })
 
 

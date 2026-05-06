@@ -14,6 +14,10 @@ Pins the PR 2 deliverables called out in
 * Token cost of the temporal additions stays well under 100 tokens for
   a typical prompt — the budget invariant from the PR plan.
 
+Telemetry counter accuracy (PR #260 review M-1) is in
+``test_temporal_metrics.py``, which exercises the ``InMemoryMetricReader``
+path without adding metric fixtures to every test in this file.
+
 All tests use a :class:`FrozenClock` so the rendered strings are
 byte-stable across CI runs.
 """
@@ -21,16 +25,17 @@ byte-stable across CI runs.
 from __future__ import annotations
 
 from copy import deepcopy
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agents.clock import FrozenClock
-from agents.llm_client import LLMClient, LLMResponse
 from agents.memory.working import estimate_tokens
-from agents.persona import create_persona_agent
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
+
+from ._temporal_test_helpers import FROZEN_EPOCH as _FROZEN_EPOCH
+from ._temporal_test_helpers import PERSONA_CONFIG as _PERSONA_CONFIG_BASE
+from ._temporal_test_helpers import make_agent as _make_agent_base
 
 
 @pytest.fixture(autouse=True)
@@ -40,53 +45,8 @@ def _clean_registry():
     clear_registry()
 
 
-# Pinned wall-clock instant for every test in this module.  Choosing a
-# Saturday afternoon UTC keeps the part-of-day word stable across
-# DST-shifting host locales.
-_FROZEN_EPOCH = 1745591520.0  # 2025-04-25T14:32:00+00:00 — Friday afternoon
-
-_PERSONA_CONFIG: dict = {
-    "id": "temporal-persona",
-    "type": "persona",
-    "name": "Temporal Test Agent",
-    "role": "Verifies the RFC 0021 PR 2 prompt shape",
-    "model": "test-model",
-    "max_llm_calls": 1,
-    "max_tokens": 512,
-    "persona": {
-        "title": "Tester",
-        "background": "Exists only inside this test module.",
-        "behavior": {
-            "directness": "balanced",
-            "formality": "professional",
-        },
-        "timezone": "UTC",
-    },
-    "permissions": {"memory": {"read": True, "write": True}},
-    "memory": {"db_path": ":memory:"},
-}
-
-
-def _make_client() -> LLMClient:
-    provider = AsyncMock()
-    provider.create_message = AsyncMock(
-        return_value=LLMResponse(text="ok"),
-    )
-    provider.format_tool_definitions = MagicMock(return_value=[])
-    provider.append_tool_round = MagicMock(side_effect=lambda msgs, *_: msgs)
-    return LLMClient(provider)
-
-
 async def _make_agent(*, clock: FrozenClock | None = None, config: dict | None = None):
-    cfg = config or deepcopy(_PERSONA_CONFIG)
-    agent = create_persona_agent(
-        agent_id=cfg["id"],
-        config=cfg,
-        llm_client=_make_client(),
-        clock=clock or FrozenClock(_FROZEN_EPOCH, tz="UTC"),
-    )
-    await agent.initialize_memory()
-    return agent
+    return await _make_agent_base(clock=clock, config=config)
 
 
 # ─── Now-anchor block ──────────────────────────────────────
@@ -114,7 +74,7 @@ class TestNowAnchor:
             await agent.close_memory()
 
     async def test_now_anchor_uses_persona_timezone(self) -> None:
-        cfg = deepcopy(_PERSONA_CONFIG)
+        cfg = deepcopy(_PERSONA_CONFIG_BASE)
         cfg["persona"]["timezone"] = "America/Los_Angeles"
         agent = await _make_agent(
             clock=FrozenClock(_FROZEN_EPOCH, tz="America/Los_Angeles"),
@@ -130,7 +90,7 @@ class TestNowAnchor:
             await agent.close_memory()
 
     async def test_now_anchor_omitted_timezone_defaults_to_utc(self) -> None:
-        cfg = deepcopy(_PERSONA_CONFIG)
+        cfg = deepcopy(_PERSONA_CONFIG_BASE)
         cfg["persona"].pop("timezone", None)
         agent = await _make_agent(config=cfg)
         try:
@@ -287,17 +247,20 @@ class TestRelationshipTemporal:
     async def test_cadence_bucket_renders_when_history_qualifies(self) -> None:
         agent = await _make_agent()
         try:
-            # Six interactions in seven days = "frequent".  The
-            # interaction_count > 5 threshold means a sixth interaction
-            # is exactly the smallest case the bucket activates.
-            for _ in range(7):
+            # Six interactions across six days = "frequent".  The
+            # ``interaction_count > 5`` threshold in ``format_cadence``
+            # means a sixth interaction is exactly the smallest case the
+            # bucket activates — so this loop pins the boundary the
+            # comment claims, not one above it.
+            # (PR #260 review L-3: prior test ran 7 iterations.)
+            for _ in range(6):
                 await agent._relationship_memory.record_interaction(
                     "bob", "chat", outcome="ok",
                 )
             db = agent._relationship_memory._ensure_db()  # noqa: SLF001 — test-only
-            # Spread the seven interactions across one week ending 1h ago.
-            for i in range(7):
-                offset = -7 * 86_400 + i * 86_400
+            # Spread the six interactions across six days ending 1h ago.
+            for i in range(6):
+                offset = -6 * 86_400 + i * 86_400
                 await db.execute(
                     "UPDATE interactions SET created_at = ? "
                     "WHERE rowid IN ("

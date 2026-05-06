@@ -496,8 +496,3 @@ class _LLMPersonaAgent(
                     now_monotonic, JANITOR_INTERVAL_SEC, self.agent_id,
                 )
                 return actions
-
-    # handle() is inherited from PersonaAgent — no override needed.
-    # PersonaAgent.handle() wraps tasks as TASK_ASSIGNED events and
-    # calls self.on_event(), which dispatches to _on_event_inner()
-    # via polymorphism.
