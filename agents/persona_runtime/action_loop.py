@@ -25,7 +25,11 @@ from ..persona_types import (
     PersonaState,
 )
 from ..response_gate import evaluate_response_gate
-from ..security import maybe_wrap_tool_content
+from ..security import (
+    CONTEXT_SOURCE_CHANNEL_MESSAGE,
+    maybe_wrap_tool_content,
+    sanitize,
+)
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_validation import validate_action_payload
 
@@ -226,6 +230,39 @@ class _ActionLoopMixin:
                 payload={"result": text},
             )]
 
+    # ─── Inbound sanitization (RFC 0011 PR 5) ──────────
+
+    def _sanitize_inbound_event(self, event: AgentEvent) -> AgentEvent:
+        """Run ``sanitize`` over inbound CHANNEL_MESSAGE content.
+
+        Runs once on ingest so the LLM prompt, ``InteractionTracker``,
+        and persistence path all see the cleared text. Non-channel
+        events pass through unchanged. Returns a new ``AgentEvent``
+        with a copied payload when a substitution lands; the original
+        event is not mutated (callers may hold references).
+        """
+        if event.event_type is not EventType.CHANNEL_MESSAGE:
+            return event
+        payload = event.payload or {}
+        content = payload.get("content", "")
+        if not isinstance(content, str) or not content:
+            return event
+        result = sanitize(content, source=CONTEXT_SOURCE_CHANNEL_MESSAGE)
+        if result.content == content and not result.flagged:
+            return event
+        new_payload = dict(payload)
+        new_payload["content"] = result.content
+        return AgentEvent(
+            event_type=event.event_type,
+            payload=new_payload,
+            channel_id=event.channel_id,
+            sender_id=event.sender_id,
+            message_id=event.message_id,
+            thread_id=event.thread_id,
+            timestamp=event.timestamp,
+            metadata=dict(event.metadata) if event.metadata else {},
+        )
+
     # ─── Core inner event handler ──────────────────────
 
     async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
@@ -244,6 +281,13 @@ class _ActionLoopMixin:
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": "Agent config missing required 'model' field"},
             )]
+
+        # RFC 0011 PR 5: ingest sanitization — apply ``sanitize`` once
+        # at the runtime boundary so downstream consumers (LLM prompt,
+        # InteractionTracker, persistence) all see the cleared text.
+        # The audit-event emission lives on the Go side; the Python
+        # sanitizer logs at WARN on every flag.
+        event = self._sanitize_inbound_event(event)
 
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
         # Gate runs *after* the LLM-client / model-config checks above on
@@ -265,6 +309,12 @@ class _ActionLoopMixin:
                     channel_id=event.channel_id or "",
                     policy=decision.policy or "unknown",
                 ))
+            # RFC 0011 PR 5: suppressed events still ingest memory.
+            # Without this, a ``when_mentioned`` listener loses every
+            # non-mention from its memory and replies in a vacuum on the
+            # next mention. The gate's job is to decide *whether to
+            # respond*, not *whether the agent remembers the channel*.
+            await self._store_event_episode(event, [])
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # 0. Format event once and inject memory context.
