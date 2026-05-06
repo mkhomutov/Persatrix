@@ -17,6 +17,12 @@ from ..memory.episodic import (
 )
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
+from ..observability.metrics import current_agent_id, try_get_instruments
+from ..temporal.rendering import (
+    format_cadence,
+    format_duration,
+    format_relative,
+)
 from .memory_budget import MemoryBudget, _truncate_to_token_limit
 
 if TYPE_CHECKING:
@@ -26,6 +32,7 @@ if TYPE_CHECKING:
     # it inside ``TYPE_CHECKING`` removes the need for the previous
     # TCH001 suppression on the runtime import.
     # (PR #148 review finding L-1: resolve TCH001 suppression.)
+    from ..clock import Clock
     from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -186,6 +193,9 @@ class _MemoryContextMixin:
     _episodic_memory: EpisodicMemory
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
+    # RFC 0021 PR 2: temporal seam, set by ``_LLMPersonaAgent.__init__``.
+    _clock: Clock
+    _timezone: str
 
     # Stub declaration for method provided by concrete class (via composition).
     if TYPE_CHECKING:
@@ -335,6 +345,10 @@ class _MemoryContextMixin:
         # → notes=6).  Higher-priority tiers consume the budget first.
         # RFC 0017 §B / OQ4.
         budget = MemoryBudget(total_tokens=_MEMORY_BUDGET_TOKENS)
+        # RFC 0021 PR 2: snapshot the temporal seam once per event.
+        now = self._clock.now()
+        _inst = try_get_instruments()
+        _agent_attr = current_agent_id()
 
         # Relationship tier (priority 8).
         if rel and rel.interaction_count > 0:
@@ -351,6 +365,22 @@ class _MemoryContextMixin:
             if abs(rel.trust_score - _DEFAULT_TRUST_SCORE) > _TRUST_DEVIATION_THRESHOLD:
                 rel_lines.append(f"  Trust: {rel.trust_score:.2f}")
             rel_lines.append(f"  Interactions: {rel.interaction_count}")
+            # RFC 0021 §E: last-seen recency + cadence (pre-computed).
+            if rel.last_interaction_at is not None:
+                last_seen = format_relative(
+                    rel.last_interaction_at, now, self._timezone,
+                )
+                rel_lines.append(f"  Last seen: {last_seen}")
+                if _inst is not None:
+                    _inst.temporal_recency_rendered.add(
+                        1, attributes={"agent.id": _agent_attr, "source": "relationship"},
+                    )
+            cadence = format_cadence(
+                rel.interaction_count, rel.first_interaction_at,
+                rel.last_interaction_at, now,
+            )
+            if cadence is not None:
+                rel_lines.append(f"  Cadence: {cadence}")
             if rel.notes:
                 # TODO(v0.3): sanitize rel.notes when A2A protocol allows
                 # external agents — a compromised peer could store prompt
@@ -396,11 +426,27 @@ class _MemoryContextMixin:
                 summary = _truncate_with_ellipsis(
                     ep.summary, _MAX_EPISODE_SUMMARY_CHARS,
                 )
+                # RFC 0021 §D: recency (+ duration on multi-turn rows) prefix.
+                anchor_ts = ep.closed_at if ep.closed_at is not None else ep.created_at
+                tag = format_relative(anchor_ts, now, self._timezone)
+                if (
+                    ep.turn_count is not None and ep.turn_count > 1
+                    and ep.started_at is not None and ep.closed_at is not None
+                ):
+                    dur = format_duration(max(0.0, ep.closed_at - ep.started_at))
+                    prefix = f"[{tag}, {dur}]"
+                else:
+                    prefix = f"[{tag}]"
                 admitted = budget.try_add(
-                    f"- {summary}", min_tokens=_MIN_TOKENS_EPISODIC,
+                    f"- {prefix} {summary}", min_tokens=_MIN_TOKENS_EPISODIC,
                 )
                 if admitted is not None:
                     ep_items.append(admitted)
+            if _inst is not None and episodes:
+                _inst.temporal_recency_rendered.add(
+                    len(episodes),
+                    attributes={"agent.id": _agent_attr, "source": "episode"},
+                )
             if ep_items:
                 # NB: the ``"Relevant past episodes:\n"`` header is added
                 # AFTER the per-item budget loop and is not itself charged

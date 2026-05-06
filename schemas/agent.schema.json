@@ -176,6 +176,10 @@
       "properties": {
         "title": { "type": "string" },
         "background": { "type": "string" },
+        "timezone": {
+          "type": "string",
+          "description": "RFC 0021 PR 2: IANA timezone name (e.g. 'UTC', 'America/Los_Angeles', 'Asia/Tokyo') used to render the persona's now-anchor and recency tags. Defaults to 'UTC' when absent. Validated by zoneinfo.ZoneInfo at construction so a typo surfaces at startup rather than at first prompt render."
+        },
         "behavior": {
           "type": "object",
           "description": "Structured behavioral dimensions (RFC 0005). Replaces free-text personality.traits / communication_style / decision_making. Individual dimensions are optional — omitted dimensions default to their middle value.",

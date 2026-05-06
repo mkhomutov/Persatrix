@@ -23,7 +23,9 @@ from __future__ import annotations
 import pytest
 
 from agents.temporal.rendering import (
+    format_cadence,
     format_duration,
+    format_now_anchor,
     format_part_of_day,
     format_relative,
 )
@@ -311,3 +313,71 @@ class TestFormatPartOfDay:
         # bug — surface it loudly rather than silently bucket it.
         with pytest.raises(ValueError):
             format_part_of_day(hour)
+
+
+# ─── format_now_anchor (PR 2) ─────────────────────────────────
+
+
+class TestFormatNowAnchor:
+    """RFC 0021 §C: the now-anchor line injected into every system prompt."""
+
+    def test_utc_friday_afternoon(self) -> None:
+        # 2024-04-26T12:00:00Z — Friday at noon.  Validates ISO-8601
+        # absolute, weekday name, and part-of-day word in the same render.
+        assert format_now_anchor(NOW, "UTC") == (
+            "Current time: 2024-04-26T12:00:00+00:00 (Friday afternoon)."
+        )
+
+    def test_persona_local_timezone_shifts_offset_and_part_of_day(self) -> None:
+        # Same epoch in PT during DST renders as 05:00 — "morning".
+        assert format_now_anchor(NOW, "America/Los_Angeles") == (
+            "Current time: 2024-04-26T05:00:00-07:00 (Friday morning)."
+        )
+
+    def test_default_timezone_is_utc(self) -> None:
+        assert format_now_anchor(NOW) == format_now_anchor(NOW, "UTC")
+
+
+# ─── format_cadence (PR 2) ────────────────────────────────────
+
+
+WEEK = 7 * 86_400
+MONTH = 30 * 86_400
+
+
+class TestFormatCadence:
+    """RFC 0021 §E: coarse cadence bucket for relationship summaries."""
+
+    def test_below_threshold_returns_none(self) -> None:
+        # interaction_count <= 5 — not enough signal to bucket.
+        assert format_cadence(5, 0.0, WEEK, WEEK) is None
+
+    def test_missing_first_or_last_returns_none(self) -> None:
+        assert format_cadence(10, None, WEEK, WEEK) is None
+        assert format_cadence(10, 0.0, None, WEEK) is None
+
+    def test_zero_lifetime_returns_none(self) -> None:
+        # All interactions stamped at the same instant — no rate to compute.
+        assert format_cadence(10, 100.0, 100.0, 100.0) is None
+
+    def test_frequent_bucket(self) -> None:
+        # 10 interactions across 30 days — 3 days/interaction → frequent.
+        assert format_cadence(10, 0.0, MONTH, MONTH) == "frequent"
+
+    def test_regular_bucket(self) -> None:
+        # 10 interactions across 200 days — 20 days/interaction → regular.
+        assert format_cadence(10, 0.0, 200 * 86_400, 200 * 86_400) == "regular"
+
+    def test_sparse_bucket(self) -> None:
+        # 10 interactions across 800 days — 80 days/interaction → sparse.
+        assert format_cadence(10, 0.0, 800 * 86_400, 800 * 86_400) == "sparse"
+
+    def test_quiet_relationship_drifts_toward_sparse(self) -> None:
+        # 10 interactions in the first 100 days, then silence for two
+        # years.  Bucketing against ``now`` rather than ``last`` keeps
+        # the cadence honest — historical "frequent" decays to sparse
+        # once the relationship goes cold.
+        first = 0.0
+        last = 100 * 86_400
+        now = last + 700 * 86_400
+        assert format_cadence(10, first, last, now) == "sparse"

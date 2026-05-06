@@ -1,7 +1,7 @@
 """
-Pure rendering functions for the temporal layer (RFC 0021 §C/§D).
+Pure rendering functions for the temporal layer (RFC 0021 §C/§D/§E).
 
-Three operator-visible string-rendering primitives:
+Operator-visible string-rendering primitives:
 
 * :func:`format_relative` — bucketed past/future tense ("3 min ago",
   "in 2 hours", "yesterday", "next week"…).  Used to prefix recalled
@@ -10,18 +10,23 @@ Three operator-visible string-rendering primitives:
   "over 2 hours") for episode summaries that aggregate ≥2 turns.
 * :func:`format_part_of_day` — coarse hour-of-day word ("morning",
   "afternoon"…) for the now-anchor block in the system prompt.
+* :func:`format_now_anchor` — the single-line now-anchor string injected
+  into every persona system prompt (RFC 0021 §C).
+* :func:`format_cadence` — coarse cadence bucket ("frequent" / "regular"
+  / "sparse") for relationship summaries (RFC 0021 §E).
 
 Hard rule: the LLM never does date arithmetic.  Every relative or
 absolute string the model sees is pre-computed here.
 
-Bucketing is duration-driven in PR 1.  Calendar-aware alternatives
+Bucketing is duration-driven in PR 2.  Calendar-aware alternatives
 ("today, HH:MM", "last <weekday>", calendar-tomorrow) are an explicit
-PR 2 follow-up — the RFC §D table lists them as "or" forms, and the
+PR 3+ follow-up — the RFC §D table lists them as "or" forms, and the
 duration form is sufficient for the prompt-shape contract PR 2 lands.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # ─── Bucket boundaries (seconds) ──────────────────────────────
@@ -166,8 +171,69 @@ def format_part_of_day(hour: int) -> str:
     raise ValueError(f"format_part_of_day band table has a gap at hour={hour}")
 
 
+def format_now_anchor(epoch: float, tz: str | ZoneInfo = "UTC") -> str:
+    """Render the now-anchor line for the system prompt (RFC 0021 §C).
+
+    Three pieces of information packed into one line:
+    1. ISO-8601 absolute time (with numeric offset — disambiguates the
+       wall-clock instant without forcing the LLM to do offset arithmetic).
+    2. Day-of-week + coarse part-of-day ("Saturday afternoon") — the
+       English form humans actually use.
+
+    Per the OQ #8 resolution in ``docs/rfcs/0021-pr-plan.md``, v0.3.0
+    omits the timezone abbreviation/IANA name from the human form; the
+    numeric offset already disambiguates and the abbreviation question
+    (PT vs. PDT, ``UTC`` vs. ``Etc/UTC``) is deferred to v0.4.0.
+    """
+    zone = _resolve_tz(tz)
+    dt = datetime.fromtimestamp(int(epoch), tz=zone)
+    weekday = dt.strftime("%A")
+    part_of_day = format_part_of_day(dt.hour)
+    return f"Current time: {dt.isoformat()} ({weekday} {part_of_day})."
+
+
+def format_cadence(
+    interaction_count: int,
+    first_interaction_at: float | None,
+    last_interaction_at: float | None,
+    now: float,
+) -> str | None:
+    """Coarse cadence bucket for a relationship (RFC 0021 §E).
+
+    Returns ``"frequent"`` (more than once per week on average over the
+    relationship lifetime), ``"regular"`` (once per week to once per
+    month), ``"sparse"`` (less than once per month), or ``None`` when
+    there is not enough data to bucket.
+
+    Below the RFC threshold of ``interaction_count > 5`` the bucket is
+    suppressed — a few interactions can produce a misleading cadence
+    label.  Same when timestamps are missing or the relationship
+    lifetime collapses to zero.
+    """
+    if interaction_count <= 5:
+        return None
+    if first_interaction_at is None or last_interaction_at is None:
+        return None
+    # Lifetime is measured against ``now`` rather than
+    # ``last_interaction_at`` so a relationship that has gone quiet
+    # falls toward "sparse" instead of staying frozen at its historical
+    # rate.  Clamp to ``last - first`` minimum so a single same-second
+    # burst at registration time still bucket-divides.
+    lifetime = max(now - first_interaction_at, last_interaction_at - first_interaction_at)
+    if lifetime <= 0:
+        return None
+    seconds_per_interaction = lifetime / interaction_count
+    if seconds_per_interaction < _SECONDS_PER_WEEK:
+        return "frequent"
+    if seconds_per_interaction < _SECONDS_PER_MONTH:
+        return "regular"
+    return "sparse"
+
+
 __all__ = [
+    "format_cadence",
     "format_duration",
+    "format_now_anchor",
     "format_part_of_day",
     "format_relative",
 ]

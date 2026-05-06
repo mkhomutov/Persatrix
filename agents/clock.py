@@ -101,9 +101,29 @@ class FrozenClock:
         self._t = float(at)
 
 
+def resolve_persona_clock(
+    config: dict, clock: Clock | None = None,
+) -> tuple[Clock, str]:
+    """Build the persona's :class:`Clock` and rendered timezone string.
+
+    Reads ``config["persona"]["timezone"]``, defaulting to
+    :data:`DEFAULT_TIMEZONE` when absent or blank.  When ``clock`` is
+    provided (typically a :class:`FrozenClock` from tests) it is returned
+    verbatim; otherwise a :class:`WallClock` against the resolved zone.
+
+    Returning the rendered timezone alongside the clock lets callers thread
+    the same string into recency-rendering helpers without re-parsing the
+    config — keeping the seam initialization a single call from the
+    persona-runtime constructor.
+    """
+    tz = ((config.get("persona") or {}).get("timezone") or "").strip() or DEFAULT_TIMEZONE
+    return clock if clock is not None else WallClock(tz), tz
+
+
 __all__ = [
     "DEFAULT_TIMEZONE",
     "Clock",
     "FrozenClock",
     "WallClock",
+    "resolve_persona_clock",
 ]

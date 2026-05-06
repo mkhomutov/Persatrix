@@ -45,3 +45,11 @@ class RelationshipSummary:
     last_interaction_at: float | None
     notes: str | None
     recent_interactions: list[Interaction] = field(default_factory=list)
+    # RFC 0021 PR 2: timestamp of the earliest stored interaction, used
+    # to compute the relationship-cadence bucket ("frequent" / "regular"
+    # / "sparse") in :mod:`agents.persona_runtime.memory_context`.
+    # Computed via ``MIN(created_at)`` on the interactions table inside
+    # ``get_relationship_summary``.  ``None`` for relationships that were
+    # seeded from config without any recorded interaction yet, or for
+    # legacy rows with no interaction history.
+    first_interaction_at: float | None = None

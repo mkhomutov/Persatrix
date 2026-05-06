@@ -25,11 +25,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..base import TaskInput
+from ..observability.metrics import current_agent_id, try_get_instruments
 from ..persona_behavior import render_behavior
 from ..persona_types import AgentEvent, EventType
 from ..prompt_loader import load_persona_section, load_snippet
+from ..temporal.rendering import format_now_anchor
 
 if TYPE_CHECKING:
+    from ..clock import Clock
     from ..persona_types import PersonaState
     from ..tools.registry import ToolDefinition
 
@@ -203,6 +206,9 @@ class _PromptAssemblyMixin:
     persona: dict[str, Any]
     _state: PersonaState
     _memory_tools: list[ToolDefinition]
+    # RFC 0021 PR 2: temporal seam.  Set by ``_LLMPersonaAgent.__init__``.
+    _clock: Clock
+    _timezone: str
 
     def _build_system_prompt(self) -> str:
         """Assemble the full system prompt from persona config, behavior, and state.
@@ -223,6 +229,22 @@ class _PromptAssemblyMixin:
                 template = load_persona_section(section.name)
                 ctx = section.context(persona_cfg, self._state, self.name, self.role)
                 rendered.append(template.format_map(ctx))
+
+        # RFC 0021 §C: now-anchor block, unconditionally appended after
+        # the persona-config sections and before the safety snippets.
+        # The persona always benefits from knowing the current time —
+        # the RFC explicitly rejects a behavioral toggle ("there is no
+        # scenario in which a persona is better off not knowing the
+        # current time").  Rendering uses the agent's ``Clock`` seam so
+        # tests can pin the line with a ``FrozenClock``.
+        anchor_template = load_persona_section("now-anchor")
+        anchor_text = format_now_anchor(self._clock.now(), self._timezone)
+        rendered.append(anchor_template.format_map({"now_anchor": anchor_text}))
+        _inst = try_get_instruments()
+        if _inst is not None:
+            _inst.temporal_now_anchor_emitted.add(
+                1, attributes={"agent.id": current_agent_id()},
+            )
 
         # Safety snippets live under ``prompts/runtime/safety/`` and load
         # through ``load_snippet`` rather than the persona section loader.

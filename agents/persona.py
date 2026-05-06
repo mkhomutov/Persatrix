@@ -51,6 +51,7 @@ from abc import abstractmethod
 from typing import Any
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from .clock import Clock
 
 # Re-export everything that was previously importable from this module
 # so that existing ``from agents.persona import X`` statements continue
@@ -261,11 +262,17 @@ def create_persona_agent(
     config: dict[str, Any],
     *,
     llm_client: LLMClient,
+    clock: Clock | None = None,
 ) -> _LLMPersonaAgent:
     """Factory that creates a concrete PersonaAgent with LLM-powered decision loop.
 
     Wires up all memory tiers, memory tools, and behavioral dimensions.
     Caller must call ``await agent.initialize_memory()`` before use.
+
+    ``clock`` is the RFC 0021 PR 2 temporal seam — leave at ``None`` in
+    production (the runtime constructs a :class:`WallClock` against the
+    persona's configured timezone) and inject a :class:`FrozenClock` from
+    tests for deterministic prompt-shape assertions.
     """
     memory_config = config.get("memory", {})
     db_path = memory_config.get("db_path", "data/memory.db")
@@ -300,4 +307,5 @@ def create_persona_agent(
         relationship_memory=relationship_memory,
         working_memory=working_memory,
         memory_tools=memory_tools,
+        clock=clock,
     )

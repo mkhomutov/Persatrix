@@ -130,6 +130,16 @@ class _FakeRelSummary:
 
 
 class _ConcreteMemoryMixin(_MemoryContextMixin):
+    def __init__(self) -> None:
+        # RFC 0021 PR 2: the mixin reads ``self._clock`` / ``self._timezone``
+        # for recency rendering on episodes and relationships.  In
+        # production these are set by ``_LLMPersonaAgent.__init__``;
+        # tests construct the mixin directly, so seed defaults here.
+        from agents.clock import WallClock  # noqa: PLC0415 — local import
+        super().__init__()
+        self._clock = WallClock()
+        self._timezone = "UTC"
+
     def _format_event(self, event: Any) -> str:  # type: ignore[override]
         # Mirror the real _LLMPersonaAgent._format_event for TICK events so
         # integration tests exercise the actual query path.

@@ -180,6 +180,30 @@ class _Instruments:
             ),
         )
 
+        # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
+        # Two counters: now-anchor emissions (one per system-prompt build,
+        # bounded by the per-event prompt-assembly call rate) and recency
+        # tag renders (one per episode/relationship line; ``source``
+        # attribute distinguishes the two surfaces so dashboards can
+        # show drift between recall volume and prompt-line volume).
+        self.temporal_now_anchor_emitted: Counter = meter.create_counter(
+            name="agent.temporal.now_anchor.emitted",
+            unit="{prompt}",
+            description=(
+                "Persona system prompts that included the RFC 0021 §C "
+                "now-anchor block."
+            ),
+        )
+        self.temporal_recency_rendered: Counter = meter.create_counter(
+            name="agent.temporal.recency.rendered",
+            unit="{render}",
+            description=(
+                "Recency tags rendered onto recalled episodes or "
+                "relationship summaries (RFC 0021 §D / §E).  Attributes: "
+                "agent.id, source (episode|relationship)."
+            ),
+        )
+
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────
         # Recorded by ``agents.memory.shared_pool`` ACL gates.  ``denied``
         # carries an ``operation`` attribute (read|write|publish) so

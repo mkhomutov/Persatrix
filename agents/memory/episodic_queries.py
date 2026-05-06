@@ -75,6 +75,16 @@ class Episode:
     # ``MemoryFacade.retrieve_relevant(scope=...)`` filtering.  Defaults
     # to ``None`` so legacy rows without a scope value round-trip cleanly.
     scope: str | None = None
+    # RFC 0021 PR 2 (this PR): expose the RFC 0020 §D interaction columns
+    # to recall consumers so the persona-runtime memory packaging path can
+    # render duration prefixes ("over 47 min, with Bob") on multi-turn
+    # episodes.  All four default to ``None`` so legacy / single-turn rows
+    # round-trip cleanly — recency rendering falls back to ``created_at``
+    # when ``closed_at`` is missing.
+    interaction_id: str | None = None
+    started_at: float | None = None
+    closed_at: float | None = None
+    turn_count: int | None = None
 
 
 # Column list for SELECT queries — keeps row_to_episode() positional
@@ -84,6 +94,8 @@ _EPISODE_COLS = (
     "importance", "access_count", "last_accessed_at",
     "tags_json", "created_at", "compressed_at", "compression_level",
     "scope",
+    # RFC 0020 §D + RFC 0021 PR 2: interaction columns surfaced to recall.
+    "interaction_id", "started_at", "closed_at", "turn_count",
 )
 EPISODE_SELECT = ", ".join(_EPISODE_COLS)
 _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
@@ -117,6 +129,12 @@ def row_to_episode(row: aiosqlite.Row) -> Episode:
         compressed_at=row[10],
         compression_level=row[11],
         scope=row[12],
+        # RFC 0020 §D / RFC 0021 PR 2: trailing optional columns.  Legacy
+        # rows that pre-date RFC 0020 PR 1 carry ``NULL`` here.
+        interaction_id=row[13],
+        started_at=row[14],
+        closed_at=row[15],
+        turn_count=row[16],
     )
 
 
