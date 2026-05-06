@@ -1,7 +1,7 @@
 # RFC 0021 — Persona Temporal Awareness
 
 **Type**: architecture
-**Status**: 🚧 Implementing
+**Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-04-25
 **Target**: v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4)

@@ -11,11 +11,12 @@ pins only the clock-seam contract that downstream callers rely on.
 from __future__ import annotations
 
 import time
+import zoneinfo
 from typing import get_type_hints
 
 import pytest
 
-from agents.clock import Clock, FrozenClock, WallClock
+from agents.clock import DEFAULT_TIMEZONE, Clock, FrozenClock, WallClock
 
 
 class TestWallClock:
@@ -47,8 +48,22 @@ class TestWallClock:
         assert iso.endswith("-07:00") or iso.endswith("-08:00")
 
     def test_unknown_timezone_raises_at_construction(self) -> None:
-        with pytest.raises(Exception):
+        # Pin the specific exception so an unrelated bug (renamed
+        # attribute, moved import) cannot satisfy the assertion and
+        # mask the regression. ISSUE-0038.
+        with pytest.raises(zoneinfo.ZoneInfoNotFoundError):
             WallClock(tz="Not/A_Real_Zone")
+
+    def test_empty_string_tz_falls_back_to_default(self) -> None:
+        # ``WallClock(tz="")`` is falsy, so ``tz or DEFAULT_TIMEZONE``
+        # silently coerces to UTC instead of raising. RFC 0021 PR 2
+        # adds the ``persona.timezone`` schema field which normalises
+        # the value upstream — until that schema is the only caller,
+        # pin the current contract so any future tightening surfaces
+        # loudly. ISSUE-0039.
+        clock = WallClock(tz="")
+        assert clock.now_iso().endswith("+00:00")
+        assert str(zoneinfo.ZoneInfo(DEFAULT_TIMEZONE)) == DEFAULT_TIMEZONE
 
 
 class TestFrozenClock:
