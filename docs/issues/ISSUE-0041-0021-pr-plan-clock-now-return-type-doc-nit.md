@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0041
 summary: "docs/rfcs/0021-pr-plan.md:57 says `Clock.now()` returns a `datetime`; RFC body and PR 1 impl return `float`"
-status: open
+status: resolved
 severity: low
 area: docs
 created: 2026-05-06
+closed: 2026-05-06
+closed_pr: 261
 refs:
   - docs/rfcs/0021-pr-plan.md
   - docs/rfcs/0021-persona-temporal-awareness.md

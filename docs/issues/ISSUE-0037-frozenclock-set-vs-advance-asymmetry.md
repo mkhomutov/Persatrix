@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0037
 summary: "FrozenClock.advance rejects backward jumps but FrozenClock.set silently rewinds — document the contract or align"
-status: open
+status: resolved
 severity: low
 area: agents
 created: 2026-05-06
+closed: 2026-05-06
+closed_pr: 261
 refs:
   - agents/clock.py
   - docs/rfcs/0021-persona-temporal-awareness.md

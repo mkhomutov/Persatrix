@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0040
 summary: "agents.clock.Clock and agents.memory.interactions.Clock collide in name but not shape; add a cross-reference comment in interactions.py"
-status: open
+status: resolved
 severity: low
 area: agents
 created: 2026-05-06
+closed: 2026-05-06
+closed_pr: 261
 refs:
   - agents/clock.py
   - agents/memory/interactions.py

@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0038
 summary: "test_clock.py and test_temporal_rendering.py use pytest.raises(Exception) for bad-tz cases — tighten to ZoneInfoNotFoundError"
-status: open
+status: resolved
 severity: low
 area: tests
 created: 2026-05-06
+closed: 2026-05-06
+closed_pr: 261
 refs:
   - tests/unit/python/test_clock.py
   - tests/unit/python/test_temporal_rendering.py
