@@ -24,7 +24,7 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
-from ..response_gate import evaluate_response_gate
+from ..response_gate import POLICY_DEFENSE_IN_DEPTH, evaluate_response_gate
 from ..security import (
     CONTEXT_SOURCE_CHANNEL_MESSAGE,
     maybe_wrap_tool_content,
@@ -248,7 +248,12 @@ class _ActionLoopMixin:
         if not isinstance(content, str) or not content:
             return event
         result = sanitize(content, source=CONTEXT_SOURCE_CHANNEL_MESSAGE)
-        if result.content == content and not result.flagged:
+        # Skip rebuild whenever content is byte-identical: the flag
+        # state is not propagated through the AgentEvent (it lives on
+        # the WARN log line in ``security.sanitize`` and the Go-side
+        # audit chain), so a flagged-but-passthrough message has
+        # nothing to rebuild.
+        if result.content == content:
             return event
         new_payload = dict(payload)
         new_payload["content"] = result.content
@@ -260,7 +265,7 @@ class _ActionLoopMixin:
             message_id=event.message_id,
             thread_id=event.thread_id,
             timestamp=event.timestamp,
-            metadata=dict(event.metadata) if event.metadata else {},
+            metadata=dict(event.metadata),
         )
 
     # ─── Core inner event handler ──────────────────────
@@ -285,8 +290,10 @@ class _ActionLoopMixin:
         # RFC 0011 PR 5: ingest sanitization — apply ``sanitize`` once
         # at the runtime boundary so downstream consumers (LLM prompt,
         # InteractionTracker, persistence) all see the cleared text.
-        # The audit-event emission lives on the Go side; the Python
-        # sanitizer logs at WARN on every flag.
+        # The audit-event side channel is the Go orchestrator's
+        # responsibility (RFC 0009 §G); not yet wired for inbound
+        # channel messages (PR-263 review L-1) — until it is, the
+        # Python sanitizer's ``WARN`` log is the interim signal.
         event = self._sanitize_inbound_event(event)
 
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
@@ -309,12 +316,18 @@ class _ActionLoopMixin:
                     channel_id=event.channel_id or "",
                     policy=decision.policy or "unknown",
                 ))
-            # RFC 0011 PR 5: suppressed events still ingest memory.
-            # Without this, a ``when_mentioned`` listener loses every
-            # non-mention from its memory and replies in a vacuum on the
-            # next mention. The gate's job is to decide *whether to
-            # respond*, not *whether the agent remembers the channel*.
-            await self._store_event_episode(event, [])
+            # RFC 0011 PR 5: suppressed events still ingest memory so a
+            # ``when_mentioned`` listener does not lose context between
+            # mentions. The gate decides *whether to respond*, not
+            # *whether to remember*.  Exception (PR-263 review M-1):
+            # ``policy=defense_in_depth`` fires only when ``sender_id ==
+            # agent_id`` — the agent's own outbound message echoed back
+            # through the cleartext gRPC port. Ingesting that row would
+            # inflate ``turn_count`` and (for DMs) write a turn whose
+            # ``payload.sender == agent_id`` for a peer-keyed scope; we
+            # do not echo our own outbound message into episodic memory.
+            if decision.policy != POLICY_DEFENSE_IN_DEPTH:
+                await self._store_event_episode(event, [])
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # 0. Format event once and inject memory context.

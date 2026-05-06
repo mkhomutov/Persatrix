@@ -278,12 +278,19 @@ class _PromptAssemblyMixin:
                     return f"You have been assigned a task:\n\n{task.payload}"
                 return f"You have been assigned a task:\n\n{event.payload}"
             case EventType.CHANNEL_MESSAGE:
-                # SECURITY: sender_id and content originate from the
-                # dispatcher today (trusted).  When external bridges
-                # (Slack, Discord, email) are added in v0.2+, these
-                # fields will carry untrusted user input — sanitize
-                # and length-cap before injecting into the LLM prompt
-                # to mitigate prompt injection risks.
+                # SECURITY: ingest-time pattern sanitisation now runs
+                # upstream in
+                # :meth:`_ActionLoopMixin._sanitize_inbound_event`
+                # (RFC 0011 PR 5), so ``content`` reaching this format
+                # site has already been cleared of the canonical
+                # injection-pattern set. Length-capping is still
+                # deferred — ``_sanitize_inbound_event`` matches
+                # patterns but does not bound input length, so a future
+                # external bridge that allows very long messages would
+                # still bloat the prompt. Wiring a length cap is the
+                # right thing to do alongside the v0.5.0 external-bridge
+                # work; until then the prompt-budget logic in
+                # :class:`MemoryBudget` is the only effective ceiling.
                 #
                 # User-typed channel messages are wrapped in XML-style
                 # ``<|user_message|>`` delimiters with the PR #120 F-2
