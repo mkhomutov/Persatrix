@@ -49,6 +49,7 @@ from .episodic_retention import (
 from .episodic_retention import (
     summarize_old_episodes as _summarize_old_episodes,
 )
+from .interactions import SUMMARY_PENDING_TEXT
 from .migrations import (
     _FTS5_DDL,
     _NOTES_FTS5_DDL,
@@ -317,7 +318,21 @@ class EpisodicMemory:
                 else:
                     rows = await recall_recency(db, self._agent_id, limit, min_importance)
 
-                episodes = [row_to_episode(row) for row in rows]
+                # RFC 0020 PR 5 / PR-262 review M1: drop unfinalised
+                # closing rows at this chokepoint so the facade, persona
+                # prompt assembly, and shared-pool callers are all
+                # covered by one filter (the persona path bypasses the
+                # facade and reads ``recall`` directly). The janitor's
+                # ``SUMMARY_UNAVAILABLE_TEXT`` fallback stays visible —
+                # it is the operator's signal that summarisation failed.
+                # Full rationale + race-window analysis lives in the
+                # test docstring at
+                # tests/unit/python/test_episodic_memory_pending_filter.py.
+                episodes = [
+                    ep
+                    for ep in (row_to_episode(row) for row in rows)
+                    if ep.summary != SUMMARY_PENDING_TEXT
+                ]
                 span.set_attribute("result.count", len(episodes))
 
                 # Increment access_count and update last_accessed_at

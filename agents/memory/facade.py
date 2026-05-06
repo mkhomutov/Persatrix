@@ -283,6 +283,13 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         )
         out: list[MemoryEntry] = []
         for ep in episodes:
+            # PR 5's per-caller ``[summary pending]`` skip moved into
+            # ``EpisodicMemory.recall`` after PR-262 review M1 (the
+            # persona prompt-assembly path bypasses the facade and
+            # called ``recall`` directly, leaving the LLM prompt path
+            # exposed during the two-phase close race window). The
+            # filter now sits at the recall chokepoint so every caller
+            # is covered by one rule.
             ep_tags = frozenset(ep.tags or ())
             # AND semantics — required tags must all appear on the entry.
             if required_tags and not required_tags.issubset(ep_tags):

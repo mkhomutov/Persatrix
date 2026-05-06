@@ -170,6 +170,70 @@ async def test_retrieve_relevant_min_score_validation(facade: MemoryFacade) -> N
         await facade.retrieve_relevant("q", min_score=1.5)
 
 
+async def test_retrieve_relevant_drops_pending_summary_rows(
+    facade: MemoryFacade,
+) -> None:
+    """RFC 0020 PR 5 — defense-in-depth: ``[summary pending]`` rows are hidden.
+
+    The two-phase close path (RFC 0020 PR 4) writes a row with
+    :data:`SUMMARY_PENDING_TEXT` before the LLM summariser fires. If the
+    summariser is in flight when ``retrieve_relevant`` runs, the pending
+    sentinel must not surface to recall consumers — they should see the
+    finalised neighbour rows but not the placeholder text.
+    """
+    from agents.memory.interactions import (
+        SUMMARY_PENDING_TEXT,
+        SUMMARY_UNAVAILABLE_TEXT,
+    )
+
+    # Finalised closed-interaction row.
+    await facade.episodic.store_episode(
+        summary="alpha closed",
+        context={"scope": "thread:t-1"},
+        importance=0.8,
+        interaction_id="alpha",
+        started_at=100.0,
+        closed_at=110.0,
+        turn_count=3,
+        scope="thread:t-1",
+    )
+    # In-flight closing row — the LLM ``UPDATE`` has not landed yet.
+    await facade.episodic.store_episode(
+        summary=SUMMARY_PENDING_TEXT,
+        context={"scope": "thread:t-2"},
+        importance=0.8,
+        interaction_id="beta",
+        started_at=200.0,
+        closed_at=210.0,
+        turn_count=4,
+        scope="thread:t-2",
+    )
+    # Janitor-finalised row (fallback summary). Must remain visible —
+    # it is the surface the operator sees when summarisation failed and
+    # hiding it would silently swallow real conversational data.
+    await facade.episodic.store_episode(
+        summary=SUMMARY_UNAVAILABLE_TEXT,
+        context={"scope": "thread:t-3"},
+        importance=0.8,
+        interaction_id="gamma",
+        started_at=300.0,
+        closed_at=310.0,
+        turn_count=5,
+        scope="thread:t-3",
+    )
+
+    # Empty query → recency ranking returns every row. The defense-
+    # in-depth filter must drop the pending sentinel even when the
+    # caller did not ask for it explicitly.
+    results = await facade.retrieve_relevant("", limit=10)
+    summaries = {entry.content for entry in results}
+    assert "alpha closed" in summaries
+    assert SUMMARY_PENDING_TEXT not in summaries
+    # The fallback marker still surfaces — the janitor explicitly chose
+    # to publish a row whose summary is unrecoverable rather than drop it.
+    assert SUMMARY_UNAVAILABLE_TEXT in summaries
+
+
 async def test_retrieve_relevant_returns_memory_entry_shape(
     facade: MemoryFacade,
 ) -> None:

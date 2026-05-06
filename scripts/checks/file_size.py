@@ -141,6 +141,30 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # docs/issues/ISSUE-0008-orchestrator-main-size.md. Remove this
     # entry once that refactor lands.
     "cmd/orchestrator/main.go",
+    # agents/memory/facade.py was at 500 lines pre-PR-5. RFC 0020 PR 5
+    # added the four-line defense-in-depth recall filter
+    # (``SUMMARY_PENDING_TEXT`` skip + import) that pushed it to 504.
+    # The PR-262 review M1 follow-up moved the filter into
+    # ``EpisodicMemory.recall`` (the recall chokepoint) and replaced
+    # the facade-level skip with a longer comment block explaining the
+    # lift, settling the file at 507 lines. The facade is the API
+    # boundary that RFC 0008 PR 2 froze for downstream consumers
+    # (RFC 0011 PR 5, RFC 0020 PR 5); splitting it means rewriting the
+    # public-import contract. Grandfather here until a dedicated
+    # facade-split lands (queued alongside the episodic split below).
+    "agents/memory/facade.py",
+    # agents/memory/episodic.py was at ~492 lines pre-PR-262.  The
+    # PR-262 review M1 follow-up lifted the ``SUMMARY_PENDING_TEXT``
+    # recall filter into this module (added the import, the comment
+    # block explaining the lift, and the post-rank filter
+    # comprehension), pushing it to 514 lines.  The companion
+    # interactions.py split (this PR) extracted ``scopes.py`` and
+    # ``interaction_janitor.py`` so that file is now under-cap; the
+    # equivalent episodic split — extracting the notes/state/retention
+    # delegation methods into mixins along the established
+    # ``facade_procedural`` / ``shared_pool_facade`` pattern — is
+    # queued as a follow-up.  Grandfather here until that split lands.
+    "agents/memory/episodic.py",
 })
 
 
