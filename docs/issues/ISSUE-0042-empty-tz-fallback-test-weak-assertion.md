@@ -6,7 +6,7 @@ severity: low
 area: tests
 created: 2026-05-06
 closed: 2026-05-07
-closed_pr:
+closed_pr: 267
 refs:
   - tests/unit/python/test_clock.py
   - agents/clock.py

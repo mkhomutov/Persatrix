@@ -6,7 +6,7 @@ severity: low
 area: docs
 created: 2026-05-06
 closed: 2026-05-07
-closed_pr:
+closed_pr: 267
 refs:
   - ROADMAP.md
   - docs/rfcs/0021-pr-plan.md
