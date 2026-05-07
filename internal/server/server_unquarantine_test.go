@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,12 +32,13 @@ func breakerWithThreshold(t *testing.T) *security.CircuitBreaker {
 	t.Helper()
 	cb, err := security.NewCircuitBreaker(security.CircuitBreakerConfig{
 		Thresholds: map[security.ViolationType]security.ThresholdRule{
-			// Window: 0 is the documented "every previously recorded
-			// violation is immediately expired" mode (see ThresholdRule
-			// godoc); paired with Count: 1 the breaker opens on the
-			// first call. Used here only to seed test state — see
-			// circuitbreaker.go for production guidance.
-			security.ViolationCapability: {Count: 1, Window: 0},
+			// Count: 1 with any positive Window trips on the first
+			// record (kept becomes [now]; len(kept) >= 1 opens). The
+			// previous {Count: 1, Window: 0} idiom relied on a silent
+			// "Window: 0 = every prior violation expired" implicit; that
+			// configuration is now rejected by NewCircuitBreaker
+			// (ISSUE-0001).
+			security.ViolationCapability: {Count: 1, Window: time.Minute},
 		},
 		Logger: zap.NewNop(),
 	})

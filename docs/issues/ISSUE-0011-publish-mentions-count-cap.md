@@ -6,7 +6,7 @@ severity: low
 area: internal/server
 created: 2026-05-04
 closed: 2026-05-07
-closed_pr:
+closed_pr: 269
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md

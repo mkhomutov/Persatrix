@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,15 +26,19 @@ const (
 // ThresholdRule defines the count + rolling window after which an agent
 // is quarantined for a given [ViolationType].
 //
-// Window must be > 0 in production. A zero-duration Window means every
-// previously recorded violation is immediately considered expired, so
-// the rolling counter resets to 1 on every call and the breaker can
-// never open. Tests intentionally use Window: 0 to suppress the
-// breaker; production callers should treat 0 as a configuration error.
-// (PR #244 review L-04.)
+// Count and Window must both be > 0 for active rules; [NewCircuitBreaker]
+// rejects any non-Disabled rule that violates either bound (ISSUE-0001).
+//
+// Disabled is the explicit no-op seam: when true, [RecordViolation]
+// records nothing toward the rolling counter for that violation type
+// and the breaker can never open on it. Count and Window are ignored on
+// disabled rules. Tests that need to suppress the breaker should set
+// Disabled rather than rely on the previous "Window: 0 → never open"
+// implicit (which silently disabled the rule and is now a config error).
 type ThresholdRule struct {
-	Count  int
-	Window time.Duration
+	Count    int
+	Window   time.Duration
+	Disabled bool
 }
 
 // CircuitBreakerConfig configures a [CircuitBreaker]. Thresholds is the
@@ -80,9 +85,25 @@ type quarantineEntry struct {
 }
 
 // NewCircuitBreaker constructs a [CircuitBreaker] from cfg.
+//
+// Each non-Disabled rule in cfg.Thresholds must have Count > 0 and
+// Window > 0; otherwise the breaker would silently never open for that
+// violation type (ISSUE-0001). Rules with Disabled: true bypass the
+// bounds check and are treated as no-ops at record time.
 func NewCircuitBreaker(cfg CircuitBreakerConfig) (*CircuitBreaker, error) {
 	if cfg.Thresholds == nil {
 		return nil, errors.New("circuitbreaker: Thresholds is required")
+	}
+	for vt, rule := range cfg.Thresholds {
+		if rule.Disabled {
+			continue
+		}
+		if rule.Window <= 0 {
+			return nil, fmt.Errorf("circuitbreaker: %s rule has Window=%s; must be > 0 (set Disabled: true to suppress)", vt, rule.Window)
+		}
+		if rule.Count <= 0 {
+			return nil, fmt.Errorf("circuitbreaker: %s rule has Count=%d; must be > 0 (set Disabled: true to suppress)", vt, rule.Count)
+		}
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -106,6 +127,11 @@ func (cb *CircuitBreaker) RecordViolation(agentID string, vt ViolationType) {
 		return
 	}
 	rule, hasRule := cb.cfg.Thresholds[vt]
+	if hasRule && rule.Disabled {
+		// Explicit no-op seam (ISSUE-0001): disabled rules contribute
+		// nothing to the rolling counter and never open the breaker.
+		return
+	}
 	now := cb.cfg.Now()
 
 	cb.mu.Lock()
