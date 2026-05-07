@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0034
 summary: "chat-as-DM reply fanout fires per-reply WARN because the user (DM member) is not in the agent registry"
-status: open
+status: resolved
 severity: medium
 area: internal/channels
 created: 2026-05-05
+closed: 2026-05-07
 refs:
   - internal/channels/grpc_dispatcher.go
   - internal/channels/router.go
@@ -109,3 +110,15 @@ in
 > chat-as-DM model where users are first-class DM participants but
 > never agent-registry entries. Worth fixing on its own merits before
 > the WARN noise becomes load-bearing on log-volume budgets.
+
+> 2026-05-07 — resolved via option 2 (recommendation): added
+> `ChannelStore.SetMemberPolicy` and wired it into
+> `Server.handleChat` so the user (chat caller, not a registered
+> agent) is demoted to `RespondNever` after `GetOrCreateDM`. The
+> existing router-level `RespondNever` short-circuit
+> ([router.go:353](../../internal/channels/router.go#L353)) then
+> skips dispatch on every agent reply — no resolver lookup, no
+> wasted gRPC dial, no WARN. Pinned by
+> `TestHandleChat_DMUserMembershipIsRespondNever`
+> (chat-handler-side contract) plus six store-level tests in
+> `internal/channels/sqlite_set_member_policy_test.go`.

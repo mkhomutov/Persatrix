@@ -146,6 +146,53 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 	return nil
 }
 
+// SetMemberPolicy implements [ChannelStore.SetMemberPolicy].
+//
+// Uses the same DELETE-style "act first, disambiguate inside the same tx"
+// shape as [RemoveMember] so a concurrent `DeleteChannel` cannot race the
+// existence check between zero-rows-affected and the channel lookup.
+func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
+	if !policy.Valid() {
+		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("channels: set member policy begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE memberships SET respond_policy = ?
+		   WHERE channel_id = ? AND participant_id = ?`,
+		string(policy), channelID, participantID,
+	)
+	if err != nil {
+		return fmt.Errorf("channels: set member policy: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("channels: set member policy rowsaffected: %w", err)
+	}
+	if n == 0 {
+		var present int
+		err := tx.QueryRowContext(ctx,
+			`SELECT 1 FROM channels WHERE id = ?`, channelID,
+		).Scan(&present)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
+		}
+		if err != nil {
+			return fmt.Errorf("channels: set member policy existence check: %w", err)
+		}
+		return fmt.Errorf("%w: channel=%s participant=%s",
+			ErrNotMember, channelID, participantID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("channels: set member policy commit: %w", err)
+	}
+	return nil
+}
+
 // AddMember implements [ChannelStore.AddMember].
 func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
 	if err := validateParticipantID(participantID); err != nil {

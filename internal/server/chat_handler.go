@@ -197,6 +197,26 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dm, err := s.channelStore.GetOrCreateDM(ctx, userID, agentID)
+	// ISSUE-0034: demote the user's membership to RespondNever so
+	// `ChannelRouter.fanout` skips dispatch to the user on every agent
+	// reply. The user is the chat caller — they read replies via the
+	// in-process `replyWaiter`, not via gRPC push, and they are not in
+	// the agent registry. Without this normalisation the dispatcher
+	// emits a `level=warn`
+	// "channels: dispatch target not registered" line per chat reply.
+	// Idempotent: repeats on every chat turn (the row stays at `never`
+	// after the first call). Runs only on a clean `GetOrCreateDM` so
+	// the existing error discrimination below remains the single 4xx /
+	// 5xx mapping point.
+	if err == nil {
+		if pErr := s.channelStore.SetMemberPolicy(ctx, dm.ID, userID, channels.RespondNever); pErr != nil {
+			s.logger.Warn("chat: SetMemberPolicy(user, never) failed; reply fanout will produce per-reply WARN until next chat turn",
+				zap.String("dm", dm.ID),
+				zap.String("user_id", userID),
+				zap.Error(pErr),
+			)
+		}
+	}
 	if err != nil {
 		// Discriminate validation errors from server-side I/O errors.
 		// Pre-fix behaviour mapped EVERY
