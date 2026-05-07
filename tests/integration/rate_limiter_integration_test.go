@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,12 @@ func TestRateLimit_BurstTriggersHTTP429(t *testing.T) {
 	require.NoError(t, err)
 	cb, err := security.NewCircuitBreaker(security.CircuitBreakerConfig{
 		Thresholds: map[security.ViolationType]security.ThresholdRule{
-			security.ViolationRateLimit: {Count: 100, Window: 0},
+			// Suppress the rate-limit breaker for this test — the
+			// rate-limit middleware path is what we exercise here, and
+			// the previous {Count: 100, Window: 0} idiom relied on the
+			// silent "Window: 0 = never opens" implicit (now rejected
+			// by NewCircuitBreaker per ISSUE-0001).
+			security.ViolationRateLimit: {Disabled: true},
 		},
 		Logger: logger,
 	})
@@ -90,7 +96,11 @@ func TestRateLimit_UnquarantineEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	cb, err := security.NewCircuitBreaker(security.CircuitBreakerConfig{
 		Thresholds: map[security.ViolationType]security.ThresholdRule{
-			security.ViolationCapability: {Count: 1, Window: 0},
+			// Trip on the first violation: Count=1 with any positive
+			// Window opens immediately (kept becomes [now], len(kept)
+			// >= 1). The previous {Count: 1, Window: 0} idiom is now
+			// rejected by NewCircuitBreaker (ISSUE-0001).
+			security.ViolationCapability: {Count: 1, Window: time.Minute},
 		},
 		Logger: logger,
 	})

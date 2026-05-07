@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0001
 summary: "CircuitBreaker silently disables threshold when Window: 0; add validator + Disabled flag"
-status: open
+status: resolved
 severity: medium
 area: security
 created: 2026-05-04
+closed: 2026-05-07
+closed_pr:
 refs:
   - docs/rfcs/0009-security-sandboxing.md
   - docs/rfcs/0009-pr-plan.md
@@ -45,3 +47,15 @@ is expected to quarantine a flooding agent and does not.
 ## Notes
 
 > 2026-05-04 — captured during PR #244 deep review (R3, finding M-R3-02).
+>
+> 2026-05-07 — resolved. `ThresholdRule` gained an explicit `Disabled
+> bool` field; `NewCircuitBreaker` now rejects any non-Disabled rule
+> with `Window <= 0` or `Count <= 0`. The three test sites that
+> previously relied on the silent `Window: 0` seam migrated:
+> `internal/server/server_unquarantine_test.go::breakerWithThreshold`
+> and `tests/integration/rate_limiter_integration_test.go` line ~93
+> moved to a finite `Window: time.Minute` (semantics unchanged when
+> paired with `Count: 1`); `tests/integration/rate_limiter_integration_test.go`
+> line ~53 moved to `{Disabled: true}` (the suppress case). New tests
+> in `internal/security/circuitbreaker_test.go` pin both the validator
+> rejections and the `Disabled` no-op contract.

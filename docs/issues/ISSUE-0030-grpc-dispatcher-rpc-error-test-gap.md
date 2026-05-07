@@ -6,7 +6,7 @@ severity: low
 area: internal/channels
 created: 2026-05-05
 closed: 2026-05-07
-closed_pr:
+closed_pr: 268
 refs:
   - internal/channels/grpc_dispatcher.go
   - internal/channels/grpc_dispatcher_test.go

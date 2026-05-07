@@ -165,3 +165,97 @@ func TestCircuitBreaker_HasAnyQuarantined_AtomicCountTracksMap(t *testing.T) {
 	assert.Equal(t, int32(1), cb.quarantinedCount.Load(),
 		"no-op Unquarantine must not decrement the counter")
 }
+
+// TestCircuitBreaker_RejectsZeroWindow guards ISSUE-0001: a zero-duration
+// Window on a non-Disabled rule silently neutralises the breaker because
+// `now.Add(-0) == now` drops every prior entry from the rolling counter.
+// `NewCircuitBreaker` must reject the bad config rather than boot a
+// breaker that can never open for that violation type.
+func TestCircuitBreaker_RejectsZeroWindow(t *testing.T) {
+	_, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationCapability: {Count: 3, Window: 0},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Window")
+	assert.Contains(t, err.Error(), "capability")
+}
+
+// TestCircuitBreaker_RejectsNegativeWindow mirrors the zero-window case;
+// negative durations would also silently neutralise the breaker.
+func TestCircuitBreaker_RejectsNegativeWindow(t *testing.T) {
+	_, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationRateLimit: {Count: 5, Window: -time.Second},
+		},
+	})
+	require.Error(t, err)
+}
+
+// TestCircuitBreaker_RejectsZeroCount guards the second half of the
+// invariant: Count <= 0 means `len(kept) >= rule.Count` is satisfied
+// before any violation is recorded, opening the breaker on first call.
+// Treat as a config error.
+func TestCircuitBreaker_RejectsZeroCount(t *testing.T) {
+	_, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationCapability: {Count: 0, Window: time.Minute},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Count")
+}
+
+// TestCircuitBreaker_DisabledRuleAcceptsZeroWindow keeps the test seam:
+// rules marked Disabled bypass the Count/Window validators (their fields
+// are unused on the disabled path). Tests that previously relied on the
+// implicit `Window: 0 → never open` behaviour migrate to `Disabled: true`.
+func TestCircuitBreaker_DisabledRuleAcceptsZeroWindow(t *testing.T) {
+	cb, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationCapability: {Disabled: true},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cb)
+}
+
+// TestCircuitBreaker_DisabledRuleNeverOpens pins the runtime contract:
+// a Disabled rule records nothing toward quarantine — RecordViolation is
+// effectively a no-op for that violation type.
+func TestCircuitBreaker_DisabledRuleNeverOpens(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cb, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Now:    clk.Now,
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationCapability: {Disabled: true},
+		},
+	})
+	require.NoError(t, err)
+	for i := 0; i < 100; i++ {
+		cb.RecordViolation("a", ViolationCapability)
+	}
+	assert.False(t, cb.IsQuarantined("a"),
+		"Disabled rules must not contribute to quarantine state")
+}
+
+// TestCircuitBreaker_RejectsZeroWindowEvenWithCount1 makes the
+// migration of test seams explicit: callers that previously used
+// `{Count: 1, Window: 0}` to "trip on first violation" must now use a
+// finite Window (any positive duration trips on first call when
+// Count == 1, since len(kept) becomes 1 on the first record).
+func TestCircuitBreaker_RejectsZeroWindowEvenWithCount1(t *testing.T) {
+	_, err := NewCircuitBreaker(CircuitBreakerConfig{
+		Logger: zaptest.NewLogger(t),
+		Thresholds: map[ViolationType]ThresholdRule{
+			ViolationCapability: {Count: 1, Window: 0},
+		},
+	})
+	require.Error(t, err)
+}

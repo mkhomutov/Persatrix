@@ -6,7 +6,7 @@ severity: low
 area: cmd/orchestrator
 created: 2026-05-05
 closed: 2026-05-07
-closed_pr:
+closed_pr: 268
 refs:
   - cmd/orchestrator/channels.go
 ---
