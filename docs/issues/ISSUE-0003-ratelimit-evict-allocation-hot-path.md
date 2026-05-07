@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0003
 summary: "RateLimiter.Allow allocates a transient slice in evictOlderThan on every admit; compact in place"
-status: open
+status: resolved
 severity: medium
 area: security
 created: 2026-05-04
+closed: 2026-05-07
 refs:
   - docs/rfcs/0009-security-sandboxing.md
 ---
@@ -42,3 +43,16 @@ Performance under attack. Not a correctness defect.
 ## Notes
 
 > 2026-05-04 — captured during PR #244 deep review (R3, finding M-R3-01).
+>
+> 2026-05-07 — resolved via in-place count-shrink. Timestamps in the
+> ring are appended in chronological order (Now is monotonic in both
+> production and `fakeClock`), and cutoff is monotonic too, so expired
+> entries always form a contiguous prefix at the chronological start
+> of the ring. evictOlderThan now counts the expired prefix and shrinks
+> `r.count` by that amount; `r.head` is unchanged because new admits
+> still land at the same physical slot, and the logical start
+> `(head - count + cap)` rebases automatically. No memory move, no
+> allocation. Benchmark on `CallsPerWindow=600`: 5979 ns/op → 67.8 ns/op
+> (~88×), 16372 B/op → 0 B/op, 1 alloc/op → 0 allocs/op. Regression
+> guard: `TestRateLimiter_AllowSteadyStateZeroAlloc` (uses
+> `testing.AllocsPerRun`) plus `BenchmarkAllowSteadyState`.

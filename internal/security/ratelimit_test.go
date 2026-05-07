@@ -348,3 +348,140 @@ func TestRateLimiter_AuditEmitNotCancelledWithRequestCtx(t *testing.T) {
 			"ISSUE-0007: auditor ctx must not inherit cancellation from the request ctx (use context.WithoutCancel)")
 	}
 }
+
+// TestRateLimiter_AllowSteadyStateZeroAlloc pins ISSUE-0003: under
+// sustained admit traffic from a single agent, Allow's hot path must
+// not allocate. The previous evictOlderThan implementation built a
+// transient `kept []time.Time` slice on every admit, producing GC
+// pressure under exactly the flooding load the limiter is meant to
+// defend against. The fix compacts the per-agent ring in place, so
+// AllocsPerRun for a steady-state Allow must be zero.
+//
+// Failure mode this guards against: a future contributor "tidying" the
+// ring by reintroducing a slice-builder pattern in evictOlderThan would
+// not be caught by the correctness tests above.
+func TestRateLimiter_AllowSteadyStateZeroAlloc(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	// CallsPerWindow=600 matches the production-relevant load profile
+	// called out in ISSUE-0003. At smaller sizes the Go compiler can
+	// stack-allocate the transient slice via escape analysis, hiding
+	// the pre-fix regression — so the test must exercise a ring big
+	// enough that `make([]time.Time, 0, r.count)` reliably escapes.
+	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) {
+		c.CallsPerWindow = 600
+	})
+	ctx := context.Background()
+
+	// Warm up: fill the ring and then drift the clock so each subsequent
+	// admit forces evictOlderThan to drop expired entries — the exact
+	// path that previously allocated.
+	for i := 0; i < 600; i++ {
+		require.True(t, rl.Allow(ctx, "agent-a"))
+	}
+	clk.Advance(61 * time.Second)
+	for i := 0; i < 600; i++ {
+		require.True(t, rl.Allow(ctx, "agent-a"))
+	}
+
+	// Under steady state, advance one tick per call and admit. With the
+	// ring at capacity and the oldest entry just past the cutoff, every
+	// call exercises the eviction-then-append path.
+	allocs := testing.AllocsPerRun(200, func() {
+		clk.Advance(time.Millisecond)
+		rl.Allow(ctx, "agent-a")
+	})
+	assert.Equal(t, 0.0, allocs,
+		"ISSUE-0003: Allow steady-state path must be zero-alloc (got %.2f allocs/op)", allocs)
+}
+
+// TestAgentRing_EvictOlderThan_PreservesOrderAndCount pins the
+// in-place compaction contract: after evictOlderThan, the ring's live
+// entries must still be reachable in chronological order via the
+// (head - count) walk, and entries newer than the cutoff must survive
+// while entries at or before the cutoff are dropped.
+//
+// This is the unit-level red test for ISSUE-0003: it lets us verify
+// the in-place compaction is correct without going through the full
+// Allow path.
+func TestAgentRing_EvictOlderThan_PreservesOrderAndCount(t *testing.T) {
+	t0 := time.Unix(0, 0)
+	r := &agentRing{
+		agentID: "agent-a",
+		calls:   make([]time.Time, 5),
+	}
+	// Append 5 timestamps at +1, +2, +3, +4, +5 seconds.
+	for i := 1; i <= 5; i++ {
+		r.append(t0.Add(time.Duration(i) * time.Second))
+	}
+	require.Equal(t, 5, r.count)
+
+	// Cutoff = +2.5s — drops entries at +1 and +2; keeps +3, +4, +5.
+	r.evictOlderThan(t0.Add(2500 * time.Millisecond))
+	assert.Equal(t, 3, r.count, "two oldest entries must be dropped")
+
+	// Walk live entries in chronological order; they must be the three
+	// surviving timestamps in ascending order.
+	ringCap := len(r.calls)
+	start := (r.head - r.count + ringCap) % ringCap
+	got := make([]time.Time, 0, r.count)
+	for i := 0; i < r.count; i++ {
+		got = append(got, r.calls[(start+i)%ringCap])
+	}
+	want := []time.Time{
+		t0.Add(3 * time.Second),
+		t0.Add(4 * time.Second),
+		t0.Add(5 * time.Second),
+	}
+	assert.Equal(t, want, got, "survivors must remain in chronological order")
+
+	// A subsequent append must land at the correct slot and bring count
+	// back up — proving head/count remain consistent post-eviction.
+	r.append(t0.Add(6 * time.Second))
+	assert.Equal(t, 4, r.count)
+	start = (r.head - r.count + ringCap) % ringCap
+	got = got[:0]
+	for i := 0; i < r.count; i++ {
+		got = append(got, r.calls[(start+i)%ringCap])
+	}
+	assert.Equal(t, []time.Time{
+		t0.Add(3 * time.Second),
+		t0.Add(4 * time.Second),
+		t0.Add(5 * time.Second),
+		t0.Add(6 * time.Second),
+	}, got, "post-eviction append must extend the chronological run")
+}
+
+// BenchmarkAllowSteadyState gives operators a runnable "what does the
+// hot path cost" handle next to the correctness tests. The companion
+// regression guard is TestRateLimiter_AllowSteadyStateZeroAlloc above;
+// this benchmark is informational and not asserted against in CI.
+func BenchmarkAllowSteadyState(b *testing.B) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cfg := RateLimitConfig{
+		CallsPerWindow:    600,
+		WindowSeconds:     60,
+		MaxTrackedAgents:  1000,
+		Enabled:           true,
+		UnauthenticatedID: "anonymous",
+		Now:               clk.Now,
+	}
+	rl, err := NewRateLimiter(cfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := 0; i < cfg.CallsPerWindow; i++ {
+		rl.Allow(ctx, "agent-a")
+	}
+	clk.Advance(time.Duration(cfg.WindowSeconds+1) * time.Second)
+	for i := 0; i < cfg.CallsPerWindow; i++ {
+		rl.Allow(ctx, "agent-a")
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		clk.Advance(time.Millisecond)
+		rl.Allow(ctx, "agent-a")
+	}
+}
