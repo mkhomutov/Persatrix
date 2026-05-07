@@ -45,9 +45,9 @@ const (
 // safe (security-class events become no-ops).
 func initRateLimiter(logger *zap.Logger, auditor security.AuditLogger) (*security.RateLimiter, *security.CircuitBreaker, error) {
 	enabled := envBoolDefault(rateLimitEnabledEnvVar, true)
-	calls := envIntDefault(rateLimitCallsEnvVar, defaultRateLimitCalls)
-	window := envIntDefault(rateLimitWindowEnvVar, defaultRateLimitWindowSeconds)
-	maxAgents := envIntDefault(rateLimitMaxAgentsEnvVar, defaultRateLimitMaxTrackedAgents)
+	calls := envIntDefault(logger, rateLimitCallsEnvVar, defaultRateLimitCalls)
+	window := envIntDefault(logger, rateLimitWindowEnvVar, defaultRateLimitWindowSeconds)
+	maxAgents := envIntDefault(logger, rateLimitMaxAgentsEnvVar, defaultRateLimitMaxTrackedAgents)
 
 	if !enabled {
 		logger.Warn("security.rate_limit.disabled scope=startup",
@@ -182,13 +182,34 @@ func emitUnquarantineEndpointOpen(logger *zap.Logger, auditor security.AuditLogg
 	}
 }
 
-func envIntDefault(key string, def int) int {
+// envIntDefault parses key from the environment as a positive int, falling
+// back to def when the var is unset, unparseable, or non-positive.
+//
+// ISSUE-0006: when the var is set but rejected, emit a single WARN naming
+// the var and the rejected value so a typo in SECURITY_RATE_LIMIT_CALLS
+// (e.g. "0", "abc") is visible in the operator's startup log instead of
+// silently booting with the default. The disable knob is the dedicated
+// SECURITY_RATE_LIMIT_ENABLED flag, not "set CALLS to 0" — that ambiguity
+// is exactly what the WARN catches. Unset stays silent because operators
+// who never set the var are not misconfigured.
+//
+// `logger` may be nil (test fixtures, early-boot paths without a logger);
+// the validation still runs and the fallback still applies, only the WARN
+// is suppressed.
+func envIntDefault(logger *zap.Logger, key string, def int) int {
 	v := os.Getenv(key)
 	if v == "" {
 		return def
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		if logger != nil {
+			logger.Warn("security.rate_limit.env_invalid scope=startup",
+				zap.String("source", key),
+				zap.String("value", v),
+				zap.Int("fallback", def),
+			)
+		}
 		return def
 	}
 	return n
