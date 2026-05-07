@@ -201,8 +201,11 @@ class AgentServer:
         # /api/v1/agents/register twice on startup.
         await self._self_register()
         # RFC 0011 PR 5 follow-up — on-startup catch-up fetch (OQ #8).
-        await replay_for_persona_agents(agents=self.agents,
-            orchestrator_url=self.orchestrator_url, session=self._session)
+        await replay_for_persona_agents(
+            agents=self.agents,
+            orchestrator_url=self.orchestrator_url,
+            session=self._session,
+        )
 
     async def _self_register(self) -> None:
         """Register all hosted agents with the orchestrator (best-effort).

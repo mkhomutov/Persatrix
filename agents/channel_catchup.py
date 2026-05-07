@@ -45,9 +45,11 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import quote
 
 import aiohttp
 
+from .channel_validation import parse_channel_timestamp
 from .persona_types import AgentEvent, EventType
 
 if TYPE_CHECKING:
@@ -77,14 +79,26 @@ DEFAULT_CATCHUP_LIMIT: int = 50
 # two REST surfaces share one tunable mental model.
 _REQUEST_TIMEOUT_SECONDS: float = 10.0
 
+# PR-265 review L1: ``GET /api/v1/channels`` falls back to
+# ``channelDefaultListLimit = 50`` server-side when no ``?limit=`` is
+# supplied (``internal/server/channel_handlers.go``); an agent enrolled
+# in >50 channels would silently miss catch-up for the tail of its
+# membership. We pin the request to ``channelMaxLimit = 1000`` (the
+# orchestrator clamp) so the explicit cap is the contract — the silent
+# default cannot drift on either side without breaking the request URL.
+_CHANNEL_LIST_LIMIT: int = 1000
+
 
 class _AgentLike(Protocol):
     """Minimum surface the catch-up fetcher needs from an agent.
 
-    Declared as a runtime-checkable :class:`Protocol` so the fetcher
-    can be exercised by lightweight test spies without booting the
-    full persona runtime. The production caller passes the
-    :class:`agents.persona_runtime._LLMPersonaAgent` instance.
+    Structural :class:`Protocol` so the fetcher can be exercised by
+    lightweight test spies without booting the full persona runtime;
+    the production caller passes the
+    :class:`agents.persona_runtime._LLMPersonaAgent` instance. Not
+    decorated with ``@runtime_checkable`` because the fetcher relies on
+    static typing only — there is no ``isinstance`` site against this
+    Protocol.
     """
 
     agent_id: str
@@ -159,10 +173,15 @@ async def _fetch_channel_list(
     base: str,
     timeout: aiohttp.ClientTimeout,
 ) -> list[dict] | None:
-    """``GET /api/v1/channels`` → list of channel JSON, or ``None`` on
-    error.  ``None`` means "best-effort failure already logged".
+    """``GET /api/v1/channels?limit=N`` → list of channel JSON, or
+    ``None`` on error.  ``None`` means "best-effort failure already
+    logged".
+
+    PR-265 review L1: the explicit ``?limit=`` is mandatory — without
+    it the Go orchestrator returns at most ``channelDefaultListLimit =
+    50`` channels, silently capping catch-up for high-fanout agents.
     """
-    url = f"{base}/api/v1/channels"
+    url = f"{base}/api/v1/channels?limit={_CHANNEL_LIST_LIMIT}"
     try:
         async with session.get(url, timeout=timeout) as resp:
             if resp.status >= 400:
@@ -189,7 +208,6 @@ async def _fetch_channel_membership(
     timeout: aiohttp.ClientTimeout,
 ) -> list[dict] | None:
     """``GET /api/v1/channels/{id}`` → member list, or ``None`` on error."""
-    from urllib.parse import quote
     url = f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
     try:
         async with session.get(url, timeout=timeout) as resp:
@@ -222,7 +240,6 @@ async def _fetch_channel_history(
 ) -> list[dict] | None:
     """``GET /api/v1/channels/{id}/messages?limit=N`` → message list,
     or ``None`` on error."""
-    from urllib.parse import quote
     url = (
         f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
         f"/messages?limit={int(limit)}"
@@ -285,13 +302,16 @@ async def replay_for_persona_agents(
     """
     if session is None:
         return
-    # Local import: ``_LLMPersonaAgent`` lives in ``persona_runtime``,
-    # which itself imports ``base`` and (transitively) other modules
-    # that would create an import cycle if pulled in at module-load
-    # time of ``channel_catchup`` (the publisher and the catch-up
-    # share a session lifecycle in ``server.py`` but the catch-up's
-    # type signature is intentionally narrower than ``_LLMPersonaAgent``
-    # so non-persona task agents could opt in later).
+    # Local import: ``persona_runtime`` is a substantial module graph
+    # (LLM client, episodic / working memory, response gate, action
+    # loop) and ``channel_catchup``'s public surface
+    # (``replay_channel_history``) is intentionally narrower than
+    # ``_LLMPersonaAgent`` so a non-persona task agent could opt in.
+    # Keeping the persona-runtime dependency local to the one site
+    # that needs it preserves that narrower surface for callers who
+    # import only ``replay_channel_history``. (PR-265 review L3:
+    # there is no actual import cycle — ``persona_runtime`` does not
+    # import ``channel_catchup`` — earlier wording was inaccurate.)
     from .persona_runtime import _LLMPersonaAgent
 
     for agent_id, agent in agents.items():
@@ -322,6 +342,25 @@ def _build_replay_event(
     ``metadata["replay_mode"] = True`` is the marker the action-loop
     short-circuit reads; without it the runtime would treat the row as
     live traffic and fire the LLM.
+
+    PR-265 review S2: the wire ``msg["timestamp"]`` (RFC 3339, set by
+    the orchestrator at publish time — see
+    ``internal/server/channel_types.go::channelMessageResponse``) is
+    parsed to epoch seconds and forwarded into ``AgentEvent.timestamp``.
+    Without this, replayed events default to ``time.time()`` at boot,
+    which (a) lies to the PR-4 summariser via
+    ``Turn.payload["timestamp"]``, (b) writes incorrect ``started_at``
+    on episodic rows, and (c) defeats the RFC 0021 P1 now-anchor /
+    recency rendering — the runtime would render replayed history as
+    "just now" instead of its actual age. The parser is shared with
+    ``validate_channel_message_event`` so the live and replay paths
+    agree on what counts as a valid timestamp.
+
+    Fallback: a missing or unparseable timestamp falls through to the
+    dataclass default (``time.time()``) rather than dropping the row.
+    Best-effort catch-up keeps the message in memory; the worst
+    observable effect is the recency drift this fix exists to prevent,
+    bounded to the small minority of malformed wire rows.
     """
     payload: dict[str, Any] = {
         "content": msg.get("content", ""),
@@ -329,12 +368,19 @@ def _build_replay_event(
         "mentions": list(msg.get("mentions") or []),
         "respond_policy": respond_policy,
     }
-    return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        payload=payload,
-        channel_id=channel_id,
-        sender_id=msg.get("sender_id"),
-        message_id=msg.get("id"),
-        thread_id=msg.get("thread_id") or None,
-        metadata={"replay_mode": True},
+    raw_ts = msg.get("timestamp")
+    parsed_ts = (
+        parse_channel_timestamp(raw_ts) if isinstance(raw_ts, str) else None
     )
+    event_kwargs: dict[str, Any] = {
+        "event_type": EventType.CHANNEL_MESSAGE,
+        "payload": payload,
+        "channel_id": channel_id,
+        "sender_id": msg.get("sender_id"),
+        "message_id": msg.get("id"),
+        "thread_id": msg.get("thread_id") or None,
+        "metadata": {"replay_mode": True},
+    }
+    if parsed_ts is not None:
+        event_kwargs["timestamp"] = parsed_ts
+    return AgentEvent(**event_kwargs)

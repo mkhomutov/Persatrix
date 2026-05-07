@@ -27,125 +27,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import aiohttp
-import pytest
-from aiohttp import web
 
 from agents.channel_catchup import replay_channel_history
-from agents.persona_types import AgentEvent, EventType
+from agents.persona_types import EventType
 
-
-# ─── Loopback orchestrator fixtures ────────────────────────
-
-
-def _msg(
-    *,
-    msg_id: str,
-    channel_id: str,
-    sender_id: str,
-    content: str,
-    ts: datetime | None = None,
-    mentions: list[str] | None = None,
-) -> dict:
-    """Build a JSON message body in the wire shape from
-    ``internal/server/channel_types.go::channelMessageResponse``."""
-    return {
-        "id": msg_id,
-        "channel_id": channel_id,
-        "sender_id": sender_id,
-        "content": content,
-        "timestamp": (ts or datetime(2026, 5, 7, 10, 0, tzinfo=timezone.utc)).isoformat(),
-        "mentions": list(mentions or []),
-    }
-
-
-def _channel(*, channel_id: str, name: str = "", channel_type: str = "group") -> dict:
-    return {
-        "id": channel_id,
-        "name": name or channel_id.split(":", 1)[-1],
-        "channel_type": channel_type,
-        "description": "",
-        "created_at": "2026-05-01T00:00:00+00:00",
-    }
-
-
-@pytest.fixture
-async def orchestrator():
-    """Loopback orchestrator with the four endpoints the fetcher needs.
-
-    Returns a dict the test can mutate to set up channels, members per
-    channel, and history per channel; plus a ``log`` list capturing the
-    URL of every request the fetcher issued (used to pin the call shape).
-    """
-    state: dict = {
-        "channels": [],            # list of channel JSON
-        "members": {},              # channel_id -> [member JSON]
-        "history": {},              # channel_id -> [message JSON]
-        "log": [],                  # request paths
-        "fail_paths": set(),        # paths that return 500
-    }
-
-    async def list_channels(request: web.Request) -> web.Response:
-        state["log"].append(request.path)
-        if request.path in state["fail_paths"]:
-            return web.json_response({"error": "boom"}, status=500)
-        return web.json_response({"channels": state["channels"]})
-
-    async def get_channel(request: web.Request) -> web.Response:
-        state["log"].append(request.path)
-        if request.path in state["fail_paths"]:
-            return web.json_response({"error": "boom"}, status=500)
-        cid = request.match_info["id"]
-        ch = next((c for c in state["channels"] if c["id"] == cid), None)
-        if ch is None:
-            return web.json_response({"error": "NOT_FOUND"}, status=404)
-        out = dict(ch)
-        out["members"] = state["members"].get(cid, [])
-        return web.json_response(out)
-
-    async def history(request: web.Request) -> web.Response:
-        state["log"].append(request.path_qs)
-        if request.path in state["fail_paths"]:
-            return web.json_response({"error": "boom"}, status=500)
-        cid = request.match_info["id"]
-        return web.json_response({"messages": state["history"].get(cid, [])})
-
-    app = web.Application()
-    app.router.add_get("/api/v1/channels", list_channels)
-    app.router.add_get("/api/v1/channels/{id}", get_channel)
-    app.router.add_get("/api/v1/channels/{id}/messages", history)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
-    try:
-        yield f"http://127.0.0.1:{port}", state
-    finally:
-        await runner.cleanup()
-
-
-# ─── Spy agent ─────────────────────────────────────────────
-
-
-class _SpyAgent:
-    """Records ``on_event`` invocations so the test can assert the
-    AgentEvent shape (event_type, channel_id, sender_id, replay_mode)
-    without booting the full persona runtime.
-
-    Mirrors the surface ``replay_channel_history`` consumes: ``agent_id``
-    + ``async on_event(event)``. The integration with the real
-    ``_LLMPersonaAgent`` is covered by
-    ``tests/unit/python/test_replay_mode_action_loop.py``.
-    """
-
-    def __init__(self, agent_id: str) -> None:
-        self.agent_id = agent_id
-        self.events: list[AgentEvent] = []
-
-    async def on_event(self, event: AgentEvent):
-        self.events.append(event)
-        return []
+# Helpers (``_msg``, ``_channel``, ``_SpyAgent``) live in a private
+# sibling module so this file and the PR-265-review follow-up file
+# ``test_channel_catchup_followups.py`` can share one loopback
+# orchestrator fixture without either file blowing past the 500-line
+# review cap. The ``orchestrator`` fixture itself is registered via
+# ``conftest.py`` so tests get it injected by name without an import
+# (avoids ruff F811 on every fixture parameter).
+from ._catchup_test_helpers import _SpyAgent, _channel, _msg
 
 
 # ─── Tests ─────────────────────────────────────────────────
@@ -166,8 +59,13 @@ class TestReplayChannelHistory:
             )
 
         assert agent.events == []
-        # Single GET /api/v1/channels — no per-channel calls.
-        assert state["log"] == ["/api/v1/channels"]
+        # Single GET /api/v1/channels — no per-channel calls. The
+        # fetcher carries an explicit ``?limit=`` (PR-265 L1: prevent
+        # the silent 50-channel default cap from masking high-fanout
+        # agents).
+        assert len(state["log"]) == 1
+        assert state["log"][0].startswith("/api/v1/channels?")
+        assert "limit=" in state["log"][0]
 
     async def test_skips_channels_where_agent_is_not_a_member(self, orchestrator):
         """The fetcher must filter on membership before fetching history.
@@ -197,7 +95,9 @@ class TestReplayChannelHistory:
 
         assert agent.events == []
         # The fetcher checked membership but did NOT fetch history.
-        assert "/api/v1/channels" in state["log"]
+        # ``list_channels`` is logged via ``path_qs`` so the recorded
+        # entry includes the explicit ``?limit=`` query string.
+        assert any(p.startswith("/api/v1/channels?") for p in state["log"])
         assert "/api/v1/channels/group:planning" in state["log"]
         assert not any(p.startswith("/api/v1/channels/group:planning/messages")
                        for p in state["log"])

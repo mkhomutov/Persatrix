@@ -31,10 +31,7 @@ Contract:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
@@ -226,6 +223,47 @@ class TestReplayModeMetric:
         n, attrs = captured[0]
         assert n == 1
         assert attrs.get("channel_id") == "group:planning"
+
+    async def test_replayed_counter_silent_for_self_sender(
+        self, monkeypatch,
+    ):
+        """The ``channel.messages.replayed`` counter measures *ingestions
+        into memory*, not events received by the short-circuit. A
+        replayed event whose sender is this agent is skipped from
+        ``_store_event_episode`` (see
+        ``test_replay_event_with_self_sender_skips_ingest``) so the
+        counter MUST stay silent for that path.
+
+        Why this matters: the metric description pins
+        "messages replayed through the on-startup catch-up fetch", and
+        operator dashboards interpret the value as "rows written to
+        InteractionTracker". Counting self-sender events that were
+        intentionally dropped would inflate the gauge by however many
+        of the agent's own outbound messages happen to sit in the
+        last-N history window — masking real ingestion regressions.
+        PR-265 review L5.
+        """
+        agent = await _make_agent()
+
+        captured: list[tuple[int, dict[str, str]]] = []
+
+        class _StubCounter:
+            def add(self, n: int, attributes: dict[str, str]) -> None:
+                captured.append((n, attributes))
+
+        class _StubInst:
+            channel_messages_replayed = _StubCounter()
+
+        monkeypatch.setattr(
+            "agents.persona_runtime.action_loop.try_get_instruments",
+            lambda: _StubInst(),
+        )
+
+        # Self-sender replay: ingest is skipped, so counter must stay 0.
+        evt = _replay_event(sender_id="ember-owl")
+        await agent.on_event(evt)
+
+        assert captured == []
 
     async def test_replayed_counter_silent_when_instruments_absent(
         self, monkeypatch,

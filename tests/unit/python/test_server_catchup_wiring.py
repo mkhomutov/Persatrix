@@ -29,7 +29,6 @@ import pytest
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.channel_catchup import replay_for_persona_agents
 from agents.persona import create_persona_agent
-from agents.persona_types import AgentEvent
 from agents.server import AgentServer
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client

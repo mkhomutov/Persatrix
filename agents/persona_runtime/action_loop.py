@@ -273,16 +273,19 @@ class _ActionLoopMixin:
         # prompt-injection boundary) and *before* the gate (the gate's
         # counter would conflate catch-up with policy suppressions).
         # Defense-in-depth: skip ingest when sender == agent_id (own
-        # outbound echoed back through the history endpoint).
+        # outbound echoed back through the history endpoint). PR-265 L5:
+        # the ``channel.messages.replayed`` counter increments only on
+        # actual ingestion so dashboards read it as "rows written to
+        # InteractionTracker" without subtracting self-sender skips.
         if event.metadata.get("replay_mode") is True:
             if event.sender_id != self.agent_id:
                 await self._store_event_episode(event, [])
-            inst = try_get_instruments()
-            if inst is not None:
-                inst.channel_messages_replayed.add(
-                    1,
-                    attributes=replay_attrs(channel_id=event.channel_id or ""),
-                )
+                inst = try_get_instruments()
+                if inst is not None:
+                    inst.channel_messages_replayed.add(
+                        1,
+                        attributes=replay_attrs(channel_id=event.channel_id or ""),
+                    )
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
