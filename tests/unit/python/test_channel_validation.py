@@ -30,6 +30,7 @@ import pytest
 from agents.channel_validation import (
     _safe_repr,
     parse_channel_timestamp,
+    validate_channel_message_dict,
     validate_channel_message_event,
 )
 from agents.generated import task_pb2
@@ -244,3 +245,155 @@ class TestThreadParentSenderIDValidation:
         err, _ = validate_channel_message_event(_event(thread_parent_sender_id="bad:id"))
         assert err is not None
         assert "thread_parent_sender_id" in err
+
+
+# ─── PR-265 review L1: dict-shape validation parity ─────────
+
+
+def _msg_dict(**overrides: object) -> dict:
+    """Build the JSON dict shape returned by
+    ``GET /api/v1/channels/{id}/messages`` (see
+    ``internal/server/channel_types.go::channelMessageResponse``).
+    """
+    fields: dict = {
+        "id": "msg-001",
+        "channel_id": "group:general",
+        "sender_id": "iron-fox",
+        "content": "hello",
+        "timestamp": "2026-05-04T00:00:00Z",
+        "thread_id": "",
+        "mentions": [],
+    }
+    fields.update(overrides)
+    return fields
+
+
+class TestValidateChannelMessageDict:
+    """``validate_channel_message_dict`` is the dict-shape sibling of
+    ``validate_channel_message_event``. The catch-up fetcher
+    (``agents.channel_catchup``) uses it to give the REST/JSON catch-up
+    path the same defense-in-depth bounds the live gRPC path enforces
+    via ``validate_channel_message_event``.
+
+    Why a separate function instead of building a synthetic
+    ``ChannelMessageEvent`` proto: the JSON shape lacks
+    ``respond_policy`` (resolved from membership) and
+    ``thread_parent_sender_id`` (not on the wire shape, see PR-265 L2).
+    Building a partial proto just to re-use the existing validator
+    would either silently default-fill those fields or require
+    conditional asserts at the call site. The dict variant validates
+    only the fields present on the JSON wire shape.
+
+    Mirrors the same module-level constants as
+    ``validate_channel_message_event`` so drift between the two paths
+    is impossible by construction.
+    """
+
+    def test_accepts_well_formed_dict(self):
+        err, ts = validate_channel_message_dict(
+            _msg_dict(timestamp="2026-05-04T12:34:56Z"),
+            channel_type="group",
+        )
+        assert err is None
+        assert ts == pytest.approx(1777898096.0, abs=1.0)
+
+    def test_rejects_oversize_content(self):
+        err, ts = validate_channel_message_dict(
+            _msg_dict(content="x" * 4001), channel_type="group",
+        )
+        assert err is not None
+        assert "content" in err
+        assert ts is None
+
+    def test_rejects_too_many_mentions(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(mentions=[f"agent-{i:02d}" for i in range(11)]),
+            channel_type="group",
+        )
+        assert err is not None
+        assert "mentions" in err
+
+    def test_rejects_invalid_mention(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(mentions=["bad:id"]), channel_type="group",
+        )
+        assert err is not None
+        assert "mentions" in err
+
+    def test_rejects_invalid_sender_id(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(sender_id="BAD-Sender"), channel_type="group",
+        )
+        assert err is not None
+        assert "sender_id" in err
+
+    def test_rejects_oversize_channel_id(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(channel_id="group:" + "x" * 256), channel_type="group",
+        )
+        assert err is not None
+        assert "channel_id" in err
+
+    def test_rejects_oversize_message_id(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(id="x" * 65), channel_type="group",
+        )
+        assert err is not None
+        assert "message_id" in err
+
+    def test_rejects_unknown_channel_type(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(), channel_type="weekly",
+        )
+        assert err is not None
+        assert "channel_type" in err
+
+    def test_rejects_channel_type_prefix_mismatch(self):
+        # ``channel_type=group`` requires ``channel_id`` to start with
+        # ``group:`` — see RFC 0011 §B.
+        err, _ = validate_channel_message_dict(
+            _msg_dict(channel_id="dm:a:b"), channel_type="group",
+        )
+        assert err is not None
+
+    def test_rejects_naive_timestamp(self):
+        # Same RFC 3339 contract as the live path: naive datetime
+        # silently shifts by the host TZ offset. PR #248 nice-to-have.
+        err, ts = validate_channel_message_dict(
+            _msg_dict(timestamp="2026-05-04T00:00:00"),
+            channel_type="group",
+        )
+        assert err is not None
+        assert "timestamp" in err
+        assert ts is None
+
+    def test_rejects_oversize_thread_id(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(thread_id="x" * 129), channel_type="group",
+        )
+        assert err is not None
+        assert "thread_id" in err
+
+    def test_accepts_missing_optional_fields(self):
+        # ``thread_id`` and ``mentions`` are optional on the JSON shape;
+        # absence must not be conflated with empty-string violations.
+        err, ts = validate_channel_message_dict(
+            {
+                "id": "msg-1",
+                "channel_id": "group:general",
+                "sender_id": "iron-fox",
+                "content": "hi",
+                "timestamp": "2026-05-04T00:00:00Z",
+            },
+            channel_type="group",
+        )
+        assert err is None
+        assert isinstance(ts, float)
+
+    def test_rejects_non_string_sender_id(self):
+        # Wire-shape malformation: non-string types where strings are
+        # required must reject rather than crash with TypeError.
+        err, _ = validate_channel_message_dict(
+            _msg_dict(sender_id=123), channel_type="group",
+        )
+        assert err is not None

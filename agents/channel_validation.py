@@ -20,7 +20,11 @@ from datetime import datetime
 
 from .generated import task_pb2
 
-__all__ = ["validate_channel_message_event", "parse_channel_timestamp"]
+__all__ = [
+    "parse_channel_timestamp",
+    "validate_channel_message_dict",
+    "validate_channel_message_event",
+]
 
 
 # Cap rendered length of attacker-controlled fields embedded in
@@ -194,6 +198,124 @@ def validate_channel_message_event(
         return (
             f"thread_parent_sender_id is not a valid participant id: "
             f"{_safe_repr(request.thread_parent_sender_id)}"
+        ), None
+
+    return None, publish_ts
+
+
+def validate_channel_message_dict(
+    msg: dict,
+    *,
+    channel_type: str,
+) -> tuple[str | None, float | None]:
+    """Validate a wire-side channel message in JSON / dict form.
+
+    Sibling of :func:`validate_channel_message_event`; the dict variant
+    drives the on-startup catch-up fetcher
+    (:mod:`agents.channel_catchup`) so the REST/JSON ingest seam
+    enforces the same defense-in-depth bounds the cleartext gRPC ingest
+    seam already does. PR-265 deep-review L1.
+
+    The two functions deliberately share module-level constants
+    (``_CHANNEL_CONTENT_MAX_CHARS``, ``_CHANNEL_PARTICIPANT_ID_RE``,
+    ``_CHANNEL_TYPE_PREFIXES``, …) so drift between the live-path and
+    catch-up-path bounds is impossible by construction; a future PR
+    that bumps any cap updates both call sites in one edit.
+
+    Wire-shape gaps relative to ``ChannelMessageEvent`` (the proto):
+
+    * ``respond_policy`` — not on the JSON wire shape
+      (``internal/server/channel_types.go::channelMessageResponse``);
+      the catch-up fetcher resolves it from the membership endpoint
+      via ``_resolve_respond_policy`` and validates the result there.
+    * ``thread_parent_sender_id`` — not on the JSON wire shape (PR-265
+      review L2 documents the asymmetry); validation is a no-op for
+      this field on the catch-up path.
+    * ``channel_type`` — not on the message itself. The catch-up
+      fetcher passes the parent channel's ``channel_type`` so the
+      ``channel_type`` ↔ ``channel_id`` prefix-agreement check still
+      runs.
+
+    Returns ``(error_message, parsed_timestamp)`` with the same
+    contract as :func:`validate_channel_message_event` so call sites
+    can structure their happy/sad paths symmetrically.
+    """
+    sender_id = msg.get("sender_id")
+    if not isinstance(sender_id, str):
+        return "sender_id is not a string", None
+    content = msg.get("content", "")
+    if not isinstance(content, str):
+        return "content is not a string", None
+    if len(content) > _CHANNEL_CONTENT_MAX_CHARS:
+        return (
+            f"content exceeds {_CHANNEL_CONTENT_MAX_CHARS} characters "
+            f"(got {len(content)})"
+        ), None
+
+    thread_id = msg.get("thread_id") or ""
+    if not isinstance(thread_id, str):
+        return "thread_id is not a string", None
+    if len(thread_id) > _CHANNEL_THREAD_ID_MAX_CHARS:
+        return (
+            f"thread_id exceeds {_CHANNEL_THREAD_ID_MAX_CHARS} characters "
+            f"(got {len(thread_id)})"
+        ), None
+
+    mentions_raw = msg.get("mentions") or []
+    if not isinstance(mentions_raw, list):
+        return "mentions is not a list", None
+    if len(mentions_raw) > _CHANNEL_MAX_MENTIONS:
+        return (
+            f"mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries "
+            f"(got {len(mentions_raw)})"
+        ), None
+    for i, m in enumerate(mentions_raw):
+        if not isinstance(m, str) or not _CHANNEL_PARTICIPANT_ID_RE.match(m):
+            rendered = _safe_repr(m if isinstance(m, str) else str(m))
+            return f"mentions[{i}] is not a valid participant id: {rendered}", None
+
+    if not _CHANNEL_PARTICIPANT_ID_RE.match(sender_id):
+        return (
+            f"sender_id is not a valid participant id: {_safe_repr(sender_id)}"
+        ), None
+
+    channel_id = msg.get("channel_id")
+    if not isinstance(channel_id, str):
+        return "channel_id is not a string", None
+    if len(channel_id) > _CHANNEL_ID_MAX_CHARS:
+        return (
+            f"channel_id exceeds {_CHANNEL_ID_MAX_CHARS} characters "
+            f"(got {len(channel_id)})"
+        ), None
+
+    message_id = msg.get("id", "")
+    if not isinstance(message_id, str):
+        return "message_id is not a string", None
+    if len(message_id) > _CHANNEL_MESSAGE_ID_MAX_CHARS:
+        return (
+            f"message_id exceeds {_CHANNEL_MESSAGE_ID_MAX_CHARS} characters "
+            f"(got {len(message_id)})"
+        ), None
+
+    expected_prefix = _CHANNEL_TYPE_PREFIXES.get(channel_type)
+    if expected_prefix is None:
+        return (
+            f"channel_type {_safe_repr(channel_type)} is not one of "
+            f"{sorted(_CHANNEL_TYPE_PREFIXES)}"
+        ), None
+    if not channel_id.startswith(expected_prefix):
+        return (
+            f"channel_id {_safe_repr(channel_id)} prefix disagrees with "
+            f"channel_type {_safe_repr(channel_type)}"
+        ), None
+
+    raw_ts = msg.get("timestamp", "")
+    if not isinstance(raw_ts, str):
+        return "timestamp is not a string", None
+    publish_ts = parse_channel_timestamp(raw_ts)
+    if publish_ts is None:
+        return (
+            f"timestamp is not a valid RFC 3339 string: {_safe_repr(raw_ts)}"
         ), None
 
     return None, publish_ts

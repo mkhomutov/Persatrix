@@ -24,16 +24,29 @@ Behaviour:
 * **Oldest-first replay.** The orchestrator returns history newest-first
   (RFC 0011 §C); the fetcher reverses before replay so
   ``InteractionTracker`` sees turns in conversational order.
-* **No watermark.** Per OQ #8, watermark + per-tick recovery is
-  deferred until operational data justifies it. v0.3.0 ships
-  on-startup last-N as the only catch-up trigger; that means the
-  fetcher may re-ingest messages the agent already saw on a previous
-  run. The action-loop's defense-in-depth ``sender_id == agent_id``
-  skip handles the agent's own outbound; for peer messages, the
-  ``InteractionTracker`` gracefully accepts the duplicate turns (same
-  scope, ``add_turn`` is idempotent in shape) and the worst observable
-  effect is a slightly inflated ``turn_count`` on the first
-  post-restart interaction.
+* **No watermark, no dedup.** Per OQ #8, watermark + per-tick
+  recovery is deferred. v0.3.0 ships on-startup last-N as the only
+  trigger, so the fetcher may re-ingest messages from a previous run.
+  Self-sender skip handles own outbound; for peer messages,
+  ``InteractionTracker.add_turn`` does **not** deduplicate by
+  ``message_id`` — it appends every turn. K consecutive restarts
+  within the catch-up window produce ``K × N`` turns on the first
+  post-restart interaction. Duplicates share the same wire shape and
+  scope, but ``turn_count`` grows linearly with restart count.
+  (PR-265 review L5: earlier "idempotent in shape" wording was
+  misleading — it suggested dedup; the tracker doesn't.)
+* **Lifecycle bleed (catch-up → live).** Replay events open
+  ``InteractionTracker`` scopes but do **not** close them: replay
+  events lack ``chat_end`` / ``session_end`` metadata, and there is
+  no synthetic ``REASON_CATCHUP_COMPLETE``. The open interaction
+  stays open until the idle-gap timer fires; the next live
+  CHANNEL_MESSAGE in the same scope appends to the catch-up
+  interaction. ``Interaction.started_at`` is set to *boot time*, not
+  the oldest replayed wire timestamp — cross-checks comparing
+  ``started_at`` to the earliest turn timestamp will be off by the
+  catch-up window. Design intent for v0.3.0; closing the scope on
+  catch-up completion is deferred to a watermark-aware revision.
+  PR-265 review L6.
 
 The module is independent of :mod:`agents.persona_runtime` so a
 non-persona task agent that opted into channel membership could call
@@ -43,13 +56,18 @@ the fetcher too — the only contract on the agent is ``agent_id`` and
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 
 import aiohttp
 
-from .channel_validation import parse_channel_timestamp
+from .channel_validation import (
+    parse_channel_timestamp,
+    validate_channel_message_dict,
+)
 from .persona_types import AgentEvent, EventType
 
 if TYPE_CHECKING:
@@ -79,14 +97,25 @@ DEFAULT_CATCHUP_LIMIT: int = 50
 # two REST surfaces share one tunable mental model.
 _REQUEST_TIMEOUT_SECONDS: float = 10.0
 
-# PR-265 review L1: ``GET /api/v1/channels`` falls back to
-# ``channelDefaultListLimit = 50`` server-side when no ``?limit=`` is
-# supplied (``internal/server/channel_handlers.go``); an agent enrolled
-# in >50 channels would silently miss catch-up for the tail of its
-# membership. We pin the request to ``channelMaxLimit = 1000`` (the
-# orchestrator clamp) so the explicit cap is the contract — the silent
-# default cannot drift on either side without breaking the request URL.
+# PR-265 review L1 (first pass): ``GET /api/v1/channels`` falls back
+# to ``channelDefaultListLimit = 50`` server-side when no ``?limit=``
+# is supplied (``internal/server/channel_handlers.go``); an agent
+# enrolled in >50 channels would silently miss catch-up for the tail
+# of its membership. We pin the request to ``channelMaxLimit = 1000``
+# (the orchestrator clamp) so the explicit cap is the contract — the
+# silent default cannot drift on either side without breaking the
+# request URL.
 _CHANNEL_LIST_LIMIT: int = 1000
+
+# PR-265 review L3 (second pass): per-agent wall-clock budget for the
+# whole catch-up pass. ``_REQUEST_TIMEOUT_SECONDS × 2N`` is unbounded
+# at the ``channelMaxLimit = 1000`` ceiling; this single-budget cap
+# means a slow / hung orchestrator cannot block boot regardless of
+# fanout. On overrun, ``replay_channel_history`` logs WARN and
+# returns; the surrounding ``asyncio.wait_for`` cancels in-flight
+# requests. 60s comfortably covers single-digit-channel agents
+# (typical pass: ~50–200ms × 2N) with cold-cache headroom.
+_CATCHUP_BUDGET_SECONDS: float = 60.0
 
 
 class _AgentLike(Protocol):
@@ -117,6 +146,71 @@ async def replay_channel_history(
 
     See module docstring for the contract. This function never raises;
     every failure path is best-effort with a WARN log line.
+
+    PR-265 review L3 (second pass): the body is wrapped in
+    :func:`asyncio.wait_for` against ``_CATCHUP_BUDGET_SECONDS`` so a
+    slow / hung orchestrator cannot stall boot for the worst-case
+    ``10s × 2N`` multiplicative bound. On overrun the helper logs WARN
+    and returns; in-flight requests are cancelled cleanly by the
+    surrounding wait_for.
+
+    PR-265 review L7 (second pass): one INFO log line at the end of the
+    pass so operators can confirm catch-up actually fired — no need to
+    join ``channel.messages.replayed`` counter values across channels
+    to answer "did boot's catch-up run?".
+    """
+    started_at = time.monotonic()
+    counts = {"channels": 0, "events": 0}
+    try:
+        await asyncio.wait_for(
+            _replay_channel_history_inner(
+                agent=agent,
+                orchestrator_url=orchestrator_url,
+                session=session,
+                limit=limit,
+                counts=counts,
+            ),
+            timeout=_CATCHUP_BUDGET_SECONDS,
+        )
+        elapsed_ms = (time.monotonic() - started_at) * 1000
+        logger.info(
+            "channels: catch-up complete agent=%s channels=%d events=%d "
+            "elapsed_ms=%.0f",
+            agent.agent_id,
+            counts["channels"],
+            counts["events"],
+            elapsed_ms,
+        )
+    except TimeoutError:
+        elapsed_ms = (time.monotonic() - started_at) * 1000
+        logger.warning(
+            "channels: catch-up exceeded %.0fs wall-clock budget for "
+            "agent=%s; partial channels=%d events=%d elapsed_ms=%.0f "
+            "(remaining channels skipped)",
+            _CATCHUP_BUDGET_SECONDS,
+            agent.agent_id,
+            counts["channels"],
+            counts["events"],
+            elapsed_ms,
+        )
+
+
+async def _replay_channel_history_inner(
+    *,
+    agent: _AgentLike,
+    orchestrator_url: str,
+    session: aiohttp.ClientSession,
+    limit: int,
+    counts: dict[str, int],
+) -> None:
+    """Wall-clock-budget-wrapped body of :func:`replay_channel_history`.
+
+    Mutates ``counts`` in-place so the outer wrapper can surface
+    per-pass totals on both the success-INFO and budget-WARN paths
+    (the latter needs to log how far the partial pass got before the
+    cancellation). Mutation is intentional — returning a tuple from a
+    function that may be cancelled mid-execution would lose the
+    partial progress.
     """
     base = orchestrator_url.rstrip("/")
     timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SECONDS)
@@ -145,10 +239,32 @@ async def replay_channel_history(
         )
         if messages is None:
             continue
+        counts["channels"] += 1
+
+        channel_type = ch.get("channel_type")
+        if not isinstance(channel_type, str):
+            channel_type = ""
 
         # The orchestrator returns newest-first; reverse so the agent's
         # InteractionTracker sees the turns in conversational order.
         for msg in reversed(messages):
+            # PR-265 review L1 (second pass): mirror the live-path
+            # validator. REST surface shares the cleartext gRPC port's
+            # TLS-deferred trust boundary; without symmetric validation
+            # a MITM (or a future writer that bypasses router
+            # validation) could drive malformed payloads through this
+            # seam. Per-row WARN + skip is "best-effort with
+            # bounds-checking", not "all-or-nothing".
+            err, _parsed_ts = validate_channel_message_dict(
+                msg, channel_type=channel_type,
+            )
+            if err is not None:
+                logger.warning(
+                    "channels: catch-up dropped malformed row "
+                    "agent=%s channel=%s msg=%s reason=%s",
+                    agent.agent_id, channel_id, msg.get("id", ""), err,
+                )
+                continue
             event = _build_replay_event(msg, channel_id, respond_policy, ch)
             try:
                 await agent.on_event(event)
@@ -163,6 +279,8 @@ async def replay_channel_history(
                     "channels: catch-up replay raised on agent=%s channel=%s msg=%s",
                     agent.agent_id, channel_id, msg.get("id", ""),
                 )
+                continue
+            counts["events"] += 1
 
 
 # ─── Internal helpers ──────────────────────────────────────
@@ -291,27 +409,18 @@ async def replay_for_persona_agents(
     """Run catch-up for every persona agent in ``agents``.
 
     Iterates only over :class:`agents.persona_runtime._LLMPersonaAgent`
-    instances — task agents have no ``CHANNEL_MESSAGE`` ingest path.
-    Sequential per agent so startup logs stay observably ordered and
-    the orchestrator does not see N agents stampede the REST surface
-    at boot.
-
-    Best-effort: any exception raised by ``replay_channel_history``
-    (which itself is best-effort) is logged and swallowed so a
-    flapping orchestrator cannot keep the agent process from booting.
+    — task agents have no ``CHANNEL_MESSAGE`` ingest path. Sequential
+    per agent so startup logs stay ordered and N agents do not
+    stampede the orchestrator's REST surface at boot. Best-effort:
+    any escaping exception is logged and swallowed.
     """
     if session is None:
         return
-    # Local import: ``persona_runtime`` is a substantial module graph
-    # (LLM client, episodic / working memory, response gate, action
-    # loop) and ``channel_catchup``'s public surface
-    # (``replay_channel_history``) is intentionally narrower than
-    # ``_LLMPersonaAgent`` so a non-persona task agent could opt in.
-    # Keeping the persona-runtime dependency local to the one site
-    # that needs it preserves that narrower surface for callers who
-    # import only ``replay_channel_history``. (PR-265 review L3:
-    # there is no actual import cycle — ``persona_runtime`` does not
-    # import ``channel_catchup`` — earlier wording was inaccurate.)
+    # Local import keeps the persona-runtime module graph (LLM client,
+    # memory, gate, action loop) out of the public surface for callers
+    # that only need ``replay_channel_history`` — a non-persona task
+    # agent could opt in. (PR-265 first-pass L3: no actual import
+    # cycle; persona_runtime does not import channel_catchup.)
     from .persona_runtime import _LLMPersonaAgent
 
     for agent_id, agent in agents.items():
@@ -343,24 +452,27 @@ def _build_replay_event(
     short-circuit reads; without it the runtime would treat the row as
     live traffic and fire the LLM.
 
-    PR-265 review S2: the wire ``msg["timestamp"]`` (RFC 3339, set by
-    the orchestrator at publish time — see
+    PR-265 review S2: wire ``msg["timestamp"]`` (RFC 3339, set by the
+    orchestrator at publish time — see
     ``internal/server/channel_types.go::channelMessageResponse``) is
-    parsed to epoch seconds and forwarded into ``AgentEvent.timestamp``.
-    Without this, replayed events default to ``time.time()`` at boot,
-    which (a) lies to the PR-4 summariser via
-    ``Turn.payload["timestamp"]``, (b) writes incorrect ``started_at``
-    on episodic rows, and (c) defeats the RFC 0021 P1 now-anchor /
-    recency rendering — the runtime would render replayed history as
-    "just now" instead of its actual age. The parser is shared with
-    ``validate_channel_message_event`` so the live and replay paths
-    agree on what counts as a valid timestamp.
+    parsed to epoch seconds and forwarded into
+    ``AgentEvent.timestamp``. Without this, replayed events default to
+    ``time.time()`` at boot, defeating RFC 0021 P1 now-anchor / recency
+    rendering, poisoning ``Turn.payload["timestamp"]``, and writing
+    wrong ``started_at`` on episodic rows. Shared parser with
+    ``validate_channel_message_event``.
 
-    Fallback: a missing or unparseable timestamp falls through to the
-    dataclass default (``time.time()``) rather than dropping the row.
-    Best-effort catch-up keeps the message in memory; the worst
-    observable effect is the recency drift this fix exists to prevent,
-    bounded to the small minority of malformed wire rows.
+    Fallback (post-PR-265 L1 second pass): malformed timestamps cannot
+    reach this function — the catch-up loop runs every row through
+    ``validate_channel_message_dict`` first. The ``parsed_ts is None``
+    branch below is defense-in-depth against an impossible state.
+
+    PR-265 review L2: ``thread_parent_sender_id`` is intentionally
+    **not** propagated. The field exists on the live proto but **not**
+    on ``channelMessageResponse`` JSON shape — nothing to forward.
+    Documented gap, not a defect: the only in-tree consumer (the
+    response gate) is bypassed by the replay short-circuit. Future
+    threading-aware consumers will need a Go-side schema bump.
     """
     payload: dict[str, Any] = {
         "content": msg.get("content", ""),

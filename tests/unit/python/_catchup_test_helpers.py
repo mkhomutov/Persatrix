@@ -83,7 +83,20 @@ async def orchestrator():
     URL of every request the fetcher issued (used to pin the call
     shape). The list endpoint logs ``path_qs`` (not ``path``) so tests
     can pin the explicit ``?limit=`` query string the fetcher MUST
-    send (PR-265 review L1: silent 50-channel cap regression).
+    send (PR-265 review L1 first-pass: silent 50-channel cap
+    regression).
+
+    Asymmetry note (PR-265 review L8 second-pass): ``log`` records
+    ``path_qs`` (path + query string) but ``fail_paths`` is matched
+    against ``request.path`` (no query string). This is intentional,
+    not a bug: ``log`` exists to *pin* fine-grained request shape
+    (which ``?limit=`` value, which ``?cursor=``), while
+    ``fail_paths`` is a coarse-grained "this endpoint is broken"
+    knob that should fail every variant of the path without forcing
+    a test to enumerate the query-string permutations. A future test
+    that wants to fail only one query-string variant should add a
+    second ``fail_query_strings: set[str]`` knob rather than
+    flattening this asymmetry.
     """
     state: dict = {
         "channels": [],            # list of channel JSON
