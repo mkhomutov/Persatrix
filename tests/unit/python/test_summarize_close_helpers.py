@@ -14,8 +14,6 @@ Pins the PR 6 review follow-ups against the close-path helpers:
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from agents.persona_runtime.summarize_close import (
@@ -136,9 +134,3 @@ class TestJanitorFailedCounter:
             ) == 0
         finally:
             await metrics_mod.shutdown()
-
-
-# Keep ruff happy — ``asyncio`` is imported for the @pytest.mark.asyncio
-# decorator's coroutine wrapping; rely on ``noqa`` only if ruff's
-# ``unused-import`` rule complains in a future revision.
-_ = asyncio

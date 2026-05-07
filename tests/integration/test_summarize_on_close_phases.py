@@ -138,6 +138,20 @@ class TestPhase2JanitorRace:
         # Auto-reflect did not double-tick on the no-op UPDATE branch.
         after = await agent._episodic_memory.get_interaction_count()
         assert after == before
+        # PR-266 review N2: pin the *second* gated side effect — the
+        # relationship row.  The race-loss path must skip
+        # ``record_closed_interaction`` (which is what would otherwise
+        # bump ``relationships.interaction_count`` and append an
+        # ``interactions`` row).  Both this and the auto-reflect tick
+        # are gated by the same ``if not updated: return`` in
+        # ``finalize_closed_interaction``; asserting them separately
+        # locks each pin against a future refactor that splits the
+        # gate.  ``get_relationship_summary`` returns
+        # ``interaction_count=0`` for a missing row, which is the state
+        # we expect because the close-path is the only writer for
+        # DM-scoped interactions in this test.
+        rel_after = await agent._relationship_memory.get_relationship_summary(peer)
+        assert rel_after.interaction_count == 0
 
 
 @pytest.mark.asyncio
