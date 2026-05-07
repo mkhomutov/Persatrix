@@ -255,3 +255,54 @@ func TestHandleChat_LocalFallback_WarnsOncePerProcess(t *testing.T) {
 	assert.Len(t, warnings, 1,
 		"local fallback Warn must fire exactly once across multiple chat requests; got %d", len(warnings))
 }
+
+// TestHandleChat_DMUserMembershipIsRespondNever pins the chat-as-DM
+// fix for ISSUE-0034: the user (DM peer who is NOT in the agent
+// registry) MUST be stored with `respond_policy = "never"` so that
+// `ChannelRouter.fanout`'s RespondNever short-circuit
+// (router.go:353) skips dispatch to the user on every agent reply.
+//
+// Pre-fix behaviour: `GetOrCreateDM` stamps both members with
+// `respond_policy = "always"`. The agent's reply fans out to the user
+// via `GRPCMessageDispatcher.Dispatch`, which calls
+// `resolver.Get(user_id)`, hits `ErrAgentNotFound` (the user is not a
+// registered agent), and emits a `level=warn` line
+// ("channels: dispatch target not registered; dropping ..."). At chat
+// QPS this floods structured-log scrapes — the same alarm-fatigue
+// anti-pattern PR-245 R3 / ISSUE-0009 fixed for the chat-fallback
+// Warn via sync.Once.
+//
+// The fix demotes the user's policy to RespondNever in the chat
+// handler after `GetOrCreateDM`. The router-level RespondNever
+// short-circuit is already pinned by
+// `TestChannelRouter_Publish_RespondNeverNotDispatched`; this test
+// pins the contract that makes that short-circuit fire on the chat
+// path, transitively eliminating the WARN.
+//
+// Asserting the membership policy (rather than observing the WARN
+// directly) is intentional: the chat test fixture uses
+// `NoopDispatcher`, which never emits the WARN. Pinning the policy
+// invariant captures the actual fix and composes with the existing
+// router test for end-to-end coverage.
+func TestHandleChat_DMUserMembershipIsRespondNever(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "alice", "agent-x", "hi", 10*time.Millisecond)
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+	require.NoError(t, err)
+
+	userMember, err := store.GetMember(context.Background(), dm.ID, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, channels.RespondNever, userMember.RespondPolicy,
+		"chat-as-DM user (non-agent) must be stored with respond_policy=never so fanout skips dispatch (ISSUE-0034)")
+
+	agentMember, err := store.GetMember(context.Background(), dm.ID, "agent-x")
+	require.NoError(t, err)
+	assert.Equal(t, channels.RespondAlways, agentMember.RespondPolicy,
+		"chat-as-DM agent must keep respond_policy=always so inbound fanout still dispatches")
+}

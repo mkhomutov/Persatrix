@@ -54,6 +54,18 @@ type ChannelStore interface {
 	// existing row's `joined_at` unchanged.
 	AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error
 
+	// SetMemberPolicy updates the respond policy on an existing membership row
+	// without changing `joined_at`. Returns [ErrChannelNotFound] when the channel
+	// does not exist and [ErrNotMember] when the participant is not a member of
+	// the channel; both 404 to REST callers but disambiguate the cause for
+	// operator triage. Returns [ErrInvalidRespondPolicy] for an unknown policy.
+	//
+	// Used by the chat-as-DM façade to demote the user (DM peer not in the agent
+	// registry) to `RespondNever` after [GetOrCreateDM] so the router's fanout
+	// short-circuit skips dispatch and avoids the per-reply
+	// "dispatch target not registered" WARN at chat QPS (ISSUE-0034).
+	SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error
+
 	// GetMembers returns all members of `channelID` ordered by `joined_at`.
 	GetMembers(ctx context.Context, channelID string) ([]Member, error)
 
