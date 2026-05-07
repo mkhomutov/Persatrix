@@ -311,9 +311,24 @@ async def finalize_closed_interaction(
     relationship row, and invokes ``on_finalized`` (used by the mixin
     to tick the auto-reflect counter).  Top-level guarded so a failure
     does not surface as ``Task exception was never retrieved`` at GC.
+
+    PR 6 review #20: when ``update_episode_summary`` returns ``False``
+    the janitor has already finalised the row to
+    :data:`SUMMARY_UNAVAILABLE_TEXT` — skip the relationship bump and
+    the auto-reflect tick so the janitor's verdict is the single
+    source of truth and the failure counter cannot double-increment.
     """
+    # PR 6 review #21: explicit guard rather than ``assert`` so a future
+    # Phase-1 reorder cannot let ``None`` through silently under
+    # ``python -O`` (where ``assert`` is stripped).
+    if interaction.interaction_id is None:
+        logger.warning(
+            "Closed interaction for agent %s has no interaction_id "
+            "(scope=%s); skipping background finalisation",
+            agent_id, interaction.scope,
+        )
+        return
     try:
-        assert interaction.interaction_id is not None
         summary, summary_failed = await summarize_closed_interaction(
             llm_client, agent_id, interaction,
         )
@@ -321,18 +336,24 @@ async def finalize_closed_interaction(
             updated = await episodic.update_episode_summary(
                 interaction.interaction_id, summary,
             )
-            if not updated:
-                logger.warning(
-                    "Pending-summary row not found for agent %s "
-                    "(interaction_id=%s); janitor will not see this row",
-                    agent_id, interaction.interaction_id,
-                )
         except Exception:
             logger.warning(
                 "Failed to update summary for agent %s (interaction_id=%s); "
                 "row will be backfilled by the janitor",
                 agent_id, interaction.interaction_id, exc_info=True,
             )
+            return
+        if not updated:
+            # Janitor already wrote SUMMARY_UNAVAILABLE_TEXT (or the row
+            # vanished); its decision is final.  No relationship bump,
+            # no auto-reflect tick — both already accounted for in the
+            # janitor sweep that owned the row.
+            logger.info(
+                "Phase 2 superseded by janitor for agent %s "
+                "(interaction_id=%s); skipping relationship + auto-reflect",
+                agent_id, interaction.interaction_id,
+            )
+            return
         await record_closed_interaction(
             memory_ns, agent_id, interaction, summary, summary_failed,
         )
@@ -372,6 +393,12 @@ async def maybe_run_janitor(
     Best-effort: any failure is logged and swallowed so a janitor
     hiccup never breaks the tick path.  See PR #229 review Should-Fix
     #2.
+
+    PR 6 review #24 — sweep failures increment
+    ``agent.interactions.janitor.failed`` so a persistent outage
+    (under which stuck rows accumulate at one cooldown window per
+    failure) raises an operator SLO signal instead of silently
+    advancing the cooldown.
     """
     if last_monotonic is not None and now_monotonic - last_monotonic < interval_sec:
         return last_monotonic
@@ -382,4 +409,9 @@ async def maybe_run_janitor(
             "Janitor sweep failed for agent %s",
             agent_id, exc_info=True,
         )
+        inst = try_get_instruments()
+        if inst is not None:
+            inst.interactions_janitor_failed.add(
+                1, {"agent_id": current_agent_id()},
+            )
     return now_monotonic

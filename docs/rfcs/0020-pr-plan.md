@@ -249,6 +249,23 @@ PR 7 (RFC close)
 
 **Depends on**: PR 5.
 **Estimated size**: ~200–400 lines.
+**Status**: 🚧 Slice 1 of N opens against this branch. The PR-4 review cluster (findings **#20–#30**, the freshest review surface around the summarise-on-close path) is the first slice; PR 1–3 review findings (#1–#19) ship as a follow-up slice once this lands. Splitting keeps each diff focused and well under the 500-line review window.
+
+#### Slice 1 (this PR) — PR 4 review findings #20, #21, #22, #23, #24, #26, #27, #28, #29, #30
+
+| # | Finding | Disposition | Code site |
+|---|---------|-------------|-----------|
+| 20 | Phase 2 ↔ janitor write race (unscoped UPDATE + double-tick failure counter). | ✅ Fixed inline. UPDATE scoped to `WHERE summary = SUMMARY_PENDING_TEXT`; on `False` return, `record_closed_interaction` and `_tick_auto_reflect_counter` are skipped. | `agents/memory/episodic_queries.py::update_episode_summary`, `agents/persona_runtime/summarize_close.py::finalize_closed_interaction` |
+| 21 | `assert interaction.interaction_id is not None` stripped under `python -O`. | ✅ Fixed inline. Replaced with explicit `if … is None: logger.warning(...); return` guard. | `agents/persona_runtime/summarize_close.py::finalize_closed_interaction` |
+| 22 | Unreachable empty-summary `ValueError` raise. | ✅ Fixed inline. Validation removed; single-writer invariant documented in the docstring. | `agents/memory/episodic_queries.py::update_episode_summary` |
+| 23 | `drain_pending_summaries` snapshot semantics depend on `_lock`. | ✅ Fixed inline. Lock-dependency comment added at the drain call site. | `agents/persona_runtime/state_persistence.py::drain_pending_summaries` |
+| 24 | No `agent.interactions.janitor.failed` counter. | ✅ Fixed inline. Counter registered in `Instruments`; incremented in `maybe_run_janitor` exception handler. | `agents/observability/metrics.py`, `agents/persona_runtime/summarize_close.py::maybe_run_janitor` |
+| 26 | No regression test for the Phase 2 ↔ janitor race (#20). | ✅ Added. `TestPhase2JanitorRace::test_janitor_wins_against_late_phase2`. | `tests/integration/test_summarize_on_close_phases.py` |
+| 27 | No test pinning `close_memory`-without-explicit-drain shutdown ordering. | ✅ Added. `TestCloseMemoryDrainsImplicitly::test_close_memory_finalises_summary_without_explicit_drain`. | `tests/integration/test_summarize_on_close_phases.py` |
+| 28 | No test pinning `update_episode_summary`'s `agent_id` scoping. | ✅ Added. `TestUpdateEpisodeSummaryAgentScoping::test_update_does_not_touch_other_agents_row`. | `tests/unit/python/test_episodic_memory_pending_filter.py` |
+| 29 | Janitor cooldown exercised only indirectly. | ✅ Added. `TestMaybeRunJanitorCooldown::test_two_calls_within_interval_runs_cleanup_once`. | `tests/unit/python/test_summarize_close_helpers.py` |
+| 30 | `await asyncio.sleep(0)` race in `test_pending_sentinel_visible_before_drain`. | ✅ Fixed inline. Replaced with `await gated.started.wait()`; `make_gated_summary_client` helper sets the event from the mock provider's first await. | `tests/integration/test_summarize_on_close_phases.py`, `tests/integration/_summarize_close_helpers.py` |
+| 25 | `_persist_closed_interaction` silently drops the close path when `_llm_client is None`. | ⏭ **Deferred to a follow-up slice.** Tightening at construction time means flipping `_StatePersistenceMixin._llm_client` from `LLMClient \| None` to `LLMClient` and migrating `tests/unit/python/test_llm_persona_agent.py::test_no_llm_client` off the `agent._llm_client = None` seam. The mixin file is at the 500-line cap, so the change is safer in its own slice where it can land alongside the test seam migration. | `agents/persona_runtime/state_persistence.py::_persist_closed_interaction` |
 
 Apply review findings from PRs 1–5 (the "From PR N review" pattern from [RFC 0017 PR plan](0017-pr-plan.md#status-by-finding-pr-6-implementation)). Out-of-scope items downgrade to tracked issues with rationale.
 

@@ -21,6 +21,7 @@ from typing import Any
 
 import aiosqlite
 
+from .interaction_janitor import SUMMARY_PENDING_TEXT
 from .migrations import _SCORE_EXPR, _SCORE_EXPR_BARE
 
 logger = logging.getLogger(__name__)
@@ -397,17 +398,26 @@ async def update_episode_summary(
     db: aiosqlite.Connection, agent_id: str,
     interaction_id: str, summary: str,
 ) -> bool:
-    """Replace ``summary`` for an episode (RFC 0020 PR 4 close-path).
+    """Replace ``[summary pending]`` for an episode (RFC 0020 PR 4 close-path).
 
-    Agent-scoped UPDATE (``WHERE agent_id AND interaction_id``); returns
-    ``True`` iff a row was updated.  See PR #229 review Must-Fix #1.
+    Agent-scoped UPDATE that *only* matches rows still carrying the
+    :data:`SUMMARY_PENDING_TEXT` sentinel — the janitor's
+    :data:`SUMMARY_UNAVAILABLE_TEXT` verdict must be final once written
+    so a late-successful Phase-2 LLM completion cannot overwrite it
+    (PR 6 review #20).  Returns ``True`` iff this UPDATE replaced a
+    pending row; callers use a ``False`` return to skip the
+    relationship-bump and auto-reflect tick so the failure counter
+    cannot double-increment for the same interaction.
+
+    The single-writer invariant guarantees ``summary`` is non-empty at
+    every production call site (the summariser returns either LLM text
+    or :data:`SUMMARY_UNAVAILABLE_TEXT`); revalidating here was dead
+    code (PR 6 review #22).
     """
-    if not summary or not summary.strip():
-        raise ValueError("summary must not be empty")
     cursor = await db.execute(
         "UPDATE episodes SET summary = ? "
-        "WHERE agent_id = ? AND interaction_id = ?",
-        (summary, agent_id, interaction_id),
+        "WHERE agent_id = ? AND interaction_id = ? AND summary = ?",
+        (summary, agent_id, interaction_id, SUMMARY_PENDING_TEXT),
     )
     await db.commit()
     return (cursor.rowcount or 0) > 0

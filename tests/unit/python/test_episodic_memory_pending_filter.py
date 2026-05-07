@@ -21,8 +21,6 @@ visible).
 
 from __future__ import annotations
 
-import pytest
-
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.interactions import (
     SUMMARY_PENDING_TEXT,
@@ -146,3 +144,49 @@ class TestRecallHidesSummaryPendingRows:
 
         results = await memory.recall("", limit=10)
         assert results == []
+
+
+class TestUpdateEpisodeSummaryAgentScoping:
+    """PR 6 review #28 — ``update_episode_summary`` is agent-scoped.
+
+    Two agents sharing a DB (the persona-orchestrator multi-tenant
+    shape) must not be able to update each other's pending rows.
+    Pins the agent-scoped ``WHERE`` clause so a future refactor
+    cannot regress to a global UPDATE that crosses agent boundaries.
+    """
+
+    async def test_update_does_not_touch_other_agents_row(
+        self, memory_pair: tuple[EpisodicMemory, EpisodicMemory],
+    ) -> None:
+        mem_a, mem_b = memory_pair
+        # Both agents write a pending row under the same interaction_id —
+        # the scoped UPDATE must match exactly one row (agent A's).
+        shared_iid = "shared-iid"
+        await mem_a.store_episode(
+            summary=SUMMARY_PENDING_TEXT, context={}, importance=0.8,
+            interaction_id=shared_iid, started_at=100.0, closed_at=110.0,
+            turn_count=3, scope="dm:peer:agent-a",
+        )
+        await mem_b.store_episode(
+            summary=SUMMARY_PENDING_TEXT, context={}, importance=0.8,
+            interaction_id=shared_iid, started_at=200.0, closed_at=210.0,
+            turn_count=3, scope="dm:peer:agent-b",
+        )
+
+        updated = await mem_a.update_episode_summary(
+            shared_iid, "agent-a's real summary",
+        )
+        assert updated is True
+
+        # Agent A's row updated; agent B's row still on the sentinel.
+        db_a = mem_a._ensure_db()
+        async with db_a.execute(
+            "SELECT agent_id, summary FROM episodes "
+            "WHERE interaction_id = ? ORDER BY agent_id",
+            (shared_iid,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        assert rows == [
+            ("agent-a", "agent-a's real summary"),
+            ("agent-b", SUMMARY_PENDING_TEXT),
+        ]
