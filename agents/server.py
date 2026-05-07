@@ -19,6 +19,7 @@ import grpc.aio
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .base import BaseAgent
+from .channel_catchup import replay_for_persona_agents
 from .channel_publisher import HTTPChannelPublisher
 from .dispatch import EventDispatcher
 from .generated import task_pb2_grpc
@@ -36,6 +37,7 @@ from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
 from .server_persona import (
+    default_grpc_target,
     initialize_persona_agents,
     load_agent,
     setup_shared_pools,
@@ -48,23 +50,6 @@ from .server_servicers import (  # noqa: F401
 from .tick import TickScheduler
 
 logger = logging.getLogger("Persatrix.agent.server")
-
-
-def _default_grpc_target(orchestrator_url: str) -> str:
-    """Derive the default gRPC target from the orchestrator REST URL.
-
-    Strips the URL scheme + path and replaces the (REST, default 8080)
-    port with the canonical orchestrator gRPC port (9090).  Matches the
-    docker-compose service layout where the same host serves both
-    REST and gRPC, so a single ``--orchestrator-url`` argument is
-    sufficient for the common case.  Operators with a non-standard
-    layout pass ``--orchestrator-grpc=<host:port>`` explicitly.
-    """
-    from urllib.parse import urlparse
-
-    parsed = urlparse(orchestrator_url)
-    host = parsed.hostname or "127.0.0.1"
-    return f"{host}:9090"
 
 
 class AgentServer:
@@ -94,7 +79,7 @@ class AgentServer:
         # Defaults to the orchestrator REST host on the canonical 9090 port;
         # operators in containerised deployments override via
         # --orchestrator-grpc=<service>:9090.
-        self.orchestrator_grpc = orchestrator_grpc or _default_grpc_target(
+        self.orchestrator_grpc = orchestrator_grpc or default_grpc_target(
             self.orchestrator_url,
         )
         self.agents: dict[str, BaseAgent] = {}
@@ -215,6 +200,9 @@ class AgentServer:
         # alongside the shipper-start block, causing every agent to POST
         # /api/v1/agents/register twice on startup.
         await self._self_register()
+        # RFC 0011 PR 5 follow-up — on-startup catch-up fetch (OQ #8).
+        await replay_for_persona_agents(agents=self.agents,
+            orchestrator_url=self.orchestrator_url, session=self._session)
 
     async def _self_register(self) -> None:
         """Register all hosted agents with the orchestrator (best-effort).

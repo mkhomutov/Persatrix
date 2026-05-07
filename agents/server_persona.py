@@ -35,7 +35,24 @@ logger = logging.getLogger("Persatrix.agent.server_persona")
 # _resolve_agent_type is intentionally excluded: it is a private helper
 # used only within load_agent; tests that import it directly are accessing
 # an implementation detail, not part of this module's public contract.
-__all__ = ["load_agent", "initialize_persona_agents"]
+__all__ = ["load_agent", "initialize_persona_agents", "default_grpc_target"]
+
+
+def default_grpc_target(orchestrator_url: str) -> str:
+    """Derive the default gRPC target from the orchestrator REST URL.
+
+    Strips the URL scheme + path and replaces the (REST, default 8080)
+    port with the canonical orchestrator gRPC port (9090). Matches the
+    docker-compose service layout where the same host serves both
+    REST and gRPC, so a single ``--orchestrator-url`` argument is
+    sufficient for the common case. Operators with a non-standard
+    layout pass ``--orchestrator-grpc=<host:port>`` explicitly.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(orchestrator_url)
+    host = parsed.hostname or "127.0.0.1"
+    return f"{host}:9090"
 
 # Agent IDs must match the cross-component contract shared with the Go
 # orchestrator registry.  Validated at load time to prevent routing mismatches.
