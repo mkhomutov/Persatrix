@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0010
 summary: membershipDivergence doc claims policy drift "is logged" but function only compares id sets
-status: open
+status: resolved
 severity: low
 area: internal/channels
 created: 2026-05-04
+closed: 2026-05-07
+closed_pr:
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md
@@ -50,3 +52,9 @@ divergence" so the spec and code agree until PR 7 lands.
 ## Notes
 
 > 2026-05-04 — initial capture during PR #245 review (Should-Fix #2).
+>
+> 2026-05-07 — resolved with option (1): the `membershipDivergence`
+> godoc was tightened to "id-set divergence only; respond-policy drift
+> OQ-deferred to PR 7" and the misleading "is logged" clause dropped.
+> No RFC §B edit was needed — the existing prose already speaks in
+> terms of "divergent participant IDs", so the spec and code agree.

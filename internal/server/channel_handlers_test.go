@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -179,6 +180,44 @@ func TestChannels_PublishMessage_MissingFields(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 		})
 	}
+}
+
+// TestChannels_PublishMessage_MentionsCountCap pins ISSUE-0011: a publish
+// whose `mentions` array exceeds [channelMaxMentionsPerPublish] is rejected
+// at the boundary with 400. At-cap is accepted; over-cap is rejected before
+// the store is touched.
+func TestChannels_PublishMessage_MentionsCountCap(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",
+		Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	atCap := make([]string, channelMaxMentionsPerPublish)
+	for i := range atCap {
+		atCap[i] = fmt.Sprintf("agent-%d", i)
+	}
+	overCap := append(append([]string(nil), atCap...), "agent-overflow")
+
+	t.Run("at cap is accepted", func(t *testing.T) {
+		body, _ := json.Marshal(publishMessageRequest{
+			SenderID: "alice", Content: "hi", Mentions: atCap,
+		})
+		rec := doRequest(srv.Handler(), http.MethodPost,
+			"/api/v1/channels/group:planning/messages", body)
+		require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+	})
+	t.Run("over cap is rejected", func(t *testing.T) {
+		body, _ := json.Marshal(publishMessageRequest{
+			SenderID: "alice", Content: "hi", Mentions: overCap,
+		})
+		rec := doRequest(srv.Handler(), http.MethodPost,
+			"/api/v1/channels/group:planning/messages", body)
+		require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "mentions")
+	})
 }
 
 // TestChannels_GetThread_ReturnsReplies pins the thread-fetch endpoint.

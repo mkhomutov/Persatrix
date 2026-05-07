@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0013
 summary: channel.messages.delivered counter has no companion published counter; delivered/published ratio dashboard not computable
-status: open
+status: resolved
 severity: low
 area: internal/observability
 created: 2026-05-04
+closed: 2026-05-07
+closed_pr:
 refs:
   - docs/rfcs/0011-channels.md
   - docs/observability.md
@@ -49,3 +51,16 @@ adding a publish-side counter is a one-line addition at the top of
 ## Notes
 
 > 2026-05-04 — initial capture during PR #245 review (Nice-to-have #2).
+>
+> 2026-05-07 — resolved by adding the `channel.messages.published`
+> Int64 counter (labelled by `channel_type` only — no `status`, since
+> publishes that fail validation never reach this point) to the
+> orchestrator instrument inventory; threading it through
+> `RouterMetrics` and `ChannelRouter.Publish` so it ticks once per
+> accepted publish, after the store commit and before fanout. Docs
+> updated in `docs/observability.md` §11.3 with the
+> delivered/published ratio PromQL. Test coverage in
+> `TestChannelRouter_Publish_PublishedCounterTicks`
+> (RespondNever-only fanout: published fires, delivered does not) and
+> `TestChannelRouter_Publish_PublishedCounter_PerType` (label-set
+> stability across repeated publishes).

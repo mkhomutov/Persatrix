@@ -94,6 +94,7 @@ type RouterMetrics struct {
 	// per recipient, not per publish. Sender filtering happens before the
 	// counter fires, so the count reflects effective delivery attempts.
 	MessagesDelivered metric.Int64Counter
+	MessagesPublished metric.Int64Counter // pairs with MessagesDelivered (ISSUE-0013)
 }
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST
@@ -179,6 +180,10 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 
 	if err := r.store.PublishMessage(ctx, msg); err != nil {
 		return err
+	}
+
+	if r.metrics != nil && r.metrics.MessagesPublished != nil {
+		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))
 	}
 
 	// RFC 0011 PR 4b: pre-resolve `thread_parent_sender_id` once per
@@ -462,9 +467,8 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 }
 
 // membershipDivergence returns the symmetric-difference participant ids
-// between the declared config and the live store. Empty result means the
-// two agree (modulo policy — divergent policy is logged but not
-// considered hard divergence in v0.3.0; OQ-deferred to PR 7).
+// between the declared config and the live store. Id-set divergence
+// only; policy drift OQ-deferred to PR 7 (ISSUE-0010).
 func membershipDivergence(decl ChannelConfig, store []Member) []string {
 	declSet := make(map[string]struct{}, len(decl.Members))
 	for _, m := range decl.Members {
