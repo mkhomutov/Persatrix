@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0004
 summary: "validBearerToken length-mismatch path leaks expected token length via response timing"
-status: open
+status: resolved
 severity: low
 area: server
 created: 2026-05-04
+closed: 2026-05-07
 refs:
   - docs/rfcs/0009-security-sandboxing.md
 ---
