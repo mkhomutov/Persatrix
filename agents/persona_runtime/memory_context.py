@@ -23,6 +23,11 @@ from ..temporal.rendering import (
     format_duration,
     format_relative,
 )
+from .channel_history import (
+    CHANNEL_HISTORY_SECTION_NAME,
+    recall_channel_episodes,
+    render_channel_history_section,
+)
 from .memory_budget import (
     MAX_EPISODE_SUMMARY_CHARS,
     MAX_NOTE_CONTENT_CHARS,
@@ -183,11 +188,16 @@ class _MemoryContextMixin:
     ) -> MemoryInjectionResult:
         """Inject episodic, relationship, and note context into working memory.
 
-        Queries the three memory tiers for content relevant to the current
-        event and allocates injected tokens via a single :class:`MemoryBudget`
-        (RFC 0017 §B).  Tiers are processed in fixed priority order
-        (relationship=8, episodic=7, notes=6) so higher-priority tiers
-        consume the budget first.  Each item is passed through
+        Queries the memory tiers for content relevant to the current event
+        and allocates injected tokens via a single :class:`MemoryBudget`
+        (RFC 0017 §B).  Tiers are processed in the canonical cross-RFC
+        priority order: relationship → channel history (CHANNEL_MESSAGE
+        only) → episodic recall → recent notes; open-commitments and
+        duration-priors slots ship empty until v0.4.0.  Pinned verbatim
+        by RFC 0011 §E and RFC 0021 §J — see
+        :mod:`agents.persona_runtime.channel_history` for the channel
+        tier and ``tests/unit/python/test_memory_context_priority_order.py``
+        for the order regression guard.  Each item is passed through
         :meth:`MemoryBudget.try_add`; items that exceed the remaining budget
         are truncated or dropped.
 
@@ -236,6 +246,7 @@ class _MemoryContextMixin:
         self._working_memory.remove_section("episodic_recall")
         self._working_memory.remove_section("recent_notes")
         self._working_memory.remove_section("relationship_context")
+        self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
         # Sequential, not concurrent: all three share the same aiosqlite
@@ -275,6 +286,13 @@ class _MemoryContextMixin:
                     self.agent_id, sender_id, exc_info=True,
                 )
                 rel = None
+
+        # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
+        # before the episodic recall so harnesses asserting on
+        # ``recall.call_args`` still pin the episodic ``min_score``.
+        channel_episodes = await recall_channel_episodes(
+            self._episodic_memory, event, agent_id=self.agent_id,
+        )
 
         # Tier 2 (priority 7): Episodic recall.
         # PR 4: TICK skip removed — the recall-layer min_score threshold
@@ -408,6 +426,15 @@ class _MemoryContextMixin:
                     _inst.temporal_recency_rendered.add(
                         1, attributes={"agent.id": _agent_attr, "source": "relationship"},
                     )
+
+        # Channel-history tier (RFC 0011 §E + RFC 0021 §J).  Slots
+        # between relationship and episodic admissions.
+        ch_section = render_channel_history_section(
+            channel_episodes, budget,
+            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
+        )
+        if ch_section is not None:
+            self._working_memory.add_section(ch_section)
 
         # Episodic tier (priority 7).
         if episodes:

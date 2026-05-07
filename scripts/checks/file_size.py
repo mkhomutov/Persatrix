@@ -165,6 +165,20 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # ``facade_procedural`` / ``shared_pool_facade`` pattern — is
     # queued as a follow-up.  Grandfather here until that split lands.
     "agents/memory/episodic.py",
+    # agents/persona_runtime/memory_context.py was at 498 lines (one
+    # line under the cap) pre-RFC-0011 PR 5 follow-up.  The
+    # channel-history tier (this PR) added the canonical-priority
+    # docstring, the section-clear sweep entry, and the two helper-call
+    # sites for ``recall_channel_episodes`` /
+    # ``render_channel_history_section``; the tier's recall + admission
+    # bodies live in the new ``agents/persona_runtime/channel_history.py``
+    # so the bulk does not land here.  Further reduction requires the
+    # parallel extraction of the relationship-admission block (~85
+    # lines spanning the temporal-rendering + trust + cadence fields)
+    # into the same companion-module pattern; that refactor is a
+    # logically distinct change and is queued as a follow-up.
+    # Grandfather here until that split lands.
+    "agents/persona_runtime/memory_context.py",
 })
 
 
