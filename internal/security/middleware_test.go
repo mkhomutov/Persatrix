@@ -51,7 +51,7 @@ func TestRESTMiddleware_QuarantinedReturns403(t *testing.T) {
 	rl := newTestRateLimiter(t, clk)
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	}
 	require.True(t, cb.IsQuarantined("agent-a"))
 	mw := RESTRateLimitMiddleware(rl, cb)
@@ -93,7 +93,7 @@ func TestGRPCInterceptor_QuarantinedReturnsPermissionDenied(t *testing.T) {
 	rl := newTestRateLimiter(t, clk)
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	}
 	interceptor := GRPCRateLimitInterceptor(rl, cb)
 	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
@@ -243,7 +243,7 @@ func TestRESTMiddleware_QuarantineActiveBlocksAnonymous(t *testing.T) {
 	rl := newTestRateLimiter(t, clk)
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-bad", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-bad", ViolationCapability)
 	}
 	require.True(t, cb.IsQuarantined("agent-bad"),
 		"precondition: agent-bad must be quarantined")
@@ -264,7 +264,7 @@ func TestRESTMiddleware_QuarantineActiveBlocksAnonymous(t *testing.T) {
 
 	// Releasing the quarantine restores anonymous access (no lingering
 	// global-deny state).
-	require.True(t, cb.Unquarantine("agent-bad", "operator-test"))
+	require.True(t, cb.Unquarantine(context.Background(), "agent-bad", "operator-test"))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/work", nil))
 	assert.Equal(t, http.StatusOK, rec.Code,
@@ -280,7 +280,7 @@ func TestGRPCInterceptor_QuarantineActiveBlocksAnonymous(t *testing.T) {
 	rl := newTestRateLimiter(t, clk)
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-bad", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-bad", ViolationCapability)
 	}
 	require.True(t, cb.IsQuarantined("agent-bad"))
 

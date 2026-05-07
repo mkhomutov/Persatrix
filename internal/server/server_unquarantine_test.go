@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -132,7 +133,7 @@ func operatorHeaders(extra map[string]string) map[string]string {
 // be exercised. Returns the agent ID used.
 func quarantineAgentForTest(t *testing.T, cb *security.CircuitBreaker, id string) {
 	t.Helper()
-	cb.RecordViolation(id, security.ViolationCapability)
+	cb.RecordViolation(context.Background(), id, security.ViolationCapability)
 	require.True(t, cb.IsQuarantined(id), "precondition: %s must be quarantined", id)
 }
 

@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0007
 summary: "RateLimiter/CircuitBreaker audit emits use context.Background(); plumb request context for trace correlation"
-status: open
+status: resolved
 severity: low
 area: security
 created: 2026-05-04
+closed: 2026-05-07
 refs:
   - docs/rfcs/0009-security-sandboxing.md
   - docs/observability.md
@@ -42,3 +43,15 @@ Aligns with the PR 4 follow-up scope.
 ## Notes
 
 > 2026-05-04 — captured during PR #244 deep review (R3, finding N-R3-01).
+>
+> 2026-05-07 — resolved. `RateLimiter.Allow`, `CircuitBreaker.RecordViolation`,
+> and `CircuitBreaker.Unquarantine` now take a leading `ctx context.Context`.
+> Both `emit` helpers detach the parent ctx via `context.WithoutCancel(ctx)`
+> before handing off to the auditor, mirroring `Server.emitAudit`. Nil ctx
+> falls back to `context.Background()` for non-request paths (background
+> sweeps, tests). REST and gRPC middleware now thread `r.Context()` /
+> the inbound gRPC ctx through. Pinned by four new unit tests:
+> `TestRateLimiter_AllowPropagatesRequestCtxToAuditor`,
+> `TestRateLimiter_AuditEmitNotCancelledWithRequestCtx`,
+> `TestCircuitBreaker_RecordViolationPropagatesCtxToAuditor`,
+> `TestCircuitBreaker_AuditEmitNotCancelledWithRequestCtx`.

@@ -111,7 +111,13 @@ func NewRateLimiter(cfg RateLimitConfig) (*RateLimiter, error) {
 // On deny, an `rate_limit.violated` event is emitted (throttled per
 // agent to one event per WindowSeconds to avoid amplifying the very
 // flood the limiter is mitigating).
-func (rl *RateLimiter) Allow(agentID string) bool {
+//
+// ISSUE-0007: ctx is the inbound request context. It is threaded through
+// to the auditor (via [context.WithoutCancel] inside [emit]) so trace
+// IDs survive into the audit chain. A nil ctx is tolerated and falls
+// back to [context.Background] — the limiter must remain usable from
+// non-request paths (eviction sweeps, tests) without a synthetic ctx.
+func (rl *RateLimiter) Allow(ctx context.Context, agentID string) bool {
 	if !rl.cfg.Enabled {
 		return true
 	}
@@ -129,7 +135,7 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 	rl.mu.Unlock()
 
 	for _, victim := range evicted {
-		rl.emit(AuditEvent{
+		rl.emit(ctx, AuditEvent{
 			Timestamp: now,
 			EventType: AuditRateLimitAgentEvicted,
 			AgentID:   victim,
@@ -140,7 +146,7 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 	}
 
 	if anon {
-		rl.emit(AuditEvent{
+		rl.emit(ctx, AuditEvent{
 			EventType: AuditRateLimitUnauthenticatedCall,
 			AgentID:   resolved,
 			Action:    "rate_limit.check",
@@ -149,7 +155,7 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 		})
 	}
 	if !allowed && rl.shouldEmitViolation(resolved, now) {
-		rl.emit(AuditEvent{
+		rl.emit(ctx, AuditEvent{
 			EventType: AuditRateLimitViolated,
 			AgentID:   resolved,
 			Action:    "rate_limit.check",
@@ -265,11 +271,24 @@ func (rl *RateLimiter) shouldEmitViolation(agentID string, now time.Time) bool {
 	return true
 }
 
-func (rl *RateLimiter) emit(ev AuditEvent) {
+// emit forwards ev to the configured auditor, detaching the parent ctx
+// from cancellation via [context.WithoutCancel] (ISSUE-0007). Detaching
+// matters because the auditor handoff for security-class events fsyncs
+// before returning; a fast client cancel between the limiter's deny
+// decision and the auditor write would otherwise drop the very event
+// the limiter just decided to record. A nil ctx is tolerated and falls
+// back to [context.Background] for the same reason: callers from
+// non-request paths (e.g. background eviction sweeps, tests) must not
+// be forced to synthesise a ctx purely to call into emit.
+func (rl *RateLimiter) emit(ctx context.Context, ev AuditEvent) {
 	if rl.cfg.Auditor == nil {
 		return
 	}
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
+	}
 	if err := rl.cfg.Auditor.Emit(ctx, ev); err != nil {
 		rl.cfg.Logger.Debug("rate limiter audit emit failed",
 			zap.String("event_type", string(ev.EventType)),

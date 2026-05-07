@@ -1,6 +1,7 @@
 package security
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestCircuitBreaker_OpensAtCapabilityThreshold(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	}
 	assert.True(t, cb.IsQuarantined("agent-a"))
 }
@@ -41,10 +42,10 @@ func TestCircuitBreaker_OpensAtCapabilityThreshold(t *testing.T) {
 func TestCircuitBreaker_DoesNotOpenAcrossWindow(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, _ := newTestBreaker(t, clk)
-	cb.RecordViolation("agent-a", ViolationCapability)
-	cb.RecordViolation("agent-a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	clk.Advance(6 * time.Minute)
-	cb.RecordViolation("agent-a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	assert.False(t, cb.IsQuarantined("agent-a"))
 }
 
@@ -52,7 +53,7 @@ func TestCircuitBreaker_OpenEmitsQuarantineEvent(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, auditor := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("agent-a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "agent-a", ViolationCapability)
 	}
 	assert.Equal(t, 1, auditor.countByType(AuditAgentQuarantined),
 		"exactly one quarantine event on first open")
@@ -62,18 +63,18 @@ func TestCircuitBreaker_PerViolationTypeThresholds(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, _ := newTestBreaker(t, clk)
 	// Capability threshold = 3
-	cb.RecordViolation("a", ViolationCapability)
-	cb.RecordViolation("a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	require.False(t, cb.IsQuarantined("a"))
-	cb.RecordViolation("a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	require.True(t, cb.IsQuarantined("a"))
 
 	// Rate-limit threshold = 5 — separate agent so prior open does not bleed.
 	for i := 0; i < 4; i++ {
-		cb.RecordViolation("b", ViolationRateLimit)
+		cb.RecordViolation(context.Background(), "b", ViolationRateLimit)
 	}
 	require.False(t, cb.IsQuarantined("b"))
-	cb.RecordViolation("b", ViolationRateLimit)
+	cb.RecordViolation(context.Background(), "b", ViolationRateLimit)
 	require.True(t, cb.IsQuarantined("b"))
 }
 
@@ -81,15 +82,15 @@ func TestCircuitBreaker_Unquarantine(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, auditor := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	}
 	require.True(t, cb.IsQuarantined("a"))
-	require.True(t, cb.Unquarantine("a", "operator-test"))
+	require.True(t, cb.Unquarantine(context.Background(), "a", "operator-test"))
 	assert.False(t, cb.IsQuarantined("a"))
 	assert.Equal(t, 1, auditor.countByType(AuditAgentUnquarantined))
 	// Counters cleared so the agent does not re-quarantine on the next
 	// violation alone.
-	cb.RecordViolation("a", ViolationCapability)
+	cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	assert.False(t, cb.IsQuarantined("a"))
 }
 
@@ -103,7 +104,7 @@ func TestCircuitBreaker_ViolationsClearedOnQuarantine(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	cb, _ := newTestBreaker(t, clk)
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	}
 	require.True(t, cb.IsQuarantined("a"))
 	cb.mu.Lock()
@@ -130,24 +131,24 @@ func TestCircuitBreaker_HasAnyQuarantined_AtomicCountTracksMap(t *testing.T) {
 
 	// Open agent-a.
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	}
 	require.True(t, cb.HasAnyQuarantined())
 	assert.Equal(t, int32(1), cb.quarantinedCount.Load())
 
 	// Open agent-b — count must reflect both.
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("b", ViolationCapability)
+		cb.RecordViolation(context.Background(), "b", ViolationCapability)
 	}
 	assert.Equal(t, int32(2), cb.quarantinedCount.Load())
 
 	// Release agent-a — count drops to 1, HasAnyQuarantined still true.
-	require.True(t, cb.Unquarantine("a", "operator-test"))
+	require.True(t, cb.Unquarantine(context.Background(), "a", "operator-test"))
 	assert.True(t, cb.HasAnyQuarantined())
 	assert.Equal(t, int32(1), cb.quarantinedCount.Load())
 
 	// Release agent-b — count drops to 0, HasAnyQuarantined flips false.
-	require.True(t, cb.Unquarantine("b", "operator-test"))
+	require.True(t, cb.Unquarantine(context.Background(), "b", "operator-test"))
 	assert.False(t, cb.HasAnyQuarantined(),
 		"L-05: anonymous-deny must release immediately when last quarantine clears")
 	assert.Equal(t, int32(0), cb.quarantinedCount.Load())
@@ -155,13 +156,13 @@ func TestCircuitBreaker_HasAnyQuarantined_AtomicCountTracksMap(t *testing.T) {
 	// Re-open agent-a after release — counter must re-engage (guards
 	// against an Unquarantine-then-RecordViolation off-by-one).
 	for i := 0; i < 3; i++ {
-		cb.RecordViolation("a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	}
 	assert.True(t, cb.HasAnyQuarantined())
 	assert.Equal(t, int32(1), cb.quarantinedCount.Load())
 
 	// Idempotent unquarantine (no-op branch) must not touch the counter.
-	assert.False(t, cb.Unquarantine("never-existed", "operator-test"))
+	assert.False(t, cb.Unquarantine(context.Background(), "never-existed", "operator-test"))
 	assert.Equal(t, int32(1), cb.quarantinedCount.Load(),
 		"no-op Unquarantine must not decrement the counter")
 }
@@ -239,7 +240,7 @@ func TestCircuitBreaker_DisabledRuleNeverOpens(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
-		cb.RecordViolation("a", ViolationCapability)
+		cb.RecordViolation(context.Background(), "a", ViolationCapability)
 	}
 	assert.False(t, cb.IsQuarantined("a"),
 		"Disabled rules must not contribute to quarantine state")
@@ -258,4 +259,49 @@ func TestCircuitBreaker_RejectsZeroWindowEvenWithCount1(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
+}
+
+// breakerCtxKey is a private key type so test marker values cannot
+// collide with anything the breaker stamps on the context.
+type breakerCtxKey struct{}
+
+// TestCircuitBreaker_RecordViolationPropagatesCtxToAuditor pins
+// ISSUE-0007: the `agent.quarantined` (`circuit_breaker.opened`) audit
+// emit triggered by RecordViolation must carry the caller's request
+// context so trace IDs survive into the audit chain. Prior to the fix,
+// `emit` handed `context.Background()` to the auditor.
+func TestCircuitBreaker_RecordViolationPropagatesCtxToAuditor(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cb, auditor := newTestBreaker(t, clk)
+	ctx := context.WithValue(context.Background(), breakerCtxKey{}, "trace-xyz")
+
+	for i := 0; i < 3; i++ {
+		cb.RecordViolation(ctx, "agent-a", ViolationCapability)
+	}
+
+	emits := auditor.snapshotByType(AuditAgentQuarantined)
+	require.Len(t, emits, 1, "exactly one quarantine event on first open")
+	got, _ := emits[0].ctx.Value(breakerCtxKey{}).(string)
+	assert.Equal(t, "trace-xyz", got,
+		"ISSUE-0007: agent.quarantined emit must propagate the caller's request ctx")
+}
+
+// TestCircuitBreaker_AuditEmitNotCancelledWithRequestCtx pins the
+// "use context.WithoutCancel" half of ISSUE-0007: the quarantine event
+// must still reach the auditor even if the inbound request context is
+// already cancelled when the breaker decides to open.
+func TestCircuitBreaker_AuditEmitNotCancelledWithRequestCtx(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cb, auditor := newTestBreaker(t, clk)
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for i := 0; i < 3; i++ {
+		cb.RecordViolation(parent, "agent-a", ViolationCapability)
+	}
+
+	emits := auditor.snapshotByType(AuditAgentQuarantined)
+	require.Len(t, emits, 1)
+	assert.NoError(t, emits[0].ctx.Err(),
+		"ISSUE-0007: auditor ctx must not inherit cancellation from the request ctx (use context.WithoutCancel)")
 }
