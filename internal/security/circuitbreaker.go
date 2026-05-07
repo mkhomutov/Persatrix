@@ -122,7 +122,12 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) (*CircuitBreaker, error) {
 // the breaker (emitting `agent.quarantined`) when the rolling count
 // crosses the threshold for vt. Repeated calls after the breaker is
 // already open are recorded but do not re-emit the quarantine event.
-func (cb *CircuitBreaker) RecordViolation(agentID string, vt ViolationType) {
+//
+// ISSUE-0007: ctx is the inbound request context. It is threaded through
+// to the auditor (via [context.WithoutCancel] inside [emit]) so trace
+// IDs survive into the audit chain. A nil ctx is tolerated and falls
+// back to [context.Background] for non-request paths.
+func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, vt ViolationType) {
 	if agentID == "" {
 		return
 	}
@@ -175,7 +180,7 @@ func (cb *CircuitBreaker) RecordViolation(agentID string, vt ViolationType) {
 	cb.mu.Unlock()
 
 	if shouldOpen {
-		cb.emit(AuditEvent{
+		cb.emit(ctx, AuditEvent{
 			Timestamp: now,
 			EventType: AuditAgentQuarantined,
 			AgentID:   agentID,
@@ -219,7 +224,12 @@ func (cb *CircuitBreaker) HasAnyQuarantined() bool {
 // Unquarantine releases agentID and clears its violation history.
 // Returns true when the agent was quarantined; false on no-op.
 // `actor` is recorded on the audit event for forensics.
-func (cb *CircuitBreaker) Unquarantine(agentID, actor string) bool {
+//
+// ISSUE-0007: ctx is the inbound request context (typically from the
+// operator-driven REST unquarantine handler). Nil ctx falls back to
+// [context.Background] — Unquarantine is also called from CLI/admin
+// paths that have no ambient request scope.
+func (cb *CircuitBreaker) Unquarantine(ctx context.Context, agentID, actor string) bool {
 	cb.mu.Lock()
 	_, ok := cb.quarantined[agentID]
 	if ok {
@@ -229,7 +239,7 @@ func (cb *CircuitBreaker) Unquarantine(agentID, actor string) bool {
 	}
 	cb.mu.Unlock()
 	if ok {
-		cb.emit(AuditEvent{
+		cb.emit(ctx, AuditEvent{
 			Timestamp: cb.cfg.Now(),
 			EventType: AuditAgentUnquarantined,
 			AgentID:   agentID,
@@ -256,11 +266,23 @@ func (cb *CircuitBreaker) QuarantinedAgents() []string {
 	return ids
 }
 
-func (cb *CircuitBreaker) emit(ev AuditEvent) {
+// emit forwards ev to the configured auditor, detaching the parent ctx
+// from cancellation via [context.WithoutCancel] (ISSUE-0007). Detaching
+// matters because the breaker's `agent.quarantined` /
+// `agent.unquarantined` events are security-class and fsync before
+// returning; a fast client cancel between the open/close decision and
+// the auditor write would otherwise drop the event the breaker just
+// recorded. A nil ctx falls back to [context.Background].
+func (cb *CircuitBreaker) emit(ctx context.Context, ev AuditEvent) {
 	if cb.cfg.Auditor == nil {
 		return
 	}
-	if err := cb.cfg.Auditor.Emit(context.Background(), ev); err != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
+	}
+	if err := cb.cfg.Auditor.Emit(ctx, ev); err != nil {
 		cb.cfg.Logger.Debug("circuit breaker audit emit failed",
 			zap.String("event_type", string(ev.EventType)),
 			zap.String("agent_id", ev.AgentID),

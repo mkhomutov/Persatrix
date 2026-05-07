@@ -322,7 +322,7 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 	if actor == "" {
 		actor = "operator"
 	}
-	if !s.circuitBreaker.Unquarantine(id, actor) {
+	if !s.circuitBreaker.Unquarantine(r.Context(), id, actor) {
 		writeError(w, "NOT_FOUND", "agent is not quarantined", http.StatusNotFound)
 		return
 	}

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -106,7 +107,7 @@ func TestRateLimit_UnquarantineEndpoint(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	cb.RecordViolation("quarantined-agent", security.ViolationCapability)
+	cb.RecordViolation(context.Background(), "quarantined-agent", security.ViolationCapability)
 	require.True(t, cb.IsQuarantined("quarantined-agent"))
 
 	srv := newRateLimitedServer(t, rl, cb)

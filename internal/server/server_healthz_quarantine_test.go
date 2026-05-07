@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestHealthzAllowedDuringQuarantine(t *testing.T) {
 
 	// Seed quarantine state so the middleware would otherwise deny
 	// anonymous traffic via the H-01 protection.
-	cb.RecordViolation("agent-bad", security.ViolationCapability)
+	cb.RecordViolation(context.Background(), "agent-bad", security.ViolationCapability)
 	require.True(t, cb.IsQuarantined("agent-bad"),
 		"precondition: agent-bad must be quarantined to exercise H-03")
 
@@ -53,7 +54,7 @@ func TestHealthzAllowedDuringQuarantine(t *testing.T) {
 func TestQuarantineActiveBlocksAnonymousAPIv1(t *testing.T) {
 	cb := breakerWithThreshold(t)
 	srv := testServerWithBreaker(t, cb)
-	cb.RecordViolation("agent-bad", security.ViolationCapability)
+	cb.RecordViolation(context.Background(), "agent-bad", security.ViolationCapability)
 	require.True(t, cb.IsQuarantined("agent-bad"))
 
 	// An anonymous call to a real API endpoint (DELETE on a nonexistent

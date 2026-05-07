@@ -109,9 +109,9 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 					return
 				}
 			}
-			if limiter != nil && !limiter.Allow(agentID) {
+			if limiter != nil && !limiter.Allow(r.Context(), agentID) {
 				if breaker != nil && agentID != "" {
-					breaker.RecordViolation(agentID, ViolationRateLimit)
+					breaker.RecordViolation(r.Context(), agentID, ViolationRateLimit)
 				}
 				w.Header().Set("Retry-After", strconv.Itoa(limiter.cfg.WindowSeconds))
 				writeJSONError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
@@ -158,9 +158,9 @@ func GRPCRateLimitInterceptor(limiter *RateLimiter, breaker *CircuitBreaker) grp
 				return nil, status.Error(codes.PermissionDenied, "agent is quarantined")
 			}
 		}
-		if limiter != nil && !limiter.Allow(agentID) {
+		if limiter != nil && !limiter.Allow(ctx, agentID) {
 			if breaker != nil && agentID != "" {
-				breaker.RecordViolation(agentID, ViolationRateLimit)
+				breaker.RecordViolation(ctx, agentID, ViolationRateLimit)
 			}
 			_ = grpc.SetHeader(ctx, metadata.Pairs(
 				"retry-after-seconds", strconv.Itoa(limiter.cfg.WindowSeconds),
