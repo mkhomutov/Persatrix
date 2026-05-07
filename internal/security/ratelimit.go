@@ -306,10 +306,21 @@ func (r *agentRing) append(t time.Time) {
 	}
 }
 
-// evictOlderThan walks the ring and drops entries older than cutoff by
-// rebuilding the populated entries in order. The ring is small
-// (CallsPerWindow timestamps) so the linear scan is cheaper than a
-// per-entry heap.
+// evictOlderThan drops admit timestamps at or before cutoff. This is on
+// the per-Allow hot path (PR #244 review M-R3-01 / ISSUE-0003), so it
+// must not allocate.
+//
+// Invariant exploited: timestamps are appended in chronological order
+// because both production [time.Now] and the test [fakeClock] are
+// monotonic, and cutoff (now - window) is monotonic too. Therefore
+// expired entries always form a contiguous prefix at the chronological
+// start of the ring — there is no "stale entry surrounded by live
+// entries" case to compact around.
+//
+// The fix is to shrink `r.count` by the number of expired prefix
+// entries; `r.head` is unchanged because new admits still land at the
+// same physical slot, and the logical start `(head - count + cap)`
+// rebases automatically. No memory move, no allocation.
 func (r *agentRing) evictOlderThan(cutoff time.Time) {
 	if r.count == 0 {
 		return
@@ -318,19 +329,15 @@ func (r *agentRing) evictOlderThan(cutoff time.Time) {
 	// the builtin and obscured the intent. `ringCap` reads as "the
 	// fixed capacity of the per-agent ring".
 	ringCap := len(r.calls)
-	kept := make([]time.Time, 0, r.count)
 	start := (r.head - r.count + ringCap) % ringCap
-	for i := 0; i < r.count; i++ {
-		t := r.calls[(start+i)%ringCap]
-		if t.After(cutoff) {
-			kept = append(kept, t)
+	drop := 0
+	for drop < r.count {
+		if r.calls[(start+drop)%ringCap].After(cutoff) {
+			break
 		}
+		drop++
 	}
-	r.count = len(kept)
-	r.head = r.count % ringCap
-	for i := 0; i < r.count; i++ {
-		r.calls[i] = kept[i]
-	}
+	r.count -= drop
 }
 
 // String implements [fmt.Stringer] for ring debugging in test failures.
