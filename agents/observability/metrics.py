@@ -198,9 +198,10 @@ class _Instruments:
             name="agent.temporal.recency.rendered",
             unit="{render}",
             description=(
-                "Recency tags rendered onto recalled episodes or "
-                "relationship summaries (RFC 0021 §D / §E).  Attributes: "
-                "agent.id, source (episode|relationship)."
+                "Recency tags rendered onto recalled episodes, "
+                "relationship summaries, or channel-history turns "
+                "(RFC 0021 §D / §E + RFC 0011 §E).  Attributes: "
+                "agent.id, source (episode|relationship|channel_history)."
             ),
         )
 

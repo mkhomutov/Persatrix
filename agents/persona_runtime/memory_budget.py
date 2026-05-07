@@ -23,6 +23,8 @@ __all__ = [
     "MIN_TOKENS_RELATIONSHIP",
     "MIN_TOKENS_EPISODIC",
     "MIN_TOKENS_NOTES",
+    "MIN_TOKENS_CHANNEL_HISTORY",
+    "CHANNEL_RECALL_LIMIT",
     "REL_NOTES_INTERIM_CHARS",
     "MAX_EPISODE_SUMMARY_CHARS",
     "MAX_NOTE_CONTENT_CHARS",
@@ -44,6 +46,18 @@ MEMORY_BUDGET_TOKENS: int = 1500
 MIN_TOKENS_RELATIONSHIP: int = 64
 MIN_TOKENS_EPISODIC: int = 32
 MIN_TOKENS_NOTES: int = 24
+# Channel-history tier (RFC 0011 PR 5 follow-up).  Same render shape as
+# episodic recall ([recency-tag] summary), so the floor matches.
+MIN_TOKENS_CHANNEL_HISTORY: int = 32
+
+# Maximum number of channel-scoped episodes pulled per CHANNEL_MESSAGE
+# event before the budget allocator decides which fit.  Default 20 per
+# RFC 0011 §E and RFC 0021 §J.  Hardcoded for v0.3.0; the RFC describes
+# this as ``optimization.yaml → channels.recall_limit``, but the
+# persona-runtime does not load runtime tuning from YAML today (every
+# other tier constant in this file is also hardcoded).  Promote to
+# config when a runtime YAML loader exists.
+CHANNEL_RECALL_LIMIT: int = 20
 
 # Interim per-field cap on ``rel.notes`` (chars).  The pre-RFC-0017 code
 # used 300 chars as an interim mitigation against prompt injection from

@@ -32,6 +32,7 @@ from .facade_procedural import (
     ProceduralFacadeMixin,
     validate_decay_params,
 )
+from .scope_recall import recall_with_scope_filter
 from .shared_pool import SharedPoolRegistry
 from .shared_pool_facade import SharedPoolFacadeMixin
 from .working import estimate_tokens
@@ -264,46 +265,25 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         effective_min_score = (
             min_score if min_score is not None else self._default_min_score
         )
-        required_tags = frozenset(tags or ())
-        # PR-220 review M3: when a tag/scope filter is active the Python-
-        # side cull can drop matches that exist further down the BM25
-        # ranking, yielding an empty result for a small ``limit`` even
-        # when matches exist.  Over-fetch by a factor of 3 to make the
-        # AND-tag/scope contract honour ``limit`` in Phase 2.  Drop this
-        # once SQL-side tag/scope filtering lands in PR 5.
-        recall_limit = (
-            limit * _TAG_SCOPE_OVERFETCH_FACTOR
-            if (required_tags or scope is not None)
-            else limit
-        )
-        episodes = await self._episodic.recall(
+        # The recall + scope/tags filter loop lives in
+        # :func:`agents.memory.scope_recall.recall_with_scope_filter` so
+        # the persona-runtime channel-history tier (RFC 0011 PR 5
+        # follow-up) shares the same overfetch + AND-tag + scope-fallback
+        # contract.  The facade is the ``MemoryEntry`` projection layer
+        # on top of the shared helper.
+        episodes = await recall_with_scope_filter(
+            self._episodic,
             query,
-            limit=recall_limit,
+            limit=limit,
+            scope=scope,
+            tags=tags,
             min_score=effective_min_score,
         )
         out: list[MemoryEntry] = []
         for ep in episodes:
-            # PR 5's per-caller ``[summary pending]`` skip moved into
-            # ``EpisodicMemory.recall`` after PR-262 review M1 (the
-            # persona prompt-assembly path bypasses the facade and
-            # called ``recall`` directly, leaving the LLM prompt path
-            # exposed during the two-phase close race window). The
-            # filter now sits at the recall chokepoint so every caller
-            # is covered by one rule.
-            ep_tags = frozenset(ep.tags or ())
-            # AND semantics — required tags must all appear on the entry.
-            if required_tags and not required_tags.issubset(ep_tags):
-                continue
-            # PR 2a follow-up M1: prefer the column-level ``scope`` (set
-            # by RFC 0020's ``InteractionTracker`` and the facade's own
-            # ``store_observation``); fall back to ``context["scope"]``
-            # only when the column is NULL so legacy pre-PR-220 rows
-            # written by the facade still match.
             entry_scope = ep.scope
             if entry_scope is None and isinstance(ep.context, dict):
                 entry_scope = ep.context.get("scope")
-            if scope is not None and entry_scope != scope:
-                continue
             out.append(
                 MemoryEntry(
                     id=ep.id,
@@ -320,12 +300,6 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
                     scope=entry_scope,
                 )
             )
-            # Truncate once the requested ``limit`` is reached even when
-            # over-fetching above (M3 mitigation): callers must never
-            # observe more than ``limit`` entries, regardless of whether
-            # a tag/scope filter was applied.
-            if len(out) >= limit:
-                break
         return out
 
     async def list_candidates(self, task_context: dict[str, Any]) -> list[Candidate]:
@@ -467,13 +441,6 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
 # in PR 5; until then the value matches the PR plan integration test
 # (``budget=500 → limit=5``).
 DEFAULT_AVG_ENTRY_TOKENS = 100
-
-# PR-220 review M3: over-fetch multiplier applied by ``retrieve_relevant``
-# when a tag or scope filter is active.  Phase 2 mitigation only — PR 5
-# replaces this with SQL-side filtering at which point the multiplier is
-# removed.  Value of 3 chosen to match typical BM25 hit-rate after AND-tag
-# culling without unbounded recall-side cost.
-_TAG_SCOPE_OVERFETCH_FACTOR = 3
 
 
 def budget_to_limit(
