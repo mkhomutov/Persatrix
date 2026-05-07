@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -332,9 +333,19 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 // validBearerToken returns true when the Authorization header carries a
 // `Bearer <token>` whose token component is byte-for-byte equal to
 // expected. The comparison is constant-time so a timing side channel
-// cannot leak the expected token. expected must be non-empty (callers
-// short-circuit when no token is configured); a zero-length expected
-// would otherwise compare equal to any zero-length supplied token.
+// cannot leak either the content OR the length of the expected token.
+// expected must be non-empty (callers short-circuit when no token is
+// configured); a zero-length expected would otherwise compare equal to
+// any zero-length supplied token.
+//
+// ISSUE-0004: both inputs are hashed to fixed-size SHA-256 digests
+// before subtle.ConstantTimeCompare. The previous implementation
+// short-circuited on len(supplied) != len(expected), making the
+// "wrong length" path observably faster than "wrong content" and
+// letting a remote attacker probe the expected token length via
+// differential response timing. Hashing first makes the comparison
+// inputs identically sized regardless of the supplied token's length,
+// so length and content cases are now indistinguishable.
 func validBearerToken(header, expected string) bool {
 	const prefix = "Bearer "
 	if expected == "" {
@@ -344,14 +355,9 @@ func validBearerToken(header, expected string) bool {
 		return false
 	}
 	supplied := header[len(prefix):]
-	// ConstantTimeCompare requires equal-length inputs to be meaningful;
-	// short-circuit unequal lengths first (this leaks length but not
-	// content, and the expected length is operator-chosen, not a
-	// per-request secret).
-	if len(supplied) != len(expected) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(supplied), []byte(expected)) == 1
+	supSum := sha256.Sum256([]byte(supplied))
+	expSum := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(supSum[:], expSum[:]) == 1
 }
 
 func agentToResponse(a *registry.AgentInfo) agentResponse {
