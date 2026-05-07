@@ -364,3 +364,64 @@ func TestGRPCMessageDispatcher_ContextCancelledMidCall(t *testing.T) {
 			"any other code means the router's per-recipient 5s deadline "+
 			"(router.go fanout) is silently bypassed or replaced. err=%v", err)
 }
+
+// TestGRPCMessageDispatcher_RPCStatusErrorPropagates closes ISSUE-0030.
+// Prior coverage exercised the dial happy path, registry/address gating,
+// and ctx-cancel-mid-call, but the case where ReceiveChannelMessage
+// itself returns a gRPC status error (the receiver is up and reachable,
+// but unhealthy / not implementing the RPC) was untested. Without this
+// guard, a regression that swallowed Unavailable / Unimplemented (e.g.
+// a defensive `return nil` on transient errors) would silently degrade
+// channel delivery to a black hole — the router would record
+// status="ok" and skip the retry-via-history fallback.
+//
+// Table-driven over the two codes the v0.3.0 dispatcher contract cares
+// about:
+//
+//   - Unavailable: receiver is reachable but not ready (restarting,
+//     handshake failed). Must surface so the router records status="error".
+//   - Unimplemented: receiver is up but does not implement the RPC
+//     (binary-skew window during a rolling deploy). Must propagate
+//     rather than degrade to silent drop.
+func TestGRPCMessageDispatcher_RPCStatusErrorPropagates(t *testing.T) {
+	cases := []struct {
+		name string
+		code codes.Code
+	}{
+		{"unavailable", codes.Unavailable},
+		{"unimplemented", codes.Unimplemented},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &recordingAgentServer{
+				respond: func() error {
+					return status.Error(tc.code, "boom")
+				},
+			}
+			dial, cleanup := startBufconnServer(t, srv)
+			defer cleanup()
+
+			resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+				"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+			}}
+			d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
+			d.dial = dial
+
+			err := d.Dispatch(context.Background(), DispatchEnvelope{
+				Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+			}, ChannelMessage{
+				ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+				Content: "hi", Timestamp: time.Now().UTC(),
+			})
+
+			require.Error(t, err,
+				"%s status from ReceiveChannelMessage must surface as a "+
+					"non-nil Dispatch error; nil here would let the router "+
+					"record status=\"ok\" against a dropped message", tc.name)
+			assert.Equal(t, tc.code, status.Code(err),
+				"Dispatch must propagate the gRPC status code unchanged so "+
+					"the router (or future retry policy) can branch on it; "+
+					"got %v, want %v. err=%v", status.Code(err), tc.code, err)
+		})
+	}
+}

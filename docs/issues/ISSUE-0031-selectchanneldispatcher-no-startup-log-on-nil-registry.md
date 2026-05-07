@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0031
 summary: "selectChannelDispatcher silently returns NoopDispatcher when registry is nil — no Info log makes the disabled state visible"
-status: open
+status: resolved
 severity: low
 area: cmd/orchestrator
 created: 2026-05-05
+closed: 2026-05-07
+closed_pr:
 refs:
   - cmd/orchestrator/channels.go
 ---
@@ -44,3 +46,10 @@ line via `zaptest`/`observer`).
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review.
+>
+> 2026-05-07 — closed. `selectChannelDispatcher` emits an `Info` line on
+> the nil-registry branch; `TestSelectChannelDispatcher_NilRegistryReturnsNoop`
+> uses a `zap/zaptest/observer` to pin the message snippet, and
+> `TestSelectChannelDispatcher_NonNilRegistryDoesNotLogDisabled` guards
+> the negative case so a future refactor that lifts the log out of the
+> nil branch is caught at test time.

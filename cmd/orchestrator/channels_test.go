@@ -7,7 +7,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/registry"
@@ -90,13 +93,47 @@ func TestInitChannels_SkipsMkdirAllForMemoryPath(t *testing.T) {
 // the branch independently testable without standing up a full router +
 // store + membership scenario just to prove the wiring picks the right
 // type.
+//
+// ISSUE-0031: also asserts the startup Info line that flags the
+// disabled-cross-process state. Without this assertion a future refactor
+// that drops the log restores the silent-degradation regression the
+// issue was filed for.
 func TestSelectChannelDispatcher_NilRegistryReturnsNoop(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	core, recorded := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+
 	d := selectChannelDispatcher(nil, logger)
 
 	_, ok := d.(channels.NoopDispatcher)
 	assert.True(t, ok,
 		"nil registry must yield NoopDispatcher (channels-disabled deployments / tests)")
+
+	logs := recorded.FilterMessageSnippet("cross-process dispatch disabled").All()
+	require.Len(t, logs, 1,
+		"nil registry must emit exactly one Info line so operators can "+
+			"distinguish intentional disable from init-order regressions "+
+			"(saw %d entries)", len(logs))
+	assert.Equal(t, zapcore.InfoLevel, logs[0].Level,
+		"disabled-state surface log must be Info, not Warn — it is the "+
+			"happy path for channels-disabled deployments")
+}
+
+// TestSelectChannelDispatcher_NonNilRegistryDoesNotLogDisabled is the
+// negative case for ISSUE-0031: the production path must not fire the
+// "dispatch disabled" Info line. Without this guard, a future refactor
+// that lifts the log out of the nil branch would silently turn the
+// happy path into log spam that operators learn to ignore.
+func TestSelectChannelDispatcher_NonNilRegistryDoesNotLogDisabled(t *testing.T) {
+	core, recorded := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+	reg := registry.NewInMemoryRegistry(logger)
+
+	_ = selectChannelDispatcher(reg, logger)
+
+	logs := recorded.FilterMessageSnippet("cross-process dispatch disabled").All()
+	assert.Empty(t, logs,
+		"non-nil registry must not log the disabled-state line "+
+			"(production path; would be misleading log noise)")
 }
 
 // TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC is the other

@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0030
 summary: "GRPCMessageDispatcher tests do not cover RPC errors (codes.Unavailable / codes.Unimplemented) — only context cancellation"
-status: open
+status: resolved
 severity: low
 area: internal/channels
 created: 2026-05-05
+closed: 2026-05-07
+closed_pr:
 refs:
   - internal/channels/grpc_dispatcher.go
   - internal/channels/grpc_dispatcher_test.go
@@ -46,3 +48,8 @@ suite that primes `recordingAgentServer.respond` with
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review.
+>
+> 2026-05-07 — closed. `TestGRPCMessageDispatcher_RPCStatusErrorPropagates`
+> added in `internal/channels/grpc_dispatcher_test.go` covers both
+> `codes.Unavailable` and `codes.Unimplemented` via a table-driven shape
+> using the existing `recordingAgentServer.respond` seam.
