@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0011
 summary: handlePublishMessage forwards req.Mentions without per-element or count cap; defense-in-depth gap on unauth REST surface
-status: open
+status: resolved
 severity: low
 area: internal/server
 created: 2026-05-04
+closed: 2026-05-07
+closed_pr:
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md
@@ -49,3 +51,12 @@ become a quadratic-cost vector on the persona-runtime side.
 ## Notes
 
 > 2026-05-04 — initial capture during PR #245 review (Should-Fix #3).
+>
+> 2026-05-07 — resolved by adding `channelMaxMentionsPerPublish = 10`
+> (mirrors the agent-side `_MAX_MENTIONS_PER_ACTION`) in
+> `internal/server/channel_handlers.go` and rejecting over-cap publishes
+> at the boundary with `400 BAD_REQUEST` before the store is touched.
+> Test coverage in `TestChannels_PublishMessage_MentionsCountCap`
+> pins both the at-cap (accept) and over-cap (reject) cases. The cap
+> stays after RFC 0009 Phase 4 lands — auth lift does not retire the
+> per-publish amplification budget on the response gate.

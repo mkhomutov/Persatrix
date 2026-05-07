@@ -114,6 +114,7 @@ func initChannels(
 	if orchMetrics != nil {
 		routerMetrics = &channels.RouterMetrics{
 			MessagesDelivered: orchMetrics.ChannelMessagesDelivered,
+			MessagesPublished: orchMetrics.ChannelMessagesPublished,
 		}
 	}
 	dispatcher := selectChannelDispatcher(reg, logger)

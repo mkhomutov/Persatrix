@@ -35,6 +35,18 @@ const (
 	channelDefaultHistoryLimit = 50
 	channelDefaultThreadLimit  = 100
 	channelMaxLimit            = 1000
+
+	// channelMaxMentionsPerPublish bounds the `mentions` array on a
+	// REST publish (ISSUE-0011 / PR #245 review SF-3). Mirrors the
+	// agent-side `_MAX_MENTIONS_PER_ACTION` (agents/action_executor.py)
+	// so a publish that would have been truncated agent-side is rejected
+	// loudly when it arrives via the unauthenticated REST surface
+	// instead. Defense-in-depth: the PR 4b response gate amplifies
+	// per-publish work with `len(mentions)`, and v0.3.0 has no auth on
+	// this endpoint until RFC 0009 Phase 4. Auth lift in Phase 4 does
+	// not retire this cap — mention spam from a compromised credential
+	// would still amplify, so the cap stays.
+	channelMaxMentionsPerPublish = 10
 )
 
 // channelFallbackWarnOnce guards the once-per-process Warn emitted by
@@ -205,6 +217,18 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == "" {
 		writeError(w, "BAD_REQUEST", "content is required", http.StatusBadRequest)
+		return
+	}
+	// ISSUE-0011 (PR #245 review SF-3): per-element validation lives in
+	// the store (`validateParticipantID` per mention), but a count cap
+	// has to live here — the store accepts whatever it gets. Reject
+	// loudly so misconfigured prompts surface with a 400 rather than
+	// silently amplifying the response gate's per-recipient work.
+	if len(req.Mentions) > channelMaxMentionsPerPublish {
+		writeError(w, "BAD_REQUEST",
+			fmt.Sprintf("mentions: count %d exceeds cap %d",
+				len(req.Mentions), channelMaxMentionsPerPublish),
+			http.StatusBadRequest)
 		return
 	}
 

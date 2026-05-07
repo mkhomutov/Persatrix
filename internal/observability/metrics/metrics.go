@@ -138,6 +138,9 @@ type Instruments struct {
 	// delivery attempts, not publish events. Pair with the `error`
 	// label to alert on a wedged dispatcher.
 	ChannelMessagesDelivered metric.Int64Counter
+	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for
+	// the delivered/published ratio (ISSUE-0013).
+	ChannelMessagesPublished metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.
@@ -331,14 +334,8 @@ func NewInstruments(m metric.Meter) (*Instruments, error) {
 		return nil, err
 	}
 
-	if i.ChannelMessagesDelivered, err = m.Int64Counter(
-		"channel.messages.delivered",
-		metric.WithUnit("{message}"),
-		metric.WithDescription(
-			"Per-subscriber channel-router dispatch attempts, labelled by channel_type and status.",
-		),
-	); err != nil {
-		return nil, fmt.Errorf("create channel.messages.delivered: %w", err)
+	if err := registerChannelInstruments(m, i); err != nil {
+		return nil, err
 	}
 	return i, nil
 }
