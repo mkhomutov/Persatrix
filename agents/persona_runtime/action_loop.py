@@ -25,13 +25,10 @@ from ..persona_types import (
     PersonaState,
 )
 from ..response_gate import POLICY_DEFENSE_IN_DEPTH, evaluate_response_gate
-from ..security import (
-    CONTEXT_SOURCE_CHANNEL_MESSAGE,
-    maybe_wrap_tool_content,
-    sanitize,
-)
+from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_validation import validate_action_payload
+from .channel_ingest import sanitize_inbound_event
 
 if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
@@ -233,40 +230,15 @@ class _ActionLoopMixin:
     # ─── Inbound sanitization (RFC 0011 PR 5) ──────────
 
     def _sanitize_inbound_event(self, event: AgentEvent) -> AgentEvent:
-        """Run ``sanitize`` over inbound CHANNEL_MESSAGE content.
+        """Delegate to :func:`channel_ingest.sanitize_inbound_event`.
 
-        Runs once on ingest so the LLM prompt, ``InteractionTracker``,
-        and persistence path all see the cleared text. Non-channel
-        events pass through unchanged. Returns a new ``AgentEvent``
-        with a copied payload when a substitution lands; the original
-        event is not mutated (callers may hold references).
+        The implementation is a free function (no ``self`` access) and
+        lives in ``channel_ingest.py`` so this file stays under the
+        500-line review limit. The mixin keeps the bound-method form
+        because tests (and historic call sites) invoke it as
+        ``agent._sanitize_inbound_event(event)``.
         """
-        if event.event_type is not EventType.CHANNEL_MESSAGE:
-            return event
-        payload = event.payload or {}
-        content = payload.get("content", "")
-        if not isinstance(content, str) or not content:
-            return event
-        result = sanitize(content, source=CONTEXT_SOURCE_CHANNEL_MESSAGE)
-        # Skip rebuild whenever content is byte-identical: the flag
-        # state is not propagated through the AgentEvent (it lives on
-        # the WARN log line in ``security.sanitize`` and the Go-side
-        # audit chain), so a flagged-but-passthrough message has
-        # nothing to rebuild.
-        if result.content == content:
-            return event
-        new_payload = dict(payload)
-        new_payload["content"] = result.content
-        return AgentEvent(
-            event_type=event.event_type,
-            payload=new_payload,
-            channel_id=event.channel_id,
-            sender_id=event.sender_id,
-            message_id=event.message_id,
-            thread_id=event.thread_id,
-            timestamp=event.timestamp,
-            metadata=dict(event.metadata),
-        )
+        return sanitize_inbound_event(event)
 
     # ─── Core inner event handler ──────────────────────
 

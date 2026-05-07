@@ -110,7 +110,7 @@ class TestChannelIngestSanitization:
         The sanitizer is the shared ``agents.security.sanitize`` entry
         point used elsewhere in the runtime.
         """
-        import agents.persona_runtime.action_loop as action_loop_mod
+        import agents.persona_runtime.channel_ingest as channel_ingest_mod
         import agents.security as security_mod
 
         calls: list[tuple[str, str]] = []
@@ -121,7 +121,10 @@ class TestChannelIngestSanitization:
             calls.append((content, source))
             return real_sanitize(content, source=source, action=action)
 
-        monkeypatch.setattr(action_loop_mod, "sanitize", _spy)
+        # Patch ``sanitize`` at the call site (``channel_ingest`` after the
+        # PR-263 review L-1/L-3 extraction), not at ``action_loop`` — the
+        # action-loop mixin now delegates and never imports ``sanitize``.
+        monkeypatch.setattr(channel_ingest_mod, "sanitize", _spy)
 
         agent = await _make_agent()
         await agent.on_event(AgentEvent(
@@ -141,6 +144,64 @@ class TestChannelIngestSanitization:
         content, source = calls[0]
         assert content == "hello world"
         assert source == security_mod.CONTEXT_SOURCE_CHANNEL_MESSAGE
+
+    @pytest.mark.parametrize(
+        "content,expect_warn",
+        [
+            pytest.param(
+                b"bytes from a misbehaving bridge", True, id="bytes_warns",
+            ),
+            pytest.param("", False, id="empty_string_silent"),
+        ],
+    )
+    async def test_non_string_warn_carve_out(
+        self, caplog, content, expect_warn,
+    ):
+        """L-3: non-str content WARNs at the seam; empty string stays silent.
+
+        PR-263 review L-3. Non-string content (``bytes`` from a forgotten
+        ``.decode()``, ``None`` from a missing field) would otherwise
+        silently bypass ``sanitize()``'s WARN audit signal — the only
+        operator-visible signal until the Go-side audit chain is wired
+        for inbound channel messages (RFC 0009 §G). Empty string is a
+        valid wire payload (placeholder messages) and must stay silent
+        — pin the carve-out so a future "log every skip" refactor does
+        not start spamming on empty content.
+        """
+        import logging as _logging
+
+        agent = await _make_agent()
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={
+                "content": content,
+                "channel_type": "group",
+                "respond_policy": "always",
+                "mentions": [],
+                "thread_parent_sender_id": "",
+            },
+            channel_id="group:planning",
+            sender_id="iron-fox",
+        )
+
+        logger_name = "agents.persona_runtime.channel_ingest"
+        with caplog.at_level(_logging.WARNING, logger=logger_name):
+            rebuilt = agent._sanitize_inbound_event(event)
+
+        # Helper passes the event through unchanged in both cases.
+        assert rebuilt is event
+        warns = [
+            r for r in caplog.records
+            if r.levelno == _logging.WARNING and r.name == logger_name
+        ]
+        if expect_warn:
+            assert warns, "expected a WARN log; got none"
+            assert "non-string" in warns[0].getMessage().lower()
+        else:
+            assert not warns, (
+                f"expected no WARN on empty content; got: "
+                f"{[r.getMessage() for r in warns]}"
+            )
 
     async def test_flagged_content_does_not_short_circuit_ingest(
         self, monkeypatch,
@@ -358,15 +419,20 @@ class TestSanitizeInboundEventMutationContract:
         self, monkeypatch,
     ):
         """When sanitize substitutes content, original event is untouched."""
-        import agents.persona_runtime.action_loop as action_loop_mod
+        import agents.persona_runtime.channel_ingest as channel_ingest_mod
 
         # Force the rebuild path: any inbound content sanitises to a
         # fixed cleared string. Mirrors what SANITIZER_ACTION_QUARANTINE
         # would do without plumbing the action through the agent config.
-        # ``_content`` / ``_action`` are accepted to match the real
-        # ``sanitize`` signature but ignored — the spy returns a fixed
-        # ``[QUARANTINED]`` regardless of input.
-        def _quarantine_spy(_content, *, source, _action="passthrough"):
+        # The spy mirrors the real ``sanitize`` signature (PR-263 review
+        # L-2) — ``content`` positional, ``source`` / ``action`` kwarg-
+        # only. ``_content`` keeps the leading underscore to signal "we
+        # ignore the input"; ``action`` does *not* — a future
+        # quarantine-action wiring at the call site would pass
+        # ``action=...`` and the kwarg name must match or the spy
+        # raises ``TypeError`` instead of cleanly stubbing.
+        def _quarantine_spy(_content, *, source, action="passthrough"):
+            del action  # explicitly unused; signature parity with real sanitize
             return SanitizedInput(
                 content="[QUARANTINED]",
                 source=source,
@@ -374,7 +440,7 @@ class TestSanitizeInboundEventMutationContract:
                 flags=("test_pattern",),
             )
 
-        monkeypatch.setattr(action_loop_mod, "sanitize", _quarantine_spy)
+        monkeypatch.setattr(channel_ingest_mod, "sanitize", _quarantine_spy)
 
         agent = await _make_agent()
 
