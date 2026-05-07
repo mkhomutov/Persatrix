@@ -189,6 +189,10 @@ class _Instruments:
                 "were filled with the fallback placeholder (RFC 0020 §C)."
             ),
         )
+        self.interactions_janitor_failed: Counter = meter.create_counter(
+            name="agent.interactions.janitor.failed", unit="{sweep}",
+            description="Closing-state janitor sweeps that raised before completing (RFC 0020 §C).",
+        )
 
         # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
         # Two counters: now-anchor emissions (one per system-prompt build,

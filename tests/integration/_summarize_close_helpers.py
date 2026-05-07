@@ -13,6 +13,8 @@ a test file.
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
@@ -90,6 +92,52 @@ def make_summary_client(text: str = LLM_SUMMARY_TEXT) -> LLMClient:
         side_effect=lambda msgs, resp, results: msgs,
     )
     return LLMClient(mock_provider)
+
+
+@dataclass
+class GatedSummaryClient:
+    """Triple returned by :func:`make_gated_summary_client`.
+
+    ``started`` is set by the mock the first time the summariser call
+    enters; ``gate`` is awaited until the test releases it.  Tests use
+    ``await started.wait()`` instead of ``await asyncio.sleep(0)`` to
+    deterministically observe Phase-2 mid-flight (PR 6 review #30).
+    """
+    client: LLMClient
+    started: asyncio.Event
+    gate: asyncio.Event
+
+
+def make_gated_summary_client(text: str = LLM_SUMMARY_TEXT) -> GatedSummaryClient:
+    """Build a summary client whose summariser call parks on a gate.
+
+    Used by the Phase-1 sentinel-visible test (PR 6 review #30) and
+    the Phase-2 ↔ janitor race regression test (PR 6 review #20/#26)
+    to deterministically interleave the close path with the janitor.
+    """
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    mock_provider = AsyncMock()
+
+    async def _route(*, model, messages, system, tools, max_tokens, temperature):
+        if max_tokens == 256:
+            started.set()
+            await gate.wait()
+            return LLMResponse(
+                text=text, stop_reason=StopReason.END_TURN,
+                usage=Usage(120, 30),
+            )
+        return LLMResponse(
+            text='```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
+            stop_reason=StopReason.END_TURN, usage=Usage(10, 5),
+        )
+
+    mock_provider.create_message = AsyncMock(side_effect=_route)
+    mock_provider.format_tool_definitions = MagicMock(return_value=[])
+    mock_provider.append_tool_round = MagicMock(
+        side_effect=lambda msgs, resp, results: msgs,
+    )
+    return GatedSummaryClient(LLMClient(mock_provider), started, gate)
 
 
 def make_failing_summary_client(exc: Exception) -> LLMClient:

@@ -366,7 +366,15 @@ class _StatePersistenceMixin:
         task.add_done_callback(self._pending_summarize_tasks.discard)
 
     async def drain_pending_summaries(self) -> None:
-        """Await in-flight background summary tasks (RFC 0020 PR 4)."""
+        """Await in-flight background summary tasks (RFC 0020 PR 4).
+
+        PR 6 review #23 — :func:`drain_pending_summary_tasks`
+        snapshots the pending set with ``list(...)``.  :meth:`close_memory`
+        runs this drain under ``self._lock`` so no new close path can
+        race in and spawn an un-awaited task.  A refactor that moves
+        the drain outside the lock MUST switch to a loop-until-empty
+        drain or it will silently lose late-arriving tasks.
+        """
         await drain_pending_summary_tasks(self._pending_summarize_tasks)
 
     async def _tick_auto_reflect_counter(self) -> None:
