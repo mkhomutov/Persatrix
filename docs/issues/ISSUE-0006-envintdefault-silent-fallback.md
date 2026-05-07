@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0006
 summary: "envIntDefault silently falls back on invalid/zero values; log WARN when SECURITY_RATE_LIMIT_* is set but unparseable"
-status: open
+status: resolved
 severity: low
 area: cmd/orchestrator
 created: 2026-05-04
+closed: 2026-05-07
 refs:
   - docs/rfcs/0009-security-sandboxing.md
 ---
@@ -35,3 +36,10 @@ the default. Optional: surface as a `rate_limit.config_invalid` audit event.
 ## Notes
 
 > 2026-05-04 — captured during PR #244 deep review (R3, finding L-R3-05).
+> 2026-05-07 — resolved: `envIntDefault` now takes a `*zap.Logger`, emits a
+> single `security.rate_limit.env_invalid scope=startup` WARN with `source`,
+> `value`, and `fallback` fields when the env var is set but unparseable
+> or `<= 0`. Unset stays silent. Audit-event escalation deferred — the
+> WARN is sufficient until an operator endpoint exists to mutate the
+> config at runtime. Pinned by `TestEnvIntDefault_*` in
+> [cmd/orchestrator/ratelimit_test.go](../../cmd/orchestrator/ratelimit_test.go).
