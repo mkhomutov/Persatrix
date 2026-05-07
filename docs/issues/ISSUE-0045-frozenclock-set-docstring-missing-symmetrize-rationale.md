@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0045
 summary: "FrozenClock.set docstring documents 'why unguarded' but does not explain why doc-only beats symmetrizing with advance"
-status: open
+status: resolved
 severity: low
 area: agents
 created: 2026-05-06
+closed: 2026-05-07
+closed_pr: 267
 refs:
   - agents/clock.py
   - docs/issues/ISSUE-0037-frozenclock-set-vs-advance-asymmetry.md
