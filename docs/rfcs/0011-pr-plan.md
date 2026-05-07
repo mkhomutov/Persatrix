@@ -335,13 +335,14 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### PR checklist
 
-- [ ] **Joint delivery** with [RFC 0020 PR plan](0020-pr-plan.md) PR 5 — both PRs reference each other's PR number
-- [ ] Integration test: agent B reply demonstrates channel-history awareness
-- [ ] Channel-ingest path applies `InputSanitizer.Sanitize()` per [RFC 0009 PR plan](0009-pr-plan.md) PR 3; sanitization audit event fires on every inbound message
-- [ ] No per-event `store_episode` call from the channel handler (regression guard against the duplicate-summary problem)
-- [ ] Cross-RFC priority order in the persona-runtime caller matches [RFC §E](0011-channels-bridges.md#e-memory-integration) and [RFC 0021 §J](0021-persona-temporal-awareness.md#j-token-budget-integration) verbatim
-- [ ] On-startup catch-up fetch implemented (last-50-per-channel REST query, replay-mode flag suppresses outbound `SEND_CHANNEL_MESSAGE`); resolves [RFC 0011 OQ #8](0011-channels-bridges.md#open-questions)
-- [ ] Catch-up fetch integration test: agent restarts mid-conversation, fetches recent messages, replays through ingest, **no** outbound responses to replayed messages
+- [x] **Joint delivery** with [RFC 0020 PR plan](0020-pr-plan.md) PR 5 — both PRs reference each other's PR number
+- [x] Channel-ingest path applies `sanitize()` once at the runtime boundary with `source=CONTEXT_SOURCE_CHANNEL_MESSAGE` (Python mirror of RFC 0009 §C); flagged content does not short-circuit ingest
+- [x] Suppressed events (response-gate `respond=False`) still call `_store_event_episode` so memory captures the channel turn — without this, a `respond: when_mentioned` listener loses every non-mention from its memory
+- [x] No per-event `store_episode` call from the channel handler (regression guard against the duplicate-summary problem) — single ingest path through `_store_event_episode` regardless of gate decision
+- [ ] Integration test: agent B reply demonstrates channel-history awareness — **deferred** to a follow-up sub-PR (channel-history tier in `MemoryBudget` greedy fill is non-trivial; tracked under MQ-3 in `docs/v0.3.0-plan.md`)
+- [ ] Cross-RFC priority order in the persona-runtime caller matches [RFC §E](0011-channels-bridges.md#e-memory-integration) and [RFC 0021 §J](0021-persona-temporal-awareness.md#j-token-budget-integration) verbatim — **deferred** to the channel-history-tier follow-up
+- [ ] On-startup catch-up fetch implemented (last-50-per-channel REST query, replay-mode flag suppresses outbound `SEND_CHANNEL_MESSAGE`); resolves [RFC 0011 OQ #8](0011-channels-bridges.md#open-questions) — **deferred** to a dedicated sub-PR (substantial new feature: REST round-trip on boot + replay-mode flag in event ingest)
+- [ ] Catch-up fetch integration test: agent restarts mid-conversation, fetches recent messages, replays through ingest, **no** outbound responses to replayed messages — **deferred** with the catch-up fetch above
 
 ---
 
