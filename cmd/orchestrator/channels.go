@@ -174,12 +174,16 @@ func initChannels(
 //   - reg == nil → [channels.NoopDispatcher]: channels-disabled
 //     deployments and the existing tests that exercise the router-only
 //     paths (member lookups + persistence) without spinning up agents.
+//     ISSUE-0031: emit a startup Info line so operators can distinguish
+//     "registry intentionally absent" from "init-order regression
+//     dropped the registry on the floor" in the first log scrape.
 //   - reg != nil → [*channels.GRPCMessageDispatcher]: production wiring
 //     (PR 4a-ii-β-1) that turns each per-recipient `Dispatch` into an
 //     `AgentService.ReceiveChannelMessage` gRPC call against the
 //     address the recipient registered under.
 func selectChannelDispatcher(reg registry.Registry, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
+		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")
 		return channels.NoopDispatcher{}
 	}
 	return channels.NewGRPCMessageDispatcher(reg, logger)

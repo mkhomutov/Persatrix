@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0028
 summary: "selectChannelDispatcher extracted with 'independently testable' rationale but has no unit test"
-status: open
+status: resolved
 severity: low
 area: cmd/orchestrator
 created: 2026-05-05
+closed: 2026-05-07
+closed_pr:
 refs:
   - cmd/orchestrator/channels.go
   - cmd/orchestrator/channels_test.go
@@ -45,3 +47,12 @@ Option 1 is preferred (≈10 lines including imports).
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review (Should-Fix #2).
+>
+> 2026-05-07 — already-resolved sweep. The two table-driven tests
+> proposed by Option 1 (`TestSelectChannelDispatcher_NilRegistryReturnsNoop`
+> and `TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC`) were
+> actually added inside PR #250 itself
+> ([cmd/orchestrator/channels_test.go:93-117](../../cmd/orchestrator/channels_test.go#L93-L117)),
+> so the issue file shipped stale on day one. Closing as resolved with
+> no further code change required; the nil-registry test is extended in
+> the same sweep to also cover ISSUE-0031.
