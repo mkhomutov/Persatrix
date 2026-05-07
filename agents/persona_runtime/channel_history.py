@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from ..memory.scope_recall import recall_with_scope_filter
 from ..memory.scopes import scope_for_channel_event
 from ..memory.working import ContextSection, estimate_tokens
+from ..observability.metrics import current_agent_id, try_get_instruments
 from ..persona_types import EventType
 from ..temporal.rendering import format_duration, format_relative
 from .memory_budget import (
@@ -82,6 +83,32 @@ async def recall_channel_episodes(
     (under-populated payloads, missing DM peer).  Recall failure is
     logged at WARNING and swallowed so the rest of the budget pipeline
     keeps running.
+
+    Recency-fence semantics (PR #264 review M-3): the empty query
+    string routes recall through ``EpisodicMemory.recall_recency``,
+    which returns the *agent-wide* ``CHANNEL_RECALL_LIMIT * 3 = 60``
+    most-recent episodes; the Python-side scope filter in
+    ``recall_with_scope_filter`` then narrows to *channel_scope*. This
+    is "recent agent activity, restricted to this channel" — **not**
+    "the 20 most-recent episodes in this channel". An agent active in
+    many channels can have its recency window dominated by other
+    channels and admit fewer than ``CHANNEL_RECALL_LIMIT`` entries
+    even when more matching channel episodes exist further back.
+    Behaviour matches the RFC 0011 §E framing ("recent channel
+    turns") but is bounded by the agent-wide recency window.
+    Tightening to per-channel recency requires SQL-side scope
+    filtering on the recency path (see the TODO in
+    ``agents/memory/scope_recall.py``).
+
+    TODO (RFC 0011 PR 6 — channel catch-up fetch): ``on_unknown=None``
+    is justified because the in-band ingest path already logs scope
+    drift via ``_StatePersistenceMixin._scope_for_multi_turn_event``.
+    A future catch-up/replay code path that calls
+    ``recall_channel_episodes`` *without* going through ingest first
+    would silently fall back to a thread-shaped scope on contradictory
+    ``channel_type`` payloads, with no log line surfacing the drift.
+    When the catch-up sub-PR lands, either route it through the same
+    ingest path or wire a real ``on_unknown`` callback here.
     """
     if event.event_type is not EventType.CHANNEL_MESSAGE:
         return []
@@ -94,7 +121,8 @@ async def recall_channel_episodes(
         channel_type=payload.get("channel_type"),
         # Ingest path already logs scope drift in
         # ``_StatePersistenceMixin._scope_for_multi_turn_event``; recall
-        # does not need to emit a second log line.
+        # does not need to emit a second log line.  See the TODO in this
+        # function's docstring for the catch-up-fetch follow-up risk.
         on_unknown=None,
     )
     if channel_scope is None:
@@ -129,11 +157,34 @@ def render_channel_history_section(
     budget admitted nothing.  Renders each line in the same
     ``[recency-tag] summary`` shape as the episodic tier so the
     LLM-visible format stays consistent across tiers.
+
+    Per-admitted-item, increments
+    ``agent.temporal.recency.rendered`` with
+    ``source="channel_history"`` (PR #264 review M-2).  Same shape and
+    rationale as the episodic and relationship tiers: the counter
+    description ("Recency tags rendered onto recalled episodes…")
+    requires a render-side bump because the channel-history tier emits
+    the same ``[recency-tag] summary`` prefix.  Counting on admission
+    (not on attempt) matches the PR #260 review M-1 contract pinned by
+    ``tests/integration/test_temporal_metrics.py`` so operators see a
+    consistent number across all three sources.
     """
     if not channel_episodes:
         return None
+    # Resolve OTel surfaces once per call rather than per-item.  Both
+    # helpers are cheap (a contextvar read and a module-global lookup),
+    # but the loop runs up to CHANNEL_RECALL_LIMIT=20 times.
+    instruments = try_get_instruments()
+    agent_attr = current_agent_id()
     items: list[str] = []
     for ep in channel_episodes:
+        # PR #264 review L4: short-circuit once the budget is
+        # exhausted.  ``try_add`` itself returns ``None`` cheaply, but
+        # the surrounding work — ``truncate`` over a 280-char summary,
+        # ``format_relative`` / ``format_duration`` — is wasted for the
+        # tail of the recall set when the budget filled up early.
+        if budget.remaining <= 0:
+            break
         summary = truncate(ep.summary, MAX_EPISODE_SUMMARY_CHARS)
         # RFC 0021 §D recency-tag (+ duration on multi-turn rows) prefix.
         anchor_ts = ep.closed_at if ep.closed_at is not None else ep.created_at
@@ -151,6 +202,15 @@ def render_channel_history_section(
         )
         if admitted is not None:
             items.append(admitted)
+            # PR #264 review M-2: bump per admitted item so operators
+            # can correlate ``agent.temporal.recency.rendered`` (with
+            # ``source="channel_history"``) against admitted-token
+            # totals without a phantom shortfall.
+            if instruments is not None:
+                instruments.temporal_recency_rendered.add(
+                    1,
+                    attributes={"agent.id": agent_attr, "source": "channel_history"},
+                )
     if not items:
         return None
     text = "Recent channel turns:\n" + "\n".join(items)

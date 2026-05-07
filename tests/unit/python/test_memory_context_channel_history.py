@@ -208,7 +208,13 @@ async def test_channel_history_recall_failure_is_non_fatal(
     async def _boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("scope_recall exploded")
 
-    caplog.set_level(logging.WARNING, logger="agents.persona_runtime.memory_context")
+    # PR #264 review L2: the warning is emitted from
+    # ``agents.persona_runtime.channel_history`` (where ``recall_channel_episodes``
+    # lives), not ``...memory_context``.  Pre-fix the test passed only because
+    # caplog's root-logger default captured the propagated record; a future
+    # tightening of caplog scoping or a logger config change would silently
+    # break the "must log" intent.
+    caplog.set_level(logging.WARNING, logger="agents.persona_runtime.channel_history")
     with patch(
         "agents.persona_runtime.channel_history.recall_with_scope_filter",
         new=_boom,

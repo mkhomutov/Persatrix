@@ -215,3 +215,84 @@ class TestRecencyCounterAccuracy:
             )
         finally:
             await agent.close_memory()
+
+
+class TestChannelHistoryRecencyCounter:
+    """``agent.temporal.recency.rendered`` covers the channel-history tier.
+
+    PR #264 review M-2: the channel-history tier (RFC 0011 §E + RFC 0021
+    §J) renders the same ``[recency-tag] summary`` shape as the episodic
+    tier, so the counter description ("Recency tags rendered onto
+    recalled episodes or relationship summaries") applies — but the
+    extracted ``render_channel_history_section`` initially shipped
+    without the bump.  Operators correlating
+    ``agent.temporal.recency.rendered`` against admitted token totals on
+    an agent active in channels would see a phantom shortfall: real
+    renders vs reported count.
+
+    This test pins the contract: the counter increments by one per
+    admitted channel-history item with ``source="channel_history"``,
+    matching the episode and relationship paths.
+    """
+
+    async def test_channel_history_counter_only_counts_admitted_items(
+        self, monkeypatch: pytest.MonkeyPatch, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        # Tighten the budget so the recall set (5 channel-scoped
+        # episodes) over-fills the budget and the channel-history loop
+        # admits a strict subset.  Same shape as the episode tier test
+        # above: the assertion is "counter == admitted", which catches
+        # both the "no bump at all" failure mode and the future
+        # "bump-before-admission-check" regression that would inflate the
+        # counter back to recall-set size.
+        monkeypatch.setattr(
+            memory_context_module, "MEMORY_BUDGET_TOKENS", 96,
+        )
+
+        agent = await make_agent()
+        try:
+            for i in range(5):
+                await agent._episodic_memory.store_episode(
+                    summary=(
+                        f"Planning channel {i}: "
+                        + "discussed roadmap with the leads " * 5
+                    ),
+                    context={},
+                    importance=0.9,
+                    scope="group:planning",
+                )
+            event = AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                channel_id="group:planning",
+                sender_id="alice",
+                payload={"content": "hello", "channel_type": "group"},
+            )
+            await agent._inject_memory_context(event, query="hello")
+
+            section = agent._working_memory.get_section("channel_history")
+            # ``Recent channel turns:\n- ...`` — count the per-item
+            # ``\n- `` separators (the header itself ends with ``:\n``,
+            # so this also matches the first item).
+            admitted = (
+                section.content.count("\n- ") if section is not None else 0
+            )
+            assert 0 < admitted < 5, (
+                "test setup error: budget should admit some-but-not-all "
+                f"of the 5 seeded channel episodes to exercise the "
+                f"admit-vs-attempt distinction, got admitted={admitted}"
+            )
+
+            points = _collect_counter_points(
+                metric_reader, "agent.temporal.recency.rendered",
+            )
+            channel_points = [
+                (v, a) for v, a in points if a.get("source") == "channel_history"
+            ]
+            channel_total = sum(v for v, _ in channel_points)
+            assert channel_total == admitted, (
+                "counter must reflect admitted channel-history items, not "
+                f"recall-set size: counter={channel_total}, "
+                f"admitted={admitted}, recall_set=5"
+            )
+        finally:
+            await agent.close_memory()
