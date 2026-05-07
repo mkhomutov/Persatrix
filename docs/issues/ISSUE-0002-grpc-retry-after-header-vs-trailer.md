@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0002
 summary: "GRPCRateLimitInterceptor godoc says trailer but uses grpc.SetHeader; align doc + add client-side test"
-status: open
+status: resolved
 severity: medium
 area: security
 created: 2026-05-04
+closed: 2026-05-07
 refs:
   - docs/rfcs/0009-security-sandboxing.md
 ---
