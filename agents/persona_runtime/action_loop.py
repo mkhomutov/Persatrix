@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
-from ..observability.metrics import gate_attrs, try_get_instruments
+from ..observability.metrics import gate_attrs, replay_attrs, try_get_instruments
 from ..persona_types import (
     ActionType,
     AgentAction,
@@ -267,6 +267,26 @@ class _ActionLoopMixin:
         # channel messages (PR-263 review L-1) — until it is, the
         # Python sanitizer's ``WARN`` log is the interim signal.
         event = self._sanitize_inbound_event(event)
+
+        # RFC 0011 PR 5 follow-up — on-startup catch-up replay (OQ #8).
+        # Branch sits *after* sanitize (replay is not exempt from the
+        # prompt-injection boundary) and *before* the gate (the gate's
+        # counter would conflate catch-up with policy suppressions).
+        # Defense-in-depth: skip ingest when sender == agent_id (own
+        # outbound echoed back through the history endpoint). PR-265 L5:
+        # the ``channel.messages.replayed`` counter increments only on
+        # actual ingestion so dashboards read it as "rows written to
+        # InteractionTracker" without subtracting self-sender skips.
+        if event.metadata.get("replay_mode") is True:
+            if event.sender_id != self.agent_id:
+                await self._store_event_episode(event, [])
+                inst = try_get_instruments()
+                if inst is not None:
+                    inst.channel_messages_replayed.add(
+                        1,
+                        attributes=replay_attrs(channel_id=event.channel_id or ""),
+                    )
+            return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
         # Gate runs *after* the LLM-client / model-config checks above on

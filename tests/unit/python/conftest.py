@@ -6,6 +6,19 @@ import pytest
 from agents.memory.episodic import EpisodicMemory
 from agents.tools.registry import clear_registry
 
+# Re-export the catch-up loopback orchestrator as a session-scoped
+# fixture name so test files in this directory can request
+# ``orchestrator`` without importing it. Without this, importing the
+# fixture by name into each test file triggers ruff F811 (fixture
+# parameters look like redefinitions of the imported name to ruff's
+# scope analysis) — twelve false-positive findings across the
+# catch-up suite. ``noqa: F401`` is the documented escape hatch for
+# the pytest fixture-discovery pattern. (PR-265 review follow-up:
+# extracted fixture to keep test_channel_catchup.py under the
+# 500-line review cap after adding the timestamp / explicit-limit
+# tests.)
+from ._catchup_test_helpers import orchestrator  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _clean_registry():

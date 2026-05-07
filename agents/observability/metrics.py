@@ -130,6 +130,16 @@ class _Instruments:
                 "(RFC 0011 §D — subscriber_id excluded for cardinality)."
             ),
         )
+        # RFC 0011 PR 5 follow-up — separate from ``channel.messages.gated``
+        # so a startup catch-up burst does not mask a gate-suppression spike.
+        self.channel_messages_replayed: Counter = meter.create_counter(
+            name="channel.messages.replayed",
+            unit="{message}",
+            description=(
+                "Channel messages replayed through the on-startup "
+                "catch-up fetch (RFC 0011 OQ #8). Attribute: channel_id."
+            ),
+        )
         self.spans_dropped: Counter = meter.create_counter(
             name="agent.observability.spans.dropped",
             unit="{span}",
@@ -470,6 +480,12 @@ def gate_attrs(*, channel_id: str, policy: str) -> dict[str, str]:
     the gate counter.
     """
     return {"channel_id": channel_id, "policy": policy}
+
+
+def replay_attrs(*, channel_id: str) -> dict[str, str]:
+    """Attribute set for ``channel.messages.replayed`` (RFC 0011 PR 5
+    follow-up). See :func:`gate_attrs` for the cardinality rationale."""
+    return {"channel_id": channel_id}
 
 
 def tick_attrs(*, agent_id: str) -> dict[str, str]:
