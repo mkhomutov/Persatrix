@@ -128,9 +128,13 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 // limit (so clients can distinguish a transient back-off from a
 // terminal break).
 //
-// On rate-limit deny the interceptor sets a `retry-after-seconds`
-// gRPC trailer (PR #244 review M-04) so clients have parity with the
-// REST `Retry-After` header and can back off intelligently.
+// On rate-limit deny the interceptor attaches a `retry-after-seconds`
+// gRPC header (initial metadata, via [grpc.SetHeader]) so clients have
+// parity with the REST `Retry-After` response header and can back off
+// intelligently. Clients read the value with the [grpc.Header] CallOption,
+// not [grpc.Trailer]. The contract is pinned by
+// TestGRPCInterceptor_RetryAfterDeliveredAsHeaderNotTrailer (ISSUE-0002,
+// PR #244 review M-04).
 //
 // NOTE: only unary RPCs are covered. A streaming interceptor is not
 // wired here; if a streaming RPC is added before Phase 4 it will
