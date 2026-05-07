@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0044
 summary: "ROADMAP.md 'Current milestone' prose still reads '1/3 PRs merged' for RFC 0021 P1; structured rows are correct"
-status: open
+status: resolved
 severity: low
 area: docs
 created: 2026-05-06
+closed: 2026-05-07
+closed_pr:
 refs:
   - ROADMAP.md
   - docs/rfcs/0021-pr-plan.md

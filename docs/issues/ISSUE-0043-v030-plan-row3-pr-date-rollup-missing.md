@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0043
 summary: "docs/v0.3.0-plan.md row 3 flipped to ✅ Merged but PR # and merge-date columns are still dashes"
-status: open
+status: resolved
 severity: low
 area: docs
 created: 2026-05-06
+closed: 2026-05-07
+closed_pr:
 refs:
   - docs/v0.3.0-plan.md
   - docs/rfcs/0021-pr-plan.md

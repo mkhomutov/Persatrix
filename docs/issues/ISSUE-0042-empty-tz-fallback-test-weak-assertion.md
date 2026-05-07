@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0042
 summary: "test_empty_string_tz_falls_back_to_default asserts on UTC offset suffix only — does not pin DEFAULT_TIMEZONE identity"
-status: open
+status: resolved
 severity: low
 area: tests
 created: 2026-05-06
+closed: 2026-05-07
+closed_pr:
 refs:
   - tests/unit/python/test_clock.py
   - agents/clock.py

@@ -16,7 +16,7 @@ from typing import get_type_hints
 
 import pytest
 
-from agents.clock import DEFAULT_TIMEZONE, Clock, FrozenClock, WallClock
+from agents.clock import Clock, FrozenClock, WallClock
 
 
 class TestWallClock:
@@ -56,14 +56,23 @@ class TestWallClock:
 
     def test_empty_string_tz_falls_back_to_default(self) -> None:
         # ``WallClock(tz="")`` is falsy, so ``tz or DEFAULT_TIMEZONE``
-        # silently coerces to UTC instead of raising. RFC 0021 PR 2
-        # adds the ``persona.timezone`` schema field which normalises
-        # the value upstream — until that schema is the only caller,
-        # pin the current contract so any future tightening surfaces
-        # loudly. ISSUE-0039.
-        clock = WallClock(tz="")
-        assert clock.now_iso().endswith("+00:00")
-        assert str(zoneinfo.ZoneInfo(DEFAULT_TIMEZONE)) == DEFAULT_TIMEZONE
+        # silently coerces to DEFAULT_TIMEZONE instead of raising. RFC
+        # 0021 PR 2 adds the ``persona.timezone`` schema field which
+        # normalises the value upstream — until that schema is the
+        # only caller, pin the current contract so any future
+        # tightening surfaces loudly. ISSUE-0039.
+        #
+        # Pin against a ``FrozenClock`` baseline rather than the
+        # ``+00:00`` offset suffix: any zone aliased to UTC offset
+        # (``Etc/UTC``, ``Etc/GMT``) would also satisfy a suffix-only
+        # check, so the drift this test claims to catch (a future
+        # fallback flipping to a non-UTC zone) would not surface.
+        # Comparing the rendered ISO at the same epoch isolates the
+        # timezone identity. ISSUE-0042.
+        epoch = 1_714_055_520.0
+        default_iso = FrozenClock(at=epoch).now_iso()
+        empty_iso = FrozenClock(at=epoch, tz="").now_iso()
+        assert empty_iso == default_iso
 
 
 class TestFrozenClock:

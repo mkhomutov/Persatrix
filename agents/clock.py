@@ -109,6 +109,15 @@ class FrozenClock:
         mid-phase to walk time backward bypasses the same guarantee.
         Construct a new ``FrozenClock`` for an unrelated test phase
         rather than rewinding an existing instance.
+
+        Why not symmetrize with ``advance`` and reject ``at < self._t``?
+        Because ``set`` is the re-anchor primitive: phase changes, DST
+        resets, and fixture rebuilds all need to move backward in time,
+        and forcing those callers to construct a fresh ``FrozenClock``
+        would be ergonomic noise without preventing the class of bug
+        ``advance`` actually guards against — a monotonic test sequence
+        accidentally rewinding mid-flow. The two methods are
+        deliberately asymmetric. ISSUE-0045.
         """
         self._t = float(at)
 
