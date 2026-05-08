@@ -319,68 +319,6 @@ func (r *ChannelRouter) PublishAndAwait(
 	}
 }
 
-// fanout looks up subscribers, filters the sender, and dispatches. Runs
-// inline (not as a goroutine) for v0.3.0 simplicity: the dispatcher in
-// PR 2 is a no-op, and even the PR 4 gRPC-backed dispatcher will fire
-// fire-and-forget RPCs that return on enqueue, not on agent ack. If a
-// future PR adds streaming or per-subscriber retry, lift this onto a
-// worker pool.
-//
-// Detaches the request context (`context.WithoutCancel`) so a client
-// disconnect mid-fanout does not silently drop later subscribers.
-//
-// PR #245 review (Med): each recipient gets its own 5s deadline rather
-// than sharing one across the whole loop. With the PR-4 gRPC dispatcher
-// a slow first recipient could otherwise starve later recipients of
-// their full timeout budget. Per-call deadlines keep publish latency
-// bounded by O(N × 5s) worst case (acceptable while fanout remains
-// inline) but eliminate intra-publish starvation.
-func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string) {
-	members, err := r.store.GetMembers(ctx, msg.ChannelID)
-	if err != nil {
-		r.logger.Warn("channels: fanout member lookup failed",
-			zap.String("channel_id", msg.ChannelID),
-			zap.Error(err))
-		return
-	}
-
-	detached := context.WithoutCancel(ctx)
-
-	for _, m := range members {
-		if m.ParticipantID == msg.SenderID {
-			continue
-		}
-		if m.RespondPolicy == RespondNever {
-			// `respond: never` participants do not receive dispatches in
-			// the v0.3.0 contract — they read history on demand. The
-			// response gate (PR 4b) is the canonical enforcement point;
-			// short-circuiting here keeps the dispatcher free of policy
-			// knowledge and saves a wasted gRPC call.
-			continue
-		}
-		dispatchCtx, cancel := context.WithTimeout(detached, 5*time.Second)
-		err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
-			Recipient:            m,
-			ThreadParentSenderID: threadParentSenderID,
-		}, msg)
-		cancel()
-		status := "ok"
-		if err != nil {
-			status = "error"
-			r.logger.Warn("channels: dispatch failed",
-				zap.String("channel_id", msg.ChannelID),
-				zap.String("recipient", m.ParticipantID),
-				zap.Error(err))
-		}
-		if r.metrics != nil && r.metrics.MessagesDelivered != nil {
-			r.metrics.MessagesDelivered.Add(detached, 1, metric.WithAttributes(
-				attribute.String("channel_type", string(ct)),
-				attribute.String("status", status),
-			))
-		}
-	}
-}
-
 // channelTypeFromID derives the canonical channel type from a channel id's
 // prefix. Returns [ErrInvalidChannelType] if the prefix is unknown.
 func channelTypeFromID(id string) (ChannelType, error) {

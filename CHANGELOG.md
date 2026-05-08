@@ -165,6 +165,26 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`ChannelRouter.fanout` now dispatches with bounded concurrency
+  (ISSUE-0014).** PR 4's gRPC dispatcher made the inline per-recipient
+  loop visible as a worst-case
+  `O(N × channelFanoutPerRecipientTimeout)` publish stall: a single hung
+  agent on a 16-member channel would have blocked the publish path for
+  ~80s before the loop reached its tail. Fanout now acquires a slot from
+  a `channelFanoutMaxConcurrency = 16` semaphore per recipient and waits
+  on a `sync.WaitGroup`, so peak in-flight dispatches stay bounded
+  while the publish-blocking tail collapses to
+  `O(ceil(N / 16) × per-recipient-timeout)`. Pinned by two new tests:
+  `TestChannelRouter_Publish_FanoutRunsConcurrently` (timing speedup —
+  8 × 100ms recipients complete in ~100ms, not ~800ms) and
+  `TestChannelRouter_Publish_FanoutRespectsConcurrencyBound` (peak
+  in-flight ≤ 16 even when recipient count exceeds the bound). The
+  per-recipient deadline (`channelFanoutPerRecipientTimeout`) is
+  preserved as a named constant rather than the prior `5*time.Second`
+  literal so future tuning lands in one place. Receiver contract is
+  unchanged — fire-and-forget; dispatcher errors continue to log+count
+  without failing the publish.
+
 - **Persona action loop synthesises `SEND_CHANNEL_MESSAGE` for plain-text
   CHANNEL_MESSAGE replies (ISSUE-0048).** The persona LLM is not
   prompt-trained on the JSON action schema, so on a normal chat-as-DM

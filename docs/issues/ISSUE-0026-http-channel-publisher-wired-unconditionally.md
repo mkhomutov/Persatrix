@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0026
 summary: "HTTPChannelPublisher wired unconditionally on agents — every channel-routed action hits 503 when orchestrator has channels disabled"
-status: open
+status: resolved
 severity: medium
 area: agents
 created: 2026-05-05
+closed: 2026-05-08
+closed_pr: 281
 refs:
   - agents/server.py
   - agents/channel_publisher.py
@@ -54,3 +56,10 @@ once channels are turned on at runtime.
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review (Should-Fix #3).
+>
+> 2026-05-08 — resolved by [PR #281](https://github.com/mkhomutov/Persatrix/pull/281)
+> via approach 2 (sticky negative cache): first 503 from
+> `POST /api/v1/channels/{id}/messages` flips `_disabled` on the
+> publisher, raises a typed `ChannelsDisabledError`, and the executor
+> maps it to `status="channels_disabled"`. Front-matter flip is a
+> follow-up cleanup — closure was already documented in CHANGELOG.
