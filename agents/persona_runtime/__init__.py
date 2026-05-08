@@ -116,28 +116,33 @@ def _coerce_event_timeout(
     raw_value: object,
     default: float,
     agent_id: str,
+    *,
+    min_value: float | None = None,
+    setting_name: str = "event_timeout",
 ) -> float:
-    """Coerce a config-sourced timeout to ``float``.
+    """Coerce a config-sourced timeout to ``float`` with optional floor.
 
-    YAML configs can supply a string for a numeric key (e.g.
-    ``event_timeout: "300"``).  ``asyncio.wait_for(timeout=...)``
-    requires a real float; a non-numeric value raises TypeError
-    that silently escapes lock acquisition with no useful log.
-
-    Returns *default* with a warning when coercion fails.
-
-    Extracted from ``on_event()`` / ``on_tick()`` where the same
-    ``try: float(raw)`` guard was duplicated.
-    (PR #60 review: timeout coercion duplicated between on_event/on_tick.)
+    Returns *default* (and warns) when coercion fails or — when
+    ``min_value`` is given — when the coerced value is ``<= min_value``.
+    PR-3 review #19 folded the prior caller-side ``<= 0`` re-check for
+    ``interaction_idle_timeout_sec`` into this helper.  PR #60 review
+    extracted the original try/float guard from on_event / on_tick.
     """
     try:
-        return float(raw_value)  # type: ignore[arg-type]
+        value = float(raw_value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         logger.warning(
-            "Agent %s: invalid event_timeout %r, using default %.0fs",
-            agent_id, raw_value, default,
+            "Agent %s: invalid %s %r, using default %.0fs",
+            agent_id, setting_name, raw_value, default,
         )
         return default
+    if min_value is not None and value <= min_value:
+        logger.warning(
+            "Agent %s: %s=%r is not greater than %r; using default %.0fs",
+            agent_id, setting_name, value, min_value, default,
+        )
+        return default
+    return value
 
 
 # ─── Memory namespace ─────────────────────────────────────
@@ -217,28 +222,20 @@ class _LLMPersonaAgent(
         # :class:`IdleGapDetector` once the per-agent idle timeout
         # elapses.  The per-channel override path lands in PR 5.
         memory_cfg = config.get("memory") or {}
-        # PR-216 review (Should-Fix #3): coerce + validate the
-        # idle-timeout knob.  A non-numeric / non-positive value would
-        # silently degrade multi-turn aggregation to PR-2 single-turn
-        # semantics (every event closes immediately on the next
-        # ``idle_check``).  Mirror ``_coerce_event_timeout``: log and
-        # fall back to the 600s default on bad input, and additionally
-        # reject ``<= 0`` (which ``float()`` would happily accept) so
-        # the default :class:`IdleGapDetector` window stays meaningful.
+        # PR-216 review (Should-Fix #3) + PR-3 review #19: coerce and
+        # reject ``<= 0`` in one call so multi-turn aggregation cannot
+        # silently degrade to PR-2 single-turn semantics on bad config.
         idle_timeout_sec = _coerce_event_timeout(
             memory_cfg.get("interaction_idle_timeout_sec", 600.0),
-            default=600.0,
-            agent_id=agent_id,
+            default=600.0, agent_id=agent_id,
+            min_value=0.0, setting_name="interaction_idle_timeout_sec",
         )
-        if idle_timeout_sec <= 0:
-            logger.warning(
-                "Agent %s: interaction_idle_timeout_sec=%r is non-positive; "
-                "using default 600s",
-                agent_id, idle_timeout_sec,
-            )
-            idle_timeout_sec = 600.0
+        # PR-3 review #16: forward the persona's clock to the tracker
+        # so a single ``create_persona_agent(clock=...)`` injection
+        # covers both the prompt layer and the tracker.
+        # ``Clock.now`` (() -> float) satisfies the tracker Protocol.
         self._interaction_tracker = InteractionTracker(
-            idle_timeout_sec=idle_timeout_sec,
+            idle_timeout_sec=idle_timeout_sec, clock=self._clock.now,
         )
         # RFC 0020 PR 4 (PR #229 Must-Fix #1 + Should-Fix #2): bg summary
         # tasks + janitor cooldown.
