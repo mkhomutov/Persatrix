@@ -51,6 +51,17 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	if err := validateParticipantID(msg.SenderID); err != nil {
 		return err
 	}
+	// ISSUE-0050: defense-in-depth byte cap. The agent layer enforces a
+	// 4000-codepoint cap upstream, but the unauthenticated REST publish
+	// surface can be hit directly. Rejecting before the transaction opens
+	// keeps the cap-prune path and the post-publish lookup off the hot
+	// path for malformed input. `len()` on a Go string returns bytes,
+	// which matches what SQLite stores and what the gRPC fanout
+	// payload measures.
+	if len(msg.Content) > MaxMessageContentBytes {
+		return fmt.Errorf("%w: got %d bytes, cap %d",
+			ErrMessageContentTooLarge, len(msg.Content), MaxMessageContentBytes)
+	}
 	// PR #231 review SF-3 (RFC 0011 PR 4a-ii-α): every mention id must
 	// pass the same registration-time check the sender went through, so
 	// the response gate (PR 4b) cannot trigger on junk values that slipped
