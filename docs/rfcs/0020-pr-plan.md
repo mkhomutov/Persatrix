@@ -249,7 +249,7 @@ PR 7 (RFC close)
 
 **Depends on**: PR 5.
 **Estimated size**: ~200–400 lines.
-**Status**: 🚧 Slice 1 of N opens against this branch. The PR-4 review cluster (findings **#20–#30**, the freshest review surface around the summarise-on-close path) is the first slice; PR 1–3 review findings (#1–#19) ship as a follow-up slice once this lands. Splitting keeps each diff focused and well under the 500-line review window.
+**Status**: 🚧 Slice 2 of N in flight. Slice 1 (PR-4 review #20–#30) ✅ merged as [#266](https://github.com/mkhomutov/Persatrix/pull/266). Slice 2 (PR-1 review #2 + #3 — typed `CloseReason` + table-driven `_emit_closed` dispatch + the three missing per-reason subtotal counters) opens next against this branch. PR 1 review #1, #4, #5; PR 2 review #6–#11; PR 3 review #12–#19; and PR 4 deferred #25 ship as further slices. Splitting keeps each diff focused and well under the 500-line review window.
 
 #### Slice 1 (this PR) — PR 4 review findings #20, #21, #22, #23, #24, #26, #27, #28, #29, #30
 
@@ -266,6 +266,15 @@ PR 7 (RFC close)
 | 29 | Janitor cooldown exercised only indirectly. | ✅ Added. `TestMaybeRunJanitorCooldown::test_two_calls_within_interval_runs_cleanup_once`. | `tests/unit/python/test_summarize_close_helpers.py` |
 | 30 | `await asyncio.sleep(0)` race in `test_pending_sentinel_visible_before_drain`. | ✅ Fixed inline. Replaced with `await gated.started.wait()`; `make_gated_summary_client` helper sets the event from the mock provider's first await. | `tests/integration/test_summarize_on_close_phases.py`, `tests/integration/_summarize_close_helpers.py` |
 | 25 | `_persist_closed_interaction` silently drops the close path when `_llm_client is None`. | ⏭ **Deferred to a follow-up slice.** Tightening at construction time means flipping `_StatePersistenceMixin._llm_client` from `LLMClient \| None` to `LLMClient` and migrating `tests/unit/python/test_llm_persona_agent.py::test_no_llm_client` off the `agent._llm_client = None` seam. The mixin file is at the 500-line cap, so the change is safer in its own slice where it can land alongside the test seam migration. | `agents/persona_runtime/state_persistence.py::_persist_closed_interaction` |
+
+#### Slice 2 — PR 1 review findings #2 + #3 (typed close reason + table-driven dispatch)
+
+| # | Finding | Disposition | Code site |
+|---|---------|-------------|-----------|
+| 2 | `InteractionTracker.close(reason: str)` accepts arbitrary strings; typo silently bypasses the per-reason counter dispatch. | ✅ Fixed inline. Added `CloseReason = Literal["structural", "idle_gap", "max_turns", "topic_shift", "shutdown"]` next to the `REASON_*` constants, tightened `close()`'s `reason` kwarg to `CloseReason`, narrowed the `BoundaryDetector.evaluate` Protocol to a tagged union (`tuple[Literal[True], CloseReason] \| tuple[Literal[False], Literal[""]]`), and re-typed each `REASON_*` constant from `str` to its `Literal[...]` value. Typo at any call site is now an `arg-type` mypy error. | `agents/memory/boundary_detectors.py`, `agents/memory/interactions.py` |
+| 3 | `_emit_closed()` per-reason dispatch is hand-coded `if/elif`; silently misses subtotal counters when a new reason lands. | ✅ Fixed inline. Replaced the `if/elif` chain with `_REASON_COUNTER_ATTR: dict[CloseReason, str]` mapping each reason to its `_Instruments` attribute name, then `getattr(inst, attr).add(1, attrs)`. Surfaced (and fixed) the long-standing gap flagged in `MaxTurnsDetector`'s docstring: registered `agent.interactions.closed.by_max_turns` / `by_topic_shift` / `by_shutdown` (the breakout that the docstring promised but PR 4 never landed). | `agents/memory/interactions.py::_emit_closed`, `agents/observability/metrics.py::_Instruments` |
+
+Tests added in `tests/unit/python/test_interaction_tracker.py::TestMetricEmission::test_close_emits_per_reason_subtotal` — parametrised over all five `REASON_*` values, asserts both the generic `agent.interactions.closed` counter and the per-reason `by_<reason>` subtotal increment together. The three new-counter cases (`max_turns`, `topic_shift`, `shutdown`) red before the dispatch-table refactor; green after.
 
 Apply review findings from PRs 1–5 (the "From PR N review" pattern from [RFC 0017 PR plan](0017-pr-plan.md#status-by-finding-pr-6-implementation)). Out-of-scope items downgrade to tracked issues with rationale.
 
