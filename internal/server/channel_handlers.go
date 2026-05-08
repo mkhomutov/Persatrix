@@ -142,6 +142,13 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListChannels handles GET /api/v1/channels.
+//
+// ISSUE-0015: paginates via keyset (`?cursor=<last id>`) and pushes
+// LIMIT into SQL so a deployment past the soft cap does not load the
+// whole table per request. Fetches `limit + 1` rows so the presence
+// of the extra row signals "more pages exist" without a separate
+// COUNT query; the response trims to `limit` and surfaces the last
+// kept id as `next_cursor`.
 func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil {
 		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
@@ -152,20 +159,26 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	chs, err := s.channelStore.ListChannels(r.Context())
+	cursor := r.URL.Query().Get("cursor")
+	chs, err := s.channelStore.ListChannels(r.Context(), limit+1, cursor)
 	if err != nil {
 		s.logger.Error("channels: list failed", zap.Error(err))
 		writeError(w, "INTERNAL", "failed to list channels", http.StatusInternalServerError)
 		return
 	}
+	var nextCursor string
 	if len(chs) > limit {
+		// The probe row indicates "more pages exist". Trim it off so
+		// the page contains exactly `limit` rows and surface the last
+		// kept id as the next cursor.
 		chs = chs[:limit]
+		nextCursor = chs[len(chs)-1].ID
 	}
 	out := make([]channelResponse, 0, len(chs))
 	for _, c := range chs {
 		out = append(out, channelToResponse(c, nil))
 	}
-	writeJSON(w, listChannelsResponse{Channels: out}, http.StatusOK)
+	writeJSON(w, listChannelsResponse{Channels: out, NextCursor: nextCursor}, http.StatusOK)
 }
 
 // handleGetChannel handles GET /api/v1/channels/{id}.

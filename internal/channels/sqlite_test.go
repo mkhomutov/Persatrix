@@ -457,7 +457,7 @@ func TestSQLiteStore_GetOrCreateDM_ConcurrentRace(t *testing.T) {
 	}
 
 	// Exactly one channel row and exactly two membership rows.
-	channels, err := store.ListChannels(ctx)
+	channels, err := store.ListChannels(ctx, 0, "")
 	require.NoError(t, err)
 	require.Len(t, channels, 1, "single canonical DM row")
 	members, err := store.GetMembers(ctx, "dm:agent-a:agent-b")

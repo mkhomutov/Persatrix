@@ -72,8 +72,14 @@ type channelMessageResponse struct {
 }
 
 // listChannelsResponse is the envelope for GET /api/v1/channels.
+//
+// `NextCursor` is opaque to clients: the handler echoes back the last
+// returned channel id and the store applies it as `WHERE id > ?` on
+// the follow-up request. Empty when the page returns the trailing
+// rows so clients know to stop paginating. ISSUE-0015.
 type listChannelsResponse struct {
-	Channels []channelResponse `json:"channels"`
+	Channels   []channelResponse `json:"channels"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 // historyResponse is the envelope for GET /api/v1/channels/{id}/messages

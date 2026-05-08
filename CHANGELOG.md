@@ -163,6 +163,23 @@ All notable changes to this project will be documented in this file.
   `DispatchChannelMessage` action and the `MESSAGE_RECEIVED` →
   `CHANNEL_MESSAGE` event-type rename.
 
+### Changed
+
+- **`GET /api/v1/channels` now paginates via keyset cursor (ISSUE-0015).**
+  `ChannelStore.ListChannels` takes `(ctx, limit, afterID)` and pushes
+  `WHERE id > ? ORDER BY id ASC LIMIT ?` into the SQL — the previous
+  shape loaded the whole table per request and truncated client-side,
+  which would silently misreport "no more pages" the moment a
+  deployment exceeded the soft cap. The handler fetches `limit + 1`
+  rows so the presence of the extra row signals "more pages exist"
+  without a separate `COUNT(*)`, trims to `limit`, and surfaces the
+  last kept id as `listChannelsResponse.next_cursor` (omitempty when
+  the page returns the trailing rows). Clients pass the value back
+  unchanged via `?cursor=<id>`. Default ordering changes from
+  `created_at ASC` (which had no tiebreaker, leaving rows with
+  identical insert timestamps in undefined order) to `id ASC` (total,
+  stable across concurrent inserts). (PR for ISSUE-0015.)
+
 ### Removed
 
 - **v0.2-era `ChannelService` proto surface.** Deletes

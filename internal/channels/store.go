@@ -46,8 +46,16 @@ type ChannelStore interface {
 	// GetChannel returns the channel addressed by `id` or [ErrChannelNotFound].
 	GetChannel(ctx context.Context, id string) (Channel, error)
 
-	// ListChannels returns all channels ordered by `created_at` ascending.
-	ListChannels(ctx context.Context) ([]Channel, error)
+	// ListChannels returns channels ordered by `id` ascending. Pass
+	// `limit > 0` for keyset paging (the caller follows up with
+	// `afterID` set to the last returned id). Pass `limit <= 0` to
+	// return every row — preserved for non-paginated callers (router
+	// reconcile sanity checks, full-table fixtures); the REST handler
+	// always supplies a positive limit. `afterID == ""` starts from
+	// the lowest id; non-empty values are returned with strict
+	// inequality (`WHERE id > ?`) so a cursor handed back by the
+	// previous page never duplicates the boundary row. ISSUE-0015.
+	ListChannels(ctx context.Context, limit int, afterID string) ([]Channel, error)
 
 	// AddMember inserts a `(channel_id, participant_id)` row with the supplied
 	// respond policy. Re-adding the same pair is idempotent and returns the

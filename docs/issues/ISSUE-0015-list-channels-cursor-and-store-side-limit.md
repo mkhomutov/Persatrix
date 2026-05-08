@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0015
 summary: handleListChannels loads all rows then truncates client-side; no next_cursor in response
-status: open
+status: resolved
 severity: low
 area: internal/server
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - docs/rfcs/0011-channels.md
 ---
@@ -49,3 +50,16 @@ response surfaces a non-empty `next_cursor`.
 ## Notes
 
 > 2026-05-04 — initial capture during PR #245 review (Nice-to-have #4).
+>
+> 2026-05-08 — resolved. `ChannelStore.ListChannels` now takes
+> `(ctx, limit, afterID)` and pushes `WHERE id > ? ORDER BY id ASC LIMIT ?`
+> into the SQL. The handler fetches `limit + 1` rows so the presence of
+> the extra row signals "more pages exist" without a separate `COUNT(*)`,
+> trims to `limit`, and surfaces the last kept id as
+> `listChannelsResponse.next_cursor` (omitempty when the page returns
+> the trailing rows). Test coverage in
+> `internal/channels/sqlite_pagination_test.go` (LIMIT pushdown, zero-
+> limit back-compat, keyset paging walk, after-id strict-inequality)
+> and `internal/server/channel_handlers_pagination_test.go`
+> (next_cursor present when more rows exist, absent on the last page,
+> round-trip cursor walk with no duplicates or skips).
