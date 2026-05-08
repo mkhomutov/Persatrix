@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0017
 summary: agents/generated/task_pb2.pyi is hand-maintained because the project's protoc invocation does not emit type stubs
-status: open
+status: resolved
 severity: low
 area: build/proto
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - docs/rfcs/0011-pr-plan.md
   - docs/issues/ISSUE-0016-grpc-stub-relative-imports-hand-edit.md
@@ -63,3 +64,16 @@ output is configured at the same time.
 > #4). Companion to ISSUE-0016. Both are out of scope for the proto +
 > RPC change itself; tracked here so the next `make proto` consumer can
 > address them as a single hygiene PR.
+
+> 2026-05-08 — closed. Wired `mypy-protobuf>=3.5,<4` into
+> `agents/pyproject.toml`'s `[project.optional-dependencies].dev` and
+> added `--mypy_out=$(PROTO_PY_OUT)` to the `proto-python` target.
+> Regenerated both `task_pb2.pyi` and `log_service_pb2.pyi` (the
+> companion hand-maintained stub for the log shipper proto), introduced
+> a `make proto-python-check` target that fails when the committed
+> `.pyi` drifts from the generator output, and locked the gate in CI
+> via the Python lint/test job. Parity is also pinned by
+> `tests/unit/python/test_task_pb2_pyi_parity.py`. The 3.5–4.0 cap on
+> `mypy-protobuf` is necessary because the 4.x line requires
+> `protobuf>=6` while the runtime closure here pins `protobuf<6`; bump
+> in lockstep with the protobuf cap.

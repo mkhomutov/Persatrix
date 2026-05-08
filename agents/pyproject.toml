@@ -48,6 +48,20 @@ dev = [
     "types-grpcio",
     "tiktoken>=0.7.0,<1",
     "pip-licenses>=5.0.0,<6",
+    # ISSUE-0017: protoc plugin that emits *_pb2.pyi stubs at `make
+    # proto-python` time, replacing the previously hand-maintained
+    # `agents/generated/task_pb2.pyi`. Pinned to an exact version
+    # because mypy-protobuf output differs across minor versions
+    # (3.5 → 3.6 swapped `typing_extensions.final` for `typing.final`
+    # and rewrote `Literal` references) — the same reason CI pins
+    # protoc to an exact version (`.github/workflows/ci.yml` →
+    # arduino/setup-protoc, version: "34.1"). Without an exact pin,
+    # `make proto-python-check` flips red whenever pip resolves a
+    # newer 3.x release. The 4.x line is excluded because it requires
+    # protobuf>=6 while the runtime closure above caps protobuf<6
+    # (see grpcio-tools constraint). Bump deliberately, regenerate the
+    # *.pyi, and commit in the same change.
+    "mypy-protobuf==3.6.0",
 ]
 accurate-tokens = [
     "tiktoken>=0.7.0,<1",
