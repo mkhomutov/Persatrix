@@ -114,14 +114,34 @@ class _EpisodeRoutingMixin:
             f"Actions: {[a.action_type.value for a in actions]}"
         )
         ctx = {"event": event.payload, "sender": event.sender_id}
-        try:
-            # Step 1: flush any interaction whose idle window expired
-            # since the last event.  Runs unconditionally so single-turn
-            # paths also drive the cross-scope janitor without waiting
-            # for PR 4.
-            for closed in self._interaction_tracker.idle_check():
+        # Step 1: flush any interaction whose idle window expired since
+        # the last event.  Runs unconditionally so single-turn paths
+        # also drive the cross-scope janitor without waiting for PR 4.
+        #
+        # PR-3 review #13: the flush loop sits OUTSIDE the outer
+        # try/except below.  Each ``_persist_closed_interaction`` call
+        # carries its own inner ``try`` around ``store_episode``, but a
+        # rare programming error in ctx-construction (or an
+        # ``asyncio.CancelledError``, which ``Exception`` does not
+        # catch) could escape it.  The earlier nesting let that escape
+        # propagate into the outer handler, which logged
+        # ``event_type=<current event>`` — misattributing the failure
+        # to the in-flight event rather than the stale scope that
+        # actually owned it.  Pulling the loop out and wrapping each
+        # iteration in its own scope-aware ``try/except`` fixes the
+        # attribution and prevents a flush failure from swallowing the
+        # current event's processing entirely.
+        for closed in self._interaction_tracker.idle_check():
+            try:
                 await self._persist_closed_interaction(closed)
-
+            except Exception:
+                logger.warning(
+                    "Failed to flush idle interaction for agent %s "
+                    "(scope=%s, interaction_id=%s)",
+                    self.agent_id, closed.scope, closed.interaction_id,
+                    exc_info=True,
+                )
+        try:
             if event.event_type in self._MULTI_TURN_EVENT_TYPES:
                 await self._handle_multi_turn_event(event, summary, ctx)
                 return
@@ -181,22 +201,25 @@ class _EpisodeRoutingMixin:
                 scope=structural_close.scope,
             )
         except Exception:
-            # PR 6 review #6: this single try guards three failure
-            # surfaces.  In order of likelihood:
+            # PR 6 slice 4 #6 + slice 5 #13: this try guards the
+            # CURRENT event's processing — multi-turn handling,
+            # single-turn ``add_turn``/``close``, and the legacy
+            # fallback's ``store_episode``.  The cross-scope idle
+            # flush above is intentionally outside this block so a
+            # stale-scope failure logs the failed scope's identity
+            # rather than the in-flight ``event_type`` (slice 5 #13).
+            # Two operator-visible failure modes remain in scope:
             #
-            # 1. ``store_episode`` (and the equivalent calls inside
-            #    :meth:`_handle_multi_turn_event` / :meth:`_persist_closed_interaction`)
-            #    raising on a SQLite I/O hiccup or asyncio cancellation.
-            # 2. The single-turn fallback path's
-            #    :meth:`store_episode` raising *after* ``close`` already
-            #    popped the scope and fired the
-            #    ``interactions.closed.by_structural`` counter — the
-            #    common operator-visible failure mode.  ``event_type``
-            #    in the warning lets operators correlate the metric
-            #    increment to the missing row.
-            # 3. Tracker programming errors from ``add_turn`` / ``close``
-            #    (rare; pinned by the explicit guard above and PR 6
-            #    review #21 precedent).
+            # 1. The single-turn path's :meth:`store_episode` raising
+            #    *after* ``close`` already popped the scope and fired
+            #    the ``interactions.closed.by_structural`` counter —
+            #    the common case.  ``event_type`` in the warning lets
+            #    operators correlate the metric increment to the
+            #    missing row.
+            # 2. Tracker programming errors from ``add_turn`` / ``close``
+            #    or :meth:`_handle_multi_turn_event` raising past its
+            #    own inner try (rare; pinned by the explicit guard
+            #    further down and PR 6 review #21 precedent).
             #
             # Log-and-continue per the pre-RFC contract: a single
             # failed episode must not crash the event loop.
