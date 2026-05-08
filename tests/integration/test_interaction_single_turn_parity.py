@@ -24,19 +24,21 @@ What "parity" means here:
   Multi-turn paths (``CHANNEL_MESSAGE`` / ``MENTION``) are deferred to
   PR 3 and continue to land with NULL interaction columns; that legacy
   shape is asserted here to keep the PR 3 boundary explicit.
+
+The PR-2 review #9 + #10 follow-ups (telemetry probe, parametrised
+event-type matrix, unknown-event fallback coverage) live in the sibling
+:mod:`test_interaction_single_turn_parity_followups` so each module
+stays under the 500-line file-size cap.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
-from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
-from agents.persona import create_persona_agent
-from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
+
+from ._persona_parity_helpers import all_episodes, make_agent
 
 
 @pytest.fixture(autouse=True)
@@ -44,99 +46,6 @@ def _clean_registry():
     clear_registry()
     yield
     clear_registry()
-
-
-_PERSONA_CONFIG: dict = {
-    "id": "parity-persona",
-    "model": "test-model",
-    "role": "Parity test persona",
-    "type": "persona",
-    "max_llm_calls": 5,
-    "max_tokens": 1024,
-    "tools": [],
-    "persona": {
-        "name": "Parity Agent",
-        "background": "A persona used by the RFC 0020 PR 2 parity test.",
-        "behavior": {
-            "directness": "balanced",
-            "formality": "professional",
-            "risk_tolerance": "moderate",
-        },
-    },
-    "autonomy": {
-        "level": "semi-autonomous",
-        "tick_interval_seconds": 1,
-        "max_actions_per_tick": 3,
-        "idle_after_ticks": 5,
-    },
-    "memory": {
-        "db_path": ":memory:",
-        "working": {"max_tokens": 50000},
-    },
-    "relationships": [],
-}
-
-
-def _do_nothing_client() -> LLMClient:
-    """Mock client whose every reply parses to a single DO_NOTHING action.
-
-    Single-turn parity does not depend on action shape — only on episode
-    count and column population — so the cheapest possible response is
-    used to keep the test deterministic.
-    """
-    mock_provider = AsyncMock()
-    mock_provider.create_message = AsyncMock(
-        return_value=LLMResponse(
-            text='```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
-            stop_reason=StopReason.END_TURN,
-            usage=Usage(10, 5),
-        ),
-    )
-    mock_provider.format_tool_definitions = MagicMock(return_value=[])
-    mock_provider.append_tool_round = MagicMock(
-        side_effect=lambda msgs, resp, results: msgs,
-    )
-    return LLMClient(mock_provider)
-
-
-async def _make_agent() -> _LLMPersonaAgent:
-    agent = create_persona_agent(
-        agent_id=_PERSONA_CONFIG["id"],
-        config=_PERSONA_CONFIG,
-        llm_client=_do_nothing_client(),
-    )
-    await agent.initialize_memory()
-    return agent
-
-
-async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
-    """Read every episode row directly so we can assert on the new
-    interaction columns without going through the recall scorer (which
-    filters NULL-summary rows and applies the §I boost).
-    """
-    db = agent._episodic_memory._ensure_db()
-    async with db.execute(
-        """
-        SELECT summary, interaction_id, started_at, closed_at,
-               turn_count, scope
-        FROM episodes
-        WHERE agent_id = ?
-        ORDER BY created_at
-        """,
-        (agent.agent_id,),
-    ) as cursor:
-        rows = await cursor.fetchall()
-    return [
-        {
-            "summary": r[0],
-            "interaction_id": r[1],
-            "started_at": r[2],
-            "closed_at": r[3],
-            "turn_count": r[4],
-            "scope": r[5],
-        }
-        for r in rows
-    ]
 
 
 # ─── Single-turn parity ──────────────────────────────────────
@@ -148,7 +57,7 @@ class TestSingleTurnParity:
 
     async def test_n_ticks_produce_n_closed_episodes(self):
         """Episode count after N TICKs equals N (parity vs. pre-RFC)."""
-        agent = await _make_agent()
+        agent = await make_agent()
         # Bypass the RFC 0017 §F empty-context TICK short-circuit so the
         # tick actually reaches the LLM call + episode-store path the
         # parity invariant is asserting against.  ``recent_context`` is
@@ -159,7 +68,7 @@ class TestSingleTurnParity:
         for _ in range(n):
             await agent.on_tick()
 
-        episodes = await _all_episodes(agent)
+        episodes = await all_episodes(agent)
         assert len(episodes) == n
 
         # Every TICK row must be a closed single-turn interaction.
@@ -196,14 +105,14 @@ class TestSingleTurnParity:
         ``EventType.TICK`` events so the column preserves provenance for
         analytics.
         """
-        agent = await _make_agent()
+        agent = await make_agent()
         event = AgentEvent(
             event_type=EventType.TASK_ASSIGNED,
             payload={"task": "Fetch the build status."},
         )
         await agent.on_event(event)
 
-        episodes = await _all_episodes(agent)
+        episodes = await all_episodes(agent)
         assert len(episodes) == 1
         ep = episodes[0]
         assert ep["interaction_id"]
@@ -233,14 +142,14 @@ class TestSingleTurnParity:
             (EventType.CHANNEL_MESSAGE, {"content": "Quick question."}, "iron-fox"),
             (EventType.MENTION, {"content": "@parity-persona ping"}, "iron-fox"),
         ):
-            agent = await _make_agent()
+            agent = await make_agent()
             await agent.on_event(AgentEvent(
                 event_type=event_type,
                 payload=payload,
                 sender_id=sender,
             ))
 
-            episodes = await _all_episodes(agent)
+            episodes = await all_episodes(agent)
             assert episodes == [], (
                 f"{event_type.value} must aggregate into the open interaction "
                 "and persist nothing until close (RFC 0020 PR 3)"
@@ -261,7 +170,7 @@ class TestSingleTurnParity:
         Single-turn parity (§PR 2 "Episode count after N TICKs equals
         N") is unchanged — covered by the other tests on this class.
         """
-        agent = await _make_agent()
+        agent = await make_agent()
         # See ``test_n_ticks_produce_n_closed_episodes`` for the
         # rationale on bypassing the empty-context TICK short-circuit.
         agent._state.recent_context.append("prior turn context")
@@ -277,7 +186,7 @@ class TestSingleTurnParity:
         ))
         await agent.on_tick()
 
-        episodes = await _all_episodes(agent)
+        episodes = await all_episodes(agent)
         assert len(episodes) == 3
 
         # Every persisted row must be a closed single-turn interaction;
@@ -312,14 +221,14 @@ class TestSingleTurnParity:
         """
         import logging
 
-        agent = await _make_agent()
+        agent = await make_agent()
 
         async def _boom(**_kwargs):
             raise RuntimeError("simulated SQLite I/O failure")
 
         agent._episodic_memory.store_episode = _boom  # type: ignore[assignment]
 
-        with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.state_persistence"):
+        with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.episode_routing"):
             # Must not raise.
             await agent.on_event(AgentEvent(
                 event_type=EventType.TASK_ASSIGNED,
