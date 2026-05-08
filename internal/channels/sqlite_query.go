@@ -39,10 +39,38 @@ func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error
 }
 
 // ListChannels implements [ChannelStore.ListChannels].
-func (s *sqliteStore) ListChannels(ctx context.Context) ([]Channel, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, channel_type, description, created_at
-		   FROM channels ORDER BY created_at ASC`)
+//
+// ISSUE-0015: keyset pagination. ORDER BY id ASC is total (id is the
+// PK) so no tiebreaker column is needed and the cursor stays a single
+// opaque string the handler can echo back without decoding. LIMIT is
+// pushed into SQL so a deployment that grows past the soft cap does
+// not load the whole table per request the way the previous
+// implementation did. `limit <= 0` keeps the historical "every row"
+// shape for non-paginated callers — the handler always passes a
+// positive limit (and over-cap silently capped at parse time).
+func (s *sqliteStore) ListChannels(ctx context.Context, limit int, afterID string) ([]Channel, error) {
+	const baseQuery = `SELECT id, name, channel_type, description, created_at
+		   FROM channels`
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	switch {
+	case limit > 0 && afterID != "":
+		rows, err = s.db.QueryContext(ctx,
+			baseQuery+` WHERE id > ? ORDER BY id ASC LIMIT ?`,
+			afterID, limit)
+	case limit > 0:
+		rows, err = s.db.QueryContext(ctx,
+			baseQuery+` ORDER BY id ASC LIMIT ?`, limit)
+	case afterID != "":
+		rows, err = s.db.QueryContext(ctx,
+			baseQuery+` WHERE id > ? ORDER BY id ASC`, afterID)
+	default:
+		rows, err = s.db.QueryContext(ctx,
+			baseQuery+` ORDER BY id ASC`)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("channels: list: %w", err)
 	}

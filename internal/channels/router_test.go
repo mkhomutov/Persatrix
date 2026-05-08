@@ -208,7 +208,7 @@ func TestChannelRouter_ReconcileConfig_PreservesRESTCreatedChannels(t *testing.T
 
 	require.NoError(t, router.ReconcileConfig(ctx, &Config{MaxChannels: 50}))
 
-	chs, err := store.ListChannels(ctx)
+	chs, err := store.ListChannels(ctx, 0, "")
 	require.NoError(t, err)
 	require.Len(t, chs, 1, "REST-created channel must survive reconcile")
 	assert.Equal(t, "group:adhoc", chs[0].ID)

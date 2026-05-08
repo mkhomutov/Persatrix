@@ -147,7 +147,7 @@ func TestSQLiteStore_Migration_V1ToV2_PreservesRows(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	chs, err := store.ListChannels(context.Background())
+	chs, err := store.ListChannels(context.Background(), 0, "")
 	require.NoError(t, err)
 	require.Len(t, chs, 3)
 
@@ -165,7 +165,7 @@ func TestSQLiteStore_Migration_V1ToV2_PreservesRows(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store2.Close() })
 
-	chs2, err := store2.ListChannels(context.Background())
+	chs2, err := store2.ListChannels(context.Background(), 0, "")
 	require.NoError(t, err)
 	assert.Len(t, chs2, 3)
 }
