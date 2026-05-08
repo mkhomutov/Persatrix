@@ -7,6 +7,7 @@ See [README.md](README.md) for conventions and lifecycle.
 <!-- BEGIN issues:auto -->
 | ID | Status | Severity | Area | Created | Closed | Closed PR | Summary |
 |----|--------|----------|------|---------|--------|-----------|---------|
+| [ISSUE-0032](ISSUE-0032-channel-publish-otel-spans.md) | in_progress | low | internal/observability | 2026-05-05 |  |  | Add OpenTelemetry spans around GRPCMessageDispatcher.Dispatch and HTTPChannelPublisher.publish for trace navigation |
 | [ISSUE-0024](ISSUE-0024-python-unit-suite-hangs.md) | open | medium | tests | 2026-05-05 |  |  | tests/unit/python/ full-suite run hangs indefinitely; per-file runs pass |
 | [ISSUE-0025](ISSUE-0025-channel-publish-fanout-receive-integration-test.md) | open | medium | tests | 2026-05-05 |  |  | No integration test covers agent SEND_CHANNEL_MESSAGE → REST publish → router fanout → gRPC dispatch → ReceiveChannelMessage |
 | [ISSUE-0029](ISSUE-0029-grpc-dispatch-connection-pooling.md) | open | medium | internal/channels | 2026-05-05 |  |  | Per-dispatch gRPC dial in both internal/executor/dispatch.go and internal/channels/grpc_dispatcher.go — consolidate connection management for v0.4.0 |
@@ -17,7 +18,6 @@ See [README.md](README.md) for conventions and lifecycle.
 | [ISSUE-0020](ISSUE-0020-channel-type-proto-enum.md) | open | low | build/proto | 2026-05-04 |  |  | ChannelMessageEvent.channel_type is a string with a closed value set ({group, dm, thread}); promote to proto enum |
 | [ISSUE-0022](ISSUE-0022-chatresponse-timestamp-format-divergence-comment.md) | open | low | build/proto | 2026-05-04 |  |  | ChannelMessageEvent.timestamp uses RFC 3339 string while ChatResponse/TaskProgress use int64 epoch; add a cross-reference proto comment |
 | [ISSUE-0023](ISSUE-0023-ci-gate-make-proto-no-diff.md) | open | low | ci | 2026-05-04 |  |  | CI does not gate on `make proto && git diff --exit-code`; orphan .proto files and hand-edits to generated stubs can drift from source |
-| [ISSUE-0032](ISSUE-0032-channel-publish-otel-spans.md) | open | low | internal/observability | 2026-05-05 |  |  | Add OpenTelemetry spans around GRPCMessageDispatcher.Dispatch and HTTPChannelPublisher.publish for trace navigation |
 | [ISSUE-0035](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md) | open | low | cmd/orchestrator | 2026-05-05 |  |  | Remove dead-but-wired chatExecutor / WithChatExecutor / SendChatMessage proto entry once the v0.3.0 upgrade window closes |
 | [ISSUE-0046](ISSUE-0046-pyproject-missing-temporal-package.md) | resolved | high | build/packaging | 2026-05-08 | 2026-05-08 |  | agents/pyproject.toml [tool.setuptools].packages omits persatrix_agents.temporal — every agent container crash-loops with ModuleNotFoundError |
 | [ISSUE-0047](ISSUE-0047-compose-orchestrator-channels-db-not-writable.md) | resolved | high | deployment/docker | 2026-05-08 | 2026-05-08 |  | docker-compose.yaml orchestrator omits --channels-db override; the binary's relative default 'data/channels.db' is read-only in the container, channels stay disabled, and POST /chat returns 500 |

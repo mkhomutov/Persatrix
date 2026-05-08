@@ -365,6 +365,10 @@ func TestGRPCMessageDispatcher_ContextCancelledMidCall(t *testing.T) {
 			"(router.go fanout) is silently bypassed or replaced. err=%v", err)
 }
 
+// (OTel span coverage and the package-wide span exporter live in
+// grpc_dispatcher_otel_test.go; the TestMain that wires them is in
+// testhelpers_test.go.)
+
 // TestGRPCMessageDispatcher_RPCStatusErrorPropagates closes ISSUE-0030.
 // Prior coverage exercised the dial happy path, registry/address gating,
 // and ctx-cancel-mid-call, but the case where ReceiveChannelMessage
