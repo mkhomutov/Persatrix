@@ -165,6 +165,26 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Persona action loop synthesises `SEND_CHANNEL_MESSAGE` for plain-text
+  CHANNEL_MESSAGE replies (ISSUE-0048).** The persona LLM is not
+  prompt-trained on the JSON action schema, so on a normal chat-as-DM
+  turn it returns conversational text — `_parse_actions` folded that
+  into a single `COMPLETE_TASK`, the executor recorded
+  `status=completed`, and the orchestrator-side `replyWaiter` never
+  saw a publish. Every `POST /api/v1/agents/<id>/chat` against a
+  healthy compose stack 504'd on `chatDefaultTimeout`. A new pure
+  helper `agents.persona_runtime.channel_reply.synthesize_channel_reply`
+  promotes the conversational reply into an explicit
+  `SEND_CHANNEL_MESSAGE` bound to the inbound `channel_id` and
+  mentioning the inbound `sender_id` (so the legacy
+  `_extract_chat_reply` priority-1 user-targeted lookup still picks
+  the reply). Hooked into `_ActionLoopMixin._on_event_inner` after
+  `_parse_actions` and before episode persistence. No-ops for
+  non-channel events, the legacy `SendChatMessage` path (no
+  `channel_id`), action lists that already publish to the inbound
+  channel, and empty/whitespace replies. Pinned by 11 cases in
+  `tests/unit/python/test_channel_reply_synthesis.py`.
+
 - **`HTTPChannelPublisher` short-circuits after the first orchestrator
   HTTP 503 (ISSUE-0026).** The same agent build is intended to run
   against orchestrators with channels enabled and disabled (per

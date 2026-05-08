@@ -1,16 +1,18 @@
 ---
 id: ISSUE-0048
 summary: "Persona agent (ember-owl) processes inbound channel_message and calls the LLM, but never publishes the reply back to the orchestrator — chat-as-DM times out at 504"
-status: open
+status: resolved
 severity: high
 area: agents/persona
 created: 2026-05-08
+closed: 2026-05-08
 refs:
   - agents/server_servicers.py
   - agents/dispatch.py
   - agents/action_executor.py
   - agents/response_gate.py
   - agents/persona_runtime/action_loop.py
+  - agents/persona_runtime/channel_reply.py
   - docs/rfcs/0011-amendment-chat-as-dm.md
   - docs/issues/ISSUE-0033-chat-as-dm-single-shot-waiter-multi-message-reply.md
   - docs/issues/ISSUE-0046-pyproject-missing-temporal-package.md
@@ -137,3 +139,26 @@ docker compose logs agent-ember-owl --since 2m | grep "api.anthropic.com"
 > infra fixes are not held up by the deeper persona-runtime
 > investigation. Will be assigned to the next persona-runtime
 > review pass.
+
+## Resolution (2026-05-08)
+
+Root cause was the third bullet on the investigation list: the LLM
+emits `DO_NOTHING` / a conversational reply rather than a structured
+`SEND_CHANNEL_MESSAGE`. No prompt snippet documents the JSON action
+schema for personas, so on a normal CHANNEL_MESSAGE turn
+`_parse_actions` falls back to a single `COMPLETE_TASK` carrying the
+reply text. `ActionExecutor` records `status=completed` for
+`COMPLETE_TASK` and never reaches the channel-publish branch — the
+orchestrator-side `replyWaiter` never sees a publish on the inbound
+channel and chat-as-DM 504s on its `chatDefaultTimeout`.
+
+Fix: a new pure helper
+[`agents.persona_runtime.channel_reply.synthesize_channel_reply`](../../agents/persona_runtime/channel_reply.py)
+promotes a conversational `COMPLETE_TASK` reply into an explicit
+`SEND_CHANNEL_MESSAGE` bound to the inbound `channel_id`. Hooked into
+`_ActionLoopMixin._on_event_inner` immediately after `_parse_actions`,
+before episode persistence. No-ops for non-channel events, the legacy
+`SendChatMessage` path (no `channel_id`), action lists that already
+publish to the inbound channel, and empty/whitespace replies. Pinned
+by `tests/unit/python/test_channel_reply_synthesis.py` (11 cases —
+pure helper + action-loop integration + replay/gate negative cases).
