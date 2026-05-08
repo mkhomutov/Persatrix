@@ -213,6 +213,118 @@ class TestBoundaryDetectors:
         assert DEFAULT_IDLE_TIMEOUT_SEC == 600.0
 
 
+# ─── PR-3 review #12: MaxTurns cap fires inline in add_turn ────
+
+
+class TestMaxTurnsInlineCap:
+    """RFC 0020 PR 6 slice 6 — PR-3 review finding #12.
+
+    Before this slice, :class:`MaxTurnsDetector` was wired into the
+    default chain but only consulted from :meth:`InteractionTracker.idle_check`,
+    which the runtime calls at the *top* of the next event.  An interaction
+    whose ``turn_count`` reached the cap therefore stayed in the
+    tracker's ``_open`` map until *another* event arrived in any scope
+    — and a structural close that fired in the meantime would label the
+    closure as ``REASON_STRUCTURAL`` rather than ``REASON_MAX_TURNS``,
+    losing the security-sensitive attribution RFC 0020 §Security
+    Considerations names.
+
+    This slice tightens enforcement: :meth:`add_turn` evaluates the
+    cap inline after appending the turn and closes the interaction
+    immediately when the cap is reached.  ``REASON_MAX_TURNS`` is the
+    only reason that can fire inline (structural is event-driven and
+    idle-gap requires time to pass since the just-appended turn).
+    """
+
+    def test_add_turn_at_cap_closes_interaction_inline(self):
+        # Cap of 3 chosen so the test doesn't have to thread a 200-deep
+        # loop just to exercise the boundary.  Wire only MaxTurnsDetector
+        # so the fixture is hermetic — no idle / structural surface to
+        # confound the assertion.
+        tracker = InteractionTracker(detectors=(MaxTurnsDetector(max_turns=3),))
+        tracker.add_turn("dm:a:b", now=100.0)
+        tracker.add_turn("dm:a:b", now=110.0)
+        third = tracker.add_turn("dm:a:b", now=120.0)
+        # Inline-cap contract: add_turn returns the (now-closed)
+        # interaction so the caller can observe ``is_open`` and persist.
+        assert third.turn_count == 3
+        assert third.is_open is False
+        assert third.close_reason == REASON_MAX_TURNS
+        assert third.closed_at == 120.0
+        # The scope is popped from the open map per RFC 0020 §C "do not
+        # reopen" — same shape as :meth:`close`.
+        assert tracker.get("dm:a:b") is None
+
+    def test_add_turn_below_cap_does_not_close(self):
+        tracker = InteractionTracker(detectors=(MaxTurnsDetector(max_turns=3),))
+        first = tracker.add_turn("dm:a:b", now=100.0)
+        second = tracker.add_turn("dm:a:b", now=110.0)
+        assert first is second
+        assert first.is_open
+        assert tracker.get("dm:a:b") is first
+
+    def test_subsequent_turn_after_inline_cap_opens_new_interaction(self):
+        # Confirms the "close-and-reopen on overflow" wording in the
+        # finding: the next add_turn after the cap fired starts a fresh
+        # interaction rather than extending the closed one (RFC 0020
+        # §C reopen rule).
+        tracker = InteractionTracker(detectors=(MaxTurnsDetector(max_turns=2),))
+        tracker.add_turn("dm:a:b", now=100.0)
+        capped = tracker.add_turn("dm:a:b", now=110.0)
+        assert capped.is_open is False
+        next_turn = tracker.add_turn("dm:a:b", now=120.0)
+        assert next_turn.interaction_id != capped.interaction_id
+        assert next_turn.turn_count == 1
+        assert next_turn.is_open
+
+    def test_inline_cap_fires_max_turns_subtotal_counter(self):
+        # The counter wiring already exists (slice 2) — this test
+        # pins that the inline path drives the same dispatch table.
+        # Without the inline-cap fix, the counter would remain at 0
+        # because no idle_check was called in this test body.
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        from agents.observability import metrics as metrics_mod
+
+        saved_provider = metrics_mod._provider
+        saved_instruments = metrics_mod._instruments
+        metrics_mod._provider = None
+        metrics_mod._instruments = None
+        try:
+            reader = InMemoryMetricReader()
+            metrics_mod.init_metrics(reader=reader)
+            tracker = InteractionTracker(
+                detectors=(MaxTurnsDetector(max_turns=2),),
+            )
+            tracker.add_turn("dm:a:b", now=100.0)
+            tracker.add_turn("dm:a:b", now=110.0)
+            assert (
+                counter_total(reader, "agent.interactions.closed.by_max_turns")
+                == 1
+            )
+            assert counter_total(reader, "agent.interactions.closed") == 1
+        finally:
+            import asyncio
+
+            if metrics_mod._provider is not None:
+                asyncio.run(metrics_mod.shutdown())
+            metrics_mod._provider = saved_provider
+            metrics_mod._instruments = saved_instruments
+
+    def test_no_inline_cap_when_max_turns_detector_absent(self):
+        # If a caller installs a custom detector chain without
+        # MaxTurnsDetector, add_turn must not invent a cap.  Pins the
+        # contract that the inline check is sourced from the chain,
+        # not from a hardcoded constant.
+        tracker = InteractionTracker(detectors=(IdleGapDetector(),))
+        for i in range(5):
+            tracker.add_turn("dm:a:b", now=100.0 + i)
+        interaction = tracker.get("dm:a:b")
+        assert interaction is not None
+        assert interaction.is_open
+        assert interaction.turn_count == 5
+
+
 # ─── Metric counter wiring ──────────────────────────────────
 
 
