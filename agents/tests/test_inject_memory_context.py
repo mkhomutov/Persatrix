@@ -199,10 +199,13 @@ class TestInjectMemoryContextTierOrdering:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Relationship block consuming entire budget → episodic and notes admit zero."""
-        # Lift the ``rel.notes`` security cap to exercise budget-allocation ordering.
-        from agents.persona_runtime import memory_context as mc
+        # Lift the ``rel.notes`` security cap to exercise budget-allocation
+        # ordering.  The cap is read inside ``relationship_section`` (extracted
+        # from ``memory_context`` to keep the mixin file under the 500-line
+        # cap), so the patch must target that module.
+        from agents.persona_runtime import relationship_section as rs
 
-        monkeypatch.setattr(mc, "REL_NOTES_INTERIM_CHARS", 1_000_000)
+        monkeypatch.setattr(rs, "REL_NOTES_INTERIM_CHARS", 1_000_000)
 
         # Build a relationship block that is itself very large.
         big_notes = "relationship detail word " * 600  # ~2400 tokens > budget
@@ -242,11 +245,11 @@ class TestInjectMemoryContextTierOrdering:
         cap itself had no direct coverage.
         (PR #146 re-review: missing regression test for ``_REL_NOTES_INTERIM_CHARS``.)
         """
-        from agents.persona_runtime import memory_context as mc
+        from agents.persona_runtime import relationship_section as rs
 
         # Notes well above the cap but small enough that the relationship
         # tier comfortably fits in the budget.
-        long_notes = "x" * (mc.REL_NOTES_INTERIM_CHARS * 3)
+        long_notes = "x" * (rs.REL_NOTES_INTERIM_CHARS * 3)
         rel = _FakeRelSummary(
             other_participant_id="carol",
             interaction_count=2,
@@ -273,9 +276,9 @@ class TestInjectMemoryContextTierOrdering:
         # _truncate_with_ellipsis appends "..." (3 chars) after the cap;
         # zero-space input means the full slice is used (no word-boundary
         # backtrack), so the payload is exactly cap + 3.
-        assert len(notes_payload) <= mc.REL_NOTES_INTERIM_CHARS + 3, (
+        assert len(notes_payload) <= rs.REL_NOTES_INTERIM_CHARS + 3, (
             f"Notes payload {len(notes_payload)} chars exceeds cap "
-            f"{mc.REL_NOTES_INTERIM_CHARS} + ellipsis"
+            f"{rs.REL_NOTES_INTERIM_CHARS} + ellipsis"
         )
         assert notes_payload.endswith("..."), (
             "Truncated notes should end with '...' to match episodic/notes "

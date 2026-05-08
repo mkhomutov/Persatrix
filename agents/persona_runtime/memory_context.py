@@ -18,11 +18,7 @@ from ..memory.episodic import (
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
-from ..temporal.rendering import (
-    format_cadence,
-    format_duration,
-    format_relative,
-)
+from ..temporal.rendering import format_duration, format_relative
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
@@ -34,10 +30,13 @@ from .memory_budget import (
     MEMORY_BUDGET_TOKENS,
     MIN_TOKENS_EPISODIC,
     MIN_TOKENS_NOTES,
-    MIN_TOKENS_RELATIONSHIP,
-    REL_NOTES_INTERIM_CHARS,
     MemoryBudget,
     _truncate_to_token_limit,
+)
+from .relationship_section import (
+    RELATIONSHIP_SECTION_NAME,
+    recall_relationship_summary,
+    render_relationship_section,
 )
 
 if TYPE_CHECKING:
@@ -62,16 +61,8 @@ __all__ = [
 # ─── Constants ─────────────────────────────────────────────
 # Budget totals and per-tier token floors live in memory_budget.py so
 # tuning stays co-located with MemoryBudget.try_add() call sites.
-# The names are re-imported above (MEMORY_BUDGET_TOKENS, MIN_TOKENS_*,
-# REL_NOTES_INTERIM_CHARS, MAX_EPISODE_SUMMARY_CHARS, MAX_NOTE_CONTENT_CHARS).
-
-# Trust score defaults for relationship context filtering.
-# A score of exactly _DEFAULT_TRUST_SCORE (the initial value) provides no
-# useful signal to the LLM.  Only inject trust when it has deviated by more
-# than _TRUST_DEVIATION_THRESHOLD from the default.
-# (PR #60 review: unnamed magic numbers in trust comparison.)
-_DEFAULT_TRUST_SCORE: float = 0.5
-_TRUST_DEVIATION_THRESHOLD: float = 0.01
+# Trust thresholds for the relationship tier live in relationship_section.py
+# alongside the rendering logic that consumes them.
 
 
 # ─── Result type ───────────────────────────────────────────
@@ -245,7 +236,7 @@ class _MemoryContextMixin:
         # not cleared between events.)
         self._working_memory.remove_section("episodic_recall")
         self._working_memory.remove_section("recent_notes")
-        self._working_memory.remove_section("relationship_context")
+        self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
@@ -257,35 +248,12 @@ class _MemoryContextMixin:
         # (PR #60 review: document why sequential rather than gather().)
 
         # Tier 1 (priority 8): Relationship context for the event sender.
-        sender_id = event.sender_id
-        rel = None
-        if sender_id:
-            # Extract sender's participant type from event metadata so
-            # user relationships are queried correctly.  Without this,
-            # get_relationship_summary() defaults to "agent" and silently
-            # misses user-type relationships.
-            # (PR #120 review F-1: other_participant_type not propagated.)
-            # TODO(v0.3): sanitize other_participant_id alongside rel.notes
-            # below when A2A allows external agents — the id flows directly
-            # into the LLM-visible label and could carry injection content
-            # if/when external agents may register arbitrary IDs.
-            # (PR #146 re-review: low-risk alignment with rel.notes TODO.)
-            sender_type = (
-                event.metadata.get("sender_participant_type", "agent")
-                if event.metadata
-                else "agent"
-            )
-            try:
-                rel = await self._relationship_memory.get_relationship_summary(
-                    sender_id,
-                    other_participant_type=sender_type,
-                )
-            except Exception:
-                logger.warning(
-                    "Agent %s: relationship lookup for %s failed, skipping",
-                    self.agent_id, sender_id, exc_info=True,
-                )
-                rel = None
+        # Recall is delegated to ``relationship_section`` which handles
+        # the no-sender / backend-failure cases and metadata-driven
+        # participant-type extraction.
+        rel = await recall_relationship_summary(
+            self._relationship_memory, event, agent_id=self.agent_id,
+        )
 
         # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
         # before the episodic recall so harnesses asserting on
@@ -345,87 +313,15 @@ class _MemoryContextMixin:
         _inst = try_get_instruments()
         _agent_attr = current_agent_id()
 
-        # Relationship tier (priority 8).
-        if rel and rel.interaction_count > 0:
-            if rel.other_participant_type == "user":
-                label = f"{rel.other_participant_id} (Human user)"
-            else:
-                label = rel.other_participant_id
-            rel_lines = [f"Relationship with {label}:"]
-            # Only inject trust when it has deviated from the default.
-            # A score of exactly _DEFAULT_TRUST_SCORE provides no useful
-            # signal to the LLM and implies a measured assessment when
-            # it's just the initial value.
-            # (F-60-4: skip default trust injection.)
-            if abs(rel.trust_score - _DEFAULT_TRUST_SCORE) > _TRUST_DEVIATION_THRESHOLD:
-                rel_lines.append(f"  Trust: {rel.trust_score:.2f}")
-            rel_lines.append(f"  Interactions: {rel.interaction_count}")
-            # RFC 0021 §E: last-seen recency + cadence (pre-computed).
-            # ``rendered_last_seen`` defers the counter increment to the
-            # post-admission branch below so the metric reflects what
-            # actually reached the prompt (PR #260 review M-1).
-            rendered_last_seen = False
-            if rel.last_interaction_at is not None:
-                last_seen = format_relative(
-                    rel.last_interaction_at, now, self._timezone,
-                )
-                rel_lines.append(f"  Last seen: {last_seen}")
-                rendered_last_seen = True
-            cadence = format_cadence(
-                rel.interaction_count, rel.first_interaction_at,
-                rel.last_interaction_at, now,
-            )
-            if cadence is not None:
-                rel_lines.append(f"  Cadence: {cadence}")
-            if rel.notes:
-                # TODO(v0.3): sanitize rel.notes when A2A protocol allows
-                # external agents — a compromised peer could store prompt
-                # injection text in its relationship notes.
-                # (PR #60 review: internal prompt injection via peer memory.)
-                # Interim per-field char cap retained from pre-RFC-0017
-                # code: the per-block budget alone allows ~6000 chars of
-                # notes if the relationship tier wins the budget.  Capping
-                # here keeps the worst-case injection surface bounded
-                # independent of budget allocation order.
-                # (PR #146 review.)
-                # Use the shared word-boundary + ellipsis helper rather than
-                # a raw slice so the LLM-visible truncation marker matches
-                # episodic summaries and note content (consistent UX across
-                # all three tiers).
-                # (PR #146 re-review: truncation-style consistency.)
-                capped_notes = _truncate_with_ellipsis(
-                    rel.notes, REL_NOTES_INTERIM_CHARS,
-                )
-                rel_lines.append(f"  Notes: {capped_notes}")
-            rel_text = "\n".join(rel_lines)
-            admitted_rel = budget.try_add(rel_text, min_tokens=MIN_TOKENS_RELATIONSHIP)
-            if admitted_rel is not None:
-                self._working_memory.add_section(ContextSection(
-                    name="relationship_context",
-                    # PR 6 — PR 2 review finding 3: pass ``accurate=True`` so
-                    # this tier's WorkingMemory token count uses tiktoken,
-                    # matching the authoritative count produced by
-                    # ``MemoryBudget`` above.  The two layers now agree on
-                    # the same accounting and operators debugging "why was
-                    # my section dropped" no longer have to reconcile a
-                    # chars/4 estimate against a tiktoken-measured budget.
-                    content=admitted_rel,
-                    priority=8,
-                    token_count=estimate_tokens(admitted_rel, accurate=True),
-                    compressible=True,
-                ))
-                # PR #260 review M-1: increment after admission so the
-                # counter reflects what reached the prompt rather than
-                # what we attempted to render.  Truncation at the budget
-                # floor (`MIN_TOKENS_RELATIONSHIP=64`) snips from the
-                # end; the ``Last seen`` line sits near the front of
-                # ``rel_lines`` (after header, trust, interactions) so
-                # it survives in the 64-token-truncated form for any
-                # realistic field sizes.
-                if rendered_last_seen and _inst is not None:
-                    _inst.temporal_recency_rendered.add(
-                        1, attributes={"agent.id": _agent_attr, "source": "relationship"},
-                    )
+        # Relationship tier (priority 8).  Admission, label formatting,
+        # default-trust filtering, and the temporal-recency metric live
+        # in ``relationship_section.render_relationship_section``.
+        rel_section = render_relationship_section(
+            rel, budget,
+            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
+        )
+        if rel_section is not None:
+            self._working_memory.add_section(rel_section)
 
         # Channel-history tier (RFC 0011 §E + RFC 0021 §J).  Slots
         # between relationship and episodic admissions.
