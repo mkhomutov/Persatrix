@@ -47,6 +47,9 @@ class TestRESTPublishBranch:
             "action_type": "send_channel_message",
             "status": "published",
             "channel_id": "group:planning",
+            # ISSUE-0027: dispatched_to always present; None on the REST
+            # branch because the orchestrator owns fan-out.
+            "dispatched_to": None,
         }
 
     async def test_publisher_exception_returns_failed_status(self, publisher):
@@ -168,6 +171,120 @@ class TestRESTPublishBranch:
         publisher.publish.assert_not_awaited()
         assert result["status"] == "no_targets"
         assert result["dispatched_to"] == 0
+
+
+class TestResultDictSymmetry:
+    """ISSUE-0027: every SEND_CHANNEL_MESSAGE result carries both keys.
+
+    Before this issue, the REST branch returned ``{action_type, status,
+    channel_id}`` and the legacy in-process branch returned ``{action_type,
+    status, dispatched_to}``. Downstream consumers (telemetry, reply
+    formatters, evaluators) had to branch on dict shape to read either
+    field. The symmetric contract: ``channel_id`` and ``dispatched_to``
+    are always present, set to ``None`` when not applicable.
+    """
+
+    _REQUIRED_KEYS = {"action_type", "status", "channel_id", "dispatched_to"}
+
+    async def test_rest_published_result_has_both_keys(self, publisher):
+        executor = ActionExecutor(channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "published"
+        assert result["channel_id"] == "group:planning"
+        # REST path: orchestrator owns fan-out, so per-recipient count is
+        # not knowable to the agent. Use None to distinguish from "0
+        # dispatches" in the legacy branch.
+        assert result["dispatched_to"] is None
+
+    async def test_rest_failed_result_has_both_keys(self, publisher):
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = ActionExecutor(channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "failed"
+        assert result["channel_id"] == "group:planning"
+        assert result["dispatched_to"] is None
+
+    async def test_legacy_dispatched_result_has_both_keys(self, publisher):
+        dispatcher = EventDispatcher()
+        dispatcher.dispatch = AsyncMock(return_value=[])
+        executor = ActionExecutor(dispatcher=dispatcher, channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"content": "reply", "mentions": ["user"]},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "dispatched"
+        assert result["dispatched_to"] == 1
+        # Legacy path with no channel_id payload field still surfaces the
+        # key — empty string is faithful to what the agent emitted.
+        assert result["channel_id"] == ""
+
+    async def test_legacy_no_targets_result_has_both_keys(self, publisher):
+        executor = ActionExecutor(
+            dispatcher=EventDispatcher(), channel_publisher=publisher,
+        )
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"content": "hi"},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "no_targets"
+        assert result["channel_id"] == ""
+        assert result["dispatched_to"] == 0
+
+    async def test_legacy_channel_id_preserved_in_no_targets(self, publisher):
+        # channel_id present but no REST publisher wired and no mentions:
+        # the result must still surface the channel_id the agent targeted,
+        # so operators can correlate the dropped message with a channel.
+        executor = ActionExecutor(dispatcher=EventDispatcher())
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "no_targets"
+        assert result["channel_id"] == "group:planning"
+        assert result["dispatched_to"] == 0
+
+    async def test_no_dispatcher_result_has_both_keys(self):
+        # No dispatcher AND no publisher AND no channel_id → no_dispatcher.
+        executor = ActionExecutor()
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"content": "hi", "mentions": ["user"]},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert set(result.keys()) == self._REQUIRED_KEYS
+        assert result["status"] == "no_dispatcher"
+        assert result["channel_id"] == ""
+        # No dispatch was attempted; None distinguishes from the legacy
+        # "0 dispatches completed" outcome.
+        assert result["dispatched_to"] is None
 
 
 class TestSetChannelPublisher:
