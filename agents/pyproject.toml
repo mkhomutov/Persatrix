@@ -84,6 +84,7 @@ packages = [
     "persatrix_agents.observability",
     "persatrix_agents.persona_runtime",
     "persatrix_agents.sub_agents",
+    "persatrix_agents.temporal",
     "persatrix_agents.tests",
     "persatrix_agents.tools",
 ]

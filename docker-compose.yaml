@@ -15,7 +15,14 @@ services:
     # every interface. Inside the compose bridge network the agents must
     # reach the orchestrator at orchestrator:9090, so 0.0.0.0 is required
     # here.
-    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development"]
+    # NOTE(ISSUE-0047): --channels-db is overridden because the binary
+    # default ('data/channels.db', relative to WORKDIR=/app) is not on
+    # any writable mount in the container. Pointing it at the
+    # orchestrator-data volume (/var/lib/persatrix) lets the SQLite
+    # store initialize; otherwise initChannels logs "mkdir data:
+    # permission denied", channels stay disabled, and chat-as-DM
+    # (RFC 0011 PR 4a-ii-β-2) returns 500 'chat not available'.
+    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development", "--channels-db", "/var/lib/persatrix/channels.db"]
     ports:
       # NOTE(review-PR187, Should-Fix S1): the gRPC LogService is currently
       # unauthenticated (auth deferred to RFC 0009). --grpc-bind 0.0.0.0
