@@ -29,6 +29,7 @@ from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_validation import validate_action_payload
 from .channel_ingest import sanitize_inbound_event
+from .channel_reply import synthesize_channel_reply
 
 if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
@@ -476,6 +477,13 @@ class _ActionLoopMixin:
 
         # 4. Parse actions
         actions = self._parse_actions(response)
+
+        # 4b. ISSUE-0048: synthesise SEND_CHANNEL_MESSAGE for plain-text
+        # CHANNEL_MESSAGE replies. See ``channel_reply.synthesize_channel_reply``
+        # for the full rationale (a persona not prompt-trained on the JSON
+        # action schema returns conversational text that ``_parse_actions``
+        # folds into ``COMPLETE_TASK``, leaving chat-as-DM to 504).
+        actions = synthesize_channel_reply(event, actions, self.agent_id)
 
         # 5. Drain energy per action
         for action in actions:
