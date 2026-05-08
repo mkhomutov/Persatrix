@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0023
 summary: CI does not gate on `make proto && git diff --exit-code`; orphan .proto files and hand-edits to generated stubs can drift from source
-status: open
+status: resolved
 severity: low
 area: ci
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - Makefile
   - .github/workflows/ci.yml
@@ -68,3 +69,32 @@ edits into a documented script rather than folk knowledge.
 > Blocked on ISSUE-0016 + ISSUE-0017 — sequence those first or accept
 > the gate will require a one-off `make proto-clean-edits` step that
 > applies the known hand-patches.
+
+> 2026-05-08 — closed. ISSUE-0016 (#246) + ISSUE-0017 (#288) shipped
+> first, so the gate no longer needs a `proto-clean-edits` shim:
+> `make proto-python` is now a faithful regen and any drift between
+> committed stubs and `proto/` is a real bug. The gate is now three
+> pieces:
+>
+> 1. `make proto-python-check` was broadened to byte-diff the full
+>    Python output (`*_pb2.py`, `*_pb2.pyi`, `*_pb2_grpc.py`) — not
+>    just the `.pyi` line, which was the only class ISSUE-0017 had
+>    locked. Catches drift classes (2) and (3) for Python stubs.
+> 2. `make proto-orphans-check` (new — `scripts/checks/proto_drift.py`)
+>    walks `agents/generated/` and `internal/generated/`, flagging
+>    any generated artifact whose `proto/<stem>.proto` source no
+>    longer exists. Catches drift class (1) for both Go and Python.
+> 3. The pre-existing `proto-staleness` CI job already covered the
+>    Go-stub freshness via `make proto-go && git diff --exit-code
+>    internal/generated/`.
+>
+> Both new gates run in CI: `proto-python-check` and the orphan
+> walk are wired into the `python` job (the freshness test
+> `tests/unit/python/test_proto_python_freshness.py` provides
+> cross-platform coverage on top, with line-ending normalisation so
+> Windows checkouts aren't false-positives). The orphan helper has
+> a unit test under `tests/unit/python/test_proto_drift_helpers.py`.
+>
+> The `make proto-clean-edits` fallback contemplated above never
+> needed to ship — by the time the gate landed, both blockers had
+> already collapsed to clean regen targets.

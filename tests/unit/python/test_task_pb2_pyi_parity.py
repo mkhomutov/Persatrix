@@ -101,7 +101,12 @@ class TestGeneratedPyiFreshness:
                 f"and commit the resulting file."
             )
 
-        if committed.read_bytes() != regenerated.read_bytes():
+        # Normalise CRLF → LF so Windows checkouts (where
+        # ``core.autocrlf=true`` rewrites LF to CRLF on checkout)
+        # compare equal to the ``protoc``-emitted LF bytes. CI runs
+        # on Linux where the bytes already match; the normalisation
+        # is purely for local-dev parity.
+        if committed.read_bytes().replace(b"\r\n", b"\n") != regenerated.read_bytes().replace(b"\r\n", b"\n"):
             pytest.fail(
                 f"agents/generated/{pyi_name} is stale relative to "
                 f"proto/{proto_file.name}. Run:\n"

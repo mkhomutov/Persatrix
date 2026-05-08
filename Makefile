@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check clean test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -51,13 +51,27 @@ import re, pathlib; \
  for f in pathlib.Path('$(PROTO_PY_OUT)').glob('*_pb2_grpc.py')]"
 	@echo "✓ Python protobuf stubs generated"
 
-proto-python-check: ## Fail if agents/generated/*.pyi is stale relative to proto/*.proto (ISSUE-0017)
+proto-python-check: ## Fail if agents/generated/*.pyi / *_pb2.py / *_pb2_grpc.py is stale relative to proto/*.proto (ISSUE-0017 + ISSUE-0023)
 	@echo "→ Checking generated Python protobuf stubs are in sync with proto/..."
+	@# Regenerate *.py + *.pyi + *_grpc.py into a tmp dir, apply the
+	@# same relative-import rewrite the proto-python target applies,
+	@# then byte-compare against the committed copies. Catches the
+	@# three drift classes called out in ISSUE-0023:
+	@#   1. .pyi stale (was the only class covered before this change)
+	@#   2. _pb2.py hand-edited or .proto-changed-without-regen
+	@#   3. _pb2_grpc.py hand-edited or .proto-changed-without-regen
 	@tmpdir=$$(mktemp -d) || exit 1; \
-	$(PYTHON) -m grpc_tools.protoc --mypy_out=$$tmpdir \
+	$(PYTHON) -m grpc_tools.protoc --python_out=$$tmpdir --grpc_python_out=$$tmpdir \
+		--mypy_out=$$tmpdir \
 		-I $(PROTO_DIR) $(PROTO_DIR)/*.proto || { rm -rf $$tmpdir; exit 1; }; \
+	$(PYTHON) -c "\
+	import re, pathlib; \
+	[f.write_text(re.sub(r'^import (\\w+_pb2\\b)', r'from . import \\1', \
+	  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8') \
+	 for f in pathlib.Path('$$tmpdir').glob('*_pb2_grpc.py')]; \
+	" || { rm -rf $$tmpdir; exit 1; }; \
 	stale=0; \
-	for f in $$tmpdir/*.pyi; do \
+	for f in $$tmpdir/*.py $$tmpdir/*.pyi; do \
 		base=$$(basename $$f); \
 		if ! diff -q "$(PROTO_PY_OUT)/$$base" "$$f" >/dev/null 2>&1; then \
 			echo "✗ $(PROTO_PY_OUT)/$$base is stale; run: make proto-python"; \
@@ -66,7 +80,13 @@ proto-python-check: ## Fail if agents/generated/*.pyi is stale relative to proto
 	done; \
 	rm -rf $$tmpdir; \
 	if [ $$stale -ne 0 ]; then exit 1; fi
-	@echo "✓ agents/generated/*.pyi are in sync with proto/"
+	@echo "✓ agents/generated/*.py + *.pyi are in sync with proto/"
+
+proto-orphans-check: ## Fail if generated stubs survive after their proto source was deleted (ISSUE-0023)
+	@$(PYTHON) scripts/checks/proto_drift.py
+
+proto-check: proto-python-check proto-orphans-check ## Run every proto-source-of-truth gate (Python freshness + orphan detection)
+	@echo "✓ proto/ source-of-truth gates passed"
 
 # ─── Build ──────────────────────────────────────────────
 build: build-orchestrator build-cli ## Build all components
