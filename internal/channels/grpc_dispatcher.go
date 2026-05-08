@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -13,6 +17,19 @@ import (
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
+
+// dispatcherTracer emits the orchestrator's `channel.dispatch` business-
+// logic span (ISSUE-0032). The autoinstrumentation gRPC client/server
+// spans already correlate the wire hops, but their names carry only the
+// RPC method — operators querying for "all spans for channel X" or
+// "deliveries to recipient Y" need a parent span with attributes pinned
+// to the publish-path vocabulary (`channel.id`, `recipient.agent_id`,
+// `recipient.address`, `channel.message_id`). Naming follows the bare
+// component-namespaced convention documented in
+// [docs/observability.md §10.1] and matches the existing
+// [internal/executor.executorTracer] / [internal/server.chatHandlerTracer]
+// shape.
+var dispatcherTracer = otel.Tracer("persatrix/channels/dispatch")
 
 // AgentResolver is the subset of [registry.Registry] that
 // [GRPCMessageDispatcher] needs to translate a participant id into a dialable
@@ -98,6 +115,22 @@ func NewGRPCMessageDispatcher(resolver AgentResolver, logger *zap.Logger) *GRPCM
 // Dispatch implements [MessageDispatcher].
 func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
 	participantID := env.Recipient.ParticipantID
+
+	// ISSUE-0032: emit the business-logic `channel.dispatch` span before
+	// any work so even the silent-drop path (unknown participant) shows
+	// up in traces. `recipient.address` is intentionally NOT set here —
+	// the registry lookup may fail, and defaulting to "" would pollute
+	// address-cardinality dashboards on every channels.yaml typo. We
+	// set it later, only after the resolver yields a real address.
+	ctx, span := dispatcherTracer.Start(ctx, "channel.dispatch",
+		trace.WithAttributes(
+			attribute.String("channel.id", msg.ChannelID),
+			attribute.String("channel.message_id", msg.ID),
+			attribute.String("recipient.agent_id", participantID),
+		),
+	)
+	defer span.End()
+
 	agent, err := d.resolver.Get(ctx, participantID)
 	if err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
@@ -106,6 +139,11 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 			// the history endpoint. Logged at warn (not error) so a
 			// reasonable channels.yaml with one mistyped membership
 			// does not turn the operator's logs red.
+			//
+			// Span: leave status Unset and do NOT RecordError —
+			// flagging this branch as Error would inflate orchestrator
+			// error-rate dashboards on every typo (RFC 0011 §C
+			// "Delivery guarantees" makes this best-effort).
 			d.logger.Warn("channels: dispatch target not registered; dropping (read via history on reconnect)",
 				zap.String("participant_id", participantID),
 				zap.String("channel_id", msg.ChannelID),
@@ -113,17 +151,31 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 			)
 			return nil
 		}
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
 		return fmt.Errorf("registry lookup for %s: %w", participantID, err)
 	}
 	if agent.Status != registry.StatusHealthy {
-		return fmt.Errorf("%w: %s status=%s", ErrAgentNotReady, participantID, agent.Status)
+		err := fmt.Errorf("%w: %s status=%s", ErrAgentNotReady, participantID, agent.Status)
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return err
 	}
 	if agent.Address == "" {
-		return fmt.Errorf("%w: %s has empty address", ErrAgentNotReady, participantID)
+		err := fmt.Errorf("%w: %s has empty address", ErrAgentNotReady, participantID)
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
+		return err
 	}
+
+	// Address known — pin it on the span so a delivery failure can be
+	// correlated to a specific dial target by Jaeger/Tempo query.
+	span.SetAttributes(attribute.String("recipient.address", agent.Address))
 
 	conn, err := d.dial(agent.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
 		return fmt.Errorf("dial %s at %s: %w", participantID, agent.Address, err)
 	}
 	// PR #250 review (Should-Fix #3): the prior `defer conn.Close()`
@@ -146,6 +198,12 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	client := taskpb.NewAgentServiceClient(conn)
 	event := d.channelMessageToProto(msg, env)
 	if _, err := client.ReceiveChannelMessage(ctx, event); err != nil {
+		// Wire-call failure: surface on the span so an operator searching
+		// by trace_id sees the receiver's gRPC status code attached to
+		// the parent span rather than only on the autoinstrumentation
+		// child.
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
 		return fmt.Errorf("ReceiveChannelMessage to %s: %w", participantID, err)
 	}
 	return nil
