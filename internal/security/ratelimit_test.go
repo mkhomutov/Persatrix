@@ -161,7 +161,7 @@ func TestSlidingWindow_Reset(t *testing.T) {
 		require.True(t, rl.Allow(ctx, "agent-a"))
 	}
 	require.False(t, rl.Allow(ctx, "agent-a"))
-	rl.Reset("agent-a")
+	rl.Reset(ctx, "agent-a", "test")
 	assert.True(t, rl.Allow(ctx, "agent-a"), "Reset must clear the window")
 }
 
@@ -274,7 +274,7 @@ func TestSlidingWindow_LastEmitPurgedOnReset(t *testing.T) {
 	rl.lastEmitMu.Unlock()
 	require.True(t, hadEntry, "precondition: lastEmit must be set after a deny")
 
-	rl.Reset("agent-a")
+	rl.Reset(ctx, "agent-a", "test")
 
 	rl.lastEmitMu.Lock()
 	_, stillThere := rl.lastEmit["agent-a"]

@@ -173,12 +173,28 @@ func (rl *RateLimiter) Allow(ctx context.Context, agentID string) bool {
 // Reset clears the ring for agentID (next call starts from empty) and
 // purges any associated `lastEmit` throttle entry so the auxiliary map
 // cannot grow unbounded under repeated reset-then-deny cycles
-// (PR #244 review M-01 follow-up — mirrors evictTailLocked). Calling
-// Reset on an unknown agent is a no-op.
-func (rl *RateLimiter) Reset(agentID string) {
+// (PR #244 review M-01 follow-up — mirrors evictTailLocked).
+//
+// Returns true when the agent was tracked; false on no-op. Calling
+// Reset on an unknown agent is a no-op and does not emit an audit
+// event — the ring map was untouched, so an emit would falsely imply
+// a state mutation.
+//
+// ISSUE-0005: when the agent was tracked, emits a `rate_limit.reset`
+// audit event mirroring [CircuitBreaker.Unquarantine]'s
+// `agent.unquarantined` pattern. The state mutation undoes a security
+// control's effect, so the action must land in the tamper-evident
+// chain. `actor` is recorded on the event for forensics so an
+// operator-driven reset is distinguishable from future automated
+// callers. ctx propagation matches ISSUE-0007: the inbound request
+// context is forwarded so trace IDs survive into the audit chain when
+// the future operator endpoint drives Reset from a request handler;
+// nil ctx is tolerated for non-request callers.
+func (rl *RateLimiter) Reset(ctx context.Context, agentID, actor string) bool {
 	resolved, _ := rl.resolveAgentID(agentID)
 	rl.mu.Lock()
-	if elem, ok := rl.rings[resolved]; ok {
+	elem, ok := rl.rings[resolved]
+	if ok {
 		rl.lru.Remove(elem)
 		delete(rl.rings, resolved)
 	}
@@ -186,6 +202,20 @@ func (rl *RateLimiter) Reset(agentID string) {
 	rl.lastEmitMu.Lock()
 	delete(rl.lastEmit, resolved)
 	rl.lastEmitMu.Unlock()
+	if ok {
+		rl.emit(ctx, AuditEvent{
+			Timestamp: rl.cfg.Now(),
+			EventType: AuditRateLimitReset,
+			AgentID:   resolved,
+			Action:    "rate_limit.reset",
+			Resource:  resolved,
+			Outcome:   "reset",
+			Detail: map[string]any{
+				"actor": actor,
+			},
+		})
+	}
+	return ok
 }
 
 // TrackedAgents returns the current agent-map size. Intended for

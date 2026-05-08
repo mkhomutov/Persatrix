@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0005
 summary: "RateLimiter.Reset() does not emit an audit event; add rate_limit.reset when surfaced to operators"
-status: open
+status: resolved
 severity: low
 area: security
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - docs/rfcs/0009-security-sandboxing.md
   - docs/rfcs/0009-pr-plan.md
@@ -35,3 +36,11 @@ Pick up alongside the executor endpoint work in RFC-0009 PR 4: register
 ## Notes
 
 > 2026-05-04 — captured during PR #244 deep review (R3, finding L-R3-04).
+
+> 2026-05-08 — resolved on `feature/v030-rfc0009-issue0005-ratelimit-reset-audit`.
+> `RateLimiter.Reset` now takes `(ctx, agentID, actor)`, returns `bool`,
+> and emits `rate_limit.reset` (security-class, fsync'd) when an actual
+> reset occurs. Mirrors `CircuitBreaker.Unquarantine` →
+> `agent.unquarantined`. The pre-emptive consistency promised here is
+> now in place, so the future operator endpoint can wire through Reset
+> without further audit plumbing.

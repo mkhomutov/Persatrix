@@ -49,6 +49,12 @@ const (
 	AuditRateLimitUnauthenticatedCall AuditEventType = "rate_limit.unauthenticated_caller"
 	AuditRateLimitAgentEvicted        AuditEventType = "rate_limit.agent_evicted"
 	AuditRateLimitDisabled            AuditEventType = "rate_limit.disabled"
+	// AuditRateLimitReset is emitted when an operator (or future
+	// administrative endpoint) clears an agent's sliding-window history
+	// via [RateLimiter.Reset]. Mirrors [AuditAgentUnquarantined]: the
+	// state mutation undoes a security control's effect, so the action
+	// must land in the tamper-evident chain. ISSUE-0005.
+	AuditRateLimitReset AuditEventType = "rate_limit.reset"
 
 	// Circuit breaker / quarantine (PR 2)
 	AuditAgentQuarantined   AuditEventType = "agent.quarantined"
@@ -93,6 +99,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditRateLimitUnauthenticatedCall,
 		AuditRateLimitAgentEvicted,
 		AuditRateLimitDisabled,
+		AuditRateLimitReset,
 		AuditAgentQuarantined,
 		AuditAgentUnquarantined,
 		AuditUnquarantineEndpointOpen,
@@ -132,6 +139,7 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditRateLimitViolated:            {},
 	AuditRateLimitUnauthenticatedCall: {},
 	AuditRateLimitDisabled:            {},
+	AuditRateLimitReset:               {},
 	AuditAgentQuarantined:             {},
 	AuditAgentUnquarantined:           {},
 	AuditUnquarantineEndpointOpen:     {},
