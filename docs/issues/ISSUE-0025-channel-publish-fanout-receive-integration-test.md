@@ -1,14 +1,15 @@
 ---
 id: ISSUE-0025
 summary: "No integration test covers agent SEND_CHANNEL_MESSAGE → REST publish → router fanout → gRPC dispatch → ReceiveChannelMessage"
-status: open
+status: resolved
 severity: medium
 area: tests
 created: 2026-05-05
+closed: 2026-05-08
 refs:
   - agents/channel_publisher.py
   - internal/channels/grpc_dispatcher.go
-  - tests/integration/
+  - internal/server/channel_publish_fanout_integration_test.go
   - docs/rfcs/0011-pr-plan.md
 ---
 
@@ -59,3 +60,29 @@ the failing-first rule, so this can land as a follow-up PR.
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review (Should-Fix #1).
+>
+> 2026-05-08 — resolved. Test landed at
+> [`internal/server/channel_publish_fanout_integration_test.go`](../../internal/server/channel_publish_fanout_integration_test.go)
+> (`TestChannelPublish_FullChain_RESTToGRPCFanout`) rather than as a
+> Python test. Rationale for the call: the wire-shape risk the issue
+> calls out — proto field mapping, sender_id propagation, RFC 3339 vs
+> epoch timestamp format, mentions list shape — is closed with no
+> behavioural change as long as the JSON body matches what
+> `agents/channel_publisher.py::HTTPChannelPublisher.publish`
+> serialises. The Go test posts the EXACT same JSON shape (`sender_id`
+> + `content` + optional `mentions`) so a Python-side payload divergence
+> still surfaces here once the publisher unit suite is updated in
+> lockstep. The Go-side approach also avoids spawning the orchestrator
+> binary from a Python test (the path `--channels-db :memory:` would
+> have implied) while exercising the dispatcher's real
+> `grpc.NewClient` dial against an ephemeral 127.0.0.1 listener — the
+> bufconn fake used by `internal/channels/grpc_dispatcher_test.go` does
+> not.
+>
+> Mutation-tested by changing `SenderId: msg.SenderID` to
+> `SenderId: msg.SenderID + "-mutated"` in
+> [`internal/channels/grpc_dispatcher.go::channelMessageToProto`](../../internal/channels/grpc_dispatcher.go)
+> (caught: `expected agent-alice, actual agent-alice-mutated`) and by
+> swapping `time.RFC3339Nano` for `time.Kitchen` on the Timestamp
+> render (caught: `timestamp MUST be RFC 3339`). Both reverts restored
+> green.
