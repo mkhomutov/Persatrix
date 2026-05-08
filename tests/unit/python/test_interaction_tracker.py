@@ -220,7 +220,58 @@ class TestMetricEmission:
     Uses an :class:`InMemoryMetricReader` per the pattern in
     ``test_observability_metrics.py`` so the assertions stay
     decoupled from the OTLP exporter.
+
+    PR-1 review finding #5: the class mutates the module-global metrics
+    registry via :func:`init_metrics`.  Without an autouse cleanup
+    fixture each test method would inherit whatever state the previous
+    test method (or the previous test class in the same pytest session)
+    left behind, producing order-coupled failures whose root cause is
+    invisible at the assertion site.  The class-scoped autouse fixture
+    below snapshots the relevant module globals before every test and
+    restores them after, using the public :func:`metrics_mod.shutdown`
+    contract for the active provider so SDK background threads do not
+    leak across tests either.
     """
+
+    @pytest.fixture(autouse=True)
+    def _reset_metrics_state(self):
+        # Snapshot the module globals before each test.  The cleanup
+        # fixture restores them after, regardless of how the test
+        # mutates state.  This isolates this class from sibling test
+        # classes in the same pytest session that may also call
+        # ``init_metrics`` or assume ``try_get_instruments() is None``.
+        import asyncio
+
+        from agents.observability import metrics as metrics_mod
+
+        saved_provider = metrics_mod._provider
+        saved_instruments = metrics_mod._instruments
+        # Force a known-clean baseline so each test method starts from
+        # ``_provider is None`` / ``_instruments is None``.  Tests that
+        # need a meter call ``_build_meter`` explicitly.
+        metrics_mod._provider = None
+        metrics_mod._instruments = None
+        try:
+            yield
+        finally:
+            # Tear down whatever the test installed via the public
+            # contract — this releases the SDK's background threads —
+            # then restore the pre-test snapshot so neighbouring test
+            # classes see the same state they had before.
+            if metrics_mod._provider is not None:
+                asyncio.run(metrics_mod.shutdown())
+            metrics_mod._provider = saved_provider
+            metrics_mod._instruments = saved_instruments
+
+    def test_autouse_fixture_clears_state_before_each_test(self):
+        # Sentinel for finding #5: the autouse fixture must zero the
+        # module globals before this test sees them.  Without the
+        # fixture, the prior method's ``_build_meter()`` call would
+        # have left ``_instruments`` set and this assertion would fail.
+        from agents.observability import metrics as metrics_mod
+
+        assert metrics_mod._provider is None
+        assert metrics_mod._instruments is None
 
     def _build_meter(self):
         from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -302,23 +353,16 @@ class TestMetricEmission:
         # Before init_metrics(), tracker calls must not raise — the
         # try_get_instruments() call returns None and emission no-ops.
         #
-        # PR-214 review fix (Should-Fix #2): the previous implementation
-        # cleared module-private globals (``metrics_mod._provider`` /
-        # ``metrics_mod._instruments``) directly to undo the side-effects
-        # of sibling tests in this class.  That pattern was explicitly
-        # called out as fragile in the PR #170 review (see
-        # ``agents/tests/test_observability_metrics.py::
-        # TestInitIdempotent.test_shutdown_clears_module_state``) — pytest
-        # does not guarantee in-class test order, and a future SDK upgrade
-        # could rename the private state under us.  Use the public
-        # :func:`agents.observability.metrics.shutdown` API instead, which
-        # is the documented contract for returning the module to the
-        # uninitialised state.
-        import asyncio
-
+        # The autouse ``_reset_metrics_state`` fixture establishes the
+        # uninitialised baseline (see class docstring); this test's
+        # body simply pins the no-op contract.  An earlier revision
+        # called ``asyncio.run(metrics_mod.shutdown())`` inline to
+        # undo sibling tests' side-effects, which pytest's
+        # ``test_observability_metrics.py`` review explicitly flagged
+        # as fragile (private-global shape, no-fixture, mid-test event
+        # loop).  The fixture now owns that contract.
         from agents.observability import metrics as metrics_mod
 
-        asyncio.run(metrics_mod.shutdown())
         assert metrics_mod.try_get_instruments() is None
 
         tracker = InteractionTracker()

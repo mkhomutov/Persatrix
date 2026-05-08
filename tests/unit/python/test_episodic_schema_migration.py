@@ -98,6 +98,97 @@ class TestMigrationIdempotency:
 # ─── Legacy upgrade path ────────────────────────────────────
 
 
+# ─── Empty-baseline guard (no `episodes` table) ─────────────
+
+
+class TestEmptyEpisodesGuard:
+    """Regression for the v5 ``no-episodes-table`` early return.
+
+    PR-1 review finding #4: an unusual but real shape during partial
+    restores is a DB whose ``schema_version`` table records v1–v4 but
+    whose ``episodes`` table is missing.  ``ALTER TABLE`` on a
+    non-existent table would raise; the handler instead detects the
+    missing table via ``sqlite_master`` and returns without writing.
+    """
+
+    async def test_handler_no_op_on_missing_episodes_table(self):
+        # Simulate the partial-restore baseline: schema_version row at v4
+        # but no ``episodes`` table.  The handler must return cleanly,
+        # leave no episodes table behind, and not roll back any other
+        # session state — the umbrella ``_apply_migrations`` is the
+        # single owner of the version record (parity with
+        # ``_apply_migration_4``'s "version-record happens after this
+        # returns" contract).
+        db = await aiosqlite.connect(":memory:")
+        try:
+            await db.execute(
+                "CREATE TABLE schema_version "
+                "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL, "
+                "description TEXT)",
+            )
+            await db.execute(
+                "INSERT INTO schema_version VALUES (4, 0.0, 'v4 baseline')",
+            )
+            await db.commit()
+
+            # Direct handler call — no exception, no episodes table created.
+            await _apply_migration_5(db)
+
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='episodes'",
+            )
+            assert await cursor.fetchone() is None
+
+            # No idx_episodes_scope index either — the index DDL must
+            # not run on a DB without the underlying table.
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND name='idx_episodes_scope'",
+            )
+            assert await cursor.fetchone() is None
+
+            # Outer harness owns the version record — a direct handler
+            # call must not touch ``schema_version``.
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 5",
+            )
+            row = await cursor.fetchone()
+            assert row[0] == 0
+        finally:
+            await db.close()
+
+    async def test_umbrella_records_v5_even_on_no_op(self):
+        # The umbrella ``_apply_migrations`` records v5 as applied even
+        # when the handler short-circuited.  This is intentional — the
+        # episodes table can be created by a later v1 re-run, and
+        # blocking v5 from being recorded would loop the upgrade.
+        db = await aiosqlite.connect(":memory:")
+        try:
+            await db.execute(
+                "CREATE TABLE schema_version "
+                "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL, "
+                "description TEXT)",
+            )
+            await db.execute(
+                "INSERT INTO schema_version VALUES (4, 0.0, 'v4 baseline')",
+            )
+            await db.commit()
+
+            await _apply_migrations(db)
+
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 5",
+            )
+            row = await cursor.fetchone()
+            assert row[0] == 1
+        finally:
+            await db.close()
+
+
+# ─── Legacy upgrade path ────────────────────────────────────
+
+
 class TestLegacyUpgrade:
     async def test_upgrade_from_v4_preserves_rows(self):
         """A DB pinned at v4 picks up v5 without losing pre-existing rows."""

@@ -268,7 +268,10 @@ async def _apply_migration_5(db: aiosqlite.Connection) -> None:
         "WHERE type='table' AND name='episodes'"
     )
     if not await cursor.fetchone():
-        await db.commit()
+        # No DDL ran, so there is nothing to commit.  The version record
+        # in schema_version is written by _apply_migrations() AFTER this
+        # function returns (parity with _apply_migration_4's tail-commit
+        # contract), so the no-op return is the only side-effect.
         return
 
     # Discover existing column names exactly once.
@@ -328,8 +331,9 @@ async def _apply_migration_6(db: aiosqlite.Connection) -> None:
     )
     if not await cursor.fetchone():
         # No episodes table yet — nothing to alter.  Mirrors the v5
-        # defensive guard for partial-baseline test fixtures.
-        await db.commit()
+        # defensive guard for partial-baseline test fixtures.  No DDL
+        # ran, so there is nothing to commit; the version record is
+        # written by _apply_migrations() AFTER this function returns.
         return
 
     cursor = await db.execute("PRAGMA table_info(episodes)")
