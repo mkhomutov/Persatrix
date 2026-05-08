@@ -32,6 +32,7 @@ the 500-line file-size cap (``scripts/checks/file_size.py --strict``).
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,6 +40,7 @@ import pytest
 
 from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
+from agents.memory.boundary_detectors import REASON_IDLE_GAP
 from agents.memory.interactions import scope_for_dm
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
@@ -120,7 +122,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     async with db.execute(
         """
         SELECT summary, interaction_id, started_at, closed_at,
-               turn_count, scope
+               turn_count, scope, context_json
         FROM episodes
         WHERE agent_id = ?
         ORDER BY created_at
@@ -136,6 +138,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
             "closed_at": r[3],
             "turn_count": r[4],
             "scope": r[5],
+            "context_json": r[6],
         }
         for r in rows
     ]
@@ -266,10 +269,21 @@ class TestCrossScopeIdleFlushViaOnEvent:
         ep = episodes[0]
         assert ep["interaction_id"] == first_a_id
         assert ep["scope"] == scope_a
-        # The two-phase summariser puts the close_reason in
-        # ``context_json``; the deterministic fallback summary still
-        # contains the reason text.  Read it from the row so the
-        # assertion is not coupled to the LLM mock.
+        # PR-3 review #14 deep-review Should-Fix (PR 299): assert the
+        # *reason* of the close, not just that summarise+update ran.
+        # The two-phase persistence path writes ``close_reason`` to
+        # ``context_json`` at the sync INSERT (see
+        # ``_persist_closed_interaction``), so reading it from the row
+        # is the lowest-coupling way to pin the close-reason contract:
+        # a regression that mis-attributed the close to ``structural``
+        # or ``shutdown`` would leave the summary non-empty (the
+        # background summariser still runs) and slip past the prior
+        # ``summary != SUMMARY_UNAVAILABLE_TEXT`` check.
+        ctx = json.loads(ep["context_json"])
+        assert ctx["close_reason"] == REASON_IDLE_GAP
+        # Complementary check: the two-phase summariser ran to
+        # completion (UPDATE replaced the SUMMARY_PENDING_TEXT
+        # placeholder with a non-empty fallback or LLM-generated text).
         from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT
         assert ep["summary"]
         assert ep["summary"] != SUMMARY_UNAVAILABLE_TEXT
