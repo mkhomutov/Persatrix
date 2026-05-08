@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -65,51 +64,28 @@ var (
 func main() {
 	flag.Parse()
 
-	// PR #12 review (F-06): validate --env flag at startup instead of silently
-	// falling through to production logger on typos like --env=test.
-	switch *env {
-	case "development", "staging", "production":
-	default:
-		fmt.Fprintln(os.Stderr, "invalid --env value: "+*env+" (must be development|staging|production)")
-		os.Exit(1)
-	}
-
-	// PR #84 F-01: Resolve deadline mode default from --env when not explicitly set.
-	// Until environment YAML config loading is wired, infer from --env to match
-	// the documented per-environment policies (production.yaml → static,
-	// development/staging.yaml → derived). An explicit --deadline-mode flag
-	// still overrides this.
+	// PR #84 F-01: Resolve --deadline-mode default from --env when not
+	// explicitly set. Until environment YAML config loading is wired,
+	// infer from --env to match the documented per-environment policies
+	// (production → static, development/staging → derived). An explicit
+	// --deadline-mode flag still overrides this.
 	if *deadlineMode == "" {
 		*deadlineMode = resolveDeadlineMode("", *env)
 	}
 
-	// PR #84 F-02: Validate --deadline-mode at startup (same pattern as --env
-	// validation above). Without this, a typo like --deadline-mode=dervied would
-	// silently fall back to static inside the executor while the startup log
-	// still reports the invalid raw string — misleading during incident analysis.
-	switch *deadlineMode {
-	case "derived", "static":
-	default:
-		fmt.Fprintln(os.Stderr, "invalid --deadline-mode value: "+*deadlineMode+" (must be derived|static)")
-		os.Exit(1)
-	}
-
-	// RFC 0018 PR 2: build the zap logger with the Persatrix-schema encoder
-	// (JSON wire format with schema_version + service.* + source) by default,
-	// or zap's development console encoder when PERSATRIX_LOG_FORMAT=pretty.
-	// Pretty mode is a developer affordance; it is not a stable wire format
-	// and is not consumed by the future persatrix logs endpoint.
-	//
-	// Env-validation discipline (matches --env / --deadline-mode above):
-	// only "json" / "" / "pretty" are accepted.  Anything else exits non-zero
-	// rather than silently falling through to JSON, so a typo in
-	// PERSATRIX_LOG_FORMAT=preety surfaces at startup.
+	// RFC 0018 PR 2: PERSATRIX_LOG_FORMAT toggles the Persatrix-schema JSON
+	// encoder (default) versus zap's development console encoder. Pretty
+	// mode is a developer affordance; it is not a stable wire format and
+	// is not consumed by the future persatrix logs endpoint.
 	logFormat := os.Getenv(zapenc.PrettyEnvVar)
-	switch logFormat {
-	case "", zapenc.JSONEnvValue, zapenc.PrettyEnvValue:
-	default:
-		fmt.Fprintln(os.Stderr, "invalid "+zapenc.PrettyEnvVar+" value: "+logFormat+
-			" (must be json|pretty; unset == json)")
+
+	// Validate --env (PR #12 F-06), --deadline-mode (PR #84 F-02), and
+	// PERSATRIX_LOG_FORMAT in one place so a typo surfaces at startup with
+	// a clean non-zero exit instead of silently falling through to a
+	// default that misleads incident analysis later. Helper extracted
+	// per ISSUE-0008.
+	if err := validateStartupFlags(*env, *deadlineMode, logFormat); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 
@@ -179,19 +155,12 @@ func main() {
 		}()
 	}
 
-	// N-47: Resolve workflowsDir to a fully canonical path once, so both
-	// the server and scheduler see the same path regardless of CWD or symlinks.
-	// Without EvalSymlinks, server.New() internally canonicalizes further via
-	// filepath.EvalSymlinks, producing a different path than the scheduler stores.
-	// (PR #33 review F-01)
-	absWorkflowsDir, err := filepath.Abs(*workflowsDir)
+	// N-47 / PR #33 review F-01: canonicalise --workflows-dir once so both
+	// the HTTP server and the scheduler see the same path regardless of CWD
+	// or symlinks. Helper extracted per ISSUE-0008.
+	absWorkflowsDir, err := resolveWorkflowsDir(*workflowsDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "failed to resolve --workflows-dir: "+err.Error())
-		os.Exit(1)
-	}
-	absWorkflowsDir, err = filepath.EvalSymlinks(absWorkflowsDir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "failed to canonicalize --workflows-dir: "+err.Error())
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 

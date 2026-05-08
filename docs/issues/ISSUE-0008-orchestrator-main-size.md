@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0008
 summary: cmd/orchestrator/main.go exceeds 500-line review-friendly cap
-status: open
+status: resolved
 severity: low
 area: cmd/orchestrator
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md
@@ -51,3 +52,16 @@ longer push it over. Once the refactor lands, remove
   pattern future RFCs should follow.
 - The grandfather entry should be temporary; treat it as a deferred TODO,
   not a permanent exemption.
+
+## Resolution
+
+> 2026-05-08 — extracted `validateStartupFlags(env, deadlineMode, logFormat)`
+> and `resolveWorkflowsDir(dir)` into [`cmd/orchestrator/startup.go`](../../cmd/orchestrator/startup.go),
+> with unit tests in
+> [`cmd/orchestrator/startup_test.go`](../../cmd/orchestrator/startup_test.go).
+> `cmd/orchestrator/main.go` dropped from 519 to ~488 lines and the entry
+> was removed from `GRANDFATHERED_FILES` in
+> [`scripts/checks/file_size.py`](../../scripts/checks/file_size.py); the
+> `--strict` size check now passes without the exemption. Future
+> phase-function extractions (e.g. observability/metrics shutdown plumbing)
+> can land incrementally on top of this.

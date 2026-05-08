@@ -131,16 +131,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # topic is a separate maintenance refactor; grandfather here until
     # that lands.
     "docs/ai-glossary.md",
-    # cmd/orchestrator/main.go grew past 500 lines after RFC 0011 PR 2
-    # (channels subsystem) wired its init helper into the orchestrator
-    # startup pipeline. The channels-specific code is already extracted
-    # into cmd/orchestrator/channels.go (`initChannels()`); only the
-    # ~7-line call site lives in main.go. The file's natural growth is
-    # the cumulative result of a long sequential init pipeline and
-    # warrants a phase-function refactor — tracked in
-    # docs/issues/ISSUE-0008-orchestrator-main-size.md. Remove this
-    # entry once that refactor lands.
-    "cmd/orchestrator/main.go",
     # agents/memory/facade.py was at 500 lines pre-PR-5. RFC 0020 PR 5
     # added the four-line defense-in-depth recall filter
     # (``SUMMARY_PENDING_TEXT`` skip + import) that pushed it to 504.
