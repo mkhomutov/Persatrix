@@ -165,6 +165,27 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`HTTPChannelPublisher` short-circuits after the first orchestrator
+  HTTP 503 (ISSUE-0026).** The same agent build is intended to run
+  against orchestrators with channels enabled and disabled (per
+  `cmd/orchestrator/channels.go::selectChannelDispatcher`); previously
+  every `SEND_CHANNEL_MESSAGE` action against a channels-disabled
+  orchestrator burned an HTTP RTT and emitted a per-action WARN — log
+  noise scaled linearly with action volume. The publisher now flips a
+  sticky `_disabled` flag on the first 503 from
+  `POST /api/v1/channels/{id}/messages`, emits a single diagnostic
+  WARN with the response body, and raises a typed
+  `ChannelsDisabledError` so subsequent calls short-circuit without
+  hitting the wire. The action executor maps the new exception to
+  `status="channels_disabled"` (distinct from `"failed"`) so the LLM
+  treats it as a deployment-wide gate rather than a transient error
+  to retry; per-action logging stays at DEBUG. Other 4xx/5xx statuses
+  (403/404/500) are still per-message conditions and do not flip the
+  flag. Also closes ISSUE-0018 retroactively (the `ChannelMessageEvent`
+  receiver-bounds validator landed with PR #248 — the issue was kept
+  open as a tracking item; closing it as resolved with the same
+  closure PR).
+
 - **`GET /api/v1/channels` now paginates via keyset cursor (ISSUE-0015).**
   `ChannelStore.ListChannels` takes `(ctx, limit, afterID)` and pushes
   `WHERE id > ? ORDER BY id ASC LIMIT ?` into the SQL — the previous

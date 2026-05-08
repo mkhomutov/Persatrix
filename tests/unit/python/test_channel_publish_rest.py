@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agents.channel_publisher import ChannelsDisabledError
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.persona_types import ActionType, AgentAction
 
@@ -306,3 +307,70 @@ class TestSetChannelPublisher:
         result = await dispatcher._executor._handle_send_channel_message("agent-a", action)
         assert result["status"] == "published"
         publisher.publish.assert_awaited_once()
+
+
+class TestChannelsDisabledStatus:
+    """ISSUE-0026 — distinct status when the publisher is sticky-disabled.
+
+    When :class:`HTTPChannelPublisher` short-circuits on the orchestrator's
+    ``channels disabled`` (HTTP 503) signal, the executor must NOT report
+    ``status="failed"`` — that would prompt the LLM to treat the action
+    as transiently broken and retry. The dedicated ``channels_disabled``
+    status communicates the deployment-wide gate to the action-results
+    consumer.
+    """
+
+    async def test_channels_disabled_error_maps_to_distinct_status(self, publisher):
+        publisher.publish = AsyncMock(
+            side_effect=ChannelsDisabledError("channels disabled at orchestrator"),
+        )
+        executor = ActionExecutor(channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert result == {
+            "action_type": "send_channel_message",
+            "status": "channels_disabled",
+            "channel_id": "group:planning",
+            "dispatched_to": None,
+        }
+
+    async def test_channels_disabled_does_not_log_warning(self, publisher, caplog):
+        """The publisher already emitted the one-shot WARN on the first
+        503; the executor must not re-WARN per action or operator log
+        noise still scales linearly with action volume.
+        """
+        publisher.publish = AsyncMock(
+            side_effect=ChannelsDisabledError("channels disabled at orchestrator"),
+        )
+        executor = ActionExecutor(channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        with caplog.at_level("WARNING", logger="agents.action_executor"):
+            await executor._handle_send_channel_message("agent-a", action)
+
+        assert not [
+            r for r in caplog.records
+            if r.levelname == "WARNING" and "channels_disabled" not in r.getMessage()
+            and "publish" in r.getMessage().lower()
+        ], "executor must not emit a per-action WARN on ChannelsDisabledError"
+
+    async def test_other_exceptions_still_map_to_failed(self, publisher):
+        """Regression guard: the new branch must not swallow generic errors."""
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = ActionExecutor(channel_publisher=publisher)
+        action = AgentAction(
+            ActionType.SEND_CHANNEL_MESSAGE,
+            {"channel_id": "group:planning", "content": "hi", "mentions": []},
+        )
+
+        result = await executor._handle_send_channel_message("agent-a", action)
+
+        assert result["status"] == "failed"

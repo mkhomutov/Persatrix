@@ -18,6 +18,7 @@ from opentelemetry import trace
 from .channel_publisher import (
     DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ChannelPublisher,
+    ChannelsDisabledError,
 )
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
@@ -245,6 +246,25 @@ class ActionExecutor:
                     ),
                     timeout=_DEFAULT_PUBLISH_HTTP_TIMEOUT,
                 )
+            except ChannelsDisabledError:
+                # ISSUE-0026: orchestrator has channels disabled. The
+                # publisher already fired a one-shot WARN on the first
+                # 503 with the response body for diagnostics; per-action
+                # logs stay at DEBUG so operator log volume does not
+                # scale linearly with action count. The dedicated
+                # status keeps the LLM from interpreting this as a
+                # transient ``failed`` it should retry.
+                logger.debug(
+                    "SEND_CHANNEL_MESSAGE short-circuited (channels disabled "
+                    "at orchestrator): agent=%s channel=%s",
+                    sender_id, target_channel,
+                )
+                return {
+                    "action_type": "send_channel_message",
+                    "status": "channels_disabled",
+                    "channel_id": target_channel,
+                    "dispatched_to": None,
+                }
             except Exception as exc:  # noqa: BLE001 — surfaced via "failed" status
                 logger.warning(
                     "Channel publish from %s to %s failed: %s",
