@@ -184,6 +184,15 @@ and [§ E](rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-con
 `<service>.<component>.<operation>` — lowercase, dot-separated, no plurals.
 `agent.*` is the Python runtime; `orchestrator.*` is the Go orchestrator.
 
+**Cross-process exception — `channel.*`.** Spans on the channels publish
+path (`channel.publish` on the Python publisher and `channel.dispatch` on
+the Go dispatcher) deliberately drop the service prefix so both halves of
+a single publish-then-fanout trace live in one query namespace. An
+operator querying `name =~ "^channel\\."` finds the full publish path
+without having to know which language runs which side; an operator
+querying for a specific channel id pivots from either span via the shared
+`channel.id` / `channel.message_id` attributes.
+
 ### 10.2 Span inventory
 
 | Span name | Emitted from | Key attributes |
@@ -197,6 +206,7 @@ and [§ E](rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-con
 | `agent.llm.call` | `LLMClient.create_message()` | OTEL **Gen-AI semantic conventions**: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
 | `agent.tool.execute` | `@tool` decorator wrapper in `tools/registry.py` | `tool.name`, `tool.success` (+ optional payload — see § 10.4) |
 | `agent.subagent.spawn` | `ActionExecutor` SPAWN_SUB_AGENT case (stub for RFC 0009) | `agent.id`, `subagent.role`, `subagent.status`. The sub-agent's root span will emit `Link(link.kind="spawn")` back here when the spawner ships in RFC 0009. |
+| `channel.publish` | `HTTPChannelPublisher.publish()` (Python REST publisher; ISSUE-0032) | `channel.id`, `channel.sender_id`, `channel.mentions_count`, `channel.message_id` (set from the orchestrator's 201 response). Joins the Go-side `channel.dispatch` span by `channel.message_id` for end-to-end publish-path traces. Status `UNSET` on the sticky `ChannelsDisabledError` (HTTP 503) branch — deployment signal, not an internal failure; mirrors the Go-side `channel.dispatch` discipline of leaving best-effort no-ops `Unset` so error-rate dashboards stay honest on channels-off runs. |
 
 ### 10.3 Span Links and A2A causality
 
