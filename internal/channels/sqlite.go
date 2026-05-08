@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,12 +103,30 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 // foreign keys ON (cascade enforcement), WAL mode (consistent with the rest
 // of the project), and a generous busy timeout so concurrent tests don't
 // flake under SQLite's writer-exclusion contract.
+//
+// `path` may itself carry a query string — the doc-comment on
+// [NewSQLiteStore] advertises `file::memory:?cache=shared` as a supported
+// form. We split the existing query off, merge the caller's params into the
+// `_pragma` Values, and emit a single `?`-separated DSN. Concatenating
+// `path + "?" + q.Encode()` (the pre-ISSUE-0049 form) produced two `?`
+// separators on a `file:` URI, which the SQLite driver parsed as a single
+// malformed `cache` value and rejected with "no such cache mode" — every
+// PRAGMA was dropped on the floor (or the open failed outright).
 func buildDSN(path string) string {
-	q := url.Values{}
-	q.Set("_pragma", "foreign_keys(1)")
+	base, existing := path, ""
+	if i := strings.Index(path, "?"); i >= 0 {
+		base, existing = path[:i], path[i+1:]
+	}
+	// url.ParseQuery on an empty string returns an empty Values + nil error;
+	// on a non-empty malformed string it returns a partial Values + a non-nil
+	// error. We accept partials silently because the SQLite driver itself is
+	// the authoritative parser of the resulting DSN — surfacing a parse error
+	// here would block paths the driver would have accepted.
+	q, _ := url.ParseQuery(existing)
+	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "busy_timeout(5000)")
-	return path + "?" + q.Encode()
+	return base + "?" + q.Encode()
 }
 
 // sqliteStore is the concrete [ChannelStore] backed by SQLite.
