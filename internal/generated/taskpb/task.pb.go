@@ -362,9 +362,13 @@ type TaskProgress struct {
 	Status          TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=persatrix.v1.TaskStatus" json:"status,omitempty"`
 	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                          // human-readable progress update
 	ProgressPercent float32                `protobuf:"fixed32,4,opt,name=progress_percent,json=progressPercent,proto3" json:"progress_percent,omitempty"` // 0.0 – 1.0
-	Timestamp       int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+	// string by deliberate exception (forwarded verbatim to the channel
+	// store's messages.created_at column — see field doc). Do not
+	// "harmonise" the two without re-reading that rationale. ISSUE-0022.
+	Timestamp     int64 `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskProgress) Reset() {
@@ -605,13 +609,17 @@ func (x *ChatRequest) GetParticipantType() string {
 }
 
 type ChatResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Reply            string                 `protobuf:"bytes,1,opt,name=reply,proto3" json:"reply,omitempty"`
-	SessionId        string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	AgentId          string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Timestamp        int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                        // Unix epoch seconds
-	AgentDisplayName string                 `protobuf:"bytes,5,opt,name=agent_display_name,json=agentDisplayName,proto3" json:"agent_display_name,omitempty"` // populated by orchestrator from Registry
-	ReplyStatus      string                 `protobuf:"bytes,6,opt,name=reply_status,json=replyStatus,proto3" json:"reply_status,omitempty"`                  // "ok" | "empty" | "error"
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Reply     string                 `protobuf:"bytes,1,opt,name=reply,proto3" json:"reply,omitempty"`
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentId   string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+	// string by deliberate exception (forwarded verbatim to the channel
+	// store's messages.created_at column — see field doc). Do not
+	// "harmonise" the two without re-reading that rationale. ISSUE-0022.
+	Timestamp        int64  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	AgentDisplayName string `protobuf:"bytes,5,opt,name=agent_display_name,json=agentDisplayName,proto3" json:"agent_display_name,omitempty"` // populated by orchestrator from Registry
+	ReplyStatus      string `protobuf:"bytes,6,opt,name=reply_status,json=replyStatus,proto3" json:"reply_status,omitempty"`                  // "ok" | "empty" | "error"
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -859,9 +867,18 @@ func (x *ChannelMessageEvent) GetThreadParentSenderId() string {
 	return ""
 }
 
-// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
-// At-most-once delivery in v0.3.0 — `success=false` signals the agent rejected
-// or could not process the event; the orchestrator does not retry in this release.
+// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
+// whose response carries no payload beyond success/error. At-most-once delivery
+// in v0.3.0 — `success=false` signals the agent rejected or could not process
+// the event; the orchestrator does not retry in this release.
+//
+// Reuse policy (ISSUE-0019): TaskAck stays generic. Channel-specific or
+// RPC-specific reasons MUST go in a future `oneof reason` field rather than as
+// additional scalar fields here. If a richer ack shape is needed for one
+// caller, define a new message (e.g. ChannelMessageAck) rather than extending
+// TaskAck — renaming after a second consumer attaches is a breaking proto
+// change, and bolting caller-specific scalars on creates optional fields whose
+// meaning silently depends on which RPC populated them.
 type TaskAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`

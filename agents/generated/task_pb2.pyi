@@ -201,6 +201,11 @@ class TaskProgress(google.protobuf.message.Message):
     progress_percent: builtins.float
     """0.0 – 1.0"""
     timestamp: builtins.int
+    """Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+    string by deliberate exception (forwarded verbatim to the channel
+    store's messages.created_at column — see field doc). Do not
+    "harmonise" the two without re-reading that rationale. ISSUE-0022.
+    """
     def __init__(
         self,
         *,
@@ -296,7 +301,11 @@ class ChatResponse(google.protobuf.message.Message):
     session_id: builtins.str
     agent_id: builtins.str
     timestamp: builtins.int
-    """Unix epoch seconds"""
+    """Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+    string by deliberate exception (forwarded verbatim to the channel
+    store's messages.created_at column — see field doc). Do not
+    "harmonise" the two without re-reading that rationale. ISSUE-0022.
+    """
     agent_display_name: builtins.str
     """populated by orchestrator from Registry"""
     reply_status: builtins.str
@@ -427,9 +436,18 @@ global___ChannelMessageEvent = ChannelMessageEvent
 
 @typing.final
 class TaskAck(google.protobuf.message.Message):
-    """Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
-    At-most-once delivery in v0.3.0 — `success=false` signals the agent rejected
-    or could not process the event; the orchestrator does not retry in this release.
+    """Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
+    whose response carries no payload beyond success/error. At-most-once delivery
+    in v0.3.0 — `success=false` signals the agent rejected or could not process
+    the event; the orchestrator does not retry in this release.
+
+    Reuse policy (ISSUE-0019): TaskAck stays generic. Channel-specific or
+    RPC-specific reasons MUST go in a future `oneof reason` field rather than as
+    additional scalar fields here. If a richer ack shape is needed for one
+    caller, define a new message (e.g. ChannelMessageAck) rather than extending
+    TaskAck — renaming after a second consumer attaches is a breaking proto
+    change, and bolting caller-specific scalars on creates optional fields whose
+    meaning silently depends on which RPC populated them.
     """
 
     DESCRIPTOR: google.protobuf.descriptor.Descriptor

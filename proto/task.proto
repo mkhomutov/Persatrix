@@ -52,6 +52,10 @@ message TaskProgress {
   TaskStatus status = 2;
   string message = 3;                    // human-readable progress update
   float progress_percent = 4;            // 0.0 – 1.0
+  // Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+  // string by deliberate exception (forwarded verbatim to the channel
+  // store's messages.created_at column — see field doc). Do not
+  // "harmonise" the two without re-reading that rationale. ISSUE-0022.
   int64 timestamp = 5;
 }
 
@@ -95,7 +99,11 @@ message ChatResponse {
   string reply = 1;
   string session_id = 2;
   string agent_id = 3;
-  int64 timestamp = 4;            // Unix epoch seconds
+  // Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
+  // string by deliberate exception (forwarded verbatim to the channel
+  // store's messages.created_at column — see field doc). Do not
+  // "harmonise" the two without re-reading that rationale. ISSUE-0022.
+  int64 timestamp = 4;
   string agent_display_name = 5;  // populated by orchestrator from Registry
   string reply_status = 6;        // "ok" | "empty" | "error"
 }
@@ -168,9 +176,18 @@ message ChannelMessageEvent {
   string thread_parent_sender_id = 10;
 }
 
-// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage).
-// At-most-once delivery in v0.3.0 — `success=false` signals the agent rejected
-// or could not process the event; the orchestrator does not retry in this release.
+// Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
+// whose response carries no payload beyond success/error. At-most-once delivery
+// in v0.3.0 — `success=false` signals the agent rejected or could not process
+// the event; the orchestrator does not retry in this release.
+//
+// Reuse policy (ISSUE-0019): TaskAck stays generic. Channel-specific or
+// RPC-specific reasons MUST go in a future `oneof reason` field rather than as
+// additional scalar fields here. If a richer ack shape is needed for one
+// caller, define a new message (e.g. ChannelMessageAck) rather than extending
+// TaskAck — renaming after a second consumer attaches is a breaking proto
+// change, and bolting caller-specific scalars on creates optional fields whose
+// meaning silently depends on which RPC populated them.
 message TaskAck {
   bool success = 1;
   string error_message = 2;       // populated when success == false
