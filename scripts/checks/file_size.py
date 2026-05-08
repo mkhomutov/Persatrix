@@ -131,44 +131,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # topic is a separate maintenance refactor; grandfather here until
     # that lands.
     "docs/ai-glossary.md",
-    # agents/memory/facade.py was at 500 lines pre-PR-5. RFC 0020 PR 5
-    # added the four-line defense-in-depth recall filter
-    # (``SUMMARY_PENDING_TEXT`` skip + import) that pushed it to 504.
-    # The PR-262 review M1 follow-up moved the filter into
-    # ``EpisodicMemory.recall`` (the recall chokepoint) and replaced
-    # the facade-level skip with a longer comment block explaining the
-    # lift, settling the file at 507 lines. The facade is the API
-    # boundary that RFC 0008 PR 2 froze for downstream consumers
-    # (RFC 0011 PR 5, RFC 0020 PR 5); splitting it means rewriting the
-    # public-import contract. Grandfather here until a dedicated
-    # facade-split lands (queued alongside the episodic split below).
-    "agents/memory/facade.py",
-    # agents/memory/episodic.py was at ~492 lines pre-PR-262.  The
-    # PR-262 review M1 follow-up lifted the ``SUMMARY_PENDING_TEXT``
-    # recall filter into this module (added the import, the comment
-    # block explaining the lift, and the post-rank filter
-    # comprehension), pushing it to 514 lines.  The companion
-    # interactions.py split (this PR) extracted ``scopes.py`` and
-    # ``interaction_janitor.py`` so that file is now under-cap; the
-    # equivalent episodic split — extracting the notes/state/retention
-    # delegation methods into mixins along the established
-    # ``facade_procedural`` / ``shared_pool_facade`` pattern — is
-    # queued as a follow-up.  Grandfather here until that split lands.
-    "agents/memory/episodic.py",
-    # agents/persona_runtime/memory_context.py was at 498 lines (one
-    # line under the cap) pre-RFC-0011 PR 5 follow-up.  The
-    # channel-history tier (this PR) added the canonical-priority
-    # docstring, the section-clear sweep entry, and the two helper-call
-    # sites for ``recall_channel_episodes`` /
-    # ``render_channel_history_section``; the tier's recall + admission
-    # bodies live in the new ``agents/persona_runtime/channel_history.py``
-    # so the bulk does not land here.  Further reduction requires the
-    # parallel extraction of the relationship-admission block (~85
-    # lines spanning the temporal-rendering + trust + cadence fields)
-    # into the same companion-module pattern; that refactor is a
-    # logically distinct change and is queued as a follow-up.
-    # Grandfather here until that split lands.
-    "agents/persona_runtime/memory_context.py",
+    # agents/memory/facade.py, agents/memory/episodic.py, and
+    # agents/persona_runtime/memory_context.py were grandfathered above
+    # the 500-line cap; their splits landed in this PR.  facade.py was
+    # already under-cap once the procedural mixin (``facade_procedural``)
+    # absorbed RFC 0008 PR 5 follow-ups; episodic.py dropped below the
+    # cap when the notes-tier delegates moved into
+    # ``episodic_notes_api._EpisodicNotesAPIMixin``; memory_context.py
+    # dropped below the cap when the relationship-tier admission block
+    # moved into ``relationship_section`` (parallel to the
+    # ``channel_history`` extraction precedent).
 })
 
 

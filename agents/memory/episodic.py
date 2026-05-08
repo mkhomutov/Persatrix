@@ -26,6 +26,7 @@ from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
+from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     EPISODE_SELECT,
     MAX_RECALL_LIMIT,
@@ -56,7 +57,7 @@ from .migrations import (
     _apply_migrations,
     _fts5_available,
 )
-from .notes import Note, NoteStore
+from .notes import NoteStore
 
 _tracer = trace.get_tracer(__name__)
 
@@ -84,8 +85,15 @@ DEFAULT_NOTES_MIN_SCORE: float = 0.20
 # ─── EpisodicMemory ────────────────────────────────────────
 
 
-class EpisodicMemory:
-    """Long-term memory store using SQLite with FTS5 search."""
+class EpisodicMemory(_EpisodicNotesAPIMixin):
+    """Long-term memory store using SQLite with FTS5 search.
+
+    The notes-tier delegation methods (``store_note`` / ``recall_notes`` /
+    ``update_note`` / ``delete_note`` / ``count_notes``) live in
+    :class:`agents.memory.episodic_notes_api._EpisodicNotesAPIMixin` to
+    keep this file under the 500-line repo cap; the public surface is
+    unchanged.
+    """
 
     def __init__(self, agent_id: str, db_path: str = "data/memory.db") -> None:
         self._agent_id = agent_id
@@ -420,60 +428,9 @@ class EpisodicMemory:
         return (cursor.rowcount or 0) > 0
 
     # ─── Notes (delegated to NoteStore) ────────────────────
-
-    async def store_note(
-        self,
-        topic: str,
-        content: str,
-        tags: list[str] | None = None,
-        max_notes: int = 500,
-    ) -> str:
-        """Store a new note. Prunes oldest low-access notes if over cap.
-
-        Returns the generated note ID.
-        """
-        return await self._ensure_note_store().store_note(
-            topic, content, tags=tags, max_notes=max_notes,
-        )
-
-    async def recall_notes(
-        self,
-        query: str = "",
-        *,
-        limit: int = 10,
-        min_score: float | None = None,
-    ) -> list[Note]:
-        """Retrieve notes matching query, ranked by relevance.
-
-        Increments access_count on returned notes.
-
-        Parameters
-        ----------
-        min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` → no filtering (current behaviour).
-            LIKE-fallback path ignores this parameter per RFC 0017 Section C.
-        """
-        # Mirror the ``recall()`` validation at the public façade so a
-        # future ``NoteStore`` refactor that drops its own guard cannot
-        # silently lose validation.  (PR 6 — RFC 0017 PR 3 review finding 1.)
-        if min_score is not None and not 0.0 <= min_score <= 1.0:
-            raise ValueError(
-                f"min_score must be in [0.0, 1.0] or None, got {min_score}"
-            )
-        return await self._ensure_note_store().recall_notes(query, limit=limit, min_score=min_score)
-
-    async def update_note(self, note_id: str, content: str) -> bool:
-        """Update note content. Topic and tags preserved. Returns True if found."""
-        return await self._ensure_note_store().update_note(note_id, content)
-
-    async def delete_note(self, note_id: str) -> bool:
-        """Delete a note by ID (agent-scoped). Returns True if found."""
-        return await self._ensure_note_store().delete_note(note_id)
-
-    async def count_notes(self) -> int:
-        """Return the number of notes for this agent."""
-        return await self._ensure_note_store().count_notes()
+    # ``store_note`` / ``recall_notes`` / ``update_note`` / ``delete_note`` /
+    # ``count_notes`` come from :class:`_EpisodicNotesAPIMixin` to keep
+    # this file under the 500-line repo cap.
 
     # ─── Interaction counter ─────────────────────────────────
 
