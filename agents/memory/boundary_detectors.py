@@ -26,7 +26,7 @@ swapped in behind a config flag without touching the tracker.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from .interactions import Interaction
@@ -38,11 +38,30 @@ if TYPE_CHECKING:
 # name (`interactions.closed.by_<reason>`) and the close-call reason
 # stay in lockstep.  Tracker close paths emit one of these; new reasons
 # require both a counter and an entry here.
-REASON_STRUCTURAL: str = "structural"
-REASON_IDLE_GAP: str = "idle_gap"
-REASON_TOPIC_SHIFT: str = "topic_shift"
-REASON_MAX_TURNS: str = "max_turns"
-REASON_SHUTDOWN: str = "shutdown"
+#
+# Each constant carries its own ``Literal[...]`` annotation so mypy
+# narrows the value through to call sites — the union of all five is
+# the :data:`CloseReason` alias defined just below, which is the
+# argument type of :meth:`InteractionTracker.close`.  A typo at the
+# call site is therefore an arg-type error rather than a silent
+# subtotal-counter miss (RFC 0020 PR 6 slice 2 #2).
+REASON_STRUCTURAL: Literal["structural"] = "structural"
+REASON_IDLE_GAP: Literal["idle_gap"] = "idle_gap"
+REASON_TOPIC_SHIFT: Literal["topic_shift"] = "topic_shift"
+REASON_MAX_TURNS: Literal["max_turns"] = "max_turns"
+REASON_SHUTDOWN: Literal["shutdown"] = "shutdown"
+
+# Closed value set for :meth:`InteractionTracker.close`'s ``reason``
+# kwarg.  Lives next to the constants so the Protocol below can
+# reference it without importing :mod:`.interactions` (would be
+# circular — interactions imports the constants from this module).
+CloseReason = Literal[
+    "structural",
+    "idle_gap",
+    "max_turns",
+    "topic_shift",
+    "shutdown",
+]
 
 
 # ─── Default thresholds (RFC 0020 §B and Security Considerations) ────
@@ -78,14 +97,17 @@ class BoundaryDetector(Protocol):
     through without re-plumbing the detectors.
 
     Returns ``(should_close, reason)``.  ``reason`` is a short symbolic
-    string (one of the ``REASON_*`` constants) used as a metric label
-    and surfaced on the close call.  When ``should_close`` is ``False``,
-    ``reason`` is the empty string.
+    string (one of the ``REASON_*`` constants — i.e. a
+    :data:`CloseReason`) used as a metric label and surfaced on the
+    close call.  The return shape is a *tagged* union — the empty
+    reason is paired exclusively with ``False`` — so ``if should_close``
+    narrows ``reason`` to :data:`CloseReason` at the call site without
+    a cast (used by :meth:`InteractionTracker.idle_check`).
     """
 
     def evaluate(
         self, interaction: Interaction, *, now: float,
-    ) -> tuple[bool, str]: ...
+    ) -> tuple[Literal[True], CloseReason] | tuple[Literal[False], Literal[""]]: ...
 
 
 # ─── Concrete detectors ─────────────────────────────────────
@@ -106,10 +128,16 @@ class StructuralCloseDetector:
 
     def evaluate(
         self, interaction: Interaction, *, now: float,
-    ) -> tuple[bool, str]:
-        reason = getattr(interaction, "structural_close_reason", "")
+    ) -> tuple[Literal[True], CloseReason] | tuple[Literal[False], Literal[""]]:
+        reason: str = getattr(interaction, "structural_close_reason", "")
+        # The marker is written by channel-side hooks (PR 5) using a
+        # ``REASON_*`` constant; ``cast`` here narrows the read-back
+        # without runtime cost.  An invalid marker would surface as a
+        # subtotal-counter miss in ``_emit_closed`` — same blast radius
+        # as the prior ``str`` annotation but with the contract pinned
+        # at the Protocol seam.
         if reason:
-            return True, reason
+            return True, cast("CloseReason", reason)
         return False, ""
 
 
@@ -131,7 +159,7 @@ class IdleGapDetector:
 
     def evaluate(
         self, interaction: Interaction, *, now: float,
-    ) -> tuple[bool, str]:
+    ) -> tuple[Literal[True], CloseReason] | tuple[Literal[False], Literal[""]]:
         last_turn_at = interaction.last_turn_at
         if last_turn_at is None:
             return False, ""
@@ -152,7 +180,7 @@ class TopicShiftDetector:
 
     def evaluate(
         self, interaction: Interaction, *, now: float,
-    ) -> tuple[bool, str]:
+    ) -> tuple[Literal[True], CloseReason] | tuple[Literal[False], Literal[""]]:
         return False, ""
 
 
@@ -174,18 +202,19 @@ class MaxTurnsDetector:
     after structural / idle so explicit closes still take precedence
     and the cap acts as the safety net.
 
-    Added per PR-216 review (Should-Fix #1).  ``REASON_MAX_TURNS`` is
-    not currently broken out into its own counter — ``_emit_closed``
-    still increments only the generic ``agent.interactions.closed``
-    plus the structural / idle-gap subtotals; PR 4's metrics pass
-    will add the per-reason breakout.
+    Added per PR-216 review (Should-Fix #1).  Per-reason subtotal
+    counter ``agent.interactions.closed.by_max_turns`` is registered
+    alongside the structural / idle-gap subtotals and dispatched from
+    the same table in :mod:`agents.memory.interactions._emit_closed`
+    (RFC 0020 PR 6 slice 2 #3 — was previously listed here as a "PR 4
+    metrics pass" gap that did not land).
     """
 
     max_turns: int = DEFAULT_MAX_INTERACTION_TURNS
 
     def evaluate(
         self, interaction: Interaction, *, now: float,
-    ) -> tuple[bool, str]:
+    ) -> tuple[Literal[True], CloseReason] | tuple[Literal[False], Literal[""]]:
         if interaction.turn_count >= self.max_turns:
             return True, REASON_MAX_TURNS
         return False, ""
@@ -224,6 +253,7 @@ def default_detectors(
 
 __all__ = [
     "BoundaryDetector",
+    "CloseReason",
     "DEFAULT_CLOSING_GRACE_SEC",
     "DEFAULT_IDLE_TIMEOUT_SEC",
     "DEFAULT_MAX_INTERACTION_TURNS",

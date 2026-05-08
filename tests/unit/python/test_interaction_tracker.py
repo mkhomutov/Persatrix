@@ -21,7 +21,10 @@ import pytest
 from agents.memory.boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
     REASON_IDLE_GAP,
+    REASON_MAX_TURNS,
+    REASON_SHUTDOWN,
     REASON_STRUCTURAL,
+    REASON_TOPIC_SHIFT,
     IdleGapDetector,
     StructuralCloseDetector,
     MaxTurnsDetector,
@@ -268,6 +271,32 @@ class TestMetricEmission:
             self._counter_total(reader, "agent.interactions.closed.by_idle_gap")
             == 1
         )
+
+    @pytest.mark.parametrize(
+        ("reason", "subtotal_metric"),
+        [
+            (REASON_STRUCTURAL, "agent.interactions.closed.by_structural"),
+            (REASON_IDLE_GAP, "agent.interactions.closed.by_idle_gap"),
+            (REASON_MAX_TURNS, "agent.interactions.closed.by_max_turns"),
+            (REASON_TOPIC_SHIFT, "agent.interactions.closed.by_topic_shift"),
+            (REASON_SHUTDOWN, "agent.interactions.closed.by_shutdown"),
+        ],
+    )
+    def test_close_emits_per_reason_subtotal(self, reason, subtotal_metric):
+        # PR 6 slice 2 #3: every REASON_* defined in
+        # ``boundary_detectors`` has a paired
+        # ``agent.interactions.closed.by_<reason>`` counter, dispatched
+        # from the same table that the boundary-detector chain consults.
+        # Drift between the two surfaces (a new REASON_* with no
+        # counter, as happened with ``max_turns`` / ``topic_shift`` /
+        # ``shutdown`` between PR 1 and PR 6 slice 1) becomes a typing
+        # / table-lookup miss instead of a silent telemetry hole.
+        reader, _ = self._build_meter()
+        tracker = InteractionTracker()
+        tracker.add_turn("tick", now=100.0)
+        tracker.close("tick", reason=reason, now=200.0)
+        assert self._counter_total(reader, "agent.interactions.closed") == 1
+        assert self._counter_total(reader, subtotal_metric) == 1
 
     def test_no_metric_emission_when_uninitialised(self):
         # Before init_metrics(), tracker calls must not raise — the

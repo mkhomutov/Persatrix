@@ -91,6 +91,21 @@ class _Instruments:
     parity test in ``test_observability_metrics.py`` asserts this.
     """
 
+    # Interaction-lifecycle counters are registered by
+    # :func:`agents.observability._metrics_interactions.register`
+    # (split out so this module stays under the 500-line cap).  The
+    # class-level annotations make the attribute surface visible to
+    # mypy / IDEs even though the assignment happens in the helper.
+    interactions_opened: Counter
+    interactions_closed: Counter
+    interactions_closed_by_idle_gap: Counter
+    interactions_closed_by_structural: Counter
+    interactions_closed_by_max_turns: Counter
+    interactions_closed_by_topic_shift: Counter
+    interactions_closed_by_shutdown: Counter
+    interactions_summary_failed: Counter
+    interactions_janitor_failed: Counter
+
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
         self.tool_invocations: Counter = meter.create_counter(
@@ -157,42 +172,15 @@ class _Instruments:
             ),
         )
 
-        # ─── Interaction lifecycle (RFC 0020 Phase 1) ────────────────
-        # Names follow RFC 0020 Phase 1 §5; emitted by InteractionTracker.
-        # Per-tracker call sites land in PRs 2–4 — counters are registered
-        # in PR 1 so dashboards can be wired ahead of the routing rollout.
-        self.interactions_opened: Counter = meter.create_counter(
-            name="agent.interactions.opened",
-            unit="{interaction}",
-            description="Interactions opened by the InteractionTracker (RFC 0020).",
-        )
-        self.interactions_closed: Counter = meter.create_counter(
-            name="agent.interactions.closed",
-            unit="{interaction}",
-            description="Interactions closed (any reason) by the InteractionTracker.",
-        )
-        self.interactions_closed_by_idle_gap: Counter = meter.create_counter(
-            name="agent.interactions.closed.by_idle_gap",
-            unit="{interaction}",
-            description="Interactions closed by the idle-gap timer (RFC 0020 §B).",
-        )
-        self.interactions_closed_by_structural: Counter = meter.create_counter(
-            name="agent.interactions.closed.by_structural",
-            unit="{interaction}",
-            description="Interactions closed by structural triggers (RFC 0020 §B).",
-        )
-        self.interactions_summary_failed: Counter = meter.create_counter(
-            name="agent.interactions.summary.failed",
-            unit="{interaction}",
-            description=(
-                "Interactions whose close-time summary call failed and "
-                "were filled with the fallback placeholder (RFC 0020 §C)."
-            ),
-        )
-        self.interactions_janitor_failed: Counter = meter.create_counter(
-            name="agent.interactions.janitor.failed", unit="{sweep}",
-            description="Closing-state janitor sweeps that raised before completing (RFC 0020 §C).",
-        )
+        # Interaction-lifecycle counters (RFC 0020 Phase 1) live in
+        # ``_metrics_interactions`` so this module stays under the
+        # 500-line review-friendly cap.  Public attribute names on
+        # ``_Instruments`` are unchanged — call sites still read
+        # ``inst.interactions_opened`` etc.  See the helper module's
+        # docstring for the full counter inventory.
+        from . import _metrics_interactions
+
+        _metrics_interactions.register(self, meter)
 
         # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
         # Two counters: now-anchor emissions (one per system-prompt build,

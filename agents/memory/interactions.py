@@ -44,8 +44,12 @@ from ..observability.metrics import current_agent_id, try_get_instruments
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
     REASON_IDLE_GAP,
+    REASON_MAX_TURNS,
+    REASON_SHUTDOWN,
     REASON_STRUCTURAL,
+    REASON_TOPIC_SHIFT,
     BoundaryDetector,
+    CloseReason,
     default_detectors,
 )
 from .interaction_janitor import (
@@ -106,6 +110,24 @@ class Clock(Protocol):
 
 
 _DEFAULT_CLOCK: Clock = time.time
+
+
+# :data:`CloseReason` is imported from :mod:`.boundary_detectors`
+# (lives next to the ``REASON_*`` constants — the type and the values
+# travel together) and is the argument type of
+# :meth:`InteractionTracker.close` below.  Adding a new reason is a
+# coordinated edit:
+#
+#     1. Add ``REASON_<NEW>`` and extend the ``CloseReason`` Literal in
+#        :mod:`.boundary_detectors`.
+#     2. Register the matching ``agent.interactions.closed.by_<new>``
+#        counter in :class:`agents.observability.metrics._Instruments`.
+#     3. Map it in :data:`_REASON_COUNTER_ATTR`.
+#
+# The dispatch table below makes step 3 the only edit to the emit
+# path (RFC 0020 PR 6 slice 2 #3 — replaces the prior hand-coded
+# ``if/elif`` chain that silently skipped subtotal counters for
+# ``max_turns`` / ``topic_shift`` / ``shutdown``).
 
 
 # ─── Data model ─────────────────────────────────────────────
@@ -261,7 +283,7 @@ class InteractionTracker:
         self,
         scope: str,
         *,
-        reason: str,
+        reason: CloseReason,
         now: float | None = None,
     ) -> Interaction | None:
         """Close the interaction in ``scope`` (no-op if none open).
@@ -272,13 +294,15 @@ class InteractionTracker:
         it to the persistence layer in one step.
 
         ``reason`` is keyword-required by design (PR-214 review fix,
-        Should-Fix #1).  An earlier draft defaulted to
-        :data:`REASON_STRUCTURAL`, which would silently mislabel the
-        ``agent.interactions.closed.by_structural`` counter if a future
-        caller (PR 4 janitor / PR 5 channel hook) forgot to pass the
-        kwarg.  Telemetry correctness outranks one-character ergonomics;
-        callers must spell the reason explicitly using one of the
-        ``REASON_*`` constants in :mod:`.boundary_detectors`.
+        Should-Fix #1) and typed as :data:`CloseReason` (RFC 0020 PR 6
+        slice 2 #2) so a typo at the call site is caught by mypy
+        instead of silently mislabelling the
+        ``agent.interactions.closed.by_<reason>`` counter.  An earlier
+        draft also defaulted to :data:`REASON_STRUCTURAL`, which would
+        have hidden a future caller forgetting the kwarg; telemetry
+        correctness outranks one-character ergonomics, so callers must
+        spell the reason explicitly using one of the ``REASON_*``
+        constants in :mod:`.boundary_detectors`.
         """
         interaction = self._open.pop(scope, None)
         if interaction is None:
@@ -307,9 +331,13 @@ class InteractionTracker:
         for scope in list(self._open):
             interaction = self._open[scope]
             for detector in self._detectors:
-                should_close, reason = detector.evaluate(interaction, now=ts)
-                if should_close:
-                    finished = self.close(scope, reason=reason, now=ts)
+                # Access the tagged-union tuple via indexing so mypy
+                # narrows ``result[1]`` to :data:`CloseReason` on the
+                # ``result[0] is True`` branch (unpacking would erase
+                # the correlation between the two slots).
+                result = detector.evaluate(interaction, now=ts)
+                if result[0]:
+                    finished = self.close(scope, reason=result[1], now=ts)
                     if finished is not None:
                         closed.append(finished)
                     break
@@ -326,16 +354,32 @@ def _emit_opened() -> None:
     inst.interactions_opened.add(1, {"agent_id": current_agent_id()})
 
 
-def _emit_closed(reason: str) -> None:
+# Reason → ``_Instruments`` attribute holding the per-reason subtotal
+# counter.  Keep this table in lockstep with :data:`CloseReason` and
+# the counter registrations in
+# :class:`agents.observability.metrics._Instruments` — adding a new
+# reason without an entry here drops its subtotal silently (the prior
+# ``if/elif`` chain had the same property; the dict shape just makes
+# the breakage table-shaped instead of statement-shaped, and a future
+# enum migration is a one-line swap).
+_REASON_COUNTER_ATTR: dict[CloseReason, str] = {
+    REASON_STRUCTURAL: "interactions_closed_by_structural",
+    REASON_IDLE_GAP: "interactions_closed_by_idle_gap",
+    REASON_MAX_TURNS: "interactions_closed_by_max_turns",
+    REASON_TOPIC_SHIFT: "interactions_closed_by_topic_shift",
+    REASON_SHUTDOWN: "interactions_closed_by_shutdown",
+}
+
+
+def _emit_closed(reason: CloseReason) -> None:
     inst = try_get_instruments()
     if inst is None:
         return
     attrs = {"agent_id": current_agent_id(), "reason": reason}
     inst.interactions_closed.add(1, attrs)
-    if reason == REASON_IDLE_GAP:
-        inst.interactions_closed_by_idle_gap.add(1, attrs)
-    elif reason == REASON_STRUCTURAL:
-        inst.interactions_closed_by_structural.add(1, attrs)
+    counter_attr = _REASON_COUNTER_ATTR.get(reason)
+    if counter_attr is not None:
+        getattr(inst, counter_attr).add(1, attrs)
 
 
 __all__ = [
