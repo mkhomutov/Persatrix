@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import pytest
 
+from _otel_test_helpers import counter_total
+
 from agents.persona_runtime.summarize_close import (
     JANITOR_INTERVAL_SEC,
     maybe_run_janitor,
@@ -30,20 +32,6 @@ def _build_meter():
     reader = InMemoryMetricReader()
     metrics_mod.init_metrics(reader=reader)
     return reader, metrics_mod
-
-
-def _counter_total(reader, name: str) -> int:
-    data = reader.get_metrics_data()
-    if data is None:
-        return 0
-    total = 0
-    for resource_metric in data.resource_metrics:
-        for scope_metric in resource_metric.scope_metrics:
-            for metric in scope_metric.metrics:
-                if metric.name == name:
-                    for point in metric.data.data_points:
-                        total += point.value
-    return total
 
 
 @pytest.mark.asyncio
@@ -112,7 +100,7 @@ class TestJanitorFailedCounter:
                 "cooldown must advance even on failure so the next call "
                 "does not hammer a struggling DB"
             )
-            assert _counter_total(
+            assert counter_total(
                 reader, "agent.interactions.janitor.failed",
             ) == 1
         finally:
@@ -129,7 +117,7 @@ class TestJanitorFailedCounter:
                 now_monotonic=1000.0, interval_sec=JANITOR_INTERVAL_SEC,
                 agent_id="janitor-ok-agent",
             )
-            assert _counter_total(
+            assert counter_total(
                 reader, "agent.interactions.janitor.failed",
             ) == 0
         finally:

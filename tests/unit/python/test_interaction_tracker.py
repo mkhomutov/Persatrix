@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import pytest
 
+from _otel_test_helpers import counter_total
+
 from agents.memory.boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
     REASON_IDLE_GAP,
@@ -282,34 +284,20 @@ class TestMetricEmission:
         metrics_mod.init_metrics(reader=reader)
         return reader, metrics_mod
 
-    @staticmethod
-    def _counter_total(reader, name: str) -> int:
-        data = reader.get_metrics_data()
-        if data is None:
-            return 0
-        total = 0
-        for resource_metric in data.resource_metrics:
-            for scope_metric in resource_metric.scope_metrics:
-                for metric in scope_metric.metrics:
-                    if metric.name == name:
-                        for point in metric.data.data_points:
-                            total += point.value
-        return total
-
     def test_open_emits_opened_counter(self):
         reader, _ = self._build_meter()
         tracker = InteractionTracker()
         tracker.add_turn("tick", now=100.0)
-        assert self._counter_total(reader, "agent.interactions.opened") == 1
+        assert counter_total(reader, "agent.interactions.opened") == 1
 
     def test_close_emits_closed_and_by_structural(self):
         reader, _ = self._build_meter()
         tracker = InteractionTracker()
         tracker.add_turn("tick", now=100.0)
         tracker.close("tick", reason=REASON_STRUCTURAL, now=200.0)
-        assert self._counter_total(reader, "agent.interactions.closed") == 1
+        assert counter_total(reader, "agent.interactions.closed") == 1
         assert (
-            self._counter_total(reader, "agent.interactions.closed.by_structural")
+            counter_total(reader, "agent.interactions.closed.by_structural")
             == 1
         )
 
@@ -319,7 +307,7 @@ class TestMetricEmission:
         tracker.add_turn("tick", now=100.0)
         tracker.idle_check(now=200.0)
         assert (
-            self._counter_total(reader, "agent.interactions.closed.by_idle_gap")
+            counter_total(reader, "agent.interactions.closed.by_idle_gap")
             == 1
         )
 
@@ -346,8 +334,8 @@ class TestMetricEmission:
         tracker = InteractionTracker()
         tracker.add_turn("tick", now=100.0)
         tracker.close("tick", reason=reason, now=200.0)
-        assert self._counter_total(reader, "agent.interactions.closed") == 1
-        assert self._counter_total(reader, subtotal_metric) == 1
+        assert counter_total(reader, "agent.interactions.closed") == 1
+        assert counter_total(reader, subtotal_metric) == 1
 
     def test_no_metric_emission_when_uninitialised(self):
         # Before init_metrics(), tracker calls must not raise — the

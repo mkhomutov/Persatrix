@@ -3,9 +3,12 @@
 Extracted from ``test_interaction_single_turn_parity.py`` so that file
 plus the slice-4 follow-ups suite (``test_interaction_single_turn_parity_followups.py``,
 PR-2 review #9 + #10 coverage) can share the persona config, mock LLM
-client, episode probe, and metric-counter probe without either file
-blowing through the 500-line cap enforced by
-``scripts/checks/file_size.py --strict``.
+client, and episode probe without either file blowing through the
+500-line cap enforced by ``scripts/checks/file_size.py --strict``.
+
+The OTel ``counter_total`` probe lives in :mod:`tests._otel_test_helpers`
+(one source of truth for every metric-counter assertion in the repo)
+and is re-exported here so existing import sites keep working.
 
 The leading underscore prevents pytest from collecting this module as
 a test file.
@@ -13,12 +16,21 @@ a test file.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+
+from _otel_test_helpers import counter_total
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+
+__all__ = [
+    "PERSONA_CONFIG",
+    "all_episodes",
+    "counter_total",
+    "do_nothing_client",
+    "make_agent",
+]
 
 PERSONA_CONFIG: dict = {
     "id": "parity-persona",
@@ -81,26 +93,6 @@ async def make_agent() -> _LLMPersonaAgent:
     )
     await agent.initialize_memory()
     return agent
-
-
-def counter_total(reader: Any, name: str) -> int:
-    """Sum every data point of an OTel counter exported through ``reader``.
-
-    Mirrors ``test_interaction_tracker.TestMetricEmission._counter_total``;
-    duplicated here rather than imported because the unit-test module
-    binds the helper as a static method on its assertion class.
-    """
-    data = reader.get_metrics_data()
-    if data is None:
-        return 0
-    total = 0
-    for resource_metric in data.resource_metrics:
-        for scope_metric in resource_metric.scope_metrics:
-            for metric in scope_metric.metrics:
-                if metric.name == name:
-                    for point in metric.data.data_points:
-                        total += point.value
-    return total
 
 
 async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:

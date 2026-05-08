@@ -178,10 +178,7 @@ class TestSingleTurnParityFollowups:
             assert closed == 1
             assert by_structural == 1
         finally:
-            import asyncio as _asyncio
-
             if metrics_mod._provider is not None:
-                await _asyncio.to_thread(metrics_mod._provider.force_flush)
-                await _asyncio.to_thread(metrics_mod._provider.shutdown)
+                await metrics_mod.shutdown()
             metrics_mod._provider = saved_provider
             metrics_mod._instruments = saved_instruments
