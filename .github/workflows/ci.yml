@@ -90,11 +90,23 @@ jobs:
       - name: Type check with mypy
         run: cd agents && mypy .
 
-      # ISSUE-0017: lock agents/generated/*.pyi to proto/*.proto. Drift here
-      # silently masks real type errors in downstream agent code, so the
-      # freshness gate runs in the same job that runs mypy + ruff.
+      # ISSUE-0017 + ISSUE-0023: lock agents/generated/*.py + *.pyi to
+      # proto/*.proto. The .pyi gate already shipped (ISSUE-0017); the
+      # broadened proto-python-check target now also catches hand-edits
+      # to *_pb2.py / *_pb2_grpc.py and a .proto change that updated
+      # the .pyi but not the actual stubs (ISSUE-0023). Drift here
+      # silently masks wire-shape changes in downstream agent code, so
+      # the freshness gate runs in the same job that runs mypy + ruff.
       - name: Check generated Python protobuf stubs are in sync
         run: make proto-python-check
+
+      # ISSUE-0023: catch the deletion drift class — a proto/<name>.proto
+      # was removed (or renamed) but its generated stubs survived in
+      # agents/generated/ or internal/generated/. proto-python-check
+      # only diffs files that exist on both sides; orphans need their
+      # own gate.
+      - name: Check for orphan generated protobuf artifacts
+        run: make proto-orphans-check
 
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short

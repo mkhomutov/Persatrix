@@ -29,6 +29,7 @@ make test           # all suites (Go + Python + integration)
 make lint           # golangci-lint + ruff + mypy + clippy
 make validate       # YAML configs against JSON schemas
 make proto          # regenerate gRPC stubs after proto changes
+make proto-check    # CI gate: Python stubs in sync + no orphans (ISSUE-0023)
 ```
 
 Detailed test invocations: `go test ./internal/planner -v -run TestName`, `python3 -m pytest tests/unit/python/test_agents.py::test_name -v`.
