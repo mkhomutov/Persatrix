@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0014
 summary: ChannelRouter.fanout dispatches inline per-recipient; worst-case publish latency is O(N × 5s) once the gRPC dispatcher lands
-status: open
+status: resolved
 severity: low
 area: internal/channels
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - docs/rfcs/0011-channels.md
   - docs/rfcs/0011-pr-plan.md
@@ -55,3 +56,11 @@ dispatcher that makes it necessary.
 ## Notes
 
 > 2026-05-04 — initial capture during PR #245 review (Nice-to-have #3).
+>
+> 2026-05-08 — resolved. Bounded-concurrency fanout shipped via a buffered
+> semaphore (`channelFanoutMaxConcurrency = 16`) + `sync.WaitGroup` in
+> `internal/channels/router.go::fanout`. Pinned by
+> `TestChannelRouter_Publish_FanoutRunsConcurrently` (timing speedup) and
+> `TestChannelRouter_Publish_FanoutRespectsConcurrencyBound` (peak in-flight
+> ≤ bound) so both halves of the contract — "concurrent" AND "bounded" —
+> regress loudly rather than silently.
