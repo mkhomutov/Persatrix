@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -65,15 +66,81 @@ class BrokenLink(NamedTuple):
 
 
 def _collect_md_files(repo_root: Path) -> list[Path]:
-    """Return all markdown files in docs/ (recursive) and repo root (depth <=1).
+    """Return every tracked markdown file under ``repo_root``.
 
-    Skips ``docs/pr-reviews/`` — per project convention (see
-    ``.github/copilot-instructions.md``) PR review reports are local-only
-    artifacts, are listed in ``.gitignore``, and may contain repo-root-relative
-    links that look broken from the ``docs/pr-reviews/`` subdirectory.
+    ISSUE-0036: the source of truth is ``git ls-files '*.md'``, so the
+    set automatically excludes (a) untracked working-tree artifacts
+    (e.g. ``PR_BODY.md`` left behind by ``git stash``), (b) files under
+    ``.git/``, and (c) gitignored paths — without ad-hoc filter chains.
+    Crucially, it also catches markdown files at depth ≥ 3 outside
+    ``docs/`` (e.g. ``.github/instructions/*.md``,
+    ``prompts/runtime/safety/*.md``) which the previous glob shape
+    silently dropped from the link scan.
+
+    ``docs/pr-reviews/`` stays excluded by project convention (see
+    ``.github/copilot-instructions.md``) — PR review reports are
+    local-only artifacts, gitignored anyway, and their links resolve
+    against repo-root paths rather than ``docs/pr-reviews/``.
+
+    Falls back to a glob-and-filter walk when ``repo_root`` is not a
+    git checkout (downstream tarball consumers, extracted-source
+    builds). The fallback prints a one-line WARN so the divergence is
+    visible.
     """
+    pr_reviews_dir = (repo_root / "docs" / "pr-reviews").resolve()
+    pr_reviews_prefix = os.path.normcase(str(pr_reviews_dir)) + os.sep
+
+    tracked = _git_ls_md_files(repo_root)
+    if tracked is None:
+        files = _glob_md_files_fallback(repo_root)
+    else:
+        files = sorted(tracked)
+
+    return [
+        f for f in files
+        if not os.path.normcase(str(f.resolve())).startswith(pr_reviews_prefix)
+    ]
+
+
+def _git_ls_md_files(repo_root: Path) -> list[Path] | None:
+    """Return ``git ls-files '*.md'`` resolved against ``repo_root``.
+
+    Returns ``None`` when the call is not viable (no ``git`` on PATH,
+    or ``repo_root`` is outside a working tree). The caller falls back
+    to the glob walk in those cases.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "*.md"],
+            cwd=repo_root,
+            capture_output=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+    return [
+        repo_root / Path(name.decode("utf-8"))
+        for name in result.stdout.split(b"\0")
+        if name
+    ]
+
+
+def _glob_md_files_fallback(repo_root: Path) -> list[Path]:
+    """Legacy glob walk used when git is unavailable.
+
+    Preserved verbatim from the pre-ISSUE-0036 implementation so
+    downstream tarball consumers still get a useful link scan. Walks
+    ``docs/**/*.md`` plus repo-root-and-one-level deep, with the same
+    ``.git/`` and ``docs/`` filters as before.
+    """
+    print(
+        "[WARN] doc_links: git ls-files unavailable; falling back to glob "
+        "walk (depth-limited).",
+        file=sys.stderr,
+    )
+
     docs_dir = repo_root / "docs"
-    pr_reviews_dir = (docs_dir / "pr-reviews").resolve()
     files: list[Path] = []
 
     if docs_dir.is_dir():
@@ -81,12 +148,11 @@ def _collect_md_files(repo_root: Path) -> list[Path]:
 
     root_files = set(repo_root.glob("*.md"))
     root_files.update(repo_root.glob("*/*.md"))
-    # Always exclude .git/ — it is not part of the working tree and may
-    # contain stale markdown artifacts (e.g. PR_BODY.md) whose relative links
-    # resolve against the .git/ directory rather than the repo root, producing
-    # spurious "broken link" failures. (PR #251 review-fix follow-up.)
     git_dir = os.path.normcase(str((repo_root / ".git").resolve())) + os.sep
-    root_files = {f for f in root_files if not os.path.normcase(str(f.resolve())).startswith(git_dir)}
+    root_files = {
+        f for f in root_files
+        if not os.path.normcase(str(f.resolve())).startswith(git_dir)
+    }
     if docs_dir.is_dir():
         docs_resolved = os.path.normcase(str(docs_dir.resolve()))
         root_files = {
@@ -97,13 +163,6 @@ def _collect_md_files(repo_root: Path) -> list[Path]:
             and os.path.normcase(str(f.resolve())) != docs_resolved
         }
     files.extend(sorted(root_files))
-
-    pr_reviews_prefix = os.path.normcase(str(pr_reviews_dir)) + os.sep
-    files = [
-        f for f in files
-        if not os.path.normcase(str(f.resolve())).startswith(pr_reviews_prefix)
-    ]
-
     return files
 
 

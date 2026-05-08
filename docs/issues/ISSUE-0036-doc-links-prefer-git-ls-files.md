@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0036
 summary: "scripts/checks/doc_links.py uses ad-hoc glob + filter chain; tighten to `git ls-files '*.md'` for the source of truth"
-status: open
+status: resolved
 severity: low
 area: scripts/checks
 created: 2026-05-05
+closed: 2026-05-08
 refs:
   - scripts/checks/doc_links.py
 ---

@@ -165,6 +165,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`scripts/checks/doc_links.py` now collects markdown files via
+  `git ls-files '*.md'` (ISSUE-0036).** The previous glob shape walked
+  `docs/**/*.md` plus `repo_root/*.md` and `repo_root/*/*.md`, which
+  silently dropped every tracked markdown file at depth ≥ 3 outside
+  `docs/` — `.github/instructions/*.md`, `.github/prompts/*.md`,
+  `prompts/runtime/persona/sections/*.md`, `prompts/runtime/safety/*.md`,
+  and `prompts/runtime/task-agents/*.md` were never link-checked. The
+  scan now covers 192 tracked markdown files (up from 164) and 1 788
+  links (up from 1 772). The git index is the source of truth, so
+  untracked artifacts (`PR_BODY.md` left behind by `git stash`),
+  `.git/`-internal residue, and gitignored paths are filtered out by
+  construction rather than by ad-hoc `os.path.normcase` prefix-matching.
+  A glob fallback with a one-line WARN preserves the script's defensive
+  posture for downstream tarball consumers running outside a git
+  checkout. Pinned by `tests/unit/python/test_doc_links_collection.py`
+  (depth-3 / depth-4+ collection, untracked exclusion, `.git/`
+  exclusion, `docs/pr-reviews/` exclusion, fallback path).
 - **`ChannelRouter.fanout` now dispatches with bounded concurrency
   (ISSUE-0014).** PR 4's gRPC dispatcher made the inline per-recipient
   loop visible as a worst-case
