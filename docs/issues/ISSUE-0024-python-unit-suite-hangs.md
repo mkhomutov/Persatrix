@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0024
 summary: "tests/unit/python/ full-suite run hangs indefinitely; per-file runs pass"
-status: open
+status: resolved
 severity: medium
 area: tests
 created: 2026-05-05
+closed: 2026-05-08
 refs:
   - tests/unit/python/
   - docs/rfcs/0011-pr-plan.md
@@ -73,3 +74,17 @@ Likely suspects to investigate (not yet bisected):
 > 2026-05-05 — captured during PR #250 review-fix verification. Do not
 > block PR #250 on this; the timeout / unify-constant fixes themselves
 > were verified per-file.
+
+> 2026-05-08 — closed without a targeted fix; could no longer reproduce.
+> Re-ran the full suite locally with `pytest tests/unit/python/ -x
+> --timeout=30 --timeout-method=thread -q` and 938 of 939 tests
+> completed in 11.34 s before the run stopped on an unrelated real
+> failure (`test_pattern_parity::test_generator_output_matches_checked_in_files`,
+> a stale-mirror gate, not a hang). No test exceeded the 30 s thread
+> timeout. The hang was incidentally fixed by one of the suite-touching
+> PRs that landed between 2026-05-05 and 2026-05-08 (PRs #261 / #267 /
+> #277–#287); since the surface area was a fixture / event-loop
+> interaction rather than a single load-bearing line, the verification
+> gate is "30 s thread timeout in CI never trips" rather than a
+> bisected commit. Re-open if the symptom returns and add a regression
+> test alongside the fix.

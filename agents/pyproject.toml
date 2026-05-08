@@ -48,6 +48,13 @@ dev = [
     "types-grpcio",
     "tiktoken>=0.7.0,<1",
     "pip-licenses>=5.0.0,<6",
+    # ISSUE-0017: protoc plugin that emits *_pb2.pyi stubs at `make
+    # proto-python` time, replacing the previously hand-maintained
+    # `agents/generated/task_pb2.pyi`. Capped below 4.0 because 4.x+
+    # require protobuf>=6 while the runtime closure above caps
+    # protobuf<6 (see grpcio-tools constraint above). Bump in lockstep
+    # with the protobuf cap.
+    "mypy-protobuf>=3.5,<4",
 ]
 accurate-tokens = [
     "tiktoken>=0.7.0,<1",
