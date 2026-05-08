@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0019
 summary: TaskAck is named generically but used by exactly one RPC; add a proto reuse-policy comment to prevent scope-creep coupling
-status: open
+status: resolved
 severity: low
 area: build/proto
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - proto/task.proto
   - docs/rfcs/0011-pr-plan.md
@@ -57,3 +58,23 @@ ambiguity entirely. Defer the choice to the PR 4 reviewer.
 
 > 2026-05-04 — initial capture during PR #246 deep review (Should-fix
 > #4). Pure documentation / naming concern; no runtime impact in v0.3.0.
+
+## Resolution
+
+> 2026-05-08 — resolved. Reuse-policy guidance added to the `TaskAck`
+> doc-comment in
+> [`proto/task.proto`](../../proto/task.proto): TaskAck stays generic;
+> caller-specific reasons go in a future `oneof reason` field rather
+> than as new scalar fields, and richer ack shapes for a single caller
+> get their own message (e.g. `ChannelMessageAck`) rather than
+> extending `TaskAck`. The rationale (renaming-after-second-consumer is
+> a breaking change; bolted-on scalars create caller-dependent
+> semantics) is preserved verbatim in the proto comment so future
+> contributors hit it on any read of the message. The committed
+> guidance ripples through both
+> [`internal/generated/taskpb/task.pb.go`](../../internal/generated/taskpb/task.pb.go)
+> and
+> [`agents/generated/task_pb2.pyi`](../../agents/generated/task_pb2.pyi)
+> via the standard `make proto` regen, so the policy surfaces in IDE
+> hovers on both sides. No wire change; field numbers and types are
+> untouched.
