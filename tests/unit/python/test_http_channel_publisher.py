@@ -147,6 +147,11 @@ class TestHTTPChannelPublisher:
         resp = MagicMock()
         resp.status = 201
         resp.text = AsyncMock(return_value="")
+        # ISSUE-0032: the publisher reads the response body to capture
+        # the orchestrator-assigned ``message_id`` for the OTel span;
+        # the mock must satisfy that read even though this test only
+        # cares about the URL the publisher built.
+        resp.json = AsyncMock(return_value={"id": "ignored-by-this-test"})
 
         post_ctx = MagicMock()
         post_ctx.__aenter__ = AsyncMock(return_value=resp)

@@ -41,6 +41,14 @@ LLM_CALL_SPAN = "agent.llm.call"
 TOOL_EXECUTE_SPAN = "agent.tool.execute"
 SUBAGENT_SPAWN_SPAN = "agent.subagent.spawn"
 
+# ISSUE-0032 — Python-side companion to the Go-side `channel.dispatch`
+# span on [internal/channels/grpc_dispatcher.go]. Both names sit at the
+# bare `channel.*` namespace (not `agent.*` or `orchestrator.*`) because
+# the publish path crosses the process boundary; an operator searching
+# for "all channel-X spans" finds both halves of the trace without
+# having to memorise which language runs which side.
+CHANNEL_PUBLISH_SPAN = "channel.publish"
+
 # ─── OTEL Gen-AI canonical finish-reason values ─────────────────────────────
 #
 # The OTEL Gen-AI semantic-conventions spec defines a closed vocabulary for

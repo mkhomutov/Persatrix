@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0032
 summary: "Add OpenTelemetry spans around GRPCMessageDispatcher.Dispatch and HTTPChannelPublisher.publish for trace navigation"
-status: in_progress
+status: resolved
 severity: low
 area: internal/observability
 created: 2026-05-05
+closed: 2026-05-08
 refs:
   - internal/channels/grpc_dispatcher.go
   - agents/channel_publisher.py
@@ -74,3 +75,18 @@ on stable attribute keys.
 > intentionally not folded into this PR — the Go change is single-file
 > and the cross-language work is best sized into its own follow-up so
 > the agent runtime gets its own focused review.
+>
+> 2026-05-08 — Python side resolved. `HTTPChannelPublisher.publish`
+> now wraps the entire publish attempt (including the sticky-disabled
+> short-circuit) in a `channel.publish` span carrying `channel.id`,
+> `channel.sender_id`, `channel.mentions_count`, and (on success)
+> `channel.message_id` lifted from the orchestrator's 201 response.
+> Status discipline mirrors the Go side: HTTP 503 channels-disabled
+> branch records the exception event but leaves status `UNSET`
+> (deployment signal, not an internal failure — flagging it ERROR
+> would inflate error-rate dashboards on every channels-off run);
+> other 4xx/5xx and transport failures `RecordException` +
+> `Status(ERROR)`. Pinned by 8 span tests in
+> `tests/unit/python/test_channel_publish_otel.py` and an updated
+> §10.2 row + §10.1 cross-process exception note in
+> `docs/observability.md`.
