@@ -35,9 +35,28 @@ DEFAULT_PUBLISH_TIMEOUT_SECONDS: float = 10.0
 
 __all__ = [
     "ChannelPublisher",
+    "ChannelsDisabledError",
     "HTTPChannelPublisher",
     "DEFAULT_PUBLISH_TIMEOUT_SECONDS",
 ]
+
+
+class ChannelsDisabledError(RuntimeError):
+    """Orchestrator returned HTTP 503 from the channels publish endpoint.
+
+    Raised by :class:`HTTPChannelPublisher.publish` after the orchestrator
+    signals that the channels subsystem is disabled (per
+    ``cmd/orchestrator/channels.go::selectChannelDispatcher``). The flag
+    is sticky for the lifetime of the process — subsequent
+    :meth:`HTTPChannelPublisher.publish` calls short-circuit with this
+    exception and never hit the wire.
+
+    Distinct from a generic transport failure so callers can map the
+    deployment-wide gate to a dedicated status taxonomy
+    (``send_channel_message`` action result ``status="channels_disabled"``)
+    rather than the per-message ``status="failed"`` that would prompt the
+    LLM to retry.
+    """
 
 
 @runtime_checkable
@@ -93,6 +112,13 @@ class HTTPChannelPublisher:
         # publisher is constructed once at server startup and the timeout
         # is a deployment knob, not a per-message decision.
         self._timeout = timeout
+        # ISSUE-0026: sticky disabled-flag flipped on the first HTTP 503 from
+        # the channels publish endpoint. Same agent build runs against
+        # orchestrators with and without channels enabled (deferred-by-default
+        # phase model in ``cmd/orchestrator/channels.go::selectChannelDispatcher``);
+        # without this short-circuit every action burned an HTTP RTT and
+        # logged a per-call WARN.
+        self._disabled = False
 
     async def publish(
         self,
@@ -102,7 +128,22 @@ class HTTPChannelPublisher:
         content: str,
         mentions: list[str],
     ) -> None:
-        """POST a single channel message; raise on transport / non-2xx."""
+        """POST a single channel message; raise on transport / non-2xx.
+
+        Raises :class:`ChannelsDisabledError` if the orchestrator has
+        signalled that the channels subsystem is disabled (HTTP 503 on a
+        prior call) — the flag is sticky for the lifetime of the
+        instance and subsequent calls short-circuit without an HTTP
+        roundtrip. Other 4xx/5xx statuses still raise
+        :class:`aiohttp.ClientResponseError` per the existing contract.
+        """
+        # ISSUE-0026: short-circuit before any work — no URL build, no
+        # request, no log line — once the deployment-wide gate has fired.
+        if self._disabled:
+            raise ChannelsDisabledError(
+                "channels disabled at orchestrator (sticky after first HTTP 503)",
+            )
+
         if not channel_id:
             # Defensive: the executor only routes here when channel_id
             # is non-empty, but a future caller path might miss the
@@ -133,6 +174,32 @@ class HTTPChannelPublisher:
             json=payload,
             timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as resp:
+            if resp.status == 503:
+                # ISSUE-0026: orchestrator-channels-disabled signal. Flip
+                # the sticky flag, emit a one-shot diagnostic WARN with
+                # the response body, and surface a typed error so the
+                # executor maps it to ``status="channels_disabled"``
+                # rather than the retry-implying ``status="failed"``.
+                # We chose 503 (and only 503) because:
+                #   - The Go orchestrator's ``selectChannelDispatcher``
+                #     returns 503 specifically when channels are off.
+                #   - 500 is treated as transient (orchestrator bug).
+                #   - 403/404 are per-message conditions (NOT_MEMBER /
+                #     channel-not-found) and must not poison the
+                #     publisher for unrelated channels.
+                body = await resp.text()
+                logger.warning(
+                    "channels: orchestrator returned HTTP 503 on publish to "
+                    "%s; disabling further publish attempts for this process. "
+                    "Response: %s",
+                    channel_id, body[:512],
+                )
+                self._disabled = True
+                raise ChannelsDisabledError(
+                    f"channels disabled at orchestrator "
+                    f"(HTTP 503 on first publish to {channel_id})",
+                )
+
             if resp.status >= 400:
                 # Read body to surface structured orchestrator error
                 # codes (e.g. NOT_MEMBER, NOT_FOUND) in the warn log

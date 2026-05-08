@@ -15,6 +15,7 @@ from aiohttp import web
 
 from agents.channel_publisher import (
     DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+    ChannelsDisabledError,
     HTTPChannelPublisher,
 )
 
@@ -255,5 +256,197 @@ class TestPublishTimeout:
                         content="hi",
                         mentions=[],
                     )
+        finally:
+            await runner.cleanup()
+
+
+class TestStickyDisabledOnHTTP503:
+    """ISSUE-0026 — `HTTPChannelPublisher` short-circuits after first 503.
+
+    Same agent build is intended to run against orchestrators with and
+    without channels enabled (per the deferred-by-default phase model in
+    `cmd/orchestrator/channels.go::selectChannelDispatcher`). Without the
+    sticky-disabled flag every `SEND_CHANNEL_MESSAGE` action against a
+    channels-disabled orchestrator hits 503, drowning the operator log in
+    one WARN per action and burning an HTTP RTT each time.
+
+    The contract pinned here:
+
+    * First 503 from `POST /api/v1/channels/{id}/messages` flips a sticky
+      `_disabled` flag, emits a one-shot WARN with the response body for
+      diagnostics, and raises a typed `ChannelsDisabledError` so callers
+      can map it to a distinct status.
+    * Subsequent `publish()` calls raise `ChannelsDisabledError`
+      immediately without any HTTP roundtrip — the loopback handler's
+      hit counter must NOT increment.
+    * The one-shot WARN fires exactly once even across many short-circuit
+      calls.
+    * Other 4xx/5xx statuses (403, 404, 500) do NOT flip the flag — those
+      are per-message conditions, not deployment-wide signals.
+    """
+
+    @pytest.fixture
+    async def disabled_server(self):
+        """Loopback server that always returns 503 and counts hits."""
+        hits: list[str] = []
+
+        async def handler(request: web.Request) -> web.Response:
+            hits.append(request.path)
+            return web.json_response(
+                {"error": "channels disabled"}, status=503,
+            )
+
+        app = web.Application()
+        app.router.add_post("/api/v1/channels/{id}/messages", handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        try:
+            yield f"http://127.0.0.1:{port}", hits
+        finally:
+            await runner.cleanup()
+
+    async def test_first_503_raises_channels_disabled_and_flips_flag(
+        self, disabled_server, caplog,
+    ):
+        base_url, hits = disabled_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            with caplog.at_level("WARNING", logger="agents.channel_publisher"):
+                with pytest.raises(ChannelsDisabledError):
+                    await pub.publish(
+                        channel_id="group:planning",
+                        sender_id="agent-a",
+                        content="hi",
+                        mentions=[],
+                    )
+        # First publish reached the wire (one hit).
+        assert len(hits) == 1
+        # Flag is now sticky.
+        assert pub._disabled is True
+        # One-shot WARN fired with diagnostic body.
+        warn_records = [
+            r for r in caplog.records
+            if r.levelname == "WARNING" and "503" in r.getMessage()
+        ]
+        assert len(warn_records) == 1, (
+            f"expected exactly one 503 WARN, got {len(warn_records)}: "
+            f"{[r.getMessage() for r in warn_records]}"
+        )
+
+    async def test_subsequent_publish_short_circuits_without_http(
+        self, disabled_server,
+    ):
+        base_url, hits = disabled_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            # Trip the sticky flag.
+            with pytest.raises(ChannelsDisabledError):
+                await pub.publish(
+                    channel_id="group:planning",
+                    sender_id="agent-a",
+                    content="hi",
+                    mentions=[],
+                )
+            assert len(hits) == 1
+            # Three more attempts must NOT hit the wire.
+            for _ in range(3):
+                with pytest.raises(ChannelsDisabledError):
+                    await pub.publish(
+                        channel_id="group:planning",
+                        sender_id="agent-a",
+                        content="again",
+                        mentions=[],
+                    )
+        assert len(hits) == 1, (
+            f"expected zero further HTTP hits after sticky-disable, "
+            f"got {len(hits) - 1}"
+        )
+
+    async def test_one_shot_warn_does_not_repeat(
+        self, disabled_server, caplog,
+    ):
+        base_url, _ = disabled_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            with caplog.at_level("WARNING", logger="agents.channel_publisher"):
+                for _ in range(5):
+                    with pytest.raises(ChannelsDisabledError):
+                        await pub.publish(
+                            channel_id="group:planning",
+                            sender_id="agent-a",
+                            content="hi",
+                            mentions=[],
+                        )
+        warn_records = [
+            r for r in caplog.records
+            if r.levelname == "WARNING" and "503" in r.getMessage()
+        ]
+        assert len(warn_records) == 1, (
+            "the disabled WARN must fire only on the first 503, not on "
+            f"every short-circuit; got {len(warn_records)} WARNs"
+        )
+
+    async def test_403_does_not_flip_disabled_flag(self):
+        """Per-message 403 is not a deployment-wide signal."""
+        async def handler_403(request: web.Request) -> web.Response:
+            await request.read()
+            return web.json_response({"error": "NOT_MEMBER"}, status=403)
+
+        app = web.Application()
+        app.router.add_post("/api/v1/channels/{id}/messages", handler_403)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        try:
+            async with aiohttp.ClientSession() as session:
+                pub = HTTPChannelPublisher(
+                    orchestrator_url=f"http://127.0.0.1:{port}",
+                    session=session,
+                )
+                with pytest.raises(aiohttp.ClientResponseError):
+                    await pub.publish(
+                        channel_id="group:planning",
+                        sender_id="agent-a",
+                        content="hi",
+                        mentions=[],
+                    )
+                # 403 is per-message; the publisher must remain enabled so
+                # other channels keep working.
+                assert pub._disabled is False
+        finally:
+            await runner.cleanup()
+
+    async def test_500_does_not_flip_disabled_flag(self):
+        """Generic 5xx is treated as transient; only 503 is the disabled signal."""
+        async def handler_500(request: web.Request) -> web.Response:
+            await request.read()
+            return web.json_response({"error": "internal"}, status=500)
+
+        app = web.Application()
+        app.router.add_post("/api/v1/channels/{id}/messages", handler_500)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        try:
+            async with aiohttp.ClientSession() as session:
+                pub = HTTPChannelPublisher(
+                    orchestrator_url=f"http://127.0.0.1:{port}",
+                    session=session,
+                )
+                with pytest.raises(aiohttp.ClientResponseError):
+                    await pub.publish(
+                        channel_id="group:planning",
+                        sender_id="agent-a",
+                        content="hi",
+                        mentions=[],
+                    )
+                assert pub._disabled is False
         finally:
             await runner.cleanup()

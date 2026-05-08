@@ -1,12 +1,15 @@
 ---
 id: ISSUE-0018
 summary: ChannelMessageEvent wire bounds (content/mentions/thread_id/channel_type) are documented as receiver MUSTs only in proto comments — no schema-level enforcement
-status: open
+status: resolved
 severity: medium
 area: agents
 created: 2026-05-04
+closed: 2026-05-08
 refs:
   - proto/task.proto
+  - agents/channel_validation.py
+  - tests/unit/python/test_channel_validation.py
   - docs/rfcs/0011-channels-bridges.md
   - docs/rfcs/0011-pr-plan.md
   - docs/issues/ISSUE-0011-publish-mentions-count-cap.md
@@ -73,3 +76,23 @@ once the real handler lands in RFC 0011 PR 4.
 > 2026-05-04 — initial capture during PR #246 deep review (Should-fix
 > #2). Largest residual risk in PR 3's scope per the review's Security
 > Assessment section.
+
+## Resolution
+
+> 2026-05-08 — closed retroactively. The proposed validator landed in
+> [`agents/channel_validation.py::validate_channel_message_event`](../../agents/channel_validation.py)
+> as part of RFC 0011 PR 4a-i (PR #248). It enforces all four documented
+> bounds (content ≤ 4000 chars, `mentions[]` ≤ 10 entries, `thread_id`
+> ≤ 128 chars, `channel_type` ∈ `{group, dm, thread}` with `channel_id`
+> prefix agreement) plus additional defence-in-depth checks
+> (`sender_id` / `mentions[]` participant-id pattern, `channel_id` /
+> `message_id` length caps, RFC 3339 timestamp parse,
+> `respond_policy` closed vocabulary, `thread_parent_sender_id`
+> participant-id pattern). The validator is invoked from
+> [`AgentServiceServicer.ReceiveChannelMessage`](../../agents/server_servicers.py)
+> on every inbound `ChannelMessageEvent`; failures return
+> `TaskAck(success=False, error_message=…)` with a taxonomised reason.
+> Coverage lives in
+> [`tests/unit/python/test_channel_validation.py`](../../tests/unit/python/test_channel_validation.py)
+> (table-driven over each bound, plus the `_safe_repr` log-injection /
+> log-cardinality guard).
