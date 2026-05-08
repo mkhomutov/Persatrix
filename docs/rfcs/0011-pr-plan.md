@@ -447,7 +447,7 @@ CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 - [ ] [ROADMAP.md](../../ROADMAP.md) RFC 0011 row → `⚠️ Partially Implemented (internal channels)`
 - [ ] [docs/v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 6 → ✅
 - [x] PR #231 review SF-1 closed: `buildDSN()` rejects (or merges) paths containing `?`; regression test for `file:`-URI input — landed via [ISSUE-0049](../issues/ISSUE-0049-builddsn-drops-pragmas-on-file-uri-paths.md) ahead of PR 8
-- [ ] PR #231 review NTH items dispatched: `PRAGMA user_version` baseline (if not already bumped by PR 2's SF-4 migration), soft byte cap on `msg.Content`, FK-disambiguation "channel deleted concurrently" test, `TestSQLiteStore_Close_Idempotent` rename or tightened assertion, `db.Stats().MaxOpenConnections == 1` invariant test, `BeforeConnect` hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift
+- [ ] PR #231 review NTH items dispatched: `PRAGMA user_version` baseline (if not already bumped by PR 2's SF-4 migration), ~~soft byte cap on `msg.Content`~~ (landed via [ISSUE-0050](../issues/ISSUE-0050-publishmessage-content-byte-cap.md) ahead of PR 8 — `MaxMessageContentBytes = 16_384` + `ErrMessageContentTooLarge` sentinel mapped to HTTP 413), FK-disambiguation "channel deleted concurrently" test, `TestSQLiteStore_Close_Idempotent` rename or tightened assertion, `db.Stats().MaxOpenConnections == 1` invariant test, `BeforeConnect` hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift
 
 ---
 

@@ -89,6 +89,19 @@ type ChannelMessage struct {
 	Metadata  map[string]any
 }
 
+// MaxMessageContentBytes is the soft byte cap on [ChannelMessage.Content]
+// at the [ChannelStore.PublishMessage] boundary (ISSUE-0050).
+//
+// Sized at 4× the upstream agent codepoint cap
+// (`agents/channel_validation.py::_CHANNEL_CONTENT_MAX_CHARS = 4000`) so a
+// well-formed agent submission near the codepoint limit (UTF-8 worst case
+// 4 bytes/codepoint) still passes. Rejecting in bytes — not codepoints —
+// at the store boundary is intentional: the upstream codepoint cap is the
+// canonical user-facing contract, while this byte cap measures the actual
+// SQLite + per-recipient gRPC fanout cost an unauthenticated REST publish
+// can impose.
+const MaxMessageContentBytes = 16_384
+
 // Errors surfaced by [ChannelStore]. Callers should compare with [errors.Is].
 var (
 	// ErrChannelNotFound — GetChannel/PublishMessage against a missing id.
@@ -115,6 +128,10 @@ var (
 	// ErrChannelCapExceeded — CreateChannel would push named-group count past
 	// the configured `max_channels` cap. DMs and threads are not counted.
 	ErrChannelCapExceeded = errors.New("channels: max_channels exceeded")
+	// ErrMessageContentTooLarge — PublishMessage rejected because
+	// `len(msg.Content) > MaxMessageContentBytes` (ISSUE-0050). The REST
+	// layer surfaces this as 413 Payload Too Large.
+	ErrMessageContentTooLarge = errors.New("channels: message content exceeds size cap")
 )
 
 // participantIDPattern is the single source of truth for legal participant

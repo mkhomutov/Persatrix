@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,6 +220,37 @@ func TestChannels_PublishMessage_MentionsCountCap(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 		assert.Contains(t, rec.Body.String(), "mentions")
 	})
+}
+
+// TestChannels_PublishMessage_OversizedContent_PayloadTooLarge pins
+// ISSUE-0050: a publish whose `content` exceeds
+// [channels.MaxMessageContentBytes] is rejected at the boundary with 413
+// Payload Too Large. The store rejects pre-transaction so no row is
+// inserted; the REST mapping surfaces the typed sentinel as 413 rather
+// than a generic 500.
+func TestChannels_PublishMessage_OversizedContent_PayloadTooLarge(t *testing.T) {
+	srv, store := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",
+		Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	oversized := strings.Repeat("x", channels.MaxMessageContentBytes+1)
+	body, _ := json.Marshal(publishMessageRequest{
+		SenderID: "alice", Content: oversized,
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost,
+		"/api/v1/channels/group:planning/messages", body)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, "body=%s", rec.Body.String())
+
+	// Defense-in-depth check: store must remain empty so a future regression
+	// that accepts the publish but then errors on a downstream step still
+	// fails this test.
+	hist, err := store.GetHistory(context.Background(), "group:planning", 10, time.Time{})
+	require.NoError(t, err)
+	assert.Empty(t, hist, "rejected publish must not persist")
 }
 
 // TestChannels_GetThread_ReturnsReplies pins the thread-fetch endpoint.
