@@ -109,9 +109,18 @@ class ActionExecutor:
     ) -> dict[str, Any]:
         """Execute a single action; status contract is documented in the README of this module.
 
-        Returned dict always carries ``action_type`` and ``status``;
-        SEND_CHANNEL_MESSAGE additionally carries ``dispatched_to`` (legacy
-        path) or ``channel_id`` (REST path).
+        Returned dict always carries ``action_type`` and ``status``.
+        SEND_CHANNEL_MESSAGE additionally carries both ``channel_id`` and
+        ``dispatched_to`` regardless of branch (REST publish vs in-process
+        dispatch). Fields not applicable to the chosen branch are set to
+        ``None`` rather than omitted, so consumers can read either field
+        without shape-defensive code (ISSUE-0027). Specifically:
+
+        * REST branch: ``dispatched_to`` is ``None`` because the
+          orchestrator owns fan-out — the agent has no per-recipient
+          count to report.
+        * Legacy branch: ``channel_id`` is the value the agent emitted
+          (empty string when the payload omitted it).
         """
         match action.action_type:
             case ActionType.COMPLETE_TASK:
@@ -246,11 +255,13 @@ class ActionExecutor:
                     "action_type": "send_channel_message",
                     "status": "failed",
                     "channel_id": target_channel,
+                    "dispatched_to": None,
                 }
             return {
                 "action_type": "send_channel_message",
                 "status": "published",
                 "channel_id": target_channel,
+                "dispatched_to": None,
             }
 
         # ── Legacy in-process dispatch branch ──
@@ -258,7 +269,12 @@ class ActionExecutor:
             logger.warning(
                 "Agent %s sent message but no dispatcher configured", sender_id,
             )
-            return {"action_type": "send_channel_message", "status": "no_dispatcher"}
+            return {
+                "action_type": "send_channel_message",
+                "status": "no_dispatcher",
+                "channel_id": target_channel,
+                "dispatched_to": None,
+            }
 
         if not mentions:
             if target_channel:
@@ -275,6 +291,7 @@ class ActionExecutor:
             return {
                 "action_type": "send_channel_message",
                 "status": "no_targets",
+                "channel_id": target_channel,
                 "dispatched_to": 0,
             }
 
@@ -311,5 +328,6 @@ class ActionExecutor:
         return {
             "action_type": "send_channel_message",
             "status": status,
+            "channel_id": target_channel,
             "dispatched_to": dispatched,
         }

@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0027
 summary: "_handle_send_channel_message returns divergent result dict shapes between REST and legacy branches"
-status: open
+status: resolved
 severity: medium
 area: agents
 created: 2026-05-05
+closed: 2026-05-08
 refs:
   - agents/action_executor.py
 ---
@@ -51,3 +52,13 @@ Option 1 is the smallest behavioural change and the easiest to test.
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review (Should-Fix #4).
+> 2026-05-08 — resolved via Option 1 (symmetrize). Both ``channel_id``
+> and ``dispatched_to`` are now always present in
+> ``_handle_send_channel_message`` results: ``dispatched_to`` is
+> ``None`` on the REST branch (orchestrator owns fan-out, so the agent
+> has no per-recipient count to surface) and on the no-dispatcher fallback;
+> ``channel_id`` is the value the action emitted (empty string when the
+> payload omitted it) on the legacy branch. New
+> ``TestResultDictSymmetry`` class in
+> [tests/unit/python/test_channel_publish_rest.py](../../tests/unit/python/test_channel_publish_rest.py)
+> pins the contract.
