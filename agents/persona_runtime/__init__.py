@@ -66,6 +66,7 @@ from ..persona_types import (
 )
 from ..tools.registry import ToolDefinition
 from .action_loop import _ActionLoopMixin
+from .episode_routing import _EpisodeRoutingMixin
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
@@ -169,6 +170,7 @@ class _LLMPersonaAgent(
     _ActionLoopMixin,
     _MemoryContextMixin,
     _PromptAssemblyMixin,
+    _EpisodeRoutingMixin,
     _StatePersistenceMixin,
     PersonaAgent,
 ):

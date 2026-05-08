@@ -2,12 +2,14 @@
 
 PR #248 deep-review findings (High + Medium tier) addressed here:
 
-- **High** — ``_StatePersistenceMixin._MULTI_TURN_EVENT_TYPES`` must list
+- **High** — ``_EpisodeRoutingMixin._MULTI_TURN_EVENT_TYPES`` must list
   ``CHANNEL_MESSAGE`` so dispatched channel events take the multi-turn
   episode path instead of falling through the legacy fallback (which logs
   a "Event type … is not classified" warning per event). The PR-215
   review comment above the frozenset explicitly anticipated this gap when
-  a new ``EventType`` lands.
+  a new ``EventType`` lands.  (The frozensets and the routing method
+  moved from ``_StatePersistenceMixin`` to ``_EpisodeRoutingMixin`` in
+  the slice-4 file-size split; the contract is unchanged.)
 
 - **Medium** — ``prompt_assembly._format_event`` must produce a
   ``<|user_message|>``-wrapped, sender-attributed string for
@@ -39,7 +41,7 @@ from unittest.mock import patch
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_runtime.state_persistence import _StatePersistenceMixin
+from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
 from agents.persona_types import ActionType, AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
@@ -89,7 +91,7 @@ class TestStatePersistenceRouting:
         """
         assert (
             EventType.CHANNEL_MESSAGE
-            in _StatePersistenceMixin._MULTI_TURN_EVENT_TYPES
+            in _EpisodeRoutingMixin._MULTI_TURN_EVENT_TYPES
         )
 
     def test_channel_message_not_in_single_turn(self):
@@ -99,7 +101,7 @@ class TestStatePersistenceRouting:
         """
         assert (
             EventType.CHANNEL_MESSAGE
-            not in _StatePersistenceMixin._SINGLE_TURN_EVENT_TYPES
+            not in _EpisodeRoutingMixin._SINGLE_TURN_EVENT_TYPES
         )
 
 
