@@ -377,9 +377,15 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### PR checklist
 
-- [ ] `cargo clippy --all-targets -- -D warnings` clean
-- [ ] `cargo fmt --check` clean
-- [ ] CLI help text reviewed against existing `persatrix logs` / `persatrix chat` voice
+- [x] `cargo clippy --all-targets -- -D warnings` clean
+- [x] `cargo fmt --check` clean
+- [x] CLI help text reviewed against existing `persatrix logs` / `persatrix chat` voice
+- [x] `scripts/checks/file_size.py --strict` clean — `ChannelCommands` clap enum + `dispatch` fn co-located with the bodies in `cli/src/commands/channel.rs` (under cap), wire DTOs split into `channel_types.rs`, helper tests externalised via `#[path = "channel_tests.rs"]` so the runtime file stays under the 500-line review cap
+- [x] `cargo test` green: 70 tests pass (12 new channel module helper tests + 8 new channel REST DTO serde-contract tests)
+
+#### Deferred to a follow-up
+
+- **Integration tests against a fixture orchestrator** (RFC plan "Integration: cargo test against a fixture orchestrator — list/send/history round-trip" + "channel watch polling loop emits each new message exactly once"). The Rust CLI has no in-tree integration-test harness against `bin/persatrix-server` today — `cli/tests/` does not exist; the existing precedent (`cli/src/commands/logs.rs`'s SSE consumer) is unit-tested only. The channel surface ships with the same coverage shape: pure-helper unit tests + golden-file serde-contract tests pin every wire-shape decision, with end-to-end coverage delivered by the manual MT-CHANNEL suite documented under [`docs/manual-tests/`](../manual-tests/) — [MT-CHANNEL-001](../manual-tests/MT-CHANNEL-001.md) (list/join), [MT-CHANNEL-002](../manual-tests/MT-CHANNEL-002.md) (send/reply/history), and [MT-CHANNEL-003](../manual-tests/MT-CHANNEL-003.md) (watch poll/dedup/full-page warning) collectively cover every flag combination on the PR 6 CLI surface against a docker-composed orchestrator + four agents. The cross-process `cargo test` harness arrives naturally with PR 7's docker-compose fixture; tracked as the PR 6 follow-up there.
 
 ---
 
