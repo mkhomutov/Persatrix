@@ -36,12 +36,14 @@ pub(crate) struct ChannelView {
 
 /// Envelope for `GET /api/v1/channels`. `next_cursor` mirrors the Go
 /// server's keyset-pagination signal (empty string when the trailing
-/// page has been returned).
+/// page has been returned). Consumed by
+/// [`crate::commands::channel::should_warn_truncation`] to surface a
+/// stderr warning when the listing is partial (PR #302 deep-review
+/// finding 1).
 #[derive(Deserialize)]
 pub(crate) struct ListChannelsResponse {
     pub(crate) channels: Vec<ChannelView>,
     #[serde(default)]
-    #[allow(dead_code)] // surfaced via --json; ignored by the human formatter
     pub(crate) next_cursor: String,
 }
 

@@ -17,7 +17,7 @@ use crate::commands::channel_types::{
     AddMemberRequest, ChannelMember, ChannelMessage, ChannelView, HistoryResponse,
     ListChannelsResponse, PublishMessageRequest,
 };
-use crate::types::{api_error_message, validate_path_param};
+use crate::types::{api_error_message, validate_path_param, validate_resource_id};
 
 /// 5 s poll cadence for `channel watch` (RFC 0011 OQ #4 default).
 pub(crate) const DEFAULT_WATCH_INTERVAL_SECS: u64 = 5;
@@ -29,11 +29,18 @@ pub(crate) const DEFAULT_HISTORY_LIMIT: u32 = 50;
 /// clear message instead of round-tripping a generic 400.
 pub(crate) const MAX_MENTIONS_PER_PUBLISH: usize = 10;
 
-/// Default cap on the `WatchState` dedup ring. Sized at ~20× the
-/// default page (50) so a few back-to-back full pages never re-emit a
-/// message that was already printed; on overflow the oldest id is
-/// evicted and a re-appearing id is treated as new.
+/// Floor for the `WatchState` dedup ring (~20× the default 50-page).
+/// Back-to-back full pages never re-emit at the default; on overflow
+/// the oldest id is evicted and a re-appearing id is treated as new.
+/// [`watch_seen_cap_for`] scales the ring at higher `--limit` values.
 pub(crate) const WATCH_SEEN_CAP: usize = 1024;
+
+/// Stderr text for the watch full-page warning. Stays accurate for
+/// both genuine page rollover (data loss) and benign bursts of exactly
+/// `--limit` new messages (no loss); the corrective knobs are the same
+/// either way. PR #302 finding 5.
+pub(crate) const FULL_PAGE_WARNING_TEXT: &str =
+    "polled page was completely full of new messages — the page may have rolled over; consider raising --limit or lowering --interval";
 
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
 
@@ -95,6 +102,39 @@ pub(crate) fn validate_message_id(input: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// True when the server signals "more pages exist" via non-empty
+/// `next_cursor`. Used by `cmd_channel_list` to warn on stderr (keeps
+/// `--json` parseable) rather than auto-paginate, which would mask the
+/// scaling concern. PR #302 finding 1.
+pub(crate) fn should_warn_truncation(next_cursor: &str) -> bool {
+    !next_cursor.is_empty()
+}
+
+/// Scale the [`WatchState`] dedup ring with the per-poll page size. At
+/// `--limit 1000` the historic 1024 cap is only ~1× the page, so a
+/// between-poll burst evicts in-page ids and they reprint on the next
+/// poll. 4× preserves the original "ring covers a few full pages of
+/// overlap" property at any limit; the 1024 floor protects multi-
+/// channel monitors. PR #302 finding 2.
+pub(crate) fn watch_seen_cap_for(limit: u32) -> usize {
+    let scaled = (limit as usize).saturating_mul(4);
+    scaled.max(WATCH_SEEN_CAP)
+}
+
+/// Validate `--as` (sender) and each `--mention` against the resource-id
+/// shape (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`). Parity with `cmd_chat`. The
+/// server's `participantIDPattern` is broader, but every configured
+/// agent id matches the stricter shape — rejecting locally beats a
+/// generic 400. `default_user_id` already conforms (quickcheck in
+/// `main.rs`); only explicit values gain coverage. PR #302 finding 3.
+pub(crate) fn validate_send_inputs(sender_id: &str, mentions: &[String]) -> Result<(), String> {
+    validate_resource_id(sender_id, "sender id")?;
+    for m in mentions {
+        validate_resource_id(m, "mention")?;
+    }
+    Ok(())
+}
+
 /// Reject mention arrays that exceed the server cap.
 ///
 /// `--mention-all` resolves to every channel member client-side; on a
@@ -134,10 +174,6 @@ impl Default for WatchState {
 }
 
 impl WatchState {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// Construct a `WatchState` with an explicit ring capacity (test seam).
     /// `cap` is clamped to ≥1 — a zero cap would make the ring useless
     /// and reintroduce the unbounded-growth risk via the `HashSet`.
@@ -200,6 +236,11 @@ pub(crate) async fn cmd_channel_list(
         .json()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
+    // Stderr keeps `--json` parseable; see [`should_warn_truncation`].
+    if should_warn_truncation(&body.next_cursor) {
+        let label = "warning:".yellow().bold();
+        eprintln!("{label} channel list truncated; more channels exist past the first page");
+    }
     if json_out {
         // Single-line output (not pretty-printed): keeps `--json` consistent
         // across subcommands so downstream tools that count lines or pipe
@@ -233,6 +274,8 @@ pub(crate) async fn cmd_channel_join(
 ) -> Result<(), String> {
     let canonical = canonicalize_channel_id(name);
     validate_path_param(&canonical, "channel id")?;
+    // Same shape chat.rs validates user_id against; see [`validate_send_inputs`].
+    validate_resource_id(user_id, "user id")?;
     let req = AddMemberRequest {
         id: user_id.to_string(),
         respond: respond.to_string(),
@@ -273,6 +316,9 @@ pub(crate) async fn cmd_channel_send(
 ) -> Result<(), String> {
     let canonical = canonicalize_channel_id(name);
     validate_path_param(&canonical, "channel id")?;
+    // `--mention-all` resolves from the server's member list (already
+    // validated at join time); only the explicit inputs need a check.
+    validate_send_inputs(sender_id, explicit_mentions)?;
     let mentions = if mention_all {
         let members = fetch_channel_members(client, server, &canonical).await?;
         expand_mentions(explicit_mentions, true, &members, sender_id)
@@ -374,7 +420,8 @@ pub(crate) async fn cmd_channel_watch(
     let canonical = canonicalize_channel_id(name);
     validate_path_param(&canonical, "channel id")?;
     let url = format!("{server}/api/v1/channels/{canonical}/messages?limit={limit}");
-    let mut state = WatchState::new();
+    // Ring sized from `--limit`; see [`watch_seen_cap_for`].
+    let mut state = WatchState::with_cap(watch_seen_cap_for(limit));
     let interval = Duration::from_secs(interval_secs.max(1));
     eprintln!(
         "Watching {} (poll every {}s; Ctrl-C to stop)",
@@ -421,10 +468,7 @@ pub(crate) async fn cmd_channel_watch(
             && batch_size as u32 == limit
             && batch_size > 0
         {
-            eprintln!(
-                "{} polled page was completely full of new messages — older messages may have been missed; raise --limit or lower --interval",
-                "warning:".yellow().bold()
-            );
+            eprintln!("{} {}", "warning:".yellow().bold(), FULL_PAGE_WARNING_TEXT);
         }
         first_poll = false;
         tokio::time::sleep(interval).await;

@@ -67,7 +67,9 @@ pub(crate) enum ChannelCommands {
         /// Sender identity (defaults to OS username, normalized)
         #[arg(long)]
         r#as: Option<String>,
-        /// Mention a participant (`--mention alice --mention bob` is repeatable)
+        /// Mention a participant (`--mention alice --mention bob` is repeatable).
+        /// Self-mentions are dropped — the channel gate would only fan the
+        /// message back to the sender (PR #302 deep-review finding 6).
         #[arg(long = "mention")]
         mention: Vec<String>,
         /// Mention every channel member (resolved client-side via GET /channels/{id})
