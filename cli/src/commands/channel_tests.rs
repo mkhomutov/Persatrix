@@ -100,6 +100,27 @@ fn expand_mentions_drops_self_mention() {
 }
 
 #[test]
+fn expand_mentions_drops_explicit_self_mention_without_mention_all() {
+    // PR #302 deep-review finding N7: the explicit-self-drop branch
+    // (no `--mention-all`) was previously only covered transitively via
+    // `expand_mentions_drops_self_mention`, which exercises the
+    // `mention_all=true` path. The drop is unconditional in
+    // `expand_mentions` regardless of the flag, but assertions on the
+    // explicit-only path keep regressions visible.
+    let mentions = expand_mentions(
+        &["alice".to_string(), "bob".to_string()],
+        false,
+        &[],
+        "alice",
+    );
+    assert_eq!(
+        mentions,
+        vec!["bob".to_string()],
+        "explicit @-self should drop even when --mention-all is off"
+    );
+}
+
+#[test]
 fn expand_mentions_no_flag_no_members_is_empty() {
     let mentions = expand_mentions(&[], false, &[], "alice");
     assert!(mentions.is_empty());
@@ -264,27 +285,6 @@ fn validate_mention_count_over_cap_is_err() {
     assert!(err.contains("10"), "error mentions the server cap: {err}");
 }
 
-// ─── should_warn_truncation (PR #302 deep-review finding 1) ─────────
-
-#[test]
-fn truncation_warning_fires_when_next_cursor_present() {
-    // The server's keyset-pagination signal: a non-empty next_cursor
-    // means more rows exist past the first page. Without surfacing it,
-    // `channel list` silently truncates once the deployment raises
-    // `MaxChannels` past 50 (the default page size). A stderr warning
-    // is the minimal signal so `--json` consumers still parse cleanly.
-    assert!(should_warn_truncation("group:next-channel"));
-    assert!(should_warn_truncation("dm:alice:bob"));
-}
-
-#[test]
-fn truncation_warning_silent_when_next_cursor_empty() {
-    // Trailing page: server omits the cursor (Go `omitempty` → empty
-    // string after deserialize). Listing is complete; warning would be
-    // misleading.
-    assert!(!should_warn_truncation(""));
-}
-
 // ─── watch_seen_cap_for (PR #302 deep-review finding 2) ─────────────
 
 #[test]
@@ -318,8 +318,48 @@ fn watch_seen_cap_floor_protects_small_limits() {
 fn watch_seen_cap_does_not_overflow_on_max_u32() {
     // Defensive: limit comes from clap as `u32`. A pathological
     // u32::MAX must not panic in the multiply — saturating_mul keeps
-    // us at usize::MAX which is still a valid (huge) cap.
-    let _ = watch_seen_cap_for(u32::MAX); // must not panic
+    // us at usize::MAX, then the ceiling clamp brings the value back
+    // to a bounded cap. PR #302 deep-review finding S1 — the prior
+    // assertion stopped at "must not panic" but the *next* step
+    // (`WatchState::with_cap`) would still attempt to allocate a
+    // multi-GB HashSet.
+    let cap = watch_seen_cap_for(u32::MAX);
+    assert_eq!(
+        cap, WATCH_SEEN_CAP_CEILING,
+        "u32::MAX must clamp to the ceiling, not pass through usize::MAX"
+    );
+}
+
+#[test]
+fn watch_seen_cap_clamps_to_ceiling_for_large_limit() {
+    // PR #302 deep-review finding S1: clap accepts `--limit: u32` with
+    // no client-side ceiling; the server silently caps at
+    // `channelMaxLimit = 1000`, but the CLI eagerly preallocates a
+    // `HashSet`/`VecDeque` of `4 × limit` capacity. A typo like
+    // `--limit 1000000000` would attempt to reserve gigabytes of heap.
+    // The ceiling clamp keeps the pre-allocation bounded for any
+    // pathological `--limit` value while leaving real values
+    // (server-capped at 1000 anyway) unchanged.
+    let cap = watch_seen_cap_for(1_000_000_000);
+    assert_eq!(cap, WATCH_SEEN_CAP_CEILING);
+    // `WatchState::with_cap` at the ceiling allocates a bounded ring
+    // and the ring still functions (records and dedupes correctly).
+    let mut state = WatchState::with_cap(cap);
+    let printed = state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    assert_eq!(printed.len(), 1, "ring at ceiling still records new ids");
+    let printed = state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    assert!(printed.is_empty(), "ring at ceiling still dedupes");
+}
+
+#[test]
+fn watch_seen_cap_below_ceiling_passes_through() {
+    // Real `--limit` values (server-capped at 1000) never hit the
+    // ceiling — the 4× scale at limit=1000 is 4000, comfortably below
+    // `WATCH_SEEN_CAP_CEILING` (16 384). The const-block assertion
+    // makes a future ceiling lowering a compile error rather than a
+    // runtime test failure.
+    const _: () = assert!(WATCH_SEEN_CAP_CEILING >= 4 * 1000);
+    assert_eq!(watch_seen_cap_for(1000), 4000);
 }
 
 // ─── validate_send_inputs (PR #302 deep-review finding 3) ───────────

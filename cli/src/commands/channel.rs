@@ -35,6 +35,13 @@ pub(crate) const MAX_MENTIONS_PER_PUBLISH: usize = 10;
 /// [`watch_seen_cap_for`] scales the ring at higher `--limit` values.
 pub(crate) const WATCH_SEEN_CAP: usize = 1024;
 
+/// Ceiling on [`watch_seen_cap_for`] so a pathological `--limit` typo
+/// cannot drive [`WatchState::with_cap`] into a multi-GB allocation.
+/// 16× [`WATCH_SEEN_CAP`] sits well above the server's
+/// `channelMaxLimit = 1000` × the 4× ring multiplier (= 4000), so no
+/// real `--limit` ever reaches the clamp. PR #302 deep-review S1.
+pub(crate) const WATCH_SEEN_CAP_CEILING: usize = WATCH_SEEN_CAP * 16;
+
 /// Stderr text for the watch full-page warning. Stays accurate for
 /// both genuine page rollover (data loss) and benign bursts of exactly
 /// `--limit` new messages (no loss); the corrective knobs are the same
@@ -102,23 +109,15 @@ pub(crate) fn validate_message_id(input: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// True when the server signals "more pages exist" via non-empty
-/// `next_cursor`. Used by `cmd_channel_list` to warn on stderr (keeps
-/// `--json` parseable) rather than auto-paginate, which would mask the
-/// scaling concern. PR #302 finding 1.
-pub(crate) fn should_warn_truncation(next_cursor: &str) -> bool {
-    !next_cursor.is_empty()
-}
-
-/// Scale the [`WatchState`] dedup ring with the per-poll page size. At
-/// `--limit 1000` the historic 1024 cap is only ~1× the page, so a
-/// between-poll burst evicts in-page ids and they reprint on the next
-/// poll. 4× preserves the original "ring covers a few full pages of
-/// overlap" property at any limit; the 1024 floor protects multi-
-/// channel monitors. PR #302 finding 2.
+/// Scale the [`WatchState`] dedup ring with the per-poll page size. 4×
+/// `limit` preserves the historic "ring covers a few full pages" property;
+/// [`WATCH_SEEN_CAP`] floors the small-limit case (multi-channel monitors)
+/// and [`WATCH_SEEN_CAP_CEILING`] clamps pathological `--limit` typos so
+/// `with_cap` cannot eager-allocate gigabytes. PR #302 findings 2 + S1.
 pub(crate) fn watch_seen_cap_for(limit: u32) -> usize {
+    // Floor ≤ ceiling by construction (1024 ≤ 16384), so `clamp` is safe.
     let scaled = (limit as usize).saturating_mul(4);
-    scaled.max(WATCH_SEEN_CAP)
+    scaled.clamp(WATCH_SEEN_CAP, WATCH_SEEN_CAP_CEILING)
 }
 
 /// Validate `--as` (sender) and each `--mention` against the resource-id
@@ -236,8 +235,9 @@ pub(crate) async fn cmd_channel_list(
         .json()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
-    // Stderr keeps `--json` parseable; see [`should_warn_truncation`].
-    if should_warn_truncation(&body.next_cursor) {
+    // Non-empty `next_cursor` = "more rows exist". Stderr keeps `--json`
+    // parseable; warn rather than auto-paginate. PR #302 finding 1.
+    if !body.next_cursor.is_empty() {
         let label = "warning:".yellow().bold();
         eprintln!("{label} channel list truncated; more channels exist past the first page");
     }

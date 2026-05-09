@@ -74,6 +74,14 @@ pub(crate) struct HistoryResponse {
     pub(crate) messages: Vec<ChannelMessage>,
 }
 
+/// Request body for `POST /api/v1/channels/{id}/messages`.
+///
+/// Subset of the Go `publishMessageRequest` ([channel_types.go]):
+/// `metadata` (`map[string]any`, omitempty) and `channel_type` (omitempty)
+/// are accepted server-side but not yet exposed by the CLI surface. Add
+/// the corresponding fields here when `--metadata` / `--channel-type`
+/// flags land — extending the wire shape silently would otherwise
+/// surprise contributors who assume parity. PR #302 deep-review N3.
 #[derive(Serialize)]
 pub(crate) struct PublishMessageRequest {
     pub(crate) sender_id: String,
