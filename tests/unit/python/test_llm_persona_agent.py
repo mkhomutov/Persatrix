@@ -310,13 +310,45 @@ class TestLLMPersonaAgent:
         that re-widens to ``| None`` is caught immediately rather than
         re-opening the silent-drop surface (PR-4 review #25 deferred
         from slice 1).
+
+        Accepts either annotation form against the :class:`LLMClient`
+        class object so the contract survives a PEP 563 flip:
+
+        * Today, both mixin modules carry ``from __future__ import
+          annotations``, so ``cls.__annotations__["_llm_client"]`` is
+          the source-text string ``"LLMClient"``.
+        * If a future cleanup drops the future-import (Python 3.13 PEP
+          649 makes it optional), the same entry becomes the evaluated
+          ``LLMClient`` class object.
+
+        A bare ``ann == "LLMClient"`` check would silently start
+        green-passing the wrong thing under the second form (the
+        equality returns ``False`` against a class object even when
+        the annotation is correct, but the failure message would point
+        at PEP 563 mechanics rather than the intended invariant).
+        Handling both forms here keeps the assertion focused on the
+        invariant — *the annotation resolves to* :class:`LLMClient` —
+        rather than on its source-level encoding (PR-6 review #2
+        robustness).
+
+        We deliberately read ``cls.__annotations__`` directly rather
+        than using :func:`typing.get_type_hints`: the mixins also
+        annotate attributes whose types are imported only under
+        ``if TYPE_CHECKING:`` (e.g. ``MemoryNamespace`` on
+        :class:`_EpisodeRoutingMixin`), and ``get_type_hints``
+        evaluates *all* annotations on the class, raising
+        :class:`NameError` for any TYPE_CHECKING-only name absent from
+        the runtime namespace.  The per-attribute check sidesteps that
+        without forcing the production modules to drop their
+        TYPE_CHECKING-gated imports.
         """
         from agents.persona_runtime.action_loop import _ActionLoopMixin
         from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
 
         for cls in (_ActionLoopMixin, _EpisodeRoutingMixin):
             ann = cls.__annotations__["_llm_client"]
-            assert ann == "LLMClient", (
+            ok = ann == "LLMClient" or ann is LLMClient
+            assert ok, (
                 f"{cls.__name__}._llm_client annotation is {ann!r}; "
                 "RFC 0020 PR 6 slice 7 pins it to bare ``LLMClient`` "
                 "(no ``| None``) so the silent-drop branches in "

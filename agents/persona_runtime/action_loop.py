@@ -63,9 +63,10 @@ class _ActionLoopMixin:
     name: str
     role: str
     persona: dict[str, Any]
-    # PR-4 review #25 (slice 7): tight ``LLMClient`` (no ``| None``);
-    # ``# type: ignore[misc]`` overrides BaseAgent's loose contract.
-    _llm_client: LLMClient  # type: ignore[misc]
+    # PR-4 review #25 (slice 7): tight ``LLMClient`` keeps the dead
+    # ``"LLM client not configured"`` branch in ``_on_event_inner``
+    # unreachable.  MRO silenced at :class:`_LLMPersonaAgent`.
+    _llm_client: LLMClient
     _working_memory: WorkingMemory
     _state: PersonaState
     _episodic_memory: EpisodicMemory

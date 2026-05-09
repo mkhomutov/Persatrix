@@ -74,10 +74,10 @@ class _EpisodeRoutingMixin:
     _lock: asyncio.Lock
     _interaction_tracker: InteractionTracker
     # PR-4 review #25 (slice 7): tight ``LLMClient`` (no ``| None``)
-    # so the dead silent-drop in ``_persist_closed_interaction`` is
-    # gone.  See :class:`_ActionLoopMixin`'s matching annotation for
-    # the ``# type: ignore[misc]`` rationale.
-    _llm_client: LLMClient  # type: ignore[misc]
+    # keeps the dead silent-drop in ``_persist_closed_interaction``
+    # gone.  MRO conflict silenced at :class:`_LLMPersonaAgent`'s
+    # re-declaration; see :class:`_ActionLoopMixin` for the rationale.
+    _llm_client: LLMClient
     _memory_ns: MemoryNamespace
     # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
     _pending_summarize_tasks: set[asyncio.Task[None]]
