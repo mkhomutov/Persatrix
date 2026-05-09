@@ -417,7 +417,7 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 #### Tests
 
-- Integration: `UserParticipant` joins a channel via REST and shows up in `GET /api/v1/channels/{id}` member list with `respond_policy=when_mentioned` — covered by `internal/server/channel_handlers_test.go::TestHandleAddChannelMember_*`.
+- Integration: `UserParticipant` joins a channel via REST and shows up in `GET /api/v1/channels/{id}` member list with `respond_policy=when_mentioned` — covered by `internal/server/channel_handlers_test.go::TestChannels_AddMember_*`.
 - Integration: human-published message flows through the agent gate (no implicit mention-all) — single-agent reply on explicit `--mention <agent>`, zero replies otherwise. Unit-level coverage in `tests/unit/python/test_channel_message_runtime.py`; end-to-end coverage in [MT-CHANNEL-004](../manual-tests/MT-CHANNEL-004.md).
 - Integration: `channel watch` polling — covered by `cli/src/commands/channel_tests.rs::watch_state_*` (unit) + [MT-CHANNEL-003](../manual-tests/MT-CHANNEL-003.md) (live).
 - Manual: MT-CHANNEL-001 … MT-CHANNEL-006 executed against a local docker-compose deployment; results captured in PR description.

@@ -166,9 +166,13 @@ $afterCount = ($afterJson | ConvertFrom-Json).Count
   was added; the agent's `respond: when_mentioned` policy gated the event.
 
 **Verification**:
-- [ ] `after - before == 1`.
-- [ ] `docker compose logs orchestrator --tail 20` shows no
-  `SEND_CHANNEL_MESSAGE` action for this turn.
+- [ ] `after - before == 1`. The history count delta of `1` is the
+  authoritative gate-suppression assertion: a fired `SEND_CHANNEL_MESSAGE`
+  action would round-trip back as a second `channels` row and produce a
+  delta of `2`. (No log-line assertion is reliable here — the action enum
+  emits as the lowercase value `send_channel_message` from
+  [agents/persona_types.py:87](../../agents/persona_types.py#L87) and
+  fires on the agent container, not the orchestrator.)
 
 ---
 

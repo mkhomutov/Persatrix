@@ -41,10 +41,13 @@ channel with a thread root straddling the per-channel cap) is covered by
   `DeleteChannel`, `RemoveMember`
 
 **Related Automated Tests**:
-- `internal/channels/sqlite_test.go::TestSQLiteStore_DeleteChannel_*` — cascade
-  semantics + idempotence
-- `internal/server/channel_handlers_test.go::TestHandleDeleteChannel_*`,
-  `TestHandleDeleteChannelMember_*` — REST surface
+- `internal/channels/sqlite_test.go::TestSQLiteStore_ChannelDeletionCascade`
+  ([sqlite_test.go:272](../../internal/channels/sqlite_test.go#L272)) — store-level cascade semantics
+- `internal/channels/sqlite_test.go::TestSQLiteStore_ThreadFKCascade`
+  ([sqlite_test.go:233](../../internal/channels/sqlite_test.go#L233)) — thread-FK cascade boundary
+- `internal/server/channel_handlers_test.go::TestChannels_DeleteChannel_*`,
+  `TestChannels_DeleteMember_*`
+  ([channel_handlers_test.go:332-435](../../internal/server/channel_handlers_test.go#L332)) — REST surface
 
 ---
 
@@ -256,9 +259,12 @@ If a publish request is in flight when the channel is deleted, the publish
 returns the standard error mapping (`ErrChannelNotFound` → 404 or
 `ErrNotMember` → 403 depending on which check fires first). The race is not
 asserted live in this MT — the boundary is small and dominated by the
-parent-row existence check; covered by
-`internal/channels/sqlite_test.go::TestSQLiteStore_DeleteChannel_RaceWithPublish`
-where the seam exists.
+parent-row existence check. There is no dedicated automated race test for
+this seam in v0.3.0; the per-row probe-then-write inside `PublishMessage`
+([sqlite_messages.go:97-111](../../internal/channels/sqlite_messages.go#L97-L111))
+serializes through SQLite's per-write lock so the lost-write window is
+bounded by a single transaction. Tracked as a v0.3.x follow-up if a flake
+ever surfaces.
 
 ### Edge Case 2: Delete with thread roots that straddle the cap
 
