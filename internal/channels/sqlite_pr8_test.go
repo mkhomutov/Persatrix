@@ -13,8 +13,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// This file gathers the three tests landed by RFC 0011 PR 8 (the internal-
-// scope close PR) to dispatch the deferred PR #231 review NTH items without
+// This file gathers the tests landed by RFC 0011 PR 8 (the internal-scope
+// close PR) to dispatch the deferred PR #231 review NTH items without
 // pushing `sqlite_test.go` over the 500-line file-size cap. Co-locating them
 // here also makes the "tests added when RFC 0011 closed" set easy to find
 // for a future reviewer auditing the partial-implementation handover into
@@ -27,6 +27,12 @@ import (
 // `defer store.Close()` after an explicit shutdown must therefore stay
 // silent, not just "not panic". Closes PR #231 review NTH "rename or
 // tighten assertion".
+//
+// Note: the two manual Close calls below are followed by a third call from
+// `newTestStore`'s `t.Cleanup` registration (sqlite_test.go: `defer-style
+// cleanup that closes the store`). Its return is intentionally discarded
+// there — pinning ≥ 3-call idempotency for free, beyond the two-call
+// minimum this test asserts directly.
 func TestSQLiteStore_Close_Idempotent(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	require.NoError(t, store.Close(), "first Close must be clean")
@@ -85,7 +91,6 @@ func TestSQLiteStore_PublishMessage_FKDisambiguation_ChannelDeletedConcurrently(
 	// the round-2 disambiguation branch was written to recognise.
 	rawDB, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(0)&_pragma=journal_mode(WAL)")
 	require.NoError(t, err)
-	rawDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = rawDB.Close() })
 	_, err = rawDB.ExecContext(ctx, `DELETE FROM channels WHERE id = ?`, id)
 	require.NoError(t, err, "raw delete must succeed with FK off")
@@ -111,4 +116,55 @@ func TestSQLiteStore_PublishMessage_FKDisambiguation_ChannelDeletedConcurrently(
 	assert.Contains(t, err.Error(), "deleted concurrently",
 		"the round-2 branch must mark the cause as a concurrent deletion, "+
 			"not as 'invalid thread_id' (round-1-only path)")
+}
+
+// TestSQLiteStore_PublishMessage_FKDisambiguation_InvalidThreadID pins
+// sub-case 2 of the round-2 FK-disambiguation branch
+// (sqlite_messages.go: the `chCount > 0 && msg.ThreadID != ""` arm). When
+// the membership probe succeeds, the channel row is still present, and the
+// INSERT fires `SQLITE_CONSTRAINT_FOREIGNKEY` because of a non-existent
+// `thread_id`, the error must surface as `"channels: invalid thread_id ..."`
+// — not as `ErrChannelNotFound` (the channel is present) and not as the
+// raw SQL error (the round-1-only path).
+//
+// The schema declares `thread_id TEXT REFERENCES messages(id) ON DELETE
+// CASCADE`, so publishing with a `ThreadID` that does not match any
+// existing message id triggers the violation directly — no test seam
+// required (this contrasts with sub-case 1, which needs the
+// `foreign_keys = OFF` second-handle trick because the cascade would
+// otherwise prevent the orphan state).
+//
+// Sub-case 3 of the round-2 branch (`chCount > 0`, empty `ThreadID` →
+// raw error, marked "unexpected" in the production code) is intentionally
+// not tested: with `thread_id` the only other FK column on `messages`,
+// the only way to fire an FK violation with `ThreadID == ""` and the
+// channel still present would be a contrived driver-level seam, which
+// would falsely imply the branch is reachable in production. A genuine
+// regression in that arm would surface through the raw-error fallback.
+//
+// Pairs with TestSQLiteStore_PublishMessage_FKDisambiguation_ChannelDeletedConcurrently
+// (sub-case 1) to round out the disambiguation coverage at PR 8 — the
+// canonical "deferred-NTH disposition" PR.
+func TestSQLiteStore_PublishMessage_FKDisambiguation_InvalidThreadID(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+
+	err := store.PublishMessage(ctx, ChannelMessage{
+		ID:        uuid.NewString(),
+		ChannelID: id,
+		SenderID:  "alice",
+		Content:   "reply",
+		ThreadID:  "msg-does-not-exist",
+	})
+	require.Error(t, err, "publish with non-existent thread_id must fail")
+	assert.Contains(t, err.Error(), "invalid thread_id",
+		"FK violation on thread_id with extant channel must surface as "+
+			"'invalid thread_id', not as ErrChannelNotFound or a raw SQL error")
+	assert.Contains(t, err.Error(), "msg-does-not-exist",
+		"the rejected thread_id value must appear in the error message so "+
+			"the caller can identify which value was unknown")
+	assert.NotErrorIs(t, err, ErrChannelNotFound,
+		"sub-case 2 must not surface as the 'deleted concurrently' branch — "+
+			"the channel row is still present")
 }
