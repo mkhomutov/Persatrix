@@ -97,8 +97,11 @@ func defaultPatterns() []patternSpec {
 		// captured by the github-token pattern rather than the
 		// generic-secret fallback.
 		{name: "github-token", expr: `gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}`},
-		// Slack bot / user / app / refresh tokens
-		// (`xoxb-` / `xoxp-` / `xoxa-` / `xoxr-`).
+		// Slack bot / user / app / refresh / legacy-service tokens
+		// (`xoxb-` / `xoxp-` / `xoxa-` / `xoxr-` / `xoxs-`). The `xoxs-`
+		// prefix is broader than the four documented in Slack's current
+		// API surface but covers legacy / third-party-issued tokens —
+		// a redactor should err toward over-matching.
 		{name: "slack-token", expr: `xox[baprs]-[A-Za-z0-9\-]{10,}`},
 		{name: "bearer-token", expr: `(?i)bearer\s+[A-Za-z0-9\-_.~+/]+=*`},
 		{name: "aws-access-key", expr: `AKIA[0-9A-Z]{16}`},
