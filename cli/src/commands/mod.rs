@@ -1,4 +1,6 @@
 pub(crate) mod agent;
+pub(crate) mod channel;
+pub(crate) mod channel_types;
 pub(crate) mod chat;
 pub(crate) mod logs;
 pub(crate) mod validate;

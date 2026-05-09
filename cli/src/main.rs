@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
+use commands::channel::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
 use commands::logs::{cmd_logs, LogsOptions};
 use commands::validate::cmd_validate;
@@ -143,6 +144,9 @@ enum Commands {
     /// State management
     #[command(subcommand)]
     State(StateCommands),
+    /// Manage internal channels (RFC 0011 §F)
+    #[command(subcommand)]
+    Channel(ChannelCommands),
     /// Manage mesh nodes (v0.3+)
     #[command(subcommand)]
     Node(NodeCommands),
@@ -301,16 +305,10 @@ async fn main() {
             .await
         }
         Commands::Chat { agent_id, user } => {
-            // Resolve user identity: explicit --user flag first, then OS
-            // username (USERNAME on Windows, USER on POSIX), normalized to
-            // resource-ID format (lowercase alphanumeric + hyphens), finally
-            // falling back to "local" if the environment provides nothing usable.
-            let user_id = user.unwrap_or_else(|| {
-                let raw = std::env::var("USERNAME")
-                    .or_else(|_| std::env::var("USER"))
-                    .unwrap_or_default();
-                normalize_user_id(&raw)
-            });
+            // Resolve user identity: explicit --user flag first, otherwise
+            // fall back to the shared OS-username derivation (see
+            // [`default_user_id`]).
+            let user_id = user.unwrap_or_else(default_user_id);
             cmd_chat(&client, server, &agent_id, &user_id).await
         }
         Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
@@ -346,6 +344,7 @@ async fn main() {
             println!("{}", "Command 'state' not yet implemented".yellow());
             Ok(())
         }
+        Commands::Channel(cmd) => dispatch_channel(&client, server, cmd, default_user_id).await,
         Commands::Node(_) => {
             println!("{}", "Command 'node' not yet implemented".yellow());
             Ok(())
@@ -360,6 +359,17 @@ async fn main() {
         eprintln!("{} {e}", "error:".red().bold());
         std::process::exit(1);
     }
+}
+
+/// Resolve the default user identity from the OS environment for
+/// channel subcommands that did not pass `--as <id>`. Mirrors the
+/// fallback logic used by `Commands::Chat` so the two REPLs and the
+/// channel CLI agree on the implicit identity.
+pub(crate) fn default_user_id() -> String {
+    let raw = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    normalize_user_id(&raw)
 }
 
 /// Normalize a raw OS username into a resource-ID-safe string.
