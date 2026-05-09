@@ -138,6 +138,45 @@ func TestRedactStruct_OpaqueOnSyncPrimitives(t *testing.T) {
 	}
 }
 
+// fixtureOpaqueByArray trips rule 1 via an unexported `[16]byte` field
+// (e.g. the fixed-size UUID byte array used by many `uuid.UUID` types
+// and other fixed-width binary identifiers). Arrays are
+// reflect.Array-kinded which is non-primitive under [isPrimitiveKind],
+// so the rule returns true and the walk leaves the carrier struct
+// alone.
+type fixtureOpaqueByArray struct {
+	Public string
+	id     [16]byte
+}
+
+// TestRedactStruct_OpaqueByUnexportedArray pins PR #236 review L-1: a
+// future maintainer narrowing isPrimitiveKind to "treat [N]byte as
+// primitive — it's just bytes" would silently weaken rule 1 on every
+// UUID-bearing struct (uuid.UUID has an unexported `data [16]byte`).
+// The opaque rule must keep covering fixed-size byte arrays; this
+// fixture makes that contract explicit before PR 3 routes tool-call
+// argument structs (which often embed UUIDs) through RedactStruct.
+func TestRedactStruct_OpaqueByUnexportedArray(t *testing.T) {
+	r := NewSecretRedactor()
+	in := &fixtureOpaqueByArray{
+		Public: "Bearer abc.def==",
+		id:     [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+	}
+	out, ok := r.RedactStruct(in).(*fixtureOpaqueByArray)
+	if !ok {
+		t.Fatalf("RedactStruct returned wrong type %T", r.RedactStruct(in))
+	}
+	if out.Public != "Bearer abc.def==" {
+		t.Errorf("opaque struct mutated: Public = %q", out.Public)
+	}
+	// The returned pointer is the original — the array bytes survive
+	// verbatim because the entire struct was returned from the rule 1
+	// branch, not reflectively rewalked.
+	if out.id != in.id {
+		t.Errorf("opaque struct's array bytes were rewritten: %v != %v", out.id, in.id)
+	}
+}
+
 // TestRedactStruct_WalkableUnexportedPrimitive confirms that a struct
 // whose only unexported field is a primitive (rule 1 not tripped) AND
 // which has at least one exported field (rule 2 not tripped) is walked

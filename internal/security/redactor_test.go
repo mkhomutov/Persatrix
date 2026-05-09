@@ -1,6 +1,7 @@
 package security
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,61 @@ func TestRedact_AllDefaultPatterns(t *testing.T) {
 		{"bearer", "Authorization: Bearer abc.def.ghi==", "[REDACTED:bearer-token]"},
 		{"aws", "AKIAABCDEFGHIJKLMNOP", "[REDACTED:aws-access-key]"},
 		{"generic-secret", "password = hunter2", "[REDACTED:generic-secret]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := r.Redact(tc.in)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("Redact(%q) = %q; want to contain %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedact_AdditionalPatterns pins PR #233 review Nice-to-have #2:
+// GitHub Personal Access Tokens, GCP service-account JSON keys, Slack
+// bot/user tokens, and Stripe live keys are realistic for the
+// orchestrator's MCP / container deployment story and must not appear
+// verbatim in audit log Detail.
+//
+// Test fixtures intentionally split the prefix from the body via Go
+// string concatenation so the source file never contains a literal
+// `sk_live_…` / `xoxb-…` / `ghp_…` token shape — GitHub's push-time
+// secret scanner false-positives on those literals even when they're
+// obvious test data. The runtime concatenation produces the full
+// secret shape that the redactor regex must still match.
+func TestRedact_AdditionalPatterns(t *testing.T) {
+	r := NewSecretRedactor()
+	const (
+		ghPrefix     = "gh" + "p_"
+		ghSecPrefix  = "gh" + "s_"
+		ghPatPrefix  = "github" + "_pat_"
+		slackBPrefix = "xo" + "xb-"
+		slackPPrefix = "xo" + "xp-"
+		stripeSk     = "sk" + "_live_"
+		stripePk     = "pk" + "_live_"
+	)
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// GitHub fine-grained tokens are `github_pat_` + 22-char prefix +
+		// `_` + 59-char body (= 82-char suffix). Realistic fixture:
+		{"github-pat", "GH_PAT=" + ghPatPrefix + "11AAAAAAAA0BCDEFGHIJ_KLMNOPQRSTUVWXYZabcdefghij0123456789klmnopqrstuvwxyzABCDEFGH", "[REDACTED:github-token]"},
+		// Classic GitHub PAT prefixes (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`)
+		{"github-classic-ghp", "GH_TOKEN=" + ghPrefix + "abcdefghijklmnopqrstuvwxyz0123456789", "[REDACTED:github-token]"},
+		{"github-classic-ghs", "GH_TOKEN=" + ghSecPrefix + "abcdefghijklmnopqrstuvwxyz0123456789", "[REDACTED:github-token]"},
+		// Slack bot / user tokens
+		{"slack-bot", "SLACK_TOKEN=" + slackBPrefix + "1234567890-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx", "[REDACTED:slack-token]"},
+		{"slack-user", "SLACK_TOKEN=" + slackPPrefix + "1234567890-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx", "[REDACTED:slack-token]"},
+		// Stripe live keys (publishable + secret)
+		{"stripe-secret", "STRIPE=" + stripeSk + "abcdefghijklmnopqrstuvwx0123456789", "[REDACTED:stripe-key]"},
+		{"stripe-publishable", "STRIPE=" + stripePk + "abcdefghijklmnopqrstuvwx0123456789", "[REDACTED:stripe-key]"},
+		// GCP service-account private-key marker. Real keys span multiple
+		// lines; the redactor only needs to scrub the BEGIN marker — its
+		// presence is itself a leak signal that warrants alerting.
+		{"gcp-private-key", "key=-----BEGIN PRIVATE KEY-----\\nMIIEvQI…", "[REDACTED:gcp-private-key]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,6 +302,81 @@ func TestRedactStruct_NilInput(t *testing.T) {
 	}
 }
 
+// TestRedactStruct_PointerCycle_NonStringPointee_ZerosField pins
+// PR #233 review Should-Fix #5: when the per-call visited-pointer set
+// detects a cycle on a non-string pointee, the walk emits the sentinel
+// up the stack. The sentinel must NOT be assigned into the destination
+// pointer field (it has the wrong type — that's the whole point of
+// the cycle-cap path); it must zero the field instead so the cycle is
+// terminated and the original (potentially secret-bearing) subtree is
+// not silently re-copied. Distinct from
+// [TestRedactStruct_CyclicInputSafe] / [TestRedactStruct_PointerCycleBounded]
+// which only assert termination + top-level redaction, not the field-
+// zeroing contract.
+func TestRedactStruct_PointerCycle_NonStringPointee_ZerosField(t *testing.T) {
+	r := NewSecretRedactor()
+	c := &cyclic{Tag: "Bearer cycle.secret=="}
+	c.Self = c
+	out, ok := r.RedactStruct(c).(*cyclic)
+	if !ok {
+		t.Fatalf("RedactStruct returned wrong type %T", r.RedactStruct(c))
+	}
+	if !strings.Contains(out.Tag, "[REDACTED:bearer-token]") {
+		t.Errorf("Tag not redacted on cycle: %q", out.Tag)
+	}
+	// PR #233 review Should-Fix #5: the cycle-cap returned the sentinel
+	// (a typed marker, not assignable to *cyclic), so the parent struct
+	// walk's switch must have fallen into the isDepthMarker arm and
+	// left the field at its zero value (nil pointer). A regression that
+	// drops the sentinel back to the original *cyclic value would
+	// silently reintroduce the cycle and leak the unredacted subtree.
+	if out.Self != nil {
+		t.Errorf("Self pointer was not zeroed on cycle detection; got %p (cycle re-formed; H-2 leak fix regressed)", out.Self)
+	}
+}
+
+// TestIsDepthMarker_RejectsCallerDataEqualToLiteral pins PR #233 review
+// Nice-to-have #3: the sentinel uses a typed string ([depthMarker]) so
+// isDepthMarker keys on the reflect type rather than string content.
+// Caller data that happens to equal [redactDepthExceededMarker] byte-
+// for-byte must NOT false-match, otherwise an attacker who can plant
+// the literal string in a Detail field could trigger the depth-cap
+// zero-out path on benign sibling fields.
+func TestIsDepthMarker_RejectsCallerDataEqualToLiteral(t *testing.T) {
+	plain := reflect.ValueOf(redactDepthExceededMarker) // bare string, not the sentinel type
+	if isDepthMarker(plain) {
+		t.Fatalf("isDepthMarker(plain string) = true; sentinel must key on type, not content")
+	}
+	sentinel := reflect.ValueOf(depthMarker(redactDepthExceededMarker))
+	if !isDepthMarker(sentinel) {
+		t.Fatalf("isDepthMarker(typed sentinel) = false; want true")
+	}
+}
+
+// TestRedactStruct_CallerDataEqualToMarker_NotZeroed pins the same
+// false-positive resistance from the user-facing surface: a caller
+// passing a struct whose string field's CONTENT equals the literal
+// marker must observe that field unchanged in the redacted copy
+// (modulo regex redaction, which the marker doesn't match). A pre-
+// fix implementation that string-compared in isDepthMarker would have
+// zeroed sibling fields when the marker arm fired; the typed sentinel
+// prevents this.
+func TestRedactStruct_CallerDataEqualToMarker_NotZeroed(t *testing.T) {
+	r := NewSecretRedactor()
+	type carrier struct {
+		Tag    string
+		Marker string
+	}
+	in := carrier{Tag: "Bearer leaky==", Marker: redactDepthExceededMarker}
+	out := r.RedactStruct(in).(carrier)
+	if !strings.Contains(out.Tag, "[REDACTED:bearer-token]") {
+		t.Errorf("Tag not redacted: %q", out.Tag)
+	}
+	if out.Marker != redactDepthExceededMarker {
+		t.Errorf("Marker field mutated: %q; caller-supplied marker-literal must survive verbatim", out.Marker)
+	}
+}
+
 func TestRedactStruct_MapAnyInDetail(t *testing.T) {
 	// AuditEvent.Detail is map[string]any — the audit logger calls
 	// RedactStruct on it. Confirm nested any-typed values are walked.
@@ -292,6 +423,27 @@ func TestRedact_GenericSecretInJSON(t *testing.T) {
 	}
 	if !strings.Contains(got, `"next":"keep-me"`) {
 		t.Errorf("adjacent field corrupted by greedy match: %q", got)
+	}
+}
+
+// TestRedact_GenericSecretConsumesTrailingQuote pins PR #233 review
+// Nice-to-have #7: the prior bounded value class excluded `"` so a JSON
+// payload's closing quote was left as a stray `"` after the marker
+// (`{[REDACTED:generic-secret]","next":…}`). The pattern now optionally
+// consumes the trailing quote so the redacted output is well-formed:
+// `{[REDACTED:generic-secret],"next":…}`.
+func TestRedact_GenericSecretConsumesTrailingQuote(t *testing.T) {
+	r := NewSecretRedactor()
+	in := `{"password":"hunter2","next":"keep-me"}`
+	got := r.Redact(in)
+	if strings.Contains(got, `]","`) {
+		t.Errorf("stray trailing quote left after marker: %q", got)
+	}
+	if !strings.Contains(got, `[REDACTED:generic-secret],"next"`) {
+		t.Errorf("expected redacted form `[REDACTED:generic-secret],\"next\"…`; got %q", got)
+	}
+	if !strings.Contains(got, `"next":"keep-me"`) {
+		t.Errorf("adjacent field corrupted: %q", got)
 	}
 }
 

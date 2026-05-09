@@ -40,10 +40,24 @@ func NewAuditMetrics(inst *Instruments) security.AuditMetrics {
 // `class` lets dashboards split security vs telemetry without joining
 // the closed-set classifier table from the security package.
 //
-// context.Background() is used because the audit logger's Emit signature
-// detaches its caller context via context.WithoutCancel for the same
-// reason: a stalled metrics export must not block the audit fsync, and
-// the surrounding span has already closed by the time this fires.
+// PR #236 review L-3: `context.Background()` is used here for two
+// reasons that are easy to confuse:
+//
+//   - [ObserveEmitLatency] runs as a deferred call in
+//     [security.fileAuditLogger.Emit] — by the time the histogram
+//     observation fires, `Emit` has already returned `mu.Unlock`'d, so
+//     the caller's context may be cancelled or the surrounding span
+//     may have closed. A captured caller context would race with that
+//     unwind. Detaching to Background avoids the race.
+//   - [RecordEvent] is invoked under the audit logger's mutex, before
+//     the deferred latency observation; it could in principle thread
+//     the caller context. We use Background here too for symmetry and
+//     to ensure a stalled metrics export cannot propagate cancellation
+//     up into the audit fsync that holds the integrity guarantee.
+//
+// In short: the detachment lives in this package's contract with the
+// audit logger, not inside `Emit` itself (which never wraps the caller
+// context with `context.WithoutCancel`).
 func (a *auditMetricsAdapter) RecordEvent(eventType security.AuditEventType, class string) {
 	a.events.Add(context.Background(), 1,
 		metric.WithAttributes(

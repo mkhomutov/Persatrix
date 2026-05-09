@@ -133,20 +133,21 @@ func readLastLine(r io.ReadSeeker) (string, bool) {
 	return string(buf), len(buf) > 0
 }
 
+// looksLikeSHA256 reports whether s parses as a 32-byte (64-hex-char)
+// SHA-256 digest. PR #233 review Should-Fix #7: the prior hand-rolled
+// loop was redundant — [hex.DecodeString] already validates the
+// alphabet and surfaces a typed error. The standard library accepts
+// both upper- and lowercase hex; the audit chain only emits lowercase
+// via [hex.EncodeToString], so the broader acceptance only matters
+// when an operator hand-edits the file (already off-spec) and we
+// prefer to accept their checksum over emitting a spurious
+// chain.recovered.
 func looksLikeSHA256(s string) bool {
 	if len(s) != 64 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= '0' && c <= '9':
-		case c >= 'a' && c <= 'f':
-		default:
-			return false
-		}
-	}
-	return true
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 func emptyChecksum() string {
@@ -275,6 +276,61 @@ func canonicalEventJSON(ev AuditEvent, prevChecksum string) ([]byte, error) {
 		buf = append(buf, '|')
 	}
 	return buf, nil
+}
+
+// VerifyChain re-reads path and recomputes the per-event sha256
+// checksum chain, returning the first error that breaks the chain. A
+// nil return means every event's recorded Checksum matches the value
+// computed from canonicalEventJSON(prev, ev). Used by external
+// auditors and the future `persatrix audit verify` CLI subcommand
+// (PR #233 review Nice-to-have #1) so callers do not re-implement
+// [canonicalEventJSON].
+//
+// Errors surface the line number (1-indexed) and the underlying
+// reason: malformed JSON, missing/short Checksum, or a recomputed
+// hash that disagrees with the recorded one. Empty / missing files
+// are reported via a typed [os.PathError]-class error from
+// [os.Open] — callers running the verifier against a wrong path see
+// the failure rather than a false-positive "clean" verdict.
+//
+// Synthetic chain.bootstrap / chain.restart / chain.recovered events
+// participate in the chain like any other event; truncated files
+// produce a chain.recovered written by the next [NewFileAuditLogger]
+// open, so a verifier run shortly after restart should validate clean
+// against the post-restart prefix even when the pre-restart suffix
+// was corrupt.
+func VerifyChain(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("security: open audit log %q: %w", path, err)
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	prevSum := emptyChecksum()
+	lineNo := 0
+	for dec.More() {
+		lineNo++
+		var ev AuditEvent
+		if err := dec.Decode(&ev); err != nil {
+			return fmt.Errorf("security: verify audit log line %d: decode: %w", lineNo, err)
+		}
+		if !looksLikeSHA256(ev.Checksum) {
+			return fmt.Errorf("security: verify audit log line %d: missing or malformed checksum %q", lineNo, ev.Checksum)
+		}
+		recorded := ev.Checksum
+		canonical, err := canonicalEventJSON(ev, prevSum)
+		if err != nil {
+			return fmt.Errorf("security: verify audit log line %d: canonicalise: %w", lineNo, err)
+		}
+		sum := sha256.Sum256(canonical)
+		got := hex.EncodeToString(sum[:])
+		if got != recorded {
+			return fmt.Errorf("security: verify audit log line %d: checksum mismatch (recorded=%s computed=%s)", lineNo, recorded, got)
+		}
+		prevSum = recorded
+	}
+	return nil
 }
 
 func sortMap(m map[string]any) any {

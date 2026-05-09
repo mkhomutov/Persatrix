@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -107,7 +107,9 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 				"limit":  maxCapabilitiesPerAgent,
 			},
 		})
-		writeError(w, "BAD_REQUEST", fmt.Sprintf("capabilities exceeds maximum of %d entries", maxCapabilitiesPerAgent), http.StatusBadRequest)
+		// PR #234 review N-1: adjacent error messages on this handler use
+		// plain string concat; align style and drop the unused fmt import.
+		writeError(w, "BAD_REQUEST", "capabilities exceeds maximum of "+strconv.Itoa(maxCapabilitiesPerAgent)+" entries", http.StatusBadRequest)
 		return
 	}
 	if violations := s.validateCapabilities(r.Context(), req.ID, req.Capabilities); len(violations) > 0 {

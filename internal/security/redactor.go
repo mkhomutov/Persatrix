@@ -39,41 +39,9 @@ type redactPattern struct {
 	replace string
 }
 
-// reflectionDepthCap bounds [SecretRedactor.RedactStruct] recursion to avoid
-// stack overflow on adversarial / pathological inputs (PR #232 review SF-2).
-//
-// A depth of 32 comfortably exceeds any realistic AuditEvent.Detail nesting
-// while still terminating on a deeply linked-list-style fixture.
-const reflectionDepthCap = 32
-
-// redactDepthExceededMarker replaces fields whose redaction would exceed
-// [reflectionDepthCap]. The form mirrors the per-pattern replace strings so
-// downstream consumers can use a single regex to detect any redacted value.
-const redactDepthExceededMarker = "[REDACTED:max-depth-exceeded]"
-
-// isDepthMarker reports whether v carries the [redactDepthExceededMarker]
-// sentinel string. Used by the reflective walk to distinguish two cases
-// where `walk` returns a value that is not assignable to the destination
-// field type:
-//
-//  1. The walk hit the depth cap or a pointer cycle on a non-string field
-//     and returned the marker (a Go string). In that case the original
-//     subtree MUST NOT be re-copied into the output — doing so would
-//     silently leak any secrets that lived past the cap (PR #233
-//     deep-review H-2).
-//  2. The walk returned an unrelated invalid / non-assignable value (e.g.
-//     a channel/func that walk returns as-is). In that case copying the
-//     original is safe because the value cannot embed secrets reachable
-//     by the regex pass.
-func isDepthMarker(v reflect.Value) bool {
-	if !v.IsValid() {
-		return false
-	}
-	if v.Kind() != reflect.String {
-		return false
-	}
-	return v.String() == redactDepthExceededMarker
-}
+// Depth-cap helpers (reflectionDepthCap, redactDepthExceededMarker, the
+// typed [depthMarker] sentinel, [isDepthMarker], and [newDepthMarker])
+// live in redactor_depth.go to keep this file under the 500-line cap.
 
 // NewSecretRedactor returns a [SecretRedactor] preloaded with the five
 // default patterns from RFC 0009 §I:
@@ -109,14 +77,41 @@ func defaultPatterns() []patternSpec {
 		// `sk-ant-…` prefix wins on Anthropic keys (covered by
 		// `TestRedact_PatternOrdering`).
 		{name: "anthropic-api-key", expr: `sk-ant-[A-Za-z0-9\-_]{20,}`},
+		// PR #233 review Nice-to-have #2: Stripe live secret/publishable
+		// keys carry a `sk_live_` / `pk_live_` prefix. Run before the
+		// `openai-api-key` pattern so `sk_live_…` is captured by the
+		// Stripe pattern (which uses `_`, not `-`, after `sk`/`pk`); the
+		// OpenAI pattern uses `sk-` so they are disjoint, but ordering
+		// is documented for grep-clarity.
+		{name: "stripe-key", expr: `[sp]k_live_[A-Za-z0-9]{20,}`},
 		// PR #233 review MF-1: real-world OpenAI keys (e.g. `sk-proj-AbCd_…`)
 		// embed `-` and `_` in the suffix. The pre-fix `[A-Za-z0-9]{20,}` class
 		// terminated at the first `-`, leaving the rest of the secret in plain
 		// text. Allow `-` and `_` in the suffix charset so the full key is
 		// captured and replaced.
 		{name: "openai-api-key", expr: `sk-[A-Za-z0-9_\-]{20,}`},
+		// PR #233 review Nice-to-have #2: GitHub fine-grained
+		// (`github_pat_…`) and classic (`gh[opusr]_…`) tokens.
+		// Fine-grained tokens are ~93 chars; classic are 40 chars after
+		// the prefix. Run before generic-secret so `GH_TOKEN=ghp_…` is
+		// captured by the github-token pattern rather than the
+		// generic-secret fallback.
+		{name: "github-token", expr: `gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}`},
+		// Slack bot / user / app / refresh / legacy-service tokens
+		// (`xoxb-` / `xoxp-` / `xoxa-` / `xoxr-` / `xoxs-`). The `xoxs-`
+		// prefix is broader than the four documented in Slack's current
+		// API surface but covers legacy / third-party-issued tokens —
+		// a redactor should err toward over-matching.
+		{name: "slack-token", expr: `xox[baprs]-[A-Za-z0-9\-]{10,}`},
 		{name: "bearer-token", expr: `(?i)bearer\s+[A-Za-z0-9\-_.~+/]+=*`},
 		{name: "aws-access-key", expr: `AKIA[0-9A-Z]{16}`},
+		// PR #233 review Nice-to-have #2: GCP service-account private
+		// keys are emitted as PEM-style multi-line strings; the BEGIN
+		// marker on its own is a leak signal that warrants alerting and
+		// makes the entire payload unsafe to log verbatim. Match the
+		// PEM header (with literal or `\n` body separator) so the
+		// minimum forensic signature is scrubbed.
+		{name: "gcp-private-key", expr: `-----BEGIN PRIVATE KEY-----[\s\S]*?(-----END PRIVATE KEY-----|$)`},
 		// PR #233 review MF-2: the previous `\S+` value class was greedy and
 		// unbounded — on a JSON payload like
 		// `{"password":"hunter2","next":"x"}` the match swallowed the closing
@@ -130,7 +125,11 @@ func defaultPatterns() []patternSpec {
 		// `&` so URL-encoded forms (`password=hunter2&next=foo`) and
 		// shell-style key-value pairs (`password=hunter2; next=foo`) do not
 		// over-redact the adjacent field.
-		{name: "generic-secret", expr: `(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s,;&"'}\]\[]+`},
+		// PR #233 review Nice-to-have #7: trailing `["']?` consumes the
+		// optional closing quote of a JSON / quoted-shell value so the
+		// redacted output does not carry a stray `"` after the marker
+		// (`{[REDACTED:generic-secret]","next":…}` → `{[REDACTED:generic-secret],"next":…}`).
+		{name: "generic-secret", expr: `(?i)["']?(password|secret|token|api[_-]?key)["']?\s*[:=]\s*["']?[^\s,;&"'}\]\[]+["']?`},
 	}
 }
 
@@ -233,7 +232,7 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		return v
 	}
 	if depth > reflectionDepthCap {
-		return reflect.ValueOf(redactDepthExceededMarker)
+		return newDepthMarker()
 	}
 
 	switch v.Kind() {
@@ -255,7 +254,7 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		}
 		addr := v.Pointer()
 		if _, seen := visited[addr]; seen {
-			return reflect.ValueOf(redactDepthExceededMarker)
+			return newDepthMarker()
 		}
 		visited[addr] = struct{}{}
 		defer delete(visited, addr)
@@ -263,10 +262,13 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 		if !inner.IsValid() {
 			return v
 		}
-		// If the recursive call replaced the value with the marker string we
-		// cannot fit it back into the original pointer's type — return the
-		// marker directly. Callers that need shape-preservation can wrap.
-		if inner.Type() == reflect.TypeOf(redactDepthExceededMarker) && v.Elem().Type().Kind() != reflect.String {
+		// If the recursive call replaced the value with the typed sentinel
+		// we cannot fit it back into the original pointer's type — return
+		// the sentinel directly. The parent struct/slice/map switch then
+		// matches via [isDepthMarker] and zeroes the destination instead
+		// of re-copying the original (potentially secret-bearing) subtree
+		// (PR #233 deep-review H-2).
+		if isDepthMarker(inner) && v.Elem().Type().Kind() != reflect.String {
 			return inner
 		}
 		out := reflect.New(v.Elem().Type())
@@ -354,12 +356,17 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 			case isDepthMarker(valOut):
 				// PR #233 deep-review H-2: drop the entry entirely
 				// rather than re-inserting the unredacted original.
-				// If the element type can hold the marker string
-				// (any/string), preserve it so operators can see the
-				// path was elided; otherwise leave the key absent.
-				marker := reflect.ValueOf(redactDepthExceededMarker)
-				if marker.Type().AssignableTo(out.Type().Elem()) {
-					out.SetMapIndex(iter.Key(), marker)
+				// If the element type can hold a plain string
+				// (any/string), preserve the user-visible marker
+				// literal so operators can see the path was elided;
+				// otherwise leave the key absent. The bare-string
+				// emission here is intentional — internal sentinel
+				// matching uses the typed [depthMarker] (see
+				// [isDepthMarker]) but the audit-log boundary surfaces
+				// the stable readable form for downstream consumers.
+				userVisible := reflect.ValueOf(redactDepthExceededMarker)
+				if userVisible.Type().AssignableTo(out.Type().Elem()) {
+					out.SetMapIndex(iter.Key(), userVisible)
 				}
 			default:
 				out.SetMapIndex(iter.Key(), iter.Value())
@@ -388,11 +395,15 @@ func (r *SecretRedactor) walk(v reflect.Value, depth int, visited map[uintptr]st
 //     anything but would still allocate a zeroed copy that loses the
 //     original's unexported state.
 //
-// Rule (1) catches `time.Time` (unexported `loc *Location`),
-// `sync.Once` / `sync.WaitGroup` (unexported embedded structs), and
-// `atomic.Value` (unexported `v any`). Rule (2) catches `sync.Mutex`
-// (`state int32` / `sema uint32` are primitive but there is nothing
-// exported to redact).
+// Rule (1) catches `time.Time` via its unexported `loc *Location`
+// pointer field. PR #236 review L-2: `time.Time` actually carries
+// three unexported fields (`wall uint64, ext int64, loc *Location`);
+// `wall` and `ext` are primitives that on their own would not trip
+// rule 1 — it is the pointer field that does. Rule (1) likewise
+// catches `sync.Once` / `sync.WaitGroup` (unexported embedded structs)
+// and `atomic.Value` (unexported `v any`). Rule (2) catches
+// `sync.Mutex` (`state int32` / `sema uint32` are primitive but there
+// is nothing exported to redact).
 //
 // Replacing the prior single-element deny-list (PR 1) means new caller
 // surfaces — notably PR 3's tool-call argument structs — cannot

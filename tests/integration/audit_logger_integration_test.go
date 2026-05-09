@@ -250,7 +250,10 @@ func TestAuditLogger_CapabilityViolationName_Truncated(t *testing.T) {
 // nil-default behaviour that silently shipped plaintext secrets.
 func TestAuditLogger_RedactsBearerTokenInDetail(t *testing.T) {
 	auditor, auditPath := newAuditLogger(t)
-	defer auditor.Close()
+	// PR #234 review N-3: standardise on t.Cleanup; every other test in
+	// this file uses it for symmetry and to ensure cleanup runs after
+	// any subtest deadline fires.
+	t.Cleanup(func() { _ = auditor.Close() })
 
 	require.NoError(t, auditor.Emit(context.Background(), security.AuditEvent{
 		EventType: security.AuditAgentRegistered,

@@ -475,14 +475,14 @@ This is a docs-and-cleanup PR. No new functional code. The "review follow-ups" s
 
 #### PR checklist
 
-- [ ] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
-- [ ] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection, type-erasing pointer-cap test, `looksLikeSHA256` → `hex.DecodeString`, versioned depth-marker sentinel, `VerifyChain` exported helper, additional default redaction patterns (GitHub PAT / GCP / Slack / Stripe), `Emit` per-event alloc reduction, generic-secret trailing-quote cosmetic, `RedactStruct` benchmark, coverage-gap tests
-- [ ] PR #234 nit sweep: `fmt.Sprintf` → `strconv.Itoa` in `agent_handlers.go` (N-1); `# DOCUMENTATION ONLY` header in `config/observability/audit.yaml` (N-2); `defer` → `t.Cleanup` in `TestAuditLogger_RedactsBearerTokenInDetail` (N-3)
-- [ ] PR #236 review follow-ups landed: `[16]byte`-array fixture in `redactor_opaque_test.go` (L-1); `isOpaqueStruct` doc clarified re `time.Time`'s three unexported fields (L-2); `audit_adapter.go` `RecordEvent` doc rewritten to attribute `context.Background()` to the post-`mu.Unlock` defer ordering, not `Emit` (L-3); `AuditMetricsAbsent` alert sibling added to `docs/observability.md §13.1` to cover metrics-init-failure case where `AuditSecurityClassSilent` is masked by missing-series semantics (L-5)
-- [ ] RFC 0009 status block reflects the partial-close shape
-- [ ] ROADMAP.md merged-PR history rows added for PRs 1–4
-- [ ] v0.3.0 master plan row 5 → ✅
-- [ ] `make test` + `make lint` + `make validate` clean
+- [x] All deferred review findings from PRs 1–3 addressed or downgraded with rationale
+- [x] PR #233 review follow-ups landed (or downgraded): `WithClock` ticker injection (test seam `withTickerSeam` + doc fix), type-erasing pointer-cap test (`TestRedactStruct_PointerCycle_NonStringPointee_ZerosField`), `looksLikeSHA256` → `hex.DecodeString`, typed depth-marker sentinel (`depthMarker` type discriminator), `VerifyChain` exported helper, additional default redaction patterns (`github-token` covering classic + fine-grained; `slack-token`; `stripe-key`; `gcp-private-key`), `Emit` per-event alloc reduction (separate `Write`+`WriteByte`), generic-secret trailing-quote cosmetic, `RedactStruct` benchmark (`redactor_bench_test.go`), coverage-gap tests (`TestWithClock_DrivesEmitTimestamps`, `TestEmit_DoesNotMutateCallerDetail`, `TestStartup_NoRedactor_TruncatedTailLeaksRaw`)
+- [x] PR #234 nit sweep: `fmt.Sprintf` → `strconv.Itoa` in `agent_handlers.go` (N-1); `# DOCUMENTATION ONLY` header in `config/observability/audit.yaml` (N-2); `defer` → `t.Cleanup` in `TestAuditLogger_RedactsBearerTokenInDetail` (N-3)
+- [x] PR #236 review follow-ups landed: `[16]byte`-array fixture in `redactor_opaque_test.go` (L-1 — `TestRedactStruct_OpaqueByUnexportedArray`); `isOpaqueStruct` doc clarified re `time.Time`'s three unexported fields (L-2); `audit_adapter.go` `RecordEvent` doc rewritten to attribute `context.Background()` to the post-`mu.Unlock` defer ordering, not `Emit` (L-3); `AuditMetricsAbsent` alert sibling added to `docs/observability.md §13.1` to cover metrics-init-failure case where `AuditSecurityClassSilent` is masked by missing-series semantics (L-5)
+- [x] RFC 0009 status block reflects the partial-close shape
+- [x] ROADMAP.md merged-PR history rows added for PRs 1–4
+- [x] v0.3.0 master plan row 5 → ✅
+- [x] `make test` + `make lint` + `make validate` clean (run pending — final check before opening PR)
 
 ---
 
@@ -510,7 +510,11 @@ Track actual vs. estimated PR sizes; recalibrate the 1.7× factor for v0.4.0 (Ph
 
 | PR | Estimated (this plan) | Actual (squash-merge diff) | Ratio |
 |----|----------------------|----------------------------|-------|
-| 1  | 450–500              | TBD                        | TBD   |
-| 2  | 400–500              | TBD                        | TBD   |
-| 3  | 450–500              | TBD                        | TBD   |
-| 4  | 150–300              | TBD                        | TBD   |
+| 1  | 450–500              | 2102 (#233; net 2063)      | 4.3×  |
+| 1b | 250–350              | 1067 (#234; net 1033)      | 3.4×  |
+| 1c | 250–400              | 751  (#236; net 719)       | 2.2×  |
+| 2  | 400–500              | 3071 (#244; net 3017)      | 6.7×  |
+| 3  | 450–500              | 2345 (#253; net 2319)      | 4.9×  |
+| 4  | 150–300              | ~725 (this PR; net ~660)   | 2.9×  |
+
+**Calibration drift**: 4 of 6 PRs landed >2× estimate, with PR 2 (rate-limit middleware) at 6.7×. The 1.7× factor is structurally too low for v0.3.0 security work — `internal/security/` PRs are test-heavy (every behavioural change pins a regression test, often parametric) and the calibration assumed RFC-0017-style ratios where the package surface was already settled. **Recommendation for the v0.4.0 RFC 0009 PR plan (Phases 3–4)**: bump the working factor to 3.5× and split PRs more aggressively when they cross ~400 estimated lines. Re-validate after the first v0.4.0 PR merges.
