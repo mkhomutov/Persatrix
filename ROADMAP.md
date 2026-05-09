@@ -51,7 +51,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
-| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | 🚧 Implementing |
+| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | ✅ Implemented |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | ⚠️ Partially Implemented (Phase 1) |
 | [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | ✅ Implemented |
 | 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)) | v0.3.x | Reserved (narrowed) |
@@ -458,7 +458,7 @@ Sequencing and rationale live in [v0.3.0-plan.md §Memory Quality Follow-Ups](do
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 🚧 Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 🚧 Implementing |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | ⚠️ Partially Implemented (internal channels — external bridges deferred to v0.5.0) |
-| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 🚧 Implementing |
+| [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | ✅ Implemented |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | ⚠️ Partially Implemented (Phase 1) |
 
 > **Note (2026-05-06)**: RFC 0007 (Conditional & Looped Workflow Control Flow) was originally scoped to v0.3.0 and has been retargeted to v0.4.0. v0.3.0's user-facing promise — *agents talk, negotiate, form opinions* — is conversation infrastructure; conditional/looped workflow control flow is workflow-engine plumbing that pairs with v0.4.0's sub-agent spawning (RFC 0010) and skill-registry (RFC 0014) work, where iterative refinement and branching on child-agent outputs are the load-bearing cases. RFC 0008 (the prerequisite) ships fully in v0.3.0, so the dep is satisfied at v0.4.0-start.
@@ -846,6 +846,14 @@ v0.5.0 complete
 | [#249](https://github.com/mkhomutov/Persatrix/pull/249) | feat(rfc0011): PR 4a-ii-α — hard rename CHANNEL_MESSAGE/SEND_CHANNEL_MESSAGE + SF-3 mentions validation | 0011 (4a-ii-α/8) | 2026-05-05 |
 | [#250](https://github.com/mkhomutov/Persatrix/pull/250) | feat(rfc0011): PR 4a-ii-β-1 — real Go gRPC MessageDispatcher + Python REST publish rewire | 0011 (4a-ii-β-1/8) | 2026-05-05 |
 | [#251](https://github.com/mkhomutov/Persatrix/pull/251) | feat(rfc0011): PR 4a-ii-β-2 — chat-as-DM rewrite (Go-side waiter + PublishAndAwait) | 0011 (4a-ii-β-2/8) | 2026-05-05 |
+| [#266](https://github.com/mkhomutov/Persatrix/pull/266) | refactor(rfc0020): PR 6 slice 1 — PR-4 review #20–#30 (Phase-2/janitor write race + janitor.failed counter + assert→guard) | 0020 (6/7 — slice 1) | 2026-05-07 |
+| [#296](https://github.com/mkhomutov/Persatrix/pull/296) | feat(rfc0020): PR 6 slice 2 — typed CloseReason + table-driven _emit_closed dispatch | 0020 (6/7 — slice 2) | 2026-05-08 |
+| [#297](https://github.com/mkhomutov/Persatrix/pull/297) | refactor(rfc0020): PR 6 slice 3 — migration no-op cleanup + autouse metrics fixture | 0020 (6/7 — slice 3) | 2026-05-08 |
+| [#298](https://github.com/mkhomutov/Persatrix/pull/298) | refactor(rfc0020): PR 6 slice 4 — PR-2 review #6/#7/#9/#10/#11 + episode-routing mixin extraction | 0020 (6/7 — slice 4) | 2026-05-08 |
+| [#299](https://github.com/mkhomutov/Persatrix/pull/299) | refactor(rfc0020): PR 6 slice 5 — clock seam + cross-scope idle-flush attribution | 0020 (6/7 — slice 5) | 2026-05-08 |
+| [#300](https://github.com/mkhomutov/Persatrix/pull/300) | refactor(rfc0020): PR 6 slice 6 — inline MaxTurns cap + multi-turn close-path coverage | 0020 (6/7 — slice 6) | 2026-05-09 |
+| [#301](https://github.com/mkhomutov/Persatrix/pull/301) | refactor(rfc0020): PR 6 slice 7 — tighten _llm_client to LLMClient + drop dead silent-drop branches | 0020 (6/7 — slice 7) | 2026-05-09 |
+| TBD | docs(rfc0020): PR 7 — RFC close (status flips for v0.3.0 scope) | 0020 (7/7) | 2026-05-09 |
 
 ---
 
