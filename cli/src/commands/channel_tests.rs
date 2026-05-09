@@ -24,6 +24,7 @@ fn message(id: &str, ts: &str) -> ChannelMessage {
         timestamp: ts.to_string(),
         thread_id: String::new(),
         mentions: Vec::new(),
+        metadata: None,
     }
 }
 
@@ -159,4 +160,142 @@ fn watch_state_dedupes_within_single_batch() {
     ]);
     let ids: Vec<&str> = printed.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["msg-1"]);
+}
+
+#[test]
+fn watch_state_evicts_oldest_beyond_cap() {
+    // Long-running watches must not grow `seen` without bound. A
+    // bounded ring evicts the oldest ids first; ids re-appearing after
+    // eviction are treated as new again. That's the deliberate
+    // tradeoff — the cap should be > 4× page size so a burst within
+    // one or two pages never re-prints across normal cadences.
+    //
+    // apply_batch reverses input (server returns newest-first), so
+    // after the first batch the insertion order is msg-1, msg-2, msg-3.
+    let mut state = WatchState::with_cap(3);
+    state.apply_batch(vec![
+        message("msg-3", "2026-05-09T10:03:00Z"),
+        message("msg-2", "2026-05-09T10:02:00Z"),
+        message("msg-1", "2026-05-09T10:01:00Z"),
+    ]);
+    // Ring (oldest→newest): [msg-1, msg-2, msg-3]. Adding msg-4 evicts
+    // msg-1. Ring: [msg-2, msg-3, msg-4].
+    let printed = state.apply_batch(vec![message("msg-4", "2026-05-09T10:04:00Z")]);
+    assert_eq!(printed.len(), 1);
+    assert_eq!(printed[0].id, "msg-4");
+
+    // msg-3 and msg-4 are still in the ring → deduped. msg-2 is also
+    // in the ring at this point.
+    let printed = state.apply_batch(vec![
+        message("msg-4", "2026-05-09T10:04:00Z"),
+        message("msg-3", "2026-05-09T10:03:00Z"),
+        message("msg-2", "2026-05-09T10:02:00Z"),
+    ]);
+    assert!(printed.is_empty(), "ids still in cap remain deduped");
+
+    // msg-1 was evicted, so a fresh sighting prints again. This
+    // re-insertion evicts msg-2 (now the oldest). Ring: [msg-3, msg-4, msg-1].
+    let printed = state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    assert_eq!(
+        printed.len(),
+        1,
+        "evicted id is re-emitted on next sighting"
+    );
+}
+
+#[test]
+fn watch_state_cap_zero_clamps_to_one() {
+    // Defensive: with_cap(0) would otherwise allow unbounded growth or
+    // immediate eviction of the only entry. Clamp to ≥1 so the ring
+    // always retains at least the most recent id.
+    let mut state = WatchState::with_cap(0);
+    let printed = state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    assert_eq!(printed.len(), 1);
+    let printed = state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    assert!(printed.is_empty(), "the kept entry still dedupes");
+}
+
+// ─── validate_message_id ────────────────────────────────────────────
+
+#[test]
+fn validate_message_id_rejects_empty() {
+    // Reproducer for PR #302 finding #1: clap accepts "" as a positional,
+    // serde then drops `thread_id` via skip_serializing_if, and the server
+    // accepts the call as a top-level publish — silently degrading a
+    // `reply` into a `send`. The CLI must reject before constructing the
+    // request.
+    let err = validate_message_id("").unwrap_err();
+    assert!(err.contains("message id"), "error names the field: {err}");
+}
+
+#[test]
+fn validate_message_id_rejects_whitespace() {
+    // A whitespace-only id would also serialize as `thread_id: " "`
+    // and the server's id-format check would reject — but emitting a
+    // clear local error is friendlier than a 400 round-trip.
+    assert!(validate_message_id("   ").is_err());
+    assert!(validate_message_id("\t\n").is_err());
+}
+
+#[test]
+fn validate_message_id_accepts_normal_id() {
+    // Server-issued message ids are UUIDs and similar opaque tokens.
+    assert!(validate_message_id("msg-100").is_ok());
+    assert!(validate_message_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
+}
+
+// ─── validate_mention_count ─────────────────────────────────────────
+
+#[test]
+fn validate_mention_count_under_cap_is_ok() {
+    // Server cap is `channelMaxMentionsPerPublish = 10`
+    // (internal/server/channel_handlers.go). Under the cap, no error.
+    let mentions: Vec<String> = (0..10).map(|i| format!("user-{i}")).collect();
+    assert!(validate_mention_count(&mentions).is_ok());
+}
+
+#[test]
+fn validate_mention_count_over_cap_is_err() {
+    // PR #302 finding #4: --mention-all on a >10-member channel must
+    // fail fast client-side rather than round-trip a generic 400.
+    let mentions: Vec<String> = (0..11).map(|i| format!("user-{i}")).collect();
+    let err = validate_mention_count(&mentions).unwrap_err();
+    assert!(err.contains("11"), "error mentions the actual count: {err}");
+    assert!(err.contains("10"), "error mentions the server cap: {err}");
+}
+
+// ─── apply_batch_full_page signal (finding #3) ──────────────────────
+
+#[test]
+fn watch_state_signals_full_page_when_all_unseen() {
+    // PR #302 finding #3: if every message on a polled page is new, the
+    // older messages have likely fallen off the page — emit a warning.
+    // The signal is "len(unseen) == len(batch)" *after* dedup; the
+    // watch loop combines that with "len(batch) == limit" to decide
+    // whether to warn.
+    let mut state = WatchState::new();
+    let batch = vec![
+        message("msg-3", "2026-05-09T10:03:00Z"),
+        message("msg-2", "2026-05-09T10:02:00Z"),
+        message("msg-1", "2026-05-09T10:01:00Z"),
+    ];
+    let batch_size = batch.len();
+    let printed = state.apply_batch(batch);
+    assert_eq!(printed.len(), batch_size, "first poll: every id is unseen");
+}
+
+#[test]
+fn watch_state_partial_page_does_not_signal() {
+    // Subsequent poll with overlap: `apply_batch` returns fewer entries
+    // than the input. The watch loop won't warn because dedup
+    // suppressed at least one entry.
+    let mut state = WatchState::new();
+    state.apply_batch(vec![message("msg-1", "2026-05-09T10:01:00Z")]);
+    let batch = vec![
+        message("msg-2", "2026-05-09T10:02:00Z"),
+        message("msg-1", "2026-05-09T10:01:00Z"),
+    ];
+    let batch_size = batch.len();
+    let printed = state.apply_batch(batch);
+    assert!(printed.len() < batch_size);
 }

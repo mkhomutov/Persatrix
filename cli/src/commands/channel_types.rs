@@ -1,13 +1,15 @@
 //! Channel REST DTOs — RFC 0011 §C.
 //!
 //! Wire shapes mirror `internal/server/channel_types.go`. Field names
-//! match the Go JSON tags exactly so `persatrix channel … --json` is a
-//! byte-for-byte passthrough of the orchestrator response.
+//! match the Go JSON tags exactly. `--json` output preserves field
+//! shapes that are explicitly modeled here; unknown server fields are
+//! dropped (no `#[serde(deny_unknown_fields)]`, no flatten-extras
+//! catch-all). Adding a server field requires a coordinated bump on
+//! this file.
 
 use serde::{Deserialize, Serialize};
-use tabled::Tabled;
 
-#[derive(Deserialize, Serialize, Tabled)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct ChannelMember {
     pub(crate) id: String,
     #[serde(rename = "respond")]
@@ -54,6 +56,13 @@ pub(crate) struct ChannelMessage {
     pub(crate) thread_id: String,
     #[serde(default)]
     pub(crate) mentions: Vec<String>,
+    /// Mirrors `channelMessageResponse.Metadata` (`map[string]any` with
+    /// `omitempty`). Captured so `--json` output round-trips server
+    /// metadata (e.g. trace propagation, source-system tags) instead
+    /// of silently dropping it. Keep `Option<Map>` over `Map` so the
+    /// absent-vs-empty distinction matches Go's `omitempty` exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) metadata: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Envelope for `GET /api/v1/channels/{id}/messages` and the thread
@@ -76,9 +85,12 @@ pub(crate) struct PublishMessageRequest {
 #[derive(Serialize)]
 pub(crate) struct AddMemberRequest {
     pub(crate) id: String,
-    /// Empty string is preserved on the wire (Go side falls back to
-    /// `when_mentioned` when blank); the CLI omits the field only via
-    /// `skip_serializing_if` semantics chosen by the helper.
+    /// Empty string is preserved on the wire; the server falls back to
+    /// `when_mentioned` when blank. The CLI surface validates non-empty
+    /// values via the `RespondPolicy` enum, so blank is unreachable in
+    /// practice — preserved here for parity with `addMemberRequest`
+    /// across alternative callers (e.g. ad-hoc curl scripts mirrored
+    /// against this DTO).
     pub(crate) respond: String,
 }
 
@@ -210,5 +222,50 @@ mod tests {
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["thread_id"], "msg-100");
         assert_eq!(json["mentions"], serde_json::json!(["bob", "carol"]));
+    }
+
+    #[test]
+    fn channel_message_round_trips_metadata() {
+        // PR #302 finding #5: the orchestrator's channelMessageResponse
+        // carries `Metadata map[string]any` (omitempty). The Rust DTO
+        // must capture and re-serialize it so `--json` does not silently
+        // drop server-side fields.
+        let json = serde_json::json!({
+            "id": "msg-1",
+            "channel_id": "group:x",
+            "sender_id": "alice",
+            "content": "hi",
+            "timestamp": "2026-05-09T10:00:00Z",
+            "mentions": [],
+            "metadata": {"trace_id": "abc-123", "source": "cli"},
+        });
+        let msg: ChannelMessage = serde_json::from_value(json.clone()).unwrap();
+        let metadata = msg.metadata.as_ref().expect("metadata preserved");
+        assert_eq!(metadata["trace_id"], "abc-123");
+        assert_eq!(metadata["source"], "cli");
+        // Re-serialize: metadata round-trips byte-equivalent.
+        let reserialized = serde_json::to_value(&msg).unwrap();
+        assert_eq!(reserialized["metadata"], json["metadata"]);
+    }
+
+    #[test]
+    fn channel_message_omits_metadata_when_absent() {
+        // Mirrors Go's `omitempty`: a message without metadata
+        // serializes without the key.
+        let json = serde_json::json!({
+            "id": "msg-1",
+            "channel_id": "group:x",
+            "sender_id": "alice",
+            "content": "hi",
+            "timestamp": "2026-05-09T10:00:00Z",
+            "mentions": [],
+        });
+        let msg: ChannelMessage = serde_json::from_value(json).unwrap();
+        assert!(msg.metadata.is_none());
+        let reserialized = serde_json::to_value(&msg).unwrap();
+        assert!(
+            reserialized.get("metadata").is_none(),
+            "absent metadata stays absent on the wire"
+        );
     }
 }

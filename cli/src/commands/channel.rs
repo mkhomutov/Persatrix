@@ -2,10 +2,12 @@
 //!
 //! Thin-client pattern (per `.github/instructions/rust-cli.instructions.md`):
 //! every subcommand marshals args into a REST call and prints the response.
-//! Wire shapes mirror `internal/server/channel_types.go` so the `--json`
-//! output is a byte-for-byte passthrough.
+//! Wire shapes mirror `internal/server/channel_types.go`. `--json` output
+//! preserves every field that is explicitly modeled in `channel_types.rs`;
+//! unknown server fields are dropped (the DTOs do not set
+//! `deny_unknown_fields` and do not flatten extras).
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
 use colored::Colorize;
@@ -22,6 +24,16 @@ pub(crate) const DEFAULT_WATCH_INTERVAL_SECS: u64 = 5;
 
 /// Mirrors `channelDefaultHistoryLimit` so CLI and server agree.
 pub(crate) const DEFAULT_HISTORY_LIMIT: u32 = 50;
+
+/// Mirrors `channelMaxMentionsPerPublish` so the CLI fails fast with a
+/// clear message instead of round-tripping a generic 400.
+pub(crate) const MAX_MENTIONS_PER_PUBLISH: usize = 10;
+
+/// Default cap on the `WatchState` dedup ring. Sized at ~20× the
+/// default page (50) so a few back-to-back full pages never re-emit a
+/// message that was already printed; on overflow the oldest id is
+/// evicted and a re-appearing id is treated as new.
+pub(crate) const WATCH_SEEN_CAP: usize = 1024;
 
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
 
@@ -70,19 +82,72 @@ pub(crate) fn expand_mentions(
     out
 }
 
+/// Reject empty/whitespace `message_id` for the `Reply` subcommand.
+///
+/// clap accepts `""` as a positional, and serde would then drop the
+/// `thread_id` field via `skip_serializing_if = "String::is_empty"`,
+/// silently degrading a `reply` into a top-level `send`. The CLI
+/// rejects locally so the surprise never reaches the wire.
+pub(crate) fn validate_message_id(input: &str) -> Result<(), String> {
+    if input.trim().is_empty() {
+        return Err("message id must not be empty".into());
+    }
+    Ok(())
+}
+
+/// Reject mention arrays that exceed the server cap.
+///
+/// `--mention-all` resolves to every channel member client-side; on a
+/// channel with > [`MAX_MENTIONS_PER_PUBLISH`] members the server's
+/// `BAD_REQUEST` is opaque. Failing fast names both the actual count
+/// and the cap so the user can pivot to explicit `--mention <id>`.
+pub(crate) fn validate_mention_count(mentions: &[String]) -> Result<(), String> {
+    if mentions.len() > MAX_MENTIONS_PER_PUBLISH {
+        return Err(format!(
+            "mentions expanded to {} ids; server caps at {}. Use explicit --mention <id> repeats.",
+            mentions.len(),
+            MAX_MENTIONS_PER_PUBLISH
+        ));
+    }
+    Ok(())
+}
+
 /// Tracks the high-watermark for `persatrix channel watch`.
 ///
 /// Each poll returns the latest N messages newest-first; we filter by
 /// message id (not timestamp — SQLite's ms resolution can repeat) and
-/// only print ids we have not seen yet.
-#[derive(Debug, Default)]
+/// only print ids we have not seen yet. The `seen` set is bounded by a
+/// FIFO ring so a long-running watch does not grow heap monotonically;
+/// on overflow the oldest id is evicted, and a re-sighting after
+/// eviction prints again. The cap defaults to [`WATCH_SEEN_CAP`].
+#[derive(Debug)]
 pub(crate) struct WatchState {
     seen: HashSet<String>,
+    order: VecDeque<String>,
+    cap: usize,
+}
+
+impl Default for WatchState {
+    fn default() -> Self {
+        Self::with_cap(WATCH_SEEN_CAP)
+    }
 }
 
 impl WatchState {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Construct a `WatchState` with an explicit ring capacity (test seam).
+    /// `cap` is clamped to ≥1 — a zero cap would make the ring useless
+    /// and reintroduce the unbounded-growth risk via the `HashSet`.
+    pub(crate) fn with_cap(cap: usize) -> Self {
+        let cap = cap.max(1);
+        Self {
+            seen: HashSet::with_capacity(cap),
+            order: VecDeque::with_capacity(cap),
+            cap,
+        }
     }
 
     /// Filter `batch` to unseen messages and reverse to oldest-first
@@ -91,11 +156,28 @@ impl WatchState {
         batch.reverse();
         let mut out: Vec<ChannelMessage> = Vec::new();
         for msg in batch {
-            if self.seen.insert(msg.id.clone()) {
+            if self.record(msg.id.clone()) {
                 out.push(msg);
             }
         }
         out
+    }
+
+    /// Insert `id` into the ring. Returns `true` when newly seen,
+    /// `false` when already present. On overflow the oldest entry is
+    /// evicted from both `order` (FIFO) and `seen` (lookup) so the two
+    /// stay in lockstep.
+    fn record(&mut self, id: String) -> bool {
+        if !self.seen.insert(id.clone()) {
+            return false;
+        }
+        self.order.push_back(id);
+        if self.order.len() > self.cap {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen.remove(&oldest);
+            }
+        }
+        true
     }
 }
 
@@ -119,7 +201,11 @@ pub(crate) async fn cmd_channel_list(
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&body.channels).unwrap());
+        // Single-line output (not pretty-printed): keeps `--json` consistent
+        // across subcommands so downstream tools that count lines or pipe
+        // through `jq` see the same shape regardless of which subcommand
+        // emitted it.
+        println!("{}", serde_json::to_string(&body.channels).unwrap());
         return Ok(());
     }
     if body.channels.is_empty() {
@@ -193,6 +279,10 @@ pub(crate) async fn cmd_channel_send(
     } else {
         expand_mentions(explicit_mentions, false, &[], sender_id)
     };
+    // Server caps mentions at MAX_MENTIONS_PER_PUBLISH; failing fast
+    // here surfaces a clear message instead of an opaque 400 from the
+    // unauthenticated REST surface.
+    validate_mention_count(&mentions)?;
     let req = PublishMessageRequest {
         sender_id: sender_id.to_string(),
         content: message.to_string(),
@@ -254,7 +344,8 @@ pub(crate) async fn cmd_channel_history(
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&body.messages).unwrap());
+        // Single-line: see comment in cmd_channel_list.
+        println!("{}", serde_json::to_string(&body.messages).unwrap());
         return Ok(());
     }
     if body.messages.is_empty() {
@@ -290,6 +381,13 @@ pub(crate) async fn cmd_channel_watch(
         format!("#{canonical}").cyan(),
         interval_secs
     );
+    // First-poll suppression: a fresh watch always returns the latest
+    // page newest-first. The "all unseen + full page" condition is
+    // expected on poll #1 (it just means the channel had ≥ limit prior
+    // messages), so warning then would be noise. After the first poll,
+    // an all-unseen full page means messages may have fallen off the
+    // window between polls and been silently lost.
+    let mut first_poll = true;
     loop {
         let resp = client
             .get(&url)
@@ -303,7 +401,10 @@ pub(crate) async fn cmd_channel_watch(
             .json()
             .await
             .map_err(|e| format!("invalid response: {e}"))?;
-        for msg in state.apply_batch(body.messages) {
+        let batch_size = body.messages.len();
+        let printed = state.apply_batch(body.messages);
+        let printed_count = printed.len();
+        for msg in printed {
             if json_out {
                 println!("{}", serde_json::to_string(&msg).unwrap());
             } else {
@@ -315,6 +416,17 @@ pub(crate) async fn cmd_channel_watch(
                 );
             }
         }
+        if !first_poll
+            && printed_count == batch_size
+            && batch_size as u32 == limit
+            && batch_size > 0
+        {
+            eprintln!(
+                "{} polled page was completely full of new messages — older messages may have been missed; raise --limit or lower --interval",
+                "warning:".yellow().bold()
+            );
+        }
+        first_poll = false;
         tokio::time::sleep(interval).await;
     }
 }
@@ -337,159 +449,6 @@ async fn fetch_channel_members(
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
     Ok(view.members)
-}
-
-// ─── Clap subcommand surface + dispatch ─────────────────────────────────
-
-/// `persatrix channel <subcommand>` parser. Co-located with `dispatch`
-/// so a new variant compile-errors here, not in `main.rs`.
-#[derive(clap::Subcommand)]
-pub(crate) enum ChannelCommands {
-    /// List channels visible to the orchestrator
-    List {
-        /// Emit JSON instead of human-readable rows
-        #[arg(long)]
-        json: bool,
-    },
-    /// Add a participant to a channel's membership
-    Join {
-        /// Channel name (`planning`) or fully-qualified id (`group:planning`, `dm:a:b`)
-        name: String,
-        /// User identity to add (defaults to OS username, normalized)
-        #[arg(long)]
-        r#as: Option<String>,
-        /// Response policy: `when_mentioned` (default), `always`, or `never`
-        #[arg(long, default_value = "when_mentioned")]
-        respond: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Publish a top-level message to a channel
-    Send {
-        name: String,
-        message: String,
-        /// Sender identity (defaults to OS username, normalized)
-        #[arg(long)]
-        r#as: Option<String>,
-        /// Mention a participant (`--mention alice --mention bob` is repeatable)
-        #[arg(long = "mention")]
-        mention: Vec<String>,
-        /// Mention every channel member (resolved client-side via GET /channels/{id})
-        #[arg(long)]
-        mention_all: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reply to an existing channel message in its thread
-    Reply {
-        name: String,
-        message_id: String,
-        message: String,
-        #[arg(long)]
-        r#as: Option<String>,
-        #[arg(long = "mention")]
-        mention: Vec<String>,
-        #[arg(long)]
-        mention_all: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Print the recent history of a channel (newest-first)
-    History {
-        name: String,
-        /// Number of messages to fetch (default: 50, server cap: 1000)
-        #[arg(long, default_value_t = DEFAULT_HISTORY_LIMIT)]
-        limit: u32,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Poll a channel for new messages (5 s default; Ctrl-C to stop)
-    Watch {
-        name: String,
-        /// Poll interval in seconds (default: 5)
-        #[arg(long, default_value_t = DEFAULT_WATCH_INTERVAL_SECS)]
-        interval: u64,
-        /// Per-poll page size (default: 50)
-        #[arg(long, default_value_t = DEFAULT_HISTORY_LIMIT)]
-        limit: u32,
-        /// Emit JSON Lines instead of human rows
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-pub(crate) async fn dispatch(
-    client: &reqwest::Client,
-    server: &str,
-    cmd: ChannelCommands,
-    default_user: impl FnOnce() -> String,
-) -> Result<(), String> {
-    match cmd {
-        ChannelCommands::List { json } => cmd_channel_list(client, server, json).await,
-        ChannelCommands::Join {
-            name,
-            r#as,
-            respond,
-            json,
-        } => {
-            let user_id = r#as.unwrap_or_else(default_user);
-            cmd_channel_join(client, server, &name, &user_id, &respond, json).await
-        }
-        ChannelCommands::Send {
-            name,
-            message,
-            r#as,
-            mention,
-            mention_all,
-            json,
-        } => {
-            let sender_id = r#as.unwrap_or_else(default_user);
-            cmd_channel_send(
-                client,
-                server,
-                &name,
-                &message,
-                &sender_id,
-                &mention,
-                mention_all,
-                "",
-                json,
-            )
-            .await
-        }
-        ChannelCommands::Reply {
-            name,
-            message_id,
-            message,
-            r#as,
-            mention,
-            mention_all,
-            json,
-        } => {
-            let sender_id = r#as.unwrap_or_else(default_user);
-            cmd_channel_send(
-                client,
-                server,
-                &name,
-                &message,
-                &sender_id,
-                &mention,
-                mention_all,
-                &message_id,
-                json,
-            )
-            .await
-        }
-        ChannelCommands::History { name, limit, json } => {
-            cmd_channel_history(client, server, &name, limit, json).await
-        }
-        ChannelCommands::Watch {
-            name,
-            interval,
-            limit,
-            json,
-        } => cmd_channel_watch(client, server, &name, interval, limit, json).await,
-    }
 }
 
 #[cfg(test)]

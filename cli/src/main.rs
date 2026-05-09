@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
-use commands::channel::{dispatch as dispatch_channel, ChannelCommands};
+use commands::channel_dispatch::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
 use commands::logs::{cmd_logs, LogsOptions};
 use commands::validate::cmd_validate;
