@@ -26,6 +26,14 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-CLI-001](MT-CLI-001.md) | `persatrix run` end-to-end against a running orchestrator | Active |
 
+## Channels (CLI)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CHANNEL-001](MT-CHANNEL-001.md) | `persatrix channel list` / `join` against a docker-composed orchestrator | Active |
+| [MT-CHANNEL-002](MT-CHANNEL-002.md) | `persatrix channel send` / `reply` / `history` against a docker-composed orchestrator | Active |
+| [MT-CHANNEL-003](MT-CHANNEL-003.md) | `persatrix channel watch` polling, dedup, full-page warning | Active |
+
 ## Config
 
 | ID | Title | Status |
