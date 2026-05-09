@@ -50,6 +50,7 @@ from .boundary_detectors import (
     REASON_TOPIC_SHIFT,
     BoundaryDetector,
     CloseReason,
+    MaxTurnsDetector,
     default_detectors,
 )
 from .interaction_janitor import (
@@ -229,6 +230,27 @@ class InteractionTracker:
         # deterministic clock once at construction time instead of
         # threading ``now=`` through every call.
         self._clock: Clock = clock if clock is not None else _DEFAULT_CLOCK
+        # PR-3 review #12: cache the cap from whichever
+        # :class:`MaxTurnsDetector` is in the chain so :meth:`add_turn`
+        # can enforce it inline (rather than waiting for the next
+        # ``idle_check`` sweep, which let a structural close in between
+        # mislabel the closure as ``REASON_STRUCTURAL`` and surface the
+        # RFC 0020 §Security amplification window).  Sourcing the cap
+        # from the chain — rather than a separate constructor kwarg —
+        # keeps the cap-config knob in one place; a test that swaps in
+        # a custom chain without :class:`MaxTurnsDetector` correctly
+        # sees no inline cap.
+        #
+        # Cache invariant (PR-3 review #300/N2): this lookup runs once
+        # at construction.  Safe today because ``_detectors`` is a tuple
+        # (no reassignment below) and :class:`MaxTurnsDetector` is
+        # ``frozen=True``; a future refactor that mutates the chain
+        # (e.g. ``replace_detectors``) must refresh this cache to stay
+        # aligned with :meth:`idle_check`'s detector-walking view.
+        self._max_turns: int | None = next(
+            (d.max_turns for d in self._detectors if isinstance(d, MaxTurnsDetector)),
+            None,
+        )
 
     # ── Read-only accessors (used by tests + janitor wiring in PR 4) ──
 
@@ -269,14 +291,35 @@ class InteractionTracker:
     ) -> Interaction:
         """Append a turn, opening an interaction in ``scope`` if needed.
 
-        Returns the open interaction so callers can read its
-        ``interaction_id`` for downstream tagging (e.g. trace spans).
+        Returns the interaction the turn landed in.  PR-3 review #12:
+        when the just-appended turn pushes ``turn_count`` to the
+        :class:`MaxTurnsDetector` cap, the interaction is closed inline
+        with :data:`REASON_MAX_TURNS` and popped from the open map —
+        the returned object's ``is_open`` is then ``False`` and the
+        caller is expected to hand it to the persistence layer in the
+        same step.  Closing inline (rather than waiting for the next
+        ``idle_check`` sweep) ensures the cap-fired closure is
+        attributed to ``max_turns`` even when a structural event
+        arrives between the cap-th turn and the next event.
         """
         ts = now if now is not None else self._clock()
         interaction = self._open.get(scope)
         if interaction is None or not interaction.is_open:
             interaction = self.start(scope, now=ts)
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
+        if (
+            self._max_turns is not None
+            and interaction.turn_count >= self._max_turns
+        ):
+            # ``close`` pops ``scope`` from ``self._open`` and returns
+            # the same interaction (with ``closed_at`` / ``close_reason``
+            # set) that we just appended to.  Returning the closed object
+            # lets callers observe ``is_open is False`` and route it
+            # straight to ``_persist_closed_interaction`` without an
+            # extra tracker lookup.
+            closed = self.close(scope, reason=REASON_MAX_TURNS, now=ts)
+            if closed is not None:
+                return closed
         return interaction
 
     def close(

@@ -350,7 +350,13 @@ class _EpisodeRoutingMixin:
         # raw body.  Keep only the structural fields here so the
         # spec-vs-code drift is closed; if a future PR genuinely needs
         # the body, RFC 0020 §D must be amended in the same change.
-        payload: dict[str, object] = {
+        # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``
+        # (the same dict ends up in persisted JSON via
+        # ``_persist_closed_interaction``).  Match the annotation here
+        # so a future caller that stashes a non-``object`` value (e.g.
+        # nested ``Any``-typed metadata read from a payload) doesn't
+        # need a cast at this site.
+        payload: dict[str, Any] = {
             "summary": summary,
             "event_type": event.event_type.value,
             "sender": event.sender_id,
@@ -363,7 +369,18 @@ class _EpisodeRoutingMixin:
                 "sender_participant_type", "agent",
             ),
         }
-        self._interaction_tracker.add_turn(scope, payload=payload)
+        interaction = self._interaction_tracker.add_turn(scope, payload=payload)
+        # PR-3 review #12: ``add_turn`` now closes inline when the
+        # MaxTurns cap fires.  The returned interaction is the
+        # cap-closed one (with ``close_reason == REASON_MAX_TURNS``);
+        # persist it immediately so the closed-interaction episode
+        # row exists before the next event arrives.  A subsequent
+        # session-end on the same scope would no-op (scope already
+        # popped), which is the correct contract — the cap closure
+        # takes precedence over a same-event structural close.
+        if not interaction.is_open:
+            await self._persist_closed_interaction(interaction)
+            return
         if self._is_session_end_event(event):
             closed = self._interaction_tracker.close(
                 scope, reason=REASON_STRUCTURAL,
