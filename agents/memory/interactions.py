@@ -240,6 +240,13 @@ class InteractionTracker:
         # keeps the cap-config knob in one place; a test that swaps in
         # a custom chain without :class:`MaxTurnsDetector` correctly
         # sees no inline cap.
+        #
+        # Cache invariant (PR-3 review #300/N2): this lookup runs once
+        # at construction.  Safe today because ``_detectors`` is a tuple
+        # (no reassignment below) and :class:`MaxTurnsDetector` is
+        # ``frozen=True``; a future refactor that mutates the chain
+        # (e.g. ``replace_detectors``) must refresh this cache to stay
+        # aligned with :meth:`idle_check`'s detector-walking view.
         self._max_turns: int | None = next(
             (d.max_turns for d in self._detectors if isinstance(d, MaxTurnsDetector)),
             None,
