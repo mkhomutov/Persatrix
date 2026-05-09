@@ -42,7 +42,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | v0.3.0 | 🚧 Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 🚧 Implementing (PRs 1 [#233](https://github.com/mkhomutov/Persatrix/pull/233), 1b [#234](https://github.com/mkhomutov/Persatrix/pull/234), 1c [#236](https://github.com/mkhomutov/Persatrix/pull/236), 2 [#244](https://github.com/mkhomutov/Persatrix/pull/244) merged — audit logger + secret redactor + orchestrator wiring + RedactStruct hardening + audit metrics + RateLimiter + CircuitBreaker + REST/gRPC middleware + unquarantine endpoint; PR 3 [#253](https://github.com/mkhomutov/Persatrix/pull/253) merged — InputSanitizer + Go canonical patterns + Python mirror + `<external_data>` envelope wrapping for `http_request`/`file_read` + persona prompt fragment + tag-escape hardening (open/close tag regex, whitespace-tolerant matching); PR 4 open — review follow-ups + Phases 1–2 close) |
 | 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
-| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | 🚧 Implementing |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | ⚠️ Partially Implemented (internal channels — external bridges deferred to v0.5.0) |
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
@@ -457,7 +457,7 @@ Sequencing and rationale live in [v0.3.0-plan.md §Memory Quality Follow-Ups](do
 |-----|-------|--------------|--------|
 | [0008](docs/rfcs/0008-agent-memory-context-optimization.md) | Agent Memory & Context Optimization | Full RFC | 🚧 Implementing |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 1–2 (audit, rate limiting, sanitization) | 🚧 Implementing |
-| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | 🚧 Implementing |
+| [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | Internal channels (Phases 1–4: routing, history, memory integration, CLI/human participation) | ⚠️ Partially Implemented (internal channels — external bridges deferred to v0.5.0) |
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle | Phases 1–3 (P4 topic-shift deferred) | 🚧 Implementing |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phase 1 only (now-anchor + recency rendering) | ⚠️ Partially Implemented (Phase 1) |
 

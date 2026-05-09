@@ -440,20 +440,32 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 | File | Change |
 |------|--------|
 | `docs/rfcs/0011-channels-bridges.md` | Status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0). |
-| `ROADMAP.md` | RFC 0011 row → `⚠️ Partially Implemented (internal channels)`. |
-| `docs/v0.3.0-plan.md` | Master Progress Overview row 6 → ✅. |
+| `ROADMAP.md` | RFC 0011 rows → `⚠️ Partially Implemented (internal channels)` (RFC Master Index + v0.3.0 Component Matrix). |
+| `docs/v0.3.0-plan.md` | Master Progress Overview row 6 → 🔀 PR open while this PR is in flight; flips to ✅ on merge. |
+| `internal/channels/sqlite_test.go` | NTH dispatch — tightened `TestSQLiteStore_Close_Idempotent` (true idempotency assertion), new `TestSQLiteStore_MaxOpenConnsPinnedToOne` invariant pin, new `TestSQLiteStore_PublishMessage_FKDisambiguation_ChannelDeletedConcurrently` regression for the round-2 "deleted concurrently" branch. |
 
 CHANGELOG.md is **deferred to v0.3.0 release prep** (Phase 4 PR 3).
 
 #### PR checklist
 
-- [ ] All deferred review findings addressed or downgraded
-- [ ] `make test` passes; `make lint` clean
-- [ ] [docs/rfcs/0011-channels-bridges.md](0011-channels-bridges.md) status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0)
-- [ ] [ROADMAP.md](../../ROADMAP.md) RFC 0011 row → `⚠️ Partially Implemented (internal channels)`
-- [ ] [docs/v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 6 → ✅
+- [x] All deferred review findings addressed or downgraded (see NTH disposition below)
+- [x] `make test` passes; `make lint` clean
+- [x] [docs/rfcs/0011-channels-bridges.md](0011-channels-bridges.md) status → `⚠️ Partially Implemented` (external bridges deferred to v0.5.0)
+- [x] [ROADMAP.md](../../ROADMAP.md) RFC 0011 rows → `⚠️ Partially Implemented (internal channels)` (RFC Master Index + v0.3.0 Component Matrix both flipped)
+- [x] [docs/v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 6 → 🔀 PR open (flips to ✅ on merge)
 - [x] PR #231 review SF-1 closed: `buildDSN()` rejects (or merges) paths containing `?`; regression test for `file:`-URI input — landed via [ISSUE-0049](../issues/ISSUE-0049-builddsn-drops-pragmas-on-file-uri-paths.md) ahead of PR 8
-- [ ] PR #231 review NTH items dispatched: `PRAGMA user_version` baseline (if not already bumped by PR 2's SF-4 migration), ~~soft byte cap on `msg.Content`~~ (landed via [ISSUE-0050](../issues/ISSUE-0050-publishmessage-content-byte-cap.md) ahead of PR 8 — `MaxMessageContentBytes = 16_384` + `ErrMessageContentTooLarge` sentinel mapped to HTTP 413), FK-disambiguation "channel deleted concurrently" test, `TestSQLiteStore_Close_Idempotent` rename or tightened assertion, `db.Stats().MaxOpenConnections == 1` invariant test, `BeforeConnect` hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift
+- [x] PR #231 review NTH items dispatched (see disposition below)
+
+#### PR #231 review NTH disposition
+
+| NTH item | Disposition |
+|----------|-------------|
+| `PRAGMA user_version` baseline | ✅ Landed in PR 2's SF-4 migration — `applySchema` now stamps `channelStoreSchemaVersion` (`internal/channels/sqlite_schema.go:112`) and `TestSQLiteStore_SchemaVersion_Stamped` pins the contract. |
+| Soft byte cap on `msg.Content` | ✅ Landed via [ISSUE-0050](../issues/ISSUE-0050-publishmessage-content-byte-cap.md) ahead of PR 8 — `MaxMessageContentBytes = 16_384` + `ErrMessageContentTooLarge` sentinel mapped to HTTP 413. |
+| FK-disambiguation "channel deleted concurrently" test | ✅ Landed in this PR — `TestSQLiteStore_PublishMessage_FKDisambiguation_ChannelDeletedConcurrently` opens a second `sql.DB` to the same file with `foreign_keys = OFF` to bypass the cascade, leaves an orphaned membership row, then publishes through the store and asserts `ErrChannelNotFound: <id> (deleted concurrently)`. The test seam the original NTH note flagged turned out to be a four-line second-handle open. |
+| `TestSQLiteStore_Close_Idempotent` rename or tightened assertion | ✅ Landed in this PR — name kept (the test *is* idempotent now), assertion tightened to `require.NoError` on both calls. The previous `_ = store.Close()` swallowed the second-call return; tightening pins `database/sql.DB`'s documented "Close is idempotent" contract so a future driver-side change that started returning `sql.ErrConnDone` on subsequent Close would red the test instead of silently changing the contract. |
+| `db.Stats().MaxOpenConnections == 1` invariant test | ✅ Landed in this PR — `TestSQLiteStore_MaxOpenConnsPinnedToOne` red-flags the cap drift before a future contributor lifts the pool past 1 without first relaxing the txn shapes named in `NewSQLiteStore`'s rationale comment. |
+| `BeforeConnect` hook for `foreign_keys = ON` paired with the PR 2 `MaxOpenConns` lift | ⏭ **Deferred to v0.4.0.** The hook is only required when `MaxOpenConns` exceeds 1; PR 2's "lift to 4–8" TODO (`internal/channels/sqlite.go:83`) was deliberately not exercised in v0.3.0 (no production REST traffic stresses it; the dmMu-protected `GetOrCreateDM` and the cap-check txn in `CreateChannel` both lean on serial-writer assumptions today). When v0.4.0 lifts the cap, the hook lands alongside that change so every connection in the pool starts with FK enforcement on, not just the first one — pinning a hook today against a single-connection pool would only test the DSN path that PR 1 already tested. Tracked alongside the `TODO(rfc0011-pr2)` comment in `sqlite.go`. |
 
 ---
 
