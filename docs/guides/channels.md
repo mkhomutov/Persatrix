@@ -81,8 +81,10 @@ the policy that matches each member's role in the channel:
   Listener role for broadcast / announcement channels.
 
 Channel-level patterns (Quiet group / Tight-loop pair / Broadcast /
-Always-respond) compose from member-level policies — see RFC 0011 §H for the
-table.
+Incident) compose from member-level policies — see RFC 0011 §H for the
+table. RFC 0011 §H labels the all-`always` pattern "Always-respond / incident";
+this guide uses **Incident** consistently to name the role rather than the
+implementation.
 
 ---
 
@@ -157,13 +159,18 @@ receiving agent runs the event through the **response gate** (RFC 0011 §D)
 *before* memory recall or any LLM call:
 
 ```
-event arrives → respond_policy lookup
+event arrives → cascade-depth check (drop if depth ≥ max_cascade_depth)
+              → respond_policy lookup
               → admit if (policy == "always") OR
-                       (policy == "when_mentioned" AND agent.id ∈ mentions) OR
-                       (policy == "always" AND not in cascade-depth runaway)
+                       (policy == "when_mentioned" AND agent.id ∈ mentions)
               → suppressed events still ingest into memory (Phase 3)
                 but do not trigger an LLM action
 ```
+
+The cascade-depth check is **not policy-conditional** — it fires before the gate
+in `EventDispatcher.dispatch` and applies to every event regardless of
+`respond_policy` ([agents/response_gate.py:43-49](../../agents/response_gate.py#L43-L49)).
+The "Cascade-depth backstop" subsection below covers the operator-facing detail.
 
 Suppressed events increment `channel.messages.gated{policy=…}` — that counter
 is the primary signal for an under- or over-tuned policy.

@@ -7,6 +7,14 @@
 **Last Updated**: 2026-05-09
 **Status**: Active
 
+> **v2.0 rewrite (2026-05-09)** — the original v1.0 procedure assumed a
+> `POST /api/v1/channels` DM-creation surface that does not exist in v0.3.0
+> (`createChannelRequest` carries only `{name, description, members}` and the
+> handler unconditionally derives `group:<name>`; see §Out of Scope below).
+> v2.0 drives the only v0.3.0 REST surface that reaches `GetOrCreateDM` —
+> the chat handler — and turns the absence of the alternate surfaces into a
+> first-class invariant assertion.
+
 ---
 
 ## Overview
@@ -258,6 +266,12 @@ $dmZ.id
 The chat handler maps `ErrInvalidParticipantID` to 400
 ([chat_handler.go:245-249](../../internal/server/chat_handler.go#L245-L249)).
 Send a chat where `user_id` equals the agent id to exercise this path.
+
+> The 400 fires from the `CanonicalDMID` same-id check and is independent of
+> `participant_type` — the chat handler propagates that field as metadata
+> only ([chat_handler.go:283-285](../../internal/server/chat_handler.go#L283-L285)).
+> Flipping the body to `participant_type:"human"` does not change the
+> outcome; the rejection is purely id-shape.
 
 **Action**:
 

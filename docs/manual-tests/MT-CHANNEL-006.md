@@ -45,9 +45,17 @@ channel with a thread root straddling the per-channel cap) is covered by
   ([sqlite_test.go:272](../../internal/channels/sqlite_test.go#L272)) — store-level cascade semantics
 - `internal/channels/sqlite_test.go::TestSQLiteStore_ThreadFKCascade`
   ([sqlite_test.go:233](../../internal/channels/sqlite_test.go#L233)) — thread-FK cascade boundary
-- `internal/server/channel_handlers_test.go::TestChannels_DeleteChannel_*`,
-  `TestChannels_DeleteMember_*`
-  ([channel_handlers_test.go:332-435](../../internal/server/channel_handlers_test.go#L332)) — REST surface
+- `internal/server/channel_handlers_test.go` — REST surface, five functions:
+  `TestChannels_DeleteChannel_CascadesMembershipsAndMessages`
+  ([:332](../../internal/server/channel_handlers_test.go#L332)),
+  `TestChannels_DeleteChannel_NotFound`
+  ([:372](../../internal/server/channel_handlers_test.go#L372)),
+  `TestChannels_DeleteMember_PreservesPriorMessages`
+  ([:381](../../internal/server/channel_handlers_test.go#L381)),
+  `TestChannels_DeleteMember_404OnUnknownChannel`
+  ([:419](../../internal/server/channel_handlers_test.go#L419)),
+  `TestChannels_DeleteMember_404OnUnknownMember`
+  ([:428](../../internal/server/channel_handlers_test.go#L428))
 
 ---
 

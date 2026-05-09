@@ -140,6 +140,10 @@ Start-Sleep -Seconds 15
 - [ ] Most recent message has `sender_id == "ember-owl"`.
 - [ ] Reply `content` is non-empty (sanity check — content quality is not asserted).
 
+> If `history` after 15 s shows only the human turn, do **not** declare Fail
+> immediately — see [Edge Case 1: Reply slower than 15 s](#edge-case-1-reply-slower-than-15s)
+> for the 5 s × 2 retry escape valve before failing.
+
 ---
 
 ### Step 4: Confirm the gate suppressed nothing on the non-mention case
