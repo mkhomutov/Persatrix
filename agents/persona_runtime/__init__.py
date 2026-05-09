@@ -184,6 +184,9 @@ class _LLMPersonaAgent(
     Created via ``create_persona_agent()``. Not intended for direct instantiation.
     """
 
+    # PR-4 review #25 (slice 7): MRO override; rationale on the mixins.
+    _llm_client: LLMClient  # type: ignore[misc]
+
     def __init__(
         self,
         agent_id: str,

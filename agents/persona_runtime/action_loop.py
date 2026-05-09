@@ -63,7 +63,9 @@ class _ActionLoopMixin:
     name: str
     role: str
     persona: dict[str, Any]
-    _llm_client: LLMClient | None
+    # PR-4 review #25 (slice 7): tight ``LLMClient`` (no ``| None``);
+    # ``# type: ignore[misc]`` overrides BaseAgent's loose contract.
+    _llm_client: LLMClient  # type: ignore[misc]
     _working_memory: WorkingMemory
     _state: PersonaState
     _episodic_memory: EpisodicMemory
@@ -245,11 +247,7 @@ class _ActionLoopMixin:
 
     async def _on_event_inner(self, event: AgentEvent) -> list[AgentAction]:
         """Inner event handler — must be called under self._lock."""
-        if self._llm_client is None:
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": "LLM client not configured"},
-            )]
+        # PR-4 review #25 (slice 7): dead ``_llm_client is None`` guard removed.
 
         # Fail-fast for missing model config — a bare KeyError from
         # self.config["model"] deep inside the LLM call produces an
