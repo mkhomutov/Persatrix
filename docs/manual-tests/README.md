@@ -33,6 +33,9 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CHANNEL-001](MT-CHANNEL-001.md) | `persatrix channel list` / `join` against a docker-composed orchestrator | Active |
 | [MT-CHANNEL-002](MT-CHANNEL-002.md) | `persatrix channel send` / `reply` / `history` against a docker-composed orchestrator | Active |
 | [MT-CHANNEL-003](MT-CHANNEL-003.md) | `persatrix channel watch` polling, dedup, full-page warning | Active |
+| [MT-CHANNEL-004](MT-CHANNEL-004.md) | Human-mentions-agent end-to-end (live LLM reply) | Active |
+| [MT-CHANNEL-005](MT-CHANNEL-005.md) | DM canonicalization round-trip | Active |
+| [MT-CHANNEL-006](MT-CHANNEL-006.md) | Channel deletion + cascade (REST DELETE pair) | Active |
 
 ## Config
 
