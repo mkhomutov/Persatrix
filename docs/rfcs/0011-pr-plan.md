@@ -392,12 +392,12 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 ### PR 7: `feature/v030-rfc0011-human-participation` — Phase 4b: Human + MT + Docs
 
 **Depends on**: PR 6.
-**Estimated size**: ~350–500 lines.
+**Estimated size**: ~350–500 lines (docs-heavy; manual-test files run long but each remains under the [BRANCHING.md](../BRANCHING.md) review-window cap independently).
 
 #### Scope (high-level)
 
-- `UserParticipant` channel membership wired through `POST /api/v1/channels/{id}/members`.
-- `persatrix channel watch` polling loop (5s default; `--interval` configurable).
+- ✅ `UserParticipant` channel membership wired through `POST /api/v1/channels/{id}/members` (already shipped in earlier PRs — `agents/participant.py` carries the abstraction; the `channel join --as <user>` CLI surface lands in PR 6).
+- ✅ `persatrix channel watch` polling loop (already shipped in PR 6; covered by [MT-CHANNEL-003](../manual-tests/MT-CHANNEL-003.md)).
 - Manual tests: MT-CHANNEL-001 through MT-CHANNEL-006.
 - Channels user guide + architecture diagram update.
 
@@ -405,30 +405,30 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 - `UserParticipant` reuses the existing RFC 0016 `Participant` abstraction unchanged. Membership flows through the same `POST /api/v1/channels/{id}/members` endpoint that agents use — no human-specific path.
 - Human messages obey the same response gate as agents per [OQ #7 resolution](0011-channels-bridges.md#open-questions) (option **b**): default `when_mentioned`, with `--mention-all` on `persatrix channel send` covering the broadcast case in 1-human-N-agent channels. Silent agents in DM-shaped channels are recoverable; flooding agents on every casual message is not.
-- Manual tests live under [`docs/manual-tests/`](../manual-tests/) with the `MT-CHANNEL-NNN` numbering convention. Suggested coverage (one per ID, refined in PR review):
-  - MT-CHANNEL-001: human creates `#planning`, joins as participant, sends a top-level message, sees one agent reply.
-  - MT-CHANNEL-002: human DMs an agent; round-trip; verify DM canonicalization (publish with reversed participant order resolves to the same channel).
-  - MT-CHANNEL-003: thread reply — human replies to an agent's message; agent's `when_mentioned` thread-reply branch fires.
-  - MT-CHANNEL-004: `--mention-all` broadcast — every channel member responds (or is gated explicitly per their policy).
-  - MT-CHANNEL-005: `channel watch` polling — second terminal observes messages from the first within one polling interval.
-  - MT-CHANNEL-006: channel deletion via `DELETE /api/v1/channels/{id}` — cascade removes memberships + messages; `channel list` no longer shows it.
+- Manual tests live under [`docs/manual-tests/`](../manual-tests/) with the `MT-CHANNEL-NNN` numbering convention. Final coverage as landed (numbering shifted from the original suggestion table because PR 6 authored the CLI-surface tests as 001–003):
+  - [MT-CHANNEL-001](../manual-tests/MT-CHANNEL-001.md) (PR 6): `channel list` / `join` CLI surface against the docker-composed orchestrator (covers human-as-participant join via `--as`).
+  - [MT-CHANNEL-002](../manual-tests/MT-CHANNEL-002.md) (PR 6): `channel send` / `reply` / `history` CLI surface (covers `--mention`, `--mention-all` sender exclusion, threaded reply, JSON shape).
+  - [MT-CHANNEL-003](../manual-tests/MT-CHANNEL-003.md) (PR 6): `channel watch` polling, dedup, and full-page-warning coverage.
+  - [MT-CHANNEL-004](../manual-tests/MT-CHANNEL-004.md) (this PR): human-mentions-agent end-to-end (live LLM reply via `ember-owl` + non-mention gate-suppression sanity check). Closes the v0.3.0 user-facing promise's "human posts and the agent replies" hot path.
+  - [MT-CHANNEL-005](../manual-tests/MT-CHANNEL-005.md) (this PR): DM canonicalization round-trip — REST publish from `(alice, bob)` and `(bob, alice)` both resolve to `dm:alice:bob`; reverse-order create is idempotent.
+  - [MT-CHANNEL-006](../manual-tests/MT-CHANNEL-006.md) (this PR): channel deletion via `DELETE /api/v1/channels/{id}` (cascade) and `DELETE /channels/{id}/members/{participant_id}` (membership only; prior messages preserved).
 - Channels user guide goes under [`docs/guides/`](../guides/) with the existing voice (concise, command-driven, screenshots only where decisive). Architecture diagram update lands in [`docs/diagrams/`](../diagrams/) — the publish HTTP/REST hop + gRPC fanout asymmetry from [RFC §C](0011-channels-bridges.md#c-message-routing-and-delivery) is the centerpiece.
 - Concurrent-publish ordering disclaimer (per [OQ #5](0011-channels-bridges.md#open-questions)) called out in the user guide; missed-message recovery contract (on-startup last-N fetch per [OQ #8](0011-channels-bridges.md#open-questions)) documented alongside.
 
 #### Tests
 
-- Integration: `UserParticipant` joins a channel via REST and shows up in `GET /api/v1/channels/{id}` member list with `respond_policy=when_mentioned`.
-- Integration: human-published message flows through the agent gate (no implicit mention-all) — single-agent reply on explicit `--mention <agent>`, zero replies otherwise.
-- Integration: `channel watch` polling — second client observes messages within `--interval` seconds; no duplicates across polls.
+- Integration: `UserParticipant` joins a channel via REST and shows up in `GET /api/v1/channels/{id}` member list with `respond_policy=when_mentioned` — covered by `internal/server/channel_handlers_test.go::TestChannels_AddMember_NoContent`.
+- Integration: human-published message flows through the agent gate (no implicit mention-all) — single-agent reply on explicit `--mention <agent>`, zero replies otherwise. Unit-level coverage in `tests/unit/python/test_channel_message_runtime.py`; end-to-end coverage in [MT-CHANNEL-004](../manual-tests/MT-CHANNEL-004.md).
+- Integration: `channel watch` polling — covered by `cli/src/commands/channel_tests.rs::watch_state_*` (unit) + [MT-CHANNEL-003](../manual-tests/MT-CHANNEL-003.md) (live).
 - Manual: MT-CHANNEL-001 … MT-CHANNEL-006 executed against a local docker-compose deployment; results captured in PR description.
 - Docs lint: `make validate` green; new guide passes the existing markdown link check.
 
 #### PR checklist
 
-- [ ] All six manual tests have a dedicated file under `docs/manual-tests/` and exit-criteria checklist
-- [ ] Channels user guide reviewed against `docs/documentation-guide.md`
-- [ ] Architecture diagram update lands in this PR (not deferred)
-- [ ] OQ #4 (`watch --json`), OQ #7 (human gate-bypass), OQ #8 (missed-message recovery) resolution wording surfaced in the user guide
+- [x] All six manual tests have a dedicated file under `docs/manual-tests/` and exit-criteria checklist
+- [x] Channels user guide reviewed against `docs/documentation-guide.md`
+- [x] Architecture diagram update lands in this PR (not deferred) — [system-overview.md](../diagrams/system-overview.md) gains the `internal/channels` node, the `ReceiveChannelMessage` gRPC edge, the persona → REST publish edge, and the `channels.db` store
+- [x] OQ #4 (`watch --json`), OQ #7 (human gate-bypass), OQ #8 (missed-message recovery) resolution wording surfaced in the user guide
 
 ---
 
