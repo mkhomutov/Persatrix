@@ -62,7 +62,7 @@ class _EpisodeRoutingMixin:
     - ``_episodic_memory: EpisodicMemory``
     - ``_lock: asyncio.Lock``
     - ``_interaction_tracker: InteractionTracker``
-    - ``_llm_client: LLMClient | None``
+    - ``_llm_client: LLMClient``
     - ``_memory_ns: MemoryNamespace``
     - ``_pending_summarize_tasks: set[asyncio.Task[None]]``
     """
@@ -73,7 +73,11 @@ class _EpisodeRoutingMixin:
     _episodic_memory: EpisodicMemory
     _lock: asyncio.Lock
     _interaction_tracker: InteractionTracker
-    _llm_client: LLMClient | None
+    # PR-4 review #25 (slice 7): tight ``LLMClient`` (no ``| None``)
+    # keeps the dead silent-drop in ``_persist_closed_interaction``
+    # gone.  MRO conflict silenced at :class:`_LLMPersonaAgent`'s
+    # re-declaration; see :class:`_ActionLoopMixin` for the rationale.
+    _llm_client: LLMClient
     _memory_ns: MemoryNamespace
     # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
     _pending_summarize_tasks: set[asyncio.Task[None]]
@@ -398,8 +402,10 @@ class _EpisodeRoutingMixin:
         and ``UPDATE``s outside the lock.  See PR #229 deep-review
         Must-Fix #1 + Should-Fix #1.
         """
-        if interaction.turn_count == 0 or self._llm_client is None:
-            return  # idle no-turn scope, or test bootstrap path.
+        if interaction.turn_count == 0:
+            return  # idle no-turn scope — nothing to persist.
+        # PR-4 review #25 (slice 7): dead ``or self._llm_client is None``
+        # clause removed; mixin annotation is now ``LLMClient``.
         if interaction.interaction_id is None:
             logger.warning(
                 "Closed interaction for agent %s has no interaction_id "

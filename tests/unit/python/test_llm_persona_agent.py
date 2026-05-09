@@ -287,21 +287,74 @@ class TestLLMPersonaAgent:
         assert actions[0].action_type == ActionType.COMPLETE_TASK
         assert "LLM provider error" in actions[0].payload["result"]
 
-    async def test_no_llm_client(self):
-        cfg = {**_PERSONA_CONFIG}
-        agent = create_persona_agent(
-            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
-        )
-        await agent.initialize_memory()
-        agent._llm_client = None
+    def test_persona_runtime_mixins_require_non_none_llm_client(self):
+        """RFC 0020 PR 6 slice 7 — ``_llm_client`` annotation tightened
+        to :class:`LLMClient` (no ``| None``).
 
-        event = AgentEvent(
-            event_type=EventType.CHANNEL_MESSAGE,
-            payload={"content": "test"},
-        )
-        actions = await agent.on_event(event)
-        assert actions[0].payload["result"] == "LLM client not configured"
-        await agent.close_memory()
+        Pins the construction-time invariant: ``_LLMPersonaAgent.__init__``
+        already takes a required ``llm_client: LLMClient`` kwarg, but
+        until slice 7 the persona-runtime mixins
+        (:class:`_ActionLoopMixin`, :class:`_EpisodeRoutingMixin`)
+        declared ``_llm_client: LLMClient | None`` to match
+        :class:`BaseAgent`'s loose annotation.  That kept two dead
+        silent-drop branches alive in production code:
+
+        * ``_on_event_inner`` returned ``"LLM client not configured"``
+          on the ``None`` path.
+        * ``_persist_closed_interaction`` early-returned on the ``None``
+          path, skipping the close-path persistence entirely.
+
+        Both branches were reachable only via the ``agent._llm_client = None``
+        test seam in the prior ``test_no_llm_client``.  Slice 7 removes
+        the branches and tightens the annotation so a future refactor
+        that re-widens to ``| None`` is caught immediately rather than
+        re-opening the silent-drop surface (PR-4 review #25 deferred
+        from slice 1).
+
+        Accepts either annotation form against the :class:`LLMClient`
+        class object so the contract survives a PEP 563 flip:
+
+        * Today, both mixin modules carry ``from __future__ import
+          annotations``, so ``cls.__annotations__["_llm_client"]`` is
+          the source-text string ``"LLMClient"``.
+        * If a future cleanup drops the future-import (Python 3.13 PEP
+          649 makes it optional), the same entry becomes the evaluated
+          ``LLMClient`` class object.
+
+        A bare ``ann == "LLMClient"`` check would silently start
+        green-passing the wrong thing under the second form (the
+        equality returns ``False`` against a class object even when
+        the annotation is correct, but the failure message would point
+        at PEP 563 mechanics rather than the intended invariant).
+        Handling both forms here keeps the assertion focused on the
+        invariant — *the annotation resolves to* :class:`LLMClient` —
+        rather than on its source-level encoding (PR-6 review #2
+        robustness).
+
+        We deliberately read ``cls.__annotations__`` directly rather
+        than using :func:`typing.get_type_hints`: the mixins also
+        annotate attributes whose types are imported only under
+        ``if TYPE_CHECKING:`` (e.g. ``MemoryNamespace`` on
+        :class:`_EpisodeRoutingMixin`), and ``get_type_hints``
+        evaluates *all* annotations on the class, raising
+        :class:`NameError` for any TYPE_CHECKING-only name absent from
+        the runtime namespace.  The per-attribute check sidesteps that
+        without forcing the production modules to drop their
+        TYPE_CHECKING-gated imports.
+        """
+        from agents.persona_runtime.action_loop import _ActionLoopMixin
+        from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
+
+        for cls in (_ActionLoopMixin, _EpisodeRoutingMixin):
+            ann = cls.__annotations__["_llm_client"]
+            ok = ann == "LLMClient" or ann is LLMClient
+            assert ok, (
+                f"{cls.__name__}._llm_client annotation is {ann!r}; "
+                "RFC 0020 PR 6 slice 7 pins it to bare ``LLMClient`` "
+                "(no ``| None``) so the silent-drop branches in "
+                "``_on_event_inner`` / ``_persist_closed_interaction`` "
+                "stay dead in production."
+            )
 
     async def test_lock_serializes_concurrent_events(self):
         """Verify the per-agent lock actually serializes concurrent on_event calls.
