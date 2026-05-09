@@ -487,4 +487,21 @@ OTEL surface in
   labels: { severity: warn }
   annotations:
     summary: No security-class audit events for 30 minutes
+
+# PR #236 review L-5: AuditSecurityClassSilent fires only when the
+# series exists. If the orchestrator boots with metrics-init failure,
+# orchestrator_audit_events_total is never registered with Prometheus,
+# `rate(...)` returns the empty vector, and `empty == 0` evaluates to
+# nothing — the silence alert never fires even though every Emit is
+# also missing from the metrics pipeline. Pair the silence alert with
+# this absence alert so an init failure surfaces independently of
+# log-based monitoring (cmd/orchestrator/main.go logs WARN on
+# metrics-init failure but the §13 templates should not silently rely
+# on log-based alerting for a metrics-stack outage).
+- alert: AuditMetricsAbsent
+  expr: absent(orchestrator_audit_events_total{class="security"}) == 1
+  for: 1h
+  labels: { severity: warn }
+  annotations:
+    summary: Audit metrics series absent for 1 hour — metrics init failure or sink down
 ```

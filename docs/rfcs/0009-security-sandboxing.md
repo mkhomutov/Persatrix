@@ -1,7 +1,7 @@
 # RFC 0009 — Agent Identity, Security & Sandboxing
 
 **Type**: architecture  
-**Status**: 🚧 Implementing  
+**Status**: ⚠️ Partially Implemented (Phases 1–2 — v0.3.0; Phases 3–4 deferred to v0.4.0)  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-15  
 **Target**: v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4)  
@@ -591,12 +591,56 @@ These arose from RFCs 0008, 0011, and 0020 landing or partly landing during v0.3
 
 ## Decision / Next Steps
 
-**Status (2026-05-06)**: RFC accepted and 🚧 Implementing. PR plan ([0009-pr-plan.md](0009-pr-plan.md)) ratified. v0.3.0 ships **Phases 1–2 only**; Phases 3–4 deferred to v0.4.0. **3 of 4 v0.3.0 PRs merged**: PR 1 (#233) AuditLogger + SecretRedactor + PR 1b (#234) deep-review follow-ups + PR 1c (#236) audit-hardening; PR 2 (#244) per-agent RateLimiter + CircuitBreaker + REST/gRPC middleware; PR 3 (#253) InputSanitizer + ContextItem + `<external_data>` envelope. PR 4 (close-out + `⚠️ Partially Implemented` flip) pending.
+**Status (2026-05-09)**: Phases 1–2 ⚠️ Partially Implemented for v0.3.0; Phases 3–4 deferred to v0.4.0. **All 4 v0.3.0 PRs merged**: PR 1 (#233) AuditLogger + SecretRedactor + PR 1b (#234) deep-review follow-ups + PR 1c (#236) audit-hardening; PR 2 (#244) per-agent RateLimiter + CircuitBreaker + REST/gRPC middleware; PR 3 (#253) InputSanitizer + ContextItem + `<external_data>` envelope; PR 4 review follow-ups + close-out (this PR). Phase 4 (agent identity tokens, HITL gates) and the rest of Phase 3 (tool argument schemas, ResourceLimiter, OutputSizeLimiter) carry forward to v0.4.0 with the unfinished RFC 0009 PR plan rewritten there.
 
 **Phase 4 sequencing — accepted divergence**: Phase 4 (agent identity + HITL) was originally recommended *before* RFC 0011 (Channels + Bridges), as channel inputs are high-trust injection vectors. v0.3.0 ships RFC 0011 internal channels without Phase 4. The divergence is compensated by:
 - Channels REST surface emits a startup-WARN trust-boundary notice ([0011-pr-plan.md PR 2](0011-pr-plan.md)).
 - v0.3.0 release notes call out Phases 3–4 as deferred and document the unauthenticated REST surface.
 - Phase 4 reopens this sequencing question for v0.4.0 — production multi-tenant deployments should not enable channels until Phase 4 lands.
+
+---
+
+## Implementation Notes (v0.3.0)
+
+Captures deviations from this RFC + the [PR plan](0009-pr-plan.md) that emerged during PRs 1–4 review cycles. Companion documents (PR plan §Review follow-ups, [docs/issues/INDEX.md](../issues/INDEX.md)) carry the per-finding disposition; this appendix only records design-shape divergences a future maintainer should know about before reading the code.
+
+### IN-1. PR 1 split into PR 1 + PR 1b + PR 1c
+
+The PR plan estimated Phase 1a as a single ~450–500-line PR. Implementation split it three ways to keep each PR comfortably under the [BRANCHING.md](../BRANCHING.md) 500-line cap and to land non-trivial design choices on their own review boundary:
+
+- PR 1 (#233) — security package + unit tests only (pure-additive boundary).
+- PR 1b (#234) — orchestrator wiring + integration tests + observability docs.
+- PR 1c (#236) — `RedactStruct` opaque-struct surface change + Prometheus / OTEL metrics surface (both items lifted from PR 1b's review backlog).
+
+Future v0.4.0 PR plans should size Phase 1a-equivalents as 2–3 PRs from the outset.
+
+### IN-2. `RedactStruct` opaque-struct rule replaced single-element deny-list
+
+The PR plan called for a single-element deny-list (`time.Time`). Implementation (PR 1c #236) replaced it with a structural rule:
+1. Any struct with at least one unexported non-primitive field is opaque.
+2. Any struct with no exported fields is opaque.
+
+Rule (1) covers `time.Time`, `sync.Once` / `sync.WaitGroup`, `atomic.Value`, and any future stdlib hazard without per-type registration. Rule (2) covers `sync.Mutex`. The change tightens the contract before PR 3 routes tool-call argument structs through `RedactStruct`. See [§I addendum](#i-secret-redaction) and [redactor.go::isOpaqueStruct](../../internal/security/redactor.go).
+
+### IN-3. Depth-marker sentinel keys on type, not content
+
+The PR plan used a string-content equality check for the depth-cap sentinel. Implementation (PR 4) wraps the marker in a typed `depthMarker` string so `isDepthMarker` matches on the reflect type. Caller data that happens to equal `[REDACTED:max-depth-exceeded]` byte-for-byte cannot false-positive into the H-2 zero-out arm of the parent struct/slice/map walks. The user-visible string in `map[string]any` outputs is converted back to a plain `string` at the map-walk boundary so JSON-encoded audit records remain stable.
+
+### IN-4. Default redactor patterns expanded
+
+PR plan listed five default patterns (anthropic, openai, bearer, aws, generic). Implementation (PR 4) added four more (GitHub PAT/classic, Slack tokens, Stripe live keys, GCP service-account private-key PEM markers) per PR #233 review Nice-to-have #2. The MCP / container deployment story makes these realistic in tool-result `Detail` payloads.
+
+### IN-5. `VerifyChain` exported helper
+
+Not in the PR plan; added in PR 4 per PR #233 review Nice-to-have #1. External auditors and the future `persatrix audit verify` CLI subcommand consume `security.VerifyChain(path)` rather than re-implementing `canonicalEventJSON`. Returns the first chain break with line number + recorded vs computed checksum.
+
+### IN-6. PR 3 `_provenance` sidecar deferred
+
+PR 3 (#253) did not ship the `agents/persona_runtime/__init__.py::_provenance` sidecar — that file is at the 500-line cap. Audit-trail provenance is still observable via `input.flagged` events. Sidecar wiring is deferred to v0.4.0 alongside the typed-proto promotion documented in [§C](#c-input-sanitization--prompt-injection-defense).
+
+### IN-7. CHANGELOG deferral
+
+Per the master plan, `CHANGELOG.md` is not updated in PR 4 — a single curated `[0.3.0] - YYYY-MM-DD` entry lands in v0.3.0 release-prep PR 3.
 
 **Genuinely-deferred Open Questions**: OQ #1 (proto token field) and OQ #4 (revocation list) remain open and gate Phase 4. See §Open Questions § "Genuinely open".
 

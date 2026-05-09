@@ -1,3 +1,5 @@
+# DOCUMENTATION ONLY — runtime config is env-driven.
+#
 # RFC 0009 PR 1b — security audit log configuration.
 #
 # This file documents the audit-log knobs the orchestrator honours via
@@ -5,6 +7,13 @@
 # otel-collector.yaml convention keeps every observability surface
 # documented in one directory; runtime behaviour is still driven by the
 # env vars below (see docs/observability.md §Audit Log).
+#
+# Neighbouring files in this directory (`prometheus.yaml`,
+# `otel-collector.yaml`) ARE consumed at runtime by the OTEL Collector
+# / Prometheus container. This file is NOT — editing the values below
+# does not change orchestrator behaviour. PR #234 review N-2: surface
+# that distinction up front so an operator triaging an incident does
+# not infer a runtime knob from the file's location.
 #
 # Status: documentation-only in PR 1b. PR 2 (rate-limit middleware)
 # extends this file with the security.rate_limit.* keys.

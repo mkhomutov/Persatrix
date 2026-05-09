@@ -89,9 +89,16 @@ func WithRedactor(r Redactor) AuditLoggerOption {
 	}
 }
 
-// WithClock injects a clock function used for event timestamps and the
-// batch-interval ticker. Tests pass a deterministic clock; production
-// defaults to [time.Now].
+// WithClock injects a clock function used for AuditEvent.Timestamp on
+// Emit (when the caller leaves Timestamp zero) and for the
+// emit-latency histogram measurement. Tests pass a deterministic clock;
+// production defaults to [time.Now].
+//
+// Note: WithClock does NOT drive the batch-interval ticker — the ticker
+// runs off the real Go time wheel. Tests that need deterministic
+// ticker control use the unexported [withTickerSeam] seam in this
+// package's *_test.go (PR #233 review Should-Fix #1: prior doc claimed
+// WithClock drove the ticker, which was misleading).
 func WithClock(now func() time.Time) AuditLoggerOption {
 	return func(l *fileAuditLogger) {
 		if now != nil {
@@ -162,6 +169,17 @@ type fileAuditLogger struct {
 	now           func() time.Time
 	logger        *zap.Logger
 	metrics       AuditMetrics
+
+	// testTickC and testFlushSignal are unexported test seams (PR #233
+	// review Should-Fix #1). When testTickC is non-nil, tickerLoop uses
+	// it instead of time.NewTicker(batchInterval).C — the test pushes
+	// values on the channel to drive the loop deterministically.
+	// testFlushSignal, when non-nil, receives a struct{} after every
+	// successful ticker-driven flush so the test can synchronise without
+	// polling on file size. Production callers leave these nil and the
+	// loop falls back to a real time.Ticker.
+	testTickC       <-chan time.Time
+	testFlushSignal chan<- struct{}
 }
 
 // NewFileAuditLogger opens path for append-only writes and returns an
@@ -321,8 +339,16 @@ func (l *fileAuditLogger) Emit(ctx context.Context, ev AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("security: marshal audit event: %w", err)
 	}
-	if _, err := l.writer.Write(append(line, '\n')); err != nil {
+	// PR #233 review Nice-to-have #6: prior `append(line, '\n')` allocated
+	// a fresh backing slice on every Emit (json.Marshal already returned a
+	// freshly-allocated slice with no headroom). Two writes on the buffered
+	// writer drop one alloc per event on the telemetry hot path; the
+	// bufio.Writer absorbs both into a single underlying write syscall.
+	if _, err := l.writer.Write(line); err != nil {
 		return fmt.Errorf("security: write audit event: %w", err)
+	}
+	if err := l.writer.WriteByte('\n'); err != nil {
+		return fmt.Errorf("security: write audit event newline: %w", err)
 	}
 	l.prevChecksum = ev.Checksum
 
@@ -389,22 +415,36 @@ func (l *fileAuditLogger) Close() error {
 }
 
 func (l *fileAuditLogger) tickerLoop(d time.Duration, stop <-chan struct{}) {
-	t := time.NewTicker(d)
-	defer t.Stop()
+	var tickC <-chan time.Time
+	if l.testTickC != nil {
+		tickC = l.testTickC
+	} else {
+		t := time.NewTicker(d)
+		defer t.Stop()
+		tickC = t.C
+	}
 	for {
 		select {
 		case <-stop:
 			return
-		case <-t.C:
+		case <-tickC:
 			l.mu.Lock()
 			if l.closed {
 				l.mu.Unlock()
 				return
 			}
+			flushed := false
 			if l.pendingTel > 0 {
 				_ = l.flushLocked()
+				flushed = true
 			}
 			l.mu.Unlock()
+			if flushed && l.testFlushSignal != nil {
+				select {
+				case l.testFlushSignal <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }
