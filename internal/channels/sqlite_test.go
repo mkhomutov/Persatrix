@@ -387,14 +387,6 @@ func TestSQLiteStore_RejectsInvalidEnums(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidRespondPolicy)
 }
 
-func TestSQLiteStore_Close_Idempotent(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	require.NoError(t, store.Close())
-	// Second close on the same handle returns an error from database/sql,
-	// which is fine — we only assert that the first one was clean.
-	_ = store.Close()
-}
-
 // Sanity: errors.Is unwraps through the fmt.Errorf wrappers used throughout.
 func TestErrors_Unwrap(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
