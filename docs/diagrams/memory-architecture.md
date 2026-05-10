@@ -54,9 +54,9 @@ graph TB
 
     PR --> CTX
     PR --> ITX
-    ITX -->|on close →<br/>summarize_close.py<br/>calls MemoryFacade.compress<br/>(pure function on turn list)| F
-    CTX -.->|persona-runtime read path<br/>bypasses facade in v0.3.0:<br/>recall / recall_notes /<br/>recall_with_scope_filter| E
-    CTX -.->|relationship summary<br/>(direct)| R
+    ITX -->|on close →<br/>summarize_close.py<br/>calls MemoryFacade.compress<br/>— pure function on turn list| F
+    CTX -.->|persona-runtime read path<br/>bypasses facade in v0.3.0<br/>recall / recall_notes /<br/>recall_with_scope_filter| E
+    CTX -.->|relationship summary<br/>— direct call| R
     F --> W
     F --> E
     F --> R
