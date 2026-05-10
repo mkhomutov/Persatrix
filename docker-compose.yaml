@@ -201,6 +201,60 @@ services:
       timeout: 5s
       retries: 3
 
+  # ─── Persona Agent: Iron Fox (v0.3.0 demo set) ───
+  # Declared in config/agents.yaml as type: "persona". Demo persona — see
+  # docs/guides/v0.3.0-demo.md.
+  agent-iron-fox:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    command: ["--agent", "iron-fox", "--port", "50055", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-iron-fox:50055"]
+    ports:
+      - "50055:50055"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace:ro
+      # Per-persona memory volume — mirrors agent-ember-owl's pattern so each
+      # persona's SQLite memory store at /app/data/memory.db is isolated.
+      - iron-fox-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50055), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── Persona Agent: Nova Sparrow (v0.3.0 demo set) ───
+  agent-nova-sparrow:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    command: ["--agent", "nova-sparrow", "--port", "50056", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-nova-sparrow:50056"]
+    ports:
+      - "50056:50056"
+    volumes:
+      - ./config:/app/config:ro
+      - workspace:/workspace:ro
+      - nova-sparrow-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50056), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # ─── Observability: OpenTelemetry Collector ──────
   # RFC 0019 § H — central tail-sampling pipeline. Traces fan out to Jaeger,
   # metrics to Prometheus, logs to Loki. Reference config under
@@ -300,4 +354,9 @@ volumes:
   # relative `db_path: data/memory.db` in config/agents.yaml resolves to a
   # writable path for the non-root container user.
   ember-owl-data:
+    driver: local
+  # v0.3.0 demo personas — see docs/guides/v0.3.0-demo.md.
+  iron-fox-data:
+    driver: local
+  nova-sparrow-data:
     driver: local
