@@ -10,6 +10,29 @@ and the response policies that shape who replies to what.
 > v0.2.1 chat under the channels wire model. This guide is deliberately
 > non-exhaustive and points into the RFC for design rationale.
 
+> **Chat is a DM in v0.3.0.** `POST /api/v1/agents/{id}/chat` and
+> `persatrix chat <agent>` no longer ride a separate `SendChatMessage` gRPC
+> path — both ride the channels publish-and-await loop with a canonical
+> `dm:<lex-sorted>` channel id. The JSON contract is preserved, but the
+> persistence and memory paths are now the same as for any other channel
+> message — see the [chat-as-DM amendment](../rfcs/0011-amendment-chat-as-dm.md).
+
+> **On-startup catch-up replay.** Persona agents fetch the last 50 messages
+> per channel they are a member of after self-registration and ingest them
+> as `CHANNEL_MESSAGE` events with `metadata["replay_mode"] = True`. Replay
+> events ingest into memory but **suppress outbound `SEND_CHANNEL_MESSAGE`**
+> so a restart does not blast everyone with stale responses. The
+> `channel.messages.replayed{channel_id}` counter is the contract pin —
+> separate from `channel.messages.gated` so a startup catch-up burst does
+> not mask a real gate-suppression spike. See §6 *Missed-message recovery*
+> below and [RFC 0011 OQ #8](../rfcs/0011-channels-bridges.md#open-questions).
+
+> **Rust CLI subcommand reference.** Every `persatrix channel …` flag is
+> sourced from [`cli/src/commands/channel.rs`](../../cli/src/commands/channel.rs).
+> Use that file (not this guide) when you need the authoritative flag
+> grammar, exit-code contract, or canonicalisation rule for a bare channel
+> name.
+
 ---
 
 ## 1. The shape of a channel

@@ -120,6 +120,26 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
+    # README.md accumulates a "What's added in vX.Y" capability table +
+    # Known Limitations subsection on every public release. v0.3.0
+    # release prep (PR 2) tipped it over the 3 000-word prose cap even
+    # after aggressively trimming the v0.3.0 surface table and bullets;
+    # the steady-state growth is structural (one section per public
+    # release × ~250–400 words). A future maintenance PR can collapse the
+    # older "What's added" sections into a single "Recent versions"
+    # pointer to ROADMAP.md/CHANGELOG.md once a fourth v0.3.x release
+    # adds another section. Grandfather here until that lands.
+    "README.md",
+    # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
+    # release-candidate tip; release-prep PR 2 added three §2 callouts
+    # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
+    # and a new §6 listing the externally inspectable persona prompt
+    # sections per RFC 0022). The new content is already trimmed (each
+    # callout is one paragraph; §6 is a one-row-per-section table). A
+    # future maintenance PR can split the chat (§4) and observability
+    # (§5) subsections into the chat-specific guide once it exists, but
+    # that is a separate refactor. Grandfather here until that lands.
+    "docs/guides/persona-agents.md",
     # docs/ai-glossary.md was at 2 999 words (1 word under the cap) when
     # RFC 0020 PR 4 (PR #229) landed. The PR #229 review Should-Fix #5
     # required adding the canonical PR-4 terminology (closing-state

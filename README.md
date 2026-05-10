@@ -139,6 +139,33 @@ gRPC boundary) see
 
 ---
 
+## What's added in v0.3.0
+
+v0.3.0 (Agent Conversations) ships shared channels: agents talk on named
+channels, hold persistent DMs, bound conversations as interactions, and
+anchor every prompt in time.
+
+| Capability | Where it lives | Spec |
+|------------|----------------|------|
+| Internal channels — groups, DMs, threads + response gate + cascade backstop + startup catch-up | [internal/channels/](internal/channels/) | [RFC 0011](docs/rfcs/0011-channels-bridges.md) |
+| `persatrix channel` CLI (`list`/`join`/`send`/`reply`/`history`/`watch`) | [cli/src/commands/channel.rs](cli/src/commands/channel.rs) | [channels guide](docs/guides/channels.md) |
+| Chat-as-DM façade — `POST /api/v1/agents/{id}/chat` rides the channels publish-and-await loop | [internal/server/chat_handler.go](internal/server/chat_handler.go) | [RFC 0011 amendment](docs/rfcs/0011-amendment-chat-as-dm.md) |
+| Interaction-bounded episodic memory (`open → multi-turn → close → summarize`) | [agents/memory/interactions.py](agents/memory/interactions.py) | [RFC 0020](docs/rfcs/0020-interaction-lifecycle.md) |
+| Temporal awareness P1 — `Clock` seam + now-anchor + relative-time rendering | [agents/temporal/rendering.py](agents/temporal/rendering.py) | [RFC 0021](docs/rfcs/0021-persona-temporal-awareness.md) |
+| `MemoryFacade` + per-step context-budget allocation | [agents/memory/facade.py](agents/memory/facade.py) | [RFC 0008](docs/rfcs/0008-agent-memory-context-optimization.md) |
+| Security hardening Phases 1–2 — audit + redactor + rate limiter + sanitizer + `<external_data>` envelope | [internal/security/](internal/security/) | [RFC 0009](docs/rfcs/0009-security-sandboxing.md) |
+| Externally inspectable persona prompt sections | [prompts/runtime/persona/sections/](prompts/runtime/persona/sections/) | [RFC 0022](docs/rfcs/0022-persona-prompt-section-templating.md) |
+
+> **Upgrade notes (summary).** Channel-event enum hard-rename
+> (`MESSAGE_RECEIVED` → `CHANNEL_MESSAGE`, `SEND_MESSAGE` →
+> `SEND_CHANNEL_MESSAGE`); chat REST migrates to the channels façade
+> (JSON contract preserved); new `SECURITY_RATE_LIMIT_*` env vars;
+> `http_request` / `file_read` tool results are wrapped in
+> `<external_data>` at the LLM-content boundary.
+> See [CHANGELOG.md](CHANGELOG.md) `[0.3.0]` for the canonical list.
+
+---
+
 ## ⚠️ Cost Warning — Read Before Running
 
 Persatrix uses commercial LLM APIs (Anthropic by default; the model is selected
@@ -445,7 +472,7 @@ Persatrix/
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural cost-leak fix unblocking RFC 0008 | ✅ Released |
 | **v0.2.3** | Observe your agent society end-to-end — structured JSON logs on a versioned schema, distributed OTEL traces with Gen-AI conventions, OTLP metrics with exemplars, `persatrix logs` CLI, and a tail-sampling Collector pipeline | ✅ Released |
-| **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 📋 Planned |
+| **v0.3** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 🚧 Release prep |
 | **v0.4** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6** | Run agent societies across multiple nodes and networks | 📋 Planned |
@@ -470,6 +497,26 @@ completion.
 - [Spec audit](docs/persatrix-spec-audit.md)
 
 ---
+
+## Known Limitations in v0.3.0
+
+- Channels are internal-only — bridges → v0.5.0
+  ([RFC 0011](docs/rfcs/0011-channels-bridges.md)).
+- Channels REST is unauthenticated (startup `WARN` fires; front with an
+  auth proxy until [RFC 0009 Phase 4](docs/rfcs/0009-security-sandboxing.md)
+  in v0.4.0).
+- Named-entity recall after idle-gap closure is weak — MT-MEMORY-005 Leg
+  1 fails by design; fix is [RFC 0026 facts tier](docs/rfcs/0026-declarative-facts-tier.md)
+  in v0.3.1. Per-leg evidence in the
+  [v0.3.0 execution report](docs/manual-tests/v0.3.0-execution-report.md).
+- RFC 0009 Phases 3–4 (sandbox isolation + token auth) and RFC 0021
+  Phases 2–4 (commitment tracking + scheduled callbacks + thread temporal
+  grounding) deferred to v0.4.0.
+- Eviction-parameter calibration (RFC 0008 OQ #12) deferred to a v0.3.x
+  follow-up gated on observed-workload telemetry.
+- v0.2.x carry-forwards still apply (MCP bridge scaffolded only;
+  `MT-COST-002` accepted-with-known-gap; site-local zap log attributes
+  remain camelCase).
 
 ## Known Limitations in v0.2.0
 

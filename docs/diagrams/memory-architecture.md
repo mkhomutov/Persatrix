@@ -4,16 +4,31 @@ Persona agents have four complementary memory stores with different lifetimes,
 purposes, and persistence characteristics. Working memory lives in-process;
 the other three are backed by a shared SQLite database.
 
+In v0.3.0 the **`MemoryFacade`** ([agents/memory/facade.py](../../agents/memory/facade.py),
+[RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-facade-shape))
+is the boundary between callers (task agents and the persona runtime) and
+the underlying tier modules. Callers must not depend on the tier-specific
+schemas — the facade's `store_observation` / `retrieve_relevant` / `compress`
+surface is the contract. Per-channel and per-DM **scoping** is layered on top
+through `recall_with_scope_filter` ([agents/memory/scope_recall.py](../../agents/memory/scope_recall.py)) —
+RFC 0020 P3 + RFC 0011 P3 joint delivery — so an agent in many channels does
+not pull unrelated history into its prompt for a single-channel turn.
+
 ```mermaid
 graph TB
     subgraph Runtime["Persona runtime (per-agent process)"]
         PR["persona_runtime/<br/>action_loop"]
         CTX["memory_context<br/>assembler"]
+        ITX["InteractionTracker<br/>(RFC 0020)"]
     end
 
-    subgraph Stores["Memory stores — agents/memory/"]
+    subgraph Facade["MemoryFacade — agents/memory/facade.py (RFC 0008 §B)"]
+        F["store_observation /<br/>retrieve_relevant /<br/>compress<br/>+ scope-filtered recall<br/>(scope_recall.py)"]
+    end
+
+    subgraph Stores["Tier modules — agents/memory/"]
         W["Working memory<br/>working.py<br/>context-window retention<br/>+ auto-summarization"]
-        E["Episodic memory<br/>episodic.py + episodic_queries.py<br/>interaction summaries"]
+        E["Episodic memory<br/>episodic.py + episodic_queries.py<br/>one entry per interaction (RFC 0020)<br/>scope tag = channel/DM id"]
         R["Relationship memory<br/>relationship.py<br/>per-pair trust + history"]
         N["Agent notes<br/>notes.py<br/>agent-curated knowledge"]
     end
@@ -24,14 +39,14 @@ graph TB
     end
 
     PR --> CTX
-    CTX -->|read| W
-    CTX -->|recall recent| E
-    CTX -->|trust + history| R
-    CTX -->|recall_notes| N
+    PR --> ITX
+    ITX -->|on close →<br/>summarize_close.py<br/>writes ONE episode| F
+    CTX -->|recall + scope filter| F
+    F --> W
+    F --> E
+    F --> R
+    F --> N
 
-    PR -->|store outcome| E
-    PR -->|update trust| R
-    PR -->|store_note| N
     PR -.->|append turn| W
 
     E --> DB
@@ -40,8 +55,42 @@ graph TB
     MIG -.migrates.-> DB
 
     classDef volatile fill:#fff8e1,stroke:#d39e00
+    classDef facade fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
     class W volatile
+    class F facade
 ```
+
+## Why a facade (RFC 0008)
+
+The pre-v0.3.0 runtime called tier modules directly — `episodic_memory.recall(...)`,
+`relationship_memory.get_relationship_summary(...)`, `note_store.recall_notes(...)`.
+That coupling made it impossible to:
+
+- **Allocate a token budget across tiers** — every caller had to know the
+  cap of every tier, and there was no central place to weigh competing
+  recalls against a shared budget. Per-step packaging
+  ([internal/executor/packaging/](../../internal/executor/packaging/))
+  now allocates a single context budget that the facade fans out across
+  episodic / relationship / notes.
+- **Switch tier implementations without rewriting callers** — the facade
+  is what lets RFC 0026 (declarative facts tier, v0.3.1) ship as an
+  additive tier without churning every persona-runtime call site.
+- **Apply per-channel / per-DM scoping uniformly** — `recall_with_scope_filter`
+  is the single read-side dual to the `interaction_id` + scope tag the
+  episodic store writes under (RFC 0020). Without the facade, every
+  caller would have to remember to pass the right scope.
+
+## Per-channel scoping (RFC 0020 P3 + RFC 0011 P3)
+
+`InteractionTracker.add_turn` accepts a `scope` (e.g. `dm:alice:ember-owl`,
+`group:planning`, or a per-workflow id). On interaction close,
+`summarize_close.py` writes the resulting episodic entry tagged with that
+scope. On the read side, `recall_with_scope_filter` applies the scope as
+an AND filter on top of the BM25 / LIKE / recency ranking, so a recall
+from inside a `group:planning` turn does not surface `dm:alice:ember-owl`
+history. The cross-RFC priority order between scoped channel-history
+recall and the relationship/episodic tiers is pinned by
+[`tests/unit/python/test_memory_context_priority_order.py`](../../tests/unit/python/test_memory_context_priority_order.py).
 
 ## Tier characteristics
 

@@ -1,8 +1,13 @@
 # Persona Runtime
 
-Persona agents (v0.2) run two concurrent loops that both converge on the same
+Persona agents run two concurrent loops that both converge on the same
 action executor: an **event-driven** loop (inbound messages/stimuli) and an
-**autonomous tick** loop (self-initiated cycles on an interval).
+**autonomous tick** loop (self-initiated cycles on an interval). v0.3.0
+also introduces an **interaction lifecycle** that sits between the event
+loop and the episodic store ([RFC 0020](../rfcs/0020-interaction-lifecycle.md)):
+inbound turns no longer write one episodic entry each — they accumulate
+under an `InteractionTracker` scope and collapse into one summary on
+close.
 
 ```mermaid
 sequenceDiagram
@@ -12,17 +17,19 @@ sequenceDiagram
     participant Tick as TickScheduler<br/>(agents/tick.py)
     participant Pers as _LLMPersonaAgent<br/>(persona_runtime/action_loop.py)
     participant Ctx as MemoryContext<br/>(persona_runtime/memory_context.py)
+    participant Itx as InteractionTracker<br/>(agents/memory/interactions.py)
     participant Mem as Memory stores<br/>(agents/memory/*)
     participant LLM as LLMClient<br/>(agents/llm_client.py)
-    participant Exec as ActionExecutor<br/>(agents/dispatch.py)
+    participant Exec as ActionExecutor<br/>(agents/action_executor.py)
 
-    %% Event-driven path
-    Inbox->>Disp: AgentEvent
-    Disp->>Pers: on_event(event)
-    Pers->>Ctx: assemble context
-    Ctx->>Mem: recall episodic + relationship
+    %% Event-driven path — gated by RFC 0011 §D response gate (v0.3.0)
+    Inbox->>Disp: AgentEvent (CHANNEL_MESSAGE / TICK / …)
+    Disp->>Pers: on_event(event) — gate fires here for channel events
+    Pers->>Itx: open(scope) or add_turn(scope)
+    Pers->>Ctx: assemble context (now-anchor + sections)
+    Ctx->>Mem: recall episodic + relationship<br/>(scope-filtered per channel/DM)
     Ctx->>Mem: read working memory
-    Mem-->>Ctx: snippets
+    Mem-->>Ctx: snippets (relative-time rendered, RFC 0021)
     Ctx-->>Pers: system + context prompt
     Pers->>LLM: complete(prompt, tools)
     loop until end_turn or max_llm_calls
@@ -33,6 +40,10 @@ sequenceDiagram
     Pers-->>Disp: list[AgentAction]
     Disp->>Exec: execute(actions)
     Exec->>Mem: persist outcomes / update relationships
+
+    %% Interaction close — janitor or explicit signal
+    Note over Itx,Mem: open → multi-turn → close → summarize<br/>(RFC 0020 §G)
+    Itx->>Mem: summarize_close → ONE episodic entry<br/>tagged with interaction_id + scope
 
     %% Autonomous tick path
     loop Every tick interval
@@ -49,17 +60,41 @@ sequenceDiagram
             Pers->>Exec: execute(actions)
             Exec->>Mem: persist outcomes
         end
+        Pers->>Itx: drive stale scopes to close (janitor)
     end
 ```
 
+## Interaction lifecycle (v0.3.0, RFC 0020)
+
+`InteractionTracker` ([agents/memory/interactions.py](../../agents/memory/interactions.py))
+sits between the event handler and the episodic store. The four stages:
+
+| Stage | Trigger | What happens |
+|-------|---------|--------------|
+| **open** | First inbound turn under a new scope (e.g. `dm:alice:ember-owl`, `group:planning`, or per-workflow id) | New `interaction_id` allocated, scope registered |
+| **multi-turn** | Each subsequent `add_turn` under the same scope | Turn appended to the in-memory transcript; **no episodic write** |
+| **close** | Quiescence timeout via the janitor on `on_tick` cadence, **or** explicit close signal | Summary generation kicks off |
+| **summarize** | After close — runs in [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) | **One** episodic entry written for the entire interaction, tagged with `interaction_id` + scope |
+
+Per-scope recall (`recall_with_scope_filter` in
+[agents/memory/scope_recall.py](../../agents/memory/scope_recall.py)) reads
+back from the same scope the channels write under, so an agent in many
+channels does not pull unrelated history into its prompt for a
+single-channel turn — see
+[memory-architecture.md](memory-architecture.md) for the read-side detail.
+
 ## Two paths, one executor
 
-Event dispatch and tick scheduling **both** terminate at `ActionExecutor`, but
-they reach it differently:
+Event dispatch and tick scheduling **both** terminate at `ActionExecutor`
+(now in [agents/action_executor.py](../../agents/action_executor.py); the
+extraction landed under RFC 0011 PR 4a-ii-β-1), but they reach it
+differently:
 
-- **Event path**: `EventDispatcher.on_event()` → persona → `ActionExecutor`.
-- **Tick path**: `TickScheduler.tick()` → persona → `ActionExecutor` (bypasses
-  `EventDispatcher` — ticks are self-initiated, not inbound events).
+- **Event path**: `EventDispatcher.on_event()` → response gate (RFC 0011 §D
+  for channel events) → persona → `ActionExecutor`.
+- **Tick path**: `TickScheduler.tick()` → persona → `ActionExecutor`
+  (bypasses `EventDispatcher` — ticks are self-initiated, not inbound
+  events).
 
 This asymmetry is intentional and verified in `agents/tick.py`.
 
