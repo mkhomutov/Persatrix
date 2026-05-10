@@ -1,0 +1,7 @@
+# Files compared byte-for-byte against generator output or marshal output.
+# Without this, Windows checkouts with `core.autocrlf=true` rewrite to CRLF
+# while Go/Python writers emit LF, causing parity tests to fail.
+# See v0.3.0 release-prep PR 1.
+tests/fixtures/**           -text eol=lf
+agents/security_patterns.py -text eol=lf
+agents/security_enums.py    -text eol=lf
