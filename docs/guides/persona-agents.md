@@ -610,13 +610,23 @@ Python ([RFC 0022](../rfcs/0022-persona-prompt-section-templating.md)).
 | Identity | [`identity.md`](../../prompts/runtime/persona/sections/identity.md) | Who the persona is — name, role, title |
 | Background | [`background.md`](../../prompts/runtime/persona/sections/background.md) | Persona's narrative history |
 | Behavior | [`behavior.md`](../../prompts/runtime/persona/sections/behavior.md) + [`behavior-dimensions.yaml`](../../prompts/runtime/persona/sections/behavior-dimensions.yaml) | Rendering of the five-dimension `behavior` block |
-| Goals | [`goals.md`](../../prompts/runtime/persona/sections/goals.md) | How `goals.{primary,secondary,hidden}` are surfaced |
 | Quirks | [`quirks.md`](../../prompts/runtime/persona/sections/quirks.md) | How quirks are introduced into the prompt |
-| Now-anchor | [`now-anchor.md`](../../prompts/runtime/persona/sections/now-anchor.md) | RFC 0021 Phase 1 temporal anchor — current time + last interaction |
+| Goals | [`goals.md`](../../prompts/runtime/persona/sections/goals.md) | How `goals.{primary,secondary,hidden}` are surfaced |
 | Current state | [`current-state.md`](../../prompts/runtime/persona/sections/current-state.md) | Stamina / energy / idle state surfaced at prompt time |
+| Now-anchor † | [`now-anchor.md`](../../prompts/runtime/persona/sections/now-anchor.md) | RFC 0021 Phase 1 temporal anchor — current time + last interaction |
 
-Sections render in a fixed order (set by the runtime, not the section
-files). The wins:
+Rows above are listed in the order the section-table loop renders them
+(`_PERSONA_SECTIONS` in
+[`agents/persona_runtime/prompt_assembly.py`](../../agents/persona_runtime/prompt_assembly.py)).
+
+† **`now-anchor` lives in the same directory but is assembled outside the
+section-table loop** — RFC 0021's temporal-rendering helpers load it via
+`load_persona_section("now-anchor")` and splice it into the prompt directly,
+so it does not appear in `_PERSONA_SECTIONS`. It is still part of the
+public surface; third-party tools that re-render the prompt should treat
+it the same as the other section files.
+
+The wins:
 
 - **Auditable** — `git log -- prompts/runtime/persona/sections/` is the
   history of every persona-prompt change since v0.3.0.

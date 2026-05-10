@@ -157,7 +157,10 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 
 For PR-level progress and per-RFC status, see [ROADMAP.md](ROADMAP.md).
 For per-release upgrade notes and operator-visible changes, see
-[CHANGELOG.md](CHANGELOG.md).
+[CHANGELOG.md](CHANGELOG.md). For known limitations and deferred scope in
+the current pre-release (channels are internal-only and unauthenticated,
+MT-MEMORY-005 dementia gap, RFC 0009 Phases 3–4 deferred to v0.4.0), see
+the [v0.3.0 release checklist § Known Gaps](docs/v0.3.0-release-checklist.md#6-known-gaps-to-document-in-release-notes).
 
 ---
 

@@ -6,13 +6,27 @@ the other three are backed by a shared SQLite database.
 
 In v0.3.0 the **`MemoryFacade`** ([agents/memory/facade.py](../../agents/memory/facade.py),
 [RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-facade-shape))
-is the boundary between callers (task agents and the persona runtime) and
-the underlying tier modules. Callers must not depend on the tier-specific
-schemas — the facade's `store_observation` / `retrieve_relevant` / `compress`
-surface is the contract. Per-channel and per-DM **scoping** is layered on top
-through `recall_with_scope_filter` ([agents/memory/scope_recall.py](../../agents/memory/scope_recall.py)) —
+is the read/write contract for **task agents** —
+`store_observation` / `retrieve_relevant` / `compress`. Task-agent callers
+must not depend on the tier-specific schemas; the facade is the boundary.
+
+The **persona runtime is asymmetric in v0.3.0**: its read path
+([memory_context.py](../../agents/persona_runtime/memory_context.py),
+[channel_history.py](../../agents/persona_runtime/channel_history.py))
+calls the tier modules directly — `episodic.recall`, `recall_notes`,
+`recall_relationship_summary`, `recall_with_scope_filter`. The only facade
+contact on the persona side is the pure-function `MemoryFacade.compress`
+invoked by [summarize_close.py](../../agents/persona_runtime/summarize_close.py)
+on interaction close (no facade instance / DB connection required).
+Closing the persona-runtime read path through the facade is a deferred
+follow-up.
+
+Per-channel and per-DM **scoping** is layered on top through
+`recall_with_scope_filter` ([agents/memory/scope_recall.py](../../agents/memory/scope_recall.py)) —
 RFC 0020 P3 + RFC 0011 P3 joint delivery — so an agent in many channels does
-not pull unrelated history into its prompt for a single-channel turn.
+not pull unrelated history into its prompt for a single-channel turn. Task
+agents reach it through the facade; the persona runtime calls it directly
+from `channel_history.py`.
 
 ```mermaid
 graph TB
@@ -22,7 +36,7 @@ graph TB
         ITX["InteractionTracker<br/>(RFC 0020)"]
     end
 
-    subgraph Facade["MemoryFacade — agents/memory/facade.py (RFC 0008 §B)"]
+    subgraph Facade["MemoryFacade — agents/memory/facade.py (RFC 0008 §B)<br/>task-agent contract; persona runtime uses compress() only in v0.3.0"]
         F["store_observation /<br/>retrieve_relevant /<br/>compress<br/>+ scope-filtered recall<br/>(scope_recall.py)"]
     end
 
@@ -40,8 +54,9 @@ graph TB
 
     PR --> CTX
     PR --> ITX
-    ITX -->|on close →<br/>summarize_close.py<br/>writes ONE episode| F
-    CTX -->|recall + scope filter| F
+    ITX -->|on close →<br/>summarize_close.py<br/>calls MemoryFacade.compress<br/>(pure function on turn list)| F
+    CTX -.->|persona-runtime read path<br/>bypasses facade in v0.3.0:<br/>recall / recall_notes /<br/>recall_with_scope_filter| E
+    CTX -.->|relationship summary<br/>(direct)| R
     F --> W
     F --> E
     F --> R
@@ -62,7 +77,7 @@ graph TB
 
 ## Why a facade (RFC 0008)
 
-The pre-v0.3.0 runtime called tier modules directly — `episodic_memory.recall(...)`,
+Pre-v0.3.0 task agents called tier modules directly — `episodic_memory.recall(...)`,
 `relationship_memory.get_relationship_summary(...)`, `note_store.recall_notes(...)`.
 That coupling made it impossible to:
 
@@ -74,11 +89,28 @@ That coupling made it impossible to:
   episodic / relationship / notes.
 - **Switch tier implementations without rewriting callers** — the facade
   is what lets RFC 0026 (declarative facts tier, v0.3.1) ship as an
-  additive tier without churning every persona-runtime call site.
+  additive tier without churning every task-agent call site.
 - **Apply per-channel / per-DM scoping uniformly** — `recall_with_scope_filter`
   is the single read-side dual to the `interaction_id` + scope tag the
   episodic store writes under (RFC 0020). Without the facade, every
   caller would have to remember to pass the right scope.
+
+### v0.3.0 reality check — persona runtime is asymmetric
+
+The persona runtime predates the facade and was not migrated as part of
+v0.3.0. Its read path
+([`memory_context.py`](../../agents/persona_runtime/memory_context.py) +
+[`channel_history.py`](../../agents/persona_runtime/channel_history.py))
+calls tier modules directly — `episodic.recall`, `recall_notes`,
+`recall_relationship_summary`, `recall_with_scope_filter`. The only facade
+contact on the persona side is the **pure-function** `MemoryFacade.compress`
+invoked by [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+on interaction close — no facade instance or DB connection is required.
+
+So the budget-allocation and uniform-scoping properties above describe the
+**task-agent** contract; the persona runtime gets per-channel scoping today
+by calling `recall_with_scope_filter` directly. Closing the persona-runtime
+read path through the facade is a deferred follow-up.
 
 ## Per-channel scoping (RFC 0020 P3 + RFC 0011 P3)
 
