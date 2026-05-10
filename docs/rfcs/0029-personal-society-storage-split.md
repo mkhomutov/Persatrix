@@ -1,6 +1,6 @@
 # RFC 0029 — Personal/Society Storage Split
 
-> **Numbering note (2026-05-10).** This RFC was originally filed as RFC 0025 (PR #309). The 0025 slot is reserved as `superseded by RFC 0027` (per [docs/rfcs/README.md §Reserved RFC Numbers](README.md#reserved-rfc-numbers) and [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index) — RFC 0027 explicitly says "supersedes the user's draft RFC 0025"). Reusing slot 0025 for an unrelated topic would invalidate that supersession edge and the README's "slot retained for historical record" semantic. Renumbered to the next free slot per [PR #308's deep review §C1](../pr-reviews/pr308-deep-review.md) and [PR #309's deep review §C1](../pr-reviews/pr309-deep-review.md). Slots 0023 (narrowed) and 0024 (deferred) had no superseding RFC pointing at them and so were not renumbered when their files landed under different topics — only 0025 had an active supersession breadcrumb that this rename preserves.
+> **Numbering note (2026-05-10).** This RFC was originally filed as RFC 0025 (PR #309). The 0025 slot is reserved as `superseded by RFC 0027` (per [docs/rfcs/README.md §Reserved RFC Numbers](README.md#reserved-rfc-numbers) and [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index) — RFC 0027 explicitly says "supersedes the user's draft RFC 0025"). Reusing slot 0025 for an unrelated topic would invalidate that supersession edge and the README's "slot retained for historical record" semantic, so this RFC was renumbered to the next free slot. Slots 0023 (narrowed) and 0024 (deferred) had no superseding RFC pointing at them and so were not renumbered when their files landed under different topics — only 0025 had an active supersession breadcrumb that this rename preserves. (The reasoning was first recorded in the PR #309 deep-review process; review reports themselves live under `docs/pr-reviews/`, which is `.gitignore`'d per repo convention, so this note is the canonical record.)
 
 **Type**: architecture
 **Status**: 📋 Proposed
@@ -91,7 +91,7 @@ flowchart TB
         FA[MemoryFacade] --> EA[EpisodicMemory]
         FA --> NA[NoteStore]
         FA --> SPA[SharedPoolRegistry]
-        RA[RelationshipMemory] --> DBA[(data/memory.db<br/>Agent A — episodes,<br/>notes, relationships,<br/>shared_pools)]
+        RA[RelationshipMemory] -->|A's outgoing edges only| DBA[(data/memory.db<br/>Agent A — episodes,<br/>notes, relationships,<br/>shared_pools)]
         EA --> DBA
         NA --> DBA
         SPA --> DBA
@@ -99,7 +99,7 @@ flowchart TB
 
     subgraph Agent_B [Agent B process]
         FB[MemoryFacade] --> DBB[(data/memory.db<br/>Agent B — same schema,<br/>different file)]
-        RB[RelationshipMemory] --> DBB
+        RB[RelationshipMemory] -->|B's outgoing edges only| DBB
     end
 
     subgraph Orchestrator [Go orchestrator]
@@ -137,10 +137,10 @@ A tier is **personal** when it has exactly one writer (the agent itself) and exa
 |---|---|---|---|
 | Episodes | Personal | Per-agent SQLite + FTS5 | Persona reads on every tick; microsecond latency budget; `rm -rf agent-{id}/` is the natural erasure boundary |
 | Notes | Personal | Per-agent SQLite | Agent-authored prose, never read by other agents |
-| Bonds (relationships) | **Personal slice + society projection** | SQLite for own outgoing edges; Postgres `bonds_view` for cross-agent queries | "Who do I trust" is personal; "who trusts X" is society. Section D specifies the projection |
+| Bonds (relationships) | **Personal slice + society projection** | SQLite for own outgoing edges; Postgres `bonds_inbound` projection for cross-agent queries | "Who do I trust" is personal; "who trusts X" is society. Section D specifies the projection (a maintained table, not a SQL `VIEW`) |
 | Scratchpad (working memory) | Personal | RAM + small SQLite snapshot | Per the roadmap's "scratchpad bridges one interaction-close boundary" |
 | Facts (RFC 0026) | Personal | Per-agent SQLite | The persona's declarative truth; `subject="self"` is identity |
-| Commitments (RFC 0021) | Personal | Per-agent SQLite | Agent's own promises |
+| Commitments (RFC 0021 Phases 2–4) | Personal | Per-agent SQLite | Agent's own promises |
 | Shared pools | **Society** | Postgres | Multi-agent by definition; current per-agent layout is a v0.2 artifact |
 | Channels (messages, memberships) | **Society** | Postgres (Phase 3) | Multi-writer fanout; today in `data/channels.db` |
 | Decision records (RFC 0028) | **Society** | Postgres | Append-only audit chain, cross-agent replay |
@@ -182,7 +182,14 @@ class MemoryStore:
     # action logs (the choice between per-agent JSONL vs SQLite append-only
     # table is OQ §3 / SA-7's call), but the facade reserves the method
     # name so SA-7 can extend the personal-tier API without re-versioning.
-    async def record_action(...) -> str: ...  # TODO(SA-7): backend chosen by RFC 0028 spawn
+    # Phase 1 raises NotImplementedError on call rather than leaving an
+    # ambiguous `...` body that types as a no-op `None` return — callers
+    # see an explicit "backend not chosen yet" error instead of silently
+    # losing audit writes.
+    async def record_action(...) -> str:
+        raise NotImplementedError(
+            "record_action backend chosen by SA-7 (RFC 0028 spawn); not in Phase 1"
+        )
 
     # ─── Society tier ──
     async def publish_to_pool(pool: str, content: str, *, confidence: float) -> str: ...
@@ -202,10 +209,12 @@ Three properties matter:
    | Mode | Trigger | Read behaviour | Write behaviour |
    |---|---|---|---|
    | Intentional disable | `society_dsn=None` (single-agent mode) | Raise `SocietyDisabled` | Raise `SocietyDisabled` |
-   | Transient outage | DSN set, pool unhealthy / Postgres unreachable | If `--keep-source` migration window active: fall back to the read-only SQLite source with structured warning. Otherwise raise `SocietyTransientError`. | Always raise `SocietyTransientError`; never silently fall back, never silently buffer. |
-   | Available | Normal | Postgres | Postgres |
+   | Transient outage | DSN set, pool unhealthy / Postgres unreachable | If `--keep-source` migration window active: return a result tagged `is_partial=True` from the read-only SQLite source (caller's own slice only — no cross-agent rows) with a structured warning. Otherwise raise `SocietyTransientError`. | Always raise `SocietyTransientError`; never silently fall back, never silently buffer. |
+   | Available | Normal | Postgres; result tagged `is_partial=False` | Postgres |
 
    The `--single-agent` deployment shape stays a one-binary, one-SQLite experience. A society-tier *write* during a Postgres outage is the case the original sketch did not cover; it raises a transient error and the caller decides whether to back off, queue (via the §D outbox for the bonds projection specifically), or surface to a human — the facade does not silently buffer because that hides outages from operators.
+
+   **Reads carry a partial-result flag so degraded cross-agent visibility is not silent.** Society-tier read results (`list[PoolEntry]`, `list[InboundTrust]`, etc.) are wrapped in a typed envelope with an `is_partial: bool` field. Under the `Available` mode the field is `False`. Under `Transient outage` with `--keep-source` fallback, the field is `True` and the rows are the caller's own slice only — never B's, never C's. Callers whose correctness depends on cross-agent completeness (the `bonds_inbound` reader is the canonical case — acting on a partial trust graph would mis-rank peers) check `is_partial` and surface a "trust scores stale" warning to the user rather than acting on stale-and-missing data. This matches the symmetry the write path already has: writes never silently fall back, and now reads never silently shrink.
 3. **The facade enforces "vectors-as-accelerator-only."** Section F. There is no `recall_by_similarity_returning_content` method; only `recall_by_similarity_returning_ids` exists, and the result must be hydrated through a personal/society read that has authoritative provenance.
 
 ### D. Society Store: Schema and Backend
@@ -264,7 +273,36 @@ CREATE TABLE audit_chain (...);
 
 **Bonds projection atomicity (write-through + outbox + nightly reconcile).** The naive write-through ("update SQLite, then UPSERT Postgres in the same call") has three failure modes that a hot-path projection cannot ignore: (a) SQLite commits, Postgres write fails (network blip, Postgres restart, transient credential rotation) and the projection drifts silently; (b) no rebuild path means a drifted projection stays wrong forever, defeating the SA-1 "compliance erasure is one JOIN-and-DELETE" promise; (c) `participant_type` was missing from the original sketch and the agent↔user / agent↔group cases (real per RFC 0011 chat-as-DM) would silently lose information. The schema above closes (c). The atomicity model is:
 
-1. **Local outbox.** Each per-agent SQLite ships a `bonds_outbox` table — `(row_pk, subject_id, subject_type, source_id, source_type, trust_score, interaction_count, last_interaction_at, queued_at, attempts)`. Every `update_trust` writes the `relationships` row and the `bonds_outbox` row in the same SQLite transaction (the personal tier is the single source of truth — it commits atomically to its own DB).
+1. **Local outbox.** Each per-agent SQLite ships a `bonds_outbox` table:
+
+   ```sql
+   -- Per-agent SQLite (lives next to `relationships` in data/memory.db).
+   -- The `id` surrogate key replaces the original prose's `row_pk`, which was
+   -- ambiguous: the personal `relationships` table is keyed on the four-tuple
+   -- (participant_id, participant_type, other_participant_id, other_participant_type)
+   -- and exposes no rowid through the public API. A monotonic `id` gives the
+   -- drain a stable FIFO order without coupling the outbox to SQLite's implicit
+   -- rowid, and tolerates multiple queued updates to the same relationship
+   -- (sequential `update_trust` calls each enqueue a row; the drain UPSERTs
+   -- them in order so the final `bonds_inbound` value reflects the last enqueue).
+   CREATE TABLE IF NOT EXISTS bonds_outbox (
+       id                  INTEGER PRIMARY KEY,
+       subject_id          TEXT NOT NULL,
+       subject_type        TEXT NOT NULL,
+       source_id           TEXT NOT NULL,
+       source_type         TEXT NOT NULL,
+       trust_score         REAL NOT NULL,
+       interaction_count   INTEGER NOT NULL,
+       last_interaction_at TEXT,
+       queued_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+       attempts            INTEGER NOT NULL DEFAULT 0
+   );
+   -- Drain reads ORDER BY id (== insert order) and bounds-staleness alerting
+   -- reads MIN(queued_at); both paths benefit from this index.
+   CREATE INDEX IF NOT EXISTS bonds_outbox_queued_at_idx ON bonds_outbox(queued_at);
+   ```
+
+   Every `update_trust` writes the `relationships` row and the `bonds_outbox` row in the same SQLite transaction (the personal tier is the single source of truth — it commits atomically to its own DB). Phase 3 may iterate on the column shape (e.g. adding a `last_error TEXT` for backoff diagnostics) but the table contract — `id`-ordered FIFO, four-tuple subject/source identity, idempotent UPSERT target — is fixed by this RFC.
 2. **Best-effort flush.** A background task drains the outbox in batches: read up to N rows, UPSERT each into Postgres `bonds_inbound` (setting `last_synced_at = NOW()`), delete the outbox rows on success, increment `attempts` with exponential backoff on failure. Hot-path `update_trust` returns immediately after the SQLite commit; the writer never blocks on Postgres.
 3. **Bounded staleness.** Steady-state staleness is one drain interval (default 1s, configurable); under Postgres outage staleness is bounded by outage duration plus catch-up time. `bonds_outbox_lag_seconds{agent_id}` and `bonds_outbox_depth{agent_id}` ship as OTel gauges so SRE can alert on either.
 4. **Nightly reconcile.** A `persatrix memory reconcile-bonds` job walks every agent's `relationships` table and re-UPSERTs into `bonds_inbound`, scrubbing rows whose `(subject_id, subject_type, source_id=A, source_type)` no longer exists in A's personal tier. Idempotent; safe to re-run; bounds drift even if the outbox loses a row to disk corruption.
@@ -272,7 +310,9 @@ CREATE TABLE audit_chain (...);
 
 This is the recommended outcome of Open Question §1: write-through + outbox + nightly reconcile. The lazy materialised view alternative (refresh on schedule) was rejected because cross-agent reads against a stale view would lie under the *normal* operating regime, not just under failure; the outbox keeps SQLite as the single source of truth in both the *logical* and *operational* sense.
 
-**Connection management.** One `asyncpg` pool per agent process, default size 4, configurable via `memory.society_pool_size` in `config/agents.yaml`. The pool is created lazily on first society-tier method call so single-agent mode never opens a Postgres connection. A separate Go-side pool serves `internal/channels/` (Phase 3 replaces the SQLite store with a Postgres-backed one in the same package).
+**Connection management.** One `asyncpg` pool per agent process, default size **2**, configurable via `memory.society_pool_size` in `config/agents.yaml`. The pool is created lazily on first society-tier method call so single-agent mode never opens a Postgres connection (Goal 3 holds — single-agent never touches Postgres). A separate Go-side pool serves `internal/channels/` (Phase 3 replaces the SQLite store with a Postgres-backed one in the same package).
+
+The default of 2 is sized so a v0.4.0 "agent organizations" deployment with up to ~50 agents fits inside Postgres' default `max_connections=100` without operator intervention. **For deployments running >25 agents, deploy `pgbouncer` (transaction pooling mode) between agents and Postgres** — the per-agent pool then multiplexes through pgbouncer's shared backend pool and `max_connections` is no longer the bound. The orchestrator-mediated pool (one shared pool, agents call society methods over a gRPC RPC instead of holding their own `asyncpg` pool) is the right long-term answer for very large deployments and is left to a follow-up RFC; this default + pgbouncer note covers the v0.4.0 target.
 
 ### E. Cross-Agent Read Path and Capability Tokens
 
@@ -314,15 +354,17 @@ episodes = await asyncio.gather(*(store.get_episode(id) for id in ids))
 A vector hit returns row IDs only. Hydration goes through the authoritative personal/society read, which:
 
 - enforces capability tokens (Section E),
-- transparently respects deletion (a deleted row hydrates to `None`, the index entry is GC'd by a background job),
+- transparently respects deletion (a deleted row hydrates to `None`; the index entry is GC'd by `persatrix memory vector-gc`, a background job that runs hourly by default — see "Vector-index GC bound" below),
 - guarantees RFC 0028 replay determinism (the hydrated content is the source-of-truth row, not a frozen embedding-time snapshot).
 
 When `pgvector` lands (deferred behind [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) per the roadmap), it lives in the society Postgres — one place to back up, one place to scrub for erasure, one ops surface.
 
+**Vector-index GC bound.** Between the row delete and the GC sweep, similarity hits return ID → hydration returns `None`. The "accelerator-only" invariant requires the GC window to be bounded so callers doing `recall_by_similarity → get_episode` see the inconsistency drain on a known schedule rather than an unspecified one. The job is `persatrix memory vector-gc`, default cadence **hourly** (configurable via `memory.vector_gc_interval`), with a forced-run subcommand for tests and post-erasure operator runbooks. RFC 0013 erasure correctness depends on this bound: an erased participant whose embeddings linger for 24h would be a partial-erasure regression, so the §Test Strategy `test_erasure_spans_boundary` runs `vector-gc --force` between the delete and the row-scan assertion to prove erasure spans the index, not just the truth tables.
+
 **Personal-tier vectors live society-side under per-agent partition keys.** The personal tiers (episodes, notes, facts) are per-agent SQLite — society Postgres has no read access to those rows. The vector index therefore stores embeddings *of rows it cannot read*, keyed on `(agent_id, tier, row_id)` with an `agent_id` partition column. Hydration of a similarity hit goes back to the owning agent's personal-tier read, which carries authoritative provenance. This is defensible against §B's "society does not hold personal data" boundary because the embedding is one-way under typical models — you cannot reconstruct the source episode from its embedding — but the property is worth stating because it is the reason the §Security Considerations partition-per-scope mitigation works:
 
 - Each personal-tier embedding is written to a partition keyed by `agent_id` (and tier).
-- A society-tier vector query against partitions the caller cannot read returns `[]` — *not* an "access denied" — so the index does not leak existence of rows the caller cannot hydrate.
+- A society-tier vector query against partitions the caller cannot read returns `[]` — *not* an "access denied" — so the index does not leak existence of rows the caller cannot hydrate. **Mechanism: query rewriting in the facade.** `pgvector` has no native partition-level access control, so the facade's `recall_by_similarity` rewrites every `<->` similarity query to append `WHERE agent_id IN (<scope>)` before issuing it to Postgres, where `<scope>` is derived from the caller's capability token (Section E). The vector-search API does not accept a caller-provided scope argument — the facade is the single decision point. RLS and per-agent vector tables were both rejected as alternatives: RLS adds a session-variable plumbing requirement that duplicates the token check the facade already runs, and per-agent tables forfeit the "one ops surface" benefit that motivates the society-side placement in the first place.
 - Cross-partition similarity (rare; only the orchestrator with a `bonds:read:*`-equivalent capability scope sees more than one partition at a time) returns IDs only; hydration still requires the owning agent's authoritative read and so the boundary holds end-to-end.
 - The "one ops surface" benefit is still real (one Postgres to back up and scrub); the `agent_id` partition is what makes per-agent erasure a `DELETE WHERE agent_id = ?` rather than an N-place scrub.
 
@@ -354,6 +396,8 @@ Steps:
 
 The migration is reversible during the deprecation window: `persatrix memory rollback` truncates the society projections and re-points the facade at SQLite-only mode. After the deprecation window, `--keep-source` becomes a no-op and the source files are deleted on next migrate run.
 
+**Rollback is not lossless after live writes.** Between `migrate` and `rollback`, agents will have written *new* society-tier rows into Postgres — new pool entries, new bond projection updates, new channel messages. Truncating Postgres deletes those new writes; the legacy SQLite source is read-only post-migration and has no record of them. So **rollback discards every society-tier row written between migrate and rollback.** The deprecation window is intentionally short (one minor version) so this loss has bounded scope, but for any deployment that has accepted human input into shared pools or channel messages post-migration, rollback is *not* a safe recovery path — operators should resolve the underlying outage instead and re-run `migrate` afresh. This is the same argument the §C write path already makes for "writes never silently fall back": being explicit about where data loss can happen is what protects Phase 4 from a "we said it was reversible" argument when it isn't.
+
 ---
 
 ## Security Considerations
@@ -378,7 +422,7 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 | **5** | RFC 0028 `decision_records` and RFC 0013 `audit_chain` schemas land directly in the society Postgres — no per-agent intermediate. (Tracked here as a downstream consumer of the boundary; the schemas themselves live in their own RFCs.) | v0.4.0+ | Depends on Phase 3 |
 | **6** | Conditional: per-tier SQLite file split (SA-5 from roadmap) if Phase 3 benchmark shows personal-tier write contention under realistic v0.3+ load. Default outcome: not needed; one file per agent stays. | v0.4.x (conditional) | Independent; gated on benchmark |
 
-**Ordering invariant.** Phase 1 lands *after* RFC 0011 (all eight PRs merged 2026-05-07 through 2026-05-10; see [`0011-pr-plan.md`](0011-pr-plan.md)) and *before* RFC 0028 implementation begins. RFC 0011's channel-history caller already targets `MemoryFacade.retrieve_relevant(...)`; Phase 1 promotes that facade to `MemoryStore` and migrates the call site as part of the rename, with the legacy facade kept as a thin shim for one minor version. RFC 0028 must not begin until Phase 1 ships — otherwise `DecisionRecord` schema lands against the legacy facade and Phase 2/3 become breaking changes for it. This mirrors the roadmap's SA-1 ordering ("should land *before* RFC 0028 implementation begins or RFC 0010 schema is settled").
+**Ordering invariant.** Phase 1 lands *after* RFC 0011 (all eight PRs merged 2026-05-07 through 2026-05-09; see [`0011-pr-plan.md`](0011-pr-plan.md)) and *before* RFC 0028 implementation begins. RFC 0011's channel-history caller already targets `MemoryFacade.retrieve_relevant(...)`; Phase 1 promotes that facade to `MemoryStore` and migrates the call site as part of the rename, with the legacy facade kept as a thin shim for one minor version. RFC 0028 must not begin until Phase 1 ships — otherwise `DecisionRecord` schema lands against the legacy facade and Phase 2/3 become breaking changes for it. This mirrors the roadmap's SA-1 ordering ("should land *before* RFC 0028 implementation begins or RFC 0010 schema is settled").
 
 **RFC 0024 interaction.** Event-driven scheduling (RFC 0024) and this RFC are independent: RFC 0024 changes *when* the persona wakes; this RFC changes *where* it reads/writes. Phase 1 of this RFC and Phase 1 of RFC 0024 both target the v0.3.x patch line and can ship in either order — neither blocks the other.
 
@@ -411,13 +455,15 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 - **Phase 2 — capability tokens.** New `test_memory_capability.py` parametrises (scope, operation) → expected outcome (allow / `CapabilityDenied`). Mock verifier; integration with the real RFC 0009 verifier deferred to RFC 0009 Phase 4 PR plan.
 - **Phase 3 — Postgres backend.** Two test rings: (a) a Postgres-required ring under `tests/integration/python/society/` skipped when `PERSATRIX_TEST_PG_DSN` is unset, mirroring the existing skip-if-DSN-unset pattern; (b) a fast unit ring covering write-through projection invariants (every personal `update_trust` produces exactly one outbox row; every successful drain produces exactly one `bonds_inbound` upsert; reconcile is idempotent). The choice of Postgres test harness for ring (b) is an Open Question (§7) — the candidates are [`pytest-postgresql`](https://github.com/ClearcodeHQ/pytest-postgresql) (real Postgres in a temp dir, ~seconds per CI run) and a hand-rolled `asyncpg`-protocol fake. `pytest-postgresql` is closer to integration than mock and adds CI minutes; the fake is faster but reproduces less of the real failure surface. Resolved before Phase 3 PR plan.
 - **Migration tool.** `tests/integration/migration/` ships a fixture: 3 synthetic per-agent `memory.db` files + 1 `channels.db`, runs `persatrix memory migrate --dry-run` then `--apply` against a throwaway Postgres, asserts row-count parity and rollback restores the SQLite-only state.
-- **Performance regression gate.** New CI gate: `tests/perf/personal_tier_latency.py` measures `MemoryStore.recall_episodes` p99 against a fixed corpus and fails the build if it regresses >20% from the **Phase 1 post-merge baseline**. The baseline is captured by the Phase 1 close-out PR after the facade promotion lands — not before — because Phase 1 is a pure refactor (behaviour identical) and the post-merge number is the legitimate "this is what the persona hot path costs after the rename" reference. The gate then protects against Phase 2/3 routing personal-tier reads through the society backend; the latency budget protects the persona hot path against accidental Postgres routing.
+- **Performance regression gate.** New CI gate: `tests/perf/personal_tier_latency.py` measures `MemoryStore.recall_episodes` p99 against a fixed corpus and fails the build if it regresses >20% from the **Phase 1 post-merge baseline**. The baseline is persisted as `tests/perf/baselines/personal_tier_latency.json` (a small checked-in JSON file: `{"recall_episodes_p99_ms": <number>, "captured_at": <iso8601>, "captured_commit": <sha>}`); regenerated by a maintainer-triggered CI workflow (`workflow_dispatch` only, gated to repo maintainers) that runs the perf harness on the current main and updates the file in a follow-up PR. The baseline is captured by the Phase 1 close-out PR after the facade promotion lands — not before — because Phase 1 is a pure refactor (behaviour identical) and the post-merge number is the legitimate "this is what the persona hot path costs after the rename" reference. The gate then protects against Phase 2/3 routing personal-tier reads through the society backend; the latency budget protects the persona hot path against accidental Postgres routing.
 - **Erasure correctness.** New `test_erasure_spans_boundary.py`: `erase_participant("bob")` removes Bob from every per-agent SQLite + every society-tier table; assertion is a row-scan over both backends.
 - **Single-agent mode.** `test_single_agent_no_postgres.py`: `MemoryStore(agent_id="alice")` with `society_dsn=None` succeeds; every personal-tier call works; every society-tier call raises `SocietyBackendUnavailable` with a clear message naming `memory.society_dsn`.
 
 ---
 
 ## Open Questions
+
+> §1 is resolved in §D as part of this RFC's ratification and is retained here for traceability. §2–§7 are genuinely open — see the per-question disposition lines for who owns each.
 
 1. **Bonds projection: write-through vs lazy materialised view.** ~~Open~~ Resolved in §D — write-through + local outbox + nightly reconcile, not raw write-through and not lazy materialised view. The naive write-through has an atomicity hole (SQLite commits, Postgres write fails → projection drifts silently) that the lazy view's "wait for next refresh" recovery does not solve under the normal operating regime; the outbox makes SQLite the single source of truth operationally, bounds steady-state staleness to one drain interval, and gives a documented rebuild path. Phase 3 ships the outbox + reconcile pair together.
 2. **Postgres-required for v0.4.0 GA?** The roadmap's Risk #1 says single-agent must remain first-class. This RFC honours that — society-tier methods raise on `society_dsn=None`. Open: do we ship v0.4.0 GA features (org graph, RFC 0028 decision records) that *require* Postgres, and document the single-agent feature subset? Recommend yes; the alternative is shipping every society feature with a SQLite fallback that the boundary was created to avoid.
