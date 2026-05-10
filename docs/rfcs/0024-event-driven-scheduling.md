@@ -6,7 +6,8 @@
 **Date**: 2026-05-09
 **Target**: v0.3.x (TBD)
 **Depends on**: RFC 0005 (Persona Agent + Memory), RFC 0011 (Channels & Bridges), RFC 0017 (Memory Injection Budget)
-**Relates to**: RFC 0023 (LLM Call Leasing)
+**Soft-depends on (Phase 2+)**: RFC 0025 (Personal/Society Storage Split) — see Open Question §1; Phase 2 timer persistence chooses a backend that the v0.3 storage decision may re-shape.
+**Relates to**: RFC 0023 (LLM Call Leasing), RFC 0027 (Reflection-Driven Consolidation) — see §D for salience-signal ownership.
 
 ---
 
@@ -19,6 +20,7 @@
 - [Design / Implementation](#design--implementation)
   - [A. Current State and Gaps](#a-current-state-and-gaps)
   - [B. Event Loop Inversion](#b-event-loop-inversion)
+    - [B.1. Synchronous-dispatch callers under the queue model](#b1-synchronous-dispatch-callers-under-the-queue-model)
   - [C. Scheduled Timer Registry](#c-scheduled-timer-registry)
   - [D. Salience-Triggered Wakes](#d-salience-triggered-wakes)
   - [E. Channel Message Integration](#e-channel-message-integration)
@@ -29,6 +31,7 @@
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
 - [Open Questions](#open-questions)
+- [Decided](#decided)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
 
@@ -113,6 +116,32 @@ Wake event taxonomy:
 
 The `wake()` method on the current `TickScheduler` remains a public entry point but becomes a thin adapter: `queue.put_nowait(InboundEventWake(...))`. Existing callers of `scheduler.wake()` keep working through Phase 4.
 
+#### B.1. Synchronous-dispatch callers under the queue model
+
+[`EventDispatcher.dispatch()`](../../agents/dispatch.py) is currently *synchronous-return*: it `await`s `agent.on_event(event)` and returns the resulting `list[AgentAction]`. Two callers depend on that contract:
+
+- **[`SendChatMessage`](../../agents/server_servicers.py)** uses `dispatch(..., execute_actions=False)` so it can extract the chat reply from the returned actions before side-effects fire (the OQ 5/7 resolution captured at [`agents/dispatch.py`](../../agents/dispatch.py) lines 92–97). The reply is the gRPC response payload — the handler cannot return until the agent has produced it. A bare enqueue-and-return would surface as `DEADLINE_EXCEEDED` for every chat call.
+- **[`ActionExecutor.dispatch`](../../agents/action_executor.py)** (cascading dispatches) currently awaits the inner dispatch and inherits its return value.
+
+A naïve "enqueue and park" therefore silently breaks the chat path. The RFC commits to **option (a): keep `dispatch()` synchronous-return through Phase 5**:
+
+```text
+dispatcher.dispatch(target, event):
+    handle = SyncDispatchHandle()                # asyncio.Future-shaped
+    queue.put_nowait(InboundEventWake(event, handle=handle))
+    return await handle                           # resolved by the loop after on_event()
+```
+
+The `EventLoop` resolves `handle` with the `list[AgentAction]` produced by `on_event()` *before* moving to the next wake, preserving (i) the synchronous return contract for chat and cascading dispatches and (ii) the queue-mediated serialisation that justifies the inversion. Fire-and-forget callers (`ReceiveChannelMessage`, salience writes, scheduled timers) construct their wakes without a handle and the loop simply does not resolve one.
+
+Why option (a), not (b) carve-out or (c) bypass-the-queue:
+
+- **(b)** "carve `SendChatMessage` out of the queue entirely" loses the serialisation guarantee with concurrent inbound events — a chat message racing a channel message could interleave inside the agent's lock window.
+- **(c)** "leave `dispatch()` synchronous and have *it* call `on_event` directly, skipping the queue" defeats the entire RFC: the queue is what makes wake sources enumerable and what unparks the agent.
+- **(a)** preserves both contracts at the cost of one `asyncio.Future` per synchronous wake. The `Future` is short-lived (resolved within one `on_event` call) and adds no steady-state cost for idle agents.
+
+Phase 6 may revisit this once `SendChatMessage` is itself rethought (streaming reply, async chat protocol, etc.) — but that is out of scope here. (PR #308 deep review C2.)
+
 ```mermaid
 sequenceDiagram
     participant RPC as gRPC Handler
@@ -167,9 +196,14 @@ Timers fire on `asyncio.loop.call_later` (monotonic), not wall-clock comparisons
 
 When a memory write occurs (episodic, notes, reflection), the write path emits a `MemoryWriteEvent` with a `salience: float` attribute. If `salience > threshold` (configured per agent), a `SalienceWake` is enqueued.
 
-Salience is *already* computed in [`agents/memory/episodic.py`](../../agents/memory/episodic.py) for the recall-side relevance ranking. The new code path consumes it on the *write* path to decide "does this warrant agent attention right now?"
+**Status of the salience signal.** No write-side `salience` field exists in the codebase today: `grep -ri salience agents/memory/` returns zero hits, and the only relevance signal in [`agents/memory/episodic.py`](../../agents/memory/episodic.py) is the recall-side FTS5 BM25 score (normalised against `min_score` per [RFC 0017 §B/C/E](0017-persona-memory-injection-budget.md)). Recall-side BM25 is *not* the right primitive to repurpose: it scores a candidate against a query, while the wake trigger needs a query-free importance score for an inbound write. (PR #308 deep review C1 — initial draft incorrectly framed this as an existing signal; corrected here.)
 
-Use cases:
+This RFC therefore introduces the write-side salience computation as part of Phase 3, with the following ownership boundaries:
+
+- **RFC 0024 owns**: the wake-trigger plumbing — `MemoryWriteEvent`, the `salience: float` field on writes, the threshold config, the `SalienceWake` enqueue path, and the loop-back guard in §F.
+- **RFC 0027 (Reflection-Driven Consolidation), if accepted, owns**: the formal definition of how `salience` is computed for consolidations and contradictions. Until 0027 lands, Phase 3 ships a deliberately conservative computation (constant 0.0 for episodic appends, a fixed positive value for reflection contradictions) so the wake plumbing can be exercised end-to-end without committing to a scoring model. The threshold default stays above the conservative scores — salience-driven wakes stay disabled-by-default until a calibrated scoring model lands. See [Open Question §2](#open-questions).
+
+Use cases (post-Phase 3, gated by the threshold default and by RFC 0027's scoring model):
 
 - A reflection consolidation produced a contradiction → wake the agent to reconcile.
 - A counterparty wrote a relationship update marking a long-running goal as resolved → wake to acknowledge.
@@ -194,9 +228,9 @@ No tick fires for channel quiet periods. No agent that joined a channel pays pol
 |---------|-----------|------------|
 | `EventLoop` task crashes mid-event | Agent stops responding to all wake sources | Supervisor restart with exponential backoff; structured log emitted with `agent_id` and last-handled wake type ([RFC 0018](0018-structured-logging-framework.md) schema) |
 | `SalienceWake` enqueued during shutdown | Wake is dropped | Acceptable — durable writes already landed; next agent restart reprocesses if needed |
-| Memory write triggers wake → wake triggers memory write → loop | Infinite wake cycle, runaway cost (the v0.2.1 leak in a new costume) | `SalienceWake` is *not* enqueued for writes that originated inside the agent's own LLM response — track `source_span_id` on the write and suppress if it matches an active LLM span |
+| Memory write triggers wake → wake triggers memory write → loop | Infinite wake cycle, runaway cost (the v0.2.1 leak in a new costume) | `SalienceWake` is *not* enqueued for writes that originated inside the agent's own LLM response — track `source_span_id` on the write and suppress if it matches an active LLM span. **Phase 3 prerequisite**: today `agents/memory/` writes do not carry `source_span_id` (verified by `grep`). The Phase 3 PR must add the attribute to the write path before `SalienceWake` ships, or fall back to a coarser guard (e.g. "no `SalienceWake` while the agent's `on_event` lock is held"). RFC 0019 covers OTEL completion broadly; the memory-write span attribute is a follow-up PR rather than something to assume in place. (PR #308 deep review S3.) |
 | Scheduled timer drift over long uptime | Timers fire on monotonic clock with `jitter_max` cap | `asyncio.loop.call_later` instead of wall-clock comparisons |
-| Backpressure: queue grows faster than agent can drain | Memory growth, eventual OOM | `asyncio.Queue(maxsize=1024)` with `put_nowait` discard policy + counter metric `agent.wake.dropped` (see Open Question §6) |
+| Backpressure: queue grows faster than agent can drain | Memory growth, eventual OOM | `asyncio.Queue(maxsize=1024)` with `put_nowait` discard policy + counter metric `agent.wake.dropped`. Trade-off: under discard, a slow agent becomes invisible to its peers — the orchestrator's [`ChannelRouter.fanout`](../../internal/channels/router.go) will not notice the drop, and the peer's `respond_policy` cannot react. Block-the-producer would push the slow-agent cost back into the channel router and degrade cross-agent traffic; discard is chosen so a single slow agent cannot stall the orchestrator. The drop is observable via `agent.wake.dropped`, not load-bearing. (Decided — see [Decided §1: backpressure](#decided-backpressure)) |
 | Misconfigured timer `interval_seconds: 0.001` | Busy loop | Validate at config load with a `_MIN_INTERVAL` floor matching today's `TickScheduler._MIN_INTERVAL = 1.0` |
 
 ### G. Migration of Existing TICK Logic
@@ -226,9 +260,9 @@ The §F guard becomes vestigial because the "empty context" condition can no lon
 
 | Phase | Scope | Backwards-compat |
 |-------|-------|-------------------|
-| 1 | Introduce `EventLoop` + `WakeEvent` types in a new `agents/event_loop.py`. `TickScheduler` becomes a deprecated alias that wraps `EventLoop` and synthesises a `ScheduledWake(timer_id="legacy_tick")` at the configured interval. Behaviour unchanged. | All existing config still works; `tick_interval_seconds` maps to one legacy timer. |
+| 1 | Introduce `EventLoop` + `WakeEvent` types in a new `agents/event_loop.py`. `TickScheduler` becomes a deprecated alias that wraps `EventLoop` and synthesises a `ScheduledWake(timer_id="legacy_tick")` at the configured interval. **`EventDispatcher.dispatch()` keeps its synchronous-return contract via the `SyncDispatchHandle` mechanism in §B.1** — chat and cascading-dispatch callers continue to receive `list[AgentAction]`; only the *delivery* of the wake moves through the queue. Behaviour unchanged. | All existing config still works; `tick_interval_seconds` maps to one legacy timer. `SendChatMessage` and `ActionExecutor.dispatch` keep their current return shape. |
 | 2 | Add `autonomy.timers` config block. Document the migration path. Both `tick_interval_seconds` and `timers` accepted (latter wins if both present). | Yes — old config still runs; warning logged when both are set. |
-| 3 | Implement `SalienceWake` from the memory write path. Add metric `agent.wake.salience_total`. Default `salience_threshold` set above the observed maximum (effectively disabled) until calibrated. | Yes — opt-in by lowering `autonomy.salience_threshold`. |
+| 3 | Introduce the write-side `salience: float` field on `MemoryWriteEvent` (does not exist today — see §D), implement `SalienceWake` from the memory write path, add metric `agent.wake.salience_total`. Phase-3 prerequisite: memory writes must carry `source_span_id` for the loop-back guard in §F (verified absent today; ship the attribute or the coarser fallback in this phase). Default `salience_threshold` set above the observed maximum (effectively disabled) until calibrated. | Yes — opt-in by lowering `autonomy.salience_threshold`. Threshold default keeps salience wakes off, so the new field is observable but not behaviour-changing. |
 | 4 | Migrate channel-message dispatch ([RFC 0011](0011-channels-bridges.md)) to call `event_loop.enqueue(InboundEventWake(event))` directly. `scheduler.wake()` keeps working for non-channel callers. | Yes — `wake()` adapter remains. |
 | 5 | `tick_interval_seconds` emits a deprecation warning at config load. Document the path to `timers: []` (the no-timers case). Update RFC 0017 §F with a note that the guard is now vestigial. | Yes — warning only, behaviour unchanged. |
 | 6 | Remove `tick_interval_seconds`. Delete §F guard code. Delete the `TickScheduler` legacy adapter. Remove `EventType.TICK` from the event taxonomy. | Breaking — minor version bump (pre-1.0). |
@@ -242,18 +276,18 @@ Phases 1–4 ship inside the v0.3.x window. Phase 5 lands in v0.4.0. Phase 6 def
 | `agents/event_loop.py` (new) | 1 | New module: `EventLoop`, `WakeEvent` taxonomy |
 | [`agents/tick.py`](../../agents/tick.py) | 1 | `TickScheduler` becomes thin adapter over `EventLoop`; legacy timer synthesised |
 | [`agents/persona.py`](../../agents/persona.py) | 1 | Wire `EventLoop` into agent lifecycle (start/stop) |
-| [`agents/dispatch.py`](../../agents/dispatch.py) | 1 | `EventDispatcher.dispatch()` calls `event_loop.enqueue` instead of `scheduler.wake()` |
+| [`agents/dispatch.py`](../../agents/dispatch.py) | 1 | `EventDispatcher.dispatch()` enqueues an `InboundEventWake` carrying a `SyncDispatchHandle` and `await`s the handle (§B.1). Replaces the current `scheduler.wake()` + `await agent.on_event(event)` shape but preserves the `list[AgentAction]` return contract for `SendChatMessage` and `ActionExecutor.dispatch`. |
 | [`agents/server_persona.py`](../../agents/server_persona.py) | 2 | Read `autonomy.timers` from config; pass to `EventLoop` |
 | [`schemas/agent.schema.json`](../../schemas/agent.schema.json) | 2 | Add `autonomy.timers` schema; mark `tick_interval_seconds` deprecated |
 | [`config/agents.yaml`](../../config/agents.yaml) | 2 | Migrate stock personas to `timers: []` (or explicit consolidation timer) |
-| [`agents/memory/episodic.py`](../../agents/memory/episodic.py) | 3 | Emit `MemoryWriteEvent` with salience attribute on write |
+| [`agents/memory/episodic.py`](../../agents/memory/episodic.py) | 3 | Introduce write-side `salience: float` (no such field today, verified by `grep`) and `source_span_id`; emit `MemoryWriteEvent` on write. Conservative scoring per §D until RFC 0027's scoring model lands. |
 | `agents/event_loop.py` | 3 | Subscribe to memory write events; enqueue `SalienceWake` above threshold; rate-limit |
 | [`agents/observability/metrics.py`](../../agents/observability/metrics.py) | 3 | Add `agent.wake.{inbound,scheduled,salience,dropped}` counters with `wake.kind` attribute |
 | [`agents/server_servicers.py`](../../agents/server_servicers.py) | 4 | `ReceiveChannelMessage` enqueues `InboundEventWake` directly |
 | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | 5–6 | RFC 0017 §F guard marked vestigial in Phase 5; removed in Phase 6 |
 | [`docs/rfcs/0017-persona-memory-injection-budget.md`](0017-persona-memory-injection-budget.md) | 5 | Cross-link: §F is superseded by RFC 0024 |
 | [`agents/tests/test_persona_tick_shortcircuit.py`](../../agents/tests/test_persona_tick_shortcircuit.py) | 5–6 | Test names updated; tests deleted in Phase 6 with the guard |
-| `agents/tests/test_event_loop.py` (new) | 1 | Coverage: enqueue/drain, queue-full discard, supervisor restart, legacy adapter |
+| `agents/tests/test_event_loop.py` (new) | 1 | Coverage: enqueue/drain, queue-full discard, supervisor restart, legacy adapter, `SyncDispatchHandle` resolves with the agent's actions for chat-style callers and stays unresolved for fire-and-forget callers (§B.1) |
 | `agents/tests/test_event_loop_salience.py` (new) | 3 | Salience threshold, write-loop guard, rate limit |
 | `agents/tests/test_event_loop_timers.py` (new) | 2 | Periodic firing, jitter bounds, monotonic-clock drift |
 
@@ -267,7 +301,7 @@ Phases 1–4 ship inside the v0.3.x window. Phase 5 lands in v0.4.0. Phase 6 def
 
 ## Open Questions
 
-1. **Timer registry persistence.** Should scheduled timers survive an agent restart by default? If yes, where do they persist — the per-agent SQLite, or a new orchestrator-side table? Channels (RFC 0011 §A) chose per-agent SQLite with the `messages` table; reusing that table feels wrong (timers aren't messages). A new `scheduled_wakes` table per agent SQLite is the cheapest option but couples the scheduler to the storage backend that #4 of the architectural critique warns may be re-shaped before v0.3 ships. **Resolved before Phase 2** — gate on whether the v0.3 memory architecture decision lands first.
+1. **Timer registry persistence.** Should scheduled timers survive an agent restart by default? If yes, where do they persist — the per-agent SQLite, or a new orchestrator-side table? Channels (RFC 0011 §A) chose per-agent SQLite with the `messages` table; reusing that table feels wrong (timers aren't messages). A new `scheduled_wakes` table per agent SQLite is the cheapest option but couples the scheduler to the storage backend that RFC 0025 (Personal/Society Storage Split) may re-shape before v0.3 ships — hence the soft-dependency in the frontmatter. **Resolved before Phase 2** — gate on RFC 0025's acceptance status: if 0025 lands first, persist into the personal-store half; if 0025 is still in draft when Phase 2 is ready, ship a per-agent SQLite `scheduled_wakes` table and accept the one-time `CREATE TABLE` migration cost in whichever backend wins (cheap; no production data to move at v0.3.x scale).
 
 2. **Salience threshold default.** Phase 3 ships with a high default that effectively disables salience wakes. What value enables it usefully without firing on every reflection? Needs a sample of production reflection scores from a deployed agent to calibrate. **Resolved before Phase 3 ships** — collect a week of salience-distribution data from a long-running persona before flipping the default.
 
@@ -275,16 +309,20 @@ Phases 1–4 ship inside the v0.3.x window. Phase 5 lands in v0.4.0. Phase 6 def
 
 4. **Observability across the new wake sources.** Today `agent.tick.duration` is a useful single histogram. Under three wake sources, dashboards either (a) split into three histograms or (b) keep one with a `wake.kind` attribute. Recommend (b) for cardinality budget. Cross-reference [RFC 0019 §F](0019-opentelemetry-completion.md#f-metrics).
 
-5. **Sub-agent lifecycle.** Sub-agents ([`agents/sub_agents/`](../../agents/sub_agents/)) inherit the parent's `TickScheduler` config today. If a sub-agent is short-lived and its parent has no scheduled timers, should the sub-agent get a default scheduled wake to ensure progress? Recommend: no — sub-agents are reactive by definition; if no event arrives, the parent supervises liveness via the sub-agent's task handle. Document explicitly in the Phase 1 PR.
+5. **Sub-agent lifecycle.** Sub-agents ([`agents/sub_agents/`](../../agents/sub_agents/)) do **not** have a `TickScheduler` today — `SubAgentSpawner.dispatch` (see [`agents/sub_agents/spawner.py`](../../agents/sub_agents/spawner.py)) calls `BaseAgent.handle()` synchronously and returns the `TaskOutput`; there is no autonomy loop on the sub-agent side. Under this RFC the sub-agent dispatch path therefore does *not* enqueue an `InboundEventWake` — it remains a direct in-process call. The open question is reduced to: **does any future RFC need a sub-agent wake source?** Recommend: no — sub-agents are reactive by definition (RFC 0008 PR 3 explicitly framed them as request/response under the `DelegationRequest`/`DelegationResult` contract); if a long-running sub-agent is ever introduced (RFC 0009 process-isolation work), it gets its own `EventLoop` instance at that point, not an inherited one. Document this non-inheritance explicitly in the Phase 1 PR. (PR #308 deep review S4 — original wording incorrectly asserted inheritance; corrected here.)
 
-6. **Backpressure semantics.** When the wake queue is full, the §F draft says "discard with metric." Alternative: block the producer (the dispatcher / memory write) until drained. Discard is safer for the orchestrator (a slow agent must not back-pressure the channel router) but loses information. Recommend discard with `maxsize=1024` to make `agent.wake.dropped` observable rather than load-bearing. **Resolved before Phase 1.**
+## Decided
+
+These were prior open questions whose resolution is now load-bearing on the design (referenced from §F failure-modes and §B.1). Documented here so future readers do not reopen them without re-reading the rationale.
+
+1. <a id="decided-backpressure"></a>**Backpressure: discard, not block.** When the wake queue is full, `put_nowait` discards and increments `agent.wake.dropped`. Block-the-producer was rejected because the producer is the orchestrator's [`ChannelRouter.fanout`](../../internal/channels/router.go) (or the memory write path), and a slow agent must not stall cross-agent traffic. The trade-off — a slow agent becomes invisible to its peers — is intentional and recovered via the `agent.wake.dropped` metric and by the per-recipient `respond_policy` already carried on `ChannelMessageEvent` (see [`proto/task.proto`](../../proto/task.proto) lines 161–167). Was Open Question §6 in the draft. (PR #308 deep review S2 — promoted from OQ to Decided to remove the assertion-as-question framing.)
 
 ## Decision / Next Steps
 
 If accepted:
 
 1. File `docs/rfcs/0024-pr-plan.md` with Phases 1–4 broken into PRs.
-2. Resolve Open Questions §1 (timer persistence) and §6 (backpressure) before Phase 1 lands.
+2. Resolve Open Question §1 (timer persistence) before Phase 1 lands. (Backpressure was OQ §6 in the draft and is now in [Decided §1](#decided-backpressure).)
 3. Cross-link from RFC 0017 §F (guard becomes vestigial in Phase 5) and RFC 0011 (channel dispatch becomes an event source, not a tick consumer).
 4. Sequence after [RFC 0023](0023-llm-call-leasing.md) lands at least Phase 1 — the leasing protocol gives the new wake sources structured cost attribution from day one, and `wake.kind` as a lease attribute is the cheapest moment to add.
 
