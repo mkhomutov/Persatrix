@@ -89,6 +89,68 @@ workflow:
 	assert.Equal(t, 0, seen["s2"].pkg.BudgetMemoryTokens, "PR 1 emits 0; PR 2 wires non-zero")
 }
 
+// TestContextPackage_RawOutputsCoexistWithPackage pins the RFC 0008 §D v1
+// advisory-only budget contract (M8): when packaging is enabled, the raw
+// upstream output keys (out1, out2, …) MUST remain in the dispatch context
+// map alongside the _context_package payload. Agents that don't yet consume
+// step_outputs need to keep reading raw outputs verbatim — packaging is
+// advisory ordering in v1, not enforcement. Closes the M8 row in the
+// triage table.
+func TestContextPackage_RawOutputsCoexistWithPackage(t *testing.T) {
+	const yaml = `schema_version: "0.1"
+workflow:
+  id: "ctxpkg-coexist-wf"
+  name: "Raw outputs coexist with _context_package"
+  trigger: "manual"
+  context_budget_total: 6000
+  steps:
+    - id: "s1"
+      agent: "test-agent"
+      input: "step one"
+      output_key: "out1"
+    - id: "s2"
+      agent: "test-agent"
+      input: "step two consuming {{ steps.out1.output }}"
+      depends_on: ["s1"]
+      output_key: "out2"
+`
+	dir := t.TempDir()
+	writeWorkflow(t, dir, "ctxpkg-coexist-wf", yaml)
+
+	store := state.NewInMemoryStore(zap.NewNop())
+
+	var mu sync.Mutex
+	type observed struct {
+		hasPackage bool
+		hasOut1    bool
+	}
+	seen := map[string]observed{}
+
+	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		_, hasPkg := req.Context[ContextPackageKey]
+		_, hasOut1 := req.Context["out1"]
+		seen[req.StepID] = observed{hasPackage: hasPkg, hasOut1: hasOut1}
+		return &executor.ExecuteResult{TaskID: "t1", Output: "ok-" + req.StepID}, nil
+	}}
+
+	sched := newTestScheduler(t, store, exec, dir, WithPollInterval(50*time.Millisecond))
+	createPendingRun(t, store, "ctxpkg-coexist-run", "ctxpkg-coexist-wf", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sched.Run(ctx) }()
+
+	waitForRunStatus(t, store, "ctxpkg-coexist-run", state.RunCompleted, 5*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Contains(t, seen, "s2")
+	assert.True(t, seen["s2"].hasPackage, "s2 must receive _context_package (packaging-on)")
+	assert.True(t, seen["s2"].hasOut1, "s2 must ALSO receive raw out1 — RFC 0008 §D v1 advisory-only contract (M8)")
+}
+
 // TestContextPackage_DisabledByDefault verifies that workflows without
 // context_budget_total preserve the legacy passthrough behaviour — no
 // _context_package key is injected, agents receive raw outputs verbatim.

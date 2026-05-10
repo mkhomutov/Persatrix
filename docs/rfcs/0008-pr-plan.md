@@ -153,7 +153,7 @@ Integration (Go + Python):
 | `agents/memory/eviction.py` | Single `EvictionPass.run()` entry point invoked on a periodic background task scheduled by `MemoryFacade.initialize()`. Default cadence: every 1 hour, configurable via `memory.eviction_cadence_seconds` in `config/agents.yaml` (default `3600`). |
 | `tests/unit/python/test_memory_facade.py` | **New** — facade contract tests, lifecycle tests, advisory-budget translation tests. |
 | `tests/unit/python/test_memory_eviction.py` | **New** — TTL eviction; size-cap eviction by hybrid score; deterministic ordering under tied scores. |
-| `tests/integration/python/test_task_agent_memory.py` | **New** — task agent with `memory.enabled: true` stores an observation, retrieves it on a subsequent call, respects `min_score` filter. |
+| `tests/integration/test_task_agent_memory.py` | **New** — task agent with `memory.enabled: true` stores an observation, retrieves it on a subsequent call, respects `min_score` filter. |
 
 #### Key implementation details
 
@@ -249,7 +249,7 @@ All blockers resolved in PR #221; deferrals routed below.
 | `internal/observability/` (Go) | New metrics: `delegation_merge_outcome{strategy, status}`, `delegation_dropped_fields_count`, `delegation_memory_writes_admitted`, `delegation_memory_writes_rejected{reason}`. Reasons: `schema_invalid`, `trust_ceiling`, `cap_exceeded`, `source_agent_set`. |
 | `tests/unit/python/test_delegation_contract.py` | **New** — request/result schema validation, framework-injected `source_agent`, importance downscaling. |
 | `tests/unit/python/test_merge_engine.py` | **New** — all four strategies + JSON Merge Patch corner cases. |
-| `tests/integration/python/test_delegation_end_to_end.py` | **New** — caller dispatches `DelegationRequest`, sub-agent returns `DelegationResult`, merge applies, `memory_writes` land in caller memory under the trust ceiling. |
+| `tests/integration/test_delegation_end_to_end.py` | **New** — caller dispatches `DelegationRequest`, sub-agent returns `DelegationResult`, merge applies, `memory_writes` land in caller memory under the trust ceiling. |
 
 #### Key implementation details
 
@@ -476,7 +476,7 @@ Fifth-pass review verified all rounds 1–4 fixes landed correctly (code-side ri
 | `schemas/agent.schema.json` | Schema for `shared_memory_pools` including ACL list validation (no duplicates, agent IDs match the canonical pattern). |
 | `internal/observability/` (Go) | Metrics `shared_pool_reads{pool,agent}`, `shared_pool_writes{pool,agent}`, `shared_pool_denied{pool,agent,operation}`. |
 | `tests/unit/python/test_shared_memory_pool.py` | **New** — ACL enforcement, provenance fields, `min_confidence` filter, sensitive-pool isolation. |
-| `tests/integration/python/test_shared_pool_publish.py` | **New** — agent A publishes to `team-knowledge`; agent B (reader) retrieves; agent C (not in ACL) is denied. |
+| `tests/integration/test_shared_pool_publish.py` | **New** — agent A publishes to `team-knowledge`; agent B (reader) retrieves; agent C (not in ACL) is denied. |
 
 #### Key implementation details
 
@@ -697,13 +697,13 @@ Status hygiene flagged for merge time: flip the unchecked PR 5 checklist items, 
 |--------|------|---------|----------------------|
 | PR 1 | M6 | Sort candidate IDs in `attachContextPackage` for cross-retry determinism. | 🔧 PR 6a |
 | PR 1 | M7 | Decide planner-tighten vs. scheduler-soften for `Σ overrides == total` zero-budget case. | 🔧 PR 6a (proposed: planner-tighten — reject at parse time) |
-| PR 1 | M8 | Document v1 advisory-only budget semantics in `Package` GoDoc + RFC 0008 §D. | ✅ Apply in PR 6 (docs-only) |
+| PR 1 | M8 | Document v1 advisory-only budget semantics in `Package` GoDoc + RFC 0008 §D. | ✅ Closed in PR 6 (`internal/executor/packaging/types.go` + `docs/rfcs/0008-agent-memory-context-optimization.md` §D) |
 | PR 1 | M9 | Decouple `RelevanceScorer` from heuristic backend's dep boost. | 🔧 PR 6a (proposed: scheduler emits uniform `Importance`; scorer owns dep-proximity) |
 | PR 1 | L7 | `utf8.RuneCountInString(s)/4` in `estimateTokens`. | 🔧 PR 6a |
 | PR 1 | L9 | `Packager.Build` test asserting `remaining < 0 → 0` clamp. | 🔧 PR 6a (test-only) |
 | PR 1 | L10 | Wire-shape test asserts `metrics.warnings == []` when absent. | 🔧 PR 6a (test-only) |
 | PR 1 | N5 | Comment in `attachContextPackage` referencing `outputKeyRegex`. | 🔧 PR 6a (comment-only) |
-| PR 1 | N6 | Reword `context_budget` schema description ("inherit" → "participates in equal-split"). | ✅ Apply in PR 6 (schema description; runs `make validate`) |
+| PR 1 | N6 | Reword `context_budget` schema description ("inherit" → "participates in equal-split"). | ✅ Closed in PR 6a (#227 — landed opportunistically alongside the M7 planner-tighten edits to `schemas/workflow.schema.json`); PR 6 verifies `make validate` green. |
 | PR 1 | N7 | Drop `TestContextPackage_DisabledByDefault` deadline 3 s → 1 s. | 🔧 PR 6a (test-only) |
 | PR 1 | N8 | `Packager` GoDoc concurrency-safety wording. | 🔧 PR 6a (doc-only) |
 | PR 1 | Wire-shape | Promote Python wire-shape test to read a Go-produced fixture. | 🔧 PR 6a |
@@ -719,18 +719,18 @@ Status hygiene flagged for merge time: flip the unchecked PR 5 checklist items, 
 | PR 1b | N10 | Sampler key construction collision-safety. | 🔧 PR 6a |
 | PR 1b | N11 | `noCopy` sentinel on `warningSampler` or embed pointer. | 🔧 PR 6a |
 | PR 1b | N12 | `recordStepUsage` GoDoc trim. | 🔧 PR 6a (doc-only) |
-| PR 2a / PR 3 N8 / PR 4 N5 | Path drift | `tests/integration/python/...` vs `tests/integration/...` — normalise the plan rows OR move the files. | ✅ Apply in PR 6 (proposed: normalise the plan rows to match the actual filesystem layout — `tests/integration/`; one-line edits to the affected scope tables) |
+| PR 2a / PR 3 N8 / PR 4 N5 | Path drift | `tests/integration/python/...` vs `tests/integration/...` — normalise the plan rows OR move the files. | ✅ Closed in PR 6 (PR 2 / PR 3 / PR 4 scope-table rows normalised to the actual `tests/integration/` layout; original per-PR review rows preserved verbatim per the merged-history convention) |
 | PR 3a R2 | L1-task-log | Bound `exc` in `agents/task_agent.py` `_parse_or_synthesise` debug log. | ✅ Closed by PR 3a R5 S1 — verify and mark closed |
 | PR 3a R2 | L2-helper | Lift `_ScriptedSubAgent` to a shared helper / fixture. | 🔨 PR 6b |
 | PR 3a R2 | L3-stub-sig | `boom_delete(*_args, **_kwargs)` for forward-compat. | 🔨 PR 6b |
 | PR 3a R3 | L5-invalid-result | Site-specific integration test for second `_bounded(exc)` raise site. | ❌ Won't fix — round-3 L4 unit suite for `_bounded` already pins the helper contract; site-specific test is redundant per the row's own "redundancy with L4 noted" call-out. |
 | PR 3a R4 | L4-bounded-lift | Lift `_bounded` + constants to `agents/sub_agents/_log_safety.py`. | 🔨 PR 6b (anchor for the multi-caller relocation noted in PR 3a R5 S1) |
 | PR 3a R4 | L5-stub-third-dup | `_FailedSubAgent` is a third stub — fold into the L2-helper consolidation. | 🔨 PR 6b (with L2-helper) |
-| PR 3a R4 | L6-u2424-encoding | Cosmetic docstring note about U+2424 sentinel. | ✅ Apply in PR 6 (docstring) |
+| PR 3a R4 | L6-u2424-encoding | Cosmetic docstring note about U+2424 sentinel. | ✅ Closed in PR 6b (#228 — encoding note included in `agents/sub_agents/_log_safety.py` `_CTRL_REPLACEMENT` block when the helper was lifted out of `spawner.py`) |
 | PR 3a R4 | L3-roadmap-wording | Tighten ROADMAP wording `S1/S6` → `S1/S6/N5–N7`. | ✅ Closed at PR 3a merge time — verify ROADMAP entry and mark closed |
-| PR 3a R5 | Info-1 / glossary | `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` to `docs/ai-glossary.md`. | ✅ Apply in PR 6 (glossary) |
+| PR 3a R5 | Info-1 / glossary | `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` to `docs/ai-glossary.md`. | ✅ Closed in PR 6 (`docs/ai-glossary.md` §RFC 0008 — Delegation Contract; four entries appended after `BudgetEnvelope`) |
 | PR 4 N3 | Multi-agent `setup_shared_pools` | Revisit `db_path` derivation when multi-agent server lands. | ⏸️ Defer (post-RFC; tracked under multi-agent-server work, not RFC 0008) |
-| PR 4 N4 / N-metrics-test | Metric-emission tests | Recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema. | 🔨 PR 6b (Python test, but emits Go-side counter inventory — keep with the Python batch since the test lives in `tests/integration/python/`) |
+| PR 4 N4 / N-metrics-test | Metric-emission tests | Recording instrument verifies `agent.shared_pool.{reads,writes,denied,evictions}` attribute schema. | 🔨 PR 6b (Python test, but emits Go-side counter inventory — keep with the Python batch since the test lives at `tests/integration/`) |
 | PR 4 N7 | Schema `writers ⊆ readers` | Deliberately permissive (publish-only writer is valid). | ❌ Won't fix — design choice already recorded |
 | PR 4 N-doc-episodic | Doc `pool-` reservation in `agents/memory/episodic.py`. | ❌ Won't fix — incidental coupling; reservation already documented at the use site (`shared_pool.py` + schema) per row's existing rationale |
 | PR 5 R1 | S3 | Push `t_max = -ln(c_min)/lambda_per_day` cutoff into `recall_procedures` SQL WHERE. | 🔨 PR 6b |
@@ -810,7 +810,7 @@ Absorbs every PR 3a + PR 4 + PR 5 deferred item routed to 🔨 PR 6b in the [tri
 | `agents/memory/decay.py` | Optional landing site for `validate_decay_constants` if `EvictionPass` direct construction surfaces (Mi3 only triggers if a periodic-task script lands). |
 | `tests/unit/python/test_procedural_key_validation.py` | **New** — PR 5 R2 M1 round-trip + idempotent re-store. |
 | `tests/unit/python/test_memory_decay_review_pins.py`, `test_memory_eviction.py` | Test gap closures for PR 5 R1 Info-4 + R2 N2. |
-| `tests/integration/python/test_shared_pool_metrics.py` | **New** — PR 4 N4 metric-emission attribute schema check. |
+| `tests/integration/test_shared_pool_metrics.py` | **New** — PR 4 N4 metric-emission attribute schema check. |
 | `agents/sub_agents/spawner.py` (docstring), `agents/memory/facade.py` (docstring) | PR 3a R4 L6 U+2424 sentinel encoding note (cosmetic). |
 
 ##### PR checklist
@@ -847,7 +847,7 @@ PR 6 (close) `Depends on` row updates from `PR 5` → `PR 5 + PR 6a + PR 6b` onc
 
 Carry-over findings from the PR 1 (`feature/v030-rfc0008-context-budget`, merged as #218) deep review that were not blocking and were deferred here. Each is self-contained so the merged history needs no external report.
 
-> **Routing (post-triage)**: M6 / M7 / M9 / L7 / L9 / L10 / N5 / N7 / N8 / Wire-shape → 🔧 PR 6a; M8 (docs) and N6 (schema description) absorbed in this PR. Per the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) above. Items below remain documented verbatim for self-contained merged history.
+> **Routing (post-triage)**: M6 / M7 / M9 / L7 / L9 / L10 / N5 / N7 / N8 / Wire-shape → ✅ PR 6a (#227); M8 (docs) → ✅ PR 6 (this PR); N6 (schema description) → ✅ PR 6a (#227 — landed alongside the M7 planner-tighten edits to `schemas/workflow.schema.json`). Per the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) above. Items below remain documented verbatim for self-contained merged history.
 
 - M6 — Sort candidate IDs in `attachContextPackage` (`internal/scheduler/context_package.go`) before constructing the candidate slice. Today it ranges over a `map[string]string` so iteration order is randomised per process; that defeats the `Packager.Build` "emit admitted in original input order" determinism contract once a packaging-aware agent (PR 2) starts comparing packages across retries. Fix: `keys := slices.Sorted(maps.Keys(outputsCopy))` then range `keys`. Add a determinism guard test with ≥ 5 outputs of equal density asserting `pkg.StepOutputs` ordering is stable across two `attachContextPackage` calls (covers L8 too).
 - M7 — Decide planner-tighten vs. scheduler-soften for the `Σ overrides == total` zero-budget case. Today the allocator returns `0` for every non-overridden step when overrides exhaust the total, and `stage_runner.executeStep` skips packaging because of its `budget > 0` gate, so a forgotten step gets legacy passthrough even though the workflow opted into packaging. Pick one: (a) reject the workflow at parse time when `Σ overrides + nonOverriddenCount > total` (require ≥ 1 token per non-overridden step); or (b) drop the `budget > 0` gate and always attach a package when `contextBudgets != nil`, emitting a `zero_budget` warning. Add a planner test (`TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected`) or an allocator test asserting the chosen semantics.
@@ -897,16 +897,16 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 #### PR checklist
 
 - [x] ~~30-day calibration review summary recorded in `docs/rfcs/0008-calibration-review.md`~~ — walked back 2026-05-10; deferred to v0.3.x follow-up
-- [ ] PR 6a + PR 6b merged; every `Disposition` cell in the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) is either ✅ closed (PR 6a / PR 6b / this PR) or explicitly ⏸️ Deferred / ❌ Won't fix with rationale recorded in the row
-- [ ] M8 (advisory-only budget semantics) documented in `Package` GoDoc + RFC 0008 §D
-- [ ] N6 schema description tweaked in `schemas/workflow.schema.json`; `make validate` green
-- [ ] Path-drift normalisation applied to PR 2 / PR 3 / PR 4 plan rows (`tests/integration/python/...` → `tests/integration/...`)
-- [ ] Glossary additions: `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` (PR 3a R5 Info-1)
-- [ ] U+2424 sentinel encoding note added to `_log_safety` docstring (PR 3a R4 L6)
-- [ ] ROADMAP.md RFC 0008 row → `✅ Implemented`
-- [ ] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
-- [ ] No link to local-only PR review reports in this committed plan
-- [ ] Plan-self-review: every cross-RFC pin in this plan ([RFC 0007 PR plan](0007-pr-plan.md) PR 3, [RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) still resolves and is reciprocated by the counterpart plan before the RFC flips to `✅ Implemented`
+- [x] PR 6a + PR 6b merged (#227 / #228); every `Disposition` cell in the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) is either ✅ closed (PR 6a / PR 6b / this PR) or explicitly ⏸️ Deferred / ❌ Won't fix with rationale recorded in the row
+- [x] M8 (advisory-only budget semantics) documented in `Package` GoDoc + RFC 0008 §D
+- [x] N6 schema description landed in PR 6a (#227); `make validate` re-verified in this PR
+- [x] Path-drift normalisation applied to PR 2 / PR 3 / PR 4 plan rows (`tests/integration/python/...` → `tests/integration/...`)
+- [x] Glossary additions: `DelegationFailure`, `DelegationContractError`, `delegation_metric`, `_bounded` (PR 3a R5 Info-1)
+- [x] U+2424 sentinel encoding note carried into `agents/sub_agents/_log_safety.py` via PR 6b (#228) when the helper was lifted out of `spawner.py`
+- [x] ROADMAP.md RFC 0008 row → `✅ Implemented`
+- [x] [v0.3.0-plan.md](../v0.3.0-plan.md) Master Progress Overview row 4 → ✅
+- [x] No link to local-only PR review reports in this committed plan
+- [x] Plan-self-review: every cross-RFC pin in this plan ([RFC 0007 PR plan](0007-pr-plan.md) PR 3, [RFC 0011 PR plan](0011-pr-plan.md) PR 5, [RFC 0020 PR plan](0020-pr-plan.md) PR 4) still resolves and is reciprocated by the counterpart plan before the RFC flips to `✅ Implemented` — RFC 0007 PR 3 dep satisfied at v0.4.0-start (RFC 0008 ships fully in v0.3.0); RFC 0011 PR 5 already merged (#263); RFC 0020 PR 4 already merged (#229).
 
 ---
 

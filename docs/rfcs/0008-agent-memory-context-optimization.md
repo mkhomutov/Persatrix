@@ -1,7 +1,7 @@
 # RFC 0008 — Agent Memory and Context Optimization
 
 **Type**: architecture  
-**Status**: 🚧 Implementing  
+**Status**: ✅ Implemented  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-15  
 **Target**: v0.3.0  
@@ -169,6 +169,8 @@ where $B$ is the step memory/context budget.
 **Phase 1 algorithm**: This is a 0/1 knapsack problem (NP-hard in the general case). Phase 1 uses greedy selection by descending relevance-per-token density (`relevance_i / tokens_i`), which is O(n log n) and gives a well-understood approximation. The exact optimum is not required at this stage; heuristic scoring quality (Open Question 1) dominates solution quality far more than the gap between greedy and optimal selection.
 
 **Compression LLM cost accounting**: The abstractive summarization step (pipeline step 3b) requires an LLM call. This call is charged to a separate orchestrator overhead budget — it does not consume from the dispatching task's `budget_input_tokens` or `budget_tool_round_tokens`. Compression calls are recorded in step metadata (`context_compression_tokens`, `context_compression_model`) for observability and cost attribution. If the overhead budget is exhausted, the pipeline falls back to extractive-only compression and emits a warning metric.
+
+**v1 advisory-only budget semantics (Phase 1)**: the `_context_package` payload travels in `TaskRequest.context` *alongside* the raw upstream outputs (under their planner output keys). A packaging-unaware agent that reads raw outputs bypasses the budget entirely. v1 packaging is therefore advisory ordering — actual budget enforcement requires the agent to consume `step_outputs` in lieu of raw outputs. The natural enforcement point is the `MemoryFacade` introduced in PR 2; until task agents migrate to facade-mediated retrieval, packaging communicates intent rather than guarantee. This is acceptable for v0.3.0 and lets the wire shape (PackageVersion 1) freeze before consumer migration is complete.
 
 ### E. Delegation Contract and Merge Semantics
 

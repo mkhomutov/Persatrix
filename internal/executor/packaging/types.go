@@ -92,6 +92,13 @@ type Metrics struct {
 // Field order matches RFC 0008 PR 1 §Key implementation details. The shape is
 // frozen as of PR 1 — additive evolution (e.g. abstractive Phase 1b) must
 // either fit existing fields or bump PackageVersion.
+//
+// v1 advisory-only contract: the dispatch carries both raw upstream outputs
+// (under their planner output keys, e.g. "out1", "out2", …) AND the same
+// content embedded inside StepOutputs[].Content. A packaging-unaware agent
+// reading raw outputs bypasses the budget entirely. v1 packaging is therefore
+// advisory ordering — actual budget enforcement requires the agent to consume
+// StepOutputs in lieu of raw outputs (e.g. via MemoryFacade in RFC 0008 PR 2).
 type Package struct {
 	Version        int               `json:"version"`
 	PinnedSections []AdmittedSection `json:"pinned_sections"`

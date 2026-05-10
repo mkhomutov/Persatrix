@@ -657,6 +657,44 @@ Terms from [RFC 0008](rfcs/0008-agent-memory-context-optimization.md) PR 3.
   `timeout_seconds`, `max_llm_calls` caps on a sub-agent invocation.
   `0` means unbounded on that axis.
 
+### DelegationContractError
+- **Definition:** `agents.sub_agents.delegation.DelegationContractError`
+  — raised when a `DelegationRequest` or `DelegationResult` violates
+  the schema (missing required field, disallowed `tier`, malformed
+  `MemoryWriteEntry`, etc.). Subclasses :class:`ValueError` so
+  existing `try / except ValueError` paths in agent code continue to
+  catch it.
+
+### DelegationFailure
+- **Definition:** `agents.sub_agents.delegation.DelegationFailure`
+  — raised when a sub-agent dispatch fails outright and no merge is
+  attempted (e.g. `schema_invalid` at step 1 of the deterministic
+  merge order). Per-entry rejections are not fatal — they are logged,
+  metrics are emitted via `delegation_metric`, and the surviving
+  entries still merge. Subclasses :class:`RuntimeError`; intentionally
+  retained over an `…Error` suffix to mirror RFC 0008 §E vocabulary
+  (`# noqa: N818`).
+
+### delegation_metric
+- **Definition:** Structured-log message name emitted by
+  `agents.sub_agents.merge.MergeEngine` for every per-entry merge
+  outcome (admitted, rejected, downscaled, conflict-rejected). Carries
+  `metric`, `labels`, `value` in the log `extra` dict. Back-fill to
+  Go-side counters lands in the delegation-metrics follow-on PR
+  (sizing-risk split). The single source of structured truth for
+  delegation observability prior to that back-fill.
+
+### _bounded (alias of `bounded`)
+- **Definition:** `agents.sub_agents._log_safety.bounded` — sanitises
+  attacker-influenceable text before it is interpolated into orchestrator
+  log lines or `DelegationFailure` messages. Two defences (CWE-117 /
+  OWASP A09 / LLM01): (1) strip every C0 control character (0x00-0x1F)
+  plus DEL (0x7F) to U+2424 (`SYMBOL FOR NEWLINE`); (2) cap length to
+  200 chars with the canonical `… (truncated)` marker. `_bounded` is a
+  backwards-compat private alias retained through v0.3.x; remove in v0.4.0
+  once the public `bounded` name has been documented for a full release
+  cycle.
+
 
 
 ## RFC 0008 — Shared Memory Pools (PR 4)
