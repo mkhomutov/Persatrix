@@ -23,7 +23,7 @@ architecture as workload evidence informs.
 
 ## Inputs (to be filled in by the v0.3.x calibration follow-up)
 
-Aggregate the following over the calibration window from the
+Aggregate the following across the data-collection pass from the
 `orchestrator.memory.*` instruments registered in
 [`internal/observability/metrics/metrics.go`](../../internal/observability/metrics/metrics.go)
 (see RFC 0008 PR 5):
@@ -98,7 +98,7 @@ The retune (if any) lands in the v0.3.x calibration follow-up alongside the stat
 
 [Memory Quality Roadmap §D](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance) lands as a separate v0.3.x carve-out off [`0020-pr-plan.md`](0020-pr-plan.md) (MQ-1). This calibration review **consumes** the `outcome` and `emotional_weight` columns it adds — once §D ships, the calibration window's importance distribution becomes the primary input for tuning §C's reinforcement constant.
 
-If §D has not landed by the calibration window close, calibrate §C against `turn_count`-derived importance and document the dependency in the calibration follow-up's findings.
+If §D has not landed by the time the calibration follow-up runs, calibrate §C against `turn_count`-derived importance and document the dependency in the calibration follow-up's findings.
 
 ### Recency-boost calibration (carved out of draft RFC 0023)
 
