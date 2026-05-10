@@ -301,11 +301,10 @@ class TestActionExecutor:
         # dispatcher raise for one specific target.
         original_dispatch = dispatcher.dispatch
 
-        call_count = 0
+        attempted: list[str] = []
 
         async def _failing_dispatch(target_id, event):
-            nonlocal call_count
-            call_count += 1
+            attempted.append(target_id)
             if target_id == "bad-agent":
                 raise RuntimeError("dispatch failed")
             return await original_dispatch(target_id, event)
@@ -320,9 +319,13 @@ class TestActionExecutor:
                 "mentions": ["bad-agent", "iron-fox"],
             }),
         ])
-        # Both mentions were attempted despite "bad-agent" raising
-        assert call_count == 2
-        # Only "iron-fox" succeeded
+        # Both top-level mentions were attempted despite "bad-agent" raising.
+        # iron-fox's own response can trigger a follow-on cascade now that the
+        # response gate admits mentioned recipients (RFC 0011 PR 4b legacy
+        # cascade fix); the loop-skip invariant only cares about the original
+        # SEND_CHANNEL_MESSAGE's two mentions.
+        assert {"bad-agent", "iron-fox"}.issubset(attempted), attempted
+        # Only "iron-fox" succeeded among the original two
         assert results[0]["dispatched_to"] == 1
         assert results[0]["status"] == "dispatched"
         await agent_ok.close_memory()
@@ -390,8 +393,12 @@ class TestActionExecutor:
 
         # _handle_send_channel_message() should create an event with cascade_depth=3
         # (the depth it received from execute()), and the dispatcher will
-        # then increment it to 4 internally.
-        assert len(received_depths) == 1
+        # then increment it to 4 internally. iron-fox's own actions from
+        # processing the cascaded CHANNEL_MESSAGE may add further dispatches
+        # at higher depths (now that RFC 0011 PR 4b's gate admits mentioned
+        # recipients in the legacy cascade); only the FIRST recorded depth
+        # is load-bearing for the propagation invariant under test.
+        assert received_depths, received_depths
         assert received_depths[0] == 3
         await agent.close_memory()
 

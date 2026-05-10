@@ -318,9 +318,19 @@ class ActionExecutor:
         dispatched = 0
         for target_id in mentions:
             try:
+                # Synthesize a CHANNEL_MESSAGE the response gate will admit:
+                # mentioned recipients in the legacy cascade are by-construction
+                # mentioned, so set ``respond_policy=when_mentioned`` and forward
+                # the mention list. Without these the gate fails closed under
+                # the unknown-policy branch (RFC 0011 PR 4b, #252).
                 event = AgentEvent(
                     event_type=EventType.CHANNEL_MESSAGE,
-                    payload={"content": content, "channel_id": target_channel},
+                    payload={
+                        "content": content,
+                        "channel_id": target_channel,
+                        "mentions": list(mentions),
+                        "respond_policy": "when_mentioned",
+                    },
                     channel_id=target_channel,
                     sender_id=sender_id,
                     metadata={"cascade_depth": cascade_depth},
