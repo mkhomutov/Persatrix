@@ -217,7 +217,7 @@ since-we-last-spoke:
 | 4 | Author [§G](#g-memory-of-context-dogfood-test) as a manual-test artifact | docs PR | v0.3.0 release-prep (Phase 4) |
 | 5 | Pull `key_facts` out of draft RFC 0023 into a "declarative-fact tier" RFC ([§A](#a-promote-key_facts-to-a-declarative-fact-tier)) | new RFC | v0.3.x |
 | 6 | Trim draft RFC 0023 to JSON-summary schema only; move recency boost to [`0008-calibration-review.md`](rfcs/0008-calibration-review.md) | scope amendment | v0.3.x |
-| 7 | Fold [§C](#c-salience-score-with-use-based-reinforcement) into the [RFC 0008 calibration review](rfcs/0008-calibration-review.md) | review-time formula change | v0.3.x (calibration window close) |
+| 7 | Fold [§C](#c-salience-score-with-use-based-reinforcement) into the [RFC 0008 calibration review](rfcs/0008-calibration-review.md) | review-time formula change | v0.3.x (carve-out) |
 | 8 | Defer draft RFC 0024 (vector recall) until [§G](#g-memory-of-context-dogfood-test) data shows BM25 misses on multi-turn summaries | gate, not a deliverable | v0.3.x or v0.4.0 |
 | 9 | Replace draft RFC 0025 with [§E](#e-reflection-driven-consolidation-not-llm-clustering) | new RFC; supersede 0025 | v0.4.0 |
 
