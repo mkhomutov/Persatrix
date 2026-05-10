@@ -9,8 +9,13 @@ persona from running away with your API bill.
 > [RFC 0006](../rfcs/0006-efficiency-execution-limits.md) (execution limits,
 > budgets, and defaults), and
 > [RFC 0016](../rfcs/0016-human-participant-chat-interface.md)
-> (the human chat surface introduced in v0.2.1). This guide is deliberately
-> non-exhaustive and points into those RFCs for design rationale.
+> (the human chat surface introduced in v0.2.1). v0.3.0 layers three new
+> shapes onto the persona runtime — see the callouts in §2 (interactions
+> are not messages — [RFC 0020](../rfcs/0020-interaction-lifecycle.md)),
+> §2 (now-anchor + relative-time — [RFC 0021](../rfcs/0021-persona-temporal-awareness.md))
+> and the new §6 (externally-inspectable prompt sections — [RFC 0022](../rfcs/0022-persona-prompt-section-templating.md)).
+> This guide is deliberately non-exhaustive and points into those RFCs for
+> design rationale.
 
 ---
 
@@ -175,6 +180,33 @@ prompt
 > [RFC 0017 §B](../rfcs/0017-persona-memory-injection-budget.md#b-memory-budget-allocator)
 > and [§F](../rfcs/0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit)
 > for the spec.
+
+> **v0.3.0 — conversations are interactions, not messages.** Multi-turn
+> dialogues no longer write one episodic entry per inbound event. Instead,
+> [`InteractionTracker`](../../agents/memory/interactions.py) opens a scope
+> on the first turn, accumulates turns via `add_turn`, and on close — either
+> a quiescence timeout or an explicit close signal — collapses the whole
+> exchange into **one** episodic record summarised by
+> [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py).
+> A janitor on the tick cadence drives stale interactions to close. The
+> `interaction_id` is the lookup key for per-channel and per-DM scoping;
+> `recall_with_scope_filter` ([agents/memory/scope_recall.py](../../agents/memory/scope_recall.py))
+> is the read-side dual. See [RFC 0020](../rfcs/0020-interaction-lifecycle.md)
+> for the full lifecycle (`open → multi-turn → close → summarize`) and
+> [`docs/diagrams/persona-runtime.md`](../diagrams/persona-runtime.md) for
+> where the stages sit in the runtime.
+
+> **v0.3.0 — what time is it?** A persona now anchors every prompt with a
+> `now-anchor` line ([prompts/runtime/persona/sections/now-anchor.md](../../prompts/runtime/persona/sections/now-anchor.md))
+> and renders episode and relationship timestamps as relative time
+> ("yesterday", "3 days ago", "just now") instead of raw epoch seconds.
+> Wall-clock reads route through the [`Clock`](../../agents/clock.py)
+> Protocol — `WallClock` in production, `FrozenClock` in tests — and the
+> rendering helpers ([agents/temporal/rendering.py](../../agents/temporal/rendering.py))
+> are pure functions. This is Phase 1 only; structured commitment tracking,
+> scheduled callbacks, and conversation-thread temporal grounding land in
+> Phases 2–4 ([RFC 0021](../rfcs/0021-persona-temporal-awareness.md);
+> v0.4.0).
 
 ### Episodic memory
 
@@ -565,7 +597,51 @@ propagation across the gRPC boundary — is drawn in
 
 ---
 
-## 6. Where to go next
+## 6. Inspecting and customising the persona prompt (v0.3.0)
+
+Every fragment that gets concatenated into a persona's system prompt lives
+in a discrete file under
+[`prompts/runtime/persona/sections/`](../../prompts/runtime/persona/sections/).
+You can read them, diff them, swap them, or template them without touching
+Python ([RFC 0022](../rfcs/0022-persona-prompt-section-templating.md)).
+
+| Section | File | What it controls |
+|---------|------|------------------|
+| Identity | [`identity.md`](../../prompts/runtime/persona/sections/identity.md) | Who the persona is — name, role, title |
+| Background | [`background.md`](../../prompts/runtime/persona/sections/background.md) | Persona's narrative history |
+| Behavior | [`behavior.md`](../../prompts/runtime/persona/sections/behavior.md) + [`behavior-dimensions.yaml`](../../prompts/runtime/persona/sections/behavior-dimensions.yaml) | Rendering of the five-dimension `behavior` block |
+| Quirks | [`quirks.md`](../../prompts/runtime/persona/sections/quirks.md) | How quirks are introduced into the prompt |
+| Goals | [`goals.md`](../../prompts/runtime/persona/sections/goals.md) | How `goals.{primary,secondary,hidden}` are surfaced |
+| Current state | [`current-state.md`](../../prompts/runtime/persona/sections/current-state.md) | Stamina / energy / idle state surfaced at prompt time |
+| Now-anchor † | [`now-anchor.md`](../../prompts/runtime/persona/sections/now-anchor.md) | RFC 0021 Phase 1 temporal anchor — current time + last interaction |
+
+Rows above are listed in the order the section-table loop renders them
+(`_PERSONA_SECTIONS` in
+[`agents/persona_runtime/prompt_assembly.py`](../../agents/persona_runtime/prompt_assembly.py)).
+
+† **`now-anchor` lives in the same directory but is assembled outside the
+section-table loop** — RFC 0021's temporal-rendering helpers load it via
+`load_persona_section("now-anchor")` and splice it into the prompt directly,
+so it does not appear in `_PERSONA_SECTIONS`. It is still part of the
+public surface; third-party tools that re-render the prompt should treat
+it the same as the other section files.
+
+The wins:
+
+- **Auditable** — `git log -- prompts/runtime/persona/sections/` is the
+  history of every persona-prompt change since v0.3.0.
+- **Diffable across versions** — promotes prompt edits out of code review
+  bikeshed and into a reviewable surface.
+- **Hot-swappable per persona** — alternate sections can be referenced
+  per-persona in `config/agents.yaml` without re-rendering or re-deploying.
+
+Prompt sections **are part of the public surface** — third-party tools that
+inspect or override prompt assembly should pin against this directory
+shape.
+
+---
+
+## 7. Where to go next
 
 - **RFC 0005 — Persona Agent & Memory System**:
   [docs/rfcs/0005-persona-agent-memory.md](../rfcs/0005-persona-agent-memory.md).
