@@ -48,7 +48,7 @@ PR 6a (Go scheduler determinism + sampler hygiene — bookkeeping under PR 1/1b)
   ↓
 PR 6b (Python procedural memory + log-safety cleanup — bookkeeping under PR 3a/5)
   ↓
-PR 6 (Review follow-ups absorbed + 30-day calibration review + RFC close)
+PR 6 (Review follow-ups absorbed + RFC close — calibration review deferred to v0.3.x per OQ #12 walkback)
 ```
 
 > **Sub-PR bookkeeping**: PR 6a and PR 6b are sizing-risk follow-ups under the existing PR 1/1b and PR 3a/5 rows, mirroring the PR 1b / PR 2a / PR 3a precedent. The canonical 6-PR count this plan's downstream consumers ([RFC 0007 PR plan](0007-pr-plan.md), [RFC 0011 PR plan](0011-pr-plan.md), [RFC 0020 PR plan](0020-pr-plan.md)) pin is preserved.
@@ -596,7 +596,7 @@ Third-pass deep-review companion re-walked the diff after pass-2 fixes landed. M
 | `config/agents.yaml` | New `procedural_memory` block: `lambda_per_day` (default `0.01`), `c_min` (default `0.1`), `stale_confidence_alert_threshold` (default `0.3`). |
 | `schemas/agent.schema.json` | Schema additions; `make validate` enforces. |
 | `internal/observability/` (Go) | New metrics required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection): `evictions_count`, `average_confidence_at_eviction`, `average_importance_at_eviction`, `memory_utilization_ratio`, `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`, `stale_memory_injection`. The `stale_memory_injection` counter is registered exactly once on the orchestrator side (incremented from agent log ingestion); agents emit the structured log only — they do not register the metric, to avoid duplicate emission across the gRPC boundary. |
-| `docs/rfcs/0008-calibration-review.md` | **New** — placeholder file scheduling the 30-day post-merge review of eviction parameters per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). PR 6 (close) replaces the placeholder with the actual review summary before flipping the RFC to `✅ Implemented`. |
+| `docs/rfcs/0008-calibration-review.md` | **New** — forward-looking placeholder for the eviction-parameter calibration carve-out per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). PR 6 (close) does **not** depend on filling this in; the calibration is rescheduled as a v0.3.x follow-up that fires when observed-workload telemetry exists. (Walked back 2026-05-10 — see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback).) |
 | `tests/unit/python/test_memory_decay.py` | **New** — decay math, refresh, eviction integration. |
 
 #### Key implementation details
@@ -605,7 +605,7 @@ Third-pass deep-review companion re-walked the diff after pass-2 fixes landed. M
 - **Migration safety**: the new `confidence` column has `DEFAULT 1.0` so existing notes/procedures upgrade cleanly without backfill. A migration test confirms a v0.2.x DB opens cleanly under v0.3.0.
 - **Refresh contract**: `MemoryFacade.store_procedure(key, ...)` with an existing `key` does not blindly overwrite — it calls `refresh_confidence(key)` and updates `content` only if provided. This implements the RFC's "Confidence refresh on successful reuse".
 - **Stale alert threshold**: when an admitted entry's decayed confidence is in `[c_min, stale_confidence_alert_threshold)`, the facade logs `stale_memory_injection` with the decayed value, key, and agent_id. Operators can set alerting rules on this metric per [Open Question 5](0008-agent-memory-context-optimization.md#5-stale-procedural-memory--downgrade-confidence-and-continue-do-not-block).
-- **30-day calibration commitment**: per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection), this PR includes a `docs/rfcs/0008-calibration-review.md` placeholder file scheduling the 30-day post-merge review of eviction parameters. PR 6 (close) updates the placeholder with actual review findings before flipping the RFC to `✅ Implemented`.
+- **Calibration commitment**: per [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection), this PR includes a `docs/rfcs/0008-calibration-review.md` placeholder file. The original "30-day post-merge review" framing was walked back 2026-05-10 (see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback)) — calibration is rescheduled as a v0.3.x follow-up that fires when observed-workload telemetry exists. PR 6 (close) does not depend on the calibration findings.
 
 #### Tests
 
@@ -632,9 +632,9 @@ Integration:
 - [x] Decay is computed at read time using `last_validated_at` (or `created_at` if never validated); no periodic rewrite pass
 - [x] `MemoryFacade.store_procedure` on an existing key calls `refresh_confidence(key)` (does not blindly overwrite)
 - [x] `stale_memory_injection` is registered exactly once, orchestrator-side (incremented from agent structured-log ingestion); agents emit the log but do not register the counter, to avoid duplicate emission across the gRPC boundary
-- [x] `docs/rfcs/0008-calibration-review.md` placeholder file landed; PR 6 will replace it with the 30-day review summary
-- [ ] 30-day calibration review (PR 6) must validate or retune `avg_entry_tokens = 100` (the PR 2 advisory-budget translation constant) against the observed `episodic_entry_token_count` distribution; record outcome in the calibration review summary
-- [x] PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge
+- [x] `docs/rfcs/0008-calibration-review.md` placeholder file landed; calibration findings are deferred to a v0.3.x follow-up per the OQ #12 walkback (PR 6 no longer needs to fill it in)
+- [ ] v0.3.x calibration follow-up must validate or retune `avg_entry_tokens = 100` (the PR 2 advisory-budget translation constant) against the observed `episodic_entry_token_count` distribution; record outcome in the calibration review summary
+- [x] ~~PR 6 reviewer pinged: 30-day calibration timer starts on this PR's merge~~ — walked back 2026-05-10 (no calendar timer; calibration fires when observed-workload data exists)
 
 > **✅ Merged as PR #225 (2026-04-29).**
 
@@ -681,7 +681,7 @@ Status hygiene flagged for merge time: flip the unchecked PR 5 checklist items, 
 **Branch**: `feature/v030-rfc0008-followup-triage` — docs-only triage PR opened 2026-04-29.
 **Purpose**: enumerate every follow-up deferred from the per-PR review tables above (PRs 1, 1b, 2/2a, 3/3a, 4, 5), assign a binding disposition, and add new sub-PR rows (PR 6a / PR 6b) for the items that require code changes large enough to warrant their own branch under the [Phase 5 splitting strategy](../development-workflow.md#phase-5--follow-up-prs). Final dispositions are confirmed during this triage PR's review; the binding decision per row is the post-review state of the `Disposition` column.
 
-> **Why a separate triage PR**: the deferred-item count across PRs 1–5 (≈55 items) exceeds what PR 6 can absorb under the 500-line soft cap, and the calibration window opened by PR 5's merge runs through 2026-05-29 — PR 6 cannot merge before then. Triaging now lets PR 6a / PR 6b proceed in parallel with the calibration window so PR 6 itself stays a small, focused close-out PR (calibration summary + RFC status flip + low-batch absorption).
+> **Why a separate triage PR**: the deferred-item count across PRs 1–5 (≈55 items) exceeds what PR 6 can absorb under the 500-line soft cap. Triaging now lets PR 6a / PR 6b absorb the bulk-code follow-ups so PR 6 itself stays a small, focused close-out PR (RFC status flip + low-batch absorption). *(Earlier framing also cited a "calibration window through 2026-05-29" as a co-justification; that gate was walked back 2026-05-10 — see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback). The triage rationale stands on the line-cap argument alone.)*
 
 ### Disposition legend
 
@@ -824,7 +824,7 @@ Absorbs every PR 3a + PR 4 + PR 5 deferred item routed to 🔨 PR 6b in the [tri
 
 #### Cross-cutting check
 
-PR 6 (close) `Depends on` row updates from `PR 5` → `PR 5 + PR 6a + PR 6b` once this triage PR merges. All three (PR 6a, PR 6b, PR 6) can land inside the 30-day calibration window (window closes 2026-05-29).
+PR 6 (close) `Depends on` row updates from `PR 5` → `PR 5 + PR 6a + PR 6b` once this triage PR merges. All three (PR 6a, PR 6b, PR 6) can land in any order — no calendar gate (the original 2026-05-29 calibration-window gate was walked back 2026-05-10).
 
 ---
 
@@ -840,7 +840,7 @@ PR 6 (close) `Depends on` row updates from `PR 5` → `PR 5 + PR 6a + PR 6b` onc
 | `docs/rfcs/0008-agent-memory-context-optimization.md` | Status → `✅ Implemented`. |
 | `ROADMAP.md` | RFC 0008 row → `✅ Implemented`; merged-PR rows for PRs 1–5 added to history. |
 | `docs/v0.3.0-plan.md` | Master Progress Overview row 4 → ✅. |
-| `docs/rfcs/0008-calibration-review.md` | Replace the PR 5 placeholder with the 30-day eviction-parameter review summary required by [Open Question 12](0008-agent-memory-context-optimization.md#12-memory-eviction-parameter-calibration--ship-defaults-with-mandatory-metrics-collection). Cite the actual `evictions_count`, `average_confidence_at_eviction`, `memory_utilization_ratio` ranges observed; record any default retunes (one-line config changes) or confirm the shipped defaults stood up. |
+| `docs/rfcs/0008-calibration-review.md` | No edit required in PR 6 — the calibration review is deferred to a v0.3.x follow-up per the OQ #12 walkback. The placeholder remains in place and fires when observed-workload telemetry is available. |
 | `docs/rfcs/0008-pr-plan.md` | Final review-follow-up table aggregating low/medium findings from PR 1–5 deep reviews under a `## From PR Reviews` subsection. (Note: this plan combines the followups + close steps that other RFC PR plans sometimes split into two terminal PRs — e.g. [RFC 0020 PR plan](0020-pr-plan.md) splits them across PR 6 (followups) + PR 7 (close) — into a single PR 6 to preserve the 6-PR count this plan's downstream consumers pin.) |
 
 ##### From PR 1 review
@@ -885,7 +885,7 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 
 #### Key implementation details
 
-- The 30-day calibration review is the **gate** for flipping RFC 0008 to `✅ Implemented`. If the metrics indicate the shipped defaults need adjustment (e.g. `memory_utilization_ratio` consistently > 0.95 → `episodic_cap` too low; consistently < 0.2 → too high), the retune ships in this PR as a `config/agents.yaml` default change. The retune is a one-line change per parameter; no code changes expected.
+- ~~The 30-day calibration review is the **gate** for flipping RFC 0008 to `✅ Implemented`.~~ **Walked back 2026-05-10** (see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback)). The calibration review is rescheduled as a v0.3.x follow-up that fires when observed-workload telemetry exists. PR 6 flips the RFC to `✅ Implemented` based on review-follow-up absorption alone — the eviction defaults ship as starting points and the retune (if any) lands in v0.3.x as a one-line `config/agents.yaml` default change.
 - Review-follow-up findings from PR 1–5 deep reviews are summarized inline here per the project convention. The committed text must not link to local-only PR review reports (per [Status Hygiene rules](../development-workflow.md#status-hygiene)); each finding is restated in full so the merged history is self-contained.
 
 #### Tests
@@ -896,7 +896,7 @@ Carry-over findings from the PR 1b (`feature/v030-rfc0008-context-metrics`, merg
 
 #### PR checklist
 
-- [ ] 30-day calibration review summary recorded in `docs/rfcs/0008-calibration-review.md`
+- [x] ~~30-day calibration review summary recorded in `docs/rfcs/0008-calibration-review.md`~~ — walked back 2026-05-10; deferred to v0.3.x follow-up
 - [ ] PR 6a + PR 6b merged; every `Disposition` cell in the [Accumulated Follow-Ups Triage](#accumulated-follow-ups-triage-pr-6-prep) is either ✅ closed (PR 6a / PR 6b / this PR) or explicitly ⏸️ Deferred / ❌ Won't fix with rationale recorded in the row
 - [ ] M8 (advisory-only budget semantics) documented in `Package` GoDoc + RFC 0008 §D
 - [ ] N6 schema description tweaked in `schemas/workflow.schema.json`; `make validate` green

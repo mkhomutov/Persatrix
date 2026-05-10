@@ -1,9 +1,8 @@
-# RFC 0008 — 30-Day Eviction Parameter Calibration Review
+# RFC 0008 — Eviction Parameter Calibration Review
 
-**Status**: 📋 Placeholder — landed in [PR 5](0008-pr-plan.md#pr-5-featurev030-rfc0008-procedural-revalidation--phase-4b-confidence-decay--revalidation); will be filled in by [PR 6](0008-pr-plan.md#pr-6-featurev030-rfc0008-close--review-follow-ups--rfc-close).
-**Calibration window opens**: PR 5 merge date.
-**Calibration window closes**: PR 5 merge date + 30 days.
-**Gate**: this review must complete before RFC 0008 flips to `✅ Implemented` (Open Question 12 commitment).
+**Status**: 📋 Forward-looking placeholder — fires as a v0.3.x follow-up once a production-like workload exists. **Not** a v0.3.0 release gate.
+**Originally framed as**: 30-day post-merge gate; walked back 2026-05-10 — see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback).
+**Owner**: opens whenever telemetry from observed workloads (developer dogfooding, public-instance traffic, paid-deployment data, whichever lands first) provides enough signal to tune the eviction parameters meaningfully.
 
 ---
 
@@ -13,16 +12,18 @@
 commits the project to shipping the v0.3.0 memory eviction defaults
 (`episodic_cap = 1000`, `ttl_low_importance_days = 30`,
 `lambda_per_day = 0.01`, `c_min = 0.1`, `stale_confidence_alert_threshold = 0.3`)
-with a **mandatory** 30-day post-merge review. The review must either
-validate the shipped defaults or retune them via a one-line
-`config/agents.yaml` change before the RFC closes. The retune (if any)
-ships in PR 6 alongside the RFC status flip.
+with the per-eviction instrumentation in PR 5 (unchanged by the walkback).
+Once observed-workload data is available, this review either
+validates the shipped defaults or retunes them via a one-line
+`config/agents.yaml` change. Future v0.3.x or v0.4.0 work may also
+revisit the eviction structure, scoring formula, or broader memory
+architecture as workload evidence informs.
 
 ---
 
-## Inputs (to be filled in by PR 6)
+## Inputs (to be filled in by the v0.3.x calibration follow-up)
 
-Aggregate the following over the 30-day window from the
+Aggregate the following over the calibration window from the
 `orchestrator.memory.*` instruments registered in
 [`internal/observability/metrics/metrics.go`](../../internal/observability/metrics/metrics.go)
 (see RFC 0008 PR 5):
@@ -41,9 +42,9 @@ distribution (PR 5 checklist item).
 
 ---
 
-## Findings (PR 6)
+## Findings (v0.3.x — pending observed-workload data)
 
-> Replace this section with the actual findings before merging PR 6.
+> Filled in by the v0.3.x calibration follow-up PR once observed-workload telemetry is available. Not gating PR 6 or v0.3.0 release per the [walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback).
 
 | Parameter | Shipped default | Observed range | Action | Justification |
 |-----------|-----------------|----------------|--------|---------------|
@@ -56,7 +57,7 @@ distribution (PR 5 checklist item).
 
 ---
 
-## Decision (PR 6)
+## Decision (v0.3.x calibration follow-up)
 
 > Replace with one of:
 >
@@ -78,7 +79,7 @@ distribution (PR 5 checklist item).
 
 ## Memory Quality Roadmap addenda
 
-The [Memory Quality Roadmap](../memory-quality-roadmap.md) (ratified 2026-05-01) folds two scope items into this calibration review window. Both are formula-level changes that ride the same 30-day data-collection pass — no new RFC needed. Tracked as **MQ-7** in [v0.3.0-plan.md §Memory Quality Follow-Ups](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond).
+The [Memory Quality Roadmap](../memory-quality-roadmap.md) (ratified 2026-05-01) folds two scope items into this calibration review window. Both are formula-level changes that ride the same data-collection pass — no new RFC needed. Tracked as **MQ-7** in [v0.3.0-plan.md §Memory Quality Follow-Ups](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond).
 
 ### §C — Salience score with use-based reinforcement
 
@@ -91,23 +92,23 @@ Implementation surface (additive only):
 - Scoring formula change: salience uses `last_recalled_at` instead of `last_accessed_at` for the recency term; reinforcement effectively resets the decay curve to `c_0` on each admitted recall.
 - Composes with [§D outcome tags](#d--outcome-tagged-importance-bootstrap) — outcome tags seed the initial salience; use reinforces it.
 
-The retune (if any) lands in PR 6 alongside the static eviction parameter retune.
+The retune (if any) lands in the v0.3.x calibration follow-up alongside the static eviction parameter retune.
 
 ### §D — Outcome-tagged importance bootstrap
 
 [Memory Quality Roadmap §D](../memory-quality-roadmap.md#d-outcome-tagged-importance-not-turn-count-importance) lands as a separate v0.3.x carve-out off [`0020-pr-plan.md`](0020-pr-plan.md) (MQ-1). This calibration review **consumes** the `outcome` and `emotional_weight` columns it adds — once §D ships, the calibration window's importance distribution becomes the primary input for tuning §C's reinforcement constant.
 
-If §D has not landed by the calibration window close, calibrate §C against `turn_count`-derived importance and document the dependency in PR 6 findings.
+If §D has not landed by the calibration window close, calibrate §C against `turn_count`-derived importance and document the dependency in the calibration follow-up's findings.
 
 ### Recency-boost calibration (carved out of draft RFC 0023)
 
 The recency-boost calibration originally proposed in draft RFC 0023 lands here, not in 0023 itself. Surface: a small additive boost to recall scores for items closed within a configurable recency window (default 24h). The boost magnitude is calibrated against the same data set as §C — the goal is that a multi-turn outcome-tagged interaction from yesterday outranks a 10-turn neutral interaction from last month.
 
-The retune (if any) ships as a one-line `config/agents.yaml` change in PR 6.
+The retune (if any) ships as a one-line `config/agents.yaml` change in the v0.3.x calibration follow-up.
 
 ### Findings table extension
 
-Extend the [Findings (PR 6)](#findings-pr-6) table with rows for:
+Extend the [Findings](#findings-v03x--pending-observed-workload-data) table with rows for:
 
 | Parameter | Shipped default | Observed range | Action | Justification |
 |-----------|-----------------|----------------|--------|---------------|

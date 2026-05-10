@@ -533,7 +533,7 @@ The `tags` list uses union semantics under `patch` (add new tags, don't remove e
 
 ### 12. Memory eviction parameter calibration — Ship defaults with mandatory metrics collection
 
-**Decision**: Ship the defaults specified in Section G's table ($\lambda = 0.01$/day, $c_{min} = 0.1$, TTL 30 days for importance < 0.3, episodic cap 1000, eviction scoring `importance × 0.6 + recency × 0.3 + access_freq × 0.1`). Phase 4 implementation must emit calibration metrics on every eviction pass. Agent-level overrides in `config/agents.yaml` are available from day one. A calibration review is scheduled after 30 days of production data.
+**Decision**: Ship the defaults specified in Section G's table ($\lambda = 0.01$/day, $c_{min} = 0.1$, TTL 30 days for importance < 0.3, episodic cap 1000, eviction scoring `importance × 0.6 + recency × 0.3 + access_freq × 0.1`). Phase 4 implementation must emit calibration metrics on every eviction pass. Agent-level overrides in `config/agents.yaml` are available from day one. A calibration review is scheduled as a v0.3.x follow-up that fires whenever a production-like workload exists, not as a v0.3.0 release blocker.
 
 **Rationale**: The defaults are informed by reasonable heuristics but are inherently speculative — no production workload exists yet to validate them. Delaying Phase 4 to find "perfect" defaults would be wasteful because the optimal parameters depend on actual agent behavior patterns (conversation frequency, memory write volume, task diversity) that can only be observed in production.
 
@@ -543,7 +543,7 @@ The mitigation is to make calibration a first-class deliverable of Phase 4, not 
 
 2. **Agent-level overrides** are already planned in Section G ("configurable per agent via `config/agents.yaml`"). This means operators can tune parameters per agent type without a code change — a persona agent with frequent interactions may need a higher episodic cap and slower decay, while a task agent doing one-off code reviews may need aggressive TTL and a low cap.
 
-3. **30-day calibration review**: After Phase 4 lands and runs with real workloads for 30 days, the team reviews eviction metrics and adjusts defaults. This is a documentation commitment, not a code gate — it goes in the Phase 4 PR plan as a follow-up task.
+3. **Calibration is a v0.3.x follow-up, not a v0.3.0 gate** *(walked back 2026-05-10 — see [v0.3.0 release-prep plan §RFC 0008 OQ #12 walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback))*: an earlier version of this RFC and `0008-pr-plan.md` framed a 30-day calendar window as a hard pre-flip gate. The project has no production workload, so a calendar-driven soak window is not load-bearing. The calibration review fires whenever a production-like workload exists — tracked in [`docs/rfcs/0008-calibration-review.md`](0008-calibration-review.md) as a v0.3.x carve-out. The instrumentation in (1) is unchanged; only the calendar gating is removed. Future versions (v0.3.x or v0.4.0) may also revisit eviction structure, formula, or memory-architecture choices once observed-workload data is available.
 
 The risk of shipping with imperfect defaults is low because all eviction is soft (entries are removed from the store, not from any external system) and reversible (entries could be reconstructed from episodic logs if needed). The risk of *not* shipping eviction is high — unbounded memory growth degrades retrieval quality and increases token waste, which is the core problem this RFC addresses.
 

@@ -409,10 +409,14 @@ re-tune.
 | RFC 0005 trust-bootstrap thresholds (see RFC 0005 §F lines 889–920) | message count | interaction count | divide by typical turns/conversation |
 | Any external dashboard derived from `relationships.interaction_count` | messages | interactions | re-baseline; do not chart across the migration |
 
-**Calibration window (RFC 0008 PR 6):** the production calibration
-window for memory-context tuning closes 2026-05-29. Calibration data
+**Calibration carve-out (v0.3.x follow-up):** the original "30-day
+production calibration window closes 2026-05-29" framing was walked
+back 2026-05-10 — see [v0.3.0 release-prep plan §RFC 0008 OQ #12
+walkback](../v0.3.0-release-prep-plan.md#rfc-0008-oq-12-walkback).
+Calibration of memory-context tuning is rescheduled as a v0.3.x
+follow-up that fires when observed-workload telemetry exists. Data
 collected before PR 4 lands reflects per-message semantics; reset the
-window after PR 4 deploys before drawing conclusions about
+collection window after PR 4 deploys before drawing conclusions about
 `interaction_count`-based heuristics.
 
 **Operational notes:**
