@@ -68,7 +68,7 @@ The fix is to make the wallet a hard gate on the call itself. If a path forgets 
 - **Replacing the existing `TokenCounter` storage.** The lease ledger reuses today's per-workflow / per-agent / global counters; only the *check point* moves.
 - **Replacing pricing logic.** [`CostConfig.EstimateCost`](../../internal/cost/config.go) stays as-is and is invoked inside `WalletService` for both the lease grant and the settlement.
 - **Tool-call cost accounting.** Only LLM-provider calls are leased in this RFC. Tool execution is gated separately by [`agents/tools/permissions.py`](../../agents/tools/permissions.py) and is out of scope.
-- **Provider-side rate-limit handling.** Provider 429s are still surfaced as `_classify_llm_error → "rate_limit"` ([`agents/llm_client.py:81`](../../agents/llm_client.py)). The wallet does not pre-emptively rate-limit against provider quotas.
+- **Provider-side rate-limit handling.** Provider 429s are still surfaced as `_classify_llm_error → "rate_limit"` ([`agents/llm_client.py:70`](../../agents/llm_client.py)). The wallet does not pre-emptively rate-limit against provider quotas.
 - **Streaming-response token accounting.** Persatrix does not yet stream LLM responses; when it does, settlement semantics for partial completions become a follow-up RFC.
 - **Removing `TaskConfig.max_llm_calls` / `max_tokens`.** These remain as per-task hints used by the scheduler and the agent's own loop bound; the wallet check is independent.
 
@@ -171,6 +171,12 @@ enum Cause {
   CAUSE_SUB_AGENT = 4;
   CAUSE_CHANNEL_MESSAGE = 5;         // RFC 0011 forward-compat
 }
+// Precedence when multiple causes apply: innermost wins. A sub-agent
+// invoked via a channel message is CAUSE_SUB_AGENT; the channel-message
+// origin is recoverable from trace correlation (lease's trace_id links
+// to the parent span). This keeps the enum a flat scalar and avoids a
+// bitmask, at the cost of one indirection in dashboards that want to
+// attribute spend to channel traffic.
 
 message LeaseResponse {
   oneof outcome {
@@ -239,6 +245,16 @@ type lease struct {
 }
 
 func (w *WalletService) AcquireLease(ctx context.Context, req *walletpb.LeaseRequest) (*walletpb.LeaseResponse, error) {
+    // Hold w.mu across CheckBudget and RecordProvisional so the
+    // read-then-write sequence is atomic. Without this, two concurrent
+    // AcquireLease calls can both pass CheckBudget (which only reads the
+    // TokenCounter snapshot — see internal/cost/cost.go:260 "atomic snapshot")
+    // and both then provision, collectively exceeding the limit. This is the
+    // same parallel-step optimism scheduler/stage_runner.go:140-144 today
+    // documents as a known limitation; the wallet must not inherit it.
+    w.mu.Lock()
+    defer w.mu.Unlock()
+
     decision := w.enforcer.CheckBudget(req.WorkflowId, req.AgentId, req.Model,
         req.EstimatedInputTokens + req.EstimatedMaxOutputTokens)
     if decision.Decision == cost.BudgetReject {
@@ -247,12 +263,12 @@ func (w *WalletService) AcquireLease(ctx context.Context, req *walletpb.LeaseReq
     // Apply provisional charge to TokenCounter (new RecordProvisional API).
     leaseID := ulid.Make().String()
     w.counter.RecordProvisional(cost.UsageRecord{...})
-    w.mu.Lock()
     w.active[leaseID] = &lease{...}
-    w.mu.Unlock()
     return &walletpb.LeaseResponse{Outcome: &walletpb.LeaseResponse_Grant{...}}, nil
 }
 ```
+
+**Lock granularity.** A single coarse mutex is acceptable for v0.3.x: lease acquire/settle is rare relative to the LLM-call latency it gates (sub-millisecond vs. seconds), so contention will not be observable. If profiling later shows the mutex on the hot path, the natural refactor is a `Reserve`-style API on `TokenCounter` itself that does check+record under its own lock — preserving atomicity while removing the wallet-level mutex.
 
 `TokenCounter` gains two new methods:
 
@@ -288,7 +304,12 @@ class WalletClient:
 
 `LLMClient.create_message` ([`agents/llm_client.py:97`](../../agents/llm_client.py)) wraps its existing body in `async with wallet.lease(...) as lease:`; on success, it calls `lease.settle(input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens)`. The lease ID is propagated as a span attribute (`persatrix.lease_id`) for trace correlation with the wallet-side logs.
 
-Estimating `estimated_input_tokens` pre-call requires tokenising the prompt; Persatrix already does this in [`internal/cost/`](../../internal/cost/) using the model-specific tokeniser config. The Python client mirrors that estimation locally rather than round-tripping the prompt to Go (privacy + bandwidth).
+Estimating `estimated_input_tokens` pre-call requires tokenising the prompt. Today the Go orchestrator does not tokenise — [`internal/cost/`](../../internal/cost/) computes cost from already-counted tokens (provider-reported, post-hoc). The Python agent already integrates `tiktoken.cl100k_base` (with a chars/4 fallback) for memory-budget calculations ([`memory_budget.py:81`](../../agents/persona_runtime/memory_budget.py#L81), [`memory/working.py:18`](../../agents/memory/working.py#L18)), but `tiktoken` is currently an *optional* extra ([`pyproject.toml:67`](../../agents/pyproject.toml#L67) — `accurate-tokens`) and the helper is not applied to the LLM-call input estimate. Two viable answers, both deferred to [Open Question §5](#open-questions) as a **Phase 0 blocker** (the choice changes the proto contract and the Python client surface, so it must close before Phase 1 lands):
+
+1. **Reuse the existing `cl100k_base` helper.** Promote `tiktoken` from optional extra to a hard runtime dependency and have `LLMClient` call the existing `_count_tokens` ([`memory_budget.py:81`](../../agents/persona_runtime/memory_budget.py#L81)) — or its sibling `estimate_tokens(accurate=True)` ([`memory/working.py:18`](../../agents/memory/working.py#L18)) — for `estimated_input_tokens`. The Go side accepts the agent's tokenisation as authoritative for both the lease and the post-hoc record. `cl100k_base` is the GPT-4 vocab and a known approximation of Claude's BPE; the same approximation is already accepted pervasively for memory-budget accounting, so adopting it for lease estimates introduces no *new* tokeniser disagreement.
+2. **Explicitly use the chars/4 fallback for lease estimates.** Keep `tiktoken` optional and have `LLMClient` use `len(prompt_chars) // 4` (the same fallback the helpers above already take when `tiktoken` is absent). Systematically over-grants leases when prompts are dense in code or non-English text; over-accounting is already the safe-side bias per [Failure Modes](#f-failure-modes), so this trades acquire-time precision for zero new install-closure cost. Acceptable as a v0.3.x stopgap if (1) is judged too large.
+
+For chat and autonomous TICK, `estimated_max_output_tokens` is the same `max_tokens` value `LLMClient.create_message` already passes to the provider — no new plumbing.
 
 `BudgetExceededError` is a new typed exception that propagates up the agent's call stack. For workflow tasks, the executor surfaces it as `TaskStatus.FAILED` with a structured `error_message`. For chat, the agent returns `ChatResponse.reply_status = "error"` with the wallet's `LeaseDenied.message`. For autonomous TICK, the loop logs a warning and treats the tick as idle (incrementing `idle_count` per the v0.2.2 short-circuit).
 
@@ -301,13 +322,18 @@ Estimating `estimated_input_tokens` pre-call requires tokenising the prompt; Per
 | Lease granted, provider 5xx before any usage reported | Agent calls `ReleaseLease(reason="provider_error")`; provisional reversed | Optimistic: provider rejected the request, no real spend occurred. |
 | Lease granted, agent crash mid-stream | Reaper at TTL expiry settles at granted amount | Same as crash pre-call — the in-flight request may have completed on provider side. |
 | Settlement RPC fails after a successful provider call | Agent retries Settle with backoff; if all retries fail, lease eventually reaped at granted amount | Granted amount ≥ actual (by construction), so the worst case is over-accounting, not under-accounting. |
+| Late `Settle` arrives after reaper already settled the lease at `granted_amount` | Wallet returns `success=true` with a `noop` indicator; the reaper-applied `granted_amount` charge stands and is not adjusted downward to `actual_amount`. | Monotone and trivially safe: the alternative (accept the late settle and reverse the delta) opens a TOCTOU window where the same lease ID can be in two states between reap and reconcile. The cost is bounded over-accounting on the slow path; the benefit is that `Settle`'s post-condition ("lease is closed") never depends on whether the reaper raced you. |
 | Clock skew between agent and orchestrator | TTL is enforced by orchestrator clock only; agent does not reason about TTL | Single source of truth removes a class of subtle bugs. |
 
 The closed-failure default is the load-bearing decision. It is the inverse of today's behaviour (a `BudgetEnforcer` outage today would manifest as the orchestrator failing entirely, but in-process LLM calls in already-dispatched tasks would continue spending).
 
+**Chat UX regression, accepted.** Today the chat path bypasses budget enforcement entirely, so a wallet outage cannot affect a live conversation. Under this RFC, a transient wallet RPC failure mid-conversation surfaces as `reply_status="error"` to the user. This is the same envelope that workflow tasks already live inside; we accept the regression on cost-safety grounds (the alternative — fail open on chat — re-creates the v0.2.3 bypass under a new name).
+
 ### G. Migration of Existing `CheckBudget`
 
 The pre-dispatch `CheckBudget` call in [`scheduler/stage_runner.go:155`](../../internal/scheduler/stage_runner.go) is preserved as an *early-fail* optimisation — if the worst-case for the whole task already exceeds budget, fail the task before paying the gRPC dispatch + lease-acquire cost. It is no longer the enforcement point; the agent-side per-call lease is.
+
+The saving is bounded — one executor dispatch + agent startup overhead — and applies only when the *aggregate* task estimate exceeds budget while the *first* per-call estimate would not. We keep it because it preserves today's fast-fail behaviour for clearly over-budget workflows and avoids reopening a regression class. Once Phase 5 has landed and the wallet has burned in, a follow-up may collapse this check into the wallet entirely.
 
 The chat and TICK paths gain enforcement they did not have. The workflow path gains *per-call* enforcement on top of the existing per-task pre-check.
 
@@ -343,9 +369,11 @@ Cause = `CHAT`. Closes the v0.2.3 documented bypass. New manual test `MT-COST-00
 
 Cause = `AUTONOMOUS_TICK` and `SUB_AGENT`. The TICK path treats `LeaseDenied` as an idle tick (consistent with v0.2.2 short-circuit). Sub-agent spawns acquire leases against the *parent's* `agent_id` so spend is attributed to the originating persona.
 
+Budget-throttled idle ticks must be recorded with a distinct `idle_reason` attribute (e.g. `idle_reason=budget_denied`) on the existing TICK metric, distinguishable from the v0.2.2 `empty_context_tick` reason and from natural-idle ticks. Without this, sustained budget pressure is invisible against organic quiet periods on dashboards.
+
 ### Phase 6: Channel-message origin (RFC 0011 follow-up)
 
-When RFC 0011 channels deliver a message and the recipient agent generates an LLM-backed reply, the lease is acquired with cause = `CHANNEL_MESSAGE`. This phase ships alongside RFC 0011 PR 4b's response gate so the gate runs *before* lease acquisition (no lease held during gate evaluation).
+When RFC 0011 channels deliver a message and the recipient agent generates an LLM-backed reply, the lease is acquired with cause = `CHANNEL_MESSAGE`. The response gate ([RFC 0011 PR 4b](0011-pr-plan.md), already shipped) runs *before* lease acquisition — only on a positive gate decision does the recipient agent attempt to acquire a lease (no lease held during gate evaluation).
 
 ## Files Touched (Estimated)
 
@@ -360,6 +388,7 @@ When RFC 0011 channels deliver a message and the recipient agent generates an LL
 | Go orchestrator | `internal/scheduler/stage_runner.go` | Comment: `CheckBudget` is now an early-fail optimisation |
 | Go orchestrator | `cmd/orchestrator/main.go` | Register `WalletService` on the gRPC server |
 | Python agents | `agents/wallet_client.py` (new) | gRPC client + `lease()` async context manager |
+| Python agents | `agents/server.py` (or agent entry point) | **Conditional on [Open Question §1](#open-questions) resolving to outbound dial:** add wallet dial-and-retain on startup; new `orchestrator_endpoint` config field; boot-time wallet unreachability becomes a fail-closed condition (agent cannot start the LLM-call path without an established wallet connection). |
 | Python agents | `agents/llm_client.py` | Wrap `create_message` in lease context |
 | Python agents | `agents/persona_runtime/action_loop.py` | Treat `BudgetExceededError` on TICK as idle |
 | Python agents | `agents/server_servicers.py` | Surface `BudgetExceededError` on chat as `reply_status="error"` |
@@ -386,14 +415,17 @@ When RFC 0011 channels deliver a message and the recipient agent generates an LL
 2. **Default TTL.** Proposed default: `2 × max(timeout_seconds across configs)`, capped at 120 s. Open to feedback — too long delays reaper recovery, too short risks settling live calls as crashed.
 3. **Should `LeaseDenied` carry `spent_usd` / `limit_usd`?** See [Security Considerations](#security-considerations). Leaving in for v0.3.x with a follow-up RFC to scrub for untrusted prompt contexts.
 4. **Per-cause budget policies.** Today all causes share the same `BudgetEnforcer` thresholds. A future extension is per-cause caps (e.g. "autonomous TICKs may use at most 20% of the per-agent daily budget"). Out of scope here but the `Cause` enum reserves the design space.
-5. **Tokeniser parity between Go and Python for the input estimate.** Both sides must agree on the input-token count, or settlement deltas will be systematically biased. Need to confirm whether [`internal/cost/`](../../internal/cost/) and the Python agent share a tokeniser implementation today, or whether a shared library / WASM binding is needed.
-6. **Interaction with the response cache** ([`internal/cost/cache.go`](../../internal/cost/cache.go)). A cache hit issues no provider call and incurs no cost; should the cache lookup happen before lease acquisition (no lease at all on hit) or after (lease acquired then released on hit)? **Provisional answer**: before — a cache hit should not consume a lease slot.
+5. **Tokeniser parity between Go and Python for the input estimate.** Both sides must agree on the input-token count, or settlement deltas will be systematically biased. Confirmed during [Section E rewrite](#e-python-client-integration): the Go orchestrator does not tokenise (`internal/cost/` only computes cost from already-counted tokens), and while the Python agent already uses `tiktoken.cl100k_base` (with a chars/4 fallback) for memory-budget calculations ([`memory_budget.py:81`](../../agents/persona_runtime/memory_budget.py#L81)), `tiktoken` is an *optional* extra ([`pyproject.toml:67`](../../agents/pyproject.toml#L67)) and the helper is not currently applied to the LLM-call input estimate. **Promoted to Phase 0 blocker.** The decision is a calibration choice — *which* existing tokeniser path becomes authoritative for the wallet — rather than build-vs-not: (a) promote `tiktoken` to a hard dep and reuse the existing helper, or (b) keep `tiktoken` optional and explicitly use the chars/4 fallback for the wallet path. Both proto and Python client surface depend on the choice.
+6. **Interaction with the response cache** ([`internal/cost/cache.go`](../../internal/cost/cache.go)). The Go-side `ResponseCache` is consulted by the executor ([`internal/executor/dispatch.go`](../../internal/executor/dispatch.go)) *before* gRPC dispatch to the agent — so it sits structurally upstream of any lease the agent would acquire. Today no cache-vs-lease ordering question exists for the workflow path: a cache hit short-circuits the entire dispatch, the agent is never contacted, no lease is ever requested. The chat and TICK paths do not consult the cache at all. **Provisional answer**: no change required for v0.3.x; if RFC 0011-driven channel replies or chat responses ever gain caching, re-open this question (the natural placement would be agent-side cache lookup *before* `wallet.lease()`).
+7. **Sub-agent lease pool sharing.** Phase 5 attributes sub-agent leases to the parent's `agent_id` for spend correctness. With default `max_active_leases=16` (per [Security Considerations](#security-considerations)), a parent fanning out to N sub-agents shares one lease pool, starving its own concurrency. Two coherent answers: bump the cap for personas configured as sub-agent parents, or split spend-attribution (parent) from concurrency-cap (per-process). **Provisional answer**: split — the cap is a per-process resource ceiling (DoS protection); spend attribution is a separate concern. Keep the cap per-process (the lease-issuing agent), keep attribution per-parent.
 
 ## Decision / Next Steps
 
 This RFC is in `📋 Proposed`. Next step: review and acceptance. On acceptance, file PR plan as `docs/rfcs/0023-pr-plan.md` per the project convention (mirroring [`0017-pr-plan.md`](0017-pr-plan.md), [`0018-pr-plan.md`](0018-pr-plan.md), etc.) and begin Phase 1.
 
-Open Questions §1 (transport) and §5 (tokeniser parity) should be resolved before Phase 1 lands so the proto contract and the Python client share the same assumptions.
+**Phase 0 blockers** — must close before Phase 1 lands so the proto contract and the Python client share the same assumptions:
+- Open Question §1 (transport: outbound dial vs. reverse-direction reuse).
+- Open Question §5 (tokeniser parity: shared tokeniser vs. length-based pessimistic estimator).
 
 ## Related Documentation
 
