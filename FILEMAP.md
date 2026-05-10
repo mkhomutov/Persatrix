@@ -415,10 +415,10 @@
 │   │   ├── 0022-persona-prompt-section-templating.md
 │   │   ├── 0023-llm-call-leasing.md
 │   │   ├── 0024-event-driven-scheduling.md
-│   │   ├── 0025-personal-society-storage-split.md
 │   │   ├── 0026-declarative-facts-tier.md
 │   │   ├── 0027-reflection-driven-consolidation.md
 │   │   ├── 0028-agent-decision-policy-engine.md
+│   │   ├── 0029-personal-society-storage-split.md
 │   │   ├── README.md
 │   │   └── RFC_TEMPLATE.md
 │   ├── storage-architecture-roadmap.md

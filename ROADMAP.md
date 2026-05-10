@@ -60,6 +60,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.x | 📋 Proposed |
 | [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | v0.4.0 | 📋 Proposed |
 | [0028](docs/rfcs/0028-agent-decision-policy-engine.md) | Agent Decision Policy Engine | v0.4.0 | 📋 Proposed |
+| [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.x (Phase 1) + v0.4.0 (Phases 2–6) | 📋 Proposed |
 
 ---
 
