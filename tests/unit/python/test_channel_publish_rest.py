@@ -38,11 +38,19 @@ class TestRESTPublishBranch:
 
         result = await executor._handle_send_channel_message("agent-a", action)
 
+        # ``cascade_depth=0`` is the cascade-origin default the executor
+        # forwards onto every publish (RFC 0011 amendment "Cascade-depth
+        # wire propagation", PR 3 of v0.3.0 channel test-findings plan);
+        # the *publisher* then omits the metadata map entirely when the
+        # value is zero so the on-the-wire shape stays clean. The kwarg
+        # forwarding is asserted at the executor seam; the on-wire
+        # omission is asserted in test_channel_publisher_cascade_depth.
         publisher.publish.assert_awaited_once_with(
             channel_id="group:planning",
             sender_id="agent-a",
             content="hi",
             mentions=["agent-b"],
+            cascade_depth=0,
         )
         assert result == {
             "action_type": "send_channel_message",

@@ -41,11 +41,19 @@ For non-CHANNEL_MESSAGE events the gate returns ``True`` unconditionally
 — it has no opinion on TICK / TASK_ASSIGNED / etc.
 
 Defense-in-depth ordering is preserved (RFC 0011 PR plan §PR 4 Key
-implementation details): gate (primary) → existing
-``EventDispatcher.max_cascade_depth=5`` (backstop) → REST-side rate
-limit. The cascade-depth check fires *before* the gate in
+implementation details): gate (primary for per-recipient policy) →
+existing ``EventDispatcher.max_cascade_depth=5`` (defense-in-depth for
+cross-agent cascade) → REST-side rate limit.
+
+The cascade-depth check fires *before* the gate in
 :meth:`EventDispatcher.dispatch`, so the gate never sees an event past
-the depth ceiling. The backstop is verified by
+the depth ceiling. The Python check is now the **defense-in-depth
+backstop** for the legacy in-process mention cascade and any wire-side
+regression: the **primary** cross-agent cascade-depth enforcement lives
+in the Go orchestrator's fanout cap (RFC 0011 amendment "Cascade-depth
+wire propagation", PR 2 of the v0.3.0 channel test-findings plan — the
+orchestrator sits on the trust boundary that agents cannot be relied on
+to honour). The backstop is verified by
 ``tests/unit/python/test_response_gate_cascade_backstop.py``.
 """
 

@@ -433,3 +433,48 @@ class TestReceiveChannelMessageIdValidation:
         assert "message_id" in ack.error_message
         dispatcher.dispatch.assert_not_awaited()
 
+
+# ─── Cascade-depth wire propagation (PR 3 of v0.3.0 test-findings) ─
+
+
+class TestReceiveChannelMessageCascadeDepth:
+    """RFC 0011 amendment "Cascade-depth wire propagation" (PR 3).
+
+    The gRPC receive path reads ``request.cascade_depth`` (typed proto
+    field added in PR 1 of the v0.3.0 channel test-findings plan) and
+    seeds the resulting ``AgentEvent.metadata["cascade_depth"]`` so the
+    downstream :class:`EventDispatcher` sees the wire value instead of
+    defaulting to zero. Without this seed the Python dispatcher's
+    backstop would be permanently armed at depth=0 on every inbound
+    cross-process hop — the original F-1 failure mode.
+    """
+
+    async def test_wire_cascade_depth_seeds_event_metadata(self):
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(cascade_depth=4),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        event = dispatcher.dispatch.await_args.args[1]
+        assert event.metadata.get("cascade_depth") == 4, (
+            f"servicer must seed metadata.cascade_depth from the typed "
+            f"proto field; got metadata={event.metadata!r}"
+        )
+
+    async def test_zero_cascade_depth_seeds_zero(self):
+        """Proto3 implicit presence: unset == zero, and zero is cascade-origin.
+
+        The servicer MUST still seed the metadata key explicitly so the
+        dispatcher's ``event.metadata.get("cascade_depth", 0)`` and the
+        eventual `+1` increment have a deterministic starting point.
+        """
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(cascade_depth=0),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        await _drain(servicer)
+        event = dispatcher.dispatch.await_args.args[1]
+        assert event.metadata.get("cascade_depth") == 0
+
