@@ -49,6 +49,13 @@ pub(crate) struct AgentResponse {
     #[serde(default)]
     #[tabled(skip)]
     pub(crate) agent_type: Option<String>,
+    /// Human-readable display name from `agents.yaml` (e.g. "Iron Fox").
+    /// `#[serde(default)]` keeps deserialization tolerant of older servers
+    /// that omit the field; `#[tabled(skip)]` keeps the `agent list` table
+    /// layout unchanged. Consumers fall back to `id` when missing/empty.
+    #[serde(default)]
+    #[tabled(skip)]
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -413,6 +420,7 @@ mod tests {
             capabilities: vec![],
             status: "healthy".into(),
             agent_type: None,
+            name: None,
         };
         let output = Table::new(vec![row]).to_string();
         assert!(

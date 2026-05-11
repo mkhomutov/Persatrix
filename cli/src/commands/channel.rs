@@ -13,6 +13,7 @@ use std::time::Duration;
 use colored::Colorize;
 use serde_json::json;
 
+use crate::commands::channel_render::{fetch_agent_display_names, format_message_line};
 use crate::commands::channel_types::{
     AddMemberRequest, ChannelMember, ChannelMessage, ChannelView, HistoryResponse,
     ListChannelsResponse, PublishMessageRequest,
@@ -398,13 +399,9 @@ pub(crate) async fn cmd_channel_history(
         println!("No messages.");
         return Ok(());
     }
+    let names = fetch_agent_display_names(client, server).await;
     for msg in &body.messages {
-        println!(
-            "{}  {}: {}",
-            msg.timestamp.dimmed(),
-            msg.sender_id.cyan(),
-            msg.content
-        );
+        println!("{}", format_message_line(msg, &names));
     }
     Ok(())
 }
@@ -423,8 +420,11 @@ pub(crate) async fn cmd_channel_watch(
     // Ring sized from `--limit`; see [`watch_seen_cap_for`].
     let mut state = WatchState::with_cap(watch_seen_cap_for(limit));
     let interval = Duration::from_secs(interval_secs.max(1));
+    // One-shot pre-loop fetch: agents.yaml is static, so resolving once
+    // saves a GET per poll. New mid-watch registrations fall back to id.
+    let names = fetch_agent_display_names(client, server).await;
     eprintln!(
-        "Watching {} (poll every {}s; Ctrl-C to stop)",
+        "Watching {} (poll every {}s; times in UTC; Ctrl-C to stop)",
         format!("#{canonical}").cyan(),
         interval_secs
     );
@@ -455,12 +455,7 @@ pub(crate) async fn cmd_channel_watch(
             if json_out {
                 println!("{}", serde_json::to_string(&msg).unwrap());
             } else {
-                println!(
-                    "{}  {}: {}",
-                    msg.timestamp.dimmed(),
-                    msg.sender_id.cyan(),
-                    msg.content
-                );
+                println!("{}", format_message_line(&msg, &names));
             }
         }
         if !first_poll
