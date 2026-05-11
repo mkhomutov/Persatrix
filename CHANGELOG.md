@@ -6,6 +6,32 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **RFC 0011 amendment — cascade-depth wire propagation (v0.3.0
+  channel test-findings PR 1).** v0.3.0 manual channels testing
+  surfaced finding F-1: a single user prompt produced ~60 persona
+  replies across two `always`-respond personas in ~10 minutes. Root
+  cause — `cascade_depth` is dropped at the REST publish boundary
+  ([publishMessageRequest](internal/server/channel_types.go)) and
+  reset to `0` on every gRPC dispatch back to agents
+  ([ChannelMessageEvent](proto/task.proto)), defeating the RFC 0011
+  §D cascade backstop across processes. This PR pins the wire
+  contract:
+  - `proto/task.proto` — new `int32 cascade_depth = 11` on
+    `ChannelMessageEvent` (typed scalar, mirroring the existing
+    `timestamp` asymmetry — `ChannelMessageEvent` has no metadata map).
+  - `schemas/channel.schema.json` — new `definitions.messageMetadata`
+    pinning `metadata.cascade_depth` (integer, minimum 0; orchestrator
+    clamps above `max_cascade_depth` server-side so publishers don't
+    need to know the deployment's current cap).
+  - `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` —
+    full contract, trust model, primary/defense-in-depth split,
+    deferred work (authoritative depth derivation, cost-ceiling).
+  Cross-linked from RFC 0011 §D and the 0011 PR plan's new
+  "Amendments" section. **No behavior change in this PR** — Go still
+  ignores the field, Python still doesn't emit it. Orchestrator
+  enforcement lands in PR 2, Python emit/ingest in PR 3, cross-process
+  integration pin in PR 4 (all per `docs/v0.3.0-test-findings-pr-plan.md`).
+
 - **RFC 0011 PR 4a-ii-β-1 — real Go gRPC `MessageDispatcher` +
   Python REST publish rewire.** Replaces the `NoopDispatcher{}`
   placeholder in `cmd/orchestrator/channels.go` with a registry-aware
