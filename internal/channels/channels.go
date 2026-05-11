@@ -132,6 +132,13 @@ var (
 	// `len(msg.Content) > MaxMessageContentBytes` (ISSUE-0050). The REST
 	// layer surfaces this as 413 Payload Too Large.
 	ErrMessageContentTooLarge = errors.New("channels: message content exceeds size cap")
+	// ErrInvalidMaxCascadeDepth — `channels.yaml` carried a negative
+	// `max_cascade_depth:`. PR #319 deep review finding 5.2: belt-and-
+	// suspenders for the operator who skipped `make validate` (the JSON
+	// schema's `minimum: 0` rejects this earlier). Zero is NOT an error
+	// — it is the loader's documented "use the default" sentinel
+	// honored by [ChannelRouter.SetMaxCascadeDepth].
+	ErrInvalidMaxCascadeDepth = errors.New("channels: invalid max_cascade_depth")
 )
 
 // participantIDPattern is the single source of truth for legal participant

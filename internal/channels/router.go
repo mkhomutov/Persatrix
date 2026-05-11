@@ -144,10 +144,7 @@ type ChannelRouter struct {
 	// maxCascadeDepth is the primary-enforcement cap on the cooperative-
 	// path cascade backstop (RFC 0011 amendment 'Cascade-depth wire
 	// propagation'). Defaults to [defaults.DefaultMaxCascadeDepth];
-	// operators override via [ChannelRouter.SetMaxCascadeDepth]. MUST
-	// stay aligned with the Python dispatcher's `max_cascade_depth`
-	// (agents/dispatch.py:43) — the two are one conceptual cap with
-	// two enforcement points (primary + defense-in-depth).
+	// operators override via [ChannelRouter.SetMaxCascadeDepth].
 	maxCascadeDepth int
 }
 
@@ -174,7 +171,9 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 
 // SetMaxCascadeDepth overrides the default cap. Non-positive values
 // are ignored so a zero/negative config row cannot silently disable
-// the backstop.
+// the backstop. MUST run at startup before any [ChannelRouter.Publish]
+// call — `maxCascadeDepth` is unsynchronised, so a runtime-reload path
+// needs an [sync/atomic.Int64] promotion first (PR #319 review 5.1).
 func (r *ChannelRouter) SetMaxCascadeDepth(d int) {
 	if d > 0 {
 		r.maxCascadeDepth = d
