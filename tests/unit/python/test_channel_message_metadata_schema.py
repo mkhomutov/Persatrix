@@ -108,3 +108,33 @@ def test_cascade_depth_non_integer_is_rejected():
         _validate({"cascade_depth": "5"})
     with pytest.raises(jsonschema.ValidationError):
         _validate({"cascade_depth": 5.5})
+
+
+def test_cascade_depth_whole_number_float_is_accepted():
+    """JSON Schema draft-07 treats ``5.0`` as a valid integer.
+
+    Draft-07 defines ``integer`` as any number with a zero fractional
+    part, so ``5.0`` passes the same gate as ``5``. This is a
+    forward-looking pin for PR 2: the Go orchestrator parses the
+    metadata bag as ``map[string]any`` and JSON unmarshalling yields
+    ``float64`` for any unquoted number. The clamp-and-coerce path
+    must therefore accept whole-number floats and convert them to
+    ``int32`` — rejecting them would break wire-acceptance of
+    payloads that already pass schema validation here.
+    """
+    _validate({"cascade_depth": 5.0})
+
+
+def test_unknown_metadata_keys_are_permitted():
+    """``messageMetadata`` is intentionally open for future extension.
+
+    No ``additionalProperties: false`` on the subschema: a publisher
+    emitting unknown keys (e.g. a future ``trace_id``) must not
+    fail the gate. The trade-off is that a typo like ``cascadedepth``
+    silently degrades to the implicit-zero cascade origin on the Go
+    side rather than surfacing as a 4xx. Pin this expectation so a
+    later tightening to ``additionalProperties: false`` lands with
+    a deliberate test update rather than riding in unannotated.
+    """
+    _validate({"cascade_depth": 3, "unknown_future_key": "tolerated"})
+    _validate({"cascadedepth": 3})  # typo passes — degrades to zero downstream
