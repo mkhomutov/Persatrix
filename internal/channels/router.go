@@ -10,7 +10,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/defaults"
 )
+
+// Cascade-depth helpers (read/clamp/recordCascadeCap) live in
+// [cascade_depth.go] — pulled out of this file so the router stays
+// focused on publish + fanout topology.
 
 // DispatchEnvelope bundles the per-recipient inputs the dispatcher needs
 // to render a [taskpb.ChannelMessageEvent] without the router exposing the
@@ -95,6 +101,12 @@ type RouterMetrics struct {
 	// counter fires, so the count reflects effective delivery attempts.
 	MessagesDelivered metric.Int64Counter
 	MessagesPublished metric.Int64Counter // pairs with MessagesDelivered (ISSUE-0013)
+	// MessagesCascadeCapped counts per-recipient fanout dispatches
+	// suppressed by the cascade-depth cap (RFC 0011 amendment
+	// 'Cascade-depth wire propagation'). One increment per suppressed
+	// recipient — directly comparable to MessagesDelivered. Labelled by
+	// `channel_type`; `channel_id` lives on the structured log line.
+	MessagesCascadeCapped metric.Int64Counter
 }
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST
@@ -128,6 +140,15 @@ type ChannelRouter struct {
 	// [NewChannelRouter] — so the publish hot path can call
 	// `Notify` unconditionally without a nil check.
 	waiter *replyWaiter
+
+	// maxCascadeDepth is the primary-enforcement cap on the cooperative-
+	// path cascade backstop (RFC 0011 amendment 'Cascade-depth wire
+	// propagation'). Defaults to [defaults.DefaultMaxCascadeDepth];
+	// operators override via [ChannelRouter.SetMaxCascadeDepth]. MUST
+	// stay aligned with the Python dispatcher's `max_cascade_depth`
+	// (agents/dispatch.py:43) — the two are one conceptual cap with
+	// two enforcement points (primary + defense-in-depth).
+	maxCascadeDepth int
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -142,12 +163,27 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		dispatcher = NoopDispatcher{}
 	}
 	return &ChannelRouter{
-		store:      store,
-		dispatcher: dispatcher,
-		logger:     logger,
-		metrics:    metrics,
-		waiter:     newReplyWaiter(),
+		store:           store,
+		dispatcher:      dispatcher,
+		logger:          logger,
+		metrics:         metrics,
+		waiter:          newReplyWaiter(),
+		maxCascadeDepth: defaults.DefaultMaxCascadeDepth,
 	}
+}
+
+// SetMaxCascadeDepth overrides the default cap. Non-positive values
+// are ignored so a zero/negative config row cannot silently disable
+// the backstop.
+func (r *ChannelRouter) SetMaxCascadeDepth(d int) {
+	if d > 0 {
+		r.maxCascadeDepth = d
+	}
+}
+
+// MaxCascadeDepth returns the active cap (exposed for tests + ops logs).
+func (r *ChannelRouter) MaxCascadeDepth() int {
+	return r.maxCascadeDepth
 }
 
 // Publish runs steps 1+2 synchronously; on success, fanout (step 3) runs
@@ -178,12 +214,37 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 			ErrInvalidChannelType, declaredType, derivedType)
 	}
 
+	// RFC 0011 amendment 'Cascade-depth wire propagation': clamp inbound
+	// `cascade_depth` to [0, maxCascadeDepth] BEFORE the store commit
+	// so `GET /messages` returns what was enforced, not the publisher's
+	// claim. Defends against over-cap poisoning (NOT reset-to-0, which
+	// needs parent-message lookup — see the amendment's Future work).
+	inboundDepth := readCascadeDepth(msg.Metadata)
+	clampedDepth := clampCascadeDepth(inboundDepth, r.maxCascadeDepth)
+	if clampedDepth != inboundDepth || (msg.Metadata != nil && msg.Metadata[cascadeDepthMetadataKey] != nil) {
+		// Canonicalise the persisted shape to int (REST decode yields
+		// float64 for every numeric).
+		if msg.Metadata == nil {
+			msg.Metadata = map[string]any{}
+		}
+		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
+	}
+
 	if err := r.store.PublishMessage(ctx, msg); err != nil {
 		return err
 	}
 
 	if r.metrics != nil && r.metrics.MessagesPublished != nil {
 		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))
+	}
+
+	// Primary cascade-depth enforcement: drop fanout when at/over cap.
+	// The publish itself succeeded (2xx) — only the cascade is
+	// terminated. Python `EventDispatcher.max_cascade_depth=5`
+	// (agents/dispatch.py:108-114) remains as defense-in-depth.
+	if clampedDepth >= r.maxCascadeDepth {
+		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth)
+		return nil
 	}
 
 	// RFC 0011 PR 4b: pre-resolve `thread_parent_sender_id` once per

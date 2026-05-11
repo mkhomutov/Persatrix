@@ -34,5 +34,14 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.messages.published: %w", err)
 	}
+	if i.ChannelMessagesCascadeCapped, err = m.Int64Counter(
+		"channel.messages.cascade_capped",
+		metric.WithUnit("{message}"),
+		metric.WithDescription(
+			"Per-recipient channel-router fanout dispatches suppressed by the cascade-depth cap, labelled by channel_type. RFC 0011 amendment 'Cascade-depth wire propagation'.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.messages.cascade_capped: %w", err)
+	}
 	return nil
 }

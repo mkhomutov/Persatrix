@@ -34,3 +34,14 @@ const MinRetryBudgetFraction = 0.25
 // it is available for future timeout validation and for documentation.
 // (PR 5a, S10: added to defaults for discoverability)
 const MaxTimeoutSeconds = 3600
+
+// DefaultMaxCascadeDepth is the system default cap on the cooperative-path
+// cascade-depth backstop introduced by [RFC 0011 amendment
+// "Cascade-depth wire propagation"]
+// (docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md). The
+// orchestrator drops a fanout when inbound `cascade_depth >= cap`; the
+// Python `EventDispatcher` carries the same cap as defense-in-depth
+// ([agents/dispatch.py] `max_cascade_depth=5`). Keep the two values
+// aligned — splitting them would mean the backstop fires on routine
+// cap-bound traffic instead of only on a primary-enforcement regression.
+const DefaultMaxCascadeDepth = 5
