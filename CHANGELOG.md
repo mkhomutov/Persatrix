@@ -50,6 +50,29 @@ All notable changes to this project will be documented in this file.
 
   [RFC 0011 amendment 'Cascade-depth wire propagation']: docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
 
+- **RFC 0030 — Multi-Agent Conversation Governance (Draft).** Proposes
+  a layered architecture for terminating and pacing agent-to-agent
+  conversations in channels. Motivated by the v0.3.0 F-1 finding's
+  tail: even with `cascade_depth=5` closed, cost still scales as
+  `members × depth` per publish, and the flat cap cannot distinguish
+  productive convergence from a trivial loop. Six layers ordered
+  cheap-and-unfailable → expensive-and-judgement-based: (0)
+  cascade_depth backstop (shipped); (1) per-interaction cost ceiling
+  via RFC 0023 lease attribution; (2) per-participant reply budget;
+  (3) response gate (shipped); (4) end-of-interaction structured
+  vote; (5) optional moderator agent reading the transcript every N
+  turns; (6) declarative conversation types (brainstorm /
+  design_review / incident / retro / open) bundling sensible
+  defaults. Scope of a "conversation" is the [RFC 0020](docs/rfcs/0020-interaction-lifecycle.md)
+  Interaction; `interaction_id` joins `cascade_depth` on the publish
+  wire shape. Phased: deterministic layers (1, 2, 4) target v0.3.x;
+  moderator (Layer 5) targets v0.4.0 alongside [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md)'s
+  salience-triggered scheduler; declarative types and topic-drift
+  detection (Layer 6 + RFC 0020 §B scaffolding) target v0.5.0+.
+  Status `📋 Proposed (Draft)`; 10 open questions captured.
+  ([docs/rfcs/0030-multi-agent-conversation-governance.md](docs/rfcs/0030-multi-agent-conversation-governance.md);
+  ROADMAP RFC Master Index updated.)
+
 - **RFC 0011 amendment — cascade-depth wire propagation (v0.3.0
   channel test-findings PR 1).** v0.3.0 manual channels testing
   surfaced finding F-1: a single user prompt produced ~60 persona
