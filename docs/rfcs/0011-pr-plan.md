@@ -30,6 +30,11 @@ RFC 0011 spans four phases for v0.3.0 (internal channels). External bridges are 
 - **PR 2** (REST publish) gates on RFC 0009 PR 2 (rate-limit middleware) — see [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing). If RFC 0009 slips, this PR ships the startup-WARN path with an opt-out gate.
 - **PR 5** is the **joint-delivery PR with [RFC 0020 PR plan](0020-pr-plan.md) PR 5** — both RFCs reference each other's PR number.
 
+## Amendments
+
+- [Chat as DM Channel (RFC 0016 unification)](0011-amendment-chat-as-dm.md) — 2026-05-04, landed inside PR 4a.
+- [Cascade-depth wire propagation](0011-amendment-cascade-depth-wire-propagation.md) — 2026-05-11, lands in [v0.3.0 channel test-findings PR plan](../v0.3.0-test-findings-pr-plan.md) PRs 1–4.
+
 ---
 
 ## Dependency Graph

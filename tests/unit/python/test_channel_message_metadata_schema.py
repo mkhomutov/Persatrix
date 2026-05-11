@@ -1,0 +1,110 @@
+"""JSON-schema validation for the publish-payload ``metadata`` bag.
+
+RFC 0011 amendment "Cascade-depth wire propagation" introduced a
+``metadata.cascade_depth`` key on the channel publish payload. The
+amendment doc pins:
+
+* the key is an **optional integer**;
+* values below ``0`` are rejected at the schema gate;
+* the documented operational range is ``[0, max_cascade_depth]`` but
+  schema enforcement is permissive on the upper bound — the
+  orchestrator clamps values above ``max_cascade_depth`` down at the
+  publish boundary (PR 2 of this plan), so wire-acceptance of a large
+  value is intentional and must round-trip the schema check.
+
+This test pulls the ``messageMetadata`` definition out of
+``schemas/channel.schema.json`` and exercises it directly. Schema
+drift (e.g. someone tightens ``maximum`` and inadvertently rejects
+clamp-target values) shows up here rather than as an opaque 4xx in
+manual testing of PR 2.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import jsonschema  # type: ignore[import-untyped]
+import pytest
+
+
+_SCHEMA_PATH = Path("schemas/channel.schema.json")
+
+
+def _message_metadata_subschema() -> dict:
+    """Extract the ``messageMetadata`` definition from the channel schema.
+
+    The definition is housed in ``channel.schema.json`` per the amendment
+    doc (not in a separate schema file) so the REST publish payload's
+    metadata contract sits next to the channel config it routes against.
+    """
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    return {
+        # Validators resolve ``$ref`` against the parent schema; passing
+        # the full schema as the root means ``definitions/...`` refs are
+        # reachable, but we point the validator's root at the subschema
+        # so callers see the metadata shape directly.
+        **schema["definitions"]["messageMetadata"],
+        # Preserve the parent ``$schema`` so the right draft validator
+        # is selected even when the subschema is exercised in isolation.
+        "$schema": schema.get("$schema", "http://json-schema.org/draft-07/schema#"),
+    }
+
+
+def _validate(instance: dict) -> None:
+    jsonschema.validate(instance=instance, schema=_message_metadata_subschema())
+
+
+def test_cascade_depth_zero_is_accepted():
+    """``cascade_depth: 0`` is the wire value for an un-incremented publish."""
+    _validate({"cascade_depth": 0})
+
+
+def test_cascade_depth_in_documented_range_is_accepted():
+    """A value inside the documented ``[0, max_cascade_depth]`` band passes."""
+    _validate({"cascade_depth": 5})
+
+
+def test_cascade_depth_negative_is_rejected():
+    """Negative depths are schema-illegal — no clamp covers this case."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"cascade_depth": -1})
+
+
+def test_cascade_depth_above_max_is_accepted_for_server_clamp():
+    """Large values are accepted at the schema gate so the server can clamp.
+
+    The amendment is explicit: an above-cap value is **not** a malformed
+    payload. The orchestrator clamps ``> max_cascade_depth`` down to the
+    cap at the publish boundary (PR 2). Rejecting on the schema side
+    would force every publisher to know the orchestrator's current cap
+    before it could compose a payload, which inverts the trust model the
+    amendment establishes.
+    """
+    _validate({"cascade_depth": 9999})
+
+
+def test_cascade_depth_is_optional():
+    """An empty metadata bag is a valid publish payload (most publishes).
+
+    The vast majority of publishes do not need to set ``cascade_depth``
+    — the agent-side executor only sets it for cascade-originating
+    fanout. The schema must therefore accept an absent key without
+    falling back on a synthesized default.
+    """
+    _validate({})
+
+
+def test_cascade_depth_non_integer_is_rejected():
+    """Strings and floats both miss the wire shape Python+Go agree on.
+
+    ``int32`` on the gRPC side and ``integer`` on the schema side: a
+    publisher emitting ``"5"`` or ``5.5`` would silently degrade the
+    cap (Go would parse the metadata bag and refuse to coerce). Pin
+    the type strictly at the schema gate so the failure surfaces at
+    the REST boundary, not at the orchestrator's metadata read.
+    """
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"cascade_depth": "5"})
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"cascade_depth": 5.5})

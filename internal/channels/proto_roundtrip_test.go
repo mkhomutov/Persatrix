@@ -50,6 +50,7 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 		Mentions:             []string{"bob", "carol"},
 		RespondPolicy:        "when_mentioned",
 		ThreadParentSenderId: "dave",
+		CascadeDepth:         3,
 	}
 
 	blob, err := proto.Marshal(original)
@@ -77,6 +78,28 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, []string{"bob", "carol"}, decoded.Mentions)
 	assert.Equal(t, "when_mentioned", decoded.RespondPolicy)
 	assert.Equal(t, "dave", decoded.ThreadParentSenderId)
+	assert.Equal(t, int32(3), decoded.CascadeDepth)
+}
+
+// TestChannelMessageEvent_CascadeDepthRoundTripsWithoutValue pins the proto3
+// implicit-presence contract for the new `cascade_depth` field: an event
+// constructed without setting `CascadeDepth` must decode to the zero value
+// and the on-wire payload must omit the field entirely. Catches an
+// accidental `optional`-keyword promotion that would force explicit
+// presence and change the marshaled bytes.
+func TestChannelMessageEvent_CascadeDepthRoundTripsWithoutValue(t *testing.T) {
+	original := &taskpb.ChannelMessageEvent{
+		MessageId: "msg-002",
+		ChannelId: "group:eng",
+		// CascadeDepth deliberately omitted — proto3 zero.
+	}
+	blob, err := proto.Marshal(original)
+	require.NoError(t, err)
+
+	decoded := &taskpb.ChannelMessageEvent{}
+	require.NoError(t, proto.Unmarshal(blob, decoded))
+	assert.True(t, proto.Equal(original, decoded))
+	assert.Equal(t, int32(0), decoded.CascadeDepth)
 }
 
 func TestChannelMessageEvent_DefaultInstanceRoundTrips(t *testing.T) {
@@ -200,6 +223,25 @@ func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
 				tc.name, tc.fieldNumber)
 		})
 	}
+}
+
+func TestChannelMessageEvent_CascadeDepthFieldNumberPinned(t *testing.T) {
+	// `int32 cascade_depth = 11` is varint-encoded (wire-type 0):
+	//   tag = (11 << 3) | 0 = 0x58
+	//   value 7 encodes as varint 0x07 (single byte, payload < 0x80).
+	// A renumber of this field — or an accidental type flip to a
+	// length-delimited wire type — will fail this assertion on
+	// whichever language regenerates first.
+	ev := &taskpb.ChannelMessageEvent{CascadeDepth: 7}
+	blob, err := proto.Marshal(ev)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x58, 0x07}, blob,
+		"cascade_depth field 11 must marshal as varint tag 0x58 + payload — field renumbered or wire type changed")
+
+	// Zero must encode to nothing (proto3 implicit presence).
+	blobZero, err := proto.Marshal(&taskpb.ChannelMessageEvent{CascadeDepth: 0})
+	require.NoError(t, err)
+	assert.Empty(t, blobZero, "cascade_depth=0 must marshal to zero bytes under proto3 implicit presence")
 }
 
 func TestChannelMessageEvent_MentionsFieldNumberPinned(t *testing.T) {
