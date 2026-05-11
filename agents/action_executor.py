@@ -243,6 +243,16 @@ class ActionExecutor:
                         sender_id=sender_id,
                         content=content,
                         mentions=list(mentions),
+                        # RFC 0011 amendment "Cascade-depth wire propagation"
+                        # (PR 3 of v0.3.0 channel test-findings plan): the
+                        # ``+1`` increment lives on the dispatcher side
+                        # (see ``EventDispatcher.dispatch`` —
+                        # ``cascade_depth=depth + 1`` is what arrives on
+                        # this kwarg), so the executor forwards the value
+                        # verbatim. Re-incrementing here would fire the
+                        # orchestrator's fanout cap one hop early relative
+                        # to RFC 0011 §D's depth-5 ceiling.
+                        cascade_depth=cascade_depth,
                     ),
                     timeout=_DEFAULT_PUBLISH_HTTP_TIMEOUT,
                 )
