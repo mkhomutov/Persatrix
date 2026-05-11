@@ -256,5 +256,14 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		Mentions:             msg.Mentions,
 		RespondPolicy:        string(env.Recipient.RespondPolicy),
 		ThreadParentSenderId: env.ThreadParentSenderID,
+		// [RFC 0011 amendment 'Cascade-depth wire propagation']: the
+		// router's Publish clamped `msg.Metadata["cascade_depth"]` to
+		// `[0, maxCascadeDepth]` before persistence, so the int32
+		// downcast cannot overflow on a misbehaving publisher. proto3
+		// scalars zero-value to 0, which is exactly the chain-origin
+		// semantic for a publish that omits the field.
+		//
+		// [RFC 0011 amendment 'Cascade-depth wire propagation']: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+		CascadeDepth: int32(readCascadeDepth(msg.Metadata)),
 	}
 }

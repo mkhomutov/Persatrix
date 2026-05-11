@@ -12,6 +12,12 @@
       "default": 50,
       "description": "Global cap on declared named group channels. DMs and threads are not counted."
     },
+    "max_cascade_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 5,
+      "description": "Primary-enforcement cap on the cooperative-path cascade-depth backstop (RFC 0011 amendment 'Cascade-depth wire propagation', PR 2). Default is 5, aligned with the Python dispatcher's `max_cascade_depth` (agents/dispatch.py). The Go loader treats a zero or absent value as 'use the orchestrator default' so the backstop cannot be silently disabled from config (ChannelRouter.SetMaxCascadeDepth ignores non-positive overrides). Negative values are not permitted by the schema so an operator typo surfaces at `make validate` time rather than as a silent fall-back at startup."
+    },
     "channels": {
       "type": "array",
       "items": { "$ref": "#/definitions/channel" }

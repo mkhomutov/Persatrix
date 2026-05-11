@@ -113,12 +113,19 @@ func initChannels(
 	var routerMetrics *channels.RouterMetrics
 	if orchMetrics != nil {
 		routerMetrics = &channels.RouterMetrics{
-			MessagesDelivered: orchMetrics.ChannelMessagesDelivered,
-			MessagesPublished: orchMetrics.ChannelMessagesPublished,
+			MessagesDelivered:     orchMetrics.ChannelMessagesDelivered,
+			MessagesPublished:     orchMetrics.ChannelMessagesPublished,
+			MessagesCascadeCapped: orchMetrics.ChannelMessagesCascadeCapped,
 		}
 	}
 	dispatcher := selectChannelDispatcher(reg, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// `channels.yaml` may override the default cascade-depth cap. Apply
+	// after construction so the router's [defaults.DefaultMaxCascadeDepth]
+	// default stays the canonical "no config" value; a zero or negative
+	// row in the YAML is ignored by SetMaxCascadeDepth (the backstop
+	// cannot be silently disabled — see the [RFC 0011 amendment]).
+	router.SetMaxCascadeDepth(chanCfg.MaxCascadeDepth)
 	if rErr := router.ReconcileConfig(context.Background(), chanCfg); rErr != nil {
 		// Loud-fail per RFC 0011 §B; the caller (main) will `Fatal`.
 		// Run the cleanup ourselves first so the half-opened store does

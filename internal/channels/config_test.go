@@ -135,6 +135,47 @@ func TestChannelConfig_CanonicalID(t *testing.T) {
 	assert.Equal(t, "group:planning", cc.CanonicalID())
 }
 
+// TestLoadConfig_RejectsNegativeMaxCascadeDepth pins PR #319 deep review
+// finding 5.2: a negative `max_cascade_depth:` in `channels.yaml` MUST
+// surface as a loader error rather than silently falling through to
+// `SetMaxCascadeDepth(-1)` (which ignores non-positive and leaves the
+// cap at the default). The JSON schema already rejects negatives at
+// `make validate` time; this guard is the belt-and-suspenders for the
+// operator who skipped that step.
+func TestLoadConfig_RejectsNegativeMaxCascadeDepth(t *testing.T) {
+	body := "max_cascade_depth: -1\n"
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidMaxCascadeDepth)
+}
+
+// TestLoadConfig_AcceptsZeroMaxCascadeDepth pins the loader-default
+// sentinel contract from the schema. `max_cascade_depth: 0` MUST load
+// cleanly: `cmd/orchestrator/channels.go` then calls
+// `SetMaxCascadeDepth(0)` which the router ignores, so the active cap
+// stays at `defaults.DefaultMaxCascadeDepth`. Rejecting zero here would
+// break the documented "leave the key to take the default" path
+// (`schemas/channel.schema.json` minimum: 0; companion
+// `test_max_cascade_depth_zero_is_accepted_for_loader_default_substitution`
+// in `tests/unit/python/test_channel_config_schema.py`).
+func TestLoadConfig_AcceptsZeroMaxCascadeDepth(t *testing.T) {
+	body := "max_cascade_depth: 0\n"
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.MaxCascadeDepth)
+}
+
+// TestLoadConfig_AcceptsPositiveMaxCascadeDepth pins the operator's
+// tightening path. The Go loader has no opinion on which positive
+// integer is "correct" — that's the operator's call to make and the
+// router consumes whatever it gets (`ChannelRouter.SetMaxCascadeDepth`).
+func TestLoadConfig_AcceptsPositiveMaxCascadeDepth(t *testing.T) {
+	body := "max_cascade_depth: 3\n"
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	assert.Equal(t, 3, cfg.MaxCascadeDepth)
+}
+
 // TestLoadConfig_RejectsBadChannelName pins PR #231 review Should-Fix #6:
 // the loader's Validate() now compiles and applies the same `name` regex the
 // JSON Schema does (`schemas/channel.schema.json` →

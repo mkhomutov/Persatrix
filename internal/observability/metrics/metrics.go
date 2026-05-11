@@ -141,6 +141,11 @@ type Instruments struct {
 	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for
 	// the delivered/published ratio (ISSUE-0013).
 	ChannelMessagesPublished metric.Int64Counter
+	// ChannelMessagesCascadeCapped counts per-recipient fanout
+	// dispatches suppressed by the cascade-depth cap (RFC 0011 amendment
+	// 'Cascade-depth wire propagation'). Comparable to
+	// ChannelMessagesDelivered; labelled by `channel_type`.
+	ChannelMessagesCascadeCapped metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.

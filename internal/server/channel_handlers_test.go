@@ -253,6 +253,9 @@ func TestChannels_PublishMessage_OversizedContent_PayloadTooLarge(t *testing.T) 
 	assert.Empty(t, hist, "rejected publish must not persist")
 }
 
+// cascade_depth REST-boundary tests live in
+// channel_handlers_cascade_depth_test.go (RFC 0011 amendment).
+
 // TestChannels_GetThread_ReturnsReplies pins the thread-fetch endpoint.
 func TestChannels_GetThread_ReturnsReplies(t *testing.T) {
 	srv, _ := channelTestServer(t)

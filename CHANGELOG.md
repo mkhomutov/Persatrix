@@ -6,6 +6,50 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **v0.3.0 channel test-findings PR 2 — orchestrator-side cascade-depth
+  enforcement.** Closes the F-1 cooperative-path cascade backstop in
+  Go ([RFC 0011 amendment 'Cascade-depth wire propagation']). Builds
+  on PR 1's wire contract (schema + proto) with the primary
+  enforcement layer:
+  - `internal/channels/router.go` — `ChannelRouter.Publish` now reads
+    `msg.Metadata["cascade_depth"]`, clamps it to
+    `[0, max_cascade_depth]` at the publish trust boundary, persists
+    the clamped value (so a `GET /messages` reader sees what the
+    orchestrator actually enforced, not the publisher's claim), and
+    drops the per-recipient fanout when the clamped depth ≥ cap. The
+    publish itself still succeeds — only the cascade chain is
+    terminated. The +1 stays agent-side on outbound; the orchestrator
+    forwards the inbound depth as-is into child fanout events.
+  - `internal/channels/grpc_dispatcher.go` — outbound dispatch events
+    now carry the depth on the typed `ChannelMessageEvent.cascade_depth`
+    proto field landed in PR 1.
+  - `internal/server/channel_handlers.go` — publish handler rejects
+    negative or non-integer `metadata.cascade_depth` with `400` at the
+    REST boundary (loud-fail on a publisher bug). Over-cap values are
+    silently clamped server-side at the router boundary since
+    publishers do not know the deployment's current cap.
+  - `internal/defaults/defaults.go` — new `DefaultMaxCascadeDepth = 5`
+    constant aligned with the Python `EventDispatcher.max_cascade_depth`
+    at `agents/dispatch.py:43`. `channels.yaml` exposes
+    `max_cascade_depth:` as an explicit override (a zero or negative
+    row is ignored — the backstop cannot be silently disabled from
+    config).
+  - `channel.messages.cascade_capped{channel_type}` counter — one
+    increment per per-recipient dispatch the cap suppressed. Directly
+    comparable to `channel.messages.delivered`; `channel_id` is on
+    the structured log line for incident-driven pivots.
+  - Structured log line on cap-drop:
+    `channels: cascade limit reached channel_id=… sender_id=… depth=… max_cascade_depth=… suppressed_recipients=…`
+    at Warn level.
+  Operator-facing detail in `docs/guides/channels.md` §"Cascade-depth
+  backstop". **Wire compatibility preserved**: a Python publisher that
+  has not yet adopted PR 3's emit path will still POST with no
+  `cascade_depth` (depth defaults to 0, fanout fires normally); the
+  Python `EventDispatcher.max_cascade_depth=5` check remains as
+  defense-in-depth until PR 3's docstring re-framing lands.
+
+  [RFC 0011 amendment 'Cascade-depth wire propagation']: docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+
 - **RFC 0030 — Multi-Agent Conversation Governance (Draft).** Proposes
   a layered architecture for terminating and pacing agent-to-agent
   conversations in channels. Motivated by the v0.3.0 F-1 finding's

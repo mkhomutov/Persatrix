@@ -20,6 +20,16 @@ import (
 type Config struct {
 	MaxChannels int             `yaml:"max_channels"`
 	Channels    []ChannelConfig `yaml:"channels"`
+	// MaxCascadeDepth overrides the orchestrator-side cascade-depth cap
+	// from [RFC 0011 amendment 'Cascade-depth wire propagation'].
+	// Optional — zero or absent uses the router's
+	// [defaults.DefaultMaxCascadeDepth] default. Must stay aligned with
+	// the Python `EventDispatcher.max_cascade_depth` value
+	// ([agents/dispatch.py:43]); the two are one conceptual cap with
+	// two enforcement points (primary + defense-in-depth).
+	//
+	// [RFC 0011 amendment 'Cascade-depth wire propagation']: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+	MaxCascadeDepth int `yaml:"max_cascade_depth"`
 }
 
 // ChannelConfig is a single declared group channel.
@@ -105,7 +115,19 @@ func LoadConfig(path string) (*Config, error) {
 //   - declared channel names are unique across the file
 //   - the declared channel count does not exceed `MaxChannels`
 //   - every membership respond policy is in the canonical set
+//   - `max_cascade_depth` is non-negative (zero is the loader-default
+//     sentinel; negative is rejected — PR #319 deep review finding 5.2)
 func (c *Config) Validate() error {
+	// MaxCascadeDepth: reject negative early so an operator typo surfaces
+	// as a loader error rather than as a silent fall-back to the default.
+	// The JSON schema's `minimum: 0` catches this at `make validate` time;
+	// this Go-side check is the belt-and-suspenders for operators who
+	// skipped that step. Zero is intentionally accepted — it is the
+	// loader-default sentinel honored by [ChannelRouter.SetMaxCascadeDepth].
+	if c.MaxCascadeDepth < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)",
+			ErrInvalidMaxCascadeDepth, c.MaxCascadeDepth)
+	}
 	if len(c.Channels) > c.MaxChannels {
 		return fmt.Errorf("%w: declared=%d cap=%d",
 			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
