@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -229,6 +229,20 @@ docker-down: ## Stop all services
 
 docker-logs: ## Tail logs
 	docker compose logs -f
+
+reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
+	@echo "→ Stopping stack and removing named volumes..."
+	@# `docker compose down -v` is idempotent: it tears down whatever is up
+	@# (no-op if already down) and removes every volume declared in this
+	@# compose project — currently orchestrator-data, ember-owl-data, and
+	@# workspace. Re-running after a successful reset succeeds cleanly.
+	docker compose down -v
+	@echo "✓ Stack stopped; wiped channels DB (orchestrator-data),"
+	@echo "  persona memory (ember-owl-data), and agent scratch (workspace)."
+	@echo "  Restart with: make docker-up"
+	@echo "  Note: this is an operator workaround for F-3 cross-run state bleed."
+	@echo "  Root-cause fix (per-session memory namespacing) tracked in"
+	@echo "  docs/issues/ISSUE-0051-per-session-memory-namespacing-channels.md"
 
 # ─── Clean ──────────────────────────────────────────────
 clean: ## Remove build artifacts

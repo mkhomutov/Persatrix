@@ -429,3 +429,64 @@ func TestGRPCMessageDispatcher_RPCStatusErrorPropagates(t *testing.T) {
 		})
 	}
 }
+
+// TestChannelMessageToProto_CascadeDepth_PropagatedFromMetadata pins
+// the wire-side half of the [RFC 0011 amendment] contract: the inbound
+// `cascade_depth` carried on `msg.Metadata` (REST seat) MUST land on
+// the typed `int32 cascade_depth = 11` proto field. Without this, the
+// orchestrator's primary enforcement (router cap) would fire correctly
+// on the publish side but the cascade chain would still reset to 0 on
+// every gRPC dispatch back to agents — the original F-1 defect.
+//
+// [RFC 0011 amendment]: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+func TestChannelMessageToProto_CascadeDepth_PropagatedFromMetadata(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+		Metadata: map[string]any{"cascade_depth": 3},
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	})
+
+	assert.EqualValues(t, 3, ev.CascadeDepth,
+		"cascade_depth from msg.Metadata MUST land on the typed proto field")
+}
+
+// TestChannelMessageToProto_CascadeDepth_DefaultsToZero pins the
+// implicit-zero contract on the wire: an outbound dispatch event for a
+// publish with no cascade_depth in metadata MUST carry the proto3
+// default `cascade_depth=0`, not an absent / unset field. Agent-side
+// processing reads the value as the inbound depth before applying its
+// own +1 on outbound — a missing default would skew the chain.
+func TestChannelMessageToProto_CascadeDepth_DefaultsToZero(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	})
+
+	assert.EqualValues(t, 0, ev.CascadeDepth,
+		"absent metadata MUST translate to proto3 default cascade_depth=0")
+}
+
+// TestChannelMessageToProto_CascadeDepth_AcceptsFloat64Repr pins the
+// JSON-decoded shape: REST decode yields `float64` for every numeric,
+// so the wire translator MUST accept it. Without this, a publish
+// through the REST surface would silently land on the wire with
+// cascade_depth=0 even when the publisher correctly populated the
+// metadata bag — the F-1 defect by another route.
+func TestChannelMessageToProto_CascadeDepth_AcceptsFloat64Repr(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+		Metadata: map[string]any{"cascade_depth": float64(4)},
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	})
+
+	assert.EqualValues(t, 4, ev.CascadeDepth)
+}

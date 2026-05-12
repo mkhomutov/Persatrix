@@ -316,3 +316,54 @@ class TestEventDispatcher:
         assert original_metadata["tracing"] is inner_meta
         assert inner_meta["trace_ids"] == ["t1", "t2"]
         await agent.close_memory()
+
+    async def test_inbound_cascade_depth_increments_and_threads_to_executor(self):
+        """Inbound depth=N → child metadata depth=N+1 → executor kwarg=N+1.
+
+        RFC 0011 amendment "Cascade-depth wire propagation" (PR 3 of the
+        v0.3.0 channel test-findings plan): the dispatcher is the single
+        site that increments cascade depth as an event crosses into the
+        next agent's action loop. The executor receives the already-
+        incremented value as a kwarg and forwards it onto the REST
+        publish call without further increment — pinning the orchestrator
+        cap to fire on the "true" hop count rather than one hop early.
+
+        This case asserts the cross-boundary contract: an event arriving
+        at depth=4 (e.g. seeded by the gRPC servicer from the wire) walks
+        through the dispatcher, fires the agent's ``on_event``, and the
+        executor sees ``cascade_depth=5`` on the kwarg. The cap-drop on
+        the *next* inbound depth=5 event is already covered by
+        :class:`TestEventDispatcher.test_cascade_depth_limiting` /
+        ``test_response_gate_cascade_backstop``.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agents.dispatch import ActionExecutor
+
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(
+            agents={"ember-owl": agent}, max_cascade_depth=5,
+        )
+
+        # Swap in a recording executor so we can observe the kwarg the
+        # dispatcher hands across. The real ActionExecutor's behaviour
+        # under SEND_CHANNEL_MESSAGE is covered in test_action_executor.py.
+        recording_executor = MagicMock(spec=ActionExecutor)
+        recording_executor.execute = AsyncMock(return_value=[])
+        dispatcher._executor = recording_executor
+
+        evt = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "from the wire"},
+            sender_id="iron-fox",
+            metadata={"cascade_depth": 4},
+        )
+        await dispatcher.dispatch("ember-owl", evt)
+
+        recording_executor.execute.assert_awaited_once()
+        call = recording_executor.execute.await_args
+        assert call.kwargs.get("cascade_depth") == 5, (
+            f"executor must receive inbound depth+1 as kwarg; "
+            f"got {call.kwargs!r}"
+        )
+        await agent.close_memory()

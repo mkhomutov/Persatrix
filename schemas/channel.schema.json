@@ -12,6 +12,12 @@
       "default": 50,
       "description": "Global cap on declared named group channels. DMs and threads are not counted."
     },
+    "max_cascade_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 5,
+      "description": "Primary-enforcement cap on the cooperative-path cascade-depth backstop (RFC 0011 amendment 'Cascade-depth wire propagation', PR 2). Default is 5, aligned with the Python dispatcher's `max_cascade_depth` (agents/dispatch.py). The Go loader treats a zero or absent value as 'use the orchestrator default' so the backstop cannot be silently disabled from config (ChannelRouter.SetMaxCascadeDepth ignores non-positive overrides). Negative values are not permitted by the schema so an operator typo surfaces at `make validate` time rather than as a silent fall-back at startup."
+    },
     "channels": {
       "type": "array",
       "items": { "$ref": "#/definitions/channel" }
@@ -61,6 +67,17 @@
           }
         }
       ]
+    },
+    "messageMetadata": {
+      "type": "object",
+      "description": "Optional metadata bag on the publish payload (POST /api/v1/channels/{id}/messages → publishMessageRequest.metadata). Carries cross-cutting wire-level fields that are not part of the core message body. Documented here rather than in the channels.yaml config schema because the config file has no metadata of its own — this definition pins the REST publish contract, mirrored on the gRPC side by typed fields on ChannelMessageEvent.",
+      "properties": {
+        "cascade_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hop count along the cooperative-path cascade chain (RFC 0011 amendment 'Cascade-depth wire propagation'). Documented operational range is [0, max_cascade_depth] (default cap 5). The schema enforces a lower bound only — values above the cap are accepted and clamped server-side at the orchestrator's publish boundary so a publisher does not need to know the deployment's current cap to compose a payload. Mirrors the typed `int32 cascade_depth = 11` field on `ChannelMessageEvent` (proto/task.proto)."
+        }
+      }
     }
   }
 }

@@ -456,6 +456,30 @@ make run-agent AGENT=ember-owl PORT=50051  # in a second terminal
 The orchestrator binds to `:8080` by default; override with `--server` on
 the CLI if you have it elsewhere.
 
+### Resetting state between test runs
+
+Persona memory persists across `docker compose down` via the
+`ember-owl-data` named volume (mounted at `/app/data/memory.db`). A
+second test run with the same `--user` identity inherits prior episodes,
+relationships, and trust scores — useful for long-running scenarios,
+disruptive when you want a clean slate.
+
+For a hard reset, use `make reset` — `docker compose down -v` plus a
+one-line confirmation. This drops the orchestrator channels store
+(`orchestrator-data`), the ember-owl persona memory volume
+(`ember-owl-data`), and the shared agent scratch volume (`workspace`,
+mounted into the orchestrator and all agent containers) in one
+command — `docker compose down -v` removes every named volume the
+compose project declares, not only the memory stores. Idempotent (the
+second invocation finds nothing to remove). Restart the stack with
+`make docker-up` afterwards.
+
+> **Operator workaround, not a fix.** Per-session memory namespacing —
+> so reruns with the same user id are auto-isolated — is tracked in
+> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md).
+> Originally surfaced as F-3 in
+> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
+
 ### Opening a chat
 
 ```bash

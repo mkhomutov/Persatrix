@@ -763,8 +763,27 @@ type ChannelMessageEvent struct {
 	// publish in `ChannelRouter.Publish` (see RFC 0011 PR plan §PR 4 key
 	// implementation details — "amortizes the lookup across fanout").
 	ThreadParentSenderId string `protobuf:"bytes,10,opt,name=thread_parent_sender_id,json=threadParentSenderId,proto3" json:"thread_parent_sender_id,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// RFC 0011 amendment "Cascade-depth wire propagation": cross-process
+	// hop in the cooperative-path cascade chain. The agent-side dispatcher
+	// increments depth as it forwards events into the next action loop
+	// (`agents/dispatch.py` — `metadata["cascade_depth"]`), but the
+	// original RFC 0011 §D claim — *"No change to the cascade mechanism
+	// is required"* — overlooked that the publish→fanout boundary drops
+	// the field entirely. Typed scalar (mirrors the proto/REST asymmetry
+	// called out at `task.proto:141-148` for `timestamp`): the metadata
+	// map on `ChannelMessage.Metadata` carries the field over REST, while
+	// gRPC needs a first-class field because `ChannelMessageEvent` has no
+	// metadata map. Orchestrator MUST clamp inbound to
+	// `[0, max_cascade_depth]` on receipt; receivers treat the field as
+	// advisory until orchestrator-side enforcement lands (PR 2 of the
+	// v0.3.0 channel test-findings plan). Proto3 implicit presence: an
+	// unset field is indistinguishable from an explicit zero, which is
+	// also the cascade-origin value. See
+	// `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` for
+	// the full contract.
+	CascadeDepth  int32 `protobuf:"varint,11,opt,name=cascade_depth,json=cascadeDepth,proto3" json:"cascade_depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -865,6 +884,13 @@ func (x *ChannelMessageEvent) GetThreadParentSenderId() string {
 		return x.ThreadParentSenderId
 	}
 	return ""
+}
+
+func (x *ChannelMessageEvent) GetCascadeDepth() int32 {
+	if x != nil {
+		return x.CascadeDepth
+	}
+	return 0
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -989,7 +1015,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xe2\x02\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x87\x03\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1003,7 +1029,8 @@ const file_task_proto_rawDesc = "" +
 	"\bmentions\x18\b \x03(\tR\bmentions\x12%\n" +
 	"\x0erespond_policy\x18\t \x01(\tR\rrespondPolicy\x125\n" +
 	"\x17thread_parent_sender_id\x18\n" +
-	" \x01(\tR\x14threadParentSenderId\"H\n" +
+	" \x01(\tR\x14threadParentSenderId\x12#\n" +
+	"\rcascade_depth\x18\v \x01(\x05R\fcascadeDepth\"H\n" +
 	"\aTaskAck\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*^\n" +

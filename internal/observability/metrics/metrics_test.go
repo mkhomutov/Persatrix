@@ -71,6 +71,7 @@ func TestInstrumentInventory(t *testing.T) {
 	// RFC 0011 — channels subsystem instrument inventory.
 	inst.ChannelMessagesDelivered.Add(ctx, 0)
 	inst.ChannelMessagesPublished.Add(ctx, 0)
+	inst.ChannelMessagesCascadeCapped.Add(ctx, 0)
 
 	rm := collect(t, reader)
 
@@ -93,8 +94,9 @@ func TestInstrumentInventory(t *testing.T) {
 		"orchestrator.audit.chain_recovered_total": "{event}",
 		"orchestrator.audit.emit_latency_seconds":  "s",
 		// RFC 0011 — channels subsystem instrument inventory.
-		"channel.messages.delivered": "{message}",
-		"channel.messages.published": "{message}",
+		"channel.messages.delivered":      "{message}",
+		"channel.messages.published":      "{message}",
+		"channel.messages.cascade_capped": "{message}",
 	}
 	for name, unit := range expected {
 		m := findMetric(rm, name)

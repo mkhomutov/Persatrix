@@ -6,6 +6,99 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **v0.3.0 channel test-findings PR 2 — orchestrator-side cascade-depth
+  enforcement.** Closes the F-1 cooperative-path cascade backstop in
+  Go ([RFC 0011 amendment 'Cascade-depth wire propagation']). Builds
+  on PR 1's wire contract (schema + proto) with the primary
+  enforcement layer:
+  - `internal/channels/router.go` — `ChannelRouter.Publish` now reads
+    `msg.Metadata["cascade_depth"]`, clamps it to
+    `[0, max_cascade_depth]` at the publish trust boundary, persists
+    the clamped value (so a `GET /messages` reader sees what the
+    orchestrator actually enforced, not the publisher's claim), and
+    drops the per-recipient fanout when the clamped depth ≥ cap. The
+    publish itself still succeeds — only the cascade chain is
+    terminated. The +1 stays agent-side on outbound; the orchestrator
+    forwards the inbound depth as-is into child fanout events.
+  - `internal/channels/grpc_dispatcher.go` — outbound dispatch events
+    now carry the depth on the typed `ChannelMessageEvent.cascade_depth`
+    proto field landed in PR 1.
+  - `internal/server/channel_handlers.go` — publish handler rejects
+    negative or non-integer `metadata.cascade_depth` with `400` at the
+    REST boundary (loud-fail on a publisher bug). Over-cap values are
+    silently clamped server-side at the router boundary since
+    publishers do not know the deployment's current cap.
+  - `internal/defaults/defaults.go` — new `DefaultMaxCascadeDepth = 5`
+    constant aligned with the Python `EventDispatcher.max_cascade_depth`
+    at `agents/dispatch.py:43`. `channels.yaml` exposes
+    `max_cascade_depth:` as an explicit override (a zero or negative
+    row is ignored — the backstop cannot be silently disabled from
+    config).
+  - `channel.messages.cascade_capped{channel_type}` counter — one
+    increment per per-recipient dispatch the cap suppressed. Directly
+    comparable to `channel.messages.delivered`; `channel_id` is on
+    the structured log line for incident-driven pivots.
+  - Structured log line on cap-drop:
+    `channels: cascade limit reached channel_id=… sender_id=… depth=… max_cascade_depth=… suppressed_recipients=…`
+    at Warn level.
+  Operator-facing detail in `docs/guides/channels.md` §"Cascade-depth
+  backstop". **Wire compatibility preserved**: a Python publisher that
+  has not yet adopted PR 3's emit path will still POST with no
+  `cascade_depth` (depth defaults to 0, fanout fires normally); the
+  Python `EventDispatcher.max_cascade_depth=5` check remains as
+  defense-in-depth until PR 3's docstring re-framing lands.
+
+  [RFC 0011 amendment 'Cascade-depth wire propagation']: docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+
+- **RFC 0030 — Multi-Agent Conversation Governance (Draft).** Proposes
+  a layered architecture for terminating and pacing agent-to-agent
+  conversations in channels. Motivated by the v0.3.0 F-1 finding's
+  tail: even with `cascade_depth=5` closed, cost still scales as
+  `members × depth` per publish, and the flat cap cannot distinguish
+  productive convergence from a trivial loop. Six layers ordered
+  cheap-and-unfailable → expensive-and-judgement-based: (0)
+  cascade_depth backstop (shipped); (1) per-interaction cost ceiling
+  via RFC 0023 lease attribution; (2) per-participant reply budget;
+  (3) response gate (shipped); (4) end-of-interaction structured
+  vote; (5) optional moderator agent reading the transcript every N
+  turns; (6) declarative conversation types (brainstorm /
+  design_review / incident / retro / open) bundling sensible
+  defaults. Scope of a "conversation" is the [RFC 0020](docs/rfcs/0020-interaction-lifecycle.md)
+  Interaction; `interaction_id` joins `cascade_depth` on the publish
+  wire shape. Phased: deterministic layers (1, 2, 4) target v0.3.x;
+  moderator (Layer 5) targets v0.4.0 alongside [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md)'s
+  salience-triggered scheduler; declarative types and topic-drift
+  detection (Layer 6 + RFC 0020 §B scaffolding) target v0.5.0+.
+  Status `📋 Proposed (Draft)`; 10 open questions captured.
+  ([docs/rfcs/0030-multi-agent-conversation-governance.md](docs/rfcs/0030-multi-agent-conversation-governance.md);
+  ROADMAP RFC Master Index updated.)
+
+- **RFC 0011 amendment — cascade-depth wire propagation (v0.3.0
+  channel test-findings PR 1).** v0.3.0 manual channels testing
+  surfaced finding F-1: a single user prompt produced ~60 persona
+  replies across two `always`-respond personas in ~10 minutes. Root
+  cause — `cascade_depth` is dropped at the REST publish boundary
+  ([publishMessageRequest](internal/server/channel_types.go)) and
+  reset to `0` on every gRPC dispatch back to agents
+  ([ChannelMessageEvent](proto/task.proto)), defeating the RFC 0011
+  §D cascade backstop across processes. This PR pins the wire
+  contract:
+  - `proto/task.proto` — new `int32 cascade_depth = 11` on
+    `ChannelMessageEvent` (typed scalar, mirroring the existing
+    `timestamp` asymmetry — `ChannelMessageEvent` has no metadata map).
+  - `schemas/channel.schema.json` — new `definitions.messageMetadata`
+    pinning `metadata.cascade_depth` (integer, minimum 0; orchestrator
+    clamps above `max_cascade_depth` server-side so publishers don't
+    need to know the deployment's current cap).
+  - `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` —
+    full contract, trust model, primary/defense-in-depth split,
+    deferred work (authoritative depth derivation, cost-ceiling).
+  Cross-linked from RFC 0011 §D and the 0011 PR plan's new
+  "Amendments" section. **No behavior change in this PR** — Go still
+  ignores the field, Python still doesn't emit it. Orchestrator
+  enforcement lands in PR 2, Python emit/ingest in PR 3, cross-process
+  integration pin in PR 4 (all per `docs/v0.3.0-test-findings-pr-plan.md`).
+
 - **RFC 0011 PR 4a-ii-β-1 — real Go gRPC `MessageDispatcher` +
   Python REST publish rewire.** Replaces the `NoopDispatcher{}`
   placeholder in `cmd/orchestrator/channels.go` with a registry-aware

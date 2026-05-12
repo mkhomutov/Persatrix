@@ -214,11 +214,62 @@ expands client-side to every member except the sender.
 
 ### Cascade-depth backstop
 
-`always` members can theoretically loop indefinitely. The dispatcher caps any
-single chain of reactive replies at `max_cascade_depth` (default 5) — beyond
-that, the next event is dropped silently (debug log only). External re-triggers
-(a tick, a non-channel event, a human message) reset the counter. RFC 0011 §H
-elaborates on the patterns this enables.
+`always` members can theoretically loop indefinitely. v0.3.0 manual testing
+(finding F-1 in [`docs/v0.3.0-test-findings-pr-plan.md`](../v0.3.0-test-findings-pr-plan.md))
+showed that a single user prompt in a two-`always`-member channel produced
+~60 persona replies in ~10 minutes — the cascade backstop was being reset
+to 0 on every cross-process publish boundary. The [RFC 0011 amendment
+'Cascade-depth wire propagation'](../rfcs/0011-amendment-cascade-depth-wire-propagation.md)
+closes that gap with two enforcement points sharing one conceptual cap:
+
+- **Primary — orchestrator-side, on the publish trust boundary.** The
+  Go router (`internal/channels`) reads `metadata.cascade_depth` on
+  every inbound publish, clamps it to `[0, max_cascade_depth]`, and
+  drops the fanout when depth ≥ cap. The publish itself still
+  succeeds (the publisher sees a 2xx); only the cascade chain is
+  terminated. Default cap is **5**; operators override via
+  `max_cascade_depth:` in `channels.yaml`.
+- **Defense-in-depth — agent-side, in the Python dispatcher.** The
+  `EventDispatcher.max_cascade_depth=5` check at
+  [`agents/dispatch.py`](../../agents/dispatch.py) remains as a
+  backstop for the legacy in-process mention cascade and any wire-side
+  regression that lets a depth-violating event reach an agent.
+
+The two caps MUST stay aligned — they are one conceptual ceiling with
+two enforcement points, not two independent budgets.
+
+External re-triggers (a tick, a non-channel event, a human message)
+reset the counter to 0. RFC 0011 §H elaborates on the patterns this
+enables.
+
+**Operator-facing telemetry**
+
+- `channel.messages.cascade_capped{channel_type}` — one increment per
+  per-recipient dispatch the cap suppressed. Directly comparable to
+  `channel.messages.delivered{channel_type, status}`; a cap-rate panel
+  reads `cascade_capped / (cascade_capped + delivered)`.
+  `channel_id` is intentionally **not** a label (cardinality discipline) —
+  it appears on the structured log line below so operators can pivot
+  on a specific channel from the log surface.
+- Log line on cap-drop:
+  `channels: cascade limit reached channel_id=… sender_id=… depth=… max_cascade_depth=… suppressed_recipients=…`
+  (level=Warn). One line per capped publish.
+
+**Configuration**
+
+```yaml
+# config/channels.yaml
+max_cascade_depth: 5          # default; matches agents/dispatch.py
+max_channels: 50
+channels:
+  - name: planning
+    members:
+      - {id: alex, respond: always}
+      - {id: jordan, respond: always}
+```
+
+A zero or negative `max_cascade_depth:` row is ignored — the backstop
+cannot be silently disabled from config.
 
 ---
 
@@ -320,7 +371,42 @@ Mixed-policy channels are legitimate — e.g. a planning channel with two
 
 ---
 
-## 10. What's deferred to v0.4.0+
+## 10. Resetting state between test runs
+
+Channel history and persona memory persist across `docker compose down`
+via named volumes (`orchestrator-data` for the channels SQLite store,
+`ember-owl-data` for persona memory, and `workspace` for files agents
+wrote under `/workspace` during the run). A second test run with the
+same channel name and the same `--user` identity inherits prior content
+unless those volumes are explicitly purged — personas surface old
+participants and topics from prior runs and steer the next conversation
+off-topic within ~2 turns.
+
+For manual testing, use `make reset`:
+
+```bash
+make reset
+make docker-up
+```
+
+`make reset` runs `docker compose down -v`, which stops the stack and
+removes **every** volume declared in this compose project — currently
+the three above. Any agent-written files under `/workspace` are dropped
+along with the SQLite stores; if you need to keep scratch artefacts
+from a prior run, copy them out before resetting. The target is
+idempotent — running it twice in a row succeeds cleanly (the second
+invocation finds nothing to remove).
+
+> **This is an operator workaround, not a fix.** The root-cause fix is
+> per-session memory namespacing so reruns with the same channel name +
+> user id are auto-isolated. Tracked in
+> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md);
+> originally surfaced as F-3 in
+> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
+
+---
+
+## 11. What's deferred to v0.4.0+
 
 Documented here so the gap is visible — these are RFC 0011 non-goals or
 deferrals, not implementation oversights:
@@ -334,10 +420,14 @@ deferrals, not implementation oversights:
 - **Per-channel `cascade_depth` overrides** → v0.3.x; see
   [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
+- **Per-session memory namespacing** so reruns with the same channel
+  name + user id are auto-isolated (current workaround: `make reset` —
+  see §10) → tracked in
+  [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md).
 
 ---
 
-## 11. Manual tests
+## 12. Manual tests
 
 The channels surface is exercised end-to-end against a docker-composed
 orchestrator + four agents via the MT-CHANNEL series:

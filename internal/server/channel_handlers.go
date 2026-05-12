@@ -243,6 +243,18 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest)
 		return
 	}
+	// [RFC 0011 amendment 'Cascade-depth wire propagation']: the wire
+	// schema is loose on the upper bound (operators do not know the
+	// deployment's cap), but a negative or non-integer cascade_depth
+	// is always a publisher bug. Loud-fail at the boundary; the
+	// router-side clamp ([0, max_cascade_depth]) is defense-in-depth
+	// for programmatic callers that bypass this handler.
+	//
+	// [RFC 0011 amendment 'Cascade-depth wire propagation']: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+	if msg, ok := validateRequestCascadeDepth(req.Metadata); !ok {
+		writeError(w, "BAD_REQUEST", msg, http.StatusBadRequest)
+		return
+	}
 
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
@@ -456,6 +468,8 @@ func parseLimit(r *http.Request, fallback int) (int, error) {
 	}
 	return v, nil
 }
+
+// validateRequestCascadeDepth lives in channel_cascade_depth.go.
 
 // parseBefore parses the optional `before` cursor as RFC 3339. Returns
 // the zero value (sentinel for "now") when the parameter is absent.

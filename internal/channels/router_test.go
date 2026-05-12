@@ -27,6 +27,12 @@ type dispatchCall struct {
 	senderID             string
 	respondPolicy        RespondPolicy
 	threadParentSenderID string
+	// cascadeDepth is the int representation of the inbound
+	// `cascade_depth` carried on `msg.Metadata`. Populated by the
+	// recording dispatcher so router tests can assert that the
+	// per-recipient dispatch event carries the depth verbatim (the +1
+	// lives agent-side on outbound; the orchestrator never increments).
+	cascadeDepth int
 }
 
 func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
@@ -38,6 +44,7 @@ func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 		senderID:             msg.SenderID,
 		respondPolicy:        env.Recipient.RespondPolicy,
 		threadParentSenderID: env.ThreadParentSenderID,
+		cascadeDepth:         asInt(msg.Metadata["cascade_depth"]),
 	})
 	return d.err
 }

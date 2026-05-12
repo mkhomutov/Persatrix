@@ -40,15 +40,7 @@ _FMT_LABELS = {"go fmt", "cargo fmt"}
 
 
 def _staged_go_files() -> list[str]:
-    """Return paths of .go files staged for commit, under internal/ or cmd/.
-
-    Restricting the ``go fmt`` check to staged files keeps the hook's concern
-    local to the commit-in-progress and avoids spurious failures caused by
-    Windows ``core.autocrlf=true`` checkouts, where the working tree contains
-    CRLF but the index stores LF (``git ls-files --eol`` reports
-    ``i/lf w/crlf``).  ``gofmt`` treats CRLF content as unformatted even
-    though the committed content is fine.
-    """
+    """Return paths of .go files staged for commit, under internal/ or cmd/."""
     try:
         proc = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
@@ -65,6 +57,47 @@ def _staged_go_files() -> list[str]:
         p for p in paths
         if p.endswith(".go") and (p.startswith("internal/") or p.startswith("cmd/"))
     ]
+
+
+def _gofmt_staged_blobs(paths: list[str]) -> list[str]:
+    """Check gofmt against the staged blob content for each path.
+
+    Reads each staged blob via ``git show :path`` and pipes it into ``gofmt -l``
+    on stdin.  This sidesteps the Windows ``core.autocrlf=true`` case where
+    ``git ls-files --eol`` reports ``i/lf w/crlf`` — the index has LF, the
+    working tree has CRLF, and reading the working-tree file would make gofmt
+    flag it as unformatted even though the committed content is fine.
+
+    Returns the subset of paths whose staged content is not gofmt-clean.
+    """
+    unformatted: list[str] = []
+    for path in paths:
+        try:
+            show = subprocess.run(
+                ["git", "show", f":{path}"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            unformatted.append(path)
+            continue
+        if show.returncode != 0:
+            unformatted.append(path)
+            continue
+        try:
+            fmt = subprocess.run(
+                ["gofmt", "-l"],
+                cwd=REPO_ROOT,
+                input=show.stdout,
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            raise
+        if fmt.returncode != 0 or fmt.stdout.strip():
+            unformatted.append(path)
+    return unformatted
 
 
 _CHECKS: list[tuple[str, list[str]]] = [
@@ -129,9 +162,9 @@ def main(argv: list[str] | None = None) -> int:
         cmd = _resolve_argv(argv_template)
         print(f"\n▶ {label}")
         t0 = time.monotonic()
-        # Narrow ``go fmt`` to staged files only.  Covers the CRLF/LF
-        # mismatch case described in ``_staged_go_files`` without weakening
-        # the check for actual formatting regressions.
+        # ``go fmt`` runs against staged blob content rather than the working
+        # tree so Windows ``core.autocrlf=true`` checkouts don't flag clean
+        # commits as unformatted.  See ``_gofmt_staged_blobs``.
         if label == "go fmt":
             staged = _staged_go_files()
             if not staged:
@@ -139,23 +172,30 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  ✓ PASS  ({elapsed:.1f}s)  (no staged .go files)")
                 results.append((label, True, elapsed))
                 continue
-            cmd = ["gofmt", "-l", *staged]
+            try:
+                unformatted_paths = _gofmt_staged_blobs(staged)
+            except FileNotFoundError:
+                elapsed = time.monotonic() - t0
+                print("  ✗ FAIL  (command not found: gofmt)")
+                results.append((label, False, elapsed))
+                continue
+            elapsed = time.monotonic() - t0
+            passed = not unformatted_paths
+            if unformatted_paths:
+                print("\n".join(unformatted_paths))
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"  {status}  ({elapsed:.1f}s)")
+            results.append((label, passed, elapsed))
+            continue
         try:
-            proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=(label == "go fmt"))
+            proc = subprocess.run(cmd, cwd=REPO_ROOT)
         except FileNotFoundError:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  (command not found: {cmd[0]})")
             results.append((label, False, elapsed))
             continue
         elapsed = time.monotonic() - t0
-        # gofmt -l returns 0 even with unformatted files; check stdout instead.
-        if label == "go fmt":
-            unformatted = proc.stdout.decode().strip() if proc.stdout else ""
-            passed = proc.returncode == 0 and not unformatted
-            if unformatted:
-                print(unformatted)
-        else:
-            passed = proc.returncode == 0
+        passed = proc.returncode == 0
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"  {status}  ({elapsed:.1f}s)")
         results.append((label, passed, elapsed))

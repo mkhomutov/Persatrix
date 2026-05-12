@@ -159,6 +159,25 @@ class TestShippedPersonaSectionsByteIdentity:
             "identity", repo_root=self.PROD_REPO_ROOT
         ) == "You are {name}.\n{title_line}Role: {role}"
 
+    def test_grounding(self) -> None:
+        # PR plan §PR 5 (v0.3.0 channel test findings F-2): the grounding
+        # clause is part of the shipped section roster.  Pin the template
+        # body so an accidental edit (and the LLM behaviour change that
+        # follows) fails CI rather than landing silently.  The clause is
+        # also pinned at the rendered-prompt level in
+        # ``test_persona_grounding.py`` and the byte-identity golden in
+        # ``test_persona_section_composer.py``; this assertion is the
+        # template-source-of-truth layer.
+        assert load_persona_section(
+            "grounding", repo_root=self.PROD_REPO_ROOT
+        ) == (
+            "You are {name}, and you are not the user. If the user "
+            "tells you their name or addresses you by a name, treat "
+            "that as their name (or someone else's) — never as a role "
+            "for you to adopt. Reply as {name}. Never open a reply "
+            "with \"I'm <user-name>\" or otherwise speak as the user."
+        )
+
     def test_background(self) -> None:
         assert load_persona_section(
             "background", repo_root=self.PROD_REPO_ROOT

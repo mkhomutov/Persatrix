@@ -402,7 +402,7 @@ Suppressed events are still stored in episodic memory (per §E) so the agent ret
 2. **`cascade_depth` (existing, dispatcher-side)** — runtime backstop for misconfigured `always` memberships, accidental loops from future feature work, or any path the gate misses. Applied regardless of `respond` policy: an `always` member at `cascade_depth=5` does **not** receive the message; the drop is upstream of the gate.
 3. **RFC 0009 Phase 1 rate limiting (REST-side)** — caps per-agent publish rate. Catches loops that somehow defeat both the gate and cascade limit (e.g., agents publishing on tick rather than in reaction to events).
 
-Outbound `SEND_CHANNEL_MESSAGE` actions carry `cascade_depth + 1`, exactly as the dispatcher already does for `MESSAGE_RECEIVED`. No change to the cascade mechanism is required.
+Outbound `SEND_CHANNEL_MESSAGE` actions carry `cascade_depth + 1`, exactly as the dispatcher already does for `MESSAGE_RECEIVED`. No change to the cascade mechanism is required. [Amended 2026-05-11.](0011-amendment-cascade-depth-wire-propagation.md)
 
 Additional invariants:
 

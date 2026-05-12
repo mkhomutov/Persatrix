@@ -55,6 +55,7 @@ def test_channel_message_event_roundtrips_all_fields():
         mentions=["bob", "carol"],
         respond_policy="when_mentioned",
         thread_parent_sender_id="dave",
+        cascade_depth=3,
     )
 
     blob = event.SerializeToString()
@@ -75,6 +76,21 @@ def test_channel_message_event_roundtrips_all_fields():
     assert list(decoded.mentions) == ["bob", "carol"]
     assert decoded.respond_policy == "when_mentioned"
     assert decoded.thread_parent_sender_id == "dave"
+    assert decoded.cascade_depth == 3
+
+
+def test_channel_message_event_cascade_depth_default_roundtrips():
+    """Unset ``cascade_depth`` must round-trip as proto3 zero.
+
+    An event built without ``cascade_depth=`` must serialize without
+    emitting bytes for field 11 (proto3 implicit presence) and decode
+    back to ``cascade_depth == 0``. Catches an accidental
+    ``optional``-keyword promotion that would change the marshaled bytes.
+    """
+    event = task_pb2.ChannelMessageEvent(message_id="msg-002", channel_id="group:eng")
+    decoded = task_pb2.ChannelMessageEvent.FromString(event.SerializeToString())
+    assert decoded == event
+    assert decoded.cascade_depth == 0
 
 
 def test_channel_message_event_default_instance_roundtrips():
@@ -181,6 +197,22 @@ def test_channel_message_event_field_numbers_pinned():
             f"{ev.SerializeToString()!r}, expected {expected!r} — "
             "field number renumbered or wire type changed"
         )
+
+
+def test_channel_message_event_cascade_depth_field_number_pinned():
+    """``int32 cascade_depth = 11`` encodes as varint tag 0x58 + payload.
+
+    Field 11, wire-type 0 (varint): tag byte = (11 << 3) | 0 = 0x58. For
+    value 7 (single-byte varint) the payload is 0x07, so the full
+    serialized blob is exactly ``b"\\x58\\x07"``. A renumber of this
+    field — or an accidental type flip away from ``int32`` — will
+    fail this assertion on whichever language regenerates first.
+    """
+    ev = task_pb2.ChannelMessageEvent(cascade_depth=7)
+    assert ev.SerializeToString() == b"\x58\x07"
+
+    # Zero must encode to zero bytes under proto3 implicit presence.
+    assert task_pb2.ChannelMessageEvent(cascade_depth=0).SerializeToString() == b""
 
 
 def test_channel_message_event_mentions_field_number_pinned():

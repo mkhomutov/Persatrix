@@ -91,8 +91,16 @@ class ChannelPublisher(Protocol):
         sender_id: str,
         content: str,
         mentions: list[str],
+        cascade_depth: int = 0,
     ) -> None:
-        """Publish a message; raises on transport / HTTP failures."""
+        """Publish a message; raises on transport / HTTP failures.
+
+        ``cascade_depth`` carries the cooperative-path cascade hop count
+        through the REST publish boundary (RFC 0011 amendment
+        "Cascade-depth wire propagation"). Default is ``0`` so non-cascade
+        call sites (chat surface, on-startup catch-up, tick-originated
+        publishes) remain unchanged.
+        """
         ...
 
 
@@ -141,6 +149,7 @@ class HTTPChannelPublisher:
         sender_id: str,
         content: str,
         mentions: list[str],
+        cascade_depth: int = 0,
     ) -> None:
         """POST a single channel message; raise on transport / non-2xx.
 
@@ -222,6 +231,19 @@ class HTTPChannelPublisher:
                 }
                 if mentions:
                     payload["mentions"] = mentions
+                # RFC 0011 amendment "Cascade-depth wire propagation"
+                # (PR 3 of the v0.3.0 channel test-findings plan):
+                # forward the cooperative-path hop count via the existing
+                # REST ``metadata`` seat so the orchestrator's publish
+                # handler can clamp + fanout-cap on it (PR 2). Zero is
+                # the cascade-origin value and is indistinguishable from
+                # unset on the proto3 side; omit the ``metadata`` map
+                # entirely on zero so non-cascade publishes keep the
+                # previously-clean POST body shape (no ``"metadata": {}``
+                # on every publish — that would be operational noise
+                # without carrying a signal).
+                if cascade_depth:
+                    payload["metadata"] = {"cascade_depth": cascade_depth}
 
                 async with self._session.post(
                     url,

@@ -426,3 +426,36 @@ class TestActionExecutor:
         assert results[0]["status"] == "dispatched"
         assert results[0]["dispatched_to"] == 1
         await agent.close_memory()
+
+    async def test_cascade_depth_forwarded_to_publisher(self):
+        """Executor forwards ``cascade_depth`` kwarg as-is to the REST publisher.
+
+        RFC 0011 amendment "Cascade-depth wire propagation" (PR 3 of the
+        v0.3.0 channel test-findings plan): the ``+1`` increment lives on
+        the dispatcher side (``EventDispatcher.dispatch`` passes
+        ``cascade_depth=depth + 1`` to ``executor.execute``); the executor
+        receives the already-incremented depth and threads it onto the
+        publish call without re-incrementing. A second increment here
+        would fire the orchestrator's cap one hop earlier than the
+        amendment doc pins.
+        """
+        from unittest.mock import AsyncMock
+
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        await executor.execute("ember-owl", [
+            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
+                "channel_id": "group:planning",
+                "content": "hi",
+                "mentions": ["agent-b"],
+            }),
+        ], cascade_depth=3)
+
+        publisher.publish.assert_awaited_once()
+        kwargs = publisher.publish.await_args.kwargs
+        assert kwargs["cascade_depth"] == 3, (
+            f"executor must forward cascade_depth verbatim (no +1); "
+            f"got {kwargs.get('cascade_depth')!r}"
+        )

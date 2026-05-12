@@ -449,6 +449,13 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             message_id=request.message_id,
             thread_id=request.thread_id or None,
             timestamp=publish_ts,
+            # Seed cascade_depth from the typed proto field (RFC 0011
+            # cascade-depth wire-propagation amendment, PR 3) so the
+            # dispatcher sees the wire value instead of resetting to
+            # zero on every cross-process hop. Receiver-side advisory:
+            # the trust boundary is the Go orchestrator's outbound
+            # dispatch (PR 2), which clamps before populating.
+            metadata={"cascade_depth": request.cascade_depth},
         )
 
         task = asyncio.create_task(
