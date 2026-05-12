@@ -230,15 +230,17 @@ docker-down: ## Stop all services
 docker-logs: ## Tail logs
 	docker compose logs -f
 
-reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
+reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."
 	@# `docker compose down -v` is idempotent: it tears down whatever is up
 	@# (no-op if already down) and removes every volume declared in this
-	@# compose project — currently orchestrator-data, ember-owl-data, and
-	@# workspace. Re-running after a successful reset succeeds cleanly.
+	@# compose project — currently orchestrator-data, ember-owl-data,
+	@# iron-fox-data, nova-sparrow-data, and workspace. Re-running after a
+	@# successful reset succeeds cleanly.
 	docker compose down -v
 	@echo "✓ Stack stopped; wiped channels DB (orchestrator-data),"
-	@echo "  persona memory (ember-owl-data), and agent scratch (workspace)."
+	@echo "  persona memory (ember-owl-data, iron-fox-data, nova-sparrow-data),"
+	@echo "  and agent scratch (workspace)."
 	@echo "  Restart with: make docker-up"
 	@echo "  Note: this is an operator workaround for F-3 cross-run state bleed."
 	@echo "  Root-cause fix (per-session memory namespacing) tracked in"
