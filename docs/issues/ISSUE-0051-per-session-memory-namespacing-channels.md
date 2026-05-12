@@ -53,8 +53,13 @@ Per-session memory namespacing — sketch, not a commitment:
 - A `session_id` (or test-scope id) at channel-creation time, scoping
   the row keys in `channels.db` and the tag/scope filters in
   `agents/memory/episodic.py` + `agents/memory/relationship.py`.
-- A "scope" boundary that `InteractionTracker` already touches (RFC
-  0020 §G) — possible reuse rather than a new dimension.
+- A `scope` column already exists on episodes (`episodes.scope`, added
+  by RFC 0020 PR migration v5; see `agents/memory/episodic.py` ~L190
+  and the recall filter in `agents/memory/scope_recall.py`). Open
+  question: can it be widened to carry a session id without colliding
+  with the interaction-lifecycle semantics RFC 0020 §G assigns to
+  scope (per-interaction boundary, not per-test-run), or is a separate
+  dimension cleaner? Resolve before reusing the column.
 - Decide whether scoping is opt-in (test harness sets it) or implicit
   (every channel is session-scoped). Implicit changes the production
   recall surface and needs an RFC-level discussion.

@@ -465,9 +465,13 @@ relationships, and trust scores — useful for long-running scenarios,
 disruptive when you want a clean slate.
 
 For a hard reset, use `make reset` — `docker compose down -v` plus a
-one-line confirmation. This drops the orchestrator channels store and
-every persona's memory volume in one command. Idempotent (the second
-invocation finds nothing to remove). Restart the stack with
+one-line confirmation. This drops the orchestrator channels store
+(`orchestrator-data`), the ember-owl persona memory volume
+(`ember-owl-data`), and the shared agent scratch volume (`workspace`,
+mounted into the orchestrator and all agent containers) in one
+command — `docker compose down -v` removes every named volume the
+compose project declares, not only the memory stores. Idempotent (the
+second invocation finds nothing to remove). Restart the stack with
 `make docker-up` afterwards.
 
 > **Operator workaround, not a fix.** Per-session memory namespacing —

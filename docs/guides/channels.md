@@ -375,8 +375,9 @@ Mixed-policy channels are legitimate — e.g. a planning channel with two
 
 Channel history and persona memory persist across `docker compose down`
 via named volumes (`orchestrator-data` for the channels SQLite store,
-`ember-owl-data` for persona memory). A second test run with the same
-channel name and the same `--user` identity inherits prior content
+`ember-owl-data` for persona memory, and `workspace` for files agents
+wrote under `/workspace` during the run). A second test run with the
+same channel name and the same `--user` identity inherits prior content
 unless those volumes are explicitly purged — personas surface old
 participants and topics from prior runs and steer the next conversation
 off-topic within ~2 turns.
@@ -389,7 +390,10 @@ make docker-up
 ```
 
 `make reset` runs `docker compose down -v`, which stops the stack and
-removes only the volumes declared in this compose project. It is
+removes **every** volume declared in this compose project — currently
+the three above. Any agent-written files under `/workspace` are dropped
+along with the SQLite stores; if you need to keep scratch artefacts
+from a prior run, copy them out before resetting. The target is
 idempotent — running it twice in a row succeeds cleanly (the second
 invocation finds nothing to remove).
 
