@@ -1,3 +1,17 @@
+---
+id: RFC-0003
+title: Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
+summary: Scheduler picks up pending runs, drives stages to completion, and the Executor dispatches gRPC TaskRequests — closing the workflow execution loop.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-09
+target: v0.1 (MVP)
+depends_on:
+  - RFC-0001
+  - RFC-0002
+---
+
 # RFC 0003 — Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch)
 
 **Type**: architecture

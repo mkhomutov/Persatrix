@@ -1,3 +1,14 @@
+---
+id: RFC-0019
+title: OpenTelemetry Completion (Traces, Metrics, Correlation)
+summary: Completes OTEL traces and metrics across Go/Python/Rust with log↔trace correlation — paired with RFC 0018 structured logging in v0.2.3.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-21
+target: v0.2.3
+---
+
 # RFC 0019 — OpenTelemetry Completion (Traces, Metrics, Correlation)
 
 **Type**: architecture

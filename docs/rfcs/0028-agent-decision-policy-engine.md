@@ -1,3 +1,17 @@
+---
+id: RFC-0028
+title: Agent Decision Policy Engine
+summary: Per-agent declarative policy engine governing tool selection, delegation, and channel-publish decisions — Phases 1–3 in v0.4.0, collective extension in v0.5.0+.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-02
+target: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
+depends_on:
+  - RFC-0005
+  - RFC-0009
+---
+
 # RFC 0028 - Agent Decision Policy Engine
 
 **Type**: architecture

@@ -1,3 +1,17 @@
+---
+id: RFC-0004
+title: Python Agent gRPC Server (AgentService Implementation)
+summary: Python agent-side gRPC AgentService implementation that receives TaskRequests, runs tools, and returns TaskResponses to the Go orchestrator.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-09
+target: v0.1 (MVP)
+depends_on:
+  - RFC-0001
+  - RFC-0003
+---
+
 # RFC 0004 — Python Agent gRPC Server (AgentService Implementation)
 
 **Type**: architecture

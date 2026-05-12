@@ -1,3 +1,14 @@
+---
+id: RFC-0001
+title: Core Orchestration Pipeline (Planner + State + Registry)
+summary: Foundational v0.1 orchestrator components — Planner, State, and Registry — that all later workflow execution builds on.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-08
+target: v0.1 (MVP)
+---
+
 # RFC 0001 — Core Orchestration Pipeline (Planner + State + Registry)
 
 **Type**: architecture  

@@ -1,3 +1,19 @@
+---
+id: RFC-0015
+title: Process Automation & Pattern Extraction
+summary: Detects recurring multi-step agent workflows from execution history and crystallizes them into reusable, parameterized workflow templates.
+type: feature
+status: proposed
+author: Maksim Khomutov
+created: 2026-04-19
+target: v0.5.0
+depends_on:
+  - RFC-0006
+  - RFC-0008
+  - RFC-0009
+  - RFC-0014
+---
+
 # RFC 0015 — Process Automation & Pattern Extraction
 
 **Type**: feature

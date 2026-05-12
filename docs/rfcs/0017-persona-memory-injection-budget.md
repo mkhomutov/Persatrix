@@ -1,3 +1,16 @@
+---
+id: RFC-0017
+title: Persona Memory Injection Token Budget
+summary: Per-event token budget for persona memory injection — caps recall payloads so memory growth cannot crowd out the prompt.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-21
+target: v0.2.2
+depends_on:
+  - RFC-0005
+---
+
 # RFC 0017 — Persona Memory Injection Token Budget
 
 **Type**: architecture

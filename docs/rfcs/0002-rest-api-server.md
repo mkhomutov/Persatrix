@@ -1,3 +1,16 @@
+---
+id: RFC-0002
+title: REST API Server (HTTP Layer + Workflow Submission)
+summary: HTTP/REST surface for workflow run submission, status polling, and agent registry CRUD — closes the CLI-to-orchestrator path.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-09
+target: v0.1 (MVP)
+depends_on:
+  - RFC-0001
+---
+
 # RFC 0002 — REST API Server (HTTP Layer + Workflow Submission)
 
 **Type**: architecture

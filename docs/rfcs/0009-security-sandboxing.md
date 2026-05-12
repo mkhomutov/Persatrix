@@ -1,3 +1,17 @@
+---
+id: RFC-0009
+title: Agent Identity, Security & Sandboxing
+summary: Agent identity, deny-by-default permission model, rate limiting, input sanitization, and sandboxing — Phases 1–2 in v0.3.0, Phases 3–4 deferred to v0.4.0.
+type: architecture
+status: partially_implemented
+author: Maksim Khomutov
+created: 2026-04-15
+target: v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4)
+depends_on:
+  - RFC-0004
+  - RFC-0005
+---
+
 # RFC 0009 — Agent Identity, Security & Sandboxing
 
 **Type**: architecture  

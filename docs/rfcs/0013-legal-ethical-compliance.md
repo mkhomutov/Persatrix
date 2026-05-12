@@ -1,3 +1,16 @@
+---
+id: RFC-0013
+title: Legal, Ethical & Regulatory Compliance Framework
+summary: Compliance framework covering data retention, consent, audit trails, and regulatory boundaries — targeted at v0.5.0.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-04-16
+target: v0.5.0
+depends_on:
+  - RFC-0009
+---
+
 # RFC 0013 — Legal, Ethical & Regulatory Compliance Framework
 
 **Type**: architecture  

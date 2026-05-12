@@ -1,3 +1,17 @@
+---
+id: RFC-0023
+title: LLM Call Leasing
+summary: Lease-based concurrency control for LLM calls — bounds concurrent provider calls per agent/persona without serializing the whole orchestrator.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-09
+target: v0.3.x (TBD)
+depends_on:
+  - RFC-0006
+  - RFC-0017
+---
+
 # RFC 0023 — LLM Call Leasing
 
 **Type**: architecture

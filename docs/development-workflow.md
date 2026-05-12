@@ -4,6 +4,10 @@
 
 This document describes the end-to-end development lifecycle for Persatrix, from version planning through RFC closure. It connects the strategic planning loop to the tactical processes documented in [CONTRIBUTING.md](../CONTRIBUTING.md) (PR process), [BRANCHING.md](BRANCHING.md) (branch naming), and [rfcs/README.md](rfcs/README.md) (RFC format and lifecycle).
 
+> **Live trackers** (auto-generated from per-file YAML front-matter):
+> - [`docs/rfcs/INDEX.md`](rfcs/INDEX.md) — every RFC with status, type, target, created date. Regenerate with `make rfcs`.
+> - [`docs/issues/INDEX.md`](issues/INDEX.md) — every internal issue with status, severity, area. Regenerate with `make issues`.
+
 ---
 
 ## Table of Contents
@@ -376,4 +380,5 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 - [ROADMAP.md](../ROADMAP.md) — Version progress, RFC tracker, merged PR history
 - [Documentation Guide](documentation-guide.md) — Documentation update conventions
 - [Consistency Checklist](docs-consistency-checklist.md) — Documentation consistency verification
+- [rfcs/README.md](rfcs/README.md) — RFC format and lifecycle (conventions); [rfcs/INDEX.md](rfcs/INDEX.md) is the live table (`make rfcs`)
 - [issues/README.md](issues/README.md) — Deferred and cross-cutting findings tracker (conventions); [issues/INDEX.md](issues/INDEX.md) is the live table (`make issues`)

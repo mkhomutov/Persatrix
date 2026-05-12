@@ -1,3 +1,21 @@
+---
+id: RFC-0026
+title: Declarative Facts Tier
+summary: New persona-memory tier for canonical, dated, source-attributed facts — complements episodic recall and feeds RFC 0027 consolidation.
+type: feature
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-01
+target: v0.3.x
+depends_on:
+  - RFC-0005
+  - RFC-0008
+  - RFC-0009
+  - RFC-0013
+  - RFC-0017
+  - RFC-0020
+---
+
 # RFC 0026 — Declarative Facts Tier
 
 **Type**: feature

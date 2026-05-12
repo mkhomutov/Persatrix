@@ -149,6 +149,9 @@ jobs:
       - name: Check issues index is up to date
         run: make issues-check
 
+      - name: Check RFCs index is up to date
+        run: make rfcs-check
+
   file-size-check:
     name: File size check
     runs-on: ubuntu-latest

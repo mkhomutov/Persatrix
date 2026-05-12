@@ -1,3 +1,18 @@
+---
+id: RFC-0006
+title: Efficiency and Execution Limits
+summary: Cost tracking, token budgets, timeouts, retries, and rate limits — the v0.2 efficiency layer that prevents runaway agents.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-15
+target: v0.2
+depends_on:
+  - RFC-0001
+  - RFC-0003
+  - RFC-0004
+---
+
 # RFC 0006 — Efficiency and Execution Limits
 
 **Type**: architecture  

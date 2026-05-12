@@ -1,3 +1,18 @@
+---
+id: RFC-0024
+title: Event-Driven Agent Scheduling
+summary: Shifts agent activation from poll-driven dispatch to event-driven scheduling with persistable timers — enables proactive personas and scheduled reminders.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-09
+target: v0.3.x (TBD)
+depends_on:
+  - RFC-0005
+  - RFC-0011
+  - RFC-0017
+---
+
 # RFC 0024 — Event-Driven Agent Scheduling
 
 **Type**: architecture

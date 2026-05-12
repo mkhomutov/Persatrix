@@ -1,3 +1,16 @@
+---
+id: RFC-0016
+title: Human Participant & Chat Interface
+summary: Adds a Participant abstraction (with UserParticipant), a synchronous chat REST/gRPC façade, and the persatrix chat REPL UX — partially superseded by the RFC 0011 chat-as-DM amendment.
+type: feature
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-19
+target: v0.2.1
+depends_on:
+  - RFC-0005
+---
+
 # RFC 0016 — Human Participant & Chat Interface
 
 **Type**: feature

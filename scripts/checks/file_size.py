@@ -163,10 +163,23 @@ class FileSizeWarning(NamedTuple):
 
 
 def _count_words(text: str) -> int:
-    """Count words in *text*, stripping fenced code blocks."""
+    """Count words in *text*, stripping fenced code blocks and YAML front-matter.
+
+    YAML front-matter (the ``---``-delimited block at the very top of a doc)
+    is structured metadata, not prose — counting it against the word cap
+    would punish RFC/issue files for adding required machine-readable
+    metadata.
+    """
+    lines = text.splitlines()
+    start = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                start = i + 1
+                break
     in_code_block = False
     prose_lines: list[str] = []
-    for line in text.splitlines():
+    for line in lines[start:]:
         stripped = line.strip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
             in_code_block = not in_code_block

@@ -1,3 +1,19 @@
+---
+id: RFC-0007
+title: Conditional and Looped Workflow Control Flow
+summary: Adds when/unless conditionals and bounded loops to the DAG workflow model — retargeted from v0.3.0 to v0.4.0 on 2026-05-06.
+type: feature
+status: proposed
+author: Maksim Khomutov
+created: 2026-04-15
+target: v0.4.0
+depends_on:
+  - RFC-0001
+  - RFC-0003
+  - RFC-0006
+  - RFC-0008
+---
+
 # RFC 0007 — Conditional and Looped Workflow Control Flow
 
 **Type**: feature  
