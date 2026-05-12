@@ -396,8 +396,10 @@ async def cascade_world() -> AsyncIterator[
     try:
         yield stub, base_url
     finally:
-        # Tear down in reverse order. Agents first so their close_memory
-        # does not race with a still-incoming gRPC dispatch.
+        # Tear down in reverse-dependency order: gRPC servers stop FIRST so
+        # no inbound dispatch can land while agents are closing memory; the
+        # agents' own ``close_memory`` therefore runs LAST. Publisher sessions
+        # and the stub server fall in between (publish side then receive side).
         await server_a.stop(grace=0)
         await server_b.stop(grace=0)
         await session_a.close()
@@ -466,3 +468,24 @@ async def test_cascade_terminates_at_max_cascade_depth(
             f"stored message carries out-of-band cascade_depth={depth} "
             f"(must be clamped to [0, {_MAX_CASCADE_DEPTH}])"
         )
+
+    # The cascade MUST actually reach the cap. Without this, a regression
+    # that capped earlier (e.g. ``max_cascade_depth`` lowered from 5 to 3,
+    # or an extra ``+1`` increment somewhere on the wire) would produce
+    # fewer replies, still under ``_REPLY_UPPER_BOUND``, still ``>= 1``,
+    # still in-range — and the test would silently pass on what is
+    # effectively a tightened cap.
+    #
+    # Strict ``==`` (not ``>=``) is safe because the cascade shape is
+    # deterministic in this fixture: AsyncMock LLM (no I/O variability),
+    # in-memory sqlite, the stub mirrors the Go router's
+    # store-before-fanout-cap ordering, both agents are ``always``-respond,
+    # and ``wait_for_cascade_to_drain`` blocks until the message count is
+    # quiescent. A spot-check probe over the same setup observed
+    # ``{0:1, 1:2, 2:2, 3:2, 4:2, 5:2}`` deterministically across runs.
+    max_observed = max(m["cascade_depth"] for m in messages)
+    assert max_observed == _MAX_CASCADE_DEPTH, (
+        f"cascade terminated at depth {max_observed} instead of "
+        f"{_MAX_CASCADE_DEPTH} — the cap fired one or more hops early "
+        f"(e.g. a lowered max_cascade_depth or an extra increment site)"
+    )
