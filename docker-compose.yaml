@@ -355,7 +355,17 @@ volumes:
   # writable path for the non-root container user.
   ember-owl-data:
     driver: local
-  # v0.3.0 demo personas — see docs/guides/v0.3.0-demo.md.
+  # v0.3.0 demo personas — see docs/guides/v0.3.0-demo.md. The named-
+  # volume ownership caveat documented on the ember-owl mount above
+  # (review-PR188, N2) applies identically to these two: if a
+  # `persatrix_iron-fox-data` or `persatrix_nova-sparrow-data` volume
+  # exists from a prior run created before the /app/data chown in
+  # Dockerfile.agent, Docker mounts it as-is and SQLite init logs
+  # "unable to open database file" despite the Dockerfile fix.
+  # Recovery is the same three-step `docker compose down && docker
+  # volume rm <name> && docker compose up -d`; operators clearing
+  # ember-owl will need to clear all three persona volumes to fully
+  # reset the demo set.
   iron-fox-data:
     driver: local
   nova-sparrow-data:
