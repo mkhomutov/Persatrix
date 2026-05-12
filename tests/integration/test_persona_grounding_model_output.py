@@ -48,6 +48,16 @@ pytestmark = [
 
 
 def _first_shipped_persona() -> dict[str, Any]:
+    """Return the first ``type: persona`` entry from ``config/agents.yaml``.
+
+    Coverage note: this probe exercises only the first shipped persona. The
+    deterministic unit test (``test_persona_grounding.py``) parametrizes over
+    every persona, so the load-bearing regression gate has full coverage; this
+    probabilistic probe trades breadth for cost (each parametrized case is a
+    billed API call). If a second persona ships and per-persona model behaviour
+    diverges, widen this to ``_all_shipped_personas()`` with explicit acceptance
+    of the billing impact.
+    """
     with AGENTS_YAML.open("rb") as fh:
         doc = yaml.safe_load(fh)
     for agent in doc.get("agents", []):
@@ -59,6 +69,12 @@ def _first_shipped_persona() -> dict[str, Any]:
 # Matches a reply opening with first-person adoption of the user's name.
 # Tolerates leading whitespace / common prefixes ("Hey!", "Hi.") so a
 # warm-up word before the impersonation still counts as a failure.
+#
+# Intentionally narrow: this detector exists to flag the canonical F-2
+# opener ("Hey! I'm Alex, …"). Broader categories of role-adoption
+# ("Alex here.", "Yeah, I'm Alex") are out of scope — the grounding
+# clause's downstream effect on model behaviour is the real defence, and
+# false-positive risk from a broader regex would erode test signal.
 _IMPERSONATION_OPENER = re.compile(
     r"^\W*(hey[\W]+|hi[\W]+|hello[\W]+)?i['’ ]?\s*am\s+alex\b|"
     r"^\W*(hey[\W]+|hi[\W]+|hello[\W]+)?i['’]?m\s+alex\b",
@@ -79,7 +95,9 @@ async def test_persona_does_not_adopt_user_name_in_first_person() -> None:
     """
     cfg = deepcopy(_first_shipped_persona())
     cfg.setdefault("memory", {})["db_path"] = ":memory:"
-    cfg["model"] = cfg.get("model", "claude-sonnet-4-20250514")
+    # ``model`` is required by schemas/agent.schema.json (line 25), so no
+    # fallback default is needed — ``make validate`` would reject any
+    # agents.yaml entry that omits it.
 
     provider = AnthropicProvider(api_key=os.environ["ANTHROPIC_API_KEY"])
     llm_client = LLMClient(provider)
