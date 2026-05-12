@@ -158,8 +158,16 @@ def _list(fm: dict[str, str | list[str]], key: str) -> list[str]:
     return [value] if value else []
 
 
-def collect_rfcs() -> list[RFC]:
+def collect_rfcs() -> tuple[list[RFC], list[str]]:
+    """Collect every canonical RFC and report any that lack front-matter.
+
+    A canonical RFC file (matching ``RFC_FILE_PATTERN`` and not a companion)
+    must have a YAML front-matter block; otherwise it would silently drop
+    out of INDEX.md while still being a tracked RFC, which is a real drift
+    vector. Reported as a hard error rather than a warning so CI catches it.
+    """
     rfcs: list[RFC] = []
+    errors: list[str] = []
     for path in sorted(RFCS_DIR.glob("*.md")):
         if path.name in SKIP_NAMES:
             continue
@@ -170,12 +178,8 @@ def collect_rfcs() -> list[RFC]:
         text = path.read_text(encoding="utf-8")
         fm = parse_front_matter(text)
         if not fm:
-            # An RFC file without front-matter is a soft warning, not a
-            # hard error — keeps the generator usable while frontmatter
-            # is rolled out across older RFCs.
-            print(
-                f"warning: {path.name} is missing YAML front-matter — skipped",
-                file=sys.stderr,
+            errors.append(
+                f"{path.name}: missing YAML front-matter (required for INDEX generation)"
             )
             continue
         rfcs.append(
@@ -193,7 +197,7 @@ def collect_rfcs() -> list[RFC]:
                 superseded_by=_scalar(fm, "superseded_by"),
             )
         )
-    return rfcs
+    return rfcs, errors
 
 
 _ID_RE = re.compile(r"^RFC-\d{4}$")
@@ -227,6 +231,15 @@ def validate(rfcs: list[RFC]) -> list[str]:
             errors.append(
                 f"{loc}: 'superseded_by: {rfc.superseded_by}' references an RFC id not present in docs/rfcs/"
             )
+        for dep in rfc.depends_on:
+            if not _ID_RE.match(dep):
+                errors.append(
+                    f"{loc}: invalid 'depends_on' entry '{dep}' (expected RFC-NNNN)"
+                )
+            elif dep not in known_ids:
+                errors.append(
+                    f"{loc}: 'depends_on: {dep}' references an RFC id not present in docs/rfcs/"
+                )
     return errors
 
 
@@ -277,8 +290,8 @@ def render_index(rfcs: list[RFC]) -> str:
 
 
 def _build() -> tuple[str, int, list[str]]:
-    rfcs = collect_rfcs()
-    errors = validate(rfcs)
+    rfcs, collect_errors = collect_rfcs()
+    errors = collect_errors + validate(rfcs)
     return render_index(rfcs), len(rfcs), errors
 
 
