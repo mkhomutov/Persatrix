@@ -371,7 +371,42 @@ Mixed-policy channels are legitimate — e.g. a planning channel with two
 
 ---
 
-## 10. What's deferred to v0.4.0+
+## 10. Resetting state between test runs
+
+Channel history and persona memory persist across `docker compose down`
+via named volumes (`orchestrator-data` for the channels SQLite store,
+`ember-owl-data` for persona memory, and `workspace` for files agents
+wrote under `/workspace` during the run). A second test run with the
+same channel name and the same `--user` identity inherits prior content
+unless those volumes are explicitly purged — personas surface old
+participants and topics from prior runs and steer the next conversation
+off-topic within ~2 turns.
+
+For manual testing, use `make reset`:
+
+```bash
+make reset
+make docker-up
+```
+
+`make reset` runs `docker compose down -v`, which stops the stack and
+removes **every** volume declared in this compose project — currently
+the three above. Any agent-written files under `/workspace` are dropped
+along with the SQLite stores; if you need to keep scratch artefacts
+from a prior run, copy them out before resetting. The target is
+idempotent — running it twice in a row succeeds cleanly (the second
+invocation finds nothing to remove).
+
+> **This is an operator workaround, not a fix.** The root-cause fix is
+> per-session memory namespacing so reruns with the same channel name +
+> user id are auto-isolated. Tracked in
+> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md);
+> originally surfaced as F-3 in
+> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
+
+---
+
+## 11. What's deferred to v0.4.0+
 
 Documented here so the gap is visible — these are RFC 0011 non-goals or
 deferrals, not implementation oversights:
@@ -385,10 +420,14 @@ deferrals, not implementation oversights:
 - **Per-channel `cascade_depth` overrides** → v0.3.x; see
   [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
+- **Per-session memory namespacing** so reruns with the same channel
+  name + user id are auto-isolated (current workaround: `make reset` —
+  see §10) → tracked in
+  [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md).
 
 ---
 
-## 11. Manual tests
+## 12. Manual tests
 
 The channels surface is exercised end-to-end against a docker-composed
 orchestrator + four agents via the MT-CHANNEL series:
