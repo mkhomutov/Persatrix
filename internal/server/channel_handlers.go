@@ -175,7 +175,14 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]channelResponse, 0, len(chs))
 	for _, c := range chs {
-		out = append(out, channelToResponse(c, nil))
+		members, mErr := s.channelStore.GetMembers(r.Context(), c.ID)
+		if mErr != nil {
+			s.logger.Error("channels: list members fetch failed",
+				zap.String("channel_id", c.ID), zap.Error(mErr))
+			writeError(w, "INTERNAL", "failed to load channel members", http.StatusInternalServerError)
+			return
+		}
+		out = append(out, channelToResponse(c, members))
 	}
 	writeJSON(w, listChannelsResponse{Channels: out, NextCursor: nextCursor}, http.StatusOK)
 }
