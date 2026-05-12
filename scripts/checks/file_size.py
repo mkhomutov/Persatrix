@@ -120,6 +120,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
+    # Per-release manual-test execution reports accumulate evidence across
+    # the PR 1 (initial sweep) and PR 4 (final pre-tag verification)
+    # release-prep passes — every test row carries inline command + output
+    # snippets, per-leg notes, and §"Release-prep regressions fixed"
+    # tables that grow the file past the 3 000-word prose cap. Same
+    # release-cycle-accumulator pattern as `CHANGELOG.md` above: written
+    # against a fixed release, archived once the tag ships. The v0.2.3
+    # report (3 395 words at tag time) set the precedent; the v0.3.0 PR 4
+    # rerun (this addition) brings the report to ~4 600 words.
+    "docs/manual-tests/v0.3.0-execution-report.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,

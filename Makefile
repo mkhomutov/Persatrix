@@ -44,10 +44,13 @@ proto-python: ## Generate Python gRPC stubs from protobuf definitions (incl. myp
 	@# when the package is installed as persatrix_agents.generated.* (agents/generated/
 	@# is not on sys.path). Rewrite to 'from . import X_pb2' so the stubs work in
 	@# the installed layout. ISSUE-0016 / PR #246 finding M1.
+	@# `newline='\n'` pins LF on disk regardless of platform — Python text-mode
+	@# write defaults to os.linesep, which produces CRLF on Windows and breaks
+	@# byte-parity gates against the LF-only blobs. v0.3.0 release-prep PR 4.
 	@$(PYTHON) -c "\
 import re, pathlib; \
 [f.write_text(re.sub(r'^import (\\w+_pb2\\b)', r'from . import \\1', \
-  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8') \
+  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8', newline='\\n') \
  for f in pathlib.Path('$(PROTO_PY_OUT)').glob('*_pb2_grpc.py')]"
 	@echo "✓ Python protobuf stubs generated"
 
@@ -67,7 +70,7 @@ proto-python-check: ## Fail if agents/generated/*.pyi / *_pb2.py / *_pb2_grpc.py
 	$(PYTHON) -c "\
 	import re, pathlib; \
 	[f.write_text(re.sub(r'^import (\\w+_pb2\\b)', r'from . import \\1', \
-	  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8') \
+	  f.read_text(encoding='utf-8'), flags=re.MULTILINE), encoding='utf-8', newline='\\n') \
 	 for f in pathlib.Path('$$tmpdir').glob('*_pb2_grpc.py')]; \
 	" || { rm -rf $$tmpdir; exit 1; }; \
 	stale=0; \
@@ -190,7 +193,14 @@ check-licenses-go: ## Check Go module licenses against the allow-list
 
 check-licenses-python: ## Check Python dependency licenses against the allow-list
 	@echo "→ Checking Python dependency licenses..."
-	@$(PYTHON) scripts/checks/python_licenses.py --exception Persatrix-agents
+	@# pytest-timeout 2.4.0 declares `License: MIT` and the OSI-MIT classifier,
+	@# but its metadata also carries the legacy `License :: DFSG approved`
+	@# Trove classifier; `pip-licenses --from=mixed` concatenates both into
+	@# "DFSG approved; MIT License", which the strict-split allow-list checker
+	@# rejects (the SPDX token is "MIT", not "MIT License"). Genuinely MIT,
+	@# reviewed exception. Added in v0.3.0 release-prep PR 4. See ISSUE-0024
+	@# for why the dep is required (pytest hangs without it).
+	@$(PYTHON) scripts/checks/python_licenses.py --exception Persatrix-agents --exception pytest-timeout
 
 check-licenses-rust: ## Check Rust crate licenses via cargo-deny
 	@echo "→ Checking Rust dependency licenses..."

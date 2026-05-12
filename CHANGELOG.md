@@ -2,790 +2,199 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-05-12
 
-### Added
+> **Codename:** Agent Conversations
 
-- **Persona reply discretion + conversational pacing prompt snippets
-  (ISSUE-0048 follow-up).** Two unconditional safety snippets shape the
-  persona's channel-reply behaviour from the prompt layer rather than
-  the executor:
-  - `prompts/runtime/safety/reply-discretion.md` — silence is a valid
-    turn outcome on group channels (with three explicit grounds:
-    not-concerning-you, nothing-new, better-placed-elsewhere); DMs
-    always reply because the response gate forces `always` on DMs and
-    the orchestrator's `replyWaiter` 504s without a publish.
-  - `prompts/runtime/safety/conversational-pacing.md` — match the
-    length and register of the inbound message; substantive requests
-    still get substantive replies.
-  Wired into `agents.persona_runtime.prompt_assembly` between the
-  `external-data-handling` and (conditional) `memory-tool-usage`
-  snippets so a memory-less persona still receives the conversational
-  nudges. **User-visible behaviour change:** a persona on a group
-  channel may now legitimately stay silent where it previously emitted
-  a fallback publish; on DM channels, an empty LLM response now
-  resolves to a synthesised ellipsis (`…`) so the chat-as-DM REST
-  round-trip closes cleanly instead of 504ing on `chatDefaultTimeout`
-  — see `synthesize_channel_reply` in
-  `agents/persona_runtime/channel_reply.py`. Follows the RFC 0022
-  safety-snippet pattern; no new RFC required. Pinned by extended
-  cases in `tests/unit/python/test_channel_reply_synthesis.py`,
-  `tests/unit/python/test_reply_discretion_and_pacing.py`, and a
-  byte-identical golden update in
-  `tests/unit/python/test_persona_section_composer.py`.
+### Highlights
 
-- **v0.3.0 channel test-findings PR 2 — orchestrator-side cascade-depth
-  enforcement.** Closes the F-1 cooperative-path cascade backstop in
-  Go ([RFC 0011 amendment 'Cascade-depth wire propagation']). Builds
-  on PR 1's wire contract (schema + proto) with the primary
-  enforcement layer:
-  - `internal/channels/router.go` — `ChannelRouter.Publish` now reads
-    `msg.Metadata["cascade_depth"]`, clamps it to
-    `[0, max_cascade_depth]` at the publish trust boundary, persists
-    the clamped value (so a `GET /messages` reader sees what the
-    orchestrator actually enforced, not the publisher's claim), and
-    drops the per-recipient fanout when the clamped depth ≥ cap. The
-    publish itself still succeeds — only the cascade chain is
-    terminated. The +1 stays agent-side on outbound; the orchestrator
-    forwards the inbound depth as-is into child fanout events.
-  - `internal/channels/grpc_dispatcher.go` — outbound dispatch events
-    now carry the depth on the typed `ChannelMessageEvent.cascade_depth`
-    proto field landed in PR 1.
-  - `internal/server/channel_handlers.go` — publish handler rejects
-    negative or non-integer `metadata.cascade_depth` with `400` at the
-    REST boundary (loud-fail on a publisher bug). Over-cap values are
-    silently clamped server-side at the router boundary since
-    publishers do not know the deployment's current cap.
-  - `internal/defaults/defaults.go` — new `DefaultMaxCascadeDepth = 5`
-    constant aligned with the Python `EventDispatcher.max_cascade_depth`
-    at `agents/dispatch.py:43`. `channels.yaml` exposes
-    `max_cascade_depth:` as an explicit override (a zero or negative
-    row is ignored — the backstop cannot be silently disabled from
-    config).
-  - `channel.messages.cascade_capped{channel_type}` counter — one
-    increment per per-recipient dispatch the cap suppressed. Directly
-    comparable to `channel.messages.delivered`; `channel_id` is on
-    the structured log line for incident-driven pivots.
-  - Structured log line on cap-drop:
-    `channels: cascade limit reached channel_id=… sender_id=… depth=… max_cascade_depth=… suppressed_recipients=…`
-    at Warn level.
-  Operator-facing detail in `docs/guides/channels.md` §"Cascade-depth
-  backstop". **Wire compatibility preserved**: a Python publisher that
-  has not yet adopted PR 3's emit path will still POST with no
-  `cascade_depth` (depth defaults to 0, fanout fires normally); the
-  Python `EventDispatcher.max_cascade_depth=5` check remains as
-  defense-in-depth until PR 3's docstring re-framing lands.
+- **Internal channels — agents and humans share a typed conversation surface.** Group channels, DMs, threads, and the chat-as-DM façade ship as the v0.3.0 user-facing promise (RFC 0011 internal scope). `POST /api/v1/channels`, `POST /api/v1/channels/{id}/messages`, `GET /api/v1/channels/{id}/messages/{msg_id}/thread`, plus a publish → fanout → response-gate → LLM action → publish-back loop wired end-to-end across the Go orchestrator, the Python persona runtime, and a new `persatrix channel` CLI subcommand (`list` / `join` / `send` / `reply` / `history` / `watch`). The legacy `SendChatMessage` gRPC path is dead code — every `/chat` REST call now flows through the channels publish-and-await façade ([RFC 0011 amendment](docs/rfcs/0011-amendment-chat-as-dm.md)).
+- **Interaction-bounded episodic memory** (RFC 0020). A multi-turn dialogue is now one episode (open → multi-turn → close → summarize), not one per inbound event. The close path is two-phase + async — synchronous `[summary pending]` sentinel inside the per-agent lock, then a background LLM summariser updates the row — so a follow-up message no longer queues head-of-line behind the summariser. Janitor cleanup wired into `on_tick` recovers crash-stuck `[summary pending]` rows.
+- **Persona temporal awareness, Phase 1** (RFC 0021). Persona prompts now emit a `now-anchor` line and render episode + relationship timestamps as relative time ("yesterday", "3 days ago") instead of raw epoch seconds. Structured commitment tracking + scheduled callbacks are deferred to v0.4.0 (Phases 2–4).
+- **Memory facade + per-step context-budget allocation** (RFC 0008). `MemoryFacade` becomes the single boundary between persona-runtime + memory tiers (working / relationship / facts / notes / episodic); `attachContextPackage` allocates a typed budget per workflow step and routes it through cross-language wire shape pinned by [`tests/fixtures/context_package_v1.json`](tests/fixtures/context_package_v1.json). Procedural tier ships read-time exponential confidence decay (default 69-day half-life) + revalidation; shared-memory pools with deny-by-default ACL + provenance ship behind a new `shared_memory_pools:` config block.
+- **Security Phases 1–2** (RFC 0009). Audit logger with checksum-chained tamper evidence (JSONL append-only sink, per-event fsync for security-class events, three-state startup recovery), `SecretRedactor` with five default patterns + cycle-safe reflective walk, per-agent sliding-window REST + gRPC rate limiter with circuit-breaker quarantine, `<external_data>` envelope wrapping at the LLM-content boundary, Go↔Python sanitizer-pattern parity enforced at build time. Sandbox isolation + token auth (Phases 3–4) deferred to v0.4.0.
+- **Externally inspectable persona prompt sections** (RFC 0022). Every persona prompt fragment lives under [`prompts/runtime/persona/sections/`](prompts/runtime/persona/sections/) as a separate markdown file — assembly order pinned by golden tests, forks and out-of-tree tooling that override prompt assembly can pin against this directory shape. New safety snippets `reply-discretion.md` + `conversational-pacing.md` shape the persona's channel-reply behaviour from the prompt layer rather than the executor.
 
-  [RFC 0011 amendment 'Cascade-depth wire propagation']: docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
+### Upgrade Notes
 
-- **RFC 0030 — Multi-Agent Conversation Governance (Draft).** Proposes
-  a layered architecture for terminating and pacing agent-to-agent
-  conversations in channels. Motivated by the v0.3.0 F-1 finding's
-  tail: even with `cascade_depth=5` closed, cost still scales as
-  `members × depth` per publish, and the flat cap cannot distinguish
-  productive convergence from a trivial loop. Six layers ordered
-  cheap-and-unfailable → expensive-and-judgement-based: (0)
-  cascade_depth backstop (shipped); (1) per-interaction cost ceiling
-  via RFC 0023 lease attribution; (2) per-participant reply budget;
-  (3) response gate (shipped); (4) end-of-interaction structured
-  vote; (5) optional moderator agent reading the transcript every N
-  turns; (6) declarative conversation types (brainstorm /
-  design_review / incident / retro / open) bundling sensible
-  defaults. Scope of a "conversation" is the [RFC 0020](docs/rfcs/0020-interaction-lifecycle.md)
-  Interaction; `interaction_id` joins `cascade_depth` on the publish
-  wire shape. Phased: deterministic layers (1, 2, 4) target v0.3.x;
-  moderator (Layer 5) targets v0.4.0 alongside [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md)'s
-  salience-triggered scheduler; declarative types and topic-drift
-  detection (Layer 6 + RFC 0020 §B scaffolding) target v0.5.0+.
-  Status `📋 Proposed (Draft)`; 10 open questions captured.
-  ([docs/rfcs/0030-multi-agent-conversation-governance.md](docs/rfcs/0030-multi-agent-conversation-governance.md);
-  ROADMAP RFC Master Index updated.)
+| Notable change | Detail |
+|----------------|--------|
+| Channel-event enum hard-rename | `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` across all Python producers (chat ingest, persona-runtime response gate, dispatch executor, action validators, prompt assembly, state persistence, memory routing). v0.2 enum aliases dropped. `ActionExecutor` result dict now carries `"action_type": "send_channel_message"`. Out-of-tree consumers must update event-type filters and result-dict consumers. |
+| Chat REST endpoint migrated to channels | `POST /api/v1/agents/{id}/chat` now goes through the channels publish-and-await façade ([RFC 0011 amendment](docs/rfcs/0011-amendment-chat-as-dm.md)). JSON contract on `chatRequest` / `chatResponse` is preserved — Rust CLI and existing REST clients are unaffected — but the legacy `SendChatMessage` gRPC path is dead code (cleanup tracked in ISSUE-0035). |
+| New `SECURITY_RATE_LIMIT_*` env vars | RFC 0009 PR 2 ships a per-agent sliding-window rate limiter with circuit breaker. `SECURITY_RATE_LIMIT_ENABLED`, `SECURITY_RATE_LIMIT_CALLS`, `SECURITY_RATE_LIMIT_WINDOW_SECONDS`, `SECURITY_RATE_LIMIT_MAX_AGENTS` configure the limiter at startup (defaults: enabled, 60 calls / 60-s window). Opting out emits a one-shot `rate_limit.disabled` audit event so the choice is visible in the audit log. Operators see HTTP 429 + `Retry-After` on REST and `ResourceExhausted` / `PermissionDenied` on gRPC after threshold violations; `POST /api/v1/agents/{id}/unquarantine` clears a quarantined agent (call it with a non-`anonymous` `X-Agent-ID` header so the operator's own request is not rate-limited as `anonymous`). |
+| `<external_data>` envelope wrapping | RFC 0009 PR 3 wraps `http_request` / `file_read` tool results in an `<external_data>…</external_data>` envelope at the LLM-content boundary, with close/open-tag escaping (`_EXTERNAL_DATA_TAG_RE`) so untrusted content cannot break out. Out-of-tree LLM evaluators or post-processors that grepped on raw tool-output strings must move to the wrapped form. The unconditional `external-data-handling` prompt fragment teaches the model the contract. |
+| Channels REST surface is unauthenticated | A startup `WARN` notice fires whenever the channels subsystem is enabled. `sender_id` is body-trusted in v0.3.0 — firewall the port or front with an authenticating reverse proxy until [RFC 0009 Phase 4](docs/rfcs/0009-security-sandboxing.md) lands in v0.4.0. The notice is intentionally not suppressible from config. |
+| Persona prompt-section directory is public surface | Every persona prompt fragment now lives under [`prompts/runtime/persona/sections/`](prompts/runtime/persona/sections/) ([RFC 0022](docs/rfcs/0022-persona-prompt-section-templating.md)). Forks and out-of-tree tooling that override prompt assembly should pin against this directory shape. |
+| Now-anchor in persona prompts | Persona prompts emit a `now-anchor` line and render episode + relationship timestamps as relative time ("yesterday", "3 days ago") instead of raw epoch seconds (RFC 0021 Phase 1). Out-of-tree prompt evaluators that key on absolute timestamps must move to the rendered form, or read the underlying epoch from the episodic store directly. |
+| Episodic write cadence changed | RFC 0020 collapses multi-turn dialogues to **one** episodic entry per interaction (open → multi-turn → close → summarize) instead of one entry per inbound event. Out-of-tree memory-inspection tools that counted episodes-per-message will see the count drop sharply on chatty channels — this is by design. The `interaction_id` + scope tag on each episode is the new lookup key. |
+| `relationships.interaction_count` unit changed | `interaction_count` and `auto_reflect_after` are now per-closed-interaction, not per-message. A 10-message DM session now bumps `interaction_count` by 1 (previously by 10). Operators with bespoke trust thresholds calibrated against the per-message scale should consult the Migration Notes in [docs/rfcs/0020-interaction-lifecycle.md](docs/rfcs/0020-interaction-lifecycle.md). |
+| `memory.min_score` schema default changed | `null` → `0.20` (RFC 0008 PR 2a). Operators with `memory.enabled: true` who did not previously set `memory.min_score` will see strictly fewer recall results — low-score entries are no longer concatenated into the system prompt. Restore the pre-PR-221 behaviour by setting `memory.min_score: null` in [`config/agents.yaml`](config/agents.yaml). |
+| `MemoryFacade.store_procedure` key validation | Validates `key` against `^[A-Za-z0-9._-]+$` (max 256 chars) and raises `ValueError` on non-conforming keys. Callers persisting procedural keys with spaces, slashes, percent-signs, non-ASCII characters, or newlines must rename them before upgrading. |
+| `pytest-timeout` test dependency added | Transitive dev dep added per ISSUE-0024 to stop the Python unit-suite from hanging on the full-suite invocation. Genuinely MIT-licensed; the `check-licenses-python` Makefile target carries an `--exception pytest-timeout` with justification (pip-licenses `--from=mixed` concatenates the legacy `License :: DFSG approved` Trove classifier producing a token the strict allow-list doesn't accept). |
 
-- **RFC 0011 amendment — cascade-depth wire propagation (v0.3.0
-  channel test-findings PR 1).** v0.3.0 manual channels testing
-  surfaced finding F-1: a single user prompt produced ~60 persona
-  replies across two `always`-respond personas in ~10 minutes. Root
-  cause — `cascade_depth` is dropped at the REST publish boundary
-  ([publishMessageRequest](internal/server/channel_types.go)) and
-  reset to `0` on every gRPC dispatch back to agents
-  ([ChannelMessageEvent](proto/task.proto)), defeating the RFC 0011
-  §D cascade backstop across processes. This PR pins the wire
-  contract:
-  - `proto/task.proto` — new `int32 cascade_depth = 11` on
-    `ChannelMessageEvent` (typed scalar, mirroring the existing
-    `timestamp` asymmetry — `ChannelMessageEvent` has no metadata map).
-  - `schemas/channel.schema.json` — new `definitions.messageMetadata`
-    pinning `metadata.cascade_depth` (integer, minimum 0; orchestrator
-    clamps above `max_cascade_depth` server-side so publishers don't
-    need to know the deployment's current cap).
-  - `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` —
-    full contract, trust model, primary/defense-in-depth split,
-    deferred work (authoritative depth derivation, cost-ceiling).
-  Cross-linked from RFC 0011 §D and the 0011 PR plan's new
-  "Amendments" section. **No behavior change in this PR** — Go still
-  ignores the field, Python still doesn't emit it. Orchestrator
-  enforcement lands in PR 2, Python emit/ingest in PR 3, cross-process
-  integration pin in PR 4 (all per `docs/v0.3.0-test-findings-pr-plan.md`).
+### 🚀 Features
 
-- **RFC 0011 PR 4a-ii-β-1 — real Go gRPC `MessageDispatcher` +
-  Python REST publish rewire.** Replaces the `NoopDispatcher{}`
-  placeholder in `cmd/orchestrator/channels.go` with a registry-aware
-  `GRPCMessageDispatcher` (`internal/channels/grpc_dispatcher.go`)
-  that resolves the target agent through an `AgentResolver` Protocol
-  seam, dials with insecure transport credentials (in-cluster
-  traffic; mTLS deferred to RFC 0009 Phase 4), and invokes
-  `AgentService.ReceiveChannelMessage`. At-most-once / best-effort:
-  `ErrAgentNotFound` warns and returns `nil`; non-`Healthy` or empty
-  `Address` returns `ErrAgentNotReady`. `ChannelType` is derived
-  from the channel-id prefix; `Timestamp` is formatted as
-  RFC3339Nano (defaulting to `now()` when zero). `initChannels` now
-  accepts a `registry.Registry` and selects `GRPCMessageDispatcher`
-  when non-nil (`NoopDispatcher` is the test/no-registry fallback).
+- *(memory)* RFC 0020 PR 1 - InteractionTracker + episodes schema v5 (#214)
+- *(memory)* RFC 0020 PR 2 — route TICK + tool-only events through InteractionTracker (#215)
+- *(memory)* RFC 0020 PR 3 - multi-turn aggregation for human-chat + DM (#216)
+- *(rfc0008)* PR 1 - context budget allocator + packaging foundation (#218)
+- *(rfc0008)* PR 1b — context metrics emission + remaining-budget persistence (#219)
+- *(rfc0008)* PR 2 — MemoryFacade for task agents (#220)
+- *(rfc0008)* PR 2a - episodic-tier eviction + PR 2 follow-up findings (#221)
+- *(rfc0008)* PR 3 - delegation contract + merge engine (#222)
+- *(rfc0008)* PR 4 - shared pool ACL + provenance (#223)
+- *(rfc0008)* PR 3a - delegation metrics + PR 3 follow-up findings (#224)
+- *(rfc0008)* PR 5 - confidence decay + procedural revalidation (#225)
+- *(rfc0008)* PR 6a - Go scheduler hygiene + sampler bookkeeping (#227)
+- *(rfc0008)* PR 6b - Python procedural memory + log-safety cleanup (#228)
+- *(rfc0020)* PR 4 — summarization-on-close + janitor + record_interaction move (#229)
+- *(rfc0011)* PR 1 - channel store + SQLite migration + schema rewrite (#231)
+- *(rfc0009)* PR 1 - AuditLogger + SecretRedactor (security package + unit tests) (#233)
+- *(rfc0009)* PR 1b — audit wiring + default redactor + chmod self-heal (#234)
+- *(rfc0009)* PR 1c — RedactStruct hardening + audit metrics (#236)
+- Externalize hardcoded literals to prompt snippets and config (#239)
+- *(rfc0009)* PR 2 - RateLimiter + CircuitBreaker + REST/gRPC middleware (#244)
+- *(rfc0011)* PR 2 — channels REST + router + config reconciliation (#245)
+- *(rfc0011)* PR 3 — proto + RPC for ChannelMessageEvent (#246)
+- *(rfc0011)* PR 4a-i — ReceiveChannelMessage real handler + additive enums (#248)
+- *(rfc0011)* PR 4a-ii-α — hard rename CHANNEL_MESSAGE/SEND_CHANNEL_MESSAGE + SF-3 mentions validation (#249)
+- *(rfc0011)* PR 4a-ii-β-1 — real Go gRPC MessageDispatcher + Python REST publish rewire (#250)
+- *(rfc0011)* PR 4a-ii-β-2 — chat-as-DM rewrite (Go-side waiter + PublishAndAwait) (#251)
+- *(rfc0011)* PR 4b — channels response gate + DELETE endpoints (#252)
+- *(rfc0009)* PR 3 — InputSanitizer + ContextItem + external_data envelope (#253)
+- *(rfc0021p1)* PR 1 — Clock seam + temporal rendering pure functions (#256)
+- *(rfc0021p1)* PR 2 — now-anchor + episode/relationship recency rendering (#260)
+- *(rfc0021p1)* PR 3 — review follow-ups + RFC Phase-1 close (#261)
+- *(rfc0020)* PR 5 — per-channel scoping + closing-row recall filter (#262)
+- *(rfc0011)* PR 5 — channel ingest sanitization + gate-suppress memory (#263)
+- *(rfc0011)* PR 5 follow-up — channel-history tier in MemoryBudget (#264)
+- *(rfc0011)* PR 5 follow-up — on-startup catch-up fetch (OQ #8) (#265)
+- *(rfc0020)* PR 6 slice 1 — Phase-2/janitor race + PR 4 review follow-ups (#266)
+- *(channels)* Close ISSUE-0015 — paginate ListChannels via keyset cursor (#280)
+- *(channels)* ISSUE-0032 — emit channel.dispatch OTel span (Go side) (#286)
+- *(agents)* Close ISSUE-0032 — emit channel.publish OTel span (Python side) (#287)
+- *(rfc0020)* PR 6 slice 2 — typed CloseReason + table-driven _emit_closed dispatch (#296)
+- *(rfc0011)* PR 6 — Rust CLI channel subcommands (list/join/send/reply/history/watch) (#302)
+- *(rfc0009)* PR 4 — review follow-ups + Phases 1-2 close (#306)
+- *(v030)* Demo personas + planning channel + walkthrough guide (#316)
+- *(persona)* Reply-discretion + conversational-pacing prompt snippets (#327)
 
-  On the Python side, `_handle_send_channel_message` is rewired
-  from the in-process `EventDispatcher` cascade to
-  `POST /api/v1/channels/{id}/messages` via a new
-  `HTTPChannelPublisher` (`agents/channel_publisher.py`, 10s
-  timeout, raises on ≥400) when `channel_id` is set and a
-  `ChannelPublisher` is wired. The in-process cascade is preserved
-  as the fallback for the chat-reply path until the chat-as-DM
-  façade lands in PR 4a-ii-β-2. `agents/server.py` wires the
-  `HTTPChannelPublisher` onto the dispatcher alongside the shared
-  `aiohttp.ClientSession` in `start()`.
+### 🐛 Bug Fixes
 
-  To keep both modules under the project file-size limit,
-  `ActionExecutor` is extracted from `agents/dispatch.py` to
-  `agents/action_executor.py` and re-exported unchanged from
-  `agents/dispatch.py` (no behavior change for downstream
-  importers). Eight follow-up issues are captured (ISSUE-0024
-  through ISSUE-0032 in `docs/issues/INDEX.md`) covering the
-  cross-process integration test, conditional `HTTPChannelPublisher`
-  wiring, send-channel-message result-dict asymmetry,
-  `selectChannelDispatcher` test gap, gRPC connection pooling,
-  RPC-error test gap, nil-registry startup-log gap, and channel
-  publish OTEL spans. (PR #250.)
+- *(agent)* Include prompts in image and configure audit log path (#235)
+- *(security)* Dedupe ContextSource validation + codegen enum parity (#254) (#255)
+- *(security)* Close ISSUE-0001 — CircuitBreaker rejects Window/Count <= 0; add Disabled flag (#270)
+- *(security)* Close ISSUE-0007 — propagate request ctx through RateLimiter/CircuitBreaker audit emits (#272)
+- *(channels)* Close ISSUE-0034 — demote chat-DM user to RespondNever (#276)
+- *(agents)* Close ISSUE-0027 — symmetrize SEND_CHANNEL_MESSAGE result dicts (#277)
+- *(docker)* Close ISSUE-0046 + ISSUE-0047 — get compose stack functional for v0.3.0 (#279)
+- *(agents)* Close ISSUE-0026 — sticky-disable HTTPChannelPublisher on first 503 (#281)
+- *(agents)* Close ISSUE-0048 — synthesise SEND_CHANNEL_MESSAGE for plain-text persona replies (#282)
+- *(scripts)* Close ISSUE-0036 — switch doc_links collector to `git ls-files` (#284)
+- *(channels)* Close ISSUE-0049 — buildDSN merges caller query params instead of double-? concatenation (#294)
+- *(channels)* Close ISSUE-0050 — soft byte cap on msg.Content at the SQLite store boundary (#295)
+- *(v030)* Channel cascade-depth wire propagation — amendment + schemas (PR 1) (#318)
+- *(v030)* Channel cascade-depth Go orchestrator enforcement (PR 2) (#319)
+- *(v030)* Channel cascade-depth Python round-trip (PR 3) (#321)
+- *(v030)* Channel cascade-depth cross-process integration pin (PR 4) (#322)
+- *(v030)* Channel persona impersonation — grounding clause (PR 5) (#323)
+- *(v030)* Channel state-reset Make target + operator-guide notes (PR 6) (#324)
 
-- **RFC 0011 PR 4a-ii-α — hard rename
-  `MESSAGE_RECEIVED`/`SEND_MESSAGE` → `CHANNEL_MESSAGE`/`SEND_CHANNEL_MESSAGE`
-  + SF-3 mentions validation.** Drops the v0.2 enum aliases now that
-  PR 4a-ii-α has migrated every Python producer (chat ingest,
-  persona-runtime response gate, dispatch executor, action validators,
-  prompt assembly, state persistence, memory routing, all unit and
-  integration tests, glossary + spec docs) onto the canonical channel
-  vocabulary. The cross-process REST/gRPC rewire lands in PR 4a-ii-β
-  per the α/β split documented in `docs/rfcs/0011-pr-plan.md`.
+### 🔒 Security
 
-  **Behaviour change visible to downstream consumers:** the
-  `ActionExecutor` result dict for channel sends now carries
-  `"action_type": "send_channel_message"` (previously
-  `"send_message"`). Any log scraper, evaluator, or telemetry pipeline
-  that grepped on the v0.2 literal must be updated. The
-  `EventType.MESSAGE_RECEIVED` and `ActionType.SEND_MESSAGE` enum names
-  no longer resolve and any out-of-tree producer must move to the new
-  members. (PR #249.)
+- *(server)* Close ISSUE-0004 — hash bearer token before constant-time compare (#275)
+- *(ratelimit)* Close ISSUE-0005 — emit rate_limit.reset audit event from RateLimiter.Reset (#285)
 
-  Also closes PR #231 review SF-3: `sqliteStore.PublishMessage` now
-  validates every entry in `msg.Mentions` through the same
-  `validateParticipantID` check the sender goes through, before
-  `BeginTx`. The error wraps the offending index
-  (`mentions[%d]: %w`) so callers can identify the bad value while
-  preserving `errors.Is(err, ErrInvalidParticipantID)` for the
-  Router's 422 mapping.
+### ⚡ Performance
 
-- **PR #248 deep-review follow-ups — `CHANNEL_MESSAGE` runtime
-  integration + receiver hardening.** Closes the High/Medium/Low
-  findings on top of the PR 4a-i scope:
+- *(security)* Close ISSUE-0003 — RateLimiter.evictOlderThan in-place compaction (#274)
+- *(channels)* Close ISSUE-0014 — bounded-concurrency fanout in ChannelRouter (#283)
 
-  - **Persona-runtime routing for the new enum** (PR #248 deep review
-    High + Medium): `EventType.CHANNEL_MESSAGE` now sits in
-    `_StatePersistenceMixin._MULTI_TURN_EVENT_TYPES` (alongside
-    `MESSAGE_RECEIVED` / `MENTION`) so dispatched channel events take
-    the multi-turn episode path instead of falling through the legacy
-    "not classified" warning fallback PR-215 added; `_format_event`
-    treats `CHANNEL_MESSAGE` exactly like `MESSAGE_RECEIVED`
-    (`<|user_message|>` delimiter wrap with PR #120 F-2 sanitisation)
-    so the LLM sees a sender-attributed prompt rather than a raw
-    `json.dumps(payload)` blob; `action_loop` extracts
-    `payload["content"]` (not the wrapped form) for the FTS5
-    `memory_query` so recall is not contaminated with delimiter tokens.
-    Dormant until a producer wires `ReceiveChannelMessage` end-to-end
-    (PR 4a-ii / PR 4b), but pinned by tests now so the path is correct
-    the moment it activates.
-  - **Bounded `_pending_dispatches` queue** (PR #248 deep review Low):
-    new `_MAX_PENDING_DISPATCHES = 1000` cap on the strong-ref
-    fire-and-forget set in `AgentServiceServicer`. Once full,
-    `ReceiveChannelMessage` returns
-    `TaskAck(success=False, error_message="receiver overloaded …")`
-    so the orchestrator's existing per-ack failure path becomes the
-    backpressure signal — closes a slow-burn DoS surface on the
-    cleartext gRPC port symmetric with the validator's other bounds
-    work.
-  - **Naive RFC 3339 timestamp rejection** (PR #248 deep review NTH):
-    `parse_channel_timestamp` now returns `None` for inputs lacking a
-    `time-offset` (e.g. `"2026-05-04T00:00:00"`). `datetime.fromisoformat`
-    parses such values as *naive* datetimes and the subsequent
-    `.timestamp()` then converts via the *host* timezone, silently
-    shifting the publish time by however many hours the receiver is
-    offset from UTC. RFC 3339 §5.6 mandates the offset; the validator
-    now enforces the contract.
-  - **`__all__` hygiene**: removes `_extract_chat_reply` (a
-    single-leading-underscore, module-private name) from
-    `agents.server_servicers.__all__`. Direct imports continue to work
-    (the back-compat shim is unchanged); only `from … import *` no
-    longer pulls a name that advertises itself as private.
-  - **Unicode content-cap pinning** (PR #248 deep review NTH): new
-    tests pin that the validator's "4000 character" content cap means
-    4000 *codepoints*, not 4000 wire bytes — accepts `"🦊" * 4000`
-    (16 KB UTF-8) and rejects `"🦊" * 4001`, so a future "switch to
-    bytes" refactor surfaces as a hard test failure rather than
-    silently halving the effective limit for non-ASCII traffic.
+### 🔧 Refactoring
 
-- **RFC 0011 PR 4a — `ReceiveChannelMessage` real handler + additive
-  enums.** Replaces the PR 3 `TaskAck(success=False)` stub on
-  `AgentServiceServicer.ReceiveChannelMessage` with a real receiver-side
-  handler: validates the wire-side `ChannelMessageEvent` (mentions cap,
-  participant-id pattern, content/thread-id length, channel_type ↔
-  channel_id prefix agreement) defensively against the cleartext gRPC
-  transport, resolves the target agent on the single-agent-per-process
-  server, builds an `AgentEvent(event_type=CHANNEL_MESSAGE)`, and
-  schedules dispatch via `asyncio.create_task` with a strong-ref task
-  set (`self._pending_dispatches`) so Python 3.11+ does not GC the task
-  mid-flight (PR #246 deep review Should-Fix #2). Returns
-  `TaskAck(success=True)` on enqueue (at-most-once contract; the
-  orchestrator does not retry). Adds two new enum members **additively**
-  alongside the v0.2 names: `EventType.CHANNEL_MESSAGE` and
-  `ActionType.SEND_CHANNEL_MESSAGE`. Promotes `thread_id` to a top-level
-  `AgentEvent` field per RFC 0011 §D so the response gate (PR 4b) can
-  branch on thread context without a payload lookup.
+- *(tests)* Split test_persona_runtime.py into focused modules (#195)
+- *(tests)* Split test_episodic_memory.py into focused modules (#196)
+- *(tests)* Split test_event_dispatch_tick.py into focused modules (#197)
+- *(tests)* Split scheduler_test.go into focused modules (#198)
+- *(tests)* Split server_test.go into focused modules (#199)
+- *(tests)* Split executor_test.go into focused modules (#200)
+- *(tests)* Split test_validate.py and planner_test.go into focused modules (#201)
+- *(tests)* Split state_test.go and test_server.py into focused modules (#202)
+- *(tests)* Split test_chat_servicer.py, encoder_test.go, cost_test.go into focused modules (#203) (#203)
+- *(tests)* Split oversized Python test files to comply with 500-line policy (#204)
+- *(prompts)* Externalize task-agent instructions into prompts/runtime/ (#210)
+- *(prompts)* Externalize safety snippets into prompts/runtime/safety/ (#211)
+- *(prompts)* Externalize behavior-dimension descriptions into prompts/runtime/persona/sections/ (#212)
+- *(prompts)* Externalize persona section composer (RFC 0022, PR C) (#213)
+- *(orchestrator)* Close ISSUE-0008 — extract startup helpers, drop main.go below 500 lines (#292)
+- *(memory)* Drop file-size grandfather entries — split memory_context, episodic + verify facade (#293)
+- *(rfc0020)* PR 6 slice 3 — migration no-op cleanup + autouse metrics fixture (#297)
+- *(rfc0020)* PR 6 slice 4 — PR-2 review #6/#7/#9/#10/#11 + episode-routing mixin extraction (#298)
+- *(rfc0020)* PR 6 slice 5 — clock seam + cross-scope idle-flush attribution (#299)
+- *(rfc0020)* PR 6 slice 6 — inline MaxTurns cap + multi-turn close-path coverage (#300)
+- *(rfc0020)* PR 6 slice 7 — tighten _llm_client to LLMClient + drop dead silent-drop branches (#301)
 
-  The hard renames `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and
-  `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE`, the
-  `SEND_CHANNEL_MESSAGE` dispatch executor in `agents/dispatch.py`, the
-  orchestrator-side `internal/executor/dispatch.go::DispatchChannelMessage`,
-  the persona-runtime response gate, the DELETE endpoints, and the
-  chat-path migration per the RFC 0011 chat-as-DM amendment land in
-  follow-up PRs (chat is the heavy producer of the old enum names;
-  renaming without migrating chat would leave `main` broken).
+### 📚 Documentation
 
-- **RFC 0011 PR 3 — Proto + RPC for channel-message delivery.** Adds
-  `ChannelMessageEvent` + `ReceiveChannelMessage` (returning a new minimal
-  `TaskAck`) to `proto/task.proto` per RFC 0011 §C. The `channel_type`
-  string field on the event duplicates the prefix encoded in `channel_id`
-  ("group:" / "dm:" / "thread:") so log/metric attributes do not have to
-  re-parse the address; the orchestrator's `ChannelRouter` (PR 2) already
-  validates agreement on publish, and receivers should drop on mismatch
-  as malformed. The Python `AgentServiceServicer` gains a stub
-  `ReceiveChannelMessage` that returns
-  `TaskAck(success=false, error_message="…RFC 0011 PR 4")` — fail-closed
-  so the eventual orchestrator dispatcher cannot mistake the stub
-  response for a real ack (PR #246 deep review H1). The real handler
-  (build `AgentEvent(event_type=CHANNEL_MESSAGE)` and dispatch through
-  `EventDispatcher`) lands in PR 4 alongside the orchestrator-side
-  `DispatchChannelMessage` action and the `MESSAGE_RECEIVED` →
-  `CHANNEL_MESSAGE` event-type rename.
+- *(release)* Post-release follow-up for v0.2.3 (#192)
+- Apply Priority 1 + 2.2 + 3.2 cleanup recommendations (#194)
+- *(rfcs)* V0.3.0 planning kickoff — RFC 0011 (Channels) and roadmap corrections (#205)
+- *(planning)* Add v0.3.0 master plan (#206)
+- *(planning)* Scaffold the six v0.3.0 RFC PR plans (#207)
+- *(ai)* Enforce brevity policy and trim prompt footprint (#208)
+- *(ai)* Add canonical AI glossary and enforce it in assistant instructions (#209)
+- *(rfc0008)* Flesh out RFC 0008 PR plan from scaffold (#217)
+- *(rfc0008)* Triage accumulated PR 1-5 follow-ups before RFC close (#226)
+- *(rfc0011)* Flesh out RFC 0011 PR plan from scaffold (#230)
+- *(rfc0009)* Resolve in-scope open questions and flesh out PR plan (#232)
+- Memory quality roadmap (assess draft RFCs 0023-0025, propose alternatives) (#237)
+- *(instructions)* Adopt TDD from v0.3.0 onward (#240)
+- Introduce docs/issues/ finding tracker with make issues target (#241)
+- *(memory-quality)* Integrate roadmap into v0.3.x and v0.4.0 plans (#238)
+- *(rfc)* Propose RFC 0028 agent decision policy engine (#242)
+- *(storage)* Propose storage architecture roadmap discussion doc (#243)
+- *(rfc)* Amend RFC 0011 with chat-as-DM unification (RFC 0016 reconciliation) (#247)
+- *(rfc)* V0.3.0 readiness hygiene — status flips, stale Decision/Next Steps, OQ resolutions (#258)
+- *(scope)* Retarget RFC 0007 from v0.3.0 to v0.4.0 (#259)
+- *(security)* Close ISSUE-0002 — align GRPCRateLimitInterceptor godoc with grpc.SetHeader + add client-side contract test (#273)
+- *(proto)* Close ISSUE-0019 + ISSUE-0022 — TaskAck reuse policy + timestamp format cross-reference (#291)
+- *(rfc0011)* PR 7 — Phase 4b human participation MTs + channels guide + diagram (#303)
+- *(rfc0011)* PR 8 — internal-scope close (NTH dispatch + status flips) (#304)
+- *(rfc0020)* PR 7 — RFC close (status flips for v0.3.0 scope) (#305)
+- *(rfc0023)* Introduce LLM call leasing RFC (#307)
+- *(rfc0024)* Propose event-driven agent scheduling (#308)
+- *(rfc0029)* Propose personal/society storage split (#309)
+- *(rfc0023)* Review follow-ups — 3 correctness fixes + 8 clarifications (#310)
+- *(v0.3.x)* Sequence RFCs 0023/0024/0026/0029 across v0.3.1-v0.3.3 (#311)
+- *(v030)* Release-prep plan + walk back RFC 0008 OQ #12 calibration-window gate (#312)
+- *(rfc0008)* PR 6 — review follow-ups absorbed + RFC close (#313)
+- *(v030)* Release-prep PR 2 — README + ROADMAP + guide callouts + diagram refresh + release checklist (#315)
+- *(v030)* PR plan for v0.3.0 channel test findings (#317)
+- *(rfc0030)* Propose multi-agent conversation governance (#320)
+- *(rfcs)* RFC 0031 — per-session namespacing for channels + persona memory (#325)
+- *(rfcs)* YAML front-matter + auto-generated INDEX.md (#326)
 
-### Changed
+### 🧪 Testing
 
-- **`scripts/checks/doc_links.py` now collects markdown files via
-  `git ls-files '*.md'` (ISSUE-0036).** The previous glob shape walked
-  `docs/**/*.md` plus `repo_root/*.md` and `repo_root/*/*.md`, which
-  silently dropped every tracked markdown file at depth ≥ 3 outside
-  `docs/` — `.github/instructions/*.md`, `.github/prompts/*.md`,
-  `prompts/runtime/persona/sections/*.md`, `prompts/runtime/safety/*.md`,
-  and `prompts/runtime/task-agents/*.md` were never link-checked. The
-  scan now covers 192 tracked markdown files (up from 164) and 1 788
-  links (up from 1 772). The git index is the source of truth, so
-  untracked artifacts (`PR_BODY.md` left behind by `git stash`),
-  `.git/`-internal residue, and gitignored paths are filtered out by
-  construction rather than by ad-hoc `os.path.normcase` prefix-matching.
-  A glob fallback with a one-line WARN preserves the script's defensive
-  posture for downstream tarball consumers running outside a git
-  checkout. Pinned by `tests/unit/python/test_doc_links_collection.py`
-  (depth-3 / depth-4+ collection, untracked exclusion, `.git/`
-  exclusion, `docs/pr-reviews/` exclusion, fallback path).
-- **`ChannelRouter.fanout` now dispatches with bounded concurrency
-  (ISSUE-0014).** PR 4's gRPC dispatcher made the inline per-recipient
-  loop visible as a worst-case
-  `O(N × channelFanoutPerRecipientTimeout)` publish stall: a single hung
-  agent on a 16-member channel would have blocked the publish path for
-  ~80s before the loop reached its tail. Fanout now acquires a slot from
-  a `channelFanoutMaxConcurrency = 16` semaphore per recipient and waits
-  on a `sync.WaitGroup`, so peak in-flight dispatches stay bounded
-  while the publish-blocking tail collapses to
-  `O(ceil(N / 16) × per-recipient-timeout)`. Pinned by two new tests:
-  `TestChannelRouter_Publish_FanoutRunsConcurrently` (timing speedup —
-  8 × 100ms recipients complete in ~100ms, not ~800ms) and
-  `TestChannelRouter_Publish_FanoutRespectsConcurrencyBound` (peak
-  in-flight ≤ 16 even when recipient count exceeds the bound). The
-  per-recipient deadline (`channelFanoutPerRecipientTimeout`) is
-  preserved as a named constant rather than the prior `5*time.Second`
-  literal so future tuning lands in one place. Receiver contract is
-  unchanged — fire-and-forget; dispatcher errors continue to log+count
-  without failing the publish.
+- *(proto)* Close ISSUE-0021 — pin ChannelMessageEvent + TaskAck wire shape (#278)
+- *(channels)* Close ISSUE-0025 — full-chain REST→fanout→gRPC integration test (#290)
+- *(v030)* Release-prep PR 1 — manual test execution report + 3 release-prep regression fixes (#314)
 
-- **Persona action loop synthesises `SEND_CHANNEL_MESSAGE` for plain-text
-  CHANNEL_MESSAGE replies (ISSUE-0048).** The persona LLM is not
-  prompt-trained on the JSON action schema, so on a normal chat-as-DM
-  turn it returns conversational text — `_parse_actions` folded that
-  into a single `COMPLETE_TASK`, the executor recorded
-  `status=completed`, and the orchestrator-side `replyWaiter` never
-  saw a publish. Every `POST /api/v1/agents/<id>/chat` against a
-  healthy compose stack 504'd on `chatDefaultTimeout`. A new pure
-  helper `agents.persona_runtime.channel_reply.synthesize_channel_reply`
-  promotes the conversational reply into an explicit
-  `SEND_CHANNEL_MESSAGE` bound to the inbound `channel_id` and
-  mentioning the inbound `sender_id` (so the legacy
-  `_extract_chat_reply` priority-1 user-targeted lookup still picks
-  the reply). Hooked into `_ActionLoopMixin._on_event_inner` after
-  `_parse_actions` and before episode persistence. No-ops for
-  non-channel events, the legacy `SendChatMessage` path (no
-  `channel_id`), action lists that already publish to the inbound
-  channel, and empty/whitespace replies. Pinned by 11 cases in
-  `tests/unit/python/test_channel_reply_synthesis.py`.
+### 🏗️ Build
 
-- **`HTTPChannelPublisher` short-circuits after the first orchestrator
-  HTTP 503 (ISSUE-0026).** The same agent build is intended to run
-  against orchestrators with channels enabled and disabled (per
-  `cmd/orchestrator/channels.go::selectChannelDispatcher`); previously
-  every `SEND_CHANNEL_MESSAGE` action against a channels-disabled
-  orchestrator burned an HTTP RTT and emitted a per-action WARN — log
-  noise scaled linearly with action volume. The publisher now flips a
-  sticky `_disabled` flag on the first 503 from
-  `POST /api/v1/channels/{id}/messages`, emits a single diagnostic
-  WARN with the response body, and raises a typed
-  `ChannelsDisabledError` so subsequent calls short-circuit without
-  hitting the wire. The action executor maps the new exception to
-  `status="channels_disabled"` (distinct from `"failed"`) so the LLM
-  treats it as a deployment-wide gate rather than a transient error
-  to retry; per-action logging stays at DEBUG. Other 4xx/5xx statuses
-  (403/404/500) are still per-message conditions and do not flip the
-  flag. Also closes ISSUE-0018 retroactively (the `ChannelMessageEvent`
-  receiver-bounds validator landed with PR #248 — the issue was kept
-  open as a tracking item; closing it as resolved with the same
-  closure PR).
+- *(proto)* Close ISSUE-0017 — auto-generate agents/generated/*.pyi via mypy-protobuf (#288)
+- *(proto)* Close ISSUE-0023 — gate proto/ source-of-truth (Python freshness + orphan detection) (#289)
 
-- **`GET /api/v1/channels` now paginates via keyset cursor (ISSUE-0015).**
-  `ChannelStore.ListChannels` takes `(ctx, limit, afterID)` and pushes
-  `WHERE id > ? ORDER BY id ASC LIMIT ?` into the SQL — the previous
-  shape loaded the whole table per request and truncated client-side,
-  which would silently misreport "no more pages" the moment a
-  deployment exceeded the soft cap. The handler fetches `limit + 1`
-  rows so the presence of the extra row signals "more pages exist"
-  without a separate `COUNT(*)`, trims to `limit`, and surfaces the
-  last kept id as `listChannelsResponse.next_cursor` (omitempty when
-  the page returns the trailing rows). Clients pass the value back
-  unchanged via `?cursor=<id>`. Default ordering changes from
-  `created_at ASC` (which had no tiebreaker, leaving rows with
-  identical insert timestamps in undefined order) to `id ASC` (total,
-  stable across concurrent inserts). (PR for ISSUE-0015.)
+### 📦 Miscellaneous
 
-### Removed
+- *(deps)* Bump rustls-webpki from 0.103.12 to 0.103.13 in /cli (#193)
+- *(deps)* Bump openssl from 0.10.78 to 0.10.79 in /cli (#257)
+- *(rfc0021p1)* Close #261 review follow-ups (ISSUE-0042/0043/0044/0045) (#267)
+- *(rfc0011)* Close ISSUE-0028/0030/0031 — channels dispatcher observability + test gaps (#268)
+- *(rfc0011)* Close ISSUE-0010/0011/0013 — PR #245 review follow-ups (#269)
+- *(rfc0009)* Close ISSUE-0006 — WARN on invalid SECURITY_RATE_LIMIT_* env values (#271)
 
-- **v0.2-era `ChannelService` proto surface.** Deletes
-  `proto/agent_message.proto` (`ChannelService.SendMessage` +
-  `ChannelService.Subscribe(stream)`, `AgentMessage`, `MessageType`,
-  `Visibility`, `Attachment`), the matching `ChannelServiceServicer` in
-  `agents/server_servicers.py`, its registration in `agents/server.py`,
-  and `tests/unit/python/test_server_channel.py`. The surface had no
-  producer wired anywhere in the codebase — server-streaming `Subscribe`
-  was incompatible with the orchestrator-mediated dispatch model adopted
-  in RFC 0011 §C, and `MessageType` / `Visibility` were never read by a
-  consumer. The new agent-side delivery path is `AgentService.ReceiveChannelMessage`
-  on `proto/task.proto` (this PR). Generated stubs `agents/generated/agent_message_pb2*`
-  and `internal/generated/msgpb/` are removed in the same commit so CI
-  never sees a missing-import window.
-
-- **RFC 0011 PR 2 — Channels REST surface + router + config reconciliation.**
-  Wires `internal/channels` (PR 1) into the orchestrator: new `ChannelRouter`
-  publishes through the store with `channel_type` cross-validation and
-  per-recipient fanout (the gRPC dispatcher remains a `NoopDispatcher` until
-  PR 4); REST endpoints land at `POST /api/v1/channels`,
-  `GET /api/v1/channels`, `GET /api/v1/channels/{id}`,
-  `POST /api/v1/channels/{id}/messages`,
-  `GET /api/v1/channels/{id}/messages`,
-  `GET /api/v1/channels/{id}/messages/{msg_id}/thread`, and
-  `POST /api/v1/channels/{id}/members`; startup reconciles
-  `config/channels.yaml` against the live store under §B coexistence rules
-  (loud-fail on membership divergence). New env-overridable flag
-  `--channels-db` (default `data/channels.db`) selects the SQLite path; a
-  new `cmd/orchestrator/channels.go` extraction keeps `main.go` from
-  growing past the 500-line review-friendly cap (ISSUE-0008). Schema
-  migrates to **v2** automatically on first open: `channels.name` becomes
-  nullable (DM/thread channels store NULL) and a partial unique index
-  `ux_channels_name_group` enforces uniqueness only over group rows; the
-  rebuild runs the SQLite "12-step" sequence with `PRAGMA foreign_keys=OFF`
-  so existing membership and message rows survive intact. `ChannelStore`
-  grows one method (`CreateChannelWithMembers`) so handler-side create
-  bundles are atomic at the store boundary; the new
-  `internal/channels/sqlite_pr2_review_test.go` pins both the migration
-  child-row contract and the rollback contract. PR #245 re-review applied:
-  the `ReconcileConfig` missing-channel arm now uses the same atomic
-  `CreateChannelWithMembers` helper (no more orphan rows on partial
-  failure); the store's `name`-required and `name`-pattern errors are
-  wrapped with `ErrInvalidChannelType` so REST callers see 400 instead of
-  500 on bad input.
-
-  **Security — UNAUTHENTICATED in v0.3.0.** The channels REST endpoints
-  ship without authentication this release. `sender_id` is body-trusted,
-  and any HTTP-reachable client can publish as any registered participant
-  or add themselves to any channel (including `group:`-prefixed channels
-  declared in `config/channels.yaml`). Token-based auth lands in RFC 0009
-  Phase 4. Until then operators MUST: (1) bind the orchestrator listener
-  to `127.0.0.1`, (2) front it with an authenticating reverse proxy, or
-  (3) firewall the port. The orchestrator emits a one-shot
-  `channels: REST surface is UNAUTHENTICATED in v0.3.0 …` Warn at startup
-  whenever the channels subsystem is enabled so the trust boundary is
-  surfaced in the first log scrape (PR #245 re-review Must-Fix #1).
-
-  PR #245 deep review (round 3) applied: (a) the publish handler's
-  router-nil fallback path now emits a once-per-process `Warn`
-  signposting that channel_type cross-validation and the
-  `channel.messages.delivered` metric are skipped — production
-  callers always wire the router via `WithChannels(store, router)`,
-  but a forgotten wiring is now observable on first publish instead
-  of silently degrading (Should-Fix #3); (b) the default REST list
-  page size (`channelDefaultListLimit`) is aligned with
-  `channels.DefaultMaxChannels` so the page size never exceeds the
-  global channel cap (Nice-to-Have #3).
-
-- **RFC 0009 PR 1b — Audit wiring + default redactor + chmod self-heal.**
-  Wires the PR 1 `AuditLogger` + `SecretRedactor` into orchestrator hot
-  paths so security-relevant lifecycle events become forensically
-  observable on disk. New env var `OBSERVABILITY_AUDIT_PATH` (default
-  `data/logs/audit.jsonl`, resolved to absolute at startup; literal
-  `=off` disables, case-insensitive) selects the JSONL sink; parent
-  directory is created `0o700` and the file is opened `0o600` with
-  per-open chmod self-heal that re-tightens pre-existing files
-  (POSIX-only — on Windows the call is a no-op against ACLs; see
-  `docs/observability.md` §13). The orchestrator REST `register`
-  handler now emits `agent.registered` (success) and
-  `capability.violation` (rejection) and the gRPC executor emits
-  `tool.invoked` on every successful dispatch. Both wiring points are
-  nil-safe and opt-in via `WithAuditLogger`. Default `Redactor`
-  installed at constructor (closes prior plaintext-leak window from
-  PR #233 review SF-3); pass `WithRedactor(nil)` only for tests that
-  need to write plaintext fixtures. New `WithLogger(*zap.Logger)`
-  option routes audit-logger self-diagnostics (e.g. chmod warnings)
-  through the structured pipeline instead of raw stderr. PR #234
-  review applied: `tool.invoked` and `agent.registered` emits use
-  `context.WithoutCancel` so cancellation racing a committed side
-  effect cannot drop the forensic record; `validateCapabilities` caps
-  per-request capability count at 64 and per-value echo at 256 chars
-  to bound audit-log fan-out from hostile registrations; `Resource`
-  on `agent.registered` is the agent ID (consistent with
-  `tool.invoked`) with the rotating address moved to
-  `Detail["address"]`. Doc-only `config/observability/audit.yaml`
-  ships as a forward-looking knob template (no loader reads it in
-  this PR — runtime knobs are env vars).
-
-- **RFC 0009 PR 1 — `internal/security/` package: AuditLogger +
-  SecretRedactor.** First implementation PR for RFC 0009 Phase 1a ships
-  the `internal/security/` package surface with no orchestrator wiring
-  (PR 1b carries the wiring): `AuditLogger` interface +
-  `NewFileAuditLogger` JSONL append-only sink with checksum-chained
-  tamper evidence (length-tagged `prev=<len>:<sum>|` prefix per RFC
-  0009 §G), per-event fsync for security-class events, batched
-  flush for telemetry-class events, and three-state startup recovery
-  (`chain.bootstrap` / `chain.restart` / `chain.recovered`) addressing
-  PR #232 review SF-3; `Redactor` interface + `NewSecretRedactor` with
-  five default patterns (anthropic, openai, bearer, aws, generic) and
-  a cycle-safe + depth-bounded reflective struct walk (PR #232 review
-  SF-2); closed-set `AuditEventType` enum (20 constants, including the
-  reserved chain / token / HITL types) with a CI guard
-  (`TestEveryAuditEventType_HasSeverityClassification`) that fails the
-  build if a new event type lands without a severity classification.
-  PR #233 review applied: openai-key regex now matches real-world
-  shapes (`sk-proj-AbCd_…`), generic-secret value class is bounded
-  (`[^\s,"'}\]]+`) so JSON payloads no longer over-match, and the
-  truncated-tail recovery path now persists the partial tail bytes as
-  `prior_tail_raw_truncated`.
-
-- **RFC 0011 PR 1 — Channel store + SQLite migration + schema rewrite.**
-  `internal/channels/` is filled in (was a 7-line stub) with the
-  canonical `group | dm | thread` model, a SQLite-backed
-  `ChannelStore` interface (CRUD, idempotent membership, history
-  pagination, `GetOrCreateDM` canonicalisation, `DeleteChannel`),
-  per-channel oldest-first message-cap pruning with `thread_id`
-  cascade, a global `max_channels` cap on declared group channels,
-  and a YAML config loader (`config.go`) backed by a strict YAML
-  decoder so legacy `direct`/`broadcast`/`meeting` schemas fail
-  loudly. `schemas/channel.schema.json` is rewritten in place with
-  the new vocabulary plus the "internal-only until v1.0" disclaimer
-  per RFC 0011 OQ #9; `config/channels.yaml` is rewritten as a
-  commented-out template against the new schema. New dependency:
-  `modernc.org/sqlite` (pure-Go driver — preserves the
-  `CGO_ENABLED=0` orchestrator build). REST endpoints, fanout, and
-  the response gate land in subsequent RFC 0011 PRs.
-
-### Changed
-
-- **RFC 0020 PR 4 — Interaction summarisation is two-phase and
-  asynchronous.** The persona runtime's close-path
-  (`_StatePersistenceMixin._persist_closed_interaction`) now writes the
-  closed-interaction episode row twice: once synchronously with the
-  `[summary pending]` sentinel inside the per-agent lock, then again
-  from a background `asyncio` task that runs the LLM summariser
-  (≤30 s, bounded by `MemoryFacade.compress`), updates the `summary`
-  column to the final text, calls `record_interaction`, and ticks the
-  auto-reflect counter.  This change addresses two findings from the
-  PR #229 deep review:
-    - **Must-Fix #1:** the prior single-INSERT-with-final-summary path
-      never wrote the `[summary pending]` sentinel from production
-      code, so RFC 0020 §C's crash-recovery contract (the
-      `cleanup_closing_interactions` janitor) was effectively dead
-      code.  The two-phase write makes the sentinel reachable on every
-      close, so the janitor now has real rows to sweep.
-    - **Should-Fix #1:** the LLM round-trip no longer holds the
-      per-agent `_lock`, so a second inbound event for the same agent
-      no longer queues head-of-line behind the summariser.
-  The runtime exposes `_LLMPersonaAgent.drain_pending_summaries()` so
-  callers (tests, shutdown paths) can synchronise against the
-  background tail.  `close_memory()` drains pending tasks before
-  closing the underlying memory tiers.
-- **RFC 0020 PR 4 — Interaction janitor wired into `on_tick`.** The
-  closing-state janitor (`cleanup_closing_interactions`) is now
-  invoked opportunistically from `_LLMPersonaAgent.on_tick` at most
-  once per `_JANITOR_INTERVAL_SEC` (300 s by default).  Operators no
-  longer need an out-of-band cron path to recover crash-stuck
-  `[summary pending]` rows.  Closes PR #229 review Should-Fix #2.
-- **`relationships.interaction_count` and `auto_reflect_after` units
-  changed from per-message to per-closed-interaction.** A 10-message
-  DM session now bumps `interaction_count` by 1 (previously by 10).
-  Operators with bespoke trust thresholds calibrated against the
-  per-message scale should consult the Migration Notes appendix in
-  [docs/rfcs/0020-interaction-lifecycle.md](docs/rfcs/0020-interaction-lifecycle.md)
-  before upgrading; RFC 0008 PR 6's 30-day calibration window is the
-  canonical recovery path for production deployments.
-- **BREAKING — `MemoryFacade.store_procedure` now validates `key`**
-  against `^[A-Za-z0-9._-]+$` (max 256 chars) and raises `ValueError`
-  on non-conforming keys (RFC 0008 PR 6b, closes PR 5 review M1).
-  Previously the facade only rejected empty / whitespace-only keys,
-  letting in payloads with spaces, slashes, percent-signs, non-ASCII
-  characters, or newlines that could (a) confuse downstream FTS5
-  tokenisation and (b) silently widen `LIKE` matches inside the
-  refresh-confidence path.  Existing callers persisting procedural
-  keys with disallowed characters must rename them before upgrading.
-  Pinned by `tests/unit/python/test_procedural_key_validation.py`.
-- **RFC 0008 PR 6b — Python procedural memory + log-safety cleanup.**
-  Internal-only follow-up consolidating deferred review findings from
-  PR 3a (delegation log-safety) and PR 5 (procedural decay) into the
-  Python agent + memory surfaces.  No wire-shape changes.  Highlights:
-  log-safety helpers (`bounded`, `_CTRL_TRANSLATION`,
-  `_CTRL_REPLACEMENT`, `_DELEGATION_FAILURE_MESSAGE_CAP`) lifted from
-  [`agents/sub_agents/spawner.py`](agents/sub_agents/spawner.py) into
-  the new [`agents/sub_agents/_log_safety.py`](agents/sub_agents/_log_safety.py)
-  single-source-of-truth module (PR 3a R4 L4 / R5 S1) — `task_agent.py`
-  now imports from `_log_safety` directly; `spawner.py` re-imports
-  `bounded` as the module-local `_bounded` alias so its existing call
-  sites are unchanged. The underscore-prefixed names
-  (`_bounded`, `_CTRL_TRANSLATION`, `_CTRL_REPLACEMENT`,
-  `_DELEGATION_FAILURE_MESSAGE_CAP`) remain importable from
-  `agents.sub_agents._log_safety` (listed in that module's `__all__`)
-  for any out-of-tree caller pinned to the old names; they are *not*
-  re-exported from `agents.sub_agents.spawner` and that import path is
-  removed.
-  Delegation test harness consolidated: `_ScriptedSubAgent`,
-  `_FailedSubAgent`, `_MalformedSubAgent`, `boom_delete` now live in
-  shared [`tests/integration/_delegation_helpers.py`](tests/integration/_delegation_helpers.py)
-  (PR 3a R2 L2 / R4 L5).  `MemoryFacade.retrieve_procedures` exposes a
-  new `now: float | None` parameter (deterministic-time test injection;
-  PR 5 R1 L4).  `recall_procedures` now pushes the
-  `t_max = -ln(c_min) / lambda_per_day` decay cutoff into the SQL
-  `WHERE` clause and adds a `LIMIT` over-fetch (PR 5 R1 S3 + Info-3).
-  Promoted `_resolve_base_confidence` → public
-  `resolve_base_confidence` (PR 5 R1 L2 / R2 M2; legacy alias kept for
-  v0.3.x).  `stale_memory_injection` warn-log relocated into
-  `recall_procedures` so it fires regardless of caller (PR 5 R2 Mi2).
-  `EvictionStats.procedural_evicted` no longer has a default value
-  (PR 5 R2 N2 — forces explicit construction at every call site).
-  New attribute-schema pin
-  [`tests/integration/test_shared_pool_metrics.py`](tests/integration/test_shared_pool_metrics.py)
-  closes PR 4 N4 (verifies `agent.shared_pool.{reads,writes,denied}`
-  emit the documented `{pool, agent.id[, operation]}` keys).
-- **RFC 0008 PR 6a — Go scheduler hygiene + sampler bookkeeping.**
-  Internal-only follow-up consolidating ~22 deferred review findings from
-  PR 1 / PR 1b / PR 3 / PR 4 / PR 5 into the Go scheduler & packaging
-  surfaces.  No wire-shape or schema-shape changes.  Highlights:
-  deterministic candidate ordering in `attachContextPackage` (sorts map
-  keys before building `packaging.Candidate`s); per-run warning-sampler
-  bookkeeping with `pruneRun(execID)` invoked from `executeRun`
-  (eliminates unbounded growth on long-running orchestrators); `noCopy`
-  sentinel on the sampler (verified by `go vet -copylocks`); rune-count
-  token estimate for multibyte payloads; cross-language wire-shape
-  contract pinned via Go-produced fixture
-  (`tests/fixtures/context_package_v1.json`, regenerated with
-  `PERSATRIX_REGEN_FIXTURES=1`) consumed by the Python wire-shape test.
-  See `internal/scheduler/context_package_pr6a_pins_test.go` for the
-  contract pin tests.
-  - **Operator-visible behaviour change (planner-tighten, M7).** The
-    planner now rejects workflows where the sum of per-step
-    `context_budget` overrides plus the count of non-overridden steps
-    exceeds `workflow.context_budget_total` (each non-overridden step
-    must receive at least one token). Previously such workflows parsed
-    and silently dispatched non-overridden steps with zero-budget legacy
-    passthrough — masking author intent. Operators with tightly-budgeted
-    workflows that previously parsed will see a new parse-time error of
-    the form `workflow %q: per-step context_budget overrides (%d) plus
-    %d non-overridden step(s) requires at least %d tokens but
-    context_budget_total is %d`. Fix: raise `context_budget_total`, drop
-    one or more per-step overrides, or remove `context_budget_total` to
-    fall back to legacy passthrough end-to-end. Pinned by
-    `TestParse_AllOverridesEqualTotal_NonOverriddenStepRejected` in
-    `internal/planner/planner_context_budget_test.go`.
-- **`memory.min_score` schema default `null` → `0.20`** (RFC 0008 PR 2a).
-  Operators with `memory.enabled: true` who did not previously set
-  `memory.min_score` will see strictly fewer recall results after this
-  release: low-score entries are no longer concatenated into the system
-  prompt by `BaseAgent._inject_memories`.  Rationale: closes the
-  recall-side trust-boundary leak flagged by OWASP LLM01 / memory
-  poisoning (PR #220 deep-review M-1).  To restore the pre-PR-221
-  behaviour explicitly, set `memory.min_score: null` in
-  [`config/agents.yaml`](config/agents.yaml).
-
-### Removed
-
-- **Deprecated underscore aliases `_DEFAULT_EPISODIC_MIN_SCORE` /
-  `_DEFAULT_NOTES_MIN_SCORE` in `agents.memory.episodic`.**  The
-  shim was introduced in v0.2 (RFC 0017 PR 6) with an explicit
-  "remove in v0.3" deprecation banner; v0.3 is the current
-  development cycle and no internal caller still references the
-  underscore form.  The public names `DEFAULT_EPISODIC_MIN_SCORE` /
-  `DEFAULT_NOTES_MIN_SCORE` are unchanged.  External consumers
-  pinned to the underscore alias must rename to the public form.
-  The corresponding back-compat test
-  (`test_underscore_aliases_back_compat`) was removed.
-
-### Added
-
-- **`EpisodicMemory.update_episode_summary(interaction_id, summary)`**
-  (RFC 0020 PR 4).  Replaces the `summary` column on a single episode
-  row keyed by `(agent_id, interaction_id)`.  Used by the close-path
-  two-phase write to swap the `[summary pending]` sentinel for the
-  final LLM-generated text; agent-scoped `WHERE` clause prevents a
-  malformed caller from rewriting a different agent's summary.
-- **`_LLMPersonaAgent.drain_pending_summaries()`** (RFC 0020 PR 4).
-  Awaits every in-flight background summarisation task spawned by the
-  two-phase close path.  Called from `close_memory()` on shutdown;
-  exposed publicly so integration tests can synchronise against the
-  background tail before asserting on the final episode `summary`
-  column.
-- **Confidence decay + procedural revalidation** (RFC 0008 PR 5,
-  Phase 4b).  The procedural memory tier now applies read-time
-  exponential confidence decay (`c_t = c_0 * exp(-lambda_per_day * age_days)`,
-  default `lambda = 0.01/day` ≈ 69-day half-life) so stale
-  procedural knowledge naturally fades.  New surface:
-  [`agents/memory/decay.py`](agents/memory/decay.py) (pure-stdlib
-  formula), [`agents/memory/episodic_procedural.py`](agents/memory/episodic_procedural.py)
-  (`recall_procedures` + `refresh_confidence` SQL helpers), facade
-  mixin [`agents/memory/facade_procedural.py`](agents/memory/facade_procedural.py)
-  exposing `MemoryFacade.store_procedure` (refreshes confidence on
-  existing keys) + `MemoryFacade.retrieve_procedures` (filters below
-  `c_min` and emits a `stale_memory_injection` structured log when
-  decayed confidence falls in `[c_min, stale_confidence_alert_threshold)`).
-  Procedural rows below `c_min` are also evicted by the periodic loop
-  ([`agents/memory/eviction.py`](agents/memory/eviction.py)) via a new
-  `_evict_procedural_decay` pass.  Schema migration v6 adds the
-  `confidence` and `last_validated_at` columns to `episodes` (non-destructive,
-  `DEFAULT 1.0` / NULL).  Operators tune the knobs via the new
-  `memory.procedural_memory: {lambda_per_day, c_min, stale_confidence_alert_threshold}`
-  block in [`config/agents.yaml`](config/agents.yaml) (schema:
-  [`schemas/agent.schema.json`](schemas/agent.schema.json)).
-  Orchestrator-side observability: seven new instruments under the
-  `orchestrator.memory.*` namespace registered in
-  [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
-  (`evictions_count`, `average_confidence_at_eviction`,
-  `average_importance_at_eviction`, `memory_utilization_ratio`,
-  `oldest_surviving_entry_age_days`, `entries_below_stale_threshold`,
-  `stale_memory_injection`).  The 30-day post-merge calibration review
-  required by RFC 0008 Open Question 12 is scheduled in
-  [`docs/rfcs/0008-calibration-review.md`](docs/rfcs/0008-calibration-review.md);
-  PR 6 (RFC close) replaces the placeholder with the actual review
-  summary before flipping the RFC to `✅ Implemented`.
-  Round-1 review follow-up (in-PR fix commit): escape SQLite LIKE
-  meta-characters (`%`, `_`, `\`) in the procedural `recall_procedures`
-  query and `refresh_confidence` UPDATE paths and align the eviction
-  pass with the same legacy-row base-confidence shim
-  (`_resolve_base_confidence`) the recall path uses, so a pre-PR-5
-  row's eviction disposition cannot disagree with its recall
-  disposition.  Closes PR #225 round-1 deep-review S1 / S2 /
-  S4-doc.
-
-- **Sub-agent delegation Go-side metrics + spawner hardening** (RFC 0008
-  PR 3a, follow-up to PR 3).  Four new Go counters land in
-  [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
-  under the `orchestrator.delegation.` namespace (per RFC 0019 OTEL
-  naming): `merge_outcome`, `memory_writes_admitted`,
-  `memory_writes_rejected`, `memory_writes_downscaled`.  These mirror the
-  Python-side structured-log metrics the merge engine already emits
-  (a future log→counter bridge needs a fixed-prefix translation, not
-  a 1-for-1 lookup; see [`internal/observability/metrics/metrics.go`](internal/observability/metrics/metrics.go)
-  comment).  Spawner-side hardening lands alongside the counters:
-  (a) **S1** — `output_schema` is no longer advisory; the spawner now
-  runs Draft-7 validation against `DelegationResult.artifacts` before
-  the merge engine sees it (OWASP A04); (b) **S6** —
-  `DelegationResult.from_metadata_value` re-runs `validate()` on
-  deserialisation; (c) **N5** — `FacadeBoundSpawner._persist_admitted`
-  rolls back partial-batch failure via `episodic.delete_episode` so a
-  mid-batch crash cannot leave orphaned writes; (d) **N6** —
-  `_parse_or_synthesise` collapsed into a single contract-parser call;
-  (e) **N7** — request payload serialised exactly once (the per-field
-  `output_schema` size check is subsumed by the whole-payload cap).
-  All `DelegationFailure` raise sites that interpolate
-  attacker-influenceable text now funnel through a module-private
-  `_bounded` helper (200-char cap, control-character strip to U+2424
-  sentinel) to neutralise CWE-117 log injection / OWASP A09.  No proto
-  / wire change.
-- **Shared memory pools — config-driven cross-agent pools with ACL +
-  provenance** (RFC 0008 §H, PR 4).  New `agents.memory.shared_pool`
-  module ships `SharedMemoryPool`, `SharedPoolEntry`, `SharedPoolConfig`,
-  `SharedPoolRegistry`, and `SharedMemoryPermissionError` (with
-  structured `reason` taxonomy).  `MemoryFacade` gains
-  `publish_to_pool` / `read_from_pool` for the curated isolated→shared
-  publish path; deny-by-default reader/writer ACLs declared under a new
-  top-level `shared_memory_pools:` section in
-  [`config/agents.yaml`](config/agents.yaml) (schema:
-  [`schemas/agent.schema.json`](schemas/agent.schema.json) `shared_memory_pool`).
-  Provenance (`source_agent`, `created_at`, `confidence`) is
-  framework-injected and bound 1-for-1 to the calling `agent_id` so an
-  in-process caller cannot spoof it.  `min_confidence` consumer-side
-  trust filter, FIFO eviction at `max_entries`, sensitive-pool
-  publish-isolation per RFC §H safety constraint #3, and OTEL counters
-  (`agent.shared_pool.{reads,writes,denied,evictions}`) round out the
-  surface.  No proto / wire change.  Persona-side wiring is partial in
-  Phase 4a — the `agents/persona_runtime/state_persistence.py` path
-  accepts a `shared_pools` arg but does not yet expose
-  `publish_to_pool` / `read_from_pool` to persona prompts (follow-on PR).
-- **Sub-agent delegation contract + merge engine** (RFC 0008 §E, PR 3).
-  New `agents.sub_agents.delegation` module ships
-  `DelegationRequest` / `DelegationResult` / `MemoryWriteEntry` /
-  `BudgetEnvelope` frozen dataclasses on the reserved
-  `_delegation_request` / `_delegation_result` `TaskInput.context` /
-  `TaskOutput.metadata` keys (no proto changes).  New
-  `agents.sub_agents.merge.MergeEngine` applies the deterministic 6-step
-  pipeline (schema → source-agent inject → cap → trust-ceiling
-  downscale → per-entry strategy → metrics) with strategies `replace`,
-  `append`, `patch` (RFC 7396 JSON Merge Patch on objects, tag-list
-  union for arrays, replace-for-strings on scalars), and
-  `reject_on_conflict`.  Procedural tier is intentionally excluded from
-  delegated writes (dedicated `procedural_tier_rejected` reason) — see
-  [RFC 0008 PR 3 plan](docs/rfcs/0008-pr-plan.md) Key implementation
-  details.  In-process `SubAgentSpawner` + `FacadeBoundSpawner` exercise
-  the contract end-to-end without sub-process isolation (full RFC 0009
-  isolation lands later).  `TaskAgent` now auto-emits a synthesised
-  `DelegationResult` envelope when invoked under a delegation request.
-  Per-rejection structured-log metric emission (`delegation_merge_outcome`,
-  `delegation_memory_writes_admitted`, `delegation_memory_writes_rejected`);
-  Go counter back-fill ships in the follow-on
-  `feature/v030-rfc0008-delegation-metrics` PR per the PR 3 sizing-risk
-  note.
-- **Episodic-tier eviction** (RFC 0008 §G, PR 2a).  TTL eviction of
-  low-importance entries (`importance < 0.3`, default 30-day window) and
-  hybrid-score size-cap eviction (`importance · 0.6 + recency · 0.3 +
-  access · 0.1`, default cap 1000) run on a per-agent background loop
-  (default cadence 1 hour).  Procedural-tier rows are excluded so
-  PR 5 owns confidence decay end-to-end.  New config keys:
-  `memory.episodic_cap`, `memory.ttl_low_importance_days`,
-  `memory.eviction_cadence_seconds`.
+[0.3.0]: https://github.com/mkhomutov/Persatrix/compare/v0.2.3...v0.3.0
 
 ## [0.2.3] - 2026-04-24
 
