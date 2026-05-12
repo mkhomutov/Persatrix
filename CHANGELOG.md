@@ -6,6 +6,34 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Persona reply discretion + conversational pacing prompt snippets
+  (ISSUE-0048 follow-up).** Two unconditional safety snippets shape the
+  persona's channel-reply behaviour from the prompt layer rather than
+  the executor:
+  - `prompts/runtime/safety/reply-discretion.md` — silence is a valid
+    turn outcome on group channels (with three explicit grounds:
+    not-concerning-you, nothing-new, better-placed-elsewhere); DMs
+    always reply because the response gate forces `always` on DMs and
+    the orchestrator's `replyWaiter` 504s without a publish.
+  - `prompts/runtime/safety/conversational-pacing.md` — match the
+    length and register of the inbound message; substantive requests
+    still get substantive replies.
+  Wired into `agents.persona_runtime.prompt_assembly` between the
+  `external-data-handling` and (conditional) `memory-tool-usage`
+  snippets so a memory-less persona still receives the conversational
+  nudges. **User-visible behaviour change:** a persona on a group
+  channel may now legitimately stay silent where it previously emitted
+  a fallback publish; on DM channels, an empty LLM response now
+  resolves to a synthesised ellipsis (`…`) so the chat-as-DM REST
+  round-trip closes cleanly instead of 504ing on `chatDefaultTimeout`
+  — see `synthesize_channel_reply` in
+  `agents/persona_runtime/channel_reply.py`. Follows the RFC 0022
+  safety-snippet pattern; no new RFC required. Pinned by extended
+  cases in `tests/unit/python/test_channel_reply_synthesis.py`,
+  `tests/unit/python/test_reply_discretion_and_pacing.py`, and a
+  byte-identical golden update in
+  `tests/unit/python/test_persona_section_composer.py`.
+
 - **v0.3.0 channel test-findings PR 2 — orchestrator-side cascade-depth
   enforcement.** Closes the F-1 cooperative-path cascade backstop in
   Go ([RFC 0011 amendment 'Cascade-depth wire propagation']). Builds

@@ -286,6 +286,17 @@ class _PromptAssemblyMixin:
         # the prompt instructions.
         rendered.append(load_snippet("external-data-handling"))
 
+        # Reply discretion + conversational pacing are unconditional
+        # behavioural nudges. The response gate (response_gate.py) decides
+        # whether the persona may speak; these snippets tell the persona
+        # how to spend that permission. ``reply-discretion`` pins the
+        # "silence is a valid turn outcome on group channels" affordance
+        # and the "DMs always reply" invariant; ``conversational-pacing``
+        # tells the persona to match the length/register of the inbound
+        # message so a one-line greeting does not draw a paragraph.
+        rendered.append(load_snippet("reply-discretion"))
+        rendered.append(load_snippet("conversational-pacing"))
+
         # Memory-tool usage nudge — without this the LLM often responds
         # conversationally ("Got it, I'll remember that") instead of
         # actually calling the store_note / recall_notes tools.
