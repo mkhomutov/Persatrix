@@ -86,15 +86,32 @@ What happens if we do nothing: every CI scenario either burns the volume (no con
 
 The vocabulary intentionally does *not* reuse "scope" — RFC 0020 §G owns that term for per-interaction-lifecycle boundaries. Conflating the two is the single largest source of misimplementation risk this RFC is trying to head off.
 
+**Distinct from RFC 0016 `ChatRequest.session_id`.** A wire-level `session_id` already exists on [`proto/task.proto:93`](../../proto/task.proto#L93) — RFC 0016's per-chat conversation UUID, generated server-side on the first `ChatRequest`. The two concepts are not the same:
+
+| Dimension | RFC 0016 `session_id` (existing wire field) | RFC 0031 `session_id` (this RFC) |
+|-----------|---------------------------------------------|----------------------------------|
+| Generator | Server, on first `ChatRequest` | Operator, via `persatrix session new` |
+| Cardinality | One per chat conversation | One per operator run / test scenario |
+| Lifecycle | Implicit until process ends | Explicit (`new` / `archive`) |
+| Visibility | Internal token | First-class CLI surface |
+| Scope | One human-agent thread | All channels + all persona memory under it |
+
+A row of `episodes` carries *both* a chat-session id (RFC 0016, identifying the conversation that produced it) and an operator-session id (this RFC, identifying the namespace it belongs to). Phase 1 plumbing must surface the two as distinct fields in structured logs (RFC 0018) and OTEL spans (RFC 0019 — see Open Question 7). **Open Question 8 captures whether to rename one of them on the wire before Phase 1 lands** — the name overlap is the single largest source of misimplementation risk this vocabulary section is *also* trying to head off.
+
 ### B. Session Lifecycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active: persatrix session new
     Active --> Archived: persatrix session archive
-    Archived --> Active: persatrix session activate
-    Archived --> [*]: (rows retained, never deleted)
+    note right of Archived
+        Terminal — rows retained,
+        readable via cross-session recall (§D).
+        No re-activation path in this RFC.
+    end note
 ```
+
+Archive is one-way in this RFC. An archived session's rows stay in place and are still surfaced by the `sessions="*"` cross-session recall path; there is no `persatrix session activate` verb (an earlier draft of this diagram had one — removed because re-binding semantics are not actually specified anywhere in §B/§E, and the "still readable via recall" path makes a back-edge unnecessary). If a future RFC adds re-activation, the verb should match the existing CLI vocabulary (`use`), not `activate`.
 
 - **Creation.** `persatrix session new [--label X]` writes a row to the `sessions` table and (optionally) sets it as the active session. If `--label` is omitted, a UUIDv7-derived id is generated. UUIDv7 (not v4) so session ids sort lexicographically by creation time, which matters for default ordering in `persatrix session list`.
 - **Activation.** `persatrix session use <id>` flips the active-session pointer. The orchestrator reads this at startup; in-flight processes continue under the session they started with (no live re-bind).
@@ -103,7 +120,7 @@ stateDiagram-v2
 
 ### C. Storage Model
 
-**New `sessions` table** (location TBD — depends on RFC 0029 §G, see §G below):
+**New `sessions` table** (location TBD — depends on RFC 0029 §B/§D, see §G below):
 
 ```sql
 CREATE TABLE sessions (
@@ -121,10 +138,12 @@ CREATE TABLE sessions (
 |-------|-----------|---------|-------|
 | `channels` (Go, `internal/channels/sqlite.go`) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_channels_session` |
 | `messages` (Go) | `session_id TEXT NOT NULL` | inherits from `channels` | covered by `idx_messages_channel_session` |
-| `episodes` (Python, [`agents/memory/episodic.py`](../../agents/memory/episodic.py)) | `session_id TEXT` | `NULL` (treated as `legacy`) | `idx_episodes_session` |
-| `relationships` (Python, [`agents/memory/relationship_mutations.py`](../../agents/memory/relationship_mutations.py)) | `session_id TEXT` | `NULL` (treated as `legacy`) | `idx_rel_session` |
+| `episodes` (Python, [`agents/memory/episodic.py`](../../agents/memory/episodic.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_episodes_session` |
+| `relationships` (Python, [`agents/memory/relationship_mutations.py`](../../agents/memory/relationship_mutations.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_rel_session` |
 
-The `legacy` sentinel is *not* a real row in the `sessions` table — recall and list paths treat `session_id IS NULL OR session_id = 'legacy'` as a synthetic "before sessions existed" namespace. This keeps the migration zero-cost (no backfill UPDATE on existing rows). See Open Question 3 for the alternative of materialising a `legacy` row.
+All four tables use the **same** column shape — `TEXT NOT NULL` with the `'legacy'` literal as the migration default — so the recall predicate is uniform (§D). An earlier draft of this table had the Python side nullable (`TEXT` / `NULL` default) and the Go side `NOT NULL`; this was tightened during deep review because the asymmetric form forced every recall path to special-case both `IS NULL` and `= 'legacy'`, and there is no design reason for the two stores to disagree on whether "pre-RFC row" is a NULL or a string. SQLite (used by both Go's `internal/channels/sqlite.go` and Python's `agents/memory/*.py`) supports `ALTER TABLE ... ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'` with a constant default since 3.20.0, so the migration is still a one-statement no-backfill change on both sides.
+
+The `legacy` sentinel is *not* a real row in the `sessions` table — recall and list paths treat `session_id = 'legacy'` as a synthetic "before sessions existed" namespace. This keeps the migration zero-cost (no backfill UPDATE on existing rows). See Open Question 3 for the alternative of materialising a `legacy` row.
 
 **Why a new column, not a `scope`-prefix widening.** Reusing RFC 0020 §G's `scope` column to carry session info (e.g. `scope = 'sess:run-a:group:planning'`) was considered and rejected — see §F.
 
@@ -137,7 +156,14 @@ Default recall is **session-scoped**:
 async def recall(query, *, limit, min_importance, min_score, sessions=None):
     if sessions is None:
         sessions = [self._active_session_id]  # default: current session only
-    # WHERE session_id IN (sessions) OR session_id IS NULL  -- legacy rows always visible
+    elif sessions == "*":
+        sessions = None  # sentinel — drop the IN-clause entirely; see mode 3 below
+    elif not sessions:
+        # Empty list is almost certainly a caller bug — without this guard the
+        # WHERE clause collapses to "session_id = 'legacy'" and silently returns
+        # only legacy rows, which an operator passing [] never intends.
+        raise ValueError("sessions must be None, '*', or a non-empty list")
+    # WHERE session_id IN (sessions) OR session_id = 'legacy'  -- legacy rows always visible
     ...
 ```
 
@@ -147,7 +173,7 @@ Three modes:
 2. **Multi-session (`sessions=[a, b]`)** — explicit list. The dementia-test path that wants to assert continuity across simulated days lives here.
 3. **All sessions (`sessions="*"`)** — operator/debug path. Surfaced via a CLI flag (`persatrix memory recall --all-sessions`) and gated off the default API. The string sentinel rather than `None` is deliberate — `None` already means "default", and conflating the two is the recall bug this RFC is most worried about.
 
-The `legacy IS NULL` carve-out is the load-bearing detail that lets us ship without backfilling old rows. Once a v0.3.x install has run long enough that operators stop caring about pre-RFC episodes, a `persatrix memory legacy-prune` verb can drop them — out of scope for this RFC.
+The `session_id = 'legacy'` carve-out (always visible regardless of the active session) is the load-bearing detail that lets us ship without backfilling old rows. Once a v0.3.x install has run long enough that operators stop caring about pre-RFC episodes, a `persatrix memory legacy-prune` verb can drop them — out of scope for this RFC.
 
 ### E. Operator Surface
 
@@ -160,6 +186,16 @@ persatrix session current
 ```
 
 The active-session pointer lives at `~/.persatrix/active-session` (path overridable via `PERSATRIX_ACTIVE_SESSION_FILE`). The orchestrator reads it at startup; an explicit `--session` flag on `persatrix chat` / `persatrix channel publish` / etc. overrides the file for that one invocation.
+
+**Phasing of the three resolution mechanisms.** The full precedence chain in Open Question 6 (`--session` flag > `PERSATRIX_SESSION_ID` env var > `~/.persatrix/active-session` file > built-in `legacy`) does not light up in one phase:
+
+| Mechanism | Available from |
+|-----------|----------------|
+| `PERSATRIX_SESSION_ID` env var | Phase 1 |
+| `~/.persatrix/active-session` file (and `PERSATRIX_ACTIVE_SESSION_FILE` override) | Phase 3 |
+| `--session` CLI flag on `persatrix chat` / `persatrix channel …` | Phase 3 |
+
+Between Phase 1 and Phase 3, **the env var is the only way to set a session**. An operator who reads §E after Phase 1 ships but before Phase 3 does, and then creates `~/.persatrix/active-session` by hand, will get silent fallback to `legacy` — the file-reading code isn't there yet. The Phase 1 deliverable list (below) is intentionally narrow for this reason; the operator-guide page (`docs/guides/sessions.md`, Phase 4) lands only after all three mechanisms are wired so the docs never describe a setting that doesn't work yet.
 
 `make reset` is **kept** but its operator-guide subsection is updated: "Prefer `persatrix session new --activate` for run isolation; `make reset` is now the deprecated nuclear option for clearing all volumes across all sessions." Removal of `make reset` is out of scope; deprecation breadcrumb only.
 
@@ -181,8 +217,8 @@ The cost of two columns is one extra `WHERE` clause and one extra index per tabl
 
 [RFC 0029](0029-personal-society-storage-split.md) draws the personal/society boundary and proposes a `MemoryStore` facade. Sessions sit *inside* that boundary — they are a namespacing dimension on every tier RFC 0029 lists (episodes, notes, relationships, channels). Two places this matters:
 
-1. **The `sessions` table is society state, not personal state.** Multiple agents share a view of "what session is active right now"; this is the same property that pushed channels to `channels.db` (§A of RFC 0029). In v0.3.x Phase 1, `sessions` lives alongside `channels` in the orchestrator-owned SQLite. When RFC 0029 Phase 2 lands its Postgres society store, the `sessions` table moves with `channels` — no re-design required.
-2. **The `MemoryStore` facade signature carries `session_id`.** Every read path that RFC 0029 §C exposes (`get_episodes`, `get_relationships`, `recall`) takes a `session_id` filter. This is the load-bearing API choice — Phase 1 of RFC 0029 ships the facade signature; this RFC adds the session_id parameter to that signature before the facade is frozen. Coordinating the two phases is captured in Open Question 4.
+1. **The `sessions` table is society state, not personal state.** Multiple agents share a view of "what session is active right now"; this is the same property that pushed channels to `channels.db` (§B of RFC 0029 — channels/messages/memberships are society state). The physical location is decided by §D of RFC 0029 (Society Store: Schema and Backend — Postgres in Phase 3). In v0.3.x Phase 1, `sessions` lives alongside `channels` in the orchestrator-owned SQLite. When RFC 0029 Phase 3 lands its Postgres society store, the `sessions` table moves with `channels` — no re-design required.
+2. **The `MemoryStore` facade signature carries `session_id`.** Every read path that RFC 0029 §C exposes — `recall_episodes` (personal episodes), `get_self_trust` (personal outgoing bond), `query_inbound_trust` (society inbound projection), and `read_pool` (society shared pools) — takes a `session_id` filter. The cited names match the §C sketch verbatim; an earlier draft of this paragraph cited `get_episodes` / `get_relationships` / `recall` which do not appear in RFC 0029 §C. This is the load-bearing API choice — Phase 1 of RFC 0029 ships the facade signature; this RFC adds the session_id parameter to that signature before the facade is frozen. Coordinating the two phases is captured in Open Question 4.
 
 ---
 
@@ -221,7 +257,7 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 
 1. `EpisodicMemory.recall` gains the `sessions` parameter per §D.
 2. Default `sessions=None` resolves to `[active_session_id]` and the recall WHERE clause filters accordingly.
-3. `legacy` rows are always visible (the `IS NULL OR = 'legacy'` carve-out).
+3. `legacy` rows are always visible (the `session_id = 'legacy'` carve-out).
 4. Dementia-test ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md)) is updated to exercise multi-session continuity explicitly — one session that spans the full test arc, with an explicit `sessions=[<id>]` assertion at the recall site.
 5. Same change applied to `RelationshipMemory` query helpers.
 
@@ -261,7 +297,7 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 | Go orchestrator | `internal/channels/sqlite.go`, `internal/channels/channels.go`, `internal/channels/router.go`, `internal/server/channel_handlers.go` | Schema migration; session_id column on channels/messages; thread session_id through publish/create. |
 | Python agents | `agents/memory/episodic.py`, `agents/memory/relationship.py`, `agents/memory/relationship_mutations.py`, `agents/memory/migrations.py`, `agents/memory/facade.py`, `agents/persona_runtime/memory_context.py` | session_id kwarg on store/record paths; recall filtering; migration. |
 | Rust CLI | `cli/src/commands/session.rs` (new), `cli/src/commands/chat.rs`, `cli/src/commands/channel.rs` | `session` subcommand; `--session` flag on existing verbs. |
-| Protos | `proto/orchestrator/v1/channels.proto` (additive `session_id` field on channel/message records) | Wire-side session_id surfacing. |
+| Protos | [`proto/task.proto`](../../proto/task.proto) — `Channel` / `ChannelMessageEvent` messages in `persatrix.v1` (may relocate to `proto/orchestrator/v1/` once RFC 0029 Phase 3 reorganises the wire surface; coordinate with that RFC) | Additive `session_id` field on channel/message records; see Open Question 8 for the name-collision question against the pre-existing `ChatRequest.session_id` field. |
 | Config / docs | `docs/guides/sessions.md` (new), `docs/guides/channels.md`, `docs/guides/persona-agents.md`, `Makefile` | Operator guide; deprecation breadcrumb on `make reset`. |
 
 ---
@@ -284,7 +320,8 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
    - **1a.** Default recall stays single-session and the dementia-test author is responsible for pinning all turns under one session id. Simple; but the test currently has no concept of session id and authoring it via `--session` is fragile.
    - **1b.** Default recall is multi-session for personal memory (episodes, relationships) but single-session for channel state (`channels.db` rows). Asymmetric but matches the natural ownership boundary — personal memory is *about* continuity; channel state is *about* a conversation.
    - **1c.** Sessions get a `parent_session_id` field, and recall walks the parent chain by default. Adds a graph dimension this RFC does not otherwise need.
-   **Resolution required before Phase 2 opens.** This is the load-bearing question that decides whether sessions are a CI-ergonomics primitive or a memory-architecture primitive.
+
+   **Proposed default: 1b** — for two reasons. First, the personal/society boundary in §G of this RFC already commits to that asymmetry (the `sessions` table is society state; personal episodes/relationships are not), so 1b is the option that does not require a *second* asymmetry to land. Second, the project-memory bar ("Persatrix memory must pass the dementia test, not just recall@k") is a hard claim about *personal* memory continuity; making channel state share that bar without an explicit reason would over-commit. 1a is the conservative fallback if 1b's "multi-session by default" surprises operators; 1c is the right answer only if a `parent_session_id` graph becomes load-bearing for another reason. **The default proposal is recorded here so the conversation has a starting position — but resolution still requires an explicit reviewer take in the PR thread before Phase 2 opens** (this is the load-bearing question and "agreed to the default by default" is not a real decision). Resolution required before Phase 2.
 
 2. **Is the `legacy` sentinel a string constant or a real row in `sessions`?**
    §C proposes the constant form (zero-cost migration). The alternative is a single seed row `INSERT INTO sessions (id, label) VALUES ('legacy', 'Legacy — pre-RFC-0031 rows')`. Materialising it makes `JOIN sessions ON ...` queries trivial and gives `persatrix session list` a stable entry to render. The constant form is two lines simpler in the migration but every read path has to special-case the sentinel.
@@ -304,13 +341,21 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 7. **Does the session_id appear in OTEL trace attributes (RFC 0019)?**
    Adding it to span attributes makes per-session trace queries trivial in Tempo / Honeycomb. Cardinality is bounded by the number of operator-created sessions, which is small in practice. Proposed: yes, as a low-cardinality attribute under the existing `persatrix.*` namespace. Confirm with the observability reviewer before Phase 1.
 
+8. **Wire-level name collision against RFC 0016 `ChatRequest.session_id` — rename, disambiguate, or live with it?**
+   [`proto/task.proto:93`](../../proto/task.proto#L93) already defines `ChatRequest.session_id` (RFC 0016 §5) — a server-generated per-chat-conversation UUID. This RFC reuses the same identifier name for a per-operator-namespace scope; the §A "Distinct from RFC 0016" table spells out the five-dimension semantic gap. Phase 1's plumbing threads this RFC's `session_id` through structured logs (RFC 0018), OTEL spans (RFC 0019, OQ 7 above), and the future `MemoryStore` facade signature (OQ 4) — every one of those surfaces will then carry two unrelated fields with the same name. Three candidate resolutions:
+   - **8a. Rename in this RFC** to `namespace_id` (mirrors the RFC title), `run_id`, or `tenant_id`. Cheapest option; loses the "session" word the operator surface (`persatrix session new`) is built around — would need to rename the CLI verb too (`persatrix namespace new`), which weakens the operator-ergonomics framing.
+   - **8b. Rename RFC 0016's field on the wire** to `chat_session_id` in a coordinated proto change. The cleaner long-term answer; pays a proto-breaking-change cost and reaches outside this RFC's scope, so it needs RFC 0016 co-author sign-off and its own migration paragraph.
+   - **8c. Keep `session_id` on both, disambiguate by context.** The §A table is the documentation; structured-log fields are namespaced (`persatrix.chat.session_id` vs `persatrix.namespace.session_id`); the `MemoryStore` facade takes the operator-namespace value as `session_id` and the chat value as a different kwarg. Lowest immediate cost; highest ongoing-confusion cost (every new contributor has to read §A to disambiguate).
+   **Resolution required before Phase 1 opens.** Phase 1 lands the `session_id` column name in four tables and the env-var name `PERSATRIX_SESSION_ID`; reversing either after Phase 1 ships is a non-additive migration. No default proposal — picking the cheapest option (8c) without paying attention is exactly the failure mode this OQ exists to prevent.
+
 ## Decision / Next Steps
 
 This RFC is `📋 Proposed`. Before moving to `👍 Accepted`:
 
-1. Resolve **Open Question 1** (dementia-test continuity). This is the only question whose answer can invalidate the whole design.
-2. Confirm **Open Question 4** sequencing with RFC 0029.
-3. Confirm **Open Question 7** with the observability reviewer.
+1. Resolve **Open Question 1** (dementia-test continuity). This is the only question whose answer can invalidate the whole *recall* design. Proposed default 1b recorded; reviewer take still required.
+2. Resolve **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`). This is the only question whose answer can invalidate the whole *naming* surface — Phase 1 lands `session_id` as a column name in four tables and as the env-var suffix, and reversing either after Phase 1 ships is a non-additive migration.
+3. Confirm **Open Question 4** sequencing with RFC 0029.
+4. Confirm **Open Question 7** with the observability reviewer.
 
 Open Questions 2, 3, 5, 6 may be resolved during phased implementation review without blocking acceptance.
 
