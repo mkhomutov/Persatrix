@@ -260,15 +260,21 @@ class ChatRequest(google.protobuf.message.Message):
     AGENT_ID_FIELD_NUMBER: builtins.int
     USER_ID_FIELD_NUMBER: builtins.int
     MESSAGE_FIELD_NUMBER: builtins.int
-    SESSION_ID_FIELD_NUMBER: builtins.int
+    CHAT_SESSION_ID_FIELD_NUMBER: builtins.int
     TIMEOUT_SECONDS_FIELD_NUMBER: builtins.int
     PARTICIPANT_TYPE_FIELD_NUMBER: builtins.int
     agent_id: builtins.str
     user_id: builtins.str
     message: builtins.str
     """max 4000 chars enforced server-side"""
-    session_id: builtins.str
-    """empty → server generates UUID; max 128 chars"""
+    chat_session_id: builtins.str
+    """RFC 0016 chat-conversation token. Renamed from `session_id` in v0.3.1
+    to disambiguate from RFC 0031's operator-namespace `session_id`
+    landing on channels/messages/episodes/relationships. Field number
+    unchanged (binary-proto consumers unaffected); JSON/proto-text
+    consumers must migrate. Resolves RFC 0031 OQ #8.
+    empty → server generates UUID; max 128 chars
+    """
     timeout_seconds: builtins.int
     """0 or negative → server default (30s); max 300s"""
     participant_type: builtins.str
@@ -279,11 +285,11 @@ class ChatRequest(google.protobuf.message.Message):
         agent_id: builtins.str = ...,
         user_id: builtins.str = ...,
         message: builtins.str = ...,
-        session_id: builtins.str = ...,
+        chat_session_id: builtins.str = ...,
         timeout_seconds: builtins.int = ...,
         participant_type: builtins.str = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "message", b"message", "participant_type", b"participant_type", "session_id", b"session_id", "timeout_seconds", b"timeout_seconds", "user_id", b"user_id"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "chat_session_id", b"chat_session_id", "message", b"message", "participant_type", b"participant_type", "timeout_seconds", b"timeout_seconds", "user_id", b"user_id"]) -> None: ...
 
 global___ChatRequest = ChatRequest
 
@@ -292,13 +298,14 @@ class ChatResponse(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     REPLY_FIELD_NUMBER: builtins.int
-    SESSION_ID_FIELD_NUMBER: builtins.int
+    CHAT_SESSION_ID_FIELD_NUMBER: builtins.int
     AGENT_ID_FIELD_NUMBER: builtins.int
     TIMESTAMP_FIELD_NUMBER: builtins.int
     AGENT_DISPLAY_NAME_FIELD_NUMBER: builtins.int
     REPLY_STATUS_FIELD_NUMBER: builtins.int
     reply: builtins.str
-    session_id: builtins.str
+    chat_session_id: builtins.str
+    """RFC 0016 chat-conversation token; see ChatRequest.chat_session_id."""
     agent_id: builtins.str
     timestamp: builtins.int
     """Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
@@ -314,13 +321,13 @@ class ChatResponse(google.protobuf.message.Message):
         self,
         *,
         reply: builtins.str = ...,
-        session_id: builtins.str = ...,
+        chat_session_id: builtins.str = ...,
         agent_id: builtins.str = ...,
         timestamp: builtins.int = ...,
         agent_display_name: builtins.str = ...,
         reply_status: builtins.str = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["agent_display_name", b"agent_display_name", "agent_id", b"agent_id", "reply", b"reply", "reply_status", b"reply_status", "session_id", b"session_id", "timestamp", b"timestamp"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["agent_display_name", b"agent_display_name", "agent_id", b"agent_id", "chat_session_id", b"chat_session_id", "reply", b"reply", "reply_status", b"reply_status", "timestamp", b"timestamp"]) -> None: ...
 
 global___ChatResponse = ChatResponse
 
@@ -385,7 +392,7 @@ class ChannelMessageEvent(google.protobuf.message.Message):
     """
     thread_id: builtins.str
     """Empty string if not a reply. Max 128 chars when set (mirrors
-    `ChatRequest.session_id` bound). PR #246 deep review M1.
+    `ChatRequest.chat_session_id` bound). PR #246 deep review M1.
     """
     respond_policy: builtins.str
     """RFC 0011 PR 4b: per-recipient response policy carried so the

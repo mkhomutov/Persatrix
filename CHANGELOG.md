@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Breaking]** Chat wire-field renamed `session_id` → `chat_session_id` | RFC 0031 Phase 1 introduces an operator-namespace `session_id` on channels, messages, episodes, and relationships. To disambiguate it from RFC 0016's chat-conversation token, `ChatRequest.session_id` (proto field 4) and `ChatResponse.session_id` (proto field 2) are renamed to `chat_session_id`. **Field numbers are preserved**, so binary-proto consumers are unaffected. **JSON / proto-text consumers must migrate**: REST callers of `POST /api/v1/agents/{id}/chat` sending the legacy `"session_id"` JSON key are silently dropped by Go's `encoding/json` (handler mints a fresh chat session id instead); proto3-JSON callers using `google.protobuf.json_format` raise `ParseError` unless `ignore_unknown_fields=True` is set. Manual-test `curl` recipes (`MT-CHAT-001`, `MT-CHAT-003`) are updated. The `ChannelMessage.Metadata` map key also moves: `"session_id"` → `"chat_session_id"`. Resolves [RFC 0031 OQ #8](docs/rfcs/0031-per-session-namespacing-channels.md#open-questions). |
+
 ## [0.3.0] - 2026-05-12
 
 > **Codename:** Agent Conversations

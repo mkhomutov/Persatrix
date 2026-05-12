@@ -31,7 +31,7 @@ def _chat_request(
     agent_id: str = "ember-owl",
     user_id: str = "local",
     message: str = "hello",
-    session_id: str = "",
+    chat_session_id: str = "",
     timeout_seconds: int = 0,
     participant_type: str = "",
 ) -> task_pb2.ChatRequest:
@@ -39,7 +39,7 @@ def _chat_request(
         agent_id=agent_id,
         user_id=user_id,
         message=message,
-        session_id=session_id,
+        chat_session_id=chat_session_id,
         timeout_seconds=timeout_seconds,
         participant_type=participant_type,
     )
@@ -139,7 +139,9 @@ class TestChatServicerFollowUps:
         """Verify the AgentEvent payload passed to dispatch() has correct structure.
 
         Asserts payload keys (content, user_id, participant_type), sender_id,
-        and metadata["session_id"].
+        and metadata["chat_session_id"]. The metadata key was renamed from
+        `"session_id"` in v0.3.1 to disambiguate from RFC 0031's
+        operator-namespace `session_id` (RFC 0031 OQ #8).
         (PR 6 review fix: PR 3 finding #1 / test gap #9.)
         """
         actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]})]
@@ -151,7 +153,7 @@ class TestChatServicerFollowUps:
                 agent_id="ember-owl",
                 user_id="local",
                 message="hello world",
-                session_id="sess-abc",
+                chat_session_id="sess-abc",
                 participant_type="user",
             ),
             context,
@@ -169,7 +171,10 @@ class TestChatServicerFollowUps:
         assert event_arg.payload["user_id"] == "local"
         assert event_arg.payload["participant_type"] == "user"
         assert event_arg.sender_id == "local"
-        assert event_arg.metadata["session_id"] == "sess-abc"
+        assert event_arg.metadata["chat_session_id"] == "sess-abc"
+        assert "session_id" not in event_arg.metadata, (
+            "legacy 'session_id' metadata key must not be present (RFC 0031 OQ #8)"
+        )
         assert event_arg.metadata["sender_participant_type"] == "user"
 
         assert call_args.kwargs.get("execute_actions") is False

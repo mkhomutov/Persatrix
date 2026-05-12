@@ -79,15 +79,15 @@ curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "I have a pet turtle named Archimedes who loves swimming in circles.", "user_id": "mt-chat-003-user"}'
 
-# Message 2 (use session_id from Message 1 response)
+# Message 2 (use chat_session_id from Message 1 response)
 curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Archimedes is 12 years old and his shell has a small crack on the left side.", "user_id": "mt-chat-003-user", "session_id": "<SESSION_ID_FROM_MSG_1>"}'
+  -d '{"message": "Archimedes is 12 years old and his shell has a small crack on the left side.", "user_id": "mt-chat-003-user", "chat_session_id": "<CHAT_SESSION_ID_FROM_MSG_1>"}'
 
 # Message 3
 curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What do you think I should do about the crack in his shell?", "user_id": "mt-chat-003-user", "session_id": "<SESSION_ID_FROM_MSG_1>"}'
+  -d '{"message": "What do you think I should do about the crack in his shell?", "user_id": "mt-chat-003-user", "chat_session_id": "<CHAT_SESSION_ID_FROM_MSG_1>"}'
 ```
 
 **Expected Result**: All three requests return HTTP 200 with `reply_status: "ok"`. The agent
@@ -97,7 +97,7 @@ provides relevant replies.
 - [ ] All three responses are HTTP 200
 - [ ] Each response has `reply_status: "ok"`
 - [ ] The agent's replies acknowledge the turtle topic
-- [ ] Note the `session_id` for reference
+- [ ] Note the `chat_session_id` for reference
 
 ---
 
@@ -174,7 +174,7 @@ curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -d '{"message": "Do you remember the pet I told you about? What was its name?", "user_id": "mt-chat-003-user"}'
 ```
 
-> **Note**: This uses a new `session_id` (server-generated) since the original session was
+> **Note**: This uses a new `chat_session_id` (server-generated) since the original session was
 > tied to the pre-restart process. The agent relies on episodic memory recall, not in-process
 > session state.
 

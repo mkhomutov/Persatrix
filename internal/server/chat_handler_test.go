@@ -112,7 +112,7 @@ func TestHandleChat_Success_RoutesViaChannels(t *testing.T) {
 	assert.Equal(t, "ember-owl", resp.AgentID)
 	assert.Equal(t, "Ember Owl", resp.AgentDisplayName)
 	assert.Equal(t, "ok", resp.ReplyStatus)
-	assert.NotEmpty(t, resp.SessionID, "handler must mint a session id when none supplied")
+	assert.NotEmpty(t, resp.ChatSessionID, "handler must mint a chat session id when none supplied")
 
 	// Verify the DM was created and both messages persisted.
 	dm, err := store.GetOrCreateDM(context.Background(), "alice", "ember-owl")
@@ -139,20 +139,20 @@ func TestHandleChat_AgentDisplayNameFallsBackToID(t *testing.T) {
 	assert.Equal(t, "no-name", resp.AgentDisplayName)
 }
 
-// TestHandleChat_PreservesSessionID pins that a client-supplied
-// session_id round-trips unchanged.
-func TestHandleChat_PreservesSessionID(t *testing.T) {
+// TestHandleChat_PreservesChatSessionID pins that a client-supplied
+// chat_session_id round-trips unchanged.
+func TestHandleChat_PreservesChatSessionID(t *testing.T) {
 	srv, reg, router, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 10*time.Millisecond)
 
-	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", SessionID: "sess-abc"})
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", ChatSessionID: "sess-abc"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	require.Equal(t, 200, rec.Code)
 
 	var resp chatResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "sess-abc", resp.SessionID)
+	assert.Equal(t, "sess-abc", resp.ChatSessionID)
 }
 
 // TestHandleChat_EmptyMessage pins request validation.
@@ -355,12 +355,12 @@ func TestHandleChat_TimeoutClamp_LowerBound(t *testing.T) {
 }
 
 // TestHandleChat_PropagatesSessionAndParticipantMetadata pins that the
-// `session_id` and `participant_type` request fields are carried into
-// the inbound `ChannelMessage.Metadata` map under the keys named in the
-// RFC 0011 amendment §Mapping table. Without this, the wire fields are
-// silently inert: callers that rely
-// on `session_id` to segment threads, or on `participant_type` to
-// distinguish human vs. bridge senders, observe no effect.
+// `chat_session_id` and `participant_type` request fields are carried
+// into the inbound `ChannelMessage.Metadata` map under the keys named
+// in the RFC 0011 amendment §Mapping table. Without this, the wire
+// fields are silently inert: callers that rely on `chat_session_id` to
+// segment threads, or on `participant_type` to distinguish human vs.
+// bridge senders, observe no effect.
 func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 	srv, reg, router, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
@@ -369,7 +369,7 @@ func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 	body, _ := json.Marshal(chatRequest{
 		Message:         "Hi",
 		UserID:          "alice",
-		SessionID:       "sess-xyz",
+		ChatSessionID:   "sess-xyz",
 		ParticipantType: "human",
 	})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
@@ -392,7 +392,7 @@ func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 	}
 	require.NotNil(t, inbound, "inbound message must persist")
 	require.NotNil(t, inbound.Metadata, "metadata must be populated")
-	assert.Equal(t, "sess-xyz", inbound.Metadata["session_id"], "session_id must be propagated to metadata")
+	assert.Equal(t, "sess-xyz", inbound.Metadata["chat_session_id"], "chat_session_id must be propagated to metadata")
 	assert.Equal(t, "human", inbound.Metadata["participant_type"], "participant_type must be propagated to metadata")
 }
 
