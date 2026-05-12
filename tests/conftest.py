@@ -49,6 +49,18 @@ def pytest_configure(config):
         "Opt-in via `pytest -m requires_orchestrator` after "
         "`make build-orchestrator build-cli`.",
     )
+    # Register the requires_anthropic marker for the v0.3.0 channel
+    # test-findings PR plan §PR 5 grounding-clause probe.  The
+    # corresponding test in tests/integration/ also self-skips when
+    # ANTHROPIC_API_KEY is unset, so a developer who forgets `-m
+    # requires_anthropic` does not hit an auth error.
+    config.addinivalue_line(
+        "markers",
+        "requires_anthropic: integration tests that exercise a real "
+        "Anthropic API call (probabilistic, billed). Opt-in via "
+        "`ANTHROPIC_API_KEY=... pytest -m requires_anthropic`. Tests "
+        "under this marker auto-skip when `ANTHROPIC_API_KEY` is unset.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -76,17 +88,23 @@ def pytest_collection_modifyitems(config, items):
     selected_marker = config.getoption("markexpr", default="") or ""
     compose_opted_in = _markexpr_selects(selected_marker, "requires_compose")
     orch_opted_in = _markexpr_selects(selected_marker, "requires_orchestrator")
+    anthropic_opted_in = _markexpr_selects(selected_marker, "requires_anthropic")
     skip_compose = pytest.mark.skip(
         reason="requires docker-compose observability stack — run with `pytest -m requires_compose`"
     )
     skip_orch = pytest.mark.skip(
         reason="requires built orchestrator + CLI binaries — run with `pytest -m requires_orchestrator`"
     )
+    skip_anthropic = pytest.mark.skip(
+        reason="requires a real Anthropic API call — run with `ANTHROPIC_API_KEY=... pytest -m requires_anthropic`"
+    )
     for item in items:
         if "requires_compose" in item.keywords and not compose_opted_in:
             item.add_marker(skip_compose)
         if "requires_orchestrator" in item.keywords and not orch_opted_in:
             item.add_marker(skip_orch)
+        if "requires_anthropic" in item.keywords and not anthropic_opted_in:
+            item.add_marker(skip_anthropic)
 
 
 def _markexpr_selects(expr: str, name: str) -> bool:

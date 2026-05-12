@@ -14,11 +14,18 @@ inclusion is decided by the composer's per-section predicate.
 | File                | Always rendered? | Placeholders                         |
 | ------------------- | :--------------: | ------------------------------------ |
 | `identity.md`       | Yes              | `{name}`, `{title_line}`, `{role}`   |
+| `grounding.md`      | Yes              | `{name}`                             |
 | `background.md`     | When set         | `{background}`                       |
 | `behavior.md`       | When non-empty   | `{behavior}`                         |
 | `quirks.md`         | When non-empty   | `{quirks}`                           |
 | `goals.md`          | When populated   | `{goals}`                            |
 | `current-state.md`  | When non-empty   | `{state}`                            |
+
+`grounding.md` carries a per-persona invariant against user-name
+impersonation (v0.3.0 channel test findings F-2, [PR plan §PR 5](../../../../docs/v0.3.0-test-findings-pr-plan.md#pr-5-fixv030-channel-persona-impersonation--grounding-the-persona-system-prompt)).
+Always rendered immediately after `identity.md` so the clause lands
+before the persona-config sections that describe voice / quirks / goals
+and could otherwise drift the model into role-adoption.
 
 `{title_line}` carries its own trailing newline (`"Title: <title>\n"`
 or `""`) so the template can keep the placeholder on its own line

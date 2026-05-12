@@ -84,6 +84,20 @@ def _identity_context(
     return {"name": name, "title_line": title_line, "role": role}
 
 
+def _grounding_context(
+    persona_cfg: dict[str, Any],
+    state: PersonaState,
+    name: str,
+    role: str,
+) -> dict[str, str]:
+    # PR plan §PR 5 (v0.3.0 channel test findings F-2): the grounding
+    # clause is rendered with the persona's own name woven in so the
+    # invariant is concrete per persona rather than a generic "you are
+    # not the user" line; the model is less likely to drift on a
+    # personalized invariant than a templated one.
+    return {"name": name}
+
+
 def _background_context(
     persona_cfg: dict[str, Any],
     state: PersonaState,
@@ -168,6 +182,17 @@ _SECTIONS: tuple[_Section, ...] = (
         name="identity",
         predicate=lambda cfg, state: True,
         context=_identity_context,
+    ),
+    # PR plan §PR 5 (v0.3.0 channel test findings F-2): grounding clause
+    # against user-name impersonation.  Always-on, placed immediately
+    # after identity so the "you are not the user" invariant lands
+    # before the persona-config sections (background, behavior, quirks,
+    # goals) that describe voice and inadvertently provide vectors for
+    # role-adoption drift.
+    _Section(
+        name="grounding",
+        predicate=lambda cfg, state: True,
+        context=_grounding_context,
     ),
     _Section(
         name="background",
