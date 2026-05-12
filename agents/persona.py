@@ -41,6 +41,7 @@ __all__ = [
     # Re-exported from dispatch
     "ActionExecutor",
     "ChannelPublisher",
+    "DEFAULT_MAX_CASCADE_DEPTH",
     "EventDispatcher",
     # Re-exported from tick
     "TickScheduler",
@@ -62,7 +63,12 @@ from .clock import Clock
 # persona_runtime).  Once all internal consumers have migrated, emit
 # DeprecationWarning and eventually remove the re-export block.
 # (PR #64 review: should fix.)
-from .dispatch import ActionExecutor, ChannelPublisher, EventDispatcher  # noqa: F401
+from .dispatch import (  # noqa: F401
+    DEFAULT_MAX_CASCADE_DEPTH,
+    ActionExecutor,
+    ChannelPublisher,
+    EventDispatcher,
+)
 from .llm_client import LLMClient
 from .memory.episodic import EpisodicMemory
 from .memory.relationship import RelationshipMemory

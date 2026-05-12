@@ -112,14 +112,25 @@ class TestCascadeDepthOnTheWire:
             f"metadata={{}}; got body={body!r}"
         )
 
-    async def test_default_cascade_depth_omits_metadata(self, captured_server):
-        """Callers that do not pass ``cascade_depth`` see no ``metadata`` on the wire.
+    async def test_default_cascade_depth_emits_terminate_at_cap(self, captured_server):
+        """Callers that omit ``cascade_depth`` publish at the cap.
 
-        Back-compat seam: the kwarg defaults to ``0`` so existing call
-        sites (e.g. the on-startup catch-up fetcher, chat-surface
-        publishes) keep working without an update — and they keep the
-        previously-clean POST body shape.
+        The kwarg default flipped from ``0`` (chain-origin, omit
+        metadata) to :data:`DEFAULT_MAX_CASCADE_DEPTH` (terminate at the
+        orchestrator clamp, include metadata) because the previous
+        default silently masked the v0.3.0 tick-scheduler regression:
+        every channel message woke the tick loop, the woken tick
+        published at depth 0, and the orchestrator's per-hop cap never
+        fired. The new default is the "no inbound depth known" sentinel
+        — the publish lands at the cap so the orchestrator's
+        ``cascade_depth >= max_cascade_depth`` clamp drops fanout and
+        the chain terminates. Call sites that legitimately mark a
+        publish as chain-origin (chat surface, dispatcher's first hop)
+        pass ``cascade_depth=0`` explicitly; the explicit-zero contract
+        is pinned by ``test_explicit_zero_omits_metadata`` above.
         """
+        from agents.cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+
         base_url, captured = captured_server
         async with aiohttp.ClientSession() as session:
             pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
@@ -129,7 +140,13 @@ class TestCascadeDepthOnTheWire:
                 content="hi",
                 mentions=[],
             )
-        assert "metadata" not in captured[0]["body"]
+        body = captured[0]["body"]
+        assert body.get("metadata") == {"cascade_depth": DEFAULT_MAX_CASCADE_DEPTH}, (
+            "publisher.publish() without cascade_depth must emit "
+            f"metadata.cascade_depth={DEFAULT_MAX_CASCADE_DEPTH} so the "
+            "orchestrator clamps and drops fanout on tick-originated "
+            f"publishes; got body={body!r}"
+        )
 
     async def test_cascade_depth_coexists_with_mentions(self, captured_server):
         """``cascade_depth`` and ``mentions`` ride the wire independently.

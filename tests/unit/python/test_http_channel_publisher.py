@@ -52,6 +52,12 @@ async def captured_server():
 class TestHTTPChannelPublisher:
 
     async def test_happy_path_posts_to_correct_url(self, captured_server):
+        # ``cascade_depth=0`` keeps the POST body shape clean (no
+        # ``metadata`` map) so this test continues to pin the
+        # historical URL + base-shape contract. The depth-on-the-wire
+        # contract (including the default-to-cap behaviour for callers
+        # that omit ``cascade_depth``) is pinned in
+        # ``test_channel_publisher_cascade_depth.py``.
         base_url, captured = captured_server
         async with aiohttp.ClientSession() as session:
             pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
@@ -60,6 +66,7 @@ class TestHTTPChannelPublisher:
                 sender_id="agent-a",
                 content="hi",
                 mentions=["agent-b"],
+                cascade_depth=0,
             )
         assert len(captured) == 1
         assert captured[0]["path"] == "/api/v1/channels/group:planning/messages"

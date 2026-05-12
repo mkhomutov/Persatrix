@@ -17,6 +17,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Link
 
 from .action_executor import ActionExecutor
+from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import ChannelPublisher
 from .persona_types import AgentAction, AgentEvent
 
@@ -26,7 +27,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ActionExecutor", "ChannelPublisher", "EventDispatcher"]
+# ``DEFAULT_MAX_CASCADE_DEPTH`` is sourced from
+# :mod:`agents.cascade_depth_defaults` so the publish-path leaf modules
+# (``action_executor``, ``channel_publisher``) can depend on it without
+# a circular import through this module. Re-exported here so callers
+# can keep using the historical ``from agents.dispatch import …``
+# surface.
+__all__ = [
+    "DEFAULT_MAX_CASCADE_DEPTH",
+    "ActionExecutor",
+    "ChannelPublisher",
+    "EventDispatcher",
+]
 
 
 class EventDispatcher:
@@ -40,7 +52,7 @@ class EventDispatcher:
     def __init__(
         self,
         agents: dict[str, _LLMPersonaAgent] | None = None,
-        max_cascade_depth: int = 5,
+        max_cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
         channel_publisher: ChannelPublisher | None = None,
     ) -> None:
         self._agents: dict[str, _LLMPersonaAgent] = agents or {}

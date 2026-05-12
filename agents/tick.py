@@ -26,6 +26,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .persona_types import ActionType
 
 if TYPE_CHECKING:
@@ -205,9 +206,27 @@ class TickScheduler:
                 else:
                     self._idle_count = 0
 
-                # Execute actions
+                # Execute actions.
+                #
+                # Pass ``cascade_depth=DEFAULT_MAX_CASCADE_DEPTH`` explicitly:
+                # the tick loop has no inbound event to derive depth from
+                # (unlike :meth:`EventDispatcher.dispatch`, which forwards
+                # ``inbound_depth + 1``), so any ``SEND_CHANNEL_MESSAGE`` an
+                # on_tick produces must publish at the cap so the
+                # orchestrator's
+                # ``cascade_depth >= max_cascade_depth`` clamp drops fanout.
+                # Without this, an inbound channel message that wakes the
+                # scheduler via :meth:`EventDispatcher.dispatch`'s
+                # ``scheduler.wake()`` would have its woken-tick reply
+                # publish at depth 0 and reset the cascade in flight —
+                # the v0.3.0 demo runaway. Explicit kwarg (rather than
+                # relying on the executor's default) so the intent is
+                # readable at the call site.
                 if self._executor is not None:
-                    await self._executor.execute(self._agent.agent_id, actions)
+                    await self._executor.execute(
+                        self._agent.agent_id, actions,
+                        cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+                    )
                 elif not all_do_nothing:
                     # No executor configured but agent produced actionable
                     # output — likely a wiring bug.  Log so operators can

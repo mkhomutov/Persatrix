@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 
+from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import (
     DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ChannelPublisher,
@@ -87,13 +88,27 @@ class ActionExecutor:
         agent_id: str,
         actions: list[AgentAction],
         *,
-        cascade_depth: int = 0,
+        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
     ) -> list[dict[str, Any]]:
         """Execute actions and return per-action status dicts.
 
         Non-fatal failures are logged but do not propagate. ``cascade_depth``
         is propagated to child dispatches so the cascade depth limit is
         enforced across the full event chain.
+
+        ``cascade_depth`` defaults to :data:`DEFAULT_MAX_CASCADE_DEPTH`
+        rather than ``0``: callers that omit the kwarg (notably the tick
+        scheduler, which has no inbound event to derive depth from) get
+        the orchestrator's terminate-at-clamp behaviour on any
+        ``SEND_CHANNEL_MESSAGE`` they produce, instead of silently
+        publishing at depth 0 and resetting any cascade in flight. The
+        v0.3.0 demo runaway cascade was a direct consequence of the
+        previous default — every channel message woke the tick scheduler,
+        the woken tick published at depth 0, and the orchestrator's
+        per-hop cap never fired. Callers that legitimately mark a publish
+        as chain-origin (chat surface, dispatcher's first hop) pass
+        ``cascade_depth=0`` explicitly; the safe default only fires for
+        omitting callers.
         """
         results: list[dict[str, Any]] = []
         for action in actions:
@@ -106,7 +121,7 @@ class ActionExecutor:
         agent_id: str,
         action: AgentAction,
         *,
-        cascade_depth: int = 0,
+        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
     ) -> dict[str, Any]:
         """Execute a single action; status contract is documented in the README of this module.
 
@@ -196,7 +211,7 @@ class ActionExecutor:
         sender_id: str,
         action: AgentAction,
         *,
-        cascade_depth: int = 0,
+        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
     ) -> dict[str, Any]:
         """Route SEND_CHANNEL_MESSAGE.
 
