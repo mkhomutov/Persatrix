@@ -83,6 +83,18 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # work and trimming the surrounding narrative would erase release-cycle
     # context. Remove this entry once v0.3.0 ships and the plan is archived.
     "docs/v0.3.0-plan.md",
+    # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
+    # patch sequence and accumulates amendments as new v0.3.x-targeted
+    # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
+    # 0031 landings and re-shuffled v0.3.1 / v0.3.2 scope). The original
+    # 2026-05-10 ratified decision is preserved verbatim above the
+    # amendment for context — that "preserve original + dated amendment"
+    # framing is the load-bearing shape of the doc and trimming the
+    # original body to fit the cap would defeat the comparison the
+    # amendment depends on. Same release-cycle-accumulator pattern as
+    # docs/v0.3.0-plan.md above. Remove this entry once v0.3.3 ships
+    # and the doc is archived.
+    "docs/v0.3.x-sequencing.md",
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
     "docs/rfcs/0006-pr-plan.md",
