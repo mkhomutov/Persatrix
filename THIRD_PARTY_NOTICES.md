@@ -23,17 +23,21 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (29 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (37 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
 | `github.com/cenkalti/backoff/v5` | MIT | [link](https://github.com/cenkalti/backoff/blob/v5.0.3/LICENSE) |
 | `github.com/cespare/xxhash/v2` | MIT | [link](https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt) |
+| `github.com/dustin/go-humanize` | MIT | [link](https://github.com/dustin/go-humanize/blob/v1.0.1/LICENSE) |
 | `github.com/felixge/httpsnoop` | MIT | [link](https://github.com/felixge/httpsnoop/blob/v1.0.4/LICENSE.txt) |
 | `github.com/go-logr/logr` | Apache-2.0 | [link](https://github.com/go-logr/logr/blob/v1.4.3/LICENSE) |
 | `github.com/go-logr/stdr` | Apache-2.0 | [link](https://github.com/go-logr/stdr/blob/v1.2.2/LICENSE) |
 | `github.com/google/uuid` | BSD-3-Clause | [link](https://github.com/google/uuid/blob/v1.6.0/LICENSE) |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | [link](https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.28.0/LICENSE) |
+| `github.com/mattn/go-isatty` | MIT | [link](https://github.com/mattn/go-isatty/blob/v0.0.20/LICENSE) |
+| `github.com/ncruces/go-strftime` | MIT | [link](https://github.com/ncruces/go-strftime/blob/v1.0.0/LICENSE) |
+| `github.com/remyoudompheng/bigfft` | BSD-3-Clause | [link](https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE) |
 | `go.opentelemetry.io/auto/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE) |
 | `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.68.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |
 | `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.68.0/instrumentation/net/http/otelhttp/LICENSE) |
@@ -56,10 +60,14 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (29 packages).
 | `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE) |
 | `google.golang.org/protobuf` | BSD-3-Clause | [link](https://github.com/protocolbuffers/protobuf-go/blob/v1.36.11/LICENSE) |
 | `gopkg.in/yaml.v3` | MIT | [link](https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE) |
+| `modernc.org/libc` | MIT | [link](https://gitlab.com/cznic/libc/blob/v1.72.0/LICENSE-3RD-PARTY.md) |
+| `modernc.org/mathutil` | !Unknown | Unknown |
+| `modernc.org/memory` | BSD-3-Clause | [link](https://gitlab.com/cznic/memory/blob/v1.11.0/LICENSE-GO) |
+| `modernc.org/sqlite` | BSD-3-Clause | [link](https://gitlab.com/cznic/sqlite/blob/v1.50.0/LICENSE) |
 
 ## Python dependencies
 
-Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packages).
+Collected via `pip-licenses --from=mixed` against the `agents` extras (72 packages).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -92,6 +100,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packag
 | `librt` | 0.9.0 | MIT | [link](https://github.com/mypyc/librt) |
 | `multidict` | 6.7.1 | Apache License 2.0 | [link](https://github.com/aio-libs/multidict) |
 | `mypy` | 1.20.1 | MIT | [link](https://www.mypy-lang.org/) |
+| `mypy-protobuf` | 3.6.0 | Apache License 2.0 | [link](https://github.com/nipunn1313/mypy-protobuf) |
 | `mypy_extensions` | 1.1.0 | MIT | [link](https://github.com/python/mypy_extensions) |
 | `openai` | 1.109.1 | Apache Software License | [link](https://github.com/openai/openai-python) |
 | `opentelemetry-api` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
@@ -113,6 +122,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packag
 | `Pygments` | 2.20.0 | BSD-2-Clause | [link](https://pygments.org) |
 | `pytest` | 9.0.3 | MIT | [link](https://docs.pytest.org/en/latest/) |
 | `pytest-asyncio` | 1.3.0 | Apache-2.0 | [link](https://github.com/pytest-dev/pytest-asyncio) |
+| `pytest-timeout` | 2.4.0 | !DFSG approved; MIT License | [link](https://github.com/pytest-dev/pytest-timeout) |
 | `PyYAML` | 6.0.3 | MIT License | [link](https://pyyaml.org/) |
 | `referencing` | 0.37.0 | MIT | [link](https://github.com/python-jsonschema/referencing) |
 | `regex` | 2026.4.4 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
@@ -128,6 +138,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (69 packag
 | `types-PyYAML` | 6.0.12.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
 | `typing-inspection` | 0.4.2 | MIT | [link](https://github.com/pydantic/typing-inspection) |
 | `typing_extensions` | 4.15.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |
+| `tzdata` | 2026.2 | Apache-2.0 | [link](https://github.com/python/tzdata) |
 | `urllib3` | 2.6.3 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
 | `wrapt` | 2.1.2 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
 | `yarl` | 1.23.0 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
@@ -229,10 +240,10 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `objc2-encode` | 4.1.0 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `once_cell` | 1.21.4 | Apache-2.0 OR MIT | [link](https://github.com/matklad/once_cell) |
 | `once_cell_polyfill` | 1.70.2 | Apache-2.0 OR MIT | [link](https://github.com/polyfill-rs/once_cell_polyfill) |
-| `openssl` | 0.10.78 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
+| `openssl` | 0.10.79 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
 | `openssl-macros` | 0.1.1 | Apache-2.0 OR MIT |  |
 | `openssl-probe` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/rustls/openssl-probe) |
-| `openssl-sys` | 0.9.114 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
+| `openssl-sys` | 0.9.115 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
 | `papergrid` | 0.17.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `percent-encoding` | 2.3.2 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url/) |
 | `pin-project-lite` | 0.2.17 | Apache-2.0 OR MIT | [link](https://github.com/taiki-e/pin-project-lite) |
@@ -249,7 +260,7 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `rustix` | 1.1.4 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/rustix) |
 | `rustls` | 0.23.37 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls) |
 | `rustls-pki-types` | 1.14.0 | Apache-2.0 OR MIT | [link](https://github.com/rustls/pki-types) |
-| `rustls-webpki` | 0.103.12 | ISC | [link](https://github.com/rustls/webpki) |
+| `rustls-webpki` | 0.103.13 | ISC | [link](https://github.com/rustls/webpki) |
 | `rustversion` | 1.0.22 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/rustversion) |
 | `ryu` | 1.0.23 | Apache-2.0 OR BSL-1.0 | [link](https://github.com/dtolnay/ryu) |
 | `schannel` | 0.1.29 | MIT | [link](https://github.com/steffengy/schannel-rs) |

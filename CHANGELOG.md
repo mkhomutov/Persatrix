@@ -2,7 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-05-12
+
+> **Codename:** Agent Conversations
+
+### Highlights
+
+- **Internal channels — agents and humans share a typed conversation surface.** Group channels, DMs, threads, and the chat-as-DM façade ship as the v0.3.0 user-facing promise (RFC 0011 internal scope). `POST /api/v1/channels`, `POST /api/v1/channels/{id}/messages`, `GET /api/v1/channels/{id}/messages/{msg_id}/thread`, plus a publish → fanout → response-gate → LLM action → publish-back loop wired end-to-end across the Go orchestrator, the Python persona runtime, and a new `persatrix channel` CLI subcommand (`list` / `join` / `send` / `reply` / `history` / `watch`). The legacy `SendChatMessage` gRPC path is dead code — every `/chat` REST call now flows through the channels publish-and-await façade ([RFC 0011 amendment](docs/rfcs/0011-amendment-chat-as-dm.md)).
+- **Interaction-bounded episodic memory** (RFC 0020). A multi-turn dialogue is now one episode (open → multi-turn → close → summarize), not one per inbound event. The close path is two-phase + async — synchronous `[summary pending]` sentinel inside the per-agent lock, then a background LLM summariser updates the row — so a follow-up message no longer queues head-of-line behind the summariser. Janitor cleanup wired into `on_tick` recovers crash-stuck `[summary pending]` rows.
+- **Persona temporal awareness, Phase 1** (RFC 0021). Persona prompts now emit a `now-anchor` line and render episode + relationship timestamps as relative time ("yesterday", "3 days ago") instead of raw epoch seconds. Structured commitment tracking + scheduled callbacks are deferred to v0.4.0 (Phases 2–4).
+- **Memory facade + per-step context-budget allocation** (RFC 0008). `MemoryFacade` becomes the single boundary between persona-runtime + memory tiers (working / relationship / facts / notes / episodic); `attachContextPackage` allocates a typed budget per workflow step and routes it through cross-language wire shape pinned by [`tests/fixtures/context_package_v1.json`](tests/fixtures/context_package_v1.json). Procedural tier ships read-time exponential confidence decay (default 69-day half-life) + revalidation; shared-memory pools with deny-by-default ACL + provenance ship behind a new `shared_memory_pools:` config block.
+- **Security Phases 1–2** (RFC 0009). Audit logger with checksum-chained tamper evidence (JSONL append-only sink, per-event fsync for security-class events, three-state startup recovery), `SecretRedactor` with five default patterns + cycle-safe reflective walk, per-agent sliding-window REST + gRPC rate limiter with circuit-breaker quarantine, `<external_data>` envelope wrapping at the LLM-content boundary, Go↔Python sanitizer-pattern parity enforced at build time. Sandbox isolation + token auth (Phases 3–4) deferred to v0.4.0.
+- **Externally inspectable persona prompt sections** (RFC 0022). Every persona prompt fragment lives under [`prompts/runtime/persona/sections/`](prompts/runtime/persona/sections/) as a separate markdown file — assembly order pinned by golden tests, forks and out-of-tree tooling that override prompt assembly can pin against this directory shape. New safety snippets `reply-discretion.md` + `conversational-pacing.md` shape the persona's channel-reply behaviour from the prompt layer rather than the executor.
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| Channel-event enum hard-rename | `EventType.MESSAGE_RECEIVED` → `CHANNEL_MESSAGE` and `ActionType.SEND_MESSAGE` → `SEND_CHANNEL_MESSAGE` across all Python producers (chat ingest, persona-runtime response gate, dispatch executor, action validators, prompt assembly, state persistence, memory routing). v0.2 enum aliases dropped. `ActionExecutor` result dict now carries `"action_type": "send_channel_message"`. Out-of-tree consumers must update event-type filters and result-dict consumers. |
+| Chat REST endpoint migrated to channels | `POST /api/v1/agents/{id}/chat` now goes through the channels publish-and-await façade ([RFC 0011 amendment](docs/rfcs/0011-amendment-chat-as-dm.md)). JSON contract on `chatRequest` / `chatResponse` is preserved — Rust CLI and existing REST clients are unaffected — but the legacy `SendChatMessage` gRPC path is dead code (cleanup tracked in ISSUE-0035). |
+| New `SECURITY_RATE_LIMIT_*` env vars | RFC 0009 PR 2 ships a per-agent sliding-window rate limiter with circuit breaker. `SECURITY_RATE_LIMIT_ENABLED`, `SECURITY_RATE_LIMIT_CALLS`, `SECURITY_RATE_LIMIT_WINDOW_SECONDS`, `SECURITY_RATE_LIMIT_MAX_AGENTS` configure the limiter at startup (defaults: enabled, 60 calls / 60-s window). Opting out emits a one-shot `rate_limit.disabled` audit event so the choice is visible in the audit log. Operators see HTTP 429 + `Retry-After` on REST and `ResourceExhausted` / `PermissionDenied` on gRPC after threshold violations; `POST /api/v1/agents/{id}/unquarantine` clears a quarantined agent (call it with a non-`anonymous` `X-Agent-ID` header so the operator's own request is not rate-limited as `anonymous`). |
+| `<external_data>` envelope wrapping | RFC 0009 PR 3 wraps `http_request` / `file_read` tool results in an `<external_data>…</external_data>` envelope at the LLM-content boundary, with close/open-tag escaping (`_EXTERNAL_DATA_TAG_RE`) so untrusted content cannot break out. Out-of-tree LLM evaluators or post-processors that grepped on raw tool-output strings must move to the wrapped form. The unconditional `external-data-handling` prompt fragment teaches the model the contract. |
+| Channels REST surface is unauthenticated | A startup `WARN` notice fires whenever the channels subsystem is enabled. `sender_id` is body-trusted in v0.3.0 — firewall the port or front with an authenticating reverse proxy until [RFC 0009 Phase 4](docs/rfcs/0009-security-sandboxing.md) lands in v0.4.0. The notice is intentionally not suppressible from config. |
+| Persona prompt-section directory is public surface | Every persona prompt fragment now lives under [`prompts/runtime/persona/sections/`](prompts/runtime/persona/sections/) ([RFC 0022](docs/rfcs/0022-persona-prompt-section-templating.md)). Forks and out-of-tree tooling that override prompt assembly should pin against this directory shape. |
+| Now-anchor in persona prompts | Persona prompts emit a `now-anchor` line and render episode + relationship timestamps as relative time ("yesterday", "3 days ago") instead of raw epoch seconds (RFC 0021 Phase 1). Out-of-tree prompt evaluators that key on absolute timestamps must move to the rendered form, or read the underlying epoch from the episodic store directly. |
+| Episodic write cadence changed | RFC 0020 collapses multi-turn dialogues to **one** episodic entry per interaction (open → multi-turn → close → summarize) instead of one entry per inbound event. Out-of-tree memory-inspection tools that counted episodes-per-message will see the count drop sharply on chatty channels — this is by design. The `interaction_id` + scope tag on each episode is the new lookup key. |
+| `relationships.interaction_count` unit changed | `interaction_count` and `auto_reflect_after` are now per-closed-interaction, not per-message. A 10-message DM session now bumps `interaction_count` by 1 (previously by 10). Operators with bespoke trust thresholds calibrated against the per-message scale should consult the Migration Notes in [docs/rfcs/0020-interaction-lifecycle.md](docs/rfcs/0020-interaction-lifecycle.md). |
+| `memory.min_score` schema default changed | `null` → `0.20` (RFC 0008 PR 2a). Operators with `memory.enabled: true` who did not previously set `memory.min_score` will see strictly fewer recall results — low-score entries are no longer concatenated into the system prompt. Restore the pre-PR-221 behaviour by setting `memory.min_score: null` in [`config/agents.yaml`](config/agents.yaml). |
+| `MemoryFacade.store_procedure` key validation | Validates `key` against `^[A-Za-z0-9._-]+$` (max 256 chars) and raises `ValueError` on non-conforming keys. Callers persisting procedural keys with spaces, slashes, percent-signs, non-ASCII characters, or newlines must rename them before upgrading. |
+| `pytest-timeout` test dependency added | Transitive dev dep added per ISSUE-0024 to stop the Python unit-suite from hanging on the full-suite invocation. Genuinely MIT-licensed; the `check-licenses-python` Makefile target carries an `--exception pytest-timeout` with justification (pip-licenses `--from=mixed` concatenates the legacy `License :: DFSG approved` Trove classifier producing a token the strict allow-list doesn't accept). |
 
 ### Added
 
@@ -786,6 +814,8 @@ All notable changes to this project will be documented in this file.
   PR 5 owns confidence decay end-to-end.  New config keys:
   `memory.episodic_cap`, `memory.ttl_low_importance_days`,
   `memory.eviction_cadence_seconds`.
+
+[0.3.0]: https://github.com/mkhomutov/Persatrix/compare/v0.2.3...v0.3.0
 
 ## [0.2.3] - 2026-04-24
 

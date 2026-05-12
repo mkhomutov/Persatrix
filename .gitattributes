@@ -5,3 +5,11 @@
 tests/fixtures/**           -text eol=lf
 agents/security_patterns.py -text eol=lf
 agents/security_enums.py    -text eol=lf
+
+# Protobuf-generated stubs are emitted with LF by protoc / grpc_tools. The
+# `make proto-check` byte-level diff fails on Windows checkouts with
+# `core.autocrlf=true` because the committed files get rewritten to CRLF
+# on checkout while regeneration emits LF. Same root cause as the security
+# mirrors above. Added in v0.3.0 release-prep PR 4.
+agents/generated/**         -text eol=lf
+internal/generated/**       -text eol=lf
