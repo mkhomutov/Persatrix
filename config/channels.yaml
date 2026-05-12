@@ -10,22 +10,21 @@
 
 max_channels: 50
 
-# Uncomment and adapt to declare named group channels:
-#
-# channels:
-#   - name: planning
-#     description: "Strategy and planning discussions"
-#     members:
-#       - id: planner-agent
-#         respond: when_mentioned
-#       - id: code-writer
-#         respond: when_mentioned
-#       - code-reviewer            # shorthand: respond defaults to when_mentioned
-#
-#   - name: code-review
-#     description: "Code review coordination — tight-loop pair channel"
-#     members:
-#       - id: code-writer
-#         respond: always
-#       - id: code-reviewer
-#         respond: always
+# v0.3.0 demo channel — see docs/guides/v0.3.0-demo.md for the walkthrough.
+# Mixed-policy pattern from RFC 0011 §H: ember-owl is `when_mentioned` (advisor
+# mode — only chimes in when @-mentioned); iron-fox + nova-sparrow are `always`
+# (active collaborators that respond to every message). Cascade-depth backstop
+# (default 5) caps any single chain of reactive replies, so the two `always`
+# members cannot loop indefinitely. Cost expectation: a single human prompt
+# typically triggers 4–8 LLM calls across the two `always` members before the
+# cascade-depth backstop or natural conversation end stops it.
+channels:
+  - name: planning
+    description: "v0.3.0 demo channel — engineering + product planning discussion"
+    members:
+      - id: ember-owl
+        respond: when_mentioned
+      - id: iron-fox
+        respond: always
+      - id: nova-sparrow
+        respond: always

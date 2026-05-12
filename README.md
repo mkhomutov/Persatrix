@@ -184,6 +184,8 @@ LLM's reply landing back. Diagrams in
   persona, configure memory, set budgets
 - [Channels guide](docs/guides/channels.md) — shared channels, DMs,
   response policies
+- [v0.3.0 demo walkthrough](docs/guides/v0.3.0-demo.md) — three pre-defined
+  personas + one channel, plain-English step-by-step
 - [Architecture diagrams](docs/diagrams/README.md) — system overview,
   components, persona runtime, memory tiers
 - [Observability](docs/observability.md) — log schema, span inventory,

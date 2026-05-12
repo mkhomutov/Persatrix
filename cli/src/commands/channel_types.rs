@@ -29,7 +29,12 @@ pub(crate) struct ChannelView {
     #[serde(default)]
     pub(crate) description: String,
     pub(crate) created_at: String,
-    /// Empty on list; populated on single-channel fetch.
+    /// Populated on both list and single-channel fetch as of PR #316
+    /// (when `handleListChannels` began returning members per row to
+    /// match the per-channel response shape). `#[serde(default)]` keeps
+    /// the field absent-tolerant for forward-compat with pre-#316
+    /// servers, which omitted `members` on list rows entirely — see
+    /// `channel_view_deserializes_list_row_without_members` below.
     #[serde(default)]
     pub(crate) members: Vec<ChannelMember>,
 }
@@ -109,9 +114,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn channel_view_deserializes_list_row() {
-        // GET /api/v1/channels returns rows with no members; matches
-        // internal/server/channel_handlers.go::handleListChannels.
+    fn channel_view_deserializes_list_row_without_members() {
+        // GET /api/v1/channels populates `members` per row as of PR #316;
+        // this test pins the forward-compat path when `members` is
+        // *absent* on the wire — e.g. a pre-#316 server, or a future
+        // endpoint that elides the field. `#[serde(default)]` on
+        // `ChannelView::members` supplies the empty `Vec` rather than
+        // failing deserialization. The "members present" path is
+        // exercised by `channel_view_deserializes_with_members` below.
         let json = serde_json::json!({
             "id": "group:planning",
             "name": "planning",
@@ -122,7 +132,10 @@ mod tests {
         let row: ChannelView = serde_json::from_value(json).unwrap();
         assert_eq!(row.id, "group:planning");
         assert_eq!(row.channel_type, "group");
-        assert!(row.members.is_empty(), "list rows omit members");
+        assert!(
+            row.members.is_empty(),
+            "absent `members` deserializes to empty Vec via serde default",
+        );
     }
 
     #[test]

@@ -324,6 +324,43 @@ func TestChannels_ListChannels(t *testing.T) {
 	assert.Len(t, resp.Channels, 2)
 }
 
+// TestChannels_ListChannels_PopulatesMembers pins that the list endpoint
+// returns each channel's members alongside the channel itself, matching
+// the contract that GET /api/v1/channels/{id} also satisfies. Discovered
+// during v0.3.0 demo dogfooding: docs/guides/v0.3.0-demo.md §3 instructs
+// operators to verify "the group:planning channel with three members" via
+// `persatrix channel list`, but the handler was passing nil members to
+// channelToResponse and rendering an empty array.
+func TestChannels_ListChannels_PopulatesMembers(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	body, _ := json.Marshal(createChannelRequest{
+		Name: "planning",
+		Members: []channelMemberRequest{
+			{ID: "ember-owl", Respond: "when_mentioned"},
+			{ID: "iron-fox", Respond: "always"},
+			{ID: "nova-sparrow", Respond: "always"},
+		},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", body).Code)
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp listChannelsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Channels, 1)
+
+	got := resp.Channels[0]
+	require.Len(t, got.Members, 3, "list endpoint must return all members")
+	policies := map[string]string{}
+	for _, m := range got.Members {
+		policies[m.ID] = m.RespondPolicy
+	}
+	assert.Equal(t, "when_mentioned", policies["ember-owl"])
+	assert.Equal(t, "always", policies["iron-fox"])
+	assert.Equal(t, "always", policies["nova-sparrow"])
+}
+
 // ─── DELETE endpoints (RFC 0011 PR 4b) ─────────────────────────────────
 
 // TestChannels_DeleteChannel_CascadesMembershipsAndMessages pins the

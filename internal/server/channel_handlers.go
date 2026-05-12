@@ -174,8 +174,19 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		nextCursor = chs[len(chs)-1].ID
 	}
 	out := make([]channelResponse, 0, len(chs))
+	// PR #316 deep-review A-3a: N+1 (1 ListChannels + N GetMembers), bounded
+	// by channels.DefaultMaxChannels=50. If that cap ever rises, replace this
+	// loop with a batched `ListChannelsWithMembers` store helper before
+	// merging the raise — the trade-off only holds while the cap is small.
 	for _, c := range chs {
-		out = append(out, channelToResponse(c, nil))
+		members, mErr := s.channelStore.GetMembers(r.Context(), c.ID)
+		if mErr != nil {
+			s.logger.Error("channels: list members fetch failed",
+				zap.String("channel_id", c.ID), zap.Error(mErr))
+			writeError(w, "INTERNAL", "failed to load channel members", http.StatusInternalServerError)
+			return
+		}
+		out = append(out, channelToResponse(c, members))
 	}
 	writeJSON(w, listChannelsResponse{Channels: out, NextCursor: nextCursor}, http.StatusOK)
 }

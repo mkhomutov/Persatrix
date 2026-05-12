@@ -251,7 +251,14 @@ class TestTickScheduler:
         agent.on_tick = _many_actions_tick  # type: ignore[assignment]
 
         class CountingExecutor:
-            async def execute(self, agent_id, actions):
+            async def execute(self, agent_id, actions, *, cascade_depth=0):
+                # ``cascade_depth`` accepted (and ignored) so the
+                # scheduler's explicit
+                # ``cascade_depth=DEFAULT_MAX_CASCADE_DEPTH`` kwarg
+                # does not raise ``TypeError`` here. The depth-on-the-
+                # wire contract is pinned by
+                # ``test_tick_cascade_depth_default.py``; this test
+                # only counts actions.
                 nonlocal executed_count
                 executed_count += len(actions)
                 return [{"status": "ok"} for _ in actions]

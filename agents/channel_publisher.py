@@ -16,6 +16,7 @@ import aiohttp
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .observability.spans import CHANNEL_PUBLISH_SPAN
 
 logger = logging.getLogger(__name__)
@@ -91,15 +92,21 @@ class ChannelPublisher(Protocol):
         sender_id: str,
         content: str,
         mentions: list[str],
-        cascade_depth: int = 0,
+        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
     ) -> None:
         """Publish a message; raises on transport / HTTP failures.
 
         ``cascade_depth`` carries the cooperative-path cascade hop count
         through the REST publish boundary (RFC 0011 amendment
-        "Cascade-depth wire propagation"). Default is ``0`` so non-cascade
-        call sites (chat surface, on-startup catch-up, tick-originated
-        publishes) remain unchanged.
+        "Cascade-depth wire propagation"). Default is
+        :data:`DEFAULT_MAX_CASCADE_DEPTH` so a call site that omits the
+        kwarg (notably the tick scheduler, which has no inbound event
+        to derive depth from) gets the orchestrator's
+        ``cascade_depth >= max_cascade_depth`` terminate-at-clamp
+        behaviour. Callers that legitimately mark a publish as
+        chain-origin (chat surface, dispatcher's first hop) pass
+        ``cascade_depth=0`` explicitly. See the contract pin in
+        :mod:`tests.unit.python.test_tick_cascade_depth_default`.
         """
         ...
 
@@ -149,7 +156,7 @@ class HTTPChannelPublisher:
         sender_id: str,
         content: str,
         mentions: list[str],
-        cascade_depth: int = 0,
+        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
     ) -> None:
         """POST a single channel message; raise on transport / non-2xx.
 
