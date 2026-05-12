@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-12
-> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — 🚧 Release prep
-> **Current milestone**: release-prep PR 3 + PR 4 bundled as [#328](https://github.com/mkhomutov/Persatrix/pull/328) — version bump to `0.3.0` (`agents/pyproject.toml` + `cli/Cargo.toml` + `cli/Cargo.lock` + two Python OTEL `service.version` constants), curated `[0.3.0]` CHANGELOG section regenerated via `git cliff` (Highlights + 12-row Upgrade Notes hand-curated; PR-list body produced by the tool to match the v0.2.x precedent), and final pre-tag verification (`make validate / lint / test / proto / sanitizer parity` green; Docker smoke test covering channels publish-and-await + chat-as-DM + Jaeger trace tree + Prometheus exemplar + rate-limit 429 + audit chain; MT-MEMORY-005 baseline rerun with canonical 11-min idle gaps — Leg 1 improvement vs PR 1, 3 ✓ / 2 ✗ overall). Three in-tree regression fixes bundled (`THIRD_PARTY_NOTICES.md` regen, `pytest-timeout` license exception, `.gitattributes` `eol=lf` pins for `agents/generated/**` + `internal/generated/**` + `Path.write_text(newline='\n')` on the inline `_pb2_grpc.py` rewrite). After #328 merges, tag procedure per [release-checklist §5](docs/v0.3.0-release-checklist.md#5-tag-and-github-release-procedure) fires. Earlier release-prep milestones: PR 0 plan + RFC 0008 OQ #12 calibration-window walk-back ([#312](https://github.com/mkhomutov/Persatrix/pull/312)); PR 1 manual-test execution report ([#314](https://github.com/mkhomutov/Persatrix/pull/314), 26 ✅ + 1 ⚠️ + 1 🔵 Baseline); PR 2 README + ROADMAP + guide callouts + diagram refresh + release checklist ([#315](https://github.com/mkhomutov/Persatrix/pull/315)).
+> **Last updated**: 2026-05-12 (v0.3.0 released — post-release document update: ROADMAP v0.3.0 section flipped to Complete, Version Map row flipped to Released, prep-plan PRs 0/1/2/3/4 marked merged, release checklist finalised, test-findings PR plan closed, v0.3.0-plan Phase 4/5 closed, manual-tests README Execution Reports table refreshed)
+> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
+> **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -19,7 +19,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.1** | Talk to a persona agent from your terminal — the agent remembers you and responds in character | ✅ Complete — released |
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
 | **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | ✅ Complete — released |
-| **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | 🚧 Release prep |
+| **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Complete — released |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
@@ -425,7 +425,7 @@ v0.2.2 complete
 
 ---
 
-## v0.3.0 — Agent Conversations
+## v0.3.0 — Agent Conversations ✅ Complete
 
 **What a user can do**: Give agents a shared channel and watch them talk, negotiate, and form opinions about each other over time.
 
@@ -923,6 +923,7 @@ v0.5.0 complete
 | [#325](https://github.com/mkhomutov/Persatrix/pull/325) | docs(rfcs): RFC 0031 — per-session namespacing for channels + persona memory | 0031 (RFC) | 2026-05-12 |
 | [#326](https://github.com/mkhomutov/Persatrix/pull/326) | docs(rfcs): YAML front-matter + auto-generated INDEX.md | cross-RFC docs | 2026-05-12 |
 | [#327](https://github.com/mkhomutov/Persatrix/pull/327) | feat(persona): reply-discretion + conversational-pacing prompt snippets | cross-RFC persona | 2026-05-12 |
+| [#328](https://github.com/mkhomutov/Persatrix/pull/328) | chore(release): v0.3.0 — version bump + curated changelog + PR 4 pre-tag verification | v0.3.0 release prep | 2026-05-12 |
 
 ---
 
