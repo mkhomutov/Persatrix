@@ -1,3 +1,16 @@
+---
+id: RFC-0022
+title: Persona Prompt Section Templating
+summary: Section-by-section templating layer for persona prompts — moves prompt assembly out of code into per-persona YAML.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-26
+target: v0.3.0
+depends_on:
+  - RFC-0005
+---
+
 # RFC 0022 — Persona Prompt Section Templating
 
 **Type**: architecture  

@@ -1,3 +1,18 @@
+---
+id: RFC-0029
+title: Personal/Society Storage Split
+summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phases 2–4 (Postgres society store, migration) in v0.4.0.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-10
+target: Phase 1 v0.3.x (facade + tier rename); Phases 2–4 v0.4.0
+depends_on:
+  - RFC-0005
+  - RFC-0008
+  - RFC-0011
+---
+
 # RFC 0029 — Personal/Society Storage Split
 
 > **Numbering note (2026-05-10).** This RFC was originally filed as RFC 0025 (PR #309). The 0025 slot is reserved as `superseded by RFC 0027` (per [docs/rfcs/README.md §Reserved RFC Numbers](README.md#reserved-rfc-numbers) and [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index) — RFC 0027 explicitly says "supersedes the user's draft RFC 0025"). Reusing slot 0025 for an unrelated topic would invalidate that supersession edge and the README's "slot retained for historical record" semantic, so this RFC was renumbered to the next free slot. Slots 0023 (narrowed) and 0024 (deferred) had no superseding RFC pointing at them and so were not renumbered when their files landed under different topics — only 0025 had an active supersession breadcrumb that this rename preserves. (The reasoning was first recorded in the PR #309 deep-review process; review reports themselves live under `docs/pr-reviews/`, which is `.gitignore`'d per repo convention, so this note is the canonical record.)

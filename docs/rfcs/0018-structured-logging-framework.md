@@ -1,3 +1,14 @@
+---
+id: RFC-0018
+title: Structured Logging Framework
+summary: Cross-language structured logging schema (Go/Python/Rust) with shared redaction hooks — paired with RFC 0019 OTEL completion in v0.2.3.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-21
+target: v0.2.3
+---
+
 # RFC 0018 — Structured Logging Framework
 
 **Type**: architecture

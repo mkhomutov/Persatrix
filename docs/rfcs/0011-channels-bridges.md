@@ -1,3 +1,20 @@
+---
+id: RFC-0011
+title: Channels & Internal Agent Messaging
+summary: Named, persistent group/DM/thread channels for agent-to-agent and chat-as-DM messaging — internal channels in v0.3.0; external bridges deferred to v0.5.0.
+type: feature
+status: partially_implemented
+author: Maksim Khomutov
+created: 2026-04-25
+target: v0.3.0 (internal channels) + v0.5.0 (external bridges)
+depends_on:
+  - RFC-0005
+  - RFC-0008
+  - RFC-0009
+  - RFC-0016
+  - RFC-0020
+---
+
 # RFC 0011 — Channels & Internal Agent Messaging
 
 **Type**: feature  

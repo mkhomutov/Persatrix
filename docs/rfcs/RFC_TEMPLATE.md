@@ -1,3 +1,29 @@
+---
+# Allowed values are documented in README.md. The YAML front-matter is the
+# source of truth read by `scripts/rfcs.py` to regenerate INDEX.md — keep
+# it in sync with the bold-markdown header below (which is what GitHub
+# renders for human readers).
+id: RFC-NNNN
+title: "[Title]"
+# summary: one-line description, surfaced by grep / future INDEX columns
+summary: ""
+# type: feature | architecture | protocol | process
+type: feature
+# status: draft | proposed | accepted | implementing | implemented |
+#         partially_implemented | rejected | deferred | stable | superseded
+status: proposed
+author: Maksim Khomutov
+# created: YYYY-MM-DD when this RFC was first drafted (validated)
+created: YYYY-MM-DD
+# target: development phase or timeline, free-form (e.g. "v0.2", "v0.4.0")
+target: ""
+# depends_on: zero or more RFC ids this RFC requires. Documentary only.
+# depends_on:
+#   - RFC-NNNN
+# superseded_by: single RFC id that replaces this one, or omit
+# superseded_by: RFC-NNNN
+---
+
 # RFC NNNN — [Title]
 
 **Type**: feature | architecture | protocol | process  

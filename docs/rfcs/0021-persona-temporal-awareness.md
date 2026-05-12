@@ -1,3 +1,18 @@
+---
+id: RFC-0021
+title: Persona Temporal Awareness
+summary: Gives personas a now-anchor in the system prompt and temporal-prefix rendering on recall — Phase 1 in v0.3.0; Phases 2–4 (commitments, REMINDER, duration calibration) in v0.4.0.
+type: architecture
+status: partially_implemented
+author: Maksim Khomutov
+created: 2026-04-25
+target: v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4)
+depends_on:
+  - RFC-0005
+  - RFC-0017
+  - RFC-0020
+---
+
 # RFC 0021 — Persona Temporal Awareness
 
 **Type**: architecture

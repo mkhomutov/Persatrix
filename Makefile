@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -257,8 +257,15 @@ clean: ## Remove build artifacts
 issues: ## Regenerate docs/issues/INDEX.md from per-issue front-matter
 	$(PYTHON) scripts/issues.py --print
 
-issues-check: ## Fail if INDEX.md is stale or front-matter is invalid (CI)
+issues-check: ## Fail if docs/issues/INDEX.md is stale or front-matter is invalid (CI)
 	$(PYTHON) scripts/issues.py --check
+
+# ─── RFCs ───────────────────────────────────────────────
+rfcs: ## Regenerate docs/rfcs/INDEX.md from per-RFC YAML front-matter
+	$(PYTHON) scripts/rfcs.py --print
+
+rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale or front-matter is invalid (CI)
+	$(PYTHON) scripts/rfcs.py --check
 
 # ─── Version ────────────────────────────────────────────
 bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])

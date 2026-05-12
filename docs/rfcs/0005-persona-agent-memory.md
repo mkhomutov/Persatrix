@@ -1,3 +1,18 @@
+---
+id: RFC-0005
+title: Persona Agent & Memory System
+summary: Introduces the persona agent type and per-persona memory substrate (episodic interactions, relationships) that all higher-level memory RFCs build on.
+type: feature
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-11
+target: v0.2
+depends_on:
+  - RFC-0001
+  - RFC-0003
+  - RFC-0004
+---
+
 # RFC 0005 — Persona Agent & Memory System
 
 **Type**: feature  

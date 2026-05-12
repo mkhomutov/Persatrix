@@ -111,5 +111,6 @@ Before and after every task, verify consistency across RFC files, PR plans, and 
 - Glossary: `docs/ai-glossary.md`
 - Development lifecycle: `docs/development-workflow.md`
 - Branching: `docs/BRANCHING.md`
-- RFC process: `docs/rfcs/README.md`
+- RFC process: `docs/rfcs/README.md`; live RFC list: [`docs/rfcs/INDEX.md`](../docs/rfcs/INDEX.md) (`make rfcs`)
+- Issue tracker: `docs/issues/README.md`; live issue list: [`docs/issues/INDEX.md`](../docs/issues/INDEX.md) (`make issues`)
 - Specs: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`

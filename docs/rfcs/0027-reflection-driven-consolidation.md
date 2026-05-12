@@ -1,3 +1,20 @@
+---
+id: RFC-0027
+title: Reflection-Driven Consolidation
+summary: Periodic LLM-driven reflection that consolidates raw episodic turns into themed summaries — replaces the previously-scoped thematic episode clustering (RFC 0025, superseded).
+type: feature
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-01
+target: v0.4.0
+depends_on:
+  - RFC-0005
+  - RFC-0008
+  - RFC-0009
+  - RFC-0013
+  - RFC-0026
+---
+
 # RFC 0027 — Reflection-Driven Consolidation
 
 **Type**: feature

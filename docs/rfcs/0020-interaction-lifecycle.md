@@ -1,3 +1,17 @@
+---
+id: RFC-0020
+title: "Interaction Lifecycle: Dialogue Boundaries and Episode Granularity"
+summary: Defines explicit interaction start/close boundaries and the InteractionTracker — gives every memory write a stable episode scope and turn ordering.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-25
+target: v0.3.0
+depends_on:
+  - RFC-0005
+  - RFC-0017
+---
+
 # RFC 0020 — Interaction Lifecycle: Dialogue Boundaries and Episode Granularity
 
 **Type**: architecture

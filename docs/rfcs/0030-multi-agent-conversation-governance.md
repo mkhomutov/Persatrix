@@ -1,3 +1,17 @@
+---
+id: RFC-0030
+title: Multi-Agent Conversation Governance
+summary: Deterministic anti-thrash governance for multi-persona channel conversations — Phase 1 cascade depth/quiet windows in v0.3.x, moderator role in v0.4.0, declarative conversation types in v0.5.0+.
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-11
+target: v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3)
+depends_on:
+  - RFC-0011
+  - RFC-0020
+---
+
 # RFC 0030 — Multi-Agent Conversation Governance
 
 **Type**: architecture

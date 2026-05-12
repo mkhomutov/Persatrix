@@ -1,3 +1,17 @@
+---
+id: RFC-0008
+title: Agent Memory and Context Optimization
+summary: Memory for all agent types, context budget as a scheduler primitive, eviction/decay, and the delegation merge contract — the v0.3.0 memory backbone.
+type: architecture
+status: implemented
+author: Maksim Khomutov
+created: 2026-04-15
+target: v0.3.0
+depends_on:
+  - RFC-0005
+  - RFC-0006
+---
+
 # RFC 0008 — Agent Memory and Context Optimization
 
 **Type**: architecture  

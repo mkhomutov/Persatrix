@@ -1,3 +1,17 @@
+---
+id: RFC-0031
+title: Per-Session Namespacing for Channels and Persona Memory
+summary: First-class Session scope under which channels are created and persona-memory rows are tagged — root-cause fix for v0.3.0 F-3 cross-run state bleed (currently mitigated by `make reset`).
+type: architecture
+status: proposed
+author: Maksim Khomutov
+created: 2026-05-12
+target: v0.3.x
+depends_on:
+  - RFC-0011
+  - RFC-0020
+---
+
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
