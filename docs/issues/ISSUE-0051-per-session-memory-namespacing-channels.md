@@ -9,6 +9,7 @@ refs:
   - docs/v0.3.0-test-findings-pr-plan.md
   - docs/guides/channels.md
   - docs/guides/persona-agents.md
+  - docs/rfcs/0031-per-session-namespacing-channels.md
 ---
 
 ## Summary
@@ -76,3 +77,10 @@ Open questions:
 > 2026-05-12 — captured during PR 6 of the v0.3.0 channel test-findings
 > plan. `make reset` is in place as the operator workaround; this
 > issue tracks the root-cause fix.
+>
+> 2026-05-12 — design proposed as [RFC 0031 — Per-Session Namespacing for
+> Channels and Persona Memory](../rfcs/0031-per-session-namespacing-channels.md).
+> The RFC bakes in the implicit-scoping + operator-visible CLI direction
+> and surfaces the dementia-test continuity tension (RFC OQ 1) as the
+> load-bearing prerequisite before any implementation PR opens. This
+> issue stays `open` until the RFC reaches `✅ Implemented`.
