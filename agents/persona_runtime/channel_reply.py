@@ -27,8 +27,18 @@ inbound channel. It is called once per turn, immediately after
   ``SendChatMessage`` path (cleanup tracked in ISSUE-0035).
 * Action lists that already contain a ``SEND_CHANNEL_MESSAGE`` for the
   inbound channel — a well-prompted agent must not be double-published.
-* COMPLETE_TASK actions whose ``result`` is empty or whitespace-only —
-  publishing a blank reply is worse than 504ing.
+* COMPLETE_TASK actions whose ``result`` is empty or whitespace-only,
+  **on group channels** — silence is a valid turn outcome under the
+  ``reply-discretion`` safety snippet; stamping a blank publish over a
+  deliberate silence would defeat the affordance.
+
+On **DM channels** the empty-reply case is not a no-op: the response
+gate (``response_gate.py``) forces ``always`` on DMs and the
+orchestrator's ``replyWaiter`` 504s if no publish arrives, so this
+helper synthesises a minimal ellipsis placeholder to close the
+round-trip. The ``reply-discretion`` snippet tells the persona this
+directly; the fallback exists for the case where the LLM ignores the
+guidance.
 
 The synthesised action mentions the inbound ``sender_id`` so the
 priority-1 chat-reply extraction in :mod:`agents.chat_reply` (legacy
@@ -43,6 +53,26 @@ from __future__ import annotations
 from ..persona_types import ActionType, AgentAction, AgentEvent, EventType
 
 __all__ = ["synthesize_channel_reply"]
+
+
+# DM channels enforce a "must reply" invariant (RFC 0011 §D,
+# ``response_gate.py`` ``dm`` branch): a DM with no reply 504s the
+# chat-as-DM REST round-trip on ``chatDefaultTimeout``. The
+# ``reply-discretion`` prompt snippet tells the persona this directly,
+# but when the LLM still produces no usable reply text — typically the
+# model failed to follow the prompt — this fallback closes the loop
+# with a minimal placeholder rather than leaving the user staring at a
+# spinner. An ellipsis is unambiguous in audit logs and naturalistic
+# as a "I have nothing to add" signal; the root cause (model not
+# following the discretion guidance) is the right place to fix it, not
+# this backstop.
+_DM_EMPTY_REPLY_FALLBACK: str = "…"
+
+# DM channels are identified by the ``dm:`` channel-id prefix — same
+# convention used by ``response_gate.py`` (see ``_DM_CHANNEL_PREFIX``).
+# Keeping the prefix literal here rather than importing avoids a
+# circular dependency between this module and the gate.
+_DM_CHANNEL_PREFIX: str = "dm:"
 
 
 def synthesize_channel_reply(
@@ -87,7 +117,18 @@ def synthesize_channel_reply(
             break
 
     if not reply_text:
-        return actions
+        # Group channels: silence is a valid turn outcome — see the
+        # ``reply-discretion`` safety snippet. Preserve the no-op path
+        # so a persona that deliberately declined does not get its
+        # silence stamped over with a publish.
+        #
+        # DM channels: silence is broken by construction (the
+        # response gate forces ``always`` on DMs, and the orchestrator's
+        # ``replyWaiter`` 504s if no publish arrives). Synthesize a
+        # minimal placeholder so the round-trip closes cleanly.
+        if not channel_id.startswith(_DM_CHANNEL_PREFIX):
+            return actions
+        reply_text = _DM_EMPTY_REPLY_FALLBACK
 
     mentions = [event.sender_id] if event.sender_id else []
     synthesized = AgentAction(

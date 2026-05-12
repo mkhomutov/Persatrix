@@ -148,12 +148,14 @@ class TestSynthesizeChannelReply:
         assert len(dm_replies) == 1
         assert dm_replies[0].payload["content"] == "Got it, Alice."
 
-    def test_empty_result_is_not_synthesized(self):
-        """An empty/whitespace COMPLETE_TASK result is not a reply —
-        synthesising it would publish a blank message that the user
-        sees as a 200 OK with empty body, which is worse than the 504.
+    def test_empty_result_on_group_channel_is_not_synthesized(self):
+        """An empty/whitespace COMPLETE_TASK on a *group* channel is a
+        valid silent turn — the reply-discretion prompt snippet
+        explicitly tells the persona it may stay silent on groups when
+        it has nothing to add. Synthesising a blank publish would
+        defeat that affordance.
         """
-        event = _channel_message_event()
+        event = _channel_message_event(channel_id="group:planning")
         actions = [
             AgentAction(
                 action_type=ActionType.COMPLETE_TASK,
@@ -167,6 +169,57 @@ class TestSynthesizeChannelReply:
         assert all(
             a.action_type is not ActionType.SEND_CHANNEL_MESSAGE for a in result
         )
+
+    def test_empty_result_on_dm_falls_back_to_minimal_reply(self):
+        """On a DM channel, the response-gate invariant is that a DM
+        with no reply is broken by construction
+        (``response_gate.py``: ``dm`` branch unconditionally admits).
+        When the LLM still produces no usable reply text — typically
+        the model failed to follow the reply-discretion guidance — the
+        synthesiser falls back to a minimal placeholder so the
+        chat-as-DM REST round-trip closes cleanly rather than 504ing
+        on ``chatDefaultTimeout``.
+
+        The placeholder is an ellipsis (``…``): unambiguous in audit
+        logs, naturalistic as a "I have nothing to add" signal, and
+        narrow enough that the model is the right place to fix the
+        root cause rather than this fallback.
+        """
+        event = _channel_message_event(channel_id="dm:alice:ember-owl")
+        actions = [
+            AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": "   \n  "},
+            ),
+        ]
+
+        result = synthesize_channel_reply(event, actions, agent_id="ember-owl")
+
+        send_actions = [
+            a for a in result if a.action_type is ActionType.SEND_CHANNEL_MESSAGE
+        ]
+        assert len(send_actions) == 1
+        synthesized = send_actions[0]
+        assert synthesized.payload["channel_id"] == "dm:alice:ember-owl"
+        assert synthesized.payload["content"] == "…"
+        assert synthesized.payload["mentions"] == ["alice"]
+
+    def test_missing_result_on_dm_also_falls_back(self):
+        """The fallback also fires when there is no COMPLETE_TASK
+        candidate at all — for example when the LLM returned tool calls
+        but no end-turn text. The DM-must-reply invariant does not
+        depend on the *shape* of the missing reply.
+        """
+        event = _channel_message_event(channel_id="dm:alice:ember-owl")
+        actions: list[AgentAction] = []
+
+        result = synthesize_channel_reply(event, actions, agent_id="ember-owl")
+
+        send_actions = [
+            a for a in result if a.action_type is ActionType.SEND_CHANNEL_MESSAGE
+        ]
+        assert len(send_actions) == 1
+        assert send_actions[0].payload["content"] == "…"
 
     def test_non_channel_event_is_passthrough(self):
         """TICK / TASK_ASSIGNED / etc. never produce channel replies —
