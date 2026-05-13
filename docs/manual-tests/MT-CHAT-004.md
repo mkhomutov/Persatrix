@@ -120,7 +120,7 @@ entries, record the baseline interaction count for comparison in later steps.
 
 ### Step 2: Send 5 Chat Messages
 
-**Action**: Send 5 messages to the agent with the test user. Capture the `session_id` from the
+**Action**: Send 5 messages to the agent with the test user. Capture the `chat_session_id` from the
 first response and reuse it:
 
 ```bash
@@ -129,13 +129,13 @@ RESP=$(curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello! I am starting a new project today.", "user_id": "mt-chat-004-user"}')
 echo "$RESP"
-SESSION_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])")
+CHAT_SESSION_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['chat_session_id'])")
 
 # Messages 2–5
 for i in 2 3 4 5; do
   curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
     -H "Content-Type: application/json" \
-    -d "{\"message\": \"This is test message number $i for the relationship memory test.\", \"user_id\": \"mt-chat-004-user\", \"session_id\": \"$SESSION_ID\"}"
+    -d "{\"message\": \"This is test message number $i for the relationship memory test.\", \"user_id\": \"mt-chat-004-user\", \"chat_session_id\": \"$CHAT_SESSION_ID\"}"
   echo ""
 done
 ```

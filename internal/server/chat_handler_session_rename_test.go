@@ -12,6 +12,11 @@ import (
 // legacy `"session_id"` JSON key (pre-RFC-0031-OQ-8 rename) fails loud
 // at 400 via `decodeJSON`'s `DisallowUnknownFields`. Operators see a
 // clear error rather than a silently-rebound fresh session id.
+//
+// Pins three layers — HTTP status, error-message substring, AND the
+// machine-readable `errorResponse.Code` envelope — so a regression that
+// flips the status code while keeping the substring (or vice versa)
+// still fails the test. (PR #333 review fix: finding L2.)
 func TestHandleChat_LegacySessionIDJSONKeyRejected(t *testing.T) {
 	srv, reg, _, _ := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
@@ -20,6 +25,10 @@ func TestHandleChat_LegacySessionIDJSONKeyRejected(t *testing.T) {
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	assert.Equal(t, 400, rec.Code, "body=%s", rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
+
+	var env errorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "BAD_REQUEST", env.Code, "error envelope code must be machine-readable BAD_REQUEST, not just a free-text message")
 }
 
 // TestHandleChat_ChatSessionIDJSONTagOnResponse pins the wire-name on

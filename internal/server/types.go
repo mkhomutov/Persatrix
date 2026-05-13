@@ -56,9 +56,12 @@ type errorResponse struct {
 //
 // `chat_session_id` (RFC 0016 chat-conversation token) was renamed from
 // `session_id` in v0.3.1 to disambiguate from RFC 0031's operator-
-// namespace `session_id`. JSON consumers sending the legacy `session_id`
-// key are unmarshalled to the zero value, which the handler treats as
-// "mint a new session" — see CHANGELOG `[0.3.1]` Upgrade Notes.
+// namespace `session_id`. JSON callers sending the legacy `session_id`
+// key receive `400 BAD_REQUEST "invalid or malformed JSON body"` —
+// `decodeJSON` in `helpers.go` enables `DisallowUnknownFields`, so the
+// rename fails loud rather than degrading to a silent fresh-session
+// mint. See CHANGELOG `[0.3.1]` Upgrade Notes and the regression test
+// `TestHandleChat_LegacySessionIDJSONKeyRejected`.
 type chatRequest struct {
 	Message         string `json:"message"`
 	UserID          string `json:"user_id"`

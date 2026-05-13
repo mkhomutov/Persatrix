@@ -448,10 +448,13 @@ class TestLegacyChatSessionIdJSONKey:
     def test_chat_request_legacy_session_id_silently_dropped_when_ignored(self):
         # Operators (or out-of-tree gateways) who explicitly opt in to
         # ``ignore_unknown_fields=True`` get a successful parse with
-        # ``chat_session_id`` left at its zero value — same shape the
-        # Go REST handler observes via ``encoding/json`` (which ignores
-        # unknown keys by default). The server then mints a fresh chat
-        # session id rather than reusing the legacy-keyed value.
+        # ``chat_session_id`` left at its zero value, so the agent mints
+        # a fresh chat session id rather than reusing the legacy-keyed
+        # value. This is an opt-in degradation path for permissive
+        # gateways only — the in-tree Go REST handler does **not** take
+        # this path: ``decodeJSON`` runs with ``DisallowUnknownFields``
+        # and rejects the legacy key with HTTP 400 (pinned by
+        # ``TestHandleChat_LegacySessionIDJSONKeyRejected``).
         req = json_format.Parse(
             '{"agent_id":"a","user_id":"u","message":"m",'
             '"session_id":"legacy"}',

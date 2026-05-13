@@ -120,13 +120,13 @@ You:
 You: Can you summarize what we just talked about?
 ```
 
-**Expected Result**: The agent replies. Internally, the same `session_id` from the first response
-is sent in this request (verifiable via orchestrator logs if needed).
+**Expected Result**: The agent replies. Internally, the same `chat_session_id` from the first
+response is sent in this request (verifiable via orchestrator logs if needed).
 
 **Verification**:
 - [ ] Reply is displayed with agent display name
 - [ ] No error about session or connection
-- [ ] (Optional) Orchestrator logs show the same `session_id` for both requests
+- [ ] (Optional) Orchestrator logs show the same `chat_session_id` for both requests
 
 ---
 

@@ -115,7 +115,7 @@ both participants as members
 $body = '{"message":"hi from MT-005","user_id":"alice","participant_type":"human"}'
 $resp = Invoke-RestMethod -Uri http://127.0.0.1:8080/api/v1/agents/ember-owl/chat `
     -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 60
-$resp | Select-Object reply_status, agent_id, session_id | Format-Table
+$resp | Select-Object reply_status, agent_id, chat_session_id | Format-Table
 ```
 
 **Expected**:
