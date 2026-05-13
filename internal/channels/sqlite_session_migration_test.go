@@ -150,6 +150,60 @@ func TestSQLiteStore_SchemaV3_Migration_Idempotent(t *testing.T) {
 	})
 }
 
+// TestSQLiteStore_SchemaV3_Reopen_DoesNotResurrectDroppedV2Index pins the
+// PR #335 review M1 regression. Before the fix, `applySchema` ran
+// `schemaV1SQL` unconditionally on every open. That string contains
+// `CREATE INDEX IF NOT EXISTS idx_messages_channel_ts`; `IF NOT EXISTS`
+// checks by *name*, and `migrateV2ToV3` drops that index by name. So on
+// every reopen of a v3 database, the index name was free, the create
+// statement ran, and the dropped index came back. Because user_version
+// was already 3 the migration loop was a no-op and the drop never re-ran
+// — the database silently ended up carrying both the v3 covering index
+// AND the v2 chronological index after every restart, defeating the
+// migration's stated design intent (single covering index — see
+// `migrateV2ToV3` header) and adding per-INSERT / per-DELETE write
+// amplification in perpetuity. The sibling test
+// `TestSQLiteStore_SchemaV3_Migration_Idempotent` above pinned
+// `user_version` stability across reopen but not the index set — the gap
+// that let this slip past two prior review passes. This test closes that
+// gap with explicit positive and negative assertions so any future
+// regression of the same shape (a later migration drops something
+// `schemaV1SQL` creates) surfaces as a labelled failure rather than a
+// generic set-equality mismatch buried in a diff.
+func TestSQLiteStore_SchemaV3_Reopen_DoesNotResurrectDroppedV2Index(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+
+	store1, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	require.NoError(t, store1.Close())
+
+	var firstOpenIdx []string
+	withDB(t, path, func(db *sql.DB) {
+		firstOpenIdx = tableIndexes(t, db, "messages")
+	})
+	require.NotContains(t, firstOpenIdx, "idx_messages_channel_ts",
+		"precondition: v2 chronological index already dropped after first open")
+
+	store2, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store2.Close() })
+
+	var secondOpenIdx []string
+	withDB(t, path, func(db *sql.DB) {
+		secondOpenIdx = tableIndexes(t, db, "messages")
+	})
+
+	assert.ElementsMatch(t, firstOpenIdx, secondOpenIdx,
+		"messages index set must not drift across reopens — first=%v second=%v",
+		firstOpenIdx, secondOpenIdx)
+	assert.NotContains(t, secondOpenIdx, "idx_messages_channel_ts",
+		"v2 chronological index (dropped by v2→v3) must not be resurrected by schemaV1SQL on reopen")
+	assert.Contains(t, secondOpenIdx, "idx_messages_channel_session",
+		"v3 covering index must survive reopen")
+	assert.Contains(t, secondOpenIdx, "idx_messages_thread",
+		"thread index must survive reopen")
+}
+
 // TestSQLiteStore_SchemaV3_GetHistory_UsesCoveringIndex pins the v3 query
 // plan for the channel-history hot path. PR #335 review M1 deferred the
 // EXPLAIN regression as a follow-up: the v2→v3 migration drops

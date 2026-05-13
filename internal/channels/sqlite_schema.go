@@ -95,16 +95,28 @@ CREATE INDEX IF NOT EXISTS idx_messages_thread     ON messages(thread_id) WHERE 
 // commit (or roll back) atomically. The two
 // `Test{V1ToV2,V2ToV3}_StampsUserVersionInTransaction` tests pin the
 // property at the single-step boundary so a future regression surfaces.
+//
+// PR #335 review M1: `schemaV1SQL` is applied only when `user_version`
+// is 0 — i.e. on a truly uninitialised database (or a PR #231-era v1 DB
+// that pre-dates version stamping; the `IF NOT EXISTS` guards inside
+// `schemaV1SQL` keep that case idempotent). Earlier shapes ran the v1
+// baseline unconditionally and relied on `IF NOT EXISTS` to make it a
+// no-op. That assumption broke once a later migration dropped something
+// `schemaV1SQL` creates: `IF NOT EXISTS` checks by *name*, so a dropped
+// index (e.g. `idx_messages_channel_ts`, replaced by v2→v3) is silently
+// resurrected on the next open — the database ends up carrying both the
+// dropped index and its replacement, in perpetuity, with per-INSERT /
+// per-DELETE write amplification. Gating on `current == 0` removes the
+// whole class. The
+// `TestSQLiteStore_SchemaV3_Reopen_DoesNotResurrectDroppedV2Index` test
+// pins the property — extension of the existing
+// `..._Migration_Idempotent` test which only checked `user_version`
+// stability, not the index set.
 func applySchema(db *sql.DB) error {
-	// Apply the v1 baseline first — `IF NOT EXISTS` guards make this a
-	// no-op for existing databases, while a fresh database lands at v1
-	// before the migration loop below stamps user_version.
-	if _, err := db.Exec(schemaV1SQL); err != nil {
-		return fmt.Errorf("channels: apply schema: %w", err)
-	}
 	// Defensive PRAGMA — DSN sets it, but a future caller wiring a
 	// pre-existing *sql.DB through a yet-to-be-added constructor should
-	// still see foreign keys enforced.
+	// still see foreign keys enforced. Applied first so it covers the
+	// v1-baseline path as well as the migration loop.
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
 		return fmt.Errorf("channels: enable foreign_keys: %w", err)
 	}
@@ -113,9 +125,15 @@ func applySchema(db *sql.DB) error {
 	if err := db.QueryRow(`PRAGMA user_version;`).Scan(&current); err != nil {
 		return fmt.Errorf("channels: read user_version: %w", err)
 	}
-	// First-time CREATE on a fresh database: PRAGMA reports 0; treat that
-	// as v1 (the baseline we just applied) so the v1→v2 step runs once.
+	// Apply the v1 baseline only on first-time CREATE: PRAGMA reports 0
+	// on a fresh database (or a PR #231-era v1 DB that pre-dates
+	// stamping). Skipping it for already-stamped databases is what
+	// closes M1 — see header for the index-resurrection hazard.
 	if current == 0 {
+		if _, err := db.Exec(schemaV1SQL); err != nil {
+			return fmt.Errorf("channels: apply schema: %w", err)
+		}
+		// Treat as v1 so the v1→v2 step runs once.
 		current = 1
 	}
 	if current > channelStoreSchemaVersion {
