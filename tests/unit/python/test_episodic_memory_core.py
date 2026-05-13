@@ -69,7 +69,7 @@ class TestMigrations:
         db = memory._ensure_db()
         async with db.execute("SELECT version, description FROM schema_version ORDER BY version") as cursor:
             rows = await cursor.fetchall()
-        assert len(rows) == 6
+        assert len(rows) == 7
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -82,6 +82,8 @@ class TestMigrations:
         assert "interaction" in rows[4][1].lower()
         assert rows[5][0] == 6
         assert "procedural" in rows[5][1].lower()
+        assert rows[6][0] == 7
+        assert "session_id" in rows[6][1]
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -89,7 +91,7 @@ class TestMigrations:
         await _apply_migrations(db)
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
-        assert row[0] == 6
+        assert row[0] == 7
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""

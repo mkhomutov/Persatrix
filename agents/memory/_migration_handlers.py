@@ -361,6 +361,68 @@ async def _apply_migration_6(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
+async def _apply_migration_7(db: aiosqlite.Connection) -> None:
+    """RFC 0031 Phase 1: ``session_id`` on episodes + relationships.
+
+    Adds ``session_id TEXT NOT NULL DEFAULT 'legacy'`` to both tables and
+    creates per-table indexes (``idx_episodes_session``,
+    ``idx_rel_session``) so Phase 2 per-session recall has a column +
+    index pair to filter on without a follow-up migration.
+
+    The ``'legacy'`` default is the synthetic carve-out described by RFC
+    0031 OQ #2 — Phase 3 CLI's ``persatrix session new --label legacy``
+    is rejected so the identifier can never collide with an
+    operator-created session.  Mirrors the orchestrator-side
+    ``channels.DefaultSessionID`` value pinned in PR 2.
+
+    Each table is handled independently with the same ``sqlite_master``
+    guard pattern used by v5/v6 — the ``ALTER TABLE ... ADD COLUMN``
+    statement is not idempotent before SQLite 3.35, so the
+    ``PRAGMA table_info`` check prevents a partial-restore baseline
+    (``schema_version`` recorded up to v6 but one or both of the target
+    tables missing) from crashing the migration.
+    """
+    # Episodes half.
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='episodes'",
+    )
+    if await cursor.fetchone():
+        cursor = await db.execute("PRAGMA table_info(episodes)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        if "session_id" not in existing:
+            await db.execute(
+                "ALTER TABLE episodes ADD COLUMN "
+                "session_id TEXT NOT NULL DEFAULT 'legacy'",
+            )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodes_session "
+            "ON episodes(session_id)",
+        )
+
+    # Relationships half — independent guard so a baseline that has one
+    # table but not the other (an unusual but legal partial-restore
+    # shape, mirrored from v5/v6's contract) still progresses cleanly.
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='relationships'",
+    )
+    if await cursor.fetchone():
+        cursor = await db.execute("PRAGMA table_info(relationships)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        if "session_id" not in existing:
+            await db.execute(
+                "ALTER TABLE relationships ADD COLUMN "
+                "session_id TEXT NOT NULL DEFAULT 'legacy'",
+            )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rel_session "
+            "ON relationships(session_id)",
+        )
+
+    await db.commit()
+
+
 # Explicit dict replaces the previous globals().get() dispatch, which was
 # fragile (typo in handler name silently fell through) and not IDE-friendly
 # (Find Usages / refactoring didn't discover the dynamic lookup).
@@ -369,4 +431,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     4: _apply_migration_4,
     5: _apply_migration_5,
     6: _apply_migration_6,
+    7: _apply_migration_7,
 }

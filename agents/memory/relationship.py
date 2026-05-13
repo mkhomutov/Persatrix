@@ -190,12 +190,18 @@ class RelationshipMemory:
         *,
         participant_type: str = "agent",
         other_participant_type: str = "agent",
+        session_id: str = "legacy",
     ) -> str:
         """Record an interaction with another participant.
 
         Inserts into the ``interactions`` table and increments the
         ``interaction_count`` on the relationship. Creates the
         relationship row if it doesn't exist.
+
+        ``session_id`` (RFC 0031 Phase 1; default ``"legacy"``) tags the
+        relationship row on first-seen INSERT.  See
+        :func:`agents.memory.relationship_mutations.record_interaction`
+        for the per-row tagging contract.
 
         Returns the generated interaction ID.
         """
@@ -204,6 +210,7 @@ class RelationshipMemory:
             outcome, sentiment,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
+            session_id=session_id,
         )
 
     # ─── Queries ────────────────────────────────────────────

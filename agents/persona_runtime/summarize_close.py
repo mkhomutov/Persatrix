@@ -210,6 +210,8 @@ async def record_closed_interaction(
     interaction: Interaction,
     summary: str,
     summary_failed: bool,
+    *,
+    session_id: str = "legacy",
 ) -> None:
     """Bump the relationship row for a DM-scoped closed interaction.
 
@@ -238,6 +240,7 @@ async def record_closed_interaction(
             interaction_type="conversation",
             outcome=outcome,
             other_participant_type=peer_type,
+            session_id=session_id,
         )
     except Exception:
         logger.warning(
@@ -304,6 +307,7 @@ async def finalize_closed_interaction(
     agent_id: str,
     interaction: Interaction,
     on_finalized: Callable[[], Awaitable[None]],
+    session_id: str = "legacy",
 ) -> None:
     """Background tail of the two-phase close path (RFC 0020 PR 4).
 
@@ -356,6 +360,7 @@ async def finalize_closed_interaction(
             return
         await record_closed_interaction(
             memory_ns, agent_id, interaction, summary, summary_failed,
+            session_id=session_id,
         )
         await on_finalized()
     except Exception:

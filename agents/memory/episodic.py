@@ -188,6 +188,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         closed_at: float | None = None,
         turn_count: int | None = None,
         scope: str | None = None,
+        session_id: str = "legacy",
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -196,6 +197,13 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         added in migration v5.  Pre-RFC callers omit them and the row keeps
         ``NULL`` in those columns — recall code treats the NULLs as legacy
         single-turn episodes per RFC 0020 §I.
+
+        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with
+        the operator-namespace active at write time.  The default
+        ``"legacy"`` matches the synthetic carve-out persisted by the
+        orchestrator-side ``channels.DefaultSessionID`` so pre-RFC callers
+        produce queryable rows.  Phase 1 ships no recall-side filtering —
+        the column exists so Phase 2 has a column + index to filter on.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -227,9 +235,11 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         (id, agent_id, summary, context_json, outcome,
                          importance, access_count, last_accessed_at,
                          tags_json, created_at, compressed_at, compression_level,
-                         interaction_id, started_at, closed_at, turn_count, scope)
+                         interaction_id, started_at, closed_at, turn_count, scope,
+                         session_id)
                     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
-                            ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?,
+                            ?)
                     """,
                     (
                         episode_id,
@@ -245,6 +255,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         closed_at,
                         turn_count,
                         scope,
+                        session_id,
                     ),
                 )
                 await db.commit()

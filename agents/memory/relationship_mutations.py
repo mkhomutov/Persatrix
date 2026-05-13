@@ -173,12 +173,22 @@ async def record_interaction(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
+    session_id: str = "legacy",
 ) -> str:
     """Record an interaction with another participant.
 
     Inserts into the ``interactions`` table and increments the
     ``interaction_count`` on the relationship. Creates the
     relationship row if it doesn't exist.
+
+    RFC 0031 Phase 1: ``session_id`` (default ``"legacy"``) tags the
+    relationship row on first creation.  Subsequent calls keep the
+    first-seen value — the relationships row is a stable per-pair
+    identity, so we treat ``session_id`` like ``trust_score`` (write on
+    INSERT, preserved by the conflict path) rather than like
+    ``last_interaction_at`` (refreshed on every interaction).  Phase 1
+    ships no recall-side filtering; the column exists so Phase 2 has a
+    column + index to filter on.
 
     Returns the generated interaction ID.
     """
@@ -218,14 +228,19 @@ async def record_interaction(
     )
 
     # Upsert relationship row: create if missing, increment count.
+    # RFC 0031 Phase 1: ``session_id`` is written on INSERT only; the
+    # ON CONFLICT branch deliberately omits it so the row tracks the
+    # first-seen session and a future cross-session interaction does
+    # not silently overwrite the per-row tag (recall semantics for that
+    # use case live on the interactions table in Phase 2).
     await db.execute(
         """
         INSERT INTO relationships
             (participant_id, participant_type,
              other_participant_id, other_participant_type,
              trust_score, interaction_count,
-             last_interaction_at, notes)
-        VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
+             last_interaction_at, notes, session_id)
+        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?)
         ON CONFLICT(participant_id, participant_type,
                     other_participant_id, other_participant_type) DO UPDATE SET
             interaction_count = interaction_count + 1,
@@ -238,6 +253,7 @@ async def record_interaction(
             other_participant_type,
             _DEFAULT_TRUST,
             now,
+            session_id,
             now,
         ),
     )
