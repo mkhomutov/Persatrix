@@ -75,13 +75,26 @@ CREATE INDEX IF NOT EXISTS idx_messages_thread     ON messages(thread_id) WHERE 
 // without taking a dependency on golang-migrate. Each future PR adds one
 // `case N:` block and bumps the const above.
 //
-// PR #231 review SF-4 (this PR): the v1 schema declared
+// PR #231 review SF-4: the v1 schema declared
 // `channels.name TEXT NOT NULL UNIQUE`, which forced DM and thread rows
 // (which have no user-visible name) to store the canonical id as a
 // placeholder. The reader-side `if name != ch.ID` shim then translated
 // the placeholder back to an empty Name on scan. v2 drops the shim:
 // `name` is nullable, and a partial UNIQUE INDEX enforces uniqueness for
 // `channel_type = 'group'` only.
+//
+// PR #335 review L3 (RFC 0031 Phase 1 PR 2): each migration stamps its
+// own `PRAGMA user_version = N` *inside* its transaction. The earlier
+// shape stamped the version once after the loop succeeded — if any step
+// committed and the final stamp then failed (lock contention, I/O), the
+// next boot would read a stale `user_version` and silently re-run earlier
+// migrations on a newer-shape schema. For v1→v2 specifically that means
+// rebuilding `channels` while copying only the v1 columns, dropping any
+// `session_id` data v2→v3 had since added. Folding the stamp into each
+// migration's tx makes the schema change and its version-bookkeeping
+// commit (or roll back) atomically. The two
+// `Test{V1ToV2,V2ToV3}_StampsUserVersionInTransaction` tests pin the
+// property at the single-step boundary so a future regression surfaces.
 func applySchema(db *sql.DB) error {
 	// Apply the v1 baseline first — `IF NOT EXISTS` guards make this a
 	// no-op for existing databases, while a fresh database lands at v1
@@ -110,17 +123,27 @@ func applySchema(db *sql.DB) error {
 			current, channelStoreSchemaVersion)
 	}
 
+	// Each migration stamps `user_version` inside its own tx — see header
+	// comment for the L3 hazard this closes. No post-loop stamp here.
 	for v := current + 1; v <= channelStoreSchemaVersion; v++ {
 		if err := applyMigration(db, v); err != nil {
 			return fmt.Errorf("channels: migrate to v%d: %w", v, err)
 		}
 	}
+	return nil
+}
 
-	// PRAGMA user_version takes a literal — `?` placeholders are not
-	// honoured. The value is internally generated, never user-supplied,
-	// so the `Sprintf` is safe.
-	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;`, channelStoreSchemaVersion)); err != nil {
-		return fmt.Errorf("channels: stamp user_version: %w", err)
+// stampUserVersionTx writes `PRAGMA user_version = target` inside the
+// supplied transaction. SQLite does not honour `?` placeholders for
+// PRAGMA, so the value is interpolated as a literal — safe because
+// `target` is an int constant chosen by the binary, never user input.
+//
+// Lifted into a helper because every migration calls it as its final
+// statement before `tx.Commit()`. See `applySchema` header for the L3
+// rationale.
+func stampUserVersionTx(tx *sql.Tx, target int) error {
+	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, target)); err != nil {
+		return fmt.Errorf("stamp user_version=%d: %w", target, err)
 	}
 	return nil
 }
@@ -192,6 +215,11 @@ func migrateV2ToV3(db *sql.DB) error {
 		if _, err := tx.Exec(q); err != nil {
 			return fmt.Errorf("exec %q: %w", firstLine(q), err)
 		}
+	}
+	// PR #335 review L3: stamp inside the tx so the schema change and
+	// the version bookkeeping commit (or roll back) atomically.
+	if err := stampUserVersionTx(tx, 3); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -275,6 +303,13 @@ func migrateV1ToV2(db *sql.DB) error {
 		if _, err := tx.Exec(q); err != nil {
 			return fmt.Errorf("exec %q: %w", firstLine(q), err)
 		}
+	}
+	// PR #335 review L3: stamp inside the tx so the rebuild and the
+	// version bookkeeping commit (or roll back) atomically — a stale
+	// stamp here is the entry point to the data-loss scenario described
+	// in `applySchema`'s header.
+	if err := stampUserVersionTx(tx, 2); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
