@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-12 (v0.3.0 released — post-release document update: ROADMAP v0.3.0 section flipped to Complete, Version Map row flipped to Released, prep-plan PRs 0/1/2/3/4 marked merged, release checklist finalised, test-findings PR plan closed, v0.3.0-plan Phase 4/5 closed, manual-tests README Execution Reports table refreshed)
+> **Last updated**: 2026-05-13 (RFC 0031 PR plan PR 1 merged — RFC 0016 row carries an "Amended 2026-05-12 (RFC 0031 §OQ #8)" footnote for the `session_id` → `chat_session_id` wire-field rename; per [v0.3.1-plan §ROADMAP hygiene](docs/v0.3.1-plan.md#roadmap-hygiene), no RFC 0031 status change on PR 1)
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
 > **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 
@@ -47,7 +47,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
-| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented |
+| [0016](docs/rfcs/0016-human-participant-chat-interface.md) | Human Participant & Chat Interface | v0.2.1 | ✅ Implemented (Amended 2026-05-12 — wire-field rename `session_id` → `chat_session_id` per [RFC 0031 §OQ #8](docs/rfcs/0031-per-session-namespacing-channels.md#open-questions); see [RFC 0016 §Amendments](docs/rfcs/0016-human-participant-chat-interface.md#amendments)) |
 | [0017](docs/rfcs/0017-persona-memory-injection-budget.md) | Persona Memory Injection Token Budget | v0.2.2 | ✅ Implemented (7/7) |
 | [0018](docs/rfcs/0018-structured-logging-framework.md) | Structured Logging Framework | v0.2.3 | ✅ Implemented |
 | [0019](docs/rfcs/0019-opentelemetry-completion.md) | OpenTelemetry Completion | v0.2.3 | ✅ Implemented |
