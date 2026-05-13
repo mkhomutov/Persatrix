@@ -17,11 +17,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ..session_id import resolve_session_id_silent
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -166,27 +166,28 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         self._eviction_task: asyncio.Task[None] | None = None
         self._shared_pools = shared_pools
         # RFC 0031 Phase 1: resolve PERSATRIX_SESSION_ID once at
-        # construction so the task-agent / sub-agent path (which builds
-        # MemoryFacade in BaseAgent.initialize_memory) inherits the
-        # operator-namespace tag without an explicit kwarg at every
-        # write site.  Persona-runtime routes its writes through
-        # ``self._episodic_memory.store_episode`` directly with its own
-        # threaded ``_session_id``; the facade-level default exists
-        # only for callers that do not have a session id of their own.
-        # The read is intentionally silent — the canonical INFO/WARN
-        # lines are emitted by ``PersonaAgent.__init__`` (Python) and
-        # ``cmd/orchestrator/startup.go::resolveSessionID`` (Go); a
-        # second log line here would double-emit on every facade build.
-        # The env-var name and "legacy" carve-out match
-        # ``agents.persona_runtime.session_id`` but are inlined here to
-        # avoid the cross-package import cycle
-        # (persona_runtime → persona → base → memory.facade).
-        raw_session = os.environ.get("PERSATRIX_SESSION_ID", "").strip()
-        self._session_id = raw_session or "legacy"
+        # construction so the task-agent / sub-agent path (built in
+        # BaseAgent.initialize_memory) inherits the operator-namespace
+        # tag without an explicit kwarg at every write site.  Silent by
+        # design — the canonical INFO/WARN lines come from
+        # ``PersonaAgent.__init__`` (Python) and the Go orchestrator's
+        # ``resolveSessionID``; logging here would double-emit.
+        # Delegates to the leaf module ``agents.session_id`` (PR #337
+        # M2) so the env-var name + legacy carve-out cannot drift
+        # against ``agents.persona_runtime.session_id``.
+        self._session_id = resolve_session_id_silent()
 
     @property
     def agent_id(self) -> str:
         return self._agent_id
+
+    @property
+    def session_id(self) -> str:
+        """Construction-time ``PERSATRIX_SESSION_ID`` snapshot (RFC 0031
+        Phase 1).  Public read-only contract; tests must use this
+        rather than the private ``_session_id`` (PR #337 review L6).
+        """
+        return self._session_id
 
     @property
     def episodic(self) -> EpisodicMemory:

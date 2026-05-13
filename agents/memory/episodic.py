@@ -11,6 +11,7 @@ structured knowledge the agent chooses to persist, delegated to
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -201,10 +202,10 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         single-turn episodes per RFC 0020 §I.
 
         ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with
-        the operator-namespace active at write time.  The default
-        ``"legacy"`` matches the synthetic carve-out persisted by the
-        orchestrator-side ``channels.DefaultSessionID`` so pre-RFC callers
-        produce queryable rows.  Phase 1 ships no recall-side filtering.
+        the operator-namespace active at write time; default ``"legacy"``
+        matches ``channels.DefaultSessionID`` so pre-RFC callers produce
+        queryable rows.  Phase 1 ships no recall-side filtering.
+
         ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
         """
         with _tracer.start_as_current_span(
@@ -261,12 +262,15 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     ),
                 )
                 await db.commit()
-                # RFC 0031 Phase 1 — increment the per-session write
-                # counter (Python mirror of the orchestrator-side
-                # ``sessions.writes``).  ``try_get_instruments`` returns
-                # ``None`` when ``init_metrics`` has not been called
-                # (e.g. unit tests that do not need OTEL); the no-op
-                # path keeps the call site cheap.
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+            # RFC 0031 Phase 1 sessions.writes (PR #337 M1) — outside
+            # the persistence try; suppress OTEL exceptions so a metric
+            # backend failure cannot mark the span ERROR or surface as a
+            # write failure (row is already persisted).
+            with contextlib.suppress(Exception):
                 inst = try_get_instruments()
                 if inst is not None:
                     inst.sessions_writes.add(
@@ -277,11 +281,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                             "surface": surface,
                         },
                     )
-                return episode_id
-            except Exception as exc:
-                span.record_exception(exc)
-                span.set_status(Status(StatusCode.ERROR, str(exc)))
-                raise
+            return episode_id
 
     async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
         return await _update_episode_summary(
