@@ -118,6 +118,11 @@ class PersonaAgent(BaseAgent):
         super().__init__(agent_id, config)
         self._persona_state: dict[str, Any] = {}
         self._orchestrator_client: OrchestratorClient | None = None  # injected by framework
+        # RFC 0031 Phase 1: per-process session tag from
+        # PERSATRIX_SESSION_ID — single read at construction; see
+        # ``agents.persona_runtime.session_id`` for the fallback contract.
+        from .persona_runtime.session_id import resolve_session_id_and_log
+        self._session_id: str = resolve_session_id_and_log(logger)
 
     # ─── BaseAgent compatibility ───────────────────────
 

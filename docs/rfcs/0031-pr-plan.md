@@ -188,16 +188,105 @@ PR 1 is logically independent of PRs 2–3 (renaming `ChatRequest.session_id` do
 
 #### Scope
 
-Items populated during review. Reserved skeleton:
+Items below are populated as PRs are reviewed. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("PR review reports are local-only artifacts"), each entry paraphrases the finding inline and does **not** reference or link any local PR review report.
 
-- "From PR 1 review" — RFC 0016 rename findings.
-- "From PR 2 review" — Go-side schema / handler findings.
-- "From PR 3 review" — Python-side schema + cross-process integration findings.
+##### From PR 1 review
+
+_None recorded at plan-update time. Add findings here if surfaced post-merge._
+
+##### From PR 2 review
+
+_None recorded at plan-update time. Add findings here if surfaced post-merge._
+
+##### From PR 3 review
+
+1. **Three persona-reachable `store_episode` / write surfaces bypass `_session_id` threading**
+   ([agents/memory/facade.py:361](../../agents/memory/facade.py#L361),
+   [agents/memory/facade_procedural.py:155](../../agents/memory/facade_procedural.py#L155),
+   [agents/memory/shared_pool.py:328](../../agents/memory/shared_pool.py#L328)). PR 3 threads
+   `_session_id` through the two persona-runtime entry points
+   ([episode_routing.py](../../agents/persona_runtime/episode_routing.py),
+   [summarize_close.py](../../agents/persona_runtime/summarize_close.py)) but three additional
+   surfaces reach `EpisodicMemory.store_episode` without a `session_id` kwarg —
+   `MemoryFacade.publish` (RFC 0008 §B / RFC 0029 P1 write path), `ProceduralFacadeMixin.publish_procedural`
+   (RFC 0008 PR 5 procedural tier), and `SharedMemoryPool.write` (RFC 0023 shared pool). Each defaults
+   to `"legacy"`, so a persona running under `PERSATRIX_SESSION_ID=run-a` that publishes via the
+   facade or shared pool lands its rows tagged `legacy`, not `run-a`. PR 3's cross-process
+   integration test does not catch this because it calls `EpisodicMemory.store_episode` directly.
+   Invisible at write time (Phase 1 ships no recall filter); becomes a silent recall miss the day
+   Phase 2's filter lands — the exact dementia-test failure mode the carve-out exists to prevent.
+   Fix: add `session_id` pass-through on each of the three surfaces and thread the persona's
+   `_session_id` through. Audit during this PR whether `BaseAgent`-derived task agents constructing
+   their own `MemoryFacade` at [agents/base.py:184](../../agents/base.py#L184) are intentionally
+   out-of-Phase-1-scope; if so, pin that deferral in this PR or in the RFC, not in silence.
+
+2. **`seed_trust` writes the legacy carve-out, then `record_interaction` cannot overwrite it**
+   ([agents/memory/relationship_mutations.py:264](../../agents/memory/relationship_mutations.py#L264-L304)).
+   The YAML-config seed path uses `INSERT OR IGNORE` without `session_id`, so seeded rows take the
+   `'legacy'` column default. The first real `record_interaction` under `PERSATRIX_SESSION_ID=run-a`
+   then hits the `ON CONFLICT DO UPDATE` branch — which deliberately omits `session_id` to preserve
+   the first-seen-wins contract verified at
+   [relationship_mutations.py:236](../../agents/memory/relationship_mutations.py#L236) — and the
+   tag stays `'legacy'`. The
+   [MT-SESSION-001 Step 7 expectation](../manual-tests/MT-SESSION-001.md) ("Relationships row
+   `session_id` is `run-a`") would fail in this seed-first scenario for any persona that
+   pre-declares the peer in its `relationships:` config block. PR 3's
+   `test_second_interaction_does_not_overwrite_session_id` catches the deliberate-preservation
+   contract but does not probe the seed-before-record sequence. Fix: either (a) thread
+   `session_id` through `seed_trust` and the `RelationshipMemory.initialize(config_relationships=...)`
+   boundary — the persona knows its `_session_id` at the same construction time it runs seeding;
+   or (b) explicitly amend RFC 0031 / MT-SESSION-001 to document that config-seeded rows always
+   carry `'legacy'` as the intended first-seen baseline. Current behaviour is underspecified.
+
+3. **Python side does not WARN on non-canonical `PERSATRIX_SESSION_ID`; Go side does**
+   ([agents/persona_runtime/session_id.py](../../agents/persona_runtime/session_id.py)). The
+   Go-side [cmd/orchestrator/startup.go::resolveSessionID](../../cmd/orchestrator/startup.go) emits
+   a `WARN` log when the env var contains characters outside `[A-Za-z0-9_-]` (regression test:
+   `cmd/orchestrator/session_env_test.go::TestResolveSessionID_InvalidCharsWarnsButAccepts`); the
+   Python `resolve_session_id_and_log` accepts any non-empty value verbatim and stays silent.
+   [MT-SESSION-001 Edge Case 1](../manual-tests/MT-SESSION-001.md) acknowledges the gap as
+   "intentional, since the canonical surface for operator-facing validation is the CLI (Phase 3)" —
+   defensible, but the asymmetry is operator-visible today: setting
+   `PERSATRIX_SESSION_ID="my session"` across both shells produces one binary that warns and one
+   that does not, and an operator may reasonably conclude the persona side is happy with the
+   value. Fix: add a `WARN` log to `resolve_session_id_and_log` using the same `[A-Za-z0-9_-]`
+   regex and the same canonical message string as the Go side, so operators grep for one phrase
+   across both logs.
+
+4. **`agents.sessions.writes{session_id}` telemetry counter promised in PR 3 plan was not shipped**
+   (no symbol in `agents/`). PR 3's `#### Tests` last bullet committed to "Telemetry counter
+   `agents.sessions.writes{session_id}` increments on store / record paths" (line 171 of this
+   plan); grep shows zero matches for any `sessions.writes` / `SessionsWrites` identifier across
+   `agents/`. The Go side ships an equivalent counter at
+   [internal/observability/metrics/channel_instruments.go](../../internal/observability/metrics/channel_instruments.go).
+   Without the Python half, an operator cannot validate end-to-end that the env var flows through
+   to disk without running the manual MT-SESSION-001 raw-SQLite asserts. Fix: add the counter via
+   [agents/observability/metrics.py](../../agents/observability/metrics.py) and increment once per
+   `store_episode` and once per `record_interaction`. Cardinality is bounded by the
+   operator-controlled session count — the same argument PR 2 §Key implementation details makes
+   for the Go counter.
+
+5. **Doc-string drift on the Python env reader's location** (three sites). The PR 3 docs name
+   the env reader at the wrong place in three places:
+   (a) [agents/persona_runtime/episode_routing.py:86](../../agents/persona_runtime/episode_routing.py#L86)
+   cites `_LLMPersonaAgent.__init__` — the read is actually in `PersonaAgent.__init__` at
+   [agents/persona.py:125](../../agents/persona.py#L125);
+   (b) [docs/manual-tests/MT-SESSION-001.md:69](../manual-tests/MT-SESSION-001.md#L69) cites
+   `agents/persona_runtime/__init__.py — _resolve_session_id` — the module is
+   [agents/persona_runtime/session_id.py](../../agents/persona_runtime/session_id.py) and the
+   function is `resolve_session_id_and_log`;
+   (c) [docs/manual-tests/MT-SESSION-001.md:111](../manual-tests/MT-SESSION-001.md#L111) invokes
+   `python -m agents.persona_runtime_main` — no such module exists; the actual persona entry
+   point is `python -m persatrix_agents.server` (per
+   [Dockerfile.agent:32](../../Dockerfile.agent#L32) and
+   [.github/CLAUDE.md:57](../../.github/CLAUDE.md#L57)). An operator following MT-SESSION-001
+   step-by-step today gets `ModuleNotFoundError`. Fix: three one-line doc edits.
 
 #### PR checklist
 
 - [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
 - [ ] `make test` + `make lint` clean.
+- [ ] MT-SESSION-001 re-run after items 2 and 5 land; Step 7 and the entry-point invocation succeed without operator intervention.
 
 ---
 
@@ -272,8 +361,8 @@ New `docs/guides/sessions.md`. Close [ISSUE-0051](../issues/ISSUE-0051-per-sessi
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 1 | RFC 0016 wire-field rename | `feature/v031-rfc0031p1-chat-session-rename` | ✅ Merged | [#333](https://github.com/mkhomutov/Persatrix/pull/333) | 2026-05-13 |
-| 2 | Sessions table + Go migrations + orchestrator env-var | `feature/v031-rfc0031p1-sessions-table-go` | 🔀 PR open | [#335](https://github.com/mkhomutov/Persatrix/pull/335) | — |
-| 3 | Python migrations + persona-runtime env-var + cross-process integration | `feature/v031-rfc0031p1-sessions-py` | ⬜ Not started | — | — |
+| 2 | Sessions table + Go migrations + orchestrator env-var | `feature/v031-rfc0031p1-sessions-table-go` | ✅ Merged | [#335](https://github.com/mkhomutov/Persatrix/pull/335) | 2026-05-13 |
+| 3 | Python migrations + persona-runtime env-var + cross-process integration | `feature/v031-rfc0031p1-sessions-py` | 🔀 PR open | — | — |
 | 4 | Review follow-ups | `feature/v031-rfc0031p1-followups` | ⬜ Not started | — | — |
 | 5 | Phase 1 closeout | `feature/v031-rfc0031p1-close` | ⬜ Not started | — | — |
 

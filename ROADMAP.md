@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-13 (RFC 0031 PR plan PR 2 opened — sessions table + Go orchestrator migrations + `PERSATRIX_SESSION_ID` env-var threading; RFC 0031 row → 🚧 Implementing per [v0.3.1-plan §ROADMAP hygiene](docs/v0.3.1-plan.md#roadmap-hygiene))
+> **Last updated**: 2026-05-13 (RFC 0031 PR plan PR 3 opened — Python persona-runtime mirror of PR 2: memory.db migration v7, `session_id` kwarg on `store_episode` / `record_interaction`, `PERSATRIX_SESSION_ID` threading from the persona constructor through every store-path call, plus a cross-Python-process integration pin and the `MT-SESSION-001` walkthrough)
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
 > **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 

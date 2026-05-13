@@ -24,6 +24,7 @@ from ._migration_handlers import (
     _apply_migration_4,
     _apply_migration_5,
     _apply_migration_6,
+    _apply_migration_7,
 )
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "_apply_migration_4",
     "_apply_migration_5",
     "_apply_migration_6",
+    "_apply_migration_7",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -194,6 +196,18 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         6,
         "RFC 0008 PR 5: procedural-tier confidence + last_validated_at",
         "",  # handled by _apply_migration_6()
+    ),
+    # Migration 7 (RFC 0031 Phase 1) tags ``episodes`` and ``relationships``
+    # with the operator-namespace ``session_id`` column.  Same callable-
+    # handler rationale as v5/v6: ``ALTER TABLE ... ADD COLUMN`` is not
+    # idempotent before SQLite 3.35 so each half guards with
+    # ``PRAGMA table_info`` and the missing-table partial-restore shape
+    # short-circuits cleanly.  See docs/rfcs/0031-pr-plan.md PR 3 for
+    # the column / index contract.
+    (
+        7,
+        "RFC 0031: session_id on episodes + relationships",
+        "",  # handled by _apply_migration_7()
     ),
 ]
 
