@@ -79,6 +79,16 @@ type Server struct {
 	// deployments that have not opted into the channels subsystem.
 	channelStore  channels.ChannelStore
 	channelRouter *channels.ChannelRouter
+
+	// channelSessionID is the per-process default session id stamped on
+	// every CreateChannel / PublishMessage that arrives without an
+	// explicit session_id (RFC 0031 Phase 1). Sourced from
+	// PERSATRIX_SESSION_ID at orchestrator boot. An empty value here
+	// lets the store boundary apply its own `legacy` default — the two
+	// defaults are intentionally co-located in case a future
+	// session-aware handler shape (Phase 3 `--session` flag) needs to
+	// distinguish "no value supplied" from "operator picked legacy".
+	channelSessionID string
 }
 
 // ServerOption configures optional Server dependencies.
@@ -176,6 +186,17 @@ func WithChannels(store channels.ChannelStore, router *channels.ChannelRouter) S
 	return func(s *Server) {
 		s.channelStore = store
 		s.channelRouter = router
+	}
+}
+
+// WithChannelSessionID injects the per-process default session id stamped
+// on every CreateChannel / PublishMessage that arrives without an explicit
+// session_id (RFC 0031 Phase 1). Sourced from PERSATRIX_SESSION_ID at
+// orchestrator boot. Empty values are accepted so the store-side `legacy`
+// default applies for tests and minimal deployments that do not opt in.
+func WithChannelSessionID(sessionID string) ServerOption {
+	return func(s *Server) {
+		s.channelSessionID = sessionID
 	}
 }
 

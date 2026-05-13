@@ -43,5 +43,20 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.messages.cascade_capped: %w", err)
 	}
+	// RFC 0031 Phase 1: per-session write counter. Increments once per
+	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /
+	// PublishMessage on the channels store. Labelled by `session_id`.
+	// Phase 1 cardinality is bounded by the operator-controlled
+	// PERSATRIX_SESSION_ID value; Phase 3 CLI adds a `persatrix session
+	// new` write path that further bounds the dimension.
+	if i.SessionsWrites, err = m.Int64Counter(
+		"sessions.writes",
+		metric.WithUnit("{write}"),
+		metric.WithDescription(
+			"Channels-store write attempts attributed to a session_id (RFC 0031 §F).",
+		),
+	); err != nil {
+		return fmt.Errorf("create sessions.writes: %w", err)
+	}
 	return nil
 }

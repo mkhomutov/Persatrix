@@ -49,7 +49,7 @@ var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for
 //   - err: non-nil only on a hard reconcile failure (operator action
 //     required); nil on the soft "channels disabled" path.
 func initChannels(
-	cfgDir, dbPath string,
+	cfgDir, dbPath, sessionID string,
 	orchMetrics *obsmetrics.Instruments,
 	reg registry.Registry,
 	logger *zap.Logger,
@@ -94,9 +94,14 @@ func initChannels(
 			return nil, noop, nil
 		}
 	}
+	var sessionMetrics *channels.SessionMetrics
+	if orchMetrics != nil {
+		sessionMetrics = &channels.SessionMetrics{Writes: orchMetrics.SessionsWrites}
+	}
 	chanStore, sErr := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
-		MaxChannels: maxCh,
-		Logger:      logger,
+		MaxChannels:    maxCh,
+		Logger:         logger,
+		SessionMetrics: sessionMetrics,
 	})
 	if sErr != nil {
 		logger.Warn("channels: store open failed; channel endpoints will return 503",
@@ -126,6 +131,10 @@ func initChannels(
 	// row in the YAML is ignored by SetMaxCascadeDepth (the backstop
 	// cannot be silently disabled — see the [RFC 0011 amendment]).
 	router.SetMaxCascadeDepth(chanCfg.MaxCascadeDepth)
+	// RFC 0031 Phase 1: stamp the per-process session id on router-
+	// internal writes (today only ReconcileConfig-created channels).
+	// Empty falls through to the store's `legacy` default.
+	router.SetDefaultSessionID(sessionID)
 	if rErr := router.ReconcileConfig(context.Background(), chanCfg); rErr != nil {
 		// Loud-fail per RFC 0011 §B; the caller (main) will `Fatal`.
 		// Run the cleanup ourselves first so the half-opened store does
@@ -169,7 +178,10 @@ func initChannels(
 		zap.String("rfc", "0011"),
 		zap.String("scope", "PublishAndAwait"),
 	)
-	return []server.ServerOption{server.WithChannels(chanStore, router)}, cleanup, nil
+	return []server.ServerOption{
+		server.WithChannels(chanStore, router),
+		server.WithChannelSessionID(sessionID),
+	}, cleanup, nil
 }
 
 // selectChannelDispatcher picks the per-recipient [channels.MessageDispatcher]
