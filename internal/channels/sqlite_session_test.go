@@ -75,6 +75,78 @@ func TestSQLiteStore_GetOrCreateDM_DefaultsToLegacy(t *testing.T) {
 	assert.Equal(t, "legacy", ch.SessionID)
 }
 
+// TestSQLiteStore_GetOrCreateDM_LegacyChannelButSessionMessages locks in
+// the Phase-1 asymmetry surfaced by PR #335 review L1: `GetOrCreateDM`
+// hard-codes the DM channel row's `session_id` to `legacy`, but messages
+// published into that DM still carry the active `PERSATRIX_SESSION_ID`
+// (the chat handler stamps `Server.channelSessionID` on the inbound
+// `ChannelMessage`). The plan accepts this — operators can promote a DM
+// into a named session via Phase 3 CLI's `persatrix session use <id>` —
+// but the asymmetry means Phase-2 recall has to use the legacy carve-out
+// to find a DM that has session-tagged messages.
+//
+// This test pins both halves of the contract:
+//
+//  1. Channel-level recall under the carve-out (`session_id IN ('run-a')
+//     OR session_id = 'legacy'`) returns the DM channel even though the
+//     channel itself is tagged `legacy`.
+//  2. Message-level recall under the same predicate returns the
+//     session-tagged messages too.
+//
+// If Phase 2 (or a future PR that threads `session_id` through
+// `GetOrCreateDM`) changes either half, this test forces an explicit
+// decision rather than a silent change in observable recall semantics.
+func TestSQLiteStore_GetOrCreateDM_LegacyChannelButSessionMessages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+
+	dm, err := store.GetOrCreateDM(ctx, "alice", "agent-x")
+	require.NoError(t, err)
+	require.Equal(t, "legacy", dm.SessionID,
+		"DM channel row is legacy by design (Phase 3 CLI promotes it)")
+
+	// Publish a message under the active session — mirrors what the chat
+	// handler does when PERSATRIX_SESSION_ID=run-a is in effect.
+	require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice",
+		Content: "hi", SessionID: "run-a",
+	}))
+
+	withDB(t, path, func(db *sql.DB) {
+		// Phase-2 channel-recall predicate: legacy carve-out brings the
+		// DM into the result set even though its session_id is not in
+		// the active session list.
+		var chSession string
+		err := db.QueryRow(
+			`SELECT session_id FROM channels
+			   WHERE id = ?
+			     AND (session_id IN ('run-a') OR session_id = 'legacy')`,
+			dm.ID).Scan(&chSession)
+		require.NoError(t, err, "DM channel must be findable via the legacy carve-out")
+		assert.Equal(t, "legacy", chSession)
+
+		// Phase-2 message-recall predicate over the same DM: the
+		// session-tagged message is returned. (The legacy carve-out
+		// would also match a message tagged legacy here; we assert
+		// the session match specifically so a future regression that
+		// silently rewrote the message's session_id to legacy at
+		// publish time would fail this assertion.)
+		var msgSession string
+		err = db.QueryRow(
+			`SELECT session_id FROM messages
+			   WHERE channel_id = ?
+			     AND (session_id IN ('run-a') OR session_id = 'legacy')
+			   ORDER BY timestamp DESC LIMIT 1`,
+			dm.ID).Scan(&msgSession)
+		require.NoError(t, err)
+		assert.Equal(t, "run-a", msgSession,
+			"DM message carries the active session, not the channel's legacy tag")
+	})
+}
+
 // TestSQLiteStore_PublishMessage_PersistsSessionID asserts a publish that
 // carries an explicit session_id stores it, and a publish that omits it
 // inherits "legacy" via the column default.

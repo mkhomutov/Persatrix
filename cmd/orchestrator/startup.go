@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 )
 
@@ -24,16 +25,23 @@ const sessionIDEnvVar = "PERSATRIX_SESSION_ID"
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // resolveSessionID returns the per-process session id sourced from
-// PERSATRIX_SESSION_ID. An unset env var logs INFO and returns "legacy"
-// (the synthetic carve-out per RFC 0031 OQ #2). A value containing
-// characters outside [A-Za-z0-9_-] emits a WARN but is still accepted
-// verbatim — Phase 3 CLI owns hard validation.
+// PERSATRIX_SESSION_ID. An unset env var logs INFO and returns the
+// synthetic carve-out [channels.DefaultSessionID] (RFC 0031 OQ #2). A
+// value containing characters outside [A-Za-z0-9_-] emits a WARN but is
+// still accepted verbatim — Phase 3 CLI owns hard validation.
+//
+// The fallback identifier is sourced from [channels.DefaultSessionID]
+// (not a local "legacy" literal) so the carve-out lives in one place —
+// PR #335 review L2. The boot-log message hard-codes the literal in the
+// human-readable text because that string is what an operator greps for
+// in incident triage; the structured `session_id` field carries the
+// canonical value.
 func resolveSessionID(logger *zap.Logger) string {
 	v := os.Getenv(sessionIDEnvVar)
 	if v == "" {
 		logger.Info(sessionIDEnvVar+" unset; defaulting to 'legacy' session",
-			zap.String("session_id", "legacy"))
-		return "legacy"
+			zap.String("session_id", channels.DefaultSessionID))
+		return channels.DefaultSessionID
 	}
 	if !sessionIDPattern.MatchString(v) {
 		logger.Warn(sessionIDEnvVar+" contains characters outside [A-Za-z0-9_-]; accepting verbatim (hard validation in Phase 3 CLI)",

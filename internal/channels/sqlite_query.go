@@ -342,7 +342,7 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
 		 VALUES (?, NULL, ?, '', ?, ?)`,
-		id, string(ChannelTypeDM), now, defaultSessionID); err != nil {
+		id, string(ChannelTypeDM), now, DefaultSessionID); err != nil {
 		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
 	}
 	for _, p := range []string{pa, pb} {
@@ -356,12 +356,12 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	if err := tx.Commit(); err != nil {
 		return Channel{}, err
 	}
-	s.recordSessionWrite(ctx, defaultSessionID)
+	s.recordSessionWrite(ctx, DefaultSessionID)
 
 	return Channel{
 		ID:        id,
 		Type:      ChannelTypeDM,
 		CreatedAt: now,
-		SessionID: defaultSessionID,
+		SessionID: DefaultSessionID,
 	}, nil
 }

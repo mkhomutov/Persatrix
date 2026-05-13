@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -146,6 +147,70 @@ func TestSQLiteStore_SchemaV3_Migration_Idempotent(t *testing.T) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, 3, version, "user_version stamped to v3")
+	})
+}
+
+// TestSQLiteStore_SchemaV3_GetHistory_UsesCoveringIndex pins the v3 query
+// plan for the channel-history hot path. PR #335 review M1 deferred the
+// EXPLAIN regression as a follow-up: the v2→v3 migration drops
+// `idx_messages_channel_ts(channel_id, timestamp DESC)` and replaces it
+// with the covering `idx_messages_channel_session(channel_id, session_id,
+// timestamp DESC)`. The chronological-scan shape (`WHERE channel_id = ?
+// ORDER BY timestamp DESC LIMIT ?`) used by `GetHistory` / `pruneExcess`
+// still has its equality prefix in the new index, so SQLite walks it.
+// This test captures that as a tested invariant so a future schema change
+// surfaces the cost early.
+//
+// Scope note: the test does not assert anything about SORT steps. In a
+// single-session-per-channel deployment (Phase 1 reality — every row is
+// `session_id='legacy'` unless `PERSATRIX_SESSION_ID` is set) SQLite's
+// skip-scan optimisation lets it satisfy the ORDER BY from the index
+// directly. Once a channel accumulates rows under multiple `session_id`
+// values, the planner introduces a sort step; that trade-off is
+// documented in [docs/rfcs/0031-pr-plan.md §PR 2 key implementation
+// details]. Pinning the sort-vs-no-sort transition requires Phase 2 read
+// shapes that this PR does not ship — locked here only as a forward-
+// looking comment, not an assertion.
+func TestSQLiteStore_SchemaV3_GetHistory_UsesCoveringIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	withDB(t, path, func(db *sql.DB) {
+		// EXPLAIN QUERY PLAN against the exact GetHistory query shape
+		// (no-`before` branch — the dominant call path; the `before`
+		// branch uses the same prefix, so a regression on one would
+		// surface in either).
+		rows, err := db.Query(
+			`EXPLAIN QUERY PLAN
+			 SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id
+			   FROM messages
+			  WHERE channel_id = ?
+			  ORDER BY timestamp DESC
+			  LIMIT ?`, "group:planning", 50)
+		require.NoError(t, err)
+		defer func() { _ = rows.Close() }()
+
+		var plan []string
+		for rows.Next() {
+			// EXPLAIN QUERY PLAN columns: (id INT, parent INT,
+			// notused INT, detail TEXT). The textual `detail` is
+			// the part we assert against; the integer columns are
+			// SQLite planner bookkeeping and are unstable across
+			// versions, so we drop them.
+			var id, parent, notused int
+			var detail string
+			require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
+			plan = append(plan, detail)
+		}
+		require.NoError(t, rows.Err())
+
+		joined := strings.Join(plan, " | ")
+		assert.Contains(t, joined, "idx_messages_channel_session",
+			"GetHistory must walk the v3 covering index (channel_id, session_id, timestamp DESC); plan=%s", joined)
+		assert.NotContains(t, joined, "idx_messages_channel_ts",
+			"v2 chronological index must be dropped during v2→v3; plan=%s", joined)
 	})
 }
 

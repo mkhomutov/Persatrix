@@ -17,11 +17,15 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; matches CGO_ENABLED=0 build (Dockerfile.orchestrator)
 )
 
-// defaultSessionID is the synthetic carve-out applied to every channel /
+// DefaultSessionID is the synthetic carve-out applied to every channel /
 // message write that arrives without an explicit session_id (RFC 0031
 // Phase 1). Phase 2 makes this carve-out a tested invariant of the recall
 // path; Phase 1 only pins the storage shape.
-const defaultSessionID = "legacy"
+//
+// Exported so callers outside this package (notably the orchestrator's
+// boot-time `resolveSessionID` fallback) reference a single source of
+// truth — PR #335 review L2.
+const DefaultSessionID = "legacy"
 
 // SessionMetrics is the subset of orchestrator OTEL handles the channel
 // store needs for the RFC 0031 `sessions.writes` counter. Defined locally
@@ -235,7 +239,7 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	// RFC 0031 Phase 1: rewrite the empty default at the store boundary
 	// so session-unaware callers persist a queryable row.
 	if ch.SessionID == "" {
-		ch.SessionID = defaultSessionID
+		ch.SessionID = DefaultSessionID
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -337,7 +341,7 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 		ch.CreatedAt = time.Now().UTC()
 	}
 	if ch.SessionID == "" {
-		ch.SessionID = defaultSessionID
+		ch.SessionID = DefaultSessionID
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)

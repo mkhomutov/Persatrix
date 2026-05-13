@@ -79,7 +79,7 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	// RFC 0031 Phase 1: rewrite the empty default at the store boundary
 	// so session-unaware callers persist a queryable row.
 	if msg.SessionID == "" {
-		msg.SessionID = defaultSessionID
+		msg.SessionID = DefaultSessionID
 	}
 	mentions, err := encodeMentions(msg.Mentions)
 	if err != nil {

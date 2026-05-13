@@ -406,6 +406,13 @@ func (s *Server) handleAddChannelMember(w http.ResponseWriter, r *http.Request) 
 
 // channelToResponse converts a [channels.Channel] (and an optional
 // member slice) to the wire shape.
+//
+// `ch.SessionID` is intentionally not surfaced. Phase 1 of RFC 0031
+// (PR #335) ships no operator-visible session surface — the Phase 3 CLI
+// (`persatrix session list / use / archive`) owns that contract. Adding
+// `session_id` to this struct would bake an unversioned wire field that
+// a future operator-facing API has to either rename or replicate. Leave
+// it off until Phase 3 lands.
 func channelToResponse(ch channels.Channel, members []channels.Member) channelResponse {
 	out := channelResponse{
 		ID:          ch.ID,
