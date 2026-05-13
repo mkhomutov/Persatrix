@@ -82,6 +82,8 @@ class RelationshipMemory:
     async def initialize(
         self,
         config_relationships: list[dict[str, object]] | None = None,
+        *,
+        session_id: str = "legacy",
     ) -> None:
         """Open database, run migrations, seed trust from config.
 
@@ -89,6 +91,12 @@ class RelationshipMemory:
         agent's YAML config (e.g. ``[{"agent_id": "mike", "trust_level": 0.9}]``).
         Existing trust scores are never overwritten — config only seeds
         the initial state.
+
+        ``session_id`` (RFC 0031 Phase 1; default ``"legacy"``) tags any
+        newly-inserted seed rows.  Persona-runtime threads the resolved
+        ``PERSATRIX_SESSION_ID`` here so a peer pre-declared in YAML
+        config takes the active session's tag rather than the column
+        default (RFC 0031 PR plan PR 4 finding #2).
         """
         # Guard against double-initialize: close any existing connection
         # to prevent file descriptor and SQLite connection leaks.
@@ -100,7 +108,10 @@ class RelationshipMemory:
         await _apply_migrations(self._db)
 
         if config_relationships:
-            await _seed_trust(self._db, self._agent_id, config_relationships)
+            await _seed_trust(
+                self._db, self._agent_id, config_relationships,
+                session_id=session_id,
+            )
 
     async def close(self) -> None:
         """Close the database connection."""

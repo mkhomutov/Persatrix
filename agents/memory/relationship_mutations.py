@@ -17,6 +17,7 @@ from typing import Any
 import aiosqlite
 from opentelemetry import trace
 
+from ..observability.metrics import try_get_instruments
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
 from .relationship_queries import truncate_field, validate_other_id, validate_participant_types
 from .relationship_types import (
@@ -258,6 +259,21 @@ async def record_interaction(
         ),
     )
     await db.commit()
+    # RFC 0031 Phase 1 — increment the per-session write counter (Python
+    # mirror of the orchestrator-side ``sessions.writes``).  Recorded on
+    # every ``record_interaction`` call, not just the first-seen INSERT
+    # branch, so dashboards see one tick per persona-level interaction
+    # event regardless of whether the conflict path fired.
+    inst = try_get_instruments()
+    if inst is not None:
+        inst.sessions_writes.add(
+            1,
+            attributes={
+                "session_id": session_id,
+                "agent.id": agent_id,
+                "surface": "relationship",
+            },
+        )
     return interaction_id
 
 
@@ -265,8 +281,18 @@ async def seed_trust(
     db: aiosqlite.Connection,
     agent_id: str,
     config_relationships: list[dict[str, Any]],
+    *,
+    session_id: str = "legacy",
 ) -> None:
-    """Seed trust scores from agent config. Never overwrites existing rows."""
+    """Seed trust scores from agent config. Never overwrites existing rows.
+
+    ``session_id`` (RFC 0031 Phase 1; default ``"legacy"``) tags every
+    newly-inserted seed row.  The caller (persona-runtime
+    ``initialize_memory``) passes its resolved ``PERSATRIX_SESSION_ID``
+    so MT-SESSION-001 Step 7 sees ``run-a`` on a config-seeded row
+    rather than the column-default ``legacy``.  Existing rows are still
+    untouched — INSERT OR IGNORE preserves the first-seen contract.
+    """
     for entry in config_relationships:
         other_id = entry.get("agent_id")
         trust_level = entry.get("trust_level")
@@ -296,9 +322,9 @@ async def seed_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes)
-            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL)
+                 last_interaction_at, notes, session_id)
+            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?)
             """,
-            (agent_id, other_id, trust_level),
+            (agent_id, other_id, trust_level, session_id),
         )
     await db.commit()

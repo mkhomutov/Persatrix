@@ -96,6 +96,9 @@ class ProceduralFacadeMixin:
     _lambda_per_day: float
     _c_min: float
     _stale_alert_threshold: float
+    # RFC 0031 Phase 1: facade-level construction-time default for the
+    # operator-namespace tag (see :class:`agents.memory.facade.MemoryFacade`).
+    _session_id: str
 
     def _require_initialised(self) -> None: ...  # pragma: no cover — host
 
@@ -106,6 +109,7 @@ class ProceduralFacadeMixin:
         *,
         confidence: float,
         expires_at: float | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Persist a procedural-tier entry under *key*.
 
@@ -152,11 +156,23 @@ class ProceduralFacadeMixin:
         context: dict[str, Any] = {"procedure_key": key}
         if expires_at is not None:
             context["expires_at"] = expires_at
+        # RFC 0031 Phase 1: thread session_id; caller passes ``None`` to
+        # inherit the facade's construction-time default (see
+        # ``MemoryFacade.__init__``).  Procedural rows live in the same
+        # ``episodes`` table as observations, so the session-tag column
+        # is shared.
         episode_id = await self._episodic.store_episode(
             summary=content,
             context=context,
             importance=confidence,
             tags=[f"procedure:{key}"],
+            session_id=(
+                session_id if session_id is not None else self._session_id
+            ),
+            # RFC 0031 PR 4 follow-up F2: procedural rows live in the
+            # same ``episodes`` table as observations; pin the counter
+            # surface so dashboards can split the two write kinds.
+            surface="procedure",
         )
         # Stamp the dedicated confidence column on the freshly-inserted
         # row so the decay clock has a base value below 1.0 when needed.
