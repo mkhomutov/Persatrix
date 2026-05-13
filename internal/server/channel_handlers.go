@@ -9,7 +9,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -104,6 +103,7 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Type:        channels.ChannelTypeGroup,
 		Description: req.Description,
+		SessionID:   s.channelSessionID, // RFC 0031 Phase 1 — empty falls through to legacy
 	}
 
 	// PR #245 review (High): the previous implementation called
@@ -276,6 +276,7 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		ThreadID:  req.ThreadID,
 		Mentions:  req.Mentions,
 		Metadata:  req.Metadata,
+		SessionID: s.channelSessionID, // RFC 0031 Phase 1 — empty falls through to legacy
 	}
 
 	var pubErr error
@@ -452,49 +453,5 @@ func messagesToResponse(in []channels.ChannelMessage) []channelMessageResponse {
 }
 
 // writeChannelError lives in channel_errors.go.
-
-// parseLimit parses the optional `?limit=` query parameter, returning
-// `fallback` when absent. PR #245 review (Low): a non-empty malformed
-// value (`abc`, `-5`, `0`) used to be silently coerced to the fallback.
-// That hides client bugs and conflicts with the parseBefore convention
-// just below (which errors loudly on a malformed `?before=`). We now
-// return an error so the caller can surface 400 BAD_REQUEST. Values
-// above [channelMaxLimit] are still capped silently — that is the
-// documented contract (the cap exists to bound allocation, not to
-// signal a client bug).
-func parseLimit(r *http.Request, fallback int) (int, error) {
-	raw := r.URL.Query().Get("limit")
-	if raw == "" {
-		return fallback, nil
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("limit must be a positive integer: %s", raw)
-	}
-	if v <= 0 {
-		return 0, fmt.Errorf("limit must be a positive integer: %d", v)
-	}
-	if v > channelMaxLimit {
-		return channelMaxLimit, nil
-	}
-	return v, nil
-}
-
+// parseLimit + parseBefore live in channel_query_params.go.
 // validateRequestCascadeDepth lives in channel_cascade_depth.go.
-
-// parseBefore parses the optional `before` cursor as RFC 3339. Returns
-// the zero value (sentinel for "now") when the parameter is absent.
-// Errors out on a malformed value rather than silently treating it as
-// "now" — drift between the cursor format and the response timestamp
-// format would be hard to debug.
-func parseBefore(r *http.Request) (time.Time, error) {
-	raw := r.URL.Query().Get("before")
-	if raw == "" {
-		return time.Time{}, nil
-	}
-	t, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("before must be RFC 3339: %w", err)
-	}
-	return t.UTC(), nil
-}

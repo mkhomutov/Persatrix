@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-13 (RFC 0031 PR plan PR 1 merged — RFC 0016 row carries an "Amended 2026-05-12 (RFC 0031 §OQ #8)" footnote for the `session_id` → `chat_session_id` wire-field rename; per [v0.3.1-plan §ROADMAP hygiene](docs/v0.3.1-plan.md#roadmap-hygiene), no RFC 0031 status change on PR 1)
+> **Last updated**: 2026-05-13 (RFC 0031 PR plan PR 2 opened — sessions table + Go orchestrator migrations + `PERSATRIX_SESSION_ID` env-var threading; RFC 0031 row → 🚧 Implementing per [v0.3.1-plan §ROADMAP hygiene](docs/v0.3.1-plan.md#roadmap-hygiene))
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
 > **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 
@@ -62,7 +62,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0028](docs/rfcs/0028-agent-decision-policy-engine.md) | Agent Decision Policy Engine | v0.4.0 | 📋 Proposed |
 | [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.x (Phase 1) + v0.4.0 (Phases 2–6) | 📋 Proposed |
 | [0030](docs/rfcs/0030-multi-agent-conversation-governance.md) | Multi-Agent Conversation Governance — layered termination + cost + reply-budget + moderator over the v0.3.0 channels stack; composes RFC 0011 amendment / RFC 0020 / RFC 0023 / RFC 0028. Motivated by the v0.3.0 F-1 finding tail (cost ceiling and productive-termination beyond cascade_depth). | v0.3.x (Phase 1 — deterministic layers) + v0.4.0 (Phase 2 — moderator) + v0.5.0+ (Phase 3 — declarative types + topic-drift) | 📋 Proposed (Draft) |
-| [0031](docs/rfcs/0031-per-session-namespacing-channels.md) | Per-Session Namespacing for Channels and Persona Memory — first-class Session primitive scoping `channels.db` and per-persona `memory.db`, with an operator-visible `persatrix session …` CLI; F-3 root-cause fix, succeeds the `make reset` workaround from PR 6 of the v0.3.0 channel test-findings plan. Spawned from [ISSUE-0051](docs/issues/ISSUE-0051-per-session-memory-namespacing-channels.md). | v0.3.x | 📋 Proposed |
+| [0031](docs/rfcs/0031-per-session-namespacing-channels.md) | Per-Session Namespacing for Channels and Persona Memory — first-class Session primitive scoping `channels.db` and per-persona `memory.db`, with an operator-visible `persatrix session …` CLI; F-3 root-cause fix, succeeds the `make reset` workaround from PR 6 of the v0.3.0 channel test-findings plan. Spawned from [ISSUE-0051](docs/issues/ISSUE-0051-per-session-memory-namespacing-channels.md). | v0.3.1 (Phase 1) + v0.3.x (Phases 2–4) | 🚧 Implementing |
 
 ---
 

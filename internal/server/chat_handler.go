@@ -293,6 +293,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Mentions:  []string{agentID},
 		Timestamp: time.Now().UTC(),
 		Metadata:  metadata,
+		// RFC 0031 Phase 1: tag the chat publish with the per-process
+		// default session_id (PERSATRIX_SESSION_ID at boot). Empty
+		// falls through to the store's legacy default.
+		SessionID: s.channelSessionID,
 	}
 
 	reply, err := s.channelRouter.PublishAndAwait(ctx, inbound, agentID, timeout)

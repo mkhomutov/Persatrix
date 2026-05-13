@@ -20,7 +20,17 @@ import (
 //	    unique index ux_channels_name_group. The placeholder shim that
 //	    previously stored the canonical id in `name` for DM/thread rows
 //	    is dropped — those rows now hold NULL there.
-const channelStoreSchemaVersion = 2
+//	v3 — RFC 0031 Phase 1 PR 2: introduces the `sessions` table and adds
+//	    `session_id TEXT NOT NULL DEFAULT 'legacy'` to `channels` and
+//	    `messages`. Replaces the chronological-scan index with the
+//	    covering `(channel_id, session_id, timestamp DESC)` shape that
+//	    keeps the today's `channel_id`-only history scan cheap AND lets
+//	    Phase 2's per-session filter use the same index. Adds
+//	    `idx_channels_session` for per-session channel lookups. The
+//	    `legacy` session is a synthetic carve-out (no row in `sessions`)
+//	    — Phase 3 CLI's `persatrix session new --label legacy` is
+//	    rejected, per OQ #2 resolution.
+const channelStoreSchemaVersion = 3
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
@@ -121,9 +131,69 @@ func applyMigration(db *sql.DB, target int) error {
 	switch target {
 	case 2:
 		return migrateV1ToV2(db)
+	case 3:
+		return migrateV2ToV3(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
+}
+
+// migrateV2ToV3 lands the RFC 0031 Phase 1 per-session storage tags on the
+// orchestrator side. Forward-only and idempotent against the v2 shape:
+//
+//   - CREATE TABLE sessions: empty at migration time; the `legacy` carve-out
+//     is synthetic (no row), per [OQ #2] resolution. Phase 3 CLI's
+//     `persatrix session new` is the canonical create path.
+//   - ALTER TABLE channels / messages: SQLite ≥3.20 supports
+//     ADD COLUMN ... NOT NULL DEFAULT '<constant>' without a backfill UPDATE,
+//     so every pre-v3 row picks up `session_id = 'legacy'` in one statement.
+//   - Index replacement: drop `idx_messages_channel_ts` (v2 chronological
+//     scan), create `idx_messages_channel_session(channel_id, session_id,
+//     timestamp DESC)`. The leading `channel_id` keeps today's
+//     `WHERE channel_id = ? ORDER BY timestamp DESC` scan cheap, and the
+//     trailing `session_id` lets Phase 2's per-session filter use the same
+//     index without a second one.
+//   - `idx_channels_session` supports fast per-session channel listings
+//     (Phase 3 CLI `persatrix session list`).
+//
+// The whole migration runs inside one transaction so a partial failure
+// rolls back cleanly — no need for the foreign-keys-off rebuild dance
+// migrateV1ToV2 uses.
+//
+// [OQ #2]: ../../docs/rfcs/0031-per-session-namespacing-channels.md#open-questions
+func migrateV2ToV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		// `created_at` and `archived_at` are REAL (Julian/unix seconds as
+		// float) per RFC 0031 §D pseudocode. Inconsistent with the
+		// DATETIME-encoded channels/memberships/messages columns, but
+		// aligned with the per-session timestamp ergonomics the spec
+		// pinned for the dementia-test bridge in Phase 2.
+		`CREATE TABLE sessions (
+            id            TEXT PRIMARY KEY,
+            label         TEXT,
+            created_at    REAL NOT NULL,
+            archived_at   REAL,
+            metadata_json TEXT
+        )`,
+		`ALTER TABLE channels ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'`,
+		`ALTER TABLE messages ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'`,
+		`DROP INDEX IF EXISTS idx_messages_channel_ts`,
+		`CREATE INDEX idx_messages_channel_session
+            ON messages(channel_id, session_id, timestamp DESC)`,
+		`CREATE INDEX idx_channels_session ON channels(session_id)`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(q), err)
+		}
+	}
+	return tx.Commit()
 }
 
 // migrateV1ToV2 relaxes channels.name to TEXT NULL and replaces the column-

@@ -47,7 +47,7 @@ func TestInitChannels_CreatesParentDirectory(t *testing.T) {
 		"pre-condition: dbDir must not exist before initChannels is called")
 
 	logger := zaptest.NewLogger(t)
-	opts, cleanup, err := initChannels(cfgDir, dbPath, nil, nil, logger)
+	opts, cleanup, err := initChannels(cfgDir, dbPath, "", nil, nil, logger)
 	t.Cleanup(cleanup)
 
 	require.NoError(t, err, "initChannels must not return a hard reconcile error")
@@ -75,7 +75,7 @@ func TestInitChannels_SkipsMkdirAllForMemoryPath(t *testing.T) {
 	))
 
 	logger := zaptest.NewLogger(t)
-	opts, cleanup, err := initChannels(cfgDir, ":memory:", nil, nil, logger)
+	opts, cleanup, err := initChannels(cfgDir, ":memory:", "", nil, nil, logger)
 	t.Cleanup(cleanup)
 
 	require.NoError(t, err)
@@ -169,7 +169,7 @@ func TestInitChannels_NonNilRegistryWiresGRPCDispatcher(t *testing.T) {
 
 	logger := zaptest.NewLogger(t)
 	reg := registry.NewInMemoryRegistry(logger)
-	opts, cleanup, err := initChannels(cfgDir, ":memory:", nil, reg, logger)
+	opts, cleanup, err := initChannels(cfgDir, ":memory:", "", nil, reg, logger)
 	t.Cleanup(cleanup)
 
 	require.NoError(t, err)

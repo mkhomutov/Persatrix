@@ -146,6 +146,8 @@ type Instruments struct {
 	// 'Cascade-depth wire propagation'). Comparable to
 	// ChannelMessagesDelivered; labelled by `channel_type`.
 	ChannelMessagesCascadeCapped metric.Int64Counter
+	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
+	SessionsWrites metric.Int64Counter
 }
 
 // NewInstruments registers every instrument against the provided meter.

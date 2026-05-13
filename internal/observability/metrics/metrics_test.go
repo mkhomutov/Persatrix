@@ -72,6 +72,8 @@ func TestInstrumentInventory(t *testing.T) {
 	inst.ChannelMessagesDelivered.Add(ctx, 0)
 	inst.ChannelMessagesPublished.Add(ctx, 0)
 	inst.ChannelMessagesCascadeCapped.Add(ctx, 0)
+	// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
+	inst.SessionsWrites.Add(ctx, 0)
 
 	rm := collect(t, reader)
 
@@ -97,6 +99,8 @@ func TestInstrumentInventory(t *testing.T) {
 		"channel.messages.delivered":      "{message}",
 		"channel.messages.published":      "{message}",
 		"channel.messages.cascade_capped": "{message}",
+		// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
+		"sessions.writes": "{write}",
 	}
 	for name, unit := range expected {
 		m := findMetric(rm, name)

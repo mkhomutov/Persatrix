@@ -76,6 +76,11 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now().UTC()
 	}
+	// RFC 0031 Phase 1: rewrite the empty default at the store boundary
+	// so session-unaware callers persist a queryable row.
+	if msg.SessionID == "" {
+		msg.SessionID = defaultSessionID
+	}
 	mentions, err := encodeMentions(msg.Mentions)
 	if err != nil {
 		return err
@@ -115,10 +120,10 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO messages (id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO messages (id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, msg.ChannelID, msg.SenderID, msg.Content, msg.Timestamp,
-		threadID, mentions, metadata); err != nil {
+		threadID, mentions, metadata, msg.SessionID); err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("channels: duplicate message id %s", msg.ID)
 		}
@@ -165,7 +170,11 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.recordSessionWrite(ctx, msg.SessionID)
+	return nil
 }
 
 // pruneExcess deletes the oldest rows from `channelID` until the row count
@@ -213,7 +222,7 @@ func (s *sqliteStore) pruneExcess(ctx context.Context, tx *sql.Tx, channelID str
 // GetMessage implements [ChannelStore.GetMessage].
 func (s *sqliteStore) GetMessage(ctx context.Context, messageID string) (ChannelMessage, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+		`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id
 		   FROM messages WHERE id = ?`, messageID)
 	msg, err := scanMessage(row)
 	if err != nil {
@@ -240,14 +249,14 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 	)
 	if before.IsZero() {
 		rows, qErr = s.db.QueryContext(ctx,
-			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id
 			   FROM messages
 			  WHERE channel_id = ?
 			  ORDER BY timestamp DESC
 			  LIMIT ?`, channelID, limit)
 	} else {
 		rows, qErr = s.db.QueryContext(ctx,
-			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+			`SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id
 			   FROM messages
 			  WHERE channel_id = ? AND timestamp < ?
 			  ORDER BY timestamp DESC
@@ -262,7 +271,7 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 
 // GetThread implements [ChannelStore.GetThread].
 func (s *sqliteStore) GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error) {
-	q := `SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata
+	q := `SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id
 	        FROM messages
 	       WHERE thread_id = ?
 	       ORDER BY timestamp ASC`
@@ -293,7 +302,7 @@ func scanMessage(s scanner) (ChannelMessage, error) {
 	)
 	if err := s.Scan(
 		&msg.ID, &msg.ChannelID, &msg.SenderID, &msg.Content, &msg.Timestamp,
-		&threadID, &mentionsJSON, &metadataJSON,
+		&threadID, &mentionsJSON, &metadataJSON, &msg.SessionID,
 	); err != nil {
 		return ChannelMessage{}, err
 	}
