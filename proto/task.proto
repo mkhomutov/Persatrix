@@ -90,14 +90,20 @@ message ChatRequest {
   string agent_id = 1;
   string user_id = 2;
   string message = 3;              // max 4000 chars enforced server-side
-  string session_id = 4;           // empty → server generates UUID; max 128 chars
+  // RFC 0016 chat-conversation token. Renamed from `session_id` in v0.3.1
+  // to disambiguate from RFC 0031's operator-namespace `session_id`
+  // landing on channels/messages/episodes/relationships. Field number
+  // unchanged (binary-proto consumers unaffected); JSON/proto-text
+  // consumers must migrate. Resolves RFC 0031 OQ #8.
+  string chat_session_id = 4;      // empty → server generates UUID; max 128 chars
   int32 timeout_seconds = 5;       // 0 or negative → server default (30s); max 300s
   string participant_type = 6;     // defaults to "user" when empty
 }
 
 message ChatResponse {
   string reply = 1;
-  string session_id = 2;
+  // RFC 0016 chat-conversation token; see ChatRequest.chat_session_id.
+  string chat_session_id = 2;
   string agent_id = 3;
   // Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
   // string by deliberate exception (forwarded verbatim to the channel
@@ -147,7 +153,7 @@ message ChannelMessageEvent {
   // as a drop reason. See PR #246 deep review finding M4.
   string timestamp = 6;
   // Empty string if not a reply. Max 128 chars when set (mirrors
-  // `ChatRequest.session_id` bound). PR #246 deep review M1.
+  // `ChatRequest.chat_session_id` bound). PR #246 deep review M1.
   string thread_id = 7;
   // Max 10 entries per event (mirrors `_MAX_MENTIONS_PER_ACTION` in
   // `agents/dispatch.py`); each entry is an agent_id constrained by

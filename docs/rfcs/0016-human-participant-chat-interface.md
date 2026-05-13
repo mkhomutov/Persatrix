@@ -766,3 +766,27 @@ The REST layer always returns HTTP 200 for successfully-processed requests (incl
 - [RFC 0011 — Channels + Bridges](../rfcs/README.md) — future dependency for multi-user channel routing and external bridges (not yet written; see ROADMAP for scope)
 - [Architecture overview](../../.github/copilot-instructions.md)
 - [Persatrix Roadmap](../../ROADMAP.md)
+
+---
+
+## Amendments
+
+### 2026-05-12 — wire-field rename to `chat_session_id`
+
+**Carried by**: [RFC 0031 PR plan PR 1](0031-pr-plan.md#pr-1-featurev031-rfc0031p1-chat-session-rename--rfc-0016-wire-field-rename) (v0.3.1).
+**Resolves**: [RFC 0031 OQ #8](0031-per-session-namespacing-channels.md#open-questions) — wire-level name collision.
+
+[RFC 0031](0031-per-session-namespacing-channels.md) introduces an operator-namespace `session_id` column on the channels schema and persona-memory tables (Phase 1, v0.3.1). That name collides with this RFC's `ChatRequest.session_id` / `ChatResponse.session_id` chat-conversation token, which is a different concept at a different lifetime — RFC 0031's session id pins the *operator-run*, RFC 0016's pins the *chat conversation within a run*. RFC 0031 §A "Distinct from RFC 0016" table is the canonical contrast.
+
+To keep one name per concept across protos, structured logs ([RFC 0018](0018-structured-logging-framework.md)), OTEL spans ([RFC 0019](0019-opentelemetry-completion.md)), and the future `MemoryStore` facade signature ([RFC 0029](0029-personal-society-storage-split.md) Phase 1), this RFC's wire field is renamed `session_id` → `chat_session_id` everywhere it crosses a boundary:
+
+- `proto/task.proto`: `ChatRequest.session_id` (field 4) and `ChatResponse.session_id` (field 2). Field *numbers* preserved, so binary-proto consumers are unaffected. Field *names* change, so proto3-JSON and proto-text consumers must migrate.
+- REST JSON: `chatRequest.session_id` / `chatResponse.session_id` JSON keys.
+- `ChannelMessage.Metadata` key: `"session_id"` → `"chat_session_id"`.
+- gRPC error text: `"session_id exceeds 128 characters"` → `"chat_session_id exceeds 128 characters"`.
+
+Function-local variables holding this token (e.g. `session_id` inside `handleChat`, `cmd_chat`, the `AgentServiceServicer.SendChatMessage` body) stay unprefixed — they are scoped well enough that the cross-RFC name ambiguity does not arise.
+
+The CHANGELOG `[0.3.1]` Upgrade Notes carries the migration guidance for external JSON consumers (Rust CLI, manual-test `curl` recipes, out-of-tree REST clients).
+
+Status row above stays `implemented`; this is additive context, not a re-litigation of the RFC.

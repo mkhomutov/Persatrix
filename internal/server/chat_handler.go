@@ -266,19 +266,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sessionID := req.SessionID
+	sessionID := req.ChatSessionID
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
 
-	// Propagate `session_id` and `participant_type` into
+	// Propagate `chat_session_id` and `participant_type` into
 	// ChannelMessage.Metadata so the wire
 	// fields are not silently inert. RFC 0011 amendment §Mapping
-	// retains `metadata["participant_type"]`; we use the same key
-	// for `session_id` to keep one conversation-segmentation
-	// vocabulary across the chat and channels surfaces.
+	// retains `metadata["participant_type"]`; the chat-session token
+	// rides on `metadata["chat_session_id"]` (renamed from
+	// `"session_id"` in v0.3.1 to disambiguate from RFC 0031's
+	// operator-namespace session id — RFC 0031 OQ #8).
 	metadata := map[string]any{
-		"session_id": sessionID,
+		"chat_session_id": sessionID,
 	}
 	if req.ParticipantType != "" {
 		metadata["participant_type"] = req.ParticipantType
@@ -371,7 +372,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	resp := chatResponse{
 		Reply:            reply.Content,
-		SessionID:        sessionID,
+		ChatSessionID:    sessionID,
 		AgentID:          agentID,
 		Timestamp:        replyTimestamp.Unix(),
 		AgentDisplayName: displayName,

@@ -53,10 +53,19 @@ type errorResponse struct {
 }
 
 // chatRequest is the JSON request body for POST /api/v1/agents/{id}/chat.
+//
+// `chat_session_id` (RFC 0016 chat-conversation token) was renamed from
+// `session_id` in v0.3.1 to disambiguate from RFC 0031's operator-
+// namespace `session_id`. JSON callers sending the legacy `session_id`
+// key receive `400 BAD_REQUEST "invalid or malformed JSON body"` —
+// `decodeJSON` in `helpers.go` enables `DisallowUnknownFields`, so the
+// rename fails loud rather than degrading to a silent fresh-session
+// mint. See CHANGELOG `[0.3.1]` Upgrade Notes and the regression test
+// `TestHandleChat_LegacySessionIDJSONKeyRejected`.
 type chatRequest struct {
 	Message         string `json:"message"`
 	UserID          string `json:"user_id"`
-	SessionID       string `json:"session_id"`
+	ChatSessionID   string `json:"chat_session_id"`
 	TimeoutSeconds  int32  `json:"timeout_seconds"`
 	ParticipantType string `json:"participant_type"`
 }
@@ -64,7 +73,7 @@ type chatRequest struct {
 // chatResponse is the JSON response for POST /api/v1/agents/{id}/chat.
 type chatResponse struct {
 	Reply            string `json:"reply"`
-	SessionID        string `json:"session_id"`
+	ChatSessionID    string `json:"chat_session_id"`
 	AgentID          string `json:"agent_id"`
 	Timestamp        int64  `json:"timestamp"`
 	AgentDisplayName string `json:"agent_display_name"`

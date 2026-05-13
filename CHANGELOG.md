@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Breaking]** Chat wire-field renamed `session_id` → `chat_session_id` | RFC 0031 Phase 1 introduces an operator-namespace `session_id` on channels, messages, episodes, and relationships. To disambiguate it from RFC 0016's chat-conversation token, `ChatRequest.session_id` (proto field 4) and `ChatResponse.session_id` (proto field 2) are renamed to `chat_session_id`. **Field numbers are preserved**, so binary-proto consumers are unaffected. **JSON / proto-text consumers must migrate**: REST callers of `POST /api/v1/agents/{id}/chat` sending the legacy `"session_id"` JSON key now receive `400 BAD_REQUEST "invalid or malformed JSON body"` — the Go handler decodes with `DisallowUnknownFields`, so unknown keys fail loud rather than degrading to a fresh-session mint. Migrate by switching the JSON key to `"chat_session_id"`. Proto3-JSON callers using `google.protobuf.json_format` raise `ParseError` unless `ignore_unknown_fields=True` is set (and even then `chat_session_id` parses to its zero value — the legacy value is discarded). Manual-test recipes are updated end-to-end: REST `curl` flows [`MT-CHAT-001`](docs/manual-tests/MT-CHAT-001.md), [`MT-CHAT-003`](docs/manual-tests/MT-CHAT-003.md), [`MT-CHAT-004`](docs/manual-tests/MT-CHAT-004.md); the CLI REPL flow [`MT-CHAT-002`](docs/manual-tests/MT-CHAT-002.md) (session-reuse prose); and the PowerShell channel-inspection flow [`MT-CHANNEL-005`](docs/manual-tests/MT-CHANNEL-005.md) (`Select-Object` on the `chat_session_id` metadata key). The chat-message Mermaid in [`docs/diagrams/workflow-execution.md`](docs/diagrams/workflow-execution.md) shows the renamed wire-field on the gRPC arrow. The `ChannelMessage.Metadata` map key also moves: `"session_id"` → `"chat_session_id"`. Resolves [RFC 0031 OQ #8](docs/rfcs/0031-per-session-namespacing-channels.md#open-questions). |
+
 ## [0.3.0] - 2026-05-12
 
 > **Codename:** Agent Conversations

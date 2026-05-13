@@ -67,18 +67,23 @@ pub(crate) struct ApiError {
 
 // ─── Chat types ──────────────────────────────────────────────────────────
 
+/// `chat_session_id` (RFC 0016 chat-conversation token) was renamed from
+/// `session_id` in v0.3.1 to disambiguate from RFC 0031's operator-
+/// namespace `session_id`. Binary-proto consumers are unaffected (field
+/// numbers preserved); JSON consumers — including this REST client —
+/// must use the new key. See CHANGELOG `[0.3.1]` Upgrade Notes.
 #[derive(Serialize)]
 pub(crate) struct ChatRequest {
     pub(crate) message: String,
     pub(crate) user_id: String,
-    pub(crate) session_id: String,
+    pub(crate) chat_session_id: String,
     pub(crate) participant_type: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct ChatResponse {
     pub(crate) reply: String,
-    pub(crate) session_id: String,
+    pub(crate) chat_session_id: String,
     #[allow(dead_code)]
     pub(crate) agent_id: String,
     /// Forward-compatible: defaults to "" if server omits the field (e.g. older
@@ -267,21 +272,29 @@ mod tests {
         let req = ChatRequest {
             message: "Hello".to_string(),
             user_id: "local".to_string(),
-            session_id: "".to_string(),
+            chat_session_id: "".to_string(),
             participant_type: "user".to_string(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["message"], "Hello");
         assert_eq!(json["user_id"], "local");
-        assert_eq!(json["session_id"], "");
+        assert_eq!(json["chat_session_id"], "");
         assert_eq!(json["participant_type"], "user");
+        // Regression: pre-v0.3.1 field name must not appear on the wire.
+        // RFC 0031 OQ #8 — the operator-namespace `session_id` now owns
+        // that JSON key elsewhere; RFC 0016's chat token rides on
+        // `chat_session_id`.
+        assert!(
+            json.get("session_id").is_none(),
+            "legacy `session_id` JSON key must not be emitted (RFC 0031 OQ #8)"
+        );
     }
 
     #[test]
     fn chat_response_deserializes_correctly() {
         let json = serde_json::json!({
             "reply": "I'm nexus-7.",
-            "session_id": "abc-123",
+            "chat_session_id": "abc-123",
             "agent_id": "nexus-7",
             "timestamp": 1713600000,
             "agent_display_name": "Nexus Seven",
@@ -289,7 +302,7 @@ mod tests {
         });
         let resp: ChatResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.reply, "I'm nexus-7.");
-        assert_eq!(resp.session_id, "abc-123");
+        assert_eq!(resp.chat_session_id, "abc-123");
         assert_eq!(resp.agent_display_name, "Nexus Seven");
         assert_eq!(resp.reply_status, "ok");
     }
@@ -298,7 +311,7 @@ mod tests {
     fn chat_response_deserializes_empty_reply() {
         let json = serde_json::json!({
             "reply": "",
-            "session_id": "abc-123",
+            "chat_session_id": "abc-123",
             "agent_id": "nexus-7",
             "timestamp": 1713600000,
             "agent_display_name": "Nexus Seven",
@@ -316,7 +329,7 @@ mod tests {
         // deserialization succeeds with empty-string defaults.
         let json = serde_json::json!({
             "reply": "Hello there",
-            "session_id": "abc-123",
+            "chat_session_id": "abc-123",
             "agent_id": "nexus-7"
         });
         let resp: ChatResponse = serde_json::from_value(json).unwrap();
@@ -331,6 +344,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn chat_response_rejects_legacy_session_id_key() {
+        // Regression: a server still emitting the pre-v0.3.1 `session_id`
+        // key (e.g. an out-of-tree fork) deserialises into a `serde_json`
+        // Error rather than silently producing a `ChatResponse` with the
+        // legacy value mapped onto `chat_session_id`. The REPL's
+        // ``resp.json()`` call in `commands::chat::cmd_chat` surfaces
+        // this as `eprintln!("error: invalid response: …")` and
+        // continues the loop — the user sees a clear failure rather
+        // than a silently-wrong session token. The break is deliberate
+        // and documented in the v0.3.1 CHANGELOG.
+        let json = serde_json::json!({
+            "reply": "Hi",
+            "session_id": "legacy-sess",
+            "agent_id": "nexus-7",
+        });
+        let result: Result<ChatResponse, _> = serde_json::from_value(json);
+        match result {
+            Ok(_) => panic!(
+                "expected the legacy `session_id` key to fail deserialisation against \
+                 the renamed `chat_session_id` field"
+            ),
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("chat_session_id"),
+                    "expected the parse error to name the missing `chat_session_id` field, got: {msg}"
+                );
+            }
+        }
+    }
+
     // ─── PR 6 review follow-up: edge-case serde tests ──────────────────
 
     #[test]
@@ -341,7 +386,7 @@ mod tests {
         let req = ChatRequest {
             message: long_msg.clone(),
             user_id: "local".to_string(),
-            session_id: "sess-123".to_string(),
+            chat_session_id: "sess-123".to_string(),
             participant_type: "user".to_string(),
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -357,7 +402,7 @@ mod tests {
         let req = ChatRequest {
             message: unicode_msg.to_string(),
             user_id: "local".to_string(),
-            session_id: "".to_string(),
+            chat_session_id: "".to_string(),
             participant_type: "user".to_string(),
         };
         let json = serde_json::to_value(&req).unwrap();
@@ -370,7 +415,7 @@ mod tests {
         // (PR 6 review fix: PR 5 test gap #11.)
         let json = serde_json::json!({
             "reply": "你好！我是 nexus-7 🤖",
-            "session_id": "abc-123",
+            "chat_session_id": "abc-123",
             "agent_id": "nexus-7",
             "agent_display_name": "Нексус Семь",
             "reply_status": "ok"

@@ -14,6 +14,8 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
+import pytest
+from google.protobuf import json_format
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher
@@ -34,7 +36,7 @@ def _chat_request(
     agent_id: str = "ember-owl",
     user_id: str = "local",
     message: str = "hello",
-    session_id: str = "",
+    chat_session_id: str = "",
     timeout_seconds: int = 0,
     participant_type: str = "",
 ) -> task_pb2.ChatRequest:
@@ -42,7 +44,7 @@ def _chat_request(
         agent_id=agent_id,
         user_id=user_id,
         message=message,
-        session_id=session_id,
+        chat_session_id=chat_session_id,
         timeout_seconds=timeout_seconds,
         participant_type=participant_type,
     )
@@ -96,30 +98,30 @@ class TestSendChatMessage:
         context.set_code.assert_called_once_with(grpc.StatusCode.NOT_FOUND)
         assert resp.reply_status == "error"
 
-    async def test_session_id_generated_when_empty(self):
-        """A UUID session_id is generated when request has empty session_id."""
+    async def test_chat_session_id_generated_when_empty(self):
+        """A UUID chat_session_id is generated when request has empty chat_session_id."""
         actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hello", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
         resp = await servicer.SendChatMessage(
-            _chat_request(session_id=""), context,
+            _chat_request(chat_session_id=""), context,
         )
 
-        assert resp.session_id != ""
-        assert len(resp.session_id) == 36  # UUID4 format
+        assert resp.chat_session_id != ""
+        assert len(resp.chat_session_id) == 36  # UUID4 format
 
-    async def test_session_id_reused_when_provided(self):
-        """Existing session_id is echoed back unchanged."""
+    async def test_chat_session_id_reused_when_provided(self):
+        """Existing chat_session_id is echoed back unchanged."""
         actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": []})]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
         resp = await servicer.SendChatMessage(
-            _chat_request(session_id="my-session-123"), context,
+            _chat_request(chat_session_id="my-session-123"), context,
         )
 
-        assert resp.session_id == "my-session-123"
+        assert resp.chat_session_id == "my-session-123"
 
     async def test_participant_type_defaults_to_user(self):
         """Empty participant_type field defaults to 'user'."""
@@ -323,18 +325,18 @@ class TestSendChatMessage:
 
     # ─── Input Validation Length Limits ──────────────────────
 
-    async def test_session_id_exceeds_max_length(self):
-        """session_id longer than 128 chars triggers INVALID_ARGUMENT."""
+    async def test_chat_session_id_exceeds_max_length(self):
+        """chat_session_id longer than 128 chars triggers INVALID_ARGUMENT."""
         servicer = _make_servicer([])
         context = _mock_context()
 
         resp = await servicer.SendChatMessage(
-            _chat_request(session_id="x" * 129), context,
+            _chat_request(chat_session_id="x" * 129), context,
         )
 
         context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
         assert resp.reply_status == "error"
-        context.set_details.assert_called_once_with("session_id exceeds 128 characters")
+        context.set_details.assert_called_once_with("chat_session_id exceeds 128 characters")
 
     async def test_message_exceeds_max_length(self):
         """message longer than 32768 chars triggers INVALID_ARGUMENT."""
@@ -416,3 +418,57 @@ class TestSendChatMessage:
         context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
         context.set_details.assert_called_once_with("agent_id is required")
         assert resp.reply_status == "error"
+
+
+# ─── proto3-JSON regression: legacy `session_id` key ───────────────
+
+
+class TestLegacyChatSessionIdJSONKey:
+    """Pin the proto3-JSON parser's behaviour on the pre-v0.3.1 field name.
+
+    RFC 0031 PR 1 (RFC 0031 OQ #8) renamed `ChatRequest.session_id` and
+    `ChatResponse.session_id` to `chat_session_id`. Field numbers stayed
+    unchanged so binary-proto consumers are unaffected, but proto3-JSON
+    consumers break: an unknown JSON key triggers `ParseError` under the
+    default ``ignore_unknown_fields=False``. These tests pin that mode
+    so a future protobuf-python upgrade can't silently flip the failure
+    shape (e.g. to silent zero-value defaults). If the parser default
+    ever does change, the v0.3.1 CHANGELOG Upgrade Note needs to update
+    alongside.
+    """
+
+    def test_chat_request_legacy_session_id_raises_parse_error(self):
+        with pytest.raises(json_format.ParseError):
+            json_format.Parse(
+                '{"agent_id":"a","user_id":"u","message":"m",'
+                '"session_id":"legacy"}',
+                task_pb2.ChatRequest(),
+            )
+
+    def test_chat_request_legacy_session_id_silently_dropped_when_ignored(self):
+        # Operators (or out-of-tree gateways) who explicitly opt in to
+        # ``ignore_unknown_fields=True`` get a successful parse with
+        # ``chat_session_id`` left at its zero value, so the agent mints
+        # a fresh chat session id rather than reusing the legacy-keyed
+        # value. This is an opt-in degradation path for permissive
+        # gateways only — the in-tree Go REST handler does **not** take
+        # this path: ``decodeJSON`` runs with ``DisallowUnknownFields``
+        # and rejects the legacy key with HTTP 400 (pinned by
+        # ``TestHandleChat_LegacySessionIDJSONKeyRejected``).
+        req = json_format.Parse(
+            '{"agent_id":"a","user_id":"u","message":"m",'
+            '"session_id":"legacy"}',
+            task_pb2.ChatRequest(),
+            ignore_unknown_fields=True,
+        )
+        assert req.chat_session_id == ""
+        assert req.agent_id == "a"
+        assert req.user_id == "u"
+        assert req.message == "m"
+
+    def test_chat_request_new_key_round_trips(self):
+        req = json_format.Parse(
+            '{"chatSessionId":"sess-abc"}',
+            task_pb2.ChatRequest(),
+        )
+        assert req.chat_session_id == "sess-abc"

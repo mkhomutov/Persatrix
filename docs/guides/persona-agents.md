@@ -516,17 +516,21 @@ than crashing.
 
 ### Session persistence
 
-The REST contract carries a `session_id` field on every request and reply.
-The first request from the REPL sends an empty `session_id`; the server
-allocates a new one and returns it on the response. Subsequent requests
-reuse that ID for the lifetime of the REPL process, so the agent sees one
-continuous conversation per `persatrix chat` invocation.
+The REST contract carries a `chat_session_id` field on every request and
+reply (renamed from `session_id` in v0.3.1 to disambiguate from RFC
+0031's operator-namespace `session_id` — see
+[RFC 0016 §Amendments](../rfcs/0016-human-participant-chat-interface.md#amendments)).
+The first request from the REPL sends an empty `chat_session_id`; the
+server allocates a new one and returns it on the response. Subsequent
+requests reuse that ID for the lifetime of the REPL process, so the
+agent sees one continuous conversation per `persatrix chat` invocation.
 
-`session_id` is currently used as a client-side conversation token only —
-it is recorded into `event.metadata["session_id"]` and flows into episodic
-memory records, but no agent-side logic branches on it. Cross-session
-threading and session-scoped memory queries are deferred to v0.3.0
-(see [RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md)).
+`chat_session_id` is currently used as a client-side conversation token
+only — it is recorded into `event.metadata["chat_session_id"]` and flows
+into episodic memory records, but no agent-side logic branches on it.
+Cross-session threading and session-scoped memory queries land via the
+RFC 0031 phases (Phase 2+; see
+[RFC 0031](../rfcs/0031-per-session-namespacing-channels.md)).
 
 ### Relationship memory evolution
 
