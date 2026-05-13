@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -164,6 +165,24 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         self._initialized = False
         self._eviction_task: asyncio.Task[None] | None = None
         self._shared_pools = shared_pools
+        # RFC 0031 Phase 1: resolve PERSATRIX_SESSION_ID once at
+        # construction so the task-agent / sub-agent path (which builds
+        # MemoryFacade in BaseAgent.initialize_memory) inherits the
+        # operator-namespace tag without an explicit kwarg at every
+        # write site.  Persona-runtime routes its writes through
+        # ``self._episodic_memory.store_episode`` directly with its own
+        # threaded ``_session_id``; the facade-level default exists
+        # only for callers that do not have a session id of their own.
+        # The read is intentionally silent — the canonical INFO/WARN
+        # lines are emitted by ``PersonaAgent.__init__`` (Python) and
+        # ``cmd/orchestrator/startup.go::resolveSessionID`` (Go); a
+        # second log line here would double-emit on every facade build.
+        # The env-var name and "legacy" carve-out match
+        # ``agents.persona_runtime.session_id`` but are inlined here to
+        # avoid the cross-package import cycle
+        # (persona_runtime → persona → base → memory.facade).
+        raw_session = os.environ.get("PERSATRIX_SESSION_ID", "").strip()
+        self._session_id = raw_session or "legacy"
 
     @property
     def agent_id(self) -> str:
@@ -323,6 +342,7 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         ttl_seconds: float | None = None,
         tags: Iterable[str] = (),
         outcome: str | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Persist *content* as an episodic observation.
 
@@ -346,6 +366,11 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
         outcome:
             Optional caller-supplied outcome string persisted on the
             underlying episode (RFC 0008 §B); not ranked separately.
+        session_id:
+            RFC 0031 Phase 1 operator-namespace tag.  ``None`` falls
+            back to the facade's construction-time default (resolved
+            from ``PERSATRIX_SESSION_ID``); pass an explicit value to
+            override on a per-call basis.
         """
         self._require_initialised()
         if not content or not content.strip():
@@ -365,6 +390,7 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
             importance=importance,
             tags=tag_list,
             scope=scope,
+            session_id=session_id if session_id is not None else self._session_id,
         )
 
     # ─── Procedural tier (RFC 0008 PR 5) ─────────────────────

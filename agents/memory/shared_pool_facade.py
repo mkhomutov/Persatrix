@@ -39,12 +39,18 @@ async def publish_via_facade(
     *,
     confidence: float,
     tags: Iterable[str] = (),
+    session_id: str = "legacy",
 ) -> str:
     """Curated isolated→shared publish path (RFC 0008 §H).
 
     Rejects publication into ``sensitive: true`` pools regardless of
     writer ACL — RFC §H safety constraint #3.  ``source_agent`` is
     framework-injected from *agent_id*; callers cannot spoof it.
+
+    ``session_id`` (RFC 0031 Phase 1; default ``"legacy"``) tags the
+    underlying episode.  The facade-mixin caller threads its own
+    construction-time default so a sub-agent publishing into a shared
+    pool inherits the same operator-namespace as its parent.
     """
     if registry is None:
         raise SharedMemoryPermissionError(
@@ -64,7 +70,7 @@ async def publish_via_facade(
     # is exactly the framework-injection guarantee the facade promises.
     return await pool.write(
         agent_id, content,
-        confidence=confidence, tags=tags,
+        confidence=confidence, tags=tags, session_id=session_id,
     )
 
 
@@ -104,24 +110,32 @@ class SharedPoolFacadeMixin:
     """Mixin that adds ``publish_to_pool`` / ``read_from_pool`` methods.
 
     Expects the host class to provide ``_shared_pools``, ``_agent_id``,
-    and ``_require_initialised()``.  Lives here (not on
+    ``_session_id`` (RFC 0031 Phase 1 facade-level default), and
+    ``_require_initialised()``.  Lives here (not on
     :class:`MemoryFacade` directly) to keep ``facade.py`` under the
     repo line cap.
     """
 
     _shared_pools: SharedPoolRegistry | None
     _agent_id: str
+    # RFC 0031 Phase 1: facade-level default for the operator-namespace
+    # tag (see :class:`agents.memory.facade.MemoryFacade`).
+    _session_id: str
 
     def _require_initialised(self) -> None: ...  # provided by host
 
     async def publish_to_pool(
         self, pool_name: str, content: str, *,
         confidence: float, tags: Iterable[str] = (),
+        session_id: str | None = None,
     ) -> str:
         self._require_initialised()
         return await publish_via_facade(
             self._shared_pools, self._agent_id, pool_name, content,
             confidence=confidence, tags=tags,
+            session_id=(
+                session_id if session_id is not None else self._session_id
+            ),
         )
 
     async def read_from_pool(

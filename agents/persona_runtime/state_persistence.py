@@ -54,6 +54,9 @@ class _StatePersistenceMixin:
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
     _lock: asyncio.Lock
+    # RFC 0031 Phase 1: resolved from PERSATRIX_SESSION_ID in
+    # PersonaAgent.__init__ (see agents/persona.py).
+    _session_id: str
 
     # ─── State persistence ─────────────────────────────
 
@@ -105,10 +108,18 @@ class _StatePersistenceMixin:
         not yet route through the shared-pool API.  Wiring lands in a
         follow-on PR; the kwarg is accepted now so callers can pass it
         unconditionally.
+
+        RFC 0031 PR plan PR 4 finding #2: ``_session_id`` is threaded
+        into :meth:`RelationshipMemory.initialize` so a config-seeded
+        peer row carries the active session's tag from the start.
+        Without this, the seed inserted ``"legacy"`` and the
+        first-seen-wins contract on ``record_interaction`` prevented a
+        later overwrite — MT-SESSION-001 Step 7 silently failed.
         """
         await self._episodic_memory.initialize()
         await self._relationship_memory.initialize(
             config_relationships=self.config.get("relationships"),
+            session_id=self._session_id,
         )
         await self._working_memory.initialize()
         self._state = await self._load_persona_state()

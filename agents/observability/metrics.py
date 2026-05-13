@@ -245,6 +245,17 @@ class _Instruments:
             ),
         )
 
+        # Python mirror of the orchestrator's ``sessions.writes`` (RFC 0031
+        # Phase 1); one tick per ``store_episode`` / ``record_interaction``.
+        self.sessions_writes: Counter = meter.create_counter(
+            name="agent.sessions.writes",
+            unit="{write}",
+            description=(
+                "Memory-tier writes attributed to a session_id "
+                "(RFC 0031 Phase 1). Attrs: session_id, agent.id, surface."
+            ),
+        )
+
         # ─── Histograms ──────────────────────────────────────────────
         self.tool_duration: Histogram = meter.create_histogram(
             name="agent.tool.duration",

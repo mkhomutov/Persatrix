@@ -286,6 +286,7 @@ class SharedMemoryPool:
         *,
         confidence: float,
         tags: Iterable[str] = (),
+        session_id: str = "legacy",
     ) -> str:
         """Persist *content* into the pool with framework-injected provenance.
 
@@ -330,6 +331,7 @@ class SharedMemoryPool:
             context=ctx,
             importance=confidence,
             tags=list(tags),
+            session_id=session_id,
         )
         await self._enforce_fifo_cap()
         _record_write(self._config.name, agent_id)
@@ -483,12 +485,8 @@ def _try_instruments() -> Any:
     return try_get_instruments()
 
 
-# ─── Facade helpers ──────────────────────────────────────────────
-#
 # ``publish_via_facade`` / ``read_via_facade`` live in
-# ``agents/memory/shared_pool_facade.py`` to keep this module under
-# the repo line cap.
-
+# ``shared_pool_facade.py`` to keep this module under the repo line cap.
 
 __all__ = [
     "SharedMemoryPermissionError",

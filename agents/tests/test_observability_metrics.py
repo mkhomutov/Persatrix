@@ -62,6 +62,16 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.agent_active.add(-1, attributes={"agent.id": "t"})
     inst.spans_dropped.add(1, attributes=_DROP_A)
     inst.logs_dropped.add(1, attributes=_DROP_A)
+    # RFC 0031 Phase 1 — exercise the per-session write counter so the
+    # inventory + unit-coverage tests below catch a rename / unit drift.
+    inst.sessions_writes.add(
+        1,
+        attributes={
+            "session_id": "legacy",
+            "agent.id": "t",
+            "surface": "episode",
+        },
+    )
 
 
 def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
@@ -93,6 +103,7 @@ class TestInstrumentInventory:
             "agent.active",
             "agent.observability.spans.dropped",
             "agent.observability.logs.dropped",
+            "agent.sessions.writes",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -110,6 +121,7 @@ class TestInstrumentInventory:
             "agent.persona.tick.interval": "ms",
             "agent.observability.spans.dropped": "{span}",
             "agent.observability.logs.dropped": "{record}",
+            "agent.sessions.writes": "{write}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"

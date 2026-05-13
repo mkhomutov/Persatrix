@@ -83,8 +83,8 @@ class _EpisodeRoutingMixin:
     _pending_summarize_tasks: set[asyncio.Task[None]]
     # RFC 0031 Phase 1: per-process operator-namespace tag stamped on
     # every ``store_episode`` / ``record_interaction`` call.  Set in
-    # ``_LLMPersonaAgent.__init__`` from ``PERSATRIX_SESSION_ID``;
-    # defaults to ``"legacy"`` when unset.
+    # ``PersonaAgent.__init__`` (``agents/persona.py``) from
+    # ``PERSATRIX_SESSION_ID``; defaults to ``"legacy"`` when unset.
     _session_id: str
 
     # RFC 0020 §G event-type routing.  Both sets are *positive lists* —

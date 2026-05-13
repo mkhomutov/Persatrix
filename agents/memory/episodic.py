@@ -22,6 +22,7 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..observability.metrics import try_get_instruments
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
@@ -259,6 +260,22 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     ),
                 )
                 await db.commit()
+                # RFC 0031 Phase 1 — increment the per-session write
+                # counter (Python mirror of the orchestrator-side
+                # ``sessions.writes``).  ``try_get_instruments`` returns
+                # ``None`` when ``init_metrics`` has not been called
+                # (e.g. unit tests that do not need OTEL); the no-op
+                # path keeps the call site cheap.
+                inst = try_get_instruments()
+                if inst is not None:
+                    inst.sessions_writes.add(
+                        1,
+                        attributes={
+                            "session_id": session_id,
+                            "agent.id": self._agent_id,
+                            "surface": "episode",
+                        },
+                    )
                 return episode_id
             except Exception as exc:
                 span.record_exception(exc)

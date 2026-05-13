@@ -65,8 +65,8 @@ filtering**; this test only asserts the *write* contract.
   — memory.db v7 migration (Python side).
 - [cmd/orchestrator/startup.go](../../cmd/orchestrator/startup.go) —
   `resolveSessionID` (Go env reader).
-- [agents/persona_runtime/__init__.py](../../agents/persona_runtime/__init__.py)
-  — `_resolve_session_id` (Python env reader).
+- [agents/persona_runtime/session_id.py](../../agents/persona_runtime/session_id.py)
+  — `resolve_session_id_and_log` (Python env reader).
 
 **Related Automated Tests**: see "Out of Scope" above.
 
@@ -108,7 +108,7 @@ $env:PERSATRIX_SESSION_ID = "run-a"
 ./bin/orchestrator.exe --env=development 2>&1 | Tee-Object orchestrator-run-a.log
 # (in a second shell)
 $env:PERSATRIX_SESSION_ID = "run-a"
-python -m agents.persona_runtime_main 2>&1 | Tee-Object persona-run-a.log
+python -m persatrix_agents.server 2>&1 | Tee-Object persona-run-a.log
 ```
 
 **Expected**:
@@ -209,7 +209,7 @@ $env:PERSATRIX_SESSION_ID = "run-b"
 ./bin/orchestrator.exe --env=development 2>&1 | Tee-Object orchestrator-run-b.log
 # (other shell)
 $env:PERSATRIX_SESSION_ID = "run-b"
-python -m agents.persona_runtime_main 2>&1 | Tee-Object persona-run-b.log
+python -m persatrix_agents.server 2>&1 | Tee-Object persona-run-b.log
 ```
 
 **Expected**:
@@ -329,19 +329,21 @@ sqlite3 data/channels.db "SELECT content, session_id FROM messages WHERE channel
 
 ### Edge Case 1: Non-canonical env value (`PERSATRIX_SESSION_ID="my session"`)
 
-Phase 1 plumbing accepts the value verbatim and emits a WARN log on the
-Go side (parity test:
-[`TestResolveSessionID_InvalidCharsWarnsButAccepts`](../../cmd/orchestrator/session_env_test.go#L59)).
-Hard validation lives in Phase 3 CLI's `persatrix session new`. The
-Python persona-runtime currently does not WARN on non-canonical values
-— this is intentional, since the canonical surface for operator-facing
-validation is the CLI (Phase 3); the runtime treats the env as opaque
-storage. To exercise the Go-side WARN manually:
+Phase 1 plumbing accepts the value verbatim and emits a WARN log on
+**both** the orchestrator and the persona-runtime (parity tests:
+[`TestResolveSessionID_InvalidCharsWarnsButAccepts`](../../cmd/orchestrator/session_env_test.go#L59)
+on the Go side; `TestNonCanonicalValue` in
+[`tests/unit/python/test_session_id_resolve.py`](../../tests/unit/python/test_session_id_resolve.py)
+on the Python side). Hard validation lives in Phase 3 CLI's
+`persatrix session new`. Both binaries' WARN messages cite the same
+regex shape so an operator greps for one phrase across both logs:
 
 ```pwsh
 $env:PERSATRIX_SESSION_ID = "my session"
 ./bin/orchestrator.exe --env=development 2>&1 | Select-String "PERSATRIX_SESSION_ID"
 # Expect: WARN line mentioning "characters outside [A-Za-z0-9_-]"
+python -m persatrix_agents.server 2>&1 | Select-String "PERSATRIX_SESSION_ID"
+# Expect: WARN line citing the same canonical regex
 ```
 
 ### Edge Case 2: Phase 2 recall semantics
