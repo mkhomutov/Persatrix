@@ -190,6 +190,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         turn_count: int | None = None,
         scope: str | None = None,
         session_id: str = "legacy",
+        surface: str = "episode",
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -203,8 +204,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         the operator-namespace active at write time.  The default
         ``"legacy"`` matches the synthetic carve-out persisted by the
         orchestrator-side ``channels.DefaultSessionID`` so pre-RFC callers
-        produce queryable rows.  Phase 1 ships no recall-side filtering —
-        the column exists so Phase 2 has a column + index to filter on.
+        produce queryable rows.  Phase 1 ships no recall-side filtering.
+        ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -273,7 +274,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         attributes={
                             "session_id": session_id,
                             "agent.id": self._agent_id,
-                            "surface": "episode",
+                            "surface": surface,
                         },
                     )
                 return episode_id

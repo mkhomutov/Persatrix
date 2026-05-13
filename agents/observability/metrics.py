@@ -245,10 +245,11 @@ class _Instruments:
             ),
         )
 
-        # Python mirror of the orchestrator's ``sessions.writes`` (RFC 0031
-        # Phase 1); one tick per ``store_episode`` / ``record_interaction``.
+        # Python mirror of channel_instruments.go:53 ``sessions.writes``
+        # (RFC 0031 Phase 1); one tick per store_episode / record_interaction.
+        # Name omits ``agent.`` prefix — cross-binary contract (PR 4 F1).
         self.sessions_writes: Counter = meter.create_counter(
-            name="agent.sessions.writes",
+            name="sessions.writes",
             unit="{write}",
             description=(
                 "Memory-tier writes attributed to a session_id "

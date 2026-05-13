@@ -332,6 +332,7 @@ class SharedMemoryPool:
             importance=confidence,
             tags=list(tags),
             session_id=session_id,
+            surface="shared_pool",  # RFC 0031 PR 4 F2: counter dimension
         )
         await self._enforce_fifo_cap()
         _record_write(self._config.name, agent_id)

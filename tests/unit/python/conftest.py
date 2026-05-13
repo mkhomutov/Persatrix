@@ -27,6 +27,32 @@ def _clean_registry():
     clear_registry()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_session_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure ``PERSATRIX_SESSION_ID`` does not leak across tests.
+
+    RFC 0031 Phase 1 makes :class:`agents.memory.facade.MemoryFacade` read
+    ``PERSATRIX_SESSION_ID`` at construction so the task-agent /
+    sub-agent path inherits the operator-namespace tag without an
+    explicit kwarg at every write site
+    (see ``agents/memory/facade.py`` ``__init__`` for the rationale).
+
+    The flip side: any test that constructs a ``MemoryFacade`` and
+    asserts ``_session_id == "legacy"`` will silently pick up a shell-
+    inherited value when the developer (or a CI job) happens to have
+    ``PERSATRIX_SESSION_ID`` exported.  This autouse fixture
+    monkeypatches the var out before every test so the env baseline is
+    deterministic; tests that *want* the env-read path call
+    ``monkeypatch.setenv("PERSATRIX_SESSION_ID", ...)`` themselves and
+    that overrides this delete for the test's scope.
+
+    Symmetric with ``_clean_registry`` above (same autouse pattern, same
+    "deterministic baseline before the test runs" intent).  PR 4 review
+    follow-up F5.
+    """
+    monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
+
+
 @pytest.fixture
 async def memory():
     """Create an initialized EpisodicMemory instance with in-memory DB."""

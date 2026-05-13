@@ -301,9 +301,14 @@ file remains an honest record of what was flagged at review time.
    operator-controlled session count — the same argument PR 2 §Key implementation details makes
    for the Go counter.
 
-   **Resolution (PR 4)**: Counter `agent.sessions.writes` registered in
+   **Resolution (PR 4)**: Counter `sessions.writes` registered in
    [`agents/observability/metrics.py`](../../agents/observability/metrics.py)
-   (unit `{write}`, attrs `session_id`, `agent.id`, `surface`).
+   (unit `{write}`, attrs `session_id`, `agent.id`, `surface`).  The name
+   intentionally omits the `agent.` prefix used by every other Python
+   instrument so a single PromQL query covers both the orchestrator-side
+   [`sessions.writes`](../../internal/observability/metrics/channel_instruments.go)
+   and this Python sibling — they are one cross-binary RFC 0031 contract,
+   not two per-binary metrics (PR 4 review follow-up F1).
    `EpisodicMemory.store_episode` and `record_interaction` each emit one
    tick per call. Inventory test updated in
    [`agents/tests/test_observability_metrics.py`](../../agents/tests/test_observability_metrics.py).

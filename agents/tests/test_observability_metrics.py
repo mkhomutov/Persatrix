@@ -103,7 +103,16 @@ class TestInstrumentInventory:
             "agent.active",
             "agent.observability.spans.dropped",
             "agent.observability.logs.dropped",
-            "agent.sessions.writes",
+            # RFC 0031 PR 4 follow-up F1: the per-session write counter
+            # drops the ``agent.`` prefix so a single PromQL query like
+            # ``sum(rate(sessions_writes_total[5m])) by (session_id)`` sees
+            # both the orchestrator (Go ``sessions.writes`` —
+            # ``internal/observability/metrics/channel_instruments.go:53``)
+            # and the persona-runtime/sub-agent ticks in the same series.
+            # All other Python instruments keep the ``agent.`` prefix
+            # because they are per-agent metrics; ``sessions.writes`` is a
+            # cross-binary RFC 0031 contract, not a per-agent metric.
+            "sessions.writes",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -121,7 +130,7 @@ class TestInstrumentInventory:
             "agent.persona.tick.interval": "ms",
             "agent.observability.spans.dropped": "{span}",
             "agent.observability.logs.dropped": "{record}",
-            "agent.sessions.writes": "{write}",
+            "sessions.writes": "{write}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"

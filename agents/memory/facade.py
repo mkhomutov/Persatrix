@@ -391,14 +391,13 @@ class MemoryFacade(ProceduralFacadeMixin, SharedPoolFacadeMixin):
             tags=tag_list,
             scope=scope,
             session_id=session_id if session_id is not None else self._session_id,
+            surface="observation",  # RFC 0031 PR 4 F2: counter dimension
         )
 
     # ─── Procedural tier (RFC 0008 PR 5) ─────────────────────
     # ``store_procedure`` and ``retrieve_procedures`` come from
     # :class:`ProceduralFacadeMixin` to keep this file under the
     # repo's 500-line cap.
-
-
 
     @staticmethod
     def compress(
