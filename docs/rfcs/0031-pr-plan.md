@@ -420,8 +420,8 @@ New `docs/guides/sessions.md`. Close [ISSUE-0051](../issues/ISSUE-0051-per-sessi
 | 1 | RFC 0016 wire-field rename | `feature/v031-rfc0031p1-chat-session-rename` | ✅ Merged | [#333](https://github.com/mkhomutov/Persatrix/pull/333) | 2026-05-13 |
 | 2 | Sessions table + Go migrations + orchestrator env-var | `feature/v031-rfc0031p1-sessions-table-go` | ✅ Merged | [#335](https://github.com/mkhomutov/Persatrix/pull/335) | 2026-05-13 |
 | 3 | Python migrations + persona-runtime env-var + cross-process integration | `feature/v031-rfc0031p1-sessions-py` | ✅ Merged | [#336](https://github.com/mkhomutov/Persatrix/pull/336) | 2026-05-13 |
-| 4 | Review follow-ups | `feature/v031-rfc0031p1-followups` | 🔀 PR open | — | — |
-| 5 | Phase 1 closeout | `feature/v031-rfc0031p1-close` | ⬜ Not started | — | — |
+| 4 | Review follow-ups | `feature/v031-rfc0031p1-followups` | ✅ Merged | [#337](https://github.com/mkhomutov/Persatrix/pull/337) | 2026-05-13 |
+| 5 | Phase 1 closeout | `feature/v031-rfc0031p1-close` | ✅ Merged | [#338](https://github.com/mkhomutov/Persatrix/pull/338) | 2026-05-14 |
 
 ---
 

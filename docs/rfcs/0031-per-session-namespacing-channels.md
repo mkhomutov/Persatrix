@@ -3,10 +3,10 @@ id: RFC-0031
 title: Per-Session Namespacing for Channels and Persona Memory
 summary: First-class Session scope under which channels are created and persona-memory rows are tagged — root-cause fix for v0.3.0 F-3 cross-run state bleed (currently mitigated by `make reset`).
 type: architecture
-status: proposed
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-12
-target: v0.3.x
+target: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)
 depends_on:
   - RFC-0011
   - RFC-0020
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
-**Target**: v0.3.x
+**Target**: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)
 **Depends on**: RFC 0011 (Channels), RFC 0020 (Interaction Lifecycle — §G scope vocabulary)
 **Relates to**: RFC 0008 (Memory & Context Optimization), RFC 0029 (Personal/Society Storage Split)
 **Spawned from**: [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) — root-cause fix for F-3 cross-run state bleed; currently mitigated by `make reset` (PR 6 of [v0.3.0 channel test-findings plan](../v0.3.0-test-findings-pr-plan.md))
@@ -365,14 +365,19 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 
 ## Decision / Next Steps
 
-This RFC is `📋 Proposed`. Before moving to `👍 Accepted`:
+**Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md), [0031-pr-plan.md](0031-pr-plan.md)). Status flipped to `⚠️ Partially Implemented (Phase 1)` on the merge of PR 5 (closeout); RFC remains open until Phases 2–4 land in subsequent v0.3.x patches. Open Questions 1 and 8 were resolved at plan-authoring time before Phase 1 shipped its non-additive column / env-var names ([0031-pr-plan.md §Open-question resolutions](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)).
 
-1. Resolve **Open Question 1** (dementia-test continuity). This is the only question whose answer can invalidate the whole *recall* design. Proposed default 1a recorded (matches §D's `sessions = [self._active_session_id]` pseudocode and delivers §Goals item 1 by default; trades a small operator-ergonomics cost on the dementia-test side for not regressing F-3); reviewer take still required.
-2. Resolve **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`). This is the only question whose answer can invalidate the whole *naming* surface — Phase 1 lands `session_id` as a column name in four tables and as the env-var suffix, and reversing either after Phase 1 ships is a non-additive migration.
-3. Confirm **Open Question 4** sequencing with RFC 0029.
-4. Confirm **Open Question 7** with the observability reviewer.
+**Already resolved (at plan-authoring time, locked by Phase 1's non-additive surface):**
 
-Open Questions 2, 3, 5, 6 may be resolved during phased implementation review without blocking acceptance.
+- **Open Question 1** (dementia-test continuity) — single-session default (1a). Load-bearing in Phase 2 recall filtering.
+- **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`) — rename RFC 0016 wire field to `chat_session_id` (8b), shipped in RFC 0031 PR 1 ([#333](https://github.com/mkhomutov/Persatrix/pull/333)).
+
+**Remaining before moving to `👍 Accepted` and resuming Phases 2–4:**
+
+- Confirm **Open Question 4** sequencing with RFC 0029.
+- Confirm **Open Question 7** with the observability reviewer.
+
+Open Questions 2, 3, 5, 6 may be resolved during phased implementation review of Phases 2–4 without blocking acceptance.
 
 ## Related Documentation
 

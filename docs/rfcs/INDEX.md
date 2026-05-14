@@ -18,10 +18,10 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
 | [RFC-0029](0029-personal-society-storage-split.md) | 📋 Proposed | architecture | Phase 1 v0.3.x (facade + tier rename); Phases 2–4 v0.4.0 | 2026-05-10 | Personal/Society Storage Split |
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
-| [RFC-0031](0031-per-session-namespacing-channels.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-12 | Per-Session Namespacing for Channels and Persona Memory |
 | [RFC-0009](0009-security-sandboxing.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 2026-04-15 | Agent Identity, Security & Sandboxing |
 | [RFC-0011](0011-channels-bridges.md) | ⚠️ Partially Implemented | feature | v0.3.0 (internal channels) + v0.5.0 (external bridges) | 2026-04-25 | Channels & Internal Agent Messaging |
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |
+| [RFC-0031](0031-per-session-namespacing-channels.md) | ⚠️ Partially Implemented | architecture | v0.3.1 (Phase 1) + v0.3.x (Phases 2–4) | 2026-05-12 | Per-Session Namespacing for Channels and Persona Memory |
 | [RFC-0001](0001-core-orchestration-pipeline.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-08 | Core Orchestration Pipeline (Planner + State + Registry) |
 | [RFC-0002](0002-rest-api-server.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-09 | REST API Server (HTTP Layer + Workflow Submission) |
 | [RFC-0003](0003-scheduler-executor.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-09 | Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch) |
