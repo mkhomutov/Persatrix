@@ -273,11 +273,12 @@ async def store_extracted_facts(
     RFC 0026 §C.
 
     PR #340 review S1: the substitution branch returns the
-    **canonical** form of ``sender_id`` rather than the raw
-    caller-supplied string, so a mixed-case ``sender_id`` (e.g.
-    ``"Bob_user_123"``) does not split rows across casings — every
-    fact about the counterparty lands under the same canonical
-    subject column.
+    **canonical** form of ``sender_id`` (see :func:`_canonicalize_subject`).
+
+    PR #340 deep-review S3: ``sender_id`` is stripped at the boundary
+    so whitespace collapses to ``None`` before reaching
+    :func:`canonicalize_subject` (which would otherwise raise *before*
+    the per-tuple try-block and drop the whole batch silently).
 
     Predicate canonicalization
     --------------------------
@@ -285,6 +286,8 @@ async def store_extracted_facts(
     allowlist.  Capitalised variants from the LLM normalise to the
     canonical form rather than counting as a rejection.
     """
+    if sender_id is not None:
+        sender_id = sender_id.strip() or None
     canonical_sender = (
         canonicalize_subject(sender_id) if sender_id else None
     )

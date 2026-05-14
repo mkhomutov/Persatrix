@@ -282,27 +282,93 @@ misleading `FactStore` "reuses EpisodicMemory connection" comment in
 [`agents/persona.py`](../../agents/persona.py) corrected; the
 `canonicalize_subject` ASCII-only `.lower()` swapped for Unicode-aware
 `.casefold()` so non-ASCII counterparties — e.g., German `ß` — do not
-silently split across two `facts.subject` rows). The items deferred to
-this PR are:
+silently split across two `facts.subject` rows).
 
-- **Combined-envelope truncation observability.** The combined
-  summarize + extract LLM call shares the RFC 0020 PR 4 `max_tokens=256`
-  cap, which was tuned for the prose-only summary (~50–100 tokens).
-  A 5-fact response is ~200–280 tokens — uncomfortably close to the
-  cap, and truncation yields invalid JSON that `split_combined_response`
-  catches by returning `(text, False, None)` and committing the raw
-  text as the summary. Result: facts are silently lost with no counter
-  bump and no log signal, indistinguishable from "model emitted no
-  facts." Two options, pick one in PR 5 review:
-  1. Bump the combined-call cap (e.g., 512) — simplest, costs tokens
-     even on summary-only paths.
-  2. Add an `agent.facts.envelope_truncated` counter and a structured
-     log emission at `split_combined_response` time when the response
-     parses-as-text-not-JSON but contains a `"facts"` substring — keeps
-     the cap tight, makes truncation observable separately from the
-     "no facts" case.
-  Test pin should assert the chosen signal fires when the LLM client
-  is stubbed to return a deliberately truncated envelope.
+Deep-review (PR #340) findings that **also** landed inline in PR 2:
+
+- **S2 — empty-summary envelope falls back to placeholder.** A well-
+  formed JSON envelope with an empty (or whitespace-only) `summary`
+  field used to commit `""` to the episode summary column *and* let
+  the facts half dispatch against a missing prose half, violating
+  the §G audit ordering ("the summary always exists before any
+  `facts.store` row pointing back at this `interaction_id`"). The
+  fix at the caller layer in
+  [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+  detects the empty `summary` field post-parse, emits
+  `agent.interactions.summary.failed{reason=empty_field}`, and
+  returns `(SUMMARY_UNAVAILABLE_TEXT, True, None)` — the
+  `not summary_failed` gate in `finalize_closed_interaction` skips
+  the facts dispatch jointly. Raising inside
+  `split_combined_response` would have been caught by the backward-
+  compat branch above and committed the raw JSON envelope as the
+  summary text — *worse* than the pre-fix behaviour — so the check
+  belongs at the caller, not the splitter. Pinned by
+  `TestEmptySummaryFieldFallsBack` (unit) and
+  `TestExtractorEmptySummaryEnvelope` (integration).
+- **S3 — whitespace `sender_id` normalised at the function boundary.**
+  `store_extracted_facts` precomputes `canonical_sender =
+  canonicalize_subject(sender_id) if sender_id else None` *before*
+  the per-tuple try-block; a whitespace-only `sender_id` ("   ")
+  satisfies the truthiness check and reaches `canonicalize_subject`,
+  which raises `ValueError("subject must not be empty")`. The
+  exception escapes the helper, is caught by
+  `dispatch_facts_from_response`'s broad `except Exception`, and
+  drops the entire batch with no per-tuple
+  `agent.facts.extraction_failed` increment — silent data loss
+  indistinguishable from "no facts extracted." Fix is a one-line
+  strip-at-boundary so a whitespace-only value collapses to `None`;
+  reachability via the production close-path is low because
+  `_interaction_sender` already filters whitespace, so this is
+  defence-in-depth for direct callers (test fixtures, the future
+  RFC 0026 OQ #9 operator-seeded write path). Pinned by
+  `TestWhitespaceSenderIdNormalisedAtBoundary`.
+
+The items deferred to this PR are:
+
+- **Combined-envelope parse-failure observability — collapsed paths.**
+  The caller's `try: split_combined_response(text) except FactsParseError:
+  return (text, False, None)` block in
+  [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+  collapses three distinct failure shapes into one outcome:
+  1. **Plain prose response** — desired backward-compat path (older
+     mock clients, legacy LLM responses without the JSON envelope).
+     Commits the prose as the summary; facts half is `None`. Correct.
+  2. **Truncated JSON envelope** (PR #340 review) — the combined call
+     shares the RFC 0020 PR 4 `max_tokens=256` cap tuned for the
+     prose-only summary (~50–100 tokens); a 5-fact response is
+     ~200–280 tokens, uncomfortably close to the cap. Mid-array
+     truncation yields invalid JSON that the catch falls through to
+     "commit as raw text" — broken JSON lands in the summary column;
+     facts silently lost; no counter, no log.
+  3. **Valid JSON object missing the `summary` key** (PR #340 deep-
+     review S1) — `{"facts": [...]}` parses as a mapping but
+     `split_combined_response` raises `FactsParseError("combined
+     response missing required `summary` key")`. Same catch, same
+     fall-through; the raw JSON envelope commits as the summary
+     text. Indistinguishable from path (1) at the surface; the
+     observability gap is identical to path (2).
+  The PR #340 deep-review S2 case (well-formed envelope with
+  empty `summary` field) was a fourth member of this cluster but
+  has its own signal as of PR 2:
+  `agent.interactions.summary.failed{reason=empty_field}` fires
+  from a post-parse check at the caller. Paths (2) and (3)
+  remain unsignalled — they are this follow-up's scope.
+  Two options, pick one in PR 5 review:
+  1. **Bump the combined-call cap** (e.g., 512) and **distinguish
+     "valid-envelope-shape-but-not-prose" at the catch site** —
+     simplest for path (2); needs the catch-site change to cover
+     path (3). Costs tokens even on summary-only paths.
+  2. **Add an `agent.facts.envelope_parse_failed` counter** with a
+     `reason` attribute (`truncated` for path (2), `missing_summary`
+     for path (3)) emitted at the catch site — distinguishes the
+     three shapes deterministically (path (1) is "no JSON brace at
+     all" or "valid JSON envelope round-trip"; the others trigger
+     the counter with their distinct reasons). Keeps the cap tight,
+     makes both failure paths observable separately from each other
+     and from the "no facts" case.
+  Test pins should assert the chosen signal fires for **both** the
+  deliberately-truncated envelope **and** the missing-`summary`-key
+  envelope, so a future regression in either path surfaces.
 - **`:memory:` cross-tier `JOIN` support (optional refactor).** The
   PR 2 review noted that `FactStore` and `EpisodicMemory` each open
   their own `aiosqlite` connection (see PR 1's `shared_db` seam and
@@ -341,6 +407,27 @@ this PR are:
   Trigger: when PR 3 / PR 4 telemetry shows a recurring near-miss
   verb pattern that operators want to attribute to a specific agent
   without joining log streams. Until that demand exists, defer.
+- **Redactor idempotence — sentinel-based short-circuit.** PR #340
+  deep-review S4. `_facts_audit.emit_audit` runs the registered
+  `Redactor.redact()` explicitly, then `_logger.info(event,
+  extra=payload)`. Once stdlib's `ProcessorFormatter.foreign_pre_chain`
+  runs (post-`configure_logging`), the structlog chain's
+  [`_apply_redactor`](../../agents/observability/logging.py)
+  processor redacts the same record a second time. This is **by
+  design** — the
+  [`Redactor.redact` contract](../../agents/observability/redact.py)
+  requires idempotence, which the `NoopRedactor` (v0.3.x default)
+  trivially satisfies. The design relies on every future PII
+  redactor being idempotent without enforcement. When a real
+  redactor lands, add a sentinel marker (e.g., `_redacted: True`
+  inside the payload) and short-circuit on re-application at the
+  chain's redactor seam — the contract docstring already calls this
+  out as the recommended pattern, but the actual implementation has
+  no signal today. Trigger: when a non-`NoopRedactor` redactor
+  lands in-tree (likely v0.4.x alongside the PII work tied to
+  RFC 0013 §C). Until then, the test pin
+  `TestRedactorFailureWarning` exercises the failure surface — the
+  idempotence contract itself is documented but unguarded.
 - **Predicate-vocabulary scope — non-person / world facts.** PR 2's
   allowlist (attribute / preference / commitment / relationship +
   `self.*`) is anthropocentric — every class assumes the subject is a

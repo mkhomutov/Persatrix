@@ -163,6 +163,27 @@ async def summarize_closed_interaction(
         summary, facts_raw = split_combined_response(text)
     except FactsParseError:
         return (text, False, None)
+    # PR #340 deep-review S2: a well-formed envelope with an empty
+    # ``summary`` field parses cleanly today and commits ``""`` to
+    # ``update_episode_summary`` while letting facts dispatch fire
+    # against a missing prose half — violating the §G audit ordering
+    # "summary always exists before any facts.store row".  Treat the
+    # empty-field case as a summary failure consistent with the empty-
+    # response branch above; the distinct ``empty_field`` reason lets
+    # operators disambiguate "model returned nothing" from "model
+    # returned a valid envelope with an empty summary."  Raising
+    # ``FactsParseError`` inside :func:`split_combined_response` would
+    # be caught by the backward-compat branch above and commit the
+    # raw JSON envelope as the summary — worse than today — so the
+    # check belongs at the caller.
+    if not summary.strip():
+        logger.warning(
+            "Summarisation returned an empty `summary` field in the "
+            "JSON envelope for agent %s (scope=%s); using fallback",
+            agent_id, interaction.scope,
+        )
+        _emit_summary_failed("empty_field")
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
     return (summary, False, facts_raw)
 
 

@@ -26,6 +26,20 @@ Pinned contracts
   rejects ``{"summary": 42}`` / ``{"summary": null}`` the same way it
   rejects a missing key, so a downstream caller does not commit a
   non-string column value.
+* **S3 — whitespace-only sender_id is inert at the boundary.**
+  :func:`agents.persona_runtime.fact_extractor.store_extracted_facts`
+  normalises an empty / whitespace-only ``sender_id`` to ``None`` at
+  the function boundary so a direct caller (test fixture or future
+  operator-seeded write path) cannot reach
+  :func:`canonicalize_subject` with whitespace input.  Without this
+  pin, the ``ValueError`` raised by ``canonicalize_subject`` would
+  fire *before* the per-tuple try-block, escape under
+  :func:`dispatch_facts_from_response`'s broad ``except``, and drop
+  the entire batch with no ``agent.facts.extraction_failed`` counter
+  bump — silent data loss indistinguishable from "no facts
+  extracted."  The close-path :func:`_interaction_sender` already
+  filters whitespace senders to ``None``, so this is defence-in-depth
+  for non-close-path callers.
 """
 
 from __future__ import annotations
@@ -193,6 +207,116 @@ class TestSplitCombinedResponseSummaryShape:
     def test_summary_null_raises(self) -> None:
         with pytest.raises(FactsParseError):
             split_combined_response(json.dumps({"summary": None}))
+
+
+# ─── S3: whitespace sender_id normalised at boundary ────────
+
+
+@pytest.mark.asyncio
+class TestWhitespaceSenderIdNormalisedAtBoundary:
+    """PR #340 deep-review S3 — a whitespace-only ``sender_id`` must
+    not abort the batch.
+
+    Why this matters: the canonical_sender precompute in
+    :func:`store_extracted_facts` runs *before* the per-tuple
+    ``try/except`` block.  A whitespace-only ``sender_id`` would
+    satisfy the truthiness check (``"   "`` is truthy in Python) and
+    reach :func:`canonicalize_subject`, which raises
+    ``ValueError("subject must not be empty")``.  The ``ValueError``
+    escapes the helper, is caught by
+    :func:`dispatch_facts_from_response`'s broad ``except Exception``,
+    and the entire batch is dropped with no per-tuple
+    ``agent.facts.extraction_failed`` increment.  Operators see one
+    WARNING that looks identical to an infra failure — no signal that
+    the LLM emitted N tuples that all got silently lost.
+
+    Reachability: the production close-path
+    (:func:`_interaction_sender`) already filters whitespace senders
+    to ``None``, so this is a defence-in-depth pin for direct callers
+    — test fixtures today, and the future RFC 0026 OQ #9
+    operator-seeded write path tomorrow.  Tests rather than docstring
+    promises because the contract belongs to the function boundary
+    not the close-path entry point.
+    """
+
+    async def test_whitespace_sender_id_stores_facts_normally(
+        self, fact_store: FactStore,
+    ):
+        """Pre-fix: ``canonicalize_subject("   ")`` raised before the
+        per-tuple loop, dropping the whole batch.  Post-fix: the
+        whitespace ``sender_id`` is treated as ``None`` and the fact
+        processes normally.
+        """
+        n = await store_extracted_facts(
+            fact_store,
+            facts=[
+                {
+                    "subject": "alice",
+                    "predicate": "has_name",
+                    "object": "Alice",
+                },
+            ],
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+            session_id="legacy",
+            sender_id="   ",
+        )
+        assert n == 1, (
+            "fact must commit; whitespace-only sender_id is inert "
+            "(treated as None)"
+        )
+
+    async def test_whitespace_sender_id_skips_substitution(
+        self, fact_store: FactStore,
+    ):
+        """With ``sender_id`` whitespace-only, the sender-id
+        substitution branch in :func:`_canonicalize_subject` must
+        *not* fire — the fact lands under the canonical form of the
+        LLM-emitted subject, not coerced to any "sender" form.
+        """
+        await store_extracted_facts(
+            fact_store,
+            facts=[
+                {
+                    "subject": "Alice",
+                    "predicate": "has_name",
+                    "object": "Alice",
+                },
+            ],
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+            session_id="legacy",
+            sender_id="   ",
+        )
+        hits = await fact_store.recall(subject="alice")
+        assert len(hits) == 1, (
+            "fact must land under canonical subject form; substitution "
+            "branch must not fire on whitespace sender_id"
+        )
+
+    async def test_empty_string_sender_id_stores_facts_normally(
+        self, fact_store: FactStore,
+    ):
+        """An empty string ``sender_id`` is already handled by the
+        existing ``if sender_id`` truthiness check pre-fix — pin the
+        regression so the S3 boundary normalisation does not
+        accidentally invert it.
+        """
+        n = await store_extracted_facts(
+            fact_store,
+            facts=[
+                {
+                    "subject": "alice",
+                    "predicate": "has_name",
+                    "object": "Alice",
+                },
+            ],
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+            session_id="legacy",
+            sender_id="",
+        )
+        assert n == 1
 
 
 if __name__ == "__main__":

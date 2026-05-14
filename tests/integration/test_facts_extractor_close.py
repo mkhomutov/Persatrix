@@ -273,3 +273,100 @@ class TestExtractorPartialFailure:
                 await agent.close_memory()
         finally:
             await metrics_mod.shutdown()
+
+
+# ─── PR #340 deep-review S2: empty-summary envelope ─────────
+
+
+@pytest.mark.asyncio
+class TestExtractorEmptySummaryEnvelope:
+    """PR #340 deep-review S2 — a well-formed JSON envelope whose
+    ``summary`` field is empty (or whitespace-only) must NOT commit
+    that empty string to the episode summary column and must NOT
+    dispatch the facts half.
+
+    Pre-fix surface (the bug this test pins as gone):
+
+    1. ``{"summary": "", "facts": [...]}`` parsed cleanly via
+       :func:`split_combined_response`.
+    2. :func:`summarize_closed_interaction` returned
+       ``("", False, "[...facts JSON...]")``.
+    3. :meth:`EpisodicMemory.update_episode_summary` wrote ``""`` to
+       the ``summary`` column.
+    4. :func:`dispatch_facts_from_response` ran on the facts half, so
+       ``facts`` rows landed in storage with ``source_interaction_id``
+       pointing at an episode whose prose half is empty — violating
+       the §G audit ordering invariant ("the summary always exists
+       before any ``facts.store`` row pointing back at this
+       ``interaction_id``").
+
+    Post-fix surface:
+
+    1. :func:`summarize_closed_interaction` detects the empty
+       ``summary`` field post-parse, emits
+       ``agent.interactions.summary.failed{reason=empty_field}``, and
+       returns ``(SUMMARY_UNAVAILABLE_TEXT, True, None)``.
+    2. :func:`finalize_closed_interaction` commits the placeholder
+       summary; the ``not summary_failed`` gate skips
+       :func:`dispatch_facts_from_response` so the facts half is
+       dropped jointly with the broken summary half.
+
+    The test exercises the full close path so the contract is pinned
+    against caller-layer regressions (a future refactor that splits
+    the gate, or unrelated work that re-routes the empty-summary
+    branch).
+    """
+
+    async def test_empty_summary_envelope_writes_placeholder_and_drops_facts(
+        self,
+    ):
+        reader, metrics_mod = _build_meter()
+        try:
+            # Empty summary field; facts half is well-formed and would
+            # have committed pre-fix — pinning that it does NOT now is
+            # the load-bearing assertion.
+            agent = await _make_agent(
+                _make_combined_client(summary="", facts=FACTS_PAYLOAD),
+            )
+            try:
+                peer = "bob"
+                await send_n_turns(agent, peer, 4)
+                await agent.on_event(AgentEvent(
+                    event_type=EventType.CHANNEL_MESSAGE,
+                    payload={"content": "bye"},
+                    sender_id=peer,
+                    metadata={"chat_end": True},
+                ))
+                await drain(agent)
+
+                # Episode summary: SUMMARY_UNAVAILABLE_TEXT, NOT empty
+                # string. The pre-fix path committed ``""``; the
+                # janitor's verdict (the only other writer that can
+                # land SUMMARY_UNAVAILABLE_TEXT) cannot have run here
+                # because the close path completed synchronously
+                # before the janitor cooldown elapsed.
+                summary = await episode_summary(agent)
+                assert summary == SUMMARY_UNAVAILABLE_TEXT
+                assert summary != ""
+                assert summary != SUMMARY_PENDING_TEXT
+
+                # No facts committed — the §G audit ordering invariant
+                # is preserved (no facts.store row points at an
+                # episode whose summary is empty / placeholder).
+                assert await agent.memory.facts.recall(subject="bob") == []
+
+                # summary.failed counter bumped exactly once for the
+                # empty-field branch.  ``agent.facts.extraction_failed``
+                # must NOT bump — the facts half was well-formed; the
+                # drop was caused by the summary-failure gate, not by
+                # a per-tuple rejection.
+                assert counter_total(
+                    reader, "agent.interactions.summary.failed",
+                ) == 1
+                assert counter_total(
+                    reader, "agent.facts.extraction_failed",
+                ) == 0
+            finally:
+                await agent.close_memory()
+        finally:
+            await metrics_mod.shutdown()
