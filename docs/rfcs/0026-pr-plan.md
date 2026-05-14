@@ -861,8 +861,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 |---|-------|--------|--------|-----------|--------|
 | 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ✅ Merged | [#340](https://github.com/mkhomutov/Persatrix/pull/340) | 2026-05-14 |
-| 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | 🔀 PR open | — | — |
-| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ⬜ Not started | — | — |
+| 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
+| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | 🔀 PR open | — | — |
 | 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 

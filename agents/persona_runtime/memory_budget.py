@@ -6,13 +6,50 @@ tokens when the truncated form is at least ``min_tokens`` long; otherwise
 they are dropped.
 
 RFC 0017 §B — stable API surface for RFC 0008 scheduler-budget composition.
+
+RFC 0026 PR 4 extends the allocator with a tier-aware admission registry
+(:meth:`MemoryBudget.record_admission`,
+:meth:`MemoryBudget.admissions_by_tier`).  Two consumers ride on it:
+
+* :doc:`MT-MEMORY-005 dementia test
+  <../../docs/manual-tests/MT-MEMORY-005-dementia-test>` leg-failure
+  analysis (MQ-11) — operators flip ``PERSATRIX_MEMORY_PROVENANCE=1``
+  to log per-turn ``(tier, item_id, tokens_admitted)`` records and
+  disambiguate recall miss (item absent from the admitted slice) from
+  reasoning miss (LLM had the row and ignored it).
+* :meth:`agents.memory.facts.FactStore.mark_recalled` — the facts
+  tier reads the admitted ``fact_id`` list off the budget to write
+  ``last_recalled_at`` on every reinforced row.
+
+The :meth:`try_add` signature is pinned (RFC 0017 §B / OQ4); the
+registry is a separate call so the allocator's hot path stays
+side-effect-free for callers that do not need provenance.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+# Provenance records emit through the persona-runtime namespace so
+# operators filtering structured logs by source can scope to a single
+# dotted prefix.  Splitting the logger from ``__name__`` keeps the
+# allocator's own DEBUG output separate from MT-MEMORY-005 dianostics.
+_provenance_logger = logging.getLogger("agents.persona_runtime.memory_budget.provenance")
+
+
+def _provenance_enabled() -> bool:
+    """Return ``True`` when the ``PERSATRIX_MEMORY_PROVENANCE`` env gate is set.
+
+    Re-read on every admission so tests can flip the env-var without a
+    process restart; the cost is one ``os.environ`` lookup per admitted
+    row, well below the LLM hot path.  Accepts ``1`` / ``true`` / ``yes``
+    (case-insensitive) for ergonomic parity with other RFC 0018-style
+    debug gates.
+    """
+    raw = os.environ.get("PERSATRIX_MEMORY_PROVENANCE", "").strip().lower()
+    return raw in {"1", "true", "yes"}
 
 __all__ = [
     "MemoryBudget",
@@ -179,11 +216,67 @@ class MemoryBudget:
 
     def __init__(self, total_tokens: int) -> None:
         self._remaining: int = max(0, total_tokens)
+        # RFC 0026 PR 4 — per-tier admission registry.  Keyed by tier
+        # name so callers can pull every admitted item_id for one tier
+        # (e.g. the facts tier reads the ``"facts"`` list to drive
+        # ``FactStore.mark_recalled``).  Insertion-ordered so admit
+        # order survives round-tripping through ``admissions_by_tier``.
+        self._admissions: dict[str, list[str]] = {}
 
     @property
     def remaining(self) -> int:
         """Tokens remaining in this budget."""
         return self._remaining
+
+    # ─── Tier-provenance registry (RFC 0026 PR 4 / MQ-11) ──────────
+
+    def record_admission(
+        self, *, tier: str, item_id: str, tokens_admitted: int,
+    ) -> None:
+        """Register an admitted item against the per-turn provenance log.
+
+        Callers invoke this immediately after a successful
+        :meth:`try_add` so the (tier, item_id, tokens_admitted) triple
+        lands on the budget's internal registry.  Two downstream uses:
+
+        * :meth:`admissions_by_tier` is read by the facts tier to drive
+          :meth:`agents.memory.facts.FactStore.mark_recalled` — the
+          ``last_recalled_at`` reinforcement write.
+        * When the ``PERSATRIX_MEMORY_PROVENANCE`` env gate is set, the
+          same call emits a structured ``persatrix.memory.tier_admitted``
+          log record for MT-MEMORY-005 leg-failure analysis (MQ-11).
+
+        The env gate keeps the structured-log surface off in production
+        deploys; the in-memory registry is always populated because the
+        facts-tier reinforcement read does not depend on the env var.
+        Side-effects are best-effort — a logging hiccup must never
+        corrupt the registry the caller is about to read.
+        """
+        self._admissions.setdefault(tier, []).append(item_id)
+        if _provenance_enabled():
+            try:
+                _provenance_logger.info(
+                    "persatrix.memory.tier_admitted",
+                    extra={
+                        "tier": tier,
+                        "item_id": item_id,
+                        "tokens_admitted": tokens_admitted,
+                    },
+                )
+            except Exception:  # noqa: BLE001 — best-effort observability path.
+                logger.debug(
+                    "tier-provenance log emission failed",
+                    exc_info=True,
+                )
+
+    def admissions_by_tier(self, tier: str) -> list[str]:
+        """Return the admitted ``item_id`` list for ``tier`` in admit-order.
+
+        Returns an empty list for tiers that have not recorded any
+        admission this turn.  Callers receive a shallow copy so a
+        downstream mutation cannot corrupt the registry mid-turn.
+        """
+        return list(self._admissions.get(tier, ()))
 
     def try_add(self, text: str, *, min_tokens: int = 32) -> str | None:
         """Try to admit *text* into the budget.

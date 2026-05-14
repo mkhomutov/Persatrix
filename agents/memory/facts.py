@@ -25,13 +25,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
 from ._facts_audit import emit_audit as _emit_audit
+from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from .fact_predicates import validate_predicate
 from .migrations import _apply_migrations
 
@@ -385,6 +386,10 @@ class FactStore:
         ) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_fact(row) for row in rows]
+
+    async def mark_recalled(self, fact_ids: Iterable[str], *, at: float | None = None) -> None:
+        # RFC 0026 PR 4 — see :mod:`._facts_reinforce` for §G rationale.
+        await _mark_recalled_for_agent(self._ensure_db(), self._agent_id, fact_ids, at=at)
 
     # ─── Retraction / cleanup ──────────────────────────────
 
