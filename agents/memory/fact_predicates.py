@@ -55,8 +55,16 @@ PREDICATE_ALLOWLIST: frozenset[str] = frozenset({
     "plans_to",
     "agreed_to",
     # Relationship (§B.4).
-    "has_daughter_named",
-    "has_son_named",
+    #
+    # ``has_child_named`` is deliberately gender-neutral: the flat
+    # ``(subject, predicate, object)`` schema cannot carry the gender
+    # axis without leaking schema gap into the vocabulary (one verb per
+    # relation × gender × generation grows unbounded as the family tree
+    # widens).  When the gender of the relationship is the load-bearing
+    # detail, it surfaces in the prose summary that ships in the same
+    # close-path round-trip — the fact records the relationship + the
+    # named entity, the summary records the framing.
+    "has_child_named",
     "has_partner_named",
     "has_parent_named",
     "works_with",

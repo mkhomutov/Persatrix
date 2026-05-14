@@ -54,7 +54,7 @@ class TestStoreAndRecall:
     async def test_store_returns_fact_id(self, fact_store: FactStore):
         fact_id = await fact_store.store(
             subject="bob",
-            predicate="has_daughter_named",
+            predicate="has_child_named",
             object="Mira",
             source_interaction_id="ix-1",
             asserted_at=1000.0,
@@ -65,7 +65,7 @@ class TestStoreAndRecall:
     async def test_recall_round_trip(self, fact_store: FactStore):
         await fact_store.store(
             subject="bob",
-            predicate="has_daughter_named",
+            predicate="has_child_named",
             object="Mira",
             source_interaction_id="ix-1",
             asserted_at=1000.0,
@@ -75,7 +75,7 @@ class TestStoreAndRecall:
         fact = results[0]
         assert isinstance(fact, Fact)
         assert fact.subject == "bob"
-        assert fact.predicate == "has_daughter_named"
+        assert fact.predicate == "has_child_named"
         assert fact.object == "Mira"
         assert fact.source_interaction_id == "ix-1"
         assert fact.asserted_at == 1000.0

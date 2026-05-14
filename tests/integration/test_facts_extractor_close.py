@@ -57,7 +57,7 @@ SUMMARY_TEXT = (
 FACTS_PAYLOAD = [
     {
         "subject": "bob",
-        "predicate": "has_daughter_named",
+        "predicate": "has_child_named",
         "object": "Mira",
         "certainty": 0.95,
     },
@@ -184,8 +184,8 @@ class TestExtractorHappyPath:
             # Facts half — both tuples landed in FactStore.
             live = await agent.memory.facts.recall(subject="bob")
             predicates = {f.predicate: f for f in live}
-            assert set(predicates.keys()) == {"has_daughter_named", "prefers"}
-            assert predicates["has_daughter_named"].object == "Mira"
+            assert set(predicates.keys()) == {"has_child_named", "prefers"}
+            assert predicates["has_child_named"].object == "Mira"
             assert predicates["prefers"].object == "tea"
             # source_interaction_id was threaded by the close-path.
             for fact in live:

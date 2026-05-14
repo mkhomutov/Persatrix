@@ -63,6 +63,60 @@ __all__ = [
 ]
 
 
+# ─── Rejected-predicate discovery telemetry ─────────────────
+#
+# RFC 0026 PR 2 review decision — the predicate allowlist is the
+# storage-boundary cap on prompt-injection blast radius, but it is also
+# the bound on what the LLM can record.  An adversarial verb is a
+# security signal; a recurring near-miss verb ("has_kid_named" when the
+# allowlist has "has_child_named") is a quality signal that the
+# vocabulary needs an amendment.  Both share one path: log the rejected
+# verb once per (process, predicate) pair so operators can mine the
+# discovery surface without log-volume blowup.
+#
+# Dedup is per-verb, capped at _REJECTED_PREDICATES_LOG_CAP distinct
+# strings so a pathological LLM emitting unique-per-rejection garbage
+# cannot grow the in-process set without bound.  After the cap, further
+# distinct verbs are silently dropped — the goal is operator discovery
+# of recurring patterns, not exhaustive capture.
+_REJECTED_PREDICATES_SEEN: set[str] = set()
+_REJECTED_PREDICATES_LOG_CAP = 256
+
+
+def _record_rejected_predicate(predicate: str) -> None:
+    """Log a rejected predicate verbatim on its first occurrence per process.
+
+    Emits one WARNING-level record with the verb in a structured
+    ``persatrix.facts.rejected_predicate`` extra field — separate from
+    the per-tuple WARNING that logs the full raw dict (object value
+    included).  The structured field is the aggregation-friendly
+    surface for log pipelines; the per-tuple log keeps the debugging
+    context.
+    """
+    if not predicate:
+        return
+    if predicate in _REJECTED_PREDICATES_SEEN:
+        return
+    if len(_REJECTED_PREDICATES_SEEN) >= _REJECTED_PREDICATES_LOG_CAP:
+        return
+    _REJECTED_PREDICATES_SEEN.add(predicate)
+    logger.warning(
+        "rfc0026.predicate_rejected predicate=%r", predicate,
+        extra={"persatrix.facts.rejected_predicate": predicate},
+    )
+
+
+def _reset_rejected_predicates_seen() -> None:
+    """Test-only — drop the per-process dedup set.
+
+    Production code never calls this; the dedup set is a process-scoped
+    discovery aid that lives until process exit.  Tests that exercise
+    the rejection path call this in setup so the dedup state from a
+    prior test does not mask a fresh emission.
+    """
+    _REJECTED_PREDICATES_SEEN.clear()
+
+
 # ─── Errors ─────────────────────────────────────────────────
 
 
@@ -316,7 +370,18 @@ def _normalise_predicate(raw: Mapping[str, Any]) -> str:
     # LLM normalises rather than rejecting.  ``self.*`` predicates
     # already follow the dotted-lowercase convention.
     predicate = predicate.lower()
-    validate_predicate(predicate)
+    try:
+        validate_predicate(predicate)
+    except ValueError:
+        # The LLM emitted a verb the allowlist does not carry.  Record
+        # the verbatim string (post-normalisation) so operators can
+        # mine the discovery surface — see
+        # :func:`_record_rejected_predicate`.  Missing / empty
+        # predicate fields are rejected by :func:`_required_str`
+        # before reaching this branch, so the recording fires only
+        # for genuine vocabulary misses.
+        _record_rejected_predicate(predicate)
+        raise
     return predicate
 
 

@@ -57,8 +57,7 @@ class TestPredicateAllowlistShape:
     @pytest.mark.parametrize(
         "predicate",
         [
-            "has_daughter_named",
-            "has_son_named",
+            "has_child_named",
             "has_partner_named",
             "has_parent_named",
             "works_with",
@@ -67,6 +66,23 @@ class TestPredicateAllowlistShape:
     )
     def test_relationship_class(self, predicate: str) -> None:
         assert predicate in PREDICATE_ALLOWLIST
+
+    @pytest.mark.parametrize(
+        "predicate", ["has_daughter_named", "has_son_named"],
+    )
+    def test_gendered_child_verbs_collapsed_to_has_child_named(
+        self, predicate: str,
+    ) -> None:
+        """RFC 0026 PR 2 review decision — the gendered relationship
+        verbs collapse into the single ``has_child_named`` predicate.
+
+        Reason: the flat ``(subject, predicate, object)`` schema cannot
+        carry the gender of the relationship without leaking schema gap
+        into the vocabulary (5 → ∞ predicates as the family tree
+        widens).  The salient fact for memory is the relationship + the
+        named entity; gender, when load-bearing, lives in the prose
+        summary that ships in the same close-path round-trip."""
+        assert predicate not in PREDICATE_ALLOWLIST
 
     @pytest.mark.parametrize(
         "predicate",

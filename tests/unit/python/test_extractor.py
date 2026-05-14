@@ -134,7 +134,7 @@ class TestParseFactsPayload:
         raw = json.dumps([
             {
                 "subject": "bob",
-                "predicate": "has_daughter_named",
+                "predicate": "has_child_named",
                 "object": "Mira",
                 "certainty": 0.9,
             },
@@ -142,7 +142,7 @@ class TestParseFactsPayload:
         result = parse_facts_payload(raw)
         assert len(result) == 1
         assert result[0]["subject"] == "bob"
-        assert result[0]["predicate"] == "has_daughter_named"
+        assert result[0]["predicate"] == "has_child_named"
         assert result[0]["object"] == "Mira"
         assert result[0]["certainty"] == 0.9
 
@@ -187,7 +187,7 @@ class TestSplitCombinedResponse:
             "facts": [
                 {
                     "subject": "bob",
-                    "predicate": "has_daughter_named",
+                    "predicate": "has_child_named",
                     "object": "Mira",
                 },
             ],
@@ -199,7 +199,7 @@ class TestSplitCombinedResponse:
         assert json.loads(facts_text) == [
             {
                 "subject": "bob",
-                "predicate": "has_daughter_named",
+                "predicate": "has_child_named",
                 "object": "Mira",
             },
         ]
@@ -250,7 +250,7 @@ class TestStoreExtractedFacts:
             facts=[
                 {
                     "subject": "Bob",
-                    "predicate": "has_daughter_named",
+                    "predicate": "has_child_named",
                     "object": "Mira",
                     "certainty": 0.9,
                 },
@@ -269,10 +269,10 @@ class TestStoreExtractedFacts:
         # Subject was canonicalised — both rows live under the same key.
         assert len(results) == 2
         predicates = {f.predicate for f in results}
-        assert predicates == {"has_daughter_named", "lives_in"}
+        assert predicates == {"has_child_named", "lives_in"}
         # Default certainty for the second tuple is 1.0 per FactStore.
         certainty_by_pred = {f.predicate: f.certainty for f in results}
-        assert certainty_by_pred["has_daughter_named"] == pytest.approx(0.9)
+        assert certainty_by_pred["has_child_named"] == pytest.approx(0.9)
         assert certainty_by_pred["lives_in"] == pytest.approx(1.0)
         # session_id threads through.
         assert all(f.session_id == "run-a" for f in results)

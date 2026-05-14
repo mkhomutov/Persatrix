@@ -89,7 +89,7 @@ class Fact:
     fact_id: str                  # ULID
     agent_id: str                 # owner (per-agent isolation; matches RFC 0008 ACL)
     subject: str                  # canonical entity key (sender_id, mentioned_entity_id, or normalized name)
-    predicate: str                # short verb phrase, e.g. "has_daughter_named", "prefers", "committed_to"
+    predicate: str                # short verb phrase, e.g. "has_child_named", "prefers", "committed_to"
     object: str                   # short value, ≤ 200 chars
     certainty: float              # [0.0, 1.0]; seeded by extractor, updated by reinforcement (§F)
     source_interaction_id: str    # foreign key to interactions table (RFC 0020 §B)
@@ -104,7 +104,11 @@ Schema is additive — new `facts` table; no changes to `episodes` or `notes`.
 
 The summarization call introduced by [RFC 0020 PR 4](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) becomes a **two-output** prompt: (a) the existing prose summary, (b) a JSON list of fact tuples. One LLM call, two structured outputs. No new per-event cost.
 
-The extractor prompt enumerates a small predicate vocabulary (~30 verbs covering attribute / preference / commitment / relationship classes) and instructs the model to return zero tuples when no extractable facts are present (the common short-interaction case).
+The extractor prompt enumerates a small predicate vocabulary (~25 verbs covering attribute / preference / commitment / relationship classes) and instructs the model to return zero tuples when no extractable facts are present (the common short-interaction case).
+
+**Relationship-predicate granularity.** Relationship verbs are intentionally gender-neutral (`has_child_named`, not `has_son_named` / `has_daughter_named`). The flat `(subject, predicate, object)` schema cannot carry the gender axis as a structured field; encoding it in the verb spawns one predicate per (relation × gender × generation) and pushes the schema gap into the vocabulary. The salient fact for memory is the relationship + the named entity; when the gender of the relationship is the load-bearing detail, it surfaces in the prose summary that ships in the same close-path round-trip.
+
+**Vocabulary discovery from rejected predicates.** The allowlist is the storage-boundary cap on prompt-injection blast radius (§Security Considerations), but it is also the bound on what the LLM can record — a near-miss verb the model emits (e.g. `has_kid_named` vs the allowlisted `has_child_named`) is a quality signal that the vocabulary needs an amendment. The extractor records each distinct rejected verb verbatim, once per process, into the structured-log surface (`persatrix.facts.rejected_predicate` field). This is the operator discovery surface for growing the allowlist from observed workload rather than guessing. Per-process dedup keeps log volume bounded; an in-process cap prevents pathological growth from an adversarial LLM emitting unique-per-call garbage.
 
 ### C. Subject canonicalization
 
