@@ -315,6 +315,38 @@ this PR are:
   then thread the `EpisodicMemory` connection through the existing
   `shared_db` seam and add a regression test that pins the join works
   under `:memory:`. Until such a caller exists, defer.
+- **Predicate-vocabulary scope — non-person / world facts.** PR 2's
+  allowlist (attribute / preference / commitment / relationship +
+  `self.*`) is anthropocentric — every class assumes the subject is a
+  person or agent. Facts the persona may acquire about the world
+  (historical events, scientific knowledge, places, routines,
+  observations) have no home in the current vocabulary. The
+  recommendation is **not** to widen the existing classes — both the
+  prompt-injection blast-radius bound (RFC §Security) and the §H
+  erasure semantics depend on the allowlist staying scoped to
+  relational state. Instead, when PR 3's recall path makes it
+  observable that some class of stable non-person facts is missing
+  from injection, evaluate three options in order:
+  1. **LLM prior.** Stable world-knowledge (`"water boils at 100°C"`,
+     `"WW2 ended in 1945"`) costs tokens to store and buys nothing the
+     model does not already know; the default answer for this class is
+     "do not store."
+  2. **Episodic memory.** Time-stamped observations the persona made
+     (`"Bob mentioned the library closes at 9pm"`) already have a home
+     in episodes — the temporal frame is load-bearing for that class
+     and a flat triple drops it.
+  3. **Separate `world.*` predicate namespace** *if* PR 3 recall
+     surfaces a class of stable, persona-relevant observations
+     episodic cannot serve (e.g., `world.place_open_hours`,
+     `world.event_occurred_on`). Keep the namespace enumerated and
+     small, same blast-radius discipline as `self.*` from OQ #10.
+     Reject generic predicates (`has_property`, `occurred_at`) with
+     structured objects — they neutralise the allowlist as a security
+     boundary and give recall nothing to key on.
+  Trigger: revisit when PR 3 recall is in dogfood and the
+  `persatrix.facts.rejected_predicate` discovery log (PR 2) shows a
+  coherent non-person verb cluster the model keeps trying to emit.
+  Until that data exists, defer — the current shape may be right.
 
 #### PR checklist
 
