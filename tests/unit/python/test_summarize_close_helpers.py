@@ -10,17 +10,32 @@ Pins the PR 6 review follow-ups against the close-path helpers:
   failure increments ``agent.interactions.janitor.failed`` so
   operators can SLO-alert on persistent janitor outages instead of
   silently accumulating stuck rows.
+* :class:`TestEmptySummaryFieldFallsBack` — PR #340 deep-review S2:
+  a well-formed JSON envelope with an empty ``summary`` field must
+  fall back to :data:`SUMMARY_UNAVAILABLE_TEXT` and *not* return the
+  serialised facts payload — committing ``""`` to
+  :meth:`EpisodicMemory.update_episode_summary` (the pre-fix state)
+  silently writes an empty summary and lets the facts dispatch fire
+  against a missing prose half, violating the §G audit ordering "the
+  summary always exists before any facts.store row pointing back at
+  this ``interaction_id``."
 """
 
 from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from _otel_test_helpers import counter_total
 
+from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
+from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT, Interaction, Turn
 from agents.persona_runtime.summarize_close import (
     JANITOR_INTERVAL_SEC,
     maybe_run_janitor,
+    summarize_closed_interaction,
 )
 
 
@@ -122,3 +137,164 @@ class TestJanitorFailedCounter:
             ) == 0
         finally:
             await metrics_mod.shutdown()
+
+
+def _make_envelope_client(envelope_text: str) -> LLMClient:
+    """Mock LLM that returns ``envelope_text`` verbatim on the summariser call.
+
+    The summariser pins ``max_tokens=256``; the integration tests use
+    that same gate to route real summariser traffic away from the
+    persona event-loop path.  Here we only ever take the summariser
+    branch (the unit test never invokes the persona loop) so the
+    routing collapses to one return statement.
+    """
+    mock_provider = AsyncMock()
+
+    async def _route(*, model, messages, system, tools, max_tokens, temperature):
+        return LLMResponse(
+            text=envelope_text,
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(120, 30),
+        )
+
+    mock_provider.create_message = AsyncMock(side_effect=_route)
+    mock_provider.format_tool_definitions = MagicMock(return_value=[])
+    mock_provider.append_tool_round = MagicMock(
+        side_effect=lambda msgs, resp, results: msgs,
+    )
+    return LLMClient(mock_provider)
+
+
+def _multi_turn_interaction() -> Interaction:
+    """Build a two-turn Interaction so :func:`summarize_closed_interaction`
+    takes the LLM path (the single-turn branch short-circuits to the
+    deterministic placeholder summary)."""
+    return Interaction(
+        interaction_id="ix-empty-summary",
+        scope="dm:test-agent:bob",
+        started_at=0.0,
+        closed_at=10.0,
+        close_reason="structural",
+        turns=[
+            Turn(at=0.0, payload={"sender": "bob", "summary": "hi"}),
+            Turn(at=5.0, payload={"sender": "test-agent", "summary": "hey"}),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+class TestEmptySummaryFieldFallsBack:
+    """PR #340 deep-review S2 — a well-formed JSON envelope with an
+    empty ``summary`` field must fall back to the placeholder, not
+    commit the empty string and let facts dispatch fire.
+
+    Why the fix lives at the :func:`summarize_closed_interaction`
+    layer rather than in :func:`split_combined_response`: raising
+    ``FactsParseError`` for empty summary would be caught by the
+    caller's broad ``except FactsParseError: return (text, False, None)``
+    backward-compat branch — which then commits the raw JSON envelope
+    as the summary text.  That is worse than today's empty-string
+    write.  The post-parse check at the caller treats an empty
+    ``summary`` field the same way the helper already treats an
+    empty LLM response (``_emit_summary_failed`` + return
+    :data:`SUMMARY_UNAVAILABLE_TEXT`), and the distinct ``empty_field``
+    reason lets operators disambiguate "model returned nothing" from
+    "model returned valid JSON envelope with empty summary."
+    """
+
+    async def test_empty_string_summary_returns_unavailable_and_drops_facts(
+        self,
+    ):
+        envelope = json.dumps({
+            "summary": "",
+            "facts": [
+                {
+                    "subject": "bob",
+                    "predicate": "has_name",
+                    "object": "Bob",
+                },
+            ],
+        })
+        result = await summarize_closed_interaction(
+            _make_envelope_client(envelope),
+            "test-agent",
+            _multi_turn_interaction(),
+        )
+        # Pre-fix: result was ("", False, "[...facts...]") — the empty
+        # string committed to update_episode_summary and facts_raw was
+        # returned so dispatch_facts_from_response ran against an
+        # empty prose half.  Post-fix: summary failed, facts not
+        # dispatched.
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+
+    async def test_whitespace_only_summary_returns_unavailable_and_drops_facts(
+        self,
+    ):
+        """Whitespace-only is the same shape: the LLM emitted "summary"
+        but it carries no prose.  :func:`split_combined_response`'s
+        type check accepts it (a string is a string); the caller
+        treats it as a summary failure."""
+        envelope = json.dumps({
+            "summary": "   \n  ",
+            "facts": [
+                {
+                    "subject": "bob",
+                    "predicate": "has_name",
+                    "object": "Bob",
+                },
+            ],
+        })
+        result = await summarize_closed_interaction(
+            _make_envelope_client(envelope),
+            "test-agent",
+            _multi_turn_interaction(),
+        )
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+
+    async def test_empty_summary_bumps_failed_counter_with_empty_field_reason(
+        self,
+    ):
+        """The counter increment goes to ``agent.interactions.summary.failed``
+        with a distinct ``reason`` attribute so operators can split
+        the "model returned nothing" path from the "model returned
+        valid envelope with empty summary" path in dashboards."""
+        reader, metrics_mod = _build_meter()
+        try:
+            envelope = json.dumps({"summary": "", "facts": []})
+            await summarize_closed_interaction(
+                _make_envelope_client(envelope),
+                "test-agent",
+                _multi_turn_interaction(),
+            )
+            assert counter_total(
+                reader, "agent.interactions.summary.failed",
+            ) == 1
+        finally:
+            await metrics_mod.shutdown()
+
+    async def test_non_empty_summary_returns_envelope_facts_unchanged(self):
+        """Regression guard — the new empty-field branch must NOT
+        catch a well-formed envelope with a non-empty summary.  This
+        is the happy path the existing integration tests already
+        cover; pinning it here too keeps the unit-level seam against
+        a future refactor that broadens the empty-check predicate."""
+        facts_payload = [
+            {
+                "subject": "bob",
+                "predicate": "has_name",
+                "object": "Bob",
+            },
+        ]
+        envelope = json.dumps({
+            "summary": "Bob said hi.",
+            "facts": facts_payload,
+        })
+        summary, failed, facts_raw = await summarize_closed_interaction(
+            _make_envelope_client(envelope),
+            "test-agent",
+            _multi_turn_interaction(),
+        )
+        assert summary == "Bob said hi."
+        assert failed is False
+        assert facts_raw is not None
+        assert json.loads(facts_raw) == facts_payload

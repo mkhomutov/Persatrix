@@ -54,7 +54,7 @@ class TestStoreAndRecall:
     async def test_store_returns_fact_id(self, fact_store: FactStore):
         fact_id = await fact_store.store(
             subject="bob",
-            predicate="has_daughter_named",
+            predicate="has_child_named",
             object="Mira",
             source_interaction_id="ix-1",
             asserted_at=1000.0,
@@ -65,7 +65,7 @@ class TestStoreAndRecall:
     async def test_recall_round_trip(self, fact_store: FactStore):
         await fact_store.store(
             subject="bob",
-            predicate="has_daughter_named",
+            predicate="has_child_named",
             object="Mira",
             source_interaction_id="ix-1",
             asserted_at=1000.0,
@@ -75,7 +75,7 @@ class TestStoreAndRecall:
         fact = results[0]
         assert isinstance(fact, Fact)
         assert fact.subject == "bob"
-        assert fact.predicate == "has_daughter_named"
+        assert fact.predicate == "has_child_named"
         assert fact.object == "Mira"
         assert fact.source_interaction_id == "ix-1"
         assert fact.asserted_at == 1000.0
@@ -96,10 +96,17 @@ class TestStoreAndRecall:
         assert results == []
 
     async def test_recall_respects_limit(self, fact_store: FactStore):
-        for i in range(5):
+        # Use distinct allowlisted predicates so PR 2's default
+        # validator does not reject the synthetic rows.  Five live
+        # rows are needed; the predicate identity is incidental to the
+        # limit-clamp invariant under test.
+        predicates = [
+            "has_name", "lives_in", "works_at", "has_age", "speaks_language",
+        ]
+        for i, pred in enumerate(predicates):
             await fact_store.store(
                 subject="bob",
-                predicate=f"attr_{i}",
+                predicate=pred,
                 object=f"v{i}",
                 source_interaction_id=f"ix-{i}",
                 asserted_at=1000.0 + i,
@@ -378,16 +385,31 @@ class TestDeleteBySubject:
 
 
 class TestPredicateValidation:
-    async def test_default_seam_is_permissive(self, fact_store: FactStore):
-        """Phase 1 ships a permissive default so PR 1 can store any
-        predicate during early integration tests.  PR 2 swaps the
-        validator in for the allowlist — the seam is exercised here so
-        that swap is a single-call-site change.
+    async def test_default_validator_enforces_allowlist(
+        self, fact_store: FactStore,
+    ):
+        """PR 2 swapped the Phase-1 permissive default for the RFC 0026
+        §B allowlist.  An unknown predicate is rejected at the storage
+        boundary so prompt-injection cannot widen the vocabulary.
         """
+        with pytest.raises(ValueError, match="not in allowlist"):
+            await fact_store.store(
+                subject="bob",
+                predicate="arbitrary_phase1_predicate",
+                object="v",
+                source_interaction_id="ix-1",
+                asserted_at=1000.0,
+            )
+
+    async def test_default_validator_accepts_allowlisted(
+        self, fact_store: FactStore,
+    ):
+        """Sanity check the swap did not over-rotate — an allowlisted
+        verb still stores successfully under the PR 2 default."""
         fact_id = await fact_store.store(
             subject="bob",
-            predicate="arbitrary_phase1_predicate",
-            object="v",
+            predicate="has_name",
+            object="Bob",
             source_interaction_id="ix-1",
             asserted_at=1000.0,
         )

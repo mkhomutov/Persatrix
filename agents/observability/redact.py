@@ -32,7 +32,26 @@ class Redactor(Protocol):
 
         Implementations must return a new dict (or the input unchanged) and
         must not raise on well-formed input.  Errors surface as the unredacted
-        record being emitted; the structlog chain logs a warning out-of-band.
+        record being emitted; the structlog chain logs a warning out-of-band,
+        and :func:`agents.memory._facts_audit.emit_audit` mirrors that
+        out-of-band warning for the pre-``configure_logging`` window
+        (PR #340 review S2).
+
+        Idempotence (PR #340 review N1)
+        -------------------------------
+        Implementations **must** be idempotent — ``redact(redact(r))``
+        must equal ``redact(r)``.  Some emission paths run the redactor
+        twice on the same record (e.g. RFC 0026 audit emissions call
+        :func:`~agents.memory._facts_audit.emit_audit` which redacts
+        explicitly *before* handing the payload to the stdlib logger,
+        whose ``ProcessorFormatter.foreign_pre_chain`` then runs the
+        chain's :func:`_apply_redactor` over the same record).  A
+        non-idempotent scrubber that masks differently on re-application
+        (e.g. progressive truncation, repeated hashing) would
+        double-mask and lose information.  :class:`NoopRedactor` is
+        trivially idempotent; future PII / secret scrubbers should
+        either short-circuit on a sentinel (e.g. an ``"_redacted": True``
+        marker on the dict) or compose to a fixed point.
         """
         ...
 

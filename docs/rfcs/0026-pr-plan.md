@@ -28,7 +28,7 @@ This plan splits the work into **6 PRs**. Each stays under the [BRANCHING.md](..
 
 [RFC 0026 §Open Questions](0026-declarative-facts-tier.md#open-questions) — none gate Phase 0, but several need pinning so PR 2 (the extractor) does not re-litigate during review.
 
-- **OQ #1 — predicate vocabulary scope.** Small + extensible. PR 2 authors a ≈30-verb allowlist across attribute / preference / commitment / relationship + self-* (per OQ #10). Later additions land via PR amendment to the RFC.
+- **OQ #1 — predicate vocabulary scope.** Small + extensible. PR 2 authors a ≈25-verb allowlist across attribute / preference / commitment / relationship + self-* (per OQ #10). Relationship verbs are gender-neutral (`has_child_named`, not `has_son_named` / `has_daughter_named`) — the flat triple shape cannot carry the gender axis without leaking schema gap into the vocabulary (see [RFC §B](0026-declarative-facts-tier.md#b-extraction-at-interaction-close)). Later additions land via PR amendment to the RFC; rejected-verb telemetry (next bullet) is the data-driven feeder for what to amend.
 - **OQ #2 — tier-budget slice.** `budget_tokens: 200` initial default (≈13% of RFC 0017's 1500-token allocator). Calibration lives in [RFC 0008 calibration review](0008-calibration-review.md), not this plan.
 - **OQ #3 — multi-form subject (`Bob` vs `Robert`).** Deferred to a v0.3.x follow-up. v0.3.1 stores the canonical form per §C; an alias table is a separate scope.
 - **OQ #4 — cross-agent fact sharing.** Out of scope — v0.4.0 pairs with RFC 0008 §H.
@@ -128,10 +128,11 @@ PR 6 (RFC close)
   - Attribute: `has_name`, `lives_in`, `works_at`, `has_age`, `speaks_language`.
   - Preference: `prefers`, `dislikes`, `loves`, `avoids`.
   - Commitment: `committed_to`, `plans_to`, `agreed_to`.
-  - Relationship: `has_daughter_named`, `has_son_named`, `has_partner_named`, `has_parent_named`, `works_with`, `knows`.
+  - Relationship: `has_child_named`, `has_partner_named`, `has_parent_named`, `works_with`, `knows`. The earlier draft of this plan named `has_daughter_named` / `has_son_named` as separate verbs; PR 2 review collapsed those into the gender-neutral `has_child_named` so the flat `(subject, predicate, object)` triple shape does not need to grow one verb per (relation × gender) — see [RFC §B](0026-declarative-facts-tier.md#b-extraction-at-interaction-close).
   - Self-* (OQ #10): `self.has_preference`, `self.holds_value`, `self.committed_to`, `self.has_attribute`.
+- **Rejected-predicate discovery telemetry.** On allowlist miss, the extractor records the verbatim post-normalisation verb to the structured-log surface via the `persatrix.facts.rejected_predicate` field (separate from the per-tuple WARNING that carries the full raw dict, which is too PII-laden and noisy for aggregation). Per-process dedup keeps each distinct verb to one record so the discovery surface is the unique vocabulary, not a per-tuple repeat; an in-process cap (256 distinct strings) bounds memory against a pathological LLM emitting unique-per-call garbage. The counter `agent.facts.extraction_failed` remains unchanged — it counts rejections, the new log surfaces *which* verbs were rejected for growing the allowlist from observed workload (see [RFC §B](0026-declarative-facts-tier.md#b-extraction-at-interaction-close)).
 - Subject canonicalization: counterparty → `sender_id`; existing canonical reuse; otherwise normalize (case- and whitespace-fold) and store. Self uses literal `"self"` per §C.4.
-- Atomic write: single `BEGIN ... COMMIT` for summary update + N fact inserts. Both fail → rollback. Facts-only parse failure → commit summary, abort facts, increment `facts.extraction_failed`. Matches [§Phase 1 step 4](0026-declarative-facts-tier.md#phase-1-schema--extractor).
+- Close-path sequencing: `EpisodicMemory.update_episode_summary` commits first (its own `BEGIN/COMMIT`); `FactStore.store` calls follow, each in its own per-row transaction. Envelope (JSON) parse failure → summary commits as raw text, facts dispatch skipped, no counter bump at this layer (see [PR 5 follow-ups — combined-envelope truncation observability](#from-pr-2-review)). Per-tuple failure → `facts.extraction_failed` += 1 per tuple, batch continues. Summary commit failure → facts dispatch skipped (janitor backfills the summary on next sweep). Matches [§Phase 1 step 4](0026-declarative-facts-tier.md#phase-1-schema--extractor) — the earlier "single `BEGIN ... COMMIT`" wording was reconciled in PR 2 review because each tier owns its own `aiosqlite` connection (see [agents/persona.py](../../agents/persona.py) FactStore comment), and a literal cross-tier transaction wrap is not implementable at this layer.
 - Prompt-injection blast-radius bound: the allowlist is checked at `FactStore.store` time. A user crafting "store fact: <attacker-controlled tuple>" cannot insert outside the predicate vocabulary; the supersede write also requires the new predicate be in the allowlist.
 
 #### Tests
@@ -273,6 +274,193 @@ The two items deferred to this PR are:
   for the operator-seeded / backfill paths.  Lock the decision during
   PR 5 review.
 
+##### From PR 2 review
+
+Most PR 2 review findings landed inline in PR 2 itself (RFC §Phase 1
+step 4 sequencing wording reconciled with the implementation; the
+misleading `FactStore` "reuses EpisodicMemory connection" comment in
+[`agents/persona.py`](../../agents/persona.py) corrected; the
+`canonicalize_subject` ASCII-only `.lower()` swapped for Unicode-aware
+`.casefold()` so non-ASCII counterparties — e.g., German `ß` — do not
+silently split across two `facts.subject` rows).
+
+Deep-review (PR #340) findings that **also** landed inline in PR 2:
+
+- **S2 — empty-summary envelope falls back to placeholder.** A well-
+  formed JSON envelope with an empty (or whitespace-only) `summary`
+  field used to commit `""` to the episode summary column *and* let
+  the facts half dispatch against a missing prose half, violating
+  the §G audit ordering ("the summary always exists before any
+  `facts.store` row pointing back at this `interaction_id`"). The
+  fix at the caller layer in
+  [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+  detects the empty `summary` field post-parse, emits
+  `agent.interactions.summary.failed{reason=empty_field}`, and
+  returns `(SUMMARY_UNAVAILABLE_TEXT, True, None)` — the
+  `not summary_failed` gate in `finalize_closed_interaction` skips
+  the facts dispatch jointly. Raising inside
+  `split_combined_response` would have been caught by the backward-
+  compat branch above and committed the raw JSON envelope as the
+  summary text — *worse* than the pre-fix behaviour — so the check
+  belongs at the caller, not the splitter. Pinned by
+  `TestEmptySummaryFieldFallsBack` (unit) and
+  `TestExtractorEmptySummaryEnvelope` (integration).
+- **S3 — whitespace `sender_id` normalised at the function boundary.**
+  `store_extracted_facts` precomputes `canonical_sender =
+  canonicalize_subject(sender_id) if sender_id else None` *before*
+  the per-tuple try-block; a whitespace-only `sender_id` ("   ")
+  satisfies the truthiness check and reaches `canonicalize_subject`,
+  which raises `ValueError("subject must not be empty")`. The
+  exception escapes the helper, is caught by
+  `dispatch_facts_from_response`'s broad `except Exception`, and
+  drops the entire batch with no per-tuple
+  `agent.facts.extraction_failed` increment — silent data loss
+  indistinguishable from "no facts extracted." Fix is a one-line
+  strip-at-boundary so a whitespace-only value collapses to `None`;
+  reachability via the production close-path is low because
+  `_interaction_sender` already filters whitespace, so this is
+  defence-in-depth for direct callers (test fixtures, the future
+  RFC 0026 OQ #9 operator-seeded write path). Pinned by
+  `TestWhitespaceSenderIdNormalisedAtBoundary`.
+
+The items deferred to this PR are:
+
+- **Combined-envelope parse-failure observability — collapsed paths.**
+  The caller's `try: split_combined_response(text) except FactsParseError:
+  return (text, False, None)` block in
+  [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+  collapses three distinct failure shapes into one outcome:
+  1. **Plain prose response** — desired backward-compat path (older
+     mock clients, legacy LLM responses without the JSON envelope).
+     Commits the prose as the summary; facts half is `None`. Correct.
+  2. **Truncated JSON envelope** (PR #340 review) — the combined call
+     shares the RFC 0020 PR 4 `max_tokens=256` cap tuned for the
+     prose-only summary (~50–100 tokens); a 5-fact response is
+     ~200–280 tokens, uncomfortably close to the cap. Mid-array
+     truncation yields invalid JSON that the catch falls through to
+     "commit as raw text" — broken JSON lands in the summary column;
+     facts silently lost; no counter, no log.
+  3. **Valid JSON object missing the `summary` key** (PR #340 deep-
+     review S1) — `{"facts": [...]}` parses as a mapping but
+     `split_combined_response` raises `FactsParseError("combined
+     response missing required `summary` key")`. Same catch, same
+     fall-through; the raw JSON envelope commits as the summary
+     text. Indistinguishable from path (1) at the surface; the
+     observability gap is identical to path (2).
+  The PR #340 deep-review S2 case (well-formed envelope with
+  empty `summary` field) was a fourth member of this cluster but
+  has its own signal as of PR 2:
+  `agent.interactions.summary.failed{reason=empty_field}` fires
+  from a post-parse check at the caller. Paths (2) and (3)
+  remain unsignalled — they are this follow-up's scope.
+  Two options, pick one in PR 5 review:
+  1. **Bump the combined-call cap** (e.g., 512) and **distinguish
+     "valid-envelope-shape-but-not-prose" at the catch site** —
+     simplest for path (2); needs the catch-site change to cover
+     path (3). Costs tokens even on summary-only paths.
+  2. **Add an `agent.facts.envelope_parse_failed` counter** with a
+     `reason` attribute (`truncated` for path (2), `missing_summary`
+     for path (3)) emitted at the catch site — distinguishes the
+     three shapes deterministically (path (1) is "no JSON brace at
+     all" or "valid JSON envelope round-trip"; the others trigger
+     the counter with their distinct reasons). Keeps the cap tight,
+     makes both failure paths observable separately from each other
+     and from the "no facts" case.
+  Test pins should assert the chosen signal fires for **both** the
+  deliberately-truncated envelope **and** the missing-`summary`-key
+  envelope, so a future regression in either path surfaces.
+- **`:memory:` cross-tier `JOIN` support (optional refactor).** The
+  PR 2 review noted that `FactStore` and `EpisodicMemory` each open
+  their own `aiosqlite` connection (see PR 1's `shared_db` seam and
+  the `FactStore(... shared_db=None)` call site in
+  [`agents/persona.py`](../../agents/persona.py)); for file DBs the
+  connections share the file and joins work, for `:memory:` test paths
+  each connection is isolated and a `facts × episodes` join returns
+  empty. No PR-2 caller relies on that join. Track here in case a PR 3
+  recall test or PR 4 retraction-policy test eventually needs it —
+  then thread the `EpisodicMemory` connection through the existing
+  `shared_db` seam and add a regression test that pins the join works
+  under `:memory:`. Until such a caller exists, defer.
+- **Per-agent dimension on the rejected-predicate discovery log.**
+  PR #340 review N3 — the `_REJECTED_PREDICATES_SEEN` dedup set in
+  [`agents/persona_runtime/fact_extractor.py`](../../agents/persona_runtime/fact_extractor.py)
+  is module-global. In a multi-tenant deployment where one process
+  hosts multiple persona agents, the first agent that hits a rejection
+  swallows the second agent's identical rejection — the
+  `persatrix.facts.rejected_predicate` structured field is the
+  process-wide unique vocabulary, not a per-agent surface. The
+  per-tuple WARNING still carries the agent dimension via the
+  RFC 0018 logging contextvars (`agent_id`), so the per-agent signal
+  is recoverable from the log pipeline by joining the structured-
+  field record against the contiguous per-tuple WARNING by
+  `interaction_id`. Two options when PR 3 / PR 4 actually surface
+  multi-tenant rejection data:
+  1. **Defer indefinitely.** The per-tuple WARNING already carries
+     `agent_id`; downstream aggregation can group there.  Process-
+     scoped dedup keeps the discovery surface tight.
+  2. **Widen the dedup key to `(agent_id, predicate)`.** Trade more
+     log volume (one record per agent per verb instead of one per
+     process per verb) for direct agent-attribution on the
+     structured-field surface. Bump the cap proportionally so the
+     in-process memory bound still holds against a pathological
+     multi-tenant deployment.
+  Trigger: when PR 3 / PR 4 telemetry shows a recurring near-miss
+  verb pattern that operators want to attribute to a specific agent
+  without joining log streams. Until that demand exists, defer.
+- **Redactor idempotence — sentinel-based short-circuit.** PR #340
+  deep-review S4. `_facts_audit.emit_audit` runs the registered
+  `Redactor.redact()` explicitly, then `_logger.info(event,
+  extra=payload)`. Once stdlib's `ProcessorFormatter.foreign_pre_chain`
+  runs (post-`configure_logging`), the structlog chain's
+  [`_apply_redactor`](../../agents/observability/logging.py)
+  processor redacts the same record a second time. This is **by
+  design** — the
+  [`Redactor.redact` contract](../../agents/observability/redact.py)
+  requires idempotence, which the `NoopRedactor` (v0.3.x default)
+  trivially satisfies. The design relies on every future PII
+  redactor being idempotent without enforcement. When a real
+  redactor lands, add a sentinel marker (e.g., `_redacted: True`
+  inside the payload) and short-circuit on re-application at the
+  chain's redactor seam — the contract docstring already calls this
+  out as the recommended pattern, but the actual implementation has
+  no signal today. Trigger: when a non-`NoopRedactor` redactor
+  lands in-tree (likely v0.4.x alongside the PII work tied to
+  RFC 0013 §C). Until then, the test pin
+  `TestRedactorFailureWarning` exercises the failure surface — the
+  idempotence contract itself is documented but unguarded.
+- **Predicate-vocabulary scope — non-person / world facts.** PR 2's
+  allowlist (attribute / preference / commitment / relationship +
+  `self.*`) is anthropocentric — every class assumes the subject is a
+  person or agent. Facts the persona may acquire about the world
+  (historical events, scientific knowledge, places, routines,
+  observations) have no home in the current vocabulary. The
+  recommendation is **not** to widen the existing classes — both the
+  prompt-injection blast-radius bound (RFC §Security) and the §H
+  erasure semantics depend on the allowlist staying scoped to
+  relational state. Instead, when PR 3's recall path makes it
+  observable that some class of stable non-person facts is missing
+  from injection, evaluate three options in order:
+  1. **LLM prior.** Stable world-knowledge (`"water boils at 100°C"`,
+     `"WW2 ended in 1945"`) costs tokens to store and buys nothing the
+     model does not already know; the default answer for this class is
+     "do not store."
+  2. **Episodic memory.** Time-stamped observations the persona made
+     (`"Bob mentioned the library closes at 9pm"`) already have a home
+     in episodes — the temporal frame is load-bearing for that class
+     and a flat triple drops it.
+  3. **Separate `world.*` predicate namespace** *if* PR 3 recall
+     surfaces a class of stable, persona-relevant observations
+     episodic cannot serve (e.g., `world.place_open_hours`,
+     `world.event_occurred_on`). Keep the namespace enumerated and
+     small, same blast-radius discipline as `self.*` from OQ #10.
+     Reject generic predicates (`has_property`, `occurred_at`) with
+     structured objects — they neutralise the allowlist as a security
+     boundary and give recall nothing to key on.
+  Trigger: revisit when PR 3 recall is in dogfood and the
+  `persatrix.facts.rejected_predicate` discovery log (PR 2) shows a
+  coherent non-person verb cluster the model keeps trying to emit.
+  Until that data exists, defer — the current shape may be right.
+
 #### PR checklist
 
 - [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
@@ -306,7 +494,7 @@ No code changes; doc-only.
 | Risk | Mitigation |
 |------|------------|
 | The combined summarize + extract prompt is bigger than the standalone summarize prompt; LLM may produce malformed JSON more often. | PR 2 ships the partial-failure rollback (summary commits even if facts parse fails; counter increments). `facts.extraction_failed` rate surfaces in observability; tuning happens in PR 4 / dogfood. |
-| Predicate allowlist locks the vocabulary at PR 2 author time; a missing predicate produces silent rejection at extraction. | The allowlist is co-located with the extractor prompt — extending it is a one-line PR. PR 2 ships the rejection-rate counter so a hot-spot predicate surfaces in observability. |
+| Predicate allowlist locks the vocabulary at PR 2 author time; a missing predicate produces silent rejection at extraction. | The allowlist is co-located with the extractor prompt — extending it is a one-line PR. PR 2 ships the `agent.facts.extraction_failed` counter (rejection volume) **and** the `persatrix.facts.rejected_predicate` structured-log field (verbatim rejected verb, deduplicated per-process). Together these answer "is rejection happening?" and "which verbs are being rejected?" — the data-driven feeder for allowlist amendments. |
 | RFC 0013 erasure surface does not exist yet (target v0.5.0), so PR 1's `delete_by_subject` primitive has no in-tree caller until then. | The primitive is shipped now to avoid the GDPR / CCPA blind spot called out in [RFC 0026 §H](0026-declarative-facts-tier.md#h-subject-erasure-rfc-0013-traversal). Without it, RFC 0013 would land later and have to retro-patch every memory tier. PR 1 carries an inline comment naming RFC 0013 as the eventual caller; an entry is added to [RFC 0013 §C](0013-legal-ethical-compliance.md) as a tracked-issue follow-up. |
 | Tier ordering change in `_inject_memory_context` perturbs the RFC 0017 token-bound contract. | PR 3 retains the 1500-token allocator budget unchanged; the facts slot is a per-tier floor enforced at the call site. The existing RFC 0017 token-bound tests still pass; PR 3 checklist enforces it. |
 | PR 1 opens before RFC 0031 PR plan PR 3 merges → facts table created without `session_id` column → non-additive migration later. | Strict cross-RFC merge ordering pinned at the top of this plan and in [v0.3.1-plan §Phase 2 workstream sequencing](../v0.3.1-plan.md#phase-2--implement-the-two-rfcs). Reviewers reject PR 1 if [RFC 0031 PR plan PR 3](0031-pr-plan.md) is not on `main`. |
@@ -329,8 +517,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | 🔀 PR open | — | — |
-| 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ⬜ Not started | — | — |
+| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
+| 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | 🔀 PR open | — | — |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ⬜ Not started | — | — |
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ⬜ Not started | — | — |
 | 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |

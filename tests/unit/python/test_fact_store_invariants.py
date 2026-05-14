@@ -177,25 +177,38 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="limit must be >= 1"):
             await fact_store.recall(subject="bob", limit=0)
 
-    async def test_recall_clamps_limit_above_max(self, fact_store: FactStore):
+    async def test_recall_clamps_limit_above_max(self):
         """``limit`` above ``_MAX_RECALL_LIMIT`` clamps to 100, not raises.
 
         Mirrors the :mod:`agents.memory.notes` ceiling.  The persona
         runtime cannot pull an unbounded result set into a single prompt
         even if a caller passes a pathological ``limit`` value.
         """
-        # Need > 100 rows to prove the clamp kicks in (otherwise the
-        # row count caps the result naturally).
-        for i in range(105):
-            await fact_store.store(
-                subject="bob",
-                predicate=f"p_{i}",
-                object="v",
-                source_interaction_id=f"ix-{i}",
-                asserted_at=1000.0 + i,
-            )
-        rows = await fact_store.recall(subject="bob", limit=10_000)
-        assert len(rows) == 100
+        # 105 distinct ``(subject, predicate)`` tuples are needed to
+        # prove the clamp; the RFC 0026 §B allowlist is ~22 verbs, so
+        # this test injects a permissive validator to manufacture the
+        # row count without coupling to the closed vocabulary.  The
+        # default-validator path is exercised by
+        # :class:`tests.unit.python.test_fact_store.TestPredicateValidation`.
+        store = FactStore(
+            agent_id="test-agent",
+            db_path=":memory:",
+            predicate_validator=lambda p: None,
+        )
+        await store.initialize()
+        try:
+            for i in range(105):
+                await store.store(
+                    subject="bob",
+                    predicate=f"p_{i}",
+                    object="v",
+                    source_interaction_id=f"ix-{i}",
+                    asserted_at=1000.0 + i,
+                )
+            rows = await store.recall(subject="bob", limit=10_000)
+            assert len(rows) == 100
+        finally:
+            await store.close()
 
 
 # ─── supersede() helper contract (PR 339 review F-5) ────────

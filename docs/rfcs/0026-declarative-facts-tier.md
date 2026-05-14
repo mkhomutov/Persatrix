@@ -89,7 +89,7 @@ class Fact:
     fact_id: str                  # ULID
     agent_id: str                 # owner (per-agent isolation; matches RFC 0008 ACL)
     subject: str                  # canonical entity key (sender_id, mentioned_entity_id, or normalized name)
-    predicate: str                # short verb phrase, e.g. "has_daughter_named", "prefers", "committed_to"
+    predicate: str                # short verb phrase, e.g. "has_child_named", "prefers", "committed_to"
     object: str                   # short value, ≤ 200 chars
     certainty: float              # [0.0, 1.0]; seeded by extractor, updated by reinforcement (§F)
     source_interaction_id: str    # foreign key to interactions table (RFC 0020 §B)
@@ -104,7 +104,11 @@ Schema is additive — new `facts` table; no changes to `episodes` or `notes`.
 
 The summarization call introduced by [RFC 0020 PR 4](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) becomes a **two-output** prompt: (a) the existing prose summary, (b) a JSON list of fact tuples. One LLM call, two structured outputs. No new per-event cost.
 
-The extractor prompt enumerates a small predicate vocabulary (~30 verbs covering attribute / preference / commitment / relationship classes) and instructs the model to return zero tuples when no extractable facts are present (the common short-interaction case).
+The extractor prompt enumerates a small predicate vocabulary (~25 verbs covering attribute / preference / commitment / relationship classes) and instructs the model to return zero tuples when no extractable facts are present (the common short-interaction case).
+
+**Relationship-predicate granularity.** Relationship verbs are intentionally gender-neutral (`has_child_named`, not `has_son_named` / `has_daughter_named`). The flat `(subject, predicate, object)` schema cannot carry the gender axis as a structured field; encoding it in the verb spawns one predicate per (relation × gender × generation) and pushes the schema gap into the vocabulary. The salient fact for memory is the relationship + the named entity; when the gender of the relationship is the load-bearing detail, it surfaces in the prose summary that ships in the same close-path round-trip.
+
+**Vocabulary discovery from rejected predicates.** The allowlist is the storage-boundary cap on prompt-injection blast radius (§Security Considerations), but it is also the bound on what the LLM can record — a near-miss verb the model emits (e.g. `has_kid_named` vs the allowlisted `has_child_named`) is a quality signal that the vocabulary needs an amendment. The extractor records each distinct rejected verb verbatim, once per process, into the structured-log surface (`persatrix.facts.rejected_predicate` field). This is the operator discovery surface for growing the allowlist from observed workload rather than guessing. Per-process dedup keeps log volume bounded; an in-process cap prevents pathological growth from an adversarial LLM emitting unique-per-call garbage.
 
 ### C. Subject canonicalization
 
@@ -164,7 +168,11 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 1. New `agents/memory/facts.py` module — `Fact` dataclass, `FactStore` with `store`, `recall`, `supersede`, `prune`.
 2. SQLite migration adds `facts` table + `idx_facts_subject_agent` index.
 3. Extractor wired into the [RFC 0020 PR 4 summarize-on-close](0020-pr-plan.md#pr-4-featurev030-rfc0020-summarize-on-close--summarization-hook--janitor--record_interaction-move) path — combined prompt; structured outputs parsed and stored.
-4. **Atomicity**: the prose-summary write and the fact-tuple writes occur inside a single SQLite transaction. A parse failure on either output rolls back both — never a half-written interaction-close state. A parse failure on facts but not summary commits only the summary plus a counter increment (`facts.extraction_failed`).
+4. **Close-path sequencing**: at interaction close the prose-summary write commits first (via the `EpisodicMemory` connection), then the fact-tuple writes commit (via the `FactStore` connection). Each tier owns its own `aiosqlite` connection, so a literal single-transaction wrap across both halves is not implementable at this layer — and the failure modes the original "single SQLite transaction" wording cared about all collapse onto **commit the summary, skip the facts, increment a counter** anyway:
+   - **Envelope (JSON) parse failure** on the combined response → summary commits as the unparsed raw text; facts are skipped; the counter is *not* bumped here because the failure surfaces before the facts-dispatch path (see also [§PR 5 follow-ups — combined-envelope truncation observability](0026-pr-plan.md#from-pr-2-review)).
+   - **Per-tuple failure** (allowlist miss, missing field, certainty out of range) inside `store_extracted_facts` → summary commits; the offending tuple is skipped; `facts.extraction_failed` increments per tuple; other tuples in the same batch still commit.
+   - **Summary commit failure** → facts dispatch is skipped (guarded by the `update_episode_summary` return value); the janitor re-attempts the summary on the next sweep.
+   The unreachable case — summary committed, mid-batch SQLite error in facts → roll back the summary — matches the spec's recovery clause regardless ("commits only the summary plus a counter increment"), so the observable behaviour is the spec's intended outcome on every path. The original "single SQLite transaction" wording was reconciled with the implementation in [PR 2 review](0026-pr-plan.md#from-pr-2-review); a future RFC amendment can revisit if cross-tier transactional rollback becomes desirable.
 5. Unit tests for the extractor's empty-list path, the predicate-allowlist rejection, the schema migration, and the partial-failure rollback.
 
 ### Phase 2: Recall + budget integration

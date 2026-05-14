@@ -30,6 +30,12 @@ from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
+from .fact_extractor import (
+    FactsParseError,
+    build_combined_prompt_suffix,
+    dispatch_facts_from_response,
+    split_combined_response,
+)
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -67,33 +73,43 @@ async def summarize_closed_interaction(
     llm_client: LLMClient,
     agent_id: str,
     interaction: Interaction,
-) -> tuple[str, bool]:
-    """Build an LLM-generated summary of a closed interaction.
+) -> tuple[str, bool, str | None]:
+    """Build an LLM-generated summary + extract declarative facts.
 
-    Returns ``(summary_text, failed_bool)``.  ``failed_bool`` is
-    ``True`` iff the LLM path failed and the caller is looking at
-    the :data:`SUMMARY_UNAVAILABLE_TEXT` fallback.  The ``failed``
-    signal feeds the ``record_interaction`` outcome path — a
-    relationship row should not anchor on a placeholder string.
+    RFC 0026 PR 2 — the summariser prompt is now a **two-output**
+    structured prompt: one LLM round-trip returns one JSON envelope
+    ``{"summary": "...", "facts": [...]}``.  The summary half feeds
+    the existing :meth:`EpisodicMemory.update_episode_summary` write
+    (RFC 0020 PR 4); the facts half is serialised back to a JSON list
+    string and returned alongside so the orchestrator can dispatch
+    :func:`store_extracted_facts` after the summary commits.
 
-    Single-turn interactions short-circuit to the deterministic
-    per-turn summary so PR 2's tick fast path does not pay an LLM
-    round-trip.  Multi-turn interactions go through
-    :meth:`MemoryFacade.compress` to bound the context and then
-    through the LLM.
+    Returns ``(summary_text, failed_bool, facts_raw_or_None)``:
+
+    * ``summary_text`` — the prose summary (or
+      :data:`SUMMARY_UNAVAILABLE_TEXT` when ``failed_bool`` is
+      ``True``).
+    * ``failed_bool`` — ``True`` iff the LLM path failed entirely
+      (timeout / exception / empty response).  Mirrors the RFC 0020
+      PR 4 contract.
+    * ``facts_raw_or_None`` — JSON-serialised list of fact tuples when
+      the response parses as the combined envelope; ``None`` when the
+      response is plain text (backward-compat path — older mock
+      clients and legacy LLM responses without the envelope still
+      yield a valid summary write but no facts).
     """
     if interaction.turn_count == 1:
         payload = interaction.turns[0].payload or {}
         single = str(payload.get("summary", "")).strip()
         if single:
-            # Multi-turn placeholder shape kept for parity with PR 3
-            # so legacy assertions on ``REASON_*`` substring matches
-            # in the summary still pass.
+            # Single-turn placeholder; no facts extracted (the
+            # deterministic per-turn shape is not LLM-routed).
             return (
                 f"Multi-turn interaction (scope={interaction.scope}, "
                 f"turns=1, reason={interaction.close_reason}): "
                 f"first[{single}] last[{single}]",
                 False,
+                None,
             )
 
     entries = _interaction_to_entries(interaction)
@@ -120,14 +136,14 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("timeout")
-        return (SUMMARY_UNAVAILABLE_TEXT, True)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
     except Exception as exc:
         logger.warning(
             "Summarisation failed for agent %s (scope=%s): %s",
             agent_id, interaction.scope, exc,
         )
         _emit_summary_failed("llm_error")
-        return (SUMMARY_UNAVAILABLE_TEXT, True)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
 
     text = (response.text or "").strip()
     if not text:
@@ -137,8 +153,38 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("empty")
-        return (SUMMARY_UNAVAILABLE_TEXT, True)
-    return (text, False)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    # Try the combined-envelope path first.  Older mock clients and
+    # legacy LLM responses that emit plain prose summary still flow
+    # through the backward-compat fallback (text=text, facts=None) so
+    # the existing RFC 0020 PR 4 summarise-on-close regression suite
+    # stays green.
+    try:
+        summary, facts_raw = split_combined_response(text)
+    except FactsParseError:
+        return (text, False, None)
+    # PR #340 deep-review S2: a well-formed envelope with an empty
+    # ``summary`` field parses cleanly today and commits ``""`` to
+    # ``update_episode_summary`` while letting facts dispatch fire
+    # against a missing prose half — violating the §G audit ordering
+    # "summary always exists before any facts.store row".  Treat the
+    # empty-field case as a summary failure consistent with the empty-
+    # response branch above; the distinct ``empty_field`` reason lets
+    # operators disambiguate "model returned nothing" from "model
+    # returned a valid envelope with an empty summary."  Raising
+    # ``FactsParseError`` inside :func:`split_combined_response` would
+    # be caught by the backward-compat branch above and commit the
+    # raw JSON envelope as the summary — worse than today — so the
+    # check belongs at the caller.
+    if not summary.strip():
+        logger.warning(
+            "Summarisation returned an empty `summary` field in the "
+            "JSON envelope for agent %s (scope=%s); using fallback",
+            agent_id, interaction.scope,
+        )
+        _emit_summary_failed("empty_field")
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    return (summary, False, facts_raw)
 
 
 def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
@@ -177,11 +223,13 @@ def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
 def _build_summarization_prompt(
     interaction: Interaction, view: CompressedView,
 ) -> str:
-    """Render the summarisation prompt body.
+    """Render the combined summarise + extract prompt body.
 
-    Mirrors the structure of
-    :func:`agents.memory.episodic_retention.summarize_old_episodes` so
-    the two LLM-summary call sites stay consistent.
+    RFC 0026 PR 2 appends the combined-prompt suffix from
+    :func:`agents.persona_runtime.fact_extractor.build_combined_prompt_suffix`
+    onto the existing RFC 0020 PR 4 summary prompt — one LLM call,
+    two structured outputs.  The summary prompt body itself stays
+    unchanged so the RFC 0020 PR 4 regression suite remains green.
     """
     return (
         load_snippet("interaction-summarizer") + "\n\n"
@@ -192,6 +240,7 @@ def _build_summarization_prompt(
         f"{view.tokens_before} / {view.tokens_after}\n"
         f"Entries dropped during compression: {view.entries_dropped}\n\n"
         f"Compressed turns:\n{view.summary}\n"
+        + build_combined_prompt_suffix()
     )
 
 
@@ -333,7 +382,7 @@ async def finalize_closed_interaction(
         )
         return
     try:
-        summary, summary_failed = await summarize_closed_interaction(
+        summary, summary_failed, facts_raw = await summarize_closed_interaction(
             llm_client, agent_id, interaction,
         )
         try:
@@ -358,6 +407,29 @@ async def finalize_closed_interaction(
                 agent_id, interaction.interaction_id,
             )
             return
+        # RFC 0026 PR 2 — facts write follows the summary commit so
+        # the audit ordering matches the data ordering: summary
+        # always exists before any facts.store row pointing back at
+        # this ``interaction_id``.  Per-tuple failures (allowlist
+        # miss, missing field, certainty range) are caught inside
+        # :func:`store_extracted_facts` and increment
+        # ``agent.facts.extraction_failed`` — one bad tuple does
+        # not drop the rest of the batch.  An *envelope* parse
+        # failure on the facts half is caught here and bumps the
+        # same counter once (RFC 0026 §Phase 1 step 4 rollback —
+        # summary commits, facts do not).
+        if (
+            not summary_failed
+            and facts_raw is not None
+            and memory_ns.facts is not None
+        ):
+            await dispatch_facts_from_response(
+                fact_store=memory_ns.facts,
+                facts_raw=facts_raw,
+                interaction=interaction,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
         await record_closed_interaction(
             memory_ns, agent_id, interaction, summary, summary_failed,
             session_id=session_id,

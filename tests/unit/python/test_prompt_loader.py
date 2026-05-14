@@ -386,6 +386,42 @@ class TestShippedSnippetsByteIdentity:
             "episode-retention-user", repo_root=self.PROD_REPO_ROOT,
         ) == expected
 
+    def test_fact_extractor_suffix(self) -> None:
+        # RFC 0026 PR 2 follow-up: the combined summarize+extract prompt
+        # body lives at ``prompts/runtime/safety/fact-extractor-suffix.md``
+        # and is loaded by
+        # :func:`agents.persona_runtime.fact_extractor.build_combined_prompt_suffix`.
+        #
+        # The markdown contains ``{{ }}`` brace escapes (intentional —
+        # ``.format()`` collapses them to single braces in the JSON-shape
+        # example) and a literal ``{predicate_list}`` placeholder which is
+        # substituted with the sorted ``PREDICATE_ALLOWLIST``.  Pinning the
+        # raw bytes here catches accidental edits to either the brace
+        # escaping or the placeholder name; the rendered-output regression
+        # in test_fact_extractor.py covers the call-site substitution.
+        expected = (
+            "Reply with EXACTLY one JSON object — no prose outside it — "
+            "with two top-level keys:\n"
+            "  * `summary` (string): the prose summary described above.\n"
+            "  * `facts` (list): zero or more declarative-fact tuples "
+            "extracted from the interaction.  Each tuple is an object "
+            '{{"subject": str, "predicate": str, "object": str, '
+            '"certainty": float in [0, 1]}}.\n'
+            "\n"
+            "Return `\"facts\": []` when the interaction yields no "
+            "extractable declarative facts (short turns, pleasantries, "
+            "and tool-only exchanges typically yield nothing — this is "
+            "the expected common case; do not invent tuples).\n"
+            "\n"
+            "Valid predicates (use ONLY these verbs): {predicate_list}.\n"
+            "Use `self` as the subject for introspective tuples about the "
+            "agent itself (paired with a `self.*` predicate); use the "
+            "counterparty's display name for tuples about them."
+        )
+        assert load_snippet(
+            "fact-extractor-suffix", repo_root=self.PROD_REPO_ROOT,
+        ) == expected
+
     def test_default_repo_root_resolves_production_snippet(self) -> None:
         # Independent of any explicit ``repo_root`` argument, the default
         # anchor (``Path(__file__).parent.parent`` from prompt_loader)
