@@ -48,15 +48,35 @@ _MAX_RECALL_LIMIT = 100
 # ─── Data model ─────────────────────────────────────────────
 
 
-@dataclass
+@dataclass(frozen=True)
 class Fact:
     """A single declarative-fact tuple — RFC 0026 §A data shape.
 
-    ``fact_id`` is a uuid4 hex string in this implementation; the RFC
-    text names ULID but the rest of the storage layer (``Episode.id``,
-    ``Note.id``, ``Interaction.id``) uses ``uuid.uuid4`` and the
-    asserted-at column already gives chronological ordering, so the
-    ULID time-prefix property is not load-bearing here.
+    Frozen so a recall caller cannot silently desynchronise its in-memory
+    view from the persisted row.  Mutations must round-trip through
+    :class:`FactStore` (``store`` / ``supersede``).
+
+    ``fact_id`` is a ``uuid4`` hex string in this implementation; the
+    RFC text names ULID but the rest of the storage layer
+    (``Episode.id``, ``Note.id``, ``Interaction.id``) uses
+    ``uuid.uuid4`` and the ``asserted_at`` column already gives
+    chronological ordering, so the ULID time-prefix property is not
+    load-bearing here.
+
+    ``source_interaction_id`` is typed ``str | None``; RFC §A names it
+    non-nullable.  PR 1 ships the storage primitive without the
+    extractor, so a caller (test fixture, RFC 0013 backfill, future
+    operator-seeded fact in OQ #9) may legitimately commit a row with
+    no source interaction.  PR 2's extractor will always populate it;
+    a definitive "tighten the column" decision is tracked under the
+    PR 5 follow-up list and may move into the RFC §A amendment in
+    PR 6.
+
+    ``asserted_at`` is ``float`` (epoch seconds) rather than the RFC's
+    ``datetime`` — matches the codebase convention (``episodes.created_at``,
+    ``interactions.started_at`` are both REAL epoch-seconds) so a single
+    conversion seam (``time.time()``) covers every tier.  Tracked as a
+    RFC §A amendment in PR 6.
 
     ``certainty`` is seeded by the extractor (PR 2) and decayed /
     reinforced by PR 4's use-based salience rule.  PR 1 stores whatever
@@ -201,23 +221,52 @@ class FactStore:
         """Persist a new fact tuple.  Returns the generated ``fact_id``.
 
         If a row with the same ``(agent_id, subject, predicate)`` and an
-        older ``asserted_at`` already exists and is not yet superseded,
-        the older row's ``superseded_by`` column is updated to point at
-        the new row — RFC 0026 §F latest-asserted-wins retraction
-        (storage half).  The recall-side filter that hides superseded
-        rows by default ships in PR 4; PR 1 lands the data shape.
+        **older** ``asserted_at`` already exists and is not yet
+        superseded, the older row's ``superseded_by`` column is updated
+        to point at the new row — RFC 0026 §F latest-asserted-wins
+        retraction (storage half).  The recall-side filter that hides
+        superseded rows by default ships in PR 4; PR 1 lands the data
+        shape.
+
+        Monotonic ``asserted_at`` precondition
+        --------------------------------------
+        Subsequent writes for the same ``(agent_id, subject, predicate)``
+        key MUST use a **strictly greater** ``asserted_at`` than any
+        existing live row.  Out-of-order or equal-timestamp writes do
+        not supersede the existing live row and leave two live rows for
+        the same key.  This is the storage primitive's documented
+        behaviour:
+
+        * PR 2's extractor uses ``interaction.closed_at`` which is
+          monotonic per-agent (the per-agent ``asyncio.Lock`` on
+          ``_LLMPersonaAgent`` serialises summarize-on-close calls), so
+          the precondition holds for the production write path.
+        * The behaviour is pinned by
+          :class:`tests.unit.python.test_fact_store.TestAssertedAtMonotonicity`
+          so a future change to the comparison surfaces as a deliberate
+          test update.
+        * PR 4 may revisit symmetric latest-wins (tighten the SELECT
+          to ``<=`` plus a "find newer live row" pass) when the
+          retraction policy lands — tracked under the PR 5 follow-up
+          list.
 
         Predicate validation runs through the injected validator (PR 2
         wires the allowlist; PR 1 default is permissive but still
         rejects empty strings).
         """
-        self._predicate_validator(predicate)
+        # Cheap value checks first — surfacing "subject must not be
+        # empty" or a certainty-range error before the (potentially
+        # PR 2 allowlist-backed) predicate validator means a caller
+        # that violates two preconditions sees the more obviously-wrong
+        # one first.  Pure ordering preference; no behaviour change for
+        # the default permissive validator.
         if not subject or not subject.strip():
             raise ValueError("subject must not be empty")
         if not 0.0 <= certainty <= 1.0:
             raise ValueError(
                 f"certainty must be in [0.0, 1.0], got {certainty}",
             )
+        self._predicate_validator(predicate)
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
@@ -375,10 +424,23 @@ class FactStore:
         Traverses **both** the ``subject`` column (facts *about* the
         subject) and the ``source_interaction_id`` column (facts
         *extracted during* an interaction belonging to the subject —
-        even if the declared subject is someone else).  The audit-map
-        return shape names the two subtotals separately so the umbrella
-        ``SubjectErasure.delete`` audit-log entry can render an honest
-        per-column breakdown.
+        even if the declared subject is someone else).
+
+        Return shape: two **disjoint** row-counts whose sum is the
+        total number of fact rows erased.  The split exists so the
+        audit log can show whether erasure landed via the declared
+        ``subject`` traversal or via the ``source_interaction_id``
+        reverse-edge traversal.  A row matching both columns is counted
+        once, in the ``by_subject`` bucket (the first DELETE removes
+        the row; the second DELETE sees no match).  This is **not** a
+        per-column match counter — it is a per-row attribution counter
+        biased toward the declared-subject column.  Pinned by
+        :class:`tests.unit.python.test_fact_store.TestDeleteBySubject`.
+
+        Per-agent ACL — RFC 0008 §H.  Both DELETEs are scoped to the
+        local ``agent_id``, so an erasure call from agent A cannot
+        touch agent B's facts even when both stores share the same
+        SQLite connection.
 
         Phase 1 ships the storage primitive only.  RFC 0013's
         ``SubjectErasure`` (target v0.5.0) will wire this into the

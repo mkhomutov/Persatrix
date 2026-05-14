@@ -4,10 +4,12 @@ Schema migrations and shared scoring SQL fragments.
 Forward-only migrations applied by ``_apply_migrations()`` and shared
 scoring constants used by ``episodic.py``.
 
-The two callable migration handlers (v4 relationships rewrite, v5 RFC
-0020 episodes columns) live in :mod:`agents.memory._migration_handlers`
-and are re-exported below for backwards compatibility — call sites and
-tests should keep importing them from this module.
+The callable migration handlers (currently ``v4`` through ``v8``) live
+in :mod:`agents.memory._migration_handlers` — itself split across that
+module and :mod:`agents.memory._migration_facts` to stay under the
+500-line soft cap.  All handlers are re-exported below for backwards
+compatibility, so call sites and tests should keep importing them from
+this module.
 """
 
 from __future__ import annotations

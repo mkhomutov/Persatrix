@@ -332,13 +332,16 @@ class TestDeleteBySubject:
         assert len(remaining) == 1
         assert remaining[0].source_interaction_id == "charlie-ix-1"
 
-    async def test_subtotals_are_independent(self, fact_store: FactStore):
-        """A subject_id that matches both columns reports both subtotals.
+    async def test_subtotals_are_disjoint_row_counts(self, fact_store: FactStore):
+        """Each row contributes to exactly one bucket.
 
-        The audit-map contract is that the two keys are *independent*
-        counts, not overlapping subsets — the caller (RFC 0013 audit
-        logger) sums them to render a total but also reports the split
-        so the operator can see where the erasure landed.
+        Two **distinct** rows — one whose ``subject`` matches and one
+        whose ``source_interaction_id`` matches — produce subtotals of
+        ``(1, 1)``.  The bucket split exists so the audit log can show
+        whether erasure landed via the declared subject traversal or
+        via the reverse-edge ``source_interaction_id`` traversal; the
+        per-row "counted once" semantics is pinned separately by
+        :meth:`test_overlap_row_counts_once_in_by_subject_bucket`.
         """
         # Row where the subject matches.
         await fact_store.store(
@@ -348,7 +351,7 @@ class TestDeleteBySubject:
             source_interaction_id="other-ix-1",
             asserted_at=1000.0,
         )
-        # Row where source_interaction_id matches.
+        # Distinct row where source_interaction_id matches.
         await fact_store.store(
             subject="bob",
             predicate="prefers",
@@ -363,6 +366,12 @@ class TestDeleteBySubject:
         }
         assert await fact_store.recall(subject="alice") == []
         assert await fact_store.recall(subject="bob") == []
+
+    # Two further ``delete_by_subject`` contracts — overlap-row-counts-once
+    # (F-2) and per-agent ACL (F-5) — live alongside the rest of the PR #339
+    # review follow-up invariants in
+    # :mod:`tests.unit.python.test_fact_store_invariants` so this file stays
+    # under the 500-line review-friendly cap.
 
 
 # ─── Predicate-validation seam (PR 2 wires the allowlist) ───
@@ -442,6 +451,13 @@ class TestAgentIsolation:
         other_results = await other.recall(subject="bob")
         assert len(other_results) == 1
         assert other_results[0].object == "Other-Bob"
+
+
+# Storage-primitive invariant tests (PR #339 review follow-ups
+# F-3 / F-4 / F-5) live in
+# :mod:`tests.unit.python.test_fact_store_invariants` so each test file
+# stays under the 500-line review-friendly cap.  Edits to the F-3 / F-4 /
+# F-5 contracts belong in that file.
 
 
 if __name__ == "__main__":

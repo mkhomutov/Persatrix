@@ -165,7 +165,7 @@ PR 6 (RFC close)
 | `agents/persona_runtime/memory_context.py` | New constant `_FACTS_BUDGET_TOKENS = 200` per OQ #2. RFC 0017's overall 1500-token allocator budget is unchanged; the facts slot is a soft per-tier floor enforced at the call site, not a separate allocator. |
 | [`config/agents.yaml`](../../config/agents.yaml) | New `memory.facts.{enabled, budget_tokens, extraction_model}` block per [§E](0026-declarative-facts-tier.md#e-composition-with-recall_notes). |
 | [`schemas/agent.schema.json`](../../schemas/agent.schema.json) | Schema additions for the new block. |
-| `agents/observability/metrics.py` | Counter `facts.injected{tier=facts}` increments per admitted fact. |
+| `agents/observability/metrics.py` | Counter `facts.injected{tier=facts}` increments per admitted fact. **`metrics.py` is at the 500-line cap exactly after PR 1** (review-friendly soft limit from `scripts/checks/file_size.py`); add the new counter via the existing `_metrics_facts.register(self, meter)` extension seam rather than inline in `_Instruments.__init__` so the cap is preserved.  Same pattern PR 1 established for `facts.{stored,superseded,extraction_failed}`. |
 | `tests/integration/test_facts_recall.py` | **New** — fact stored at interaction N is injected at interaction N+1 when the subject reappears, *without* the subject string appearing in the query (dementia-test core invariant). Tier-ordering test: when facts saturate their slice, notes and episodic still receive their share. |
 
 #### Key implementation details
@@ -239,6 +239,39 @@ Items populated during review. Reserved skeleton:
 - "From PR 2 review" — extractor / allowlist / audit findings.
 - "From PR 3 review" — recall / budget integration findings.
 - "From PR 4 review" — reinforcement / retraction / provenance findings.
+
+##### From PR 1 review
+
+The bulk of PR #339's review findings landed in PR 1 itself (docstring
+refreshes, validation reordering, frozen `Fact`, `delete_by_subject` +
+input-validation backfill tests, `agents/memory/__init__.py` re-exports).
+The two items deferred to this PR are:
+
+- **Symmetric latest-asserted-wins on insert.** PR 1 ships
+  `asserted_at < ?` (strict less-than) on the supersede-on-insert
+  SELECT, so out-of-order or equal-timestamp writes to the same
+  `(agent_id, subject, predicate)` leave two live rows.  The
+  precondition is documented on `FactStore.store` and pinned by
+  `tests.unit.python.test_fact_store_invariants.TestAssertedAtMonotonicity`,
+  and the PR 2 extractor uses monotonic `interaction.closed_at` so the
+  edge case is unreachable in the production write path.  Once PR 4's
+  retraction-policy implementation lands, tighten the SELECT to
+  `asserted_at <= ?` plus a "find newer live row" forward pass that
+  marks the new row as superseded if a strictly-newer live row already
+  exists — symmetric latest-wins.  Update `TestAssertedAtMonotonicity`
+  to assert the new semantics rather than the current edge-case
+  behaviour.
+- **`source_interaction_id` nullability.** RFC 0026 §A names this
+  field non-nullable; PR 1's implementation types it `str | None`
+  (DDL column nullable too) because Phase 1 has no extractor and
+  callers (test fixtures, the future RFC 0013 erasure backfill, and
+  the OQ #9 operator-seeded fact follow-up) may legitimately commit
+  rows without a source interaction.  PR 2 always populates the field.
+  Decision: either tighten the column + annotation in this PR (drop
+  the `| None` and add a CHECK constraint, paired with backfill
+  semantics for fixtures), or amend RFC §A in PR 6 to permit `NULL`
+  for the operator-seeded / backfill paths.  Lock the decision during
+  PR 5 review.
 
 #### PR checklist
 
