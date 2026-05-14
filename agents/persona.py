@@ -71,6 +71,7 @@ from .dispatch import (  # noqa: F401
 )
 from .llm_client import LLMClient
 from .memory.episodic import EpisodicMemory
+from .memory.facts import FactStore
 from .memory.relationship import RelationshipMemory
 from .memory.working import WorkingMemory
 from .persona_behavior import (
@@ -290,6 +291,16 @@ def create_persona_agent(
 
     episodic_memory = EpisodicMemory(agent_id=agent_id, db_path=db_path)
     relationship_memory = RelationshipMemory(agent_id=agent_id, db_path=db_path)
+    # RFC 0026 PR 2 — declarative-fact tier alongside episodes /
+    # relationships.  Reuses the EpisodicMemory connection so a single
+    # in-memory SQLite database backs every tier in the test path
+    # (:memory: connections do not share state across separate
+    # ``aiosqlite.connect`` calls).
+    fact_store = FactStore(
+        agent_id=agent_id,
+        db_path=db_path,
+        shared_db=None,  # populated at initialize_memory time
+    )
     # F-5a-1: Read working memory budget from memory config, not the agent's
     # LLM completion limit (config["max_tokens"]).  These are distinct concerns:
     # config["max_tokens"] caps LLM output tokens (e.g. 4096), while working
@@ -317,6 +328,7 @@ def create_persona_agent(
         episodic_memory=episodic_memory,
         relationship_memory=relationship_memory,
         working_memory=working_memory,
+        fact_store=fact_store,
         memory_tools=memory_tools,
         clock=clock,
     )

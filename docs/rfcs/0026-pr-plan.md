@@ -329,8 +329,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | 🔀 PR open | — | — |
-| 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ⬜ Not started | — | — |
+| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
+| 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | 🔀 PR open | — | — |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ⬜ Not started | — | — |
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ⬜ Not started | — | — |
 | 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |

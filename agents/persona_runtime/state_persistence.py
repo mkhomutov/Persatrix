@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from ..memory.episodic import EpisodicMemory
+from ..memory.facts import FactStore
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from ..persona_types import PersonaState
@@ -53,6 +54,9 @@ class _StatePersistenceMixin:
     _episodic_memory: EpisodicMemory
     _relationship_memory: RelationshipMemory
     _working_memory: WorkingMemory
+    # RFC 0026 PR 2 — declarative-fact tier; optional so legacy fixtures
+    # that build a persona agent without facts still work.
+    _fact_store: FactStore | None
     _lock: asyncio.Lock
     # RFC 0031 Phase 1: resolved from PERSATRIX_SESSION_ID in
     # PersonaAgent.__init__ (see agents/persona.py).
@@ -122,6 +126,14 @@ class _StatePersistenceMixin:
             session_id=self._session_id,
         )
         await self._working_memory.initialize()
+        # RFC 0026 PR 2 — open the facts tier last so the umbrella
+        # migration runner has already created the prerequisite tables
+        # on the episodic / relationship connections.  The facts table
+        # itself comes from the migration handler the FactStore
+        # invokes here; opening order does not affect correctness, only
+        # the close-path teardown sequence below.
+        if self._fact_store is not None:
+            await self._fact_store.initialize()
         self._state = await self._load_persona_state()
 
     async def close_memory(self) -> None:
@@ -144,8 +156,12 @@ class _StatePersistenceMixin:
                 logger.warning(
                     "Failed to drain pending summaries on close: %s", exc,
                 )
-            # working (flush compression) → episodic (DB) → relationship (DB)
-            for tier in (self._working_memory, self._episodic_memory, self._relationship_memory):
+            # working (flush compression) → facts (DB) → episodic (DB) → relationship (DB)
+            tiers: list[Any] = [self._working_memory]
+            if self._fact_store is not None:
+                tiers.append(self._fact_store)
+            tiers.extend([self._episodic_memory, self._relationship_memory])
+            for tier in tiers:
                 try:
                     await tier.close()
                 except Exception as exc:

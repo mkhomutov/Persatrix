@@ -31,6 +31,8 @@ from dataclasses import dataclass
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
+from ._facts_audit import emit_audit as _emit_audit
+from .fact_predicates import validate_predicate
 from .migrations import _apply_migrations
 
 logger = logging.getLogger(__name__)
@@ -125,23 +127,13 @@ _FACT_COLS = (
 _FACT_SELECT = ", ".join(_FACT_COLS)
 
 
-# ─── Predicate validation seam ──────────────────────────────
-
-
+# Predicate validation seam — PR 2 swapped the Phase-1 permissive
+# default for the enumerated allowlist in
+# :mod:`agents.memory.fact_predicates`.  The Callable seam stays so a
+# caller can still inject a custom validator without touching the
+# storage layer.
 PredicateValidator = Callable[[str], None]
-
-
-def _permissive_validator(predicate: str) -> None:
-    """Phase-1 default validator — accepts any non-empty predicate.
-
-    PR 2 swaps this for the enumerated allowlist (≈30 verbs across
-    attribute / preference / commitment / relationship + ``self.*``
-    classes per RFC 0026 §B + OQ #10).  The seam is exercised in
-    :mod:`tests.unit.python.test_fact_store` so the PR 2 swap is a
-    one-line change with regression coverage.
-    """
-    if not predicate or not predicate.strip():
-        raise ValueError("predicate must not be empty")
+_default_predicate_validator: PredicateValidator = validate_predicate
 
 
 # ─── FactStore ──────────────────────────────────────────────
@@ -173,7 +165,9 @@ class FactStore:
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = shared_db
         self._owns_db = shared_db is None
-        self._predicate_validator = predicate_validator or _permissive_validator
+        self._predicate_validator = (
+            predicate_validator or _default_predicate_validator
+        )
 
     @property
     def agent_id(self) -> str:
@@ -334,6 +328,18 @@ class FactStore:
                         1, attributes={"agent.id": self._agent_id},
                     )
 
+        # RFC 0026 §G audit emission — after commit so the log cannot
+        # record a write that did not happen.
+        _emit_audit(
+            "fact.store", agent_id=self._agent_id, fact_id=fact_id,
+            subject=subject, predicate=predicate, object=object,
+            source_interaction_id=source_interaction_id,
+        )
+        if superseded and older_fact_id is not None:
+            _emit_audit(
+                "fact.supersede", agent_id=self._agent_id,
+                superseded_fact_id=older_fact_id, by_fact_id=fact_id,
+            )
         return fact_id
 
     # ─── Read path ─────────────────────────────────────────
@@ -399,6 +405,11 @@ class FactStore:
             (by_fact_id, fact_id, self._agent_id),
         )
         await db.commit()
+        if cursor.rowcount > 0:
+            _emit_audit(
+                "fact.supersede", agent_id=self._agent_id,
+                superseded_fact_id=fact_id, by_fact_id=by_fact_id,
+            )
         return cursor.rowcount > 0
 
     async def prune(self, *, before: float) -> int:

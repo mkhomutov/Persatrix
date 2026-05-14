@@ -126,6 +126,19 @@ def set_redactor(redactor: Redactor) -> None:
     _redactor = redactor
 
 
+def get_redactor() -> Redactor:
+    """Return the currently-installed :class:`Redactor`.
+
+    Exposed for callers that need to redact a structured payload outside
+    the structlog chain — e.g. RFC 0026 audit emissions in
+    :mod:`agents.memory.facts` build a dict, run it through the same
+    redactor the chain would apply, then hand it to ``logger.info``
+    so PII is scrubbed even before :func:`configure_logging` has been
+    called (test environments, early-startup code).
+    """
+    return _redactor
+
+
 # ─── Processors ──────────────────────────────────────────────────────────────
 
 
@@ -426,5 +439,6 @@ __all__ = [
     "SCHEMA_VERSION",
     "configure_logging",
     "get_logger",
+    "get_redactor",
     "set_redactor",
 ]
