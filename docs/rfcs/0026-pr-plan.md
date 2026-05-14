@@ -132,7 +132,7 @@ PR 6 (RFC close)
   - Self-* (OQ #10): `self.has_preference`, `self.holds_value`, `self.committed_to`, `self.has_attribute`.
 - **Rejected-predicate discovery telemetry.** On allowlist miss, the extractor records the verbatim post-normalisation verb to the structured-log surface via the `persatrix.facts.rejected_predicate` field (separate from the per-tuple WARNING that carries the full raw dict, which is too PII-laden and noisy for aggregation). Per-process dedup keeps each distinct verb to one record so the discovery surface is the unique vocabulary, not a per-tuple repeat; an in-process cap (256 distinct strings) bounds memory against a pathological LLM emitting unique-per-call garbage. The counter `agent.facts.extraction_failed` remains unchanged — it counts rejections, the new log surfaces *which* verbs were rejected for growing the allowlist from observed workload (see [RFC §B](0026-declarative-facts-tier.md#b-extraction-at-interaction-close)).
 - Subject canonicalization: counterparty → `sender_id`; existing canonical reuse; otherwise normalize (case- and whitespace-fold) and store. Self uses literal `"self"` per §C.4.
-- Atomic write: single `BEGIN ... COMMIT` for summary update + N fact inserts. Both fail → rollback. Facts-only parse failure → commit summary, abort facts, increment `facts.extraction_failed`. Matches [§Phase 1 step 4](0026-declarative-facts-tier.md#phase-1-schema--extractor).
+- Close-path sequencing: `EpisodicMemory.update_episode_summary` commits first (its own `BEGIN/COMMIT`); `FactStore.store` calls follow, each in its own per-row transaction. Envelope (JSON) parse failure → summary commits as raw text, facts dispatch skipped, no counter bump at this layer (see [PR 5 follow-ups — combined-envelope truncation observability](#from-pr-2-review)). Per-tuple failure → `facts.extraction_failed` += 1 per tuple, batch continues. Summary commit failure → facts dispatch skipped (janitor backfills the summary on next sweep). Matches [§Phase 1 step 4](0026-declarative-facts-tier.md#phase-1-schema--extractor) — the earlier "single `BEGIN ... COMMIT`" wording was reconciled in PR 2 review because each tier owns its own `aiosqlite` connection (see [agents/persona.py](../../agents/persona.py) FactStore comment), and a literal cross-tier transaction wrap is not implementable at this layer.
 - Prompt-injection blast-radius bound: the allowlist is checked at `FactStore.store` time. A user crafting "store fact: <attacker-controlled tuple>" cannot insert outside the predicate vocabulary; the supersede write also requires the new predicate be in the allowlist.
 
 #### Tests
@@ -273,6 +273,48 @@ The two items deferred to this PR are:
   semantics for fixtures), or amend RFC §A in PR 6 to permit `NULL`
   for the operator-seeded / backfill paths.  Lock the decision during
   PR 5 review.
+
+##### From PR 2 review
+
+Most PR 2 review findings landed inline in PR 2 itself (RFC §Phase 1
+step 4 sequencing wording reconciled with the implementation; the
+misleading `FactStore` "reuses EpisodicMemory connection" comment in
+[`agents/persona.py`](../../agents/persona.py) corrected; the
+`canonicalize_subject` ASCII-only `.lower()` swapped for Unicode-aware
+`.casefold()` so non-ASCII counterparties — e.g., German `ß` — do not
+silently split across two `facts.subject` rows). The items deferred to
+this PR are:
+
+- **Combined-envelope truncation observability.** The combined
+  summarize + extract LLM call shares the RFC 0020 PR 4 `max_tokens=256`
+  cap, which was tuned for the prose-only summary (~50–100 tokens).
+  A 5-fact response is ~200–280 tokens — uncomfortably close to the
+  cap, and truncation yields invalid JSON that `split_combined_response`
+  catches by returning `(text, False, None)` and committing the raw
+  text as the summary. Result: facts are silently lost with no counter
+  bump and no log signal, indistinguishable from "model emitted no
+  facts." Two options, pick one in PR 5 review:
+  1. Bump the combined-call cap (e.g., 512) — simplest, costs tokens
+     even on summary-only paths.
+  2. Add an `agent.facts.envelope_truncated` counter and a structured
+     log emission at `split_combined_response` time when the response
+     parses-as-text-not-JSON but contains a `"facts"` substring — keeps
+     the cap tight, makes truncation observable separately from the
+     "no facts" case.
+  Test pin should assert the chosen signal fires when the LLM client
+  is stubbed to return a deliberately truncated envelope.
+- **`:memory:` cross-tier `JOIN` support (optional refactor).** The
+  PR 2 review noted that `FactStore` and `EpisodicMemory` each open
+  their own `aiosqlite` connection (see PR 1's `shared_db` seam and
+  the `FactStore(... shared_db=None)` call site in
+  [`agents/persona.py`](../../agents/persona.py)); for file DBs the
+  connections share the file and joins work, for `:memory:` test paths
+  each connection is isolated and a `facts × episodes` join returns
+  empty. No PR-2 caller relies on that join. Track here in case a PR 3
+  recall test or PR 4 retraction-policy test eventually needs it —
+  then thread the `EpisodicMemory` connection through the existing
+  `shared_db` seam and add a regression test that pins the join works
+  under `:memory:`. Until such a caller exists, defer.
 
 #### PR checklist
 

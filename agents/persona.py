@@ -292,14 +292,21 @@ def create_persona_agent(
     episodic_memory = EpisodicMemory(agent_id=agent_id, db_path=db_path)
     relationship_memory = RelationshipMemory(agent_id=agent_id, db_path=db_path)
     # RFC 0026 PR 2 — declarative-fact tier alongside episodes /
-    # relationships.  Reuses the EpisodicMemory connection so a single
-    # in-memory SQLite database backs every tier in the test path
-    # (:memory: connections do not share state across separate
-    # ``aiosqlite.connect`` calls).
+    # relationships.  Each tier owns its own ``aiosqlite`` connection
+    # opened lazily in its ``initialize()``.  For file-backed databases
+    # (production) the connections share the file and the umbrella
+    # migration runner is idempotent across them.  For ``:memory:``
+    # test paths every connection is an isolated database, so a
+    # cross-tier ``JOIN`` (e.g., ``facts`` × ``episodes`` on
+    # ``source_interaction_id``) would not find rows on the test path —
+    # no caller currently relies on that join.  The ``shared_db``
+    # parameter below stays ``None`` here; if a future test or feature
+    # needs cross-tier joins under ``:memory:``, route the FactStore
+    # through the EpisodicMemory connection via that seam.
     fact_store = FactStore(
         agent_id=agent_id,
         db_path=db_path,
-        shared_db=None,  # populated at initialize_memory time
+        shared_db=None,
     )
     # F-5a-1: Read working memory budget from memory config, not the agent's
     # LLM completion limit (config["max_tokens"]).  These are distinct concerns:

@@ -197,6 +197,41 @@ class TestCanonicalizeSubject:
         twice = canonicalize_subject(once)
         assert once == twice
 
+    def test_casefolds_non_ascii_eszett(self) -> None:
+        """RFC 0026 PR 2 review — case folding uses Unicode-aware
+        :py:meth:`str.casefold`, not ASCII-only ``str.lower``.  The
+        German ``ß`` (eszett) folds to ``"ss"`` so a counterparty
+        spelled ``"Straße"`` and another spelled ``"Strasse"`` land
+        on the same canonical row — the whole point of subject
+        normalization.
+
+        Why this matters: ``.lower()`` is locale-insensitive but
+        leaves ``ß`` unchanged, which silently splits one
+        counterparty across two memory rows.  The dementia-test
+        happy path uses ASCII names so this is latent for English
+        workloads, but the seam should be Unicode-correct from the
+        first international subject."""
+        assert canonicalize_subject("Straße") == "strasse"
+
+    def test_eszett_collapses_to_double_s_spelling(self) -> None:
+        """The two spellings of the same name collapse to one row.
+
+        This is the load-bearing assertion behind the casefold
+        choice: a user writing ``"Straße"`` once and ``"STRASSE"``
+        the next session must hit the same ``facts.subject`` key."""
+        assert canonicalize_subject("Straße") == canonicalize_subject("STRASSE")
+
+    def test_idempotent_on_non_ascii(self) -> None:
+        """Idempotence holds across the casefold transformation.
+
+        ``canonicalize_subject("Straße")`` returns ``"strasse"`` —
+        re-running on that result must be a no-op so callers that
+        defensively normalize at both write and read sites cannot
+        drift even for non-ASCII subjects."""
+        once = canonicalize_subject("Straße")
+        twice = canonicalize_subject(once)
+        assert once == twice
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

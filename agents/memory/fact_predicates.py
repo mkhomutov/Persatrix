@@ -115,16 +115,25 @@ def canonicalize_subject(raw: str) -> str:
     * Outer whitespace stripped; internal whitespace runs collapsed to
       a single space so ``"Bob   Smith"`` and ``"Bob Smith"`` land on
       the same row.
-    * Lowercased.
+    * Unicode-aware case-folded via :py:meth:`str.casefold` (not
+      ``str.lower``) so locale-specific characters collapse to a
+      single canonical spelling — ``"Straße"`` and ``"Strasse"``
+      both fold to ``"strasse"``.  ``.lower()`` would leave the
+      eszett (``ß``) intact and silently split one counterparty
+      across two ``facts.subject`` rows; PR 2 review pinned the
+      switch to ``.casefold()`` before any non-ASCII subject reaches
+      the dementia-test path.
     * The literal ``"self"`` (any case, any surrounding whitespace)
       collapses to ``"self"`` so introspective facts join on a stable
       subject column (RFC 0026 §C.4).
 
     Idempotent — applying twice equals applying once.  Load-bearing
     for callers that defensively normalize at both write and read
-    sites.
+    sites; the casefold operation is idempotent on its own output
+    (``"ss".casefold() == "ss"``) so the property survives the
+    non-ASCII path too.
     """
     if not raw or not raw.strip():
         raise ValueError("subject must not be empty")
-    normalised = " ".join(raw.strip().lower().split())
+    normalised = " ".join(raw.strip().casefold().split())
     return normalised
