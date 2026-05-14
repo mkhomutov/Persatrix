@@ -367,12 +367,15 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 
 **Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md), [0031-pr-plan.md](0031-pr-plan.md)). Status flipped to `⚠️ Partially Implemented (Phase 1)` on the merge of PR 5 (closeout); RFC remains open until Phases 2–4 land in subsequent v0.3.x patches. Open Questions 1 and 8 were resolved at plan-authoring time before Phase 1 shipped its non-additive column / env-var names ([0031-pr-plan.md §Open-question resolutions](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)).
 
-Before moving to `👍 Accepted` and resuming Phases 2–4:
+**Already resolved (at plan-authoring time, locked by Phase 1's non-additive surface):**
 
-1. Resolved **Open Question 1** (dementia-test continuity) — single-session default (1a). Load-bearing in Phase 2 recall filtering.
-2. Resolved **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`) — rename RFC 0016 wire field to `chat_session_id` (8b), shipped in RFC 0031 PR 1 ([#333](https://github.com/mkhomutov/Persatrix/pull/333)).
-3. Confirm **Open Question 4** sequencing with RFC 0029.
-4. Confirm **Open Question 7** with the observability reviewer.
+- **Open Question 1** (dementia-test continuity) — single-session default (1a). Load-bearing in Phase 2 recall filtering.
+- **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`) — rename RFC 0016 wire field to `chat_session_id` (8b), shipped in RFC 0031 PR 1 ([#333](https://github.com/mkhomutov/Persatrix/pull/333)).
+
+**Remaining before moving to `👍 Accepted` and resuming Phases 2–4:**
+
+- Confirm **Open Question 4** sequencing with RFC 0029.
+- Confirm **Open Question 7** with the observability reviewer.
 
 Open Questions 2, 3, 5, 6 may be resolved during phased implementation review of Phases 2–4 without blocking acceptance.
 
