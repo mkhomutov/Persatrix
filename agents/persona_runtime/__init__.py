@@ -203,6 +203,8 @@ class _LLMPersonaAgent(
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
         self._fact_store = fact_store  # RFC 0026 PR 2; optional.
+        from .facts_section import resolve_facts_config  # noqa: PLC0415 — RFC 0026 PR 3
+        self._facts_enabled, self._facts_budget_tokens = resolve_facts_config(config)
         self._memory_tools = memory_tools
         self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(

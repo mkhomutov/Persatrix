@@ -386,6 +386,29 @@
             }
           }
         },
+        "facts": {
+          "type": "object",
+          "description": "Declarative-fact tier configuration (RFC 0026 §E). The tier injects subject-indexed (subject, predicate, object) tuples — extracted at interaction close per RFC 0026 PR 2 — into the persona's working memory between the relationship and notes tiers. Operators can disable the tier for diagnostic purposes; the per-tier soft slice tunes how much of the RFC 0017 1500-token allocator the facts tier may consume per event.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether the persona-runtime injects declarative facts into the working memory ``facts_context`` section. Setting to false skips the FactStore.recall call and admits no facts; the extractor (PR 2) still runs at interaction close so disabling this knob does not prevent fact writes."
+            },
+            "budget_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 200,
+              "description": "Per-tier soft slice of the RFC 0017 1500-token allocator (default ≈13% per RFC 0026 OQ #2). The shared allocator still owns the 1500-token cap; this knob bounds how much of that cap the facts tier may consume on a single event so the notes / episodic tiers downstream still receive their share when many facts apply to the sender."
+            },
+            "extraction_model": {
+              "type": ["string", "null"],
+              "default": null,
+              "description": "Override the model used for the combined summarize + extract LLM call at interaction close (RFC 0026 OQ #5). When null (default), inherits from optimization.yaml → context_management.summarization.model so the prose-summary and fact-tuple halves of the response share a model. Phase 1 ships the config surface; the PR 2 extractor honours it implicitly via the inherited summariser model."
+            }
+          }
+        },
         "relationship": {
           "type": "object",
           "description": "Relationship memory configuration (extension spec E7.2)",
