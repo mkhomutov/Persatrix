@@ -396,3 +396,73 @@ class TestHeaderChargedAgainstBudget:
         # token count of the section content (the section content
         # includes the header, so the budget must have charged it).
         assert result.memory_admitted_tokens >= section.token_count
+
+
+# ─── 8. Header text names the subject (review M-2) ─────────
+
+
+class TestHeaderSubjectTemplated:
+    """The section header must name the *subject* of the facts, not
+    address the LLM persona as "you" (PR #341 deep-review finding M-2).
+
+    The facts admitted by PR 3 are about the counterparty (the canonical
+    ``event.sender_id``), not about the persona itself.  Rendering
+    ``"Known facts about you:"`` would invite the LLM to interpret a
+    row like ``"bob has_child_named Mira"`` as a fact about *itself*
+    (Mira would read as the persona's child) — the persona inversion
+    bug the dementia test is supposed to fence off.
+
+    The header is constructed from ``facts[0].subject`` (the canonical
+    form already used at the storage layer).  Phase 1 invariant: every
+    admitted fact shares one subject because :func:`_subject_seeds`
+    yields a single seed (the canonical sender); PR 4 multi-subject
+    will refactor the section shape — tracked in
+    :doc:`docs/rfcs/0026-pr-plan.md` PR 4 scope.
+    """
+
+    async def test_header_names_canonical_subject(
+        self, fact_store: FactStore, empty_episodic: EpisodicMemory,
+    ) -> None:
+        await fact_store.store(
+            subject="bob", predicate="has_child_named", object="Mira",
+            source_interaction_id="i1", asserted_at=time.time(),
+        )
+
+        mixin = _wire_mixin(
+            fact_store=fact_store, episodic=empty_episodic,
+            format_query="how are things",
+        )
+        event = _make_event(sender_id="bob", content="how are things")
+        await mixin._inject_memory_context(event)
+
+        section = mixin._working_memory.get_section("facts_context")
+        assert section is not None
+        assert section.content.startswith("Known facts about bob:\n"), (
+            f"unexpected header line: {section.content.splitlines()[0]!r}"
+        )
+        assert "Known facts about you:" not in section.content
+
+    async def test_header_uses_casefolded_subject_for_mixed_case_sender(
+        self, fact_store: FactStore, empty_episodic: EpisodicMemory,
+    ) -> None:
+        """The canonical subject is the casefolded form (RFC 0026 §C);
+        the header tracks the storage form, not the original casing of
+        ``event.sender_id``.  Pinned so a future refactor that swaps in
+        the raw sender for "display" does not silently desynchronise
+        the header from the row's join key.
+        """
+        await fact_store.store(
+            subject="bob", predicate="prefers", object="tea",
+            source_interaction_id="i1", asserted_at=time.time(),
+        )
+
+        mixin = _wire_mixin(
+            fact_store=fact_store, episodic=empty_episodic,
+            format_query="hi",
+        )
+        event = _make_event(sender_id="Bob", content="hi")
+        await mixin._inject_memory_context(event)
+
+        section = mixin._working_memory.get_section("facts_context")
+        assert section is not None
+        assert section.content.startswith("Known facts about bob:\n")

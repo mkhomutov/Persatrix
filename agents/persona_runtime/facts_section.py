@@ -202,13 +202,29 @@ def render_facts_section(
 
     Header accounting (RFC 0017 PR 2 finding #2 regression guard)
     -------------------------------------------------------------
-    The ``"Known facts about you:\\n"`` header is charged against the
-    budget inside the ``if items:`` block via
+    The ``"Known facts about <subject>:\\n"`` header is charged against
+    the budget inside the ``if items:`` block via
     :meth:`MemoryBudget.try_add` so ``memory_admitted_tokens`` does
     not under-report the prompt-side cost.  If the header itself
     cannot be admitted (every other tier already saturated the
     budget), the section is dropped — the per-item lines without a
     framing header are useless to the LLM.
+
+    Subject-templated header (PR #341 review M-2)
+    ---------------------------------------------
+    The header names the canonical subject of the facts rather than
+    addressing the LLM persona as ``"you"``.  Reason: PR 3 admits
+    facts about the counterparty (the canonical ``event.sender_id``),
+    so a literal ``"Known facts about you:"`` invites the persona to
+    interpret a row like ``- bob has_child_named Mira`` as a fact
+    about *itself* — the persona-inversion footgun that the dementia
+    test is meant to fence off.  Phase 1 invariant: every admitted
+    fact shares one subject because :func:`_subject_seeds` yields a
+    single seed (the canonical sender); the subject is read off
+    ``facts[0].subject`` (the storage form, identical across the
+    list).  When PR 4 lands multi-subject seeding the section shape
+    will need to fan out (one block per subject, or a pluralised
+    header) — tracked in :doc:`docs/rfcs/0026-pr-plan.md` PR 4 scope.
 
     Telemetry
     ---------
@@ -247,7 +263,14 @@ def render_facts_section(
     if not items:
         return None
 
-    header = "Known facts about you:\n"
+    # Phase 1 invariant: every fact in ``facts`` shares one subject (the
+    # canonical sender from :func:`_subject_seeds`); ``facts[0].subject``
+    # is the storage form (casefold + whitespace-folded by
+    # :func:`canonicalize_subject`), so the header tracks the row's
+    # join key rather than the raw ``event.sender_id`` casing — see
+    # the "Subject-templated header" section of the function docstring.
+    subject = facts[0].subject
+    header = f"Known facts about {subject}:\n"
     # Charge the header against the global budget so admitted-token
     # accounting matches the actual prompt-side cost.  If the header
     # cannot be admitted at the per-tier floor, the section would
