@@ -296,7 +296,7 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ⬜ Not started | — | — |
+| 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | 🔀 PR open | — | — |
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ⬜ Not started | — | — |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ⬜ Not started | — | — |
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ⬜ Not started | — | — |

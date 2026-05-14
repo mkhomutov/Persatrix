@@ -20,6 +20,13 @@ from collections.abc import Awaitable, Callable
 
 import aiosqlite
 
+# Migration v8 (RFC 0026 PR 1) lives in :mod:`agents.memory._migration_facts`
+# so this module stays under the 500-line cap — mirrors the
+# :mod:`agents.observability._metrics_facts` split.  Re-exported here so
+# existing call sites (``from ._migration_handlers import _apply_migration_8``)
+# continue to work without churn.
+from ._migration_facts import _apply_migration_8
+
 
 async def _apply_migration_4(db: aiosqlite.Connection) -> None:
     """Rebuild relationships/interactions with participant_type columns.
@@ -432,4 +439,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     5: _apply_migration_5,
     6: _apply_migration_6,
     7: _apply_migration_7,
+    8: _apply_migration_8,
 }
