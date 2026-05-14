@@ -103,11 +103,11 @@ class _Instruments:
     interactions_closed_by_shutdown: Counter
     interactions_summary_failed: Counter
     interactions_janitor_failed: Counter
-    # RFC 0026 PR 1 facts-tier counters — registered via
-    # :mod:`agents.observability._metrics_facts`.
+    # RFC 0026 facts-tier counters — registered in ``_metrics_facts``.
     facts_stored: Counter
     facts_superseded: Counter
     facts_extraction_failed: Counter
+    facts_injected: Counter
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────

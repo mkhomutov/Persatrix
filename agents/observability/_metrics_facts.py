@@ -9,7 +9,7 @@ counter registered here is assigned as an attribute on the parent
 ``inst.facts_stored`` / ``inst.facts_superseded`` /
 ``inst.facts_extraction_failed`` without any rename.
 
-All three keep the ``agent.`` prefix because facts are a per-agent
+All four keep the ``agent.`` prefix because facts are a per-agent
 tier (cardinality bounded by ``agent.id``), unlike the cross-binary
 ``sessions.writes`` counter registered inline in the parent module.
 """
@@ -61,5 +61,20 @@ def register(inst: _Instruments, meter: Meter) -> None:
             "JSON parse failed; summary commits, facts do not "
             "(RFC 0026 Phase 1 step 4).  Reserved by PR 1; incremented "
             "by PR 2.  Attribute: agent.id."
+        ),
+    )
+    # RFC 0026 PR 3 — facts-tier admission counter.  Increments per
+    # fact row admitted into the working-memory ``facts_context``
+    # section by :func:`agents.persona_runtime.facts_section.render_facts_section`.
+    # ``tier="facts"`` is a low-cardinality dimension that lets a
+    # future provenance dashboard join this counter against the
+    # per-turn tier-provenance log RFC 0026 PR 4 emits.
+    inst.facts_injected = meter.create_counter(
+        name="agent.facts.injected",
+        unit="{fact}",
+        description=(
+            "Declarative-fact rows admitted into the persona's "
+            "working memory ``facts_context`` section (RFC 0026 PR 3). "
+            "Attributes: agent.id, tier."
         ),
     )
