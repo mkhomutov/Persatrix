@@ -245,9 +245,6 @@ def parse_facts_payload(raw: str) -> list[dict[str, Any]]:
 # ─── Storage dispatch ───────────────────────────────────────
 
 
-_REQUIRED_FACT_KEYS = ("subject", "predicate", "object")
-
-
 async def store_extracted_facts(
     fact_store: FactStore,
     *,
@@ -270,10 +267,17 @@ async def store_extracted_facts(
     Each tuple's ``subject`` is normalised via
     :func:`agents.memory.fact_predicates.canonicalize_subject`.  When
     ``sender_id`` is supplied and the canonicalised subject matches
-    ``sender_id`` (after canonicalization), the row is stored under
-    the literal ``sender_id`` instead — so a fact about the
-    counterparty joins the relationship row that already keys on
-    ``sender_id``.  RFC 0026 §C.
+    ``canonicalize_subject(sender_id)``, the row is stored under that
+    canonical sender form — so a fact about the counterparty joins
+    the relationship row that already keys on the canonical sender.
+    RFC 0026 §C.
+
+    PR #340 review S1: the substitution branch returns the
+    **canonical** form of ``sender_id`` rather than the raw
+    caller-supplied string, so a mixed-case ``sender_id`` (e.g.
+    ``"Bob_user_123"``) does not split rows across casings — every
+    fact about the counterparty lands under the same canonical
+    subject column.
 
     Predicate canonicalization
     --------------------------
@@ -349,17 +353,20 @@ def _canonicalize_subject(
 ) -> str:
     raw_subject = _required_str(raw, "subject")
     canonical = canonicalize_subject(raw_subject)
-    # RFC 0026 §C counterparty mapping: if the LLM named the
-    # counterparty by display name and that matches the channel
-    # sender_id (after canonicalisation), substitute the canonical
-    # sender_id so this row joins the relationship row on the same
-    # key.
+    # RFC 0026 §C counterparty mapping: when the LLM names the
+    # counterparty by display name and it matches the channel
+    # sender_id (after canonicalisation), substitute the **canonical**
+    # sender_id so the row joins the relationship row on the same key.
+    # PR #340 review S1: returning raw ``sender_id`` here would split
+    # rows for mixed-case sender_ids (e.g. ``"Bob_user_123"``) — the
+    # substitution branch must yield the same canonical key any other
+    # write path would produce.
     if (
         sender_id is not None
         and canonical_sender is not None
         and canonical == canonical_sender
     ):
-        return sender_id
+        return canonical_sender
     return canonical
 
 

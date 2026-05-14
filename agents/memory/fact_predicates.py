@@ -88,14 +88,26 @@ def validate_predicate(predicate: str) -> None:
     * empty / whitespace-only input (mirrors the PR 1 permissive
       validator's only constraint so the swap is monotone — anything
       that PR 1 rejected, PR 2 still rejects),
-    * any predicate not in the allowlist (case-sensitive; the
-      extractor downcases on its own before reaching this validator).
+    * any predicate not in the allowlist (case-sensitive — see
+      "Case-sensitivity layering" below).
 
-    Case sensitivity is deliberate: predicates are normalised
-    snake_case per RFC §B.  A capitalised variant from the LLM means
-    the prompt has drifted — surfacing
-    ``agent.facts.extraction_failed`` is more useful than silently
-    coercing.
+    Case-sensitivity layering (PR #340 review N4)
+    ---------------------------------------------
+    The allowlist is lowercase / snake_case per RFC §B and this
+    validator is **strict** — ``"Has_Name"`` is rejected.  But the
+    *production* extractor path
+    (:func:`agents.persona_runtime.fact_extractor._normalise_predicate`)
+    downcases its input before calling here, so a capitalised verb
+    from the LLM normalises rather than rejecting — this is a
+    deliberate choice to absorb routine LLM casing drift without
+    bumping ``agent.facts.extraction_failed``.  The strict policy is
+    not unreachable: it covers callers that bypass the extractor's
+    normalisation (operator-seeded facts via direct
+    :meth:`FactStore.store` calls, the future RFC 0013 erasure
+    backfill, and any test fixture that constructs a fact tuple by
+    hand).  Such callers see the rejection if they emit a mis-cased
+    verb, which is the right surface — they own the canonicalisation
+    discipline at the call site.
     """
     if not predicate or not predicate.strip():
         raise ValueError("predicate must not be empty")

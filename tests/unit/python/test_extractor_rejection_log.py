@@ -32,6 +32,7 @@ from __future__ import annotations
 import pytest
 
 from agents.memory.facts import FactStore
+from agents.persona_runtime import fact_extractor as fx
 from agents.persona_runtime.fact_extractor import (
     _reset_rejected_predicates_seen,
     store_extracted_facts,
@@ -157,6 +158,65 @@ class TestRejectedPredicateLog:
             if hasattr(rec, "persatrix.facts.rejected_predicate")
         ]
         assert rejected == []
+
+    async def test_dedup_cap_saturates_silently(
+        self, fact_store: FactStore, caplog: pytest.LogCaptureFixture,
+    ):
+        """PR #340 review coverage gap — the cap on the dedup set
+        bounds memory against a pathological LLM emitting unique-per-
+        call rejection garbage.  Once the set holds
+        ``_REJECTED_PREDICATES_LOG_CAP`` distinct strings, a further
+        distinct verb is **silently dropped** — not logged, not added
+        to the set.  The discovery surface gets the first N verbs the
+        process saw; further unique noise is bounded.
+
+        We exercise the bound directly via the module-private set so
+        the test does not have to write 256 fact rows (the per-tuple
+        WARNING and the stored-count would dominate the log signal we
+        want to assert on).  The module-private import is justified —
+        this is a process-scoped invariant the public API does not
+        expose, and the test exists to pin the saturation contract
+        documented on the ``_REJECTED_PREDICATES_LOG_CAP`` constant.
+        """
+        _reset_rejected_predicates_seen()
+        # Pre-fill the dedup set to the cap with sentinel verbs that
+        # never collide with the one we care about.
+        for i in range(fx._REJECTED_PREDICATES_LOG_CAP):
+            fx._REJECTED_PREDICATES_SEEN.add(f"__sentinel_{i}__")
+        assert (
+            len(fx._REJECTED_PREDICATES_SEEN)
+            == fx._REJECTED_PREDICATES_LOG_CAP
+        )
+        caplog.set_level("INFO", logger="agents.persona_runtime.fact_extractor")
+        await store_extracted_facts(
+            fact_store,
+            facts=[
+                {
+                    "subject": "bob",
+                    "predicate": "verb_after_cap",
+                    "object": "x",
+                },
+            ],
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+            session_id="legacy",
+        )
+        # The verb is rejected (it is not in the allowlist) but the
+        # discovery log does not fire — the per-process dedup set is
+        # already at its cap.
+        rejected = [
+            rec for rec in caplog.records
+            if getattr(rec, "persatrix.facts.rejected_predicate", None)
+            == "verb_after_cap"
+        ]
+        assert rejected == [], (
+            "verb past the dedup cap must NOT reach the discovery log"
+        )
+        # And the set must not have grown past the cap.
+        assert (
+            len(fx._REJECTED_PREDICATES_SEEN)
+            == fx._REJECTED_PREDICATES_LOG_CAP
+        )
 
 
 if __name__ == "__main__":

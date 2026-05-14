@@ -218,6 +218,93 @@ class TestSupersedeEmitsAuditRecord:
         assert len(supersede_records) == 1
 
 
+# ─── Redactor failure: out-of-band warning ──────────────────
+
+
+@pytest.mark.asyncio
+class TestRedactorFailureWarning:
+    """PR #340 review S2 — when the redactor raises, ``emit_audit`` must
+    emit an out-of-band WARNING so the silent PII-passthrough is
+    observable.
+
+    Why this matters: the structlog chain's :func:`_apply_redactor`
+    already logs a warning on redactor failure (PR #164 review Must-Fix
+    #1).  But ``emit_audit`` runs the redactor *before*
+    :func:`configure_logging` may have built that chain — for unit
+    tests, early startup, or any process that never calls
+    ``configure_logging``.  Without an explicit warning, a misconfigured
+    redactor in that pre-chain window silently passes raw PII to the
+    audit sink with zero signal.
+
+    The fix mirrors the chain: catch the exception, emit one WARNING
+    via stdlib logging, then proceed with the unredacted payload.  A
+    contextvar guard prevents the warning from re-entering the
+    redactor (the warning record itself flows through the structlog
+    chain when configure_logging has run, which would re-trigger the
+    same exception).
+    """
+
+    async def test_redactor_raises_then_warning_logged(
+        self, fact_store: FactStore, caplog: pytest.LogCaptureFixture,
+    ):
+        class _BoomRedactor:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("synthetic redactor failure")
+
+        obs_logging.set_redactor(_BoomRedactor())
+
+        caplog.set_level(logging.WARNING, logger="agents.memory.facts")
+        # Also capture the audit-info records on the same logger.
+        caplog.set_level(logging.INFO, logger="agents.memory.facts")
+        await fact_store.store(
+            subject="bob",
+            predicate="has_name",
+            object="Bob",
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+        )
+        # The audit record still fires (unredacted) — the contract is
+        # "structured-log hiccup must not break a write that has
+        # already committed".  But a separate WARNING records the
+        # silent-passthrough so it is observable.
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "redactor raised" in rec.getMessage().lower()
+        ]
+        assert len(warnings) == 1, (
+            "exactly one WARNING per emit_audit when the redactor raises"
+        )
+
+    async def test_redactor_raises_does_not_block_audit_emission(
+        self, fact_store: FactStore, caplog: pytest.LogCaptureFixture,
+    ):
+        """The unredacted audit record still reaches the sink — the
+        write committed and the audit trail is preserved (the WARNING
+        is an out-of-band signal, not a substitute for the audit
+        record).
+        """
+        class _BoomRedactor:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("synthetic redactor failure")
+
+        obs_logging.set_redactor(_BoomRedactor())
+        caplog.set_level(logging.INFO, logger="agents.memory.facts")
+        fact_id = await fact_store.store(
+            subject="bob",
+            predicate="has_name",
+            object="Bob",
+            source_interaction_id="ix-1",
+            asserted_at=1000.0,
+        )
+        records = _audit_records(caplog)
+        assert len(records) == 1
+        rec = records[0]
+        event = _event_dict(rec)
+        assert event["event"] == "fact.store"
+        assert event["fact_id"] == fact_id
+
+
 # ─── delete_by_subject: silent at this layer ────────────────
 
 

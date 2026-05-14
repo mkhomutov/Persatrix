@@ -17,11 +17,32 @@ called — important for the unit-test environment and early-startup
 code where the structlog chain has not yet been built.  RFC 0026 §G
 names ``RedactStruct`` (Go) as the cross-language policy anchor; this
 helper is the Python-side counterpart.
+
+Redactor failure observability (PR #340 review S2)
+--------------------------------------------------
+The chain's :func:`agents.observability.logging._apply_redactor`
+processor emits an out-of-band WARNING when the registered redactor
+raises (PR #164 review Must-Fix #1).  That path runs after
+``configure_logging`` has built the chain.  This helper runs the
+redactor **before** that chain — for unit tests, early startup, and
+any process that never calls ``configure_logging``.  Without an
+explicit warning here, a misconfigured redactor in that pre-chain
+window silently passes raw PII to the audit sink with zero signal.
+
+The fallback mirrors the chain: catch the exception, emit one
+WARNING via stdlib logging, then proceed with the unredacted payload
+(the contract on :meth:`agents.observability.redact.Redactor.redact`
+explicitly allows this — errors surface as the *unredacted* record
+being emitted with an out-of-band warning).  A contextvar guard
+prevents the warning from re-entering this same helper if a caller
+ever installs a redactor that records its own warnings via
+``emit_audit``.
 """
 
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 from typing import Any
 
@@ -31,15 +52,41 @@ __all__ = ["emit_audit"]
 
 _logger = logging.getLogger("agents.memory.facts")
 
+#: Re-entry guard for the redactor-fallback WARNING.  Without this,
+#: a hostile / misconfigured redactor that itself calls back into
+#: :func:`emit_audit` (e.g. via a logging handler that audits its own
+#: emissions) would recurse on every failure.  Mirrors the
+#: :data:`agents.observability.logging._in_redactor_fallback` pattern
+#: but lives on this module's logger so the two guards do not share
+#: state (each redactor invocation owns its own re-entry semantics).
+_in_redactor_fallback: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_persatrix_facts_audit_in_redactor_fallback", default=False,
+)
+
 
 def emit_audit(event: str, **fields: Any) -> None:
     """Emit one ``audit=True`` record carrying ``event`` + ``fields``.
 
-    Failures in the redactor / logger are swallowed — a structured-log
-    hiccup must never break a write that has already committed.
+    Failures in the logger are swallowed — a structured-log hiccup
+    must never break a write that has already committed.  Redactor
+    failures are caught here and surface as an out-of-band WARNING on
+    the same logger (see module docstring) before the unredacted
+    record is emitted; this matches the structlog chain's contract on
+    :meth:`agents.observability.redact.Redactor.redact`.
     """
     payload: dict[str, Any] = {"audit": True, **fields}
-    with contextlib.suppress(Exception):
-        payload = get_redactor().redact(dict(payload))
+    if not _in_redactor_fallback.get():
+        try:
+            payload = get_redactor().redact(dict(payload))
+        except Exception:  # noqa: BLE001 — last line of defence around user-supplied callable.
+            token = _in_redactor_fallback.set(True)
+            try:
+                with contextlib.suppress(Exception):
+                    _logger.warning(
+                        "redactor raised; emitting unredacted audit record",
+                        exc_info=True,
+                    )
+            finally:
+                _in_redactor_fallback.reset(token)
     with contextlib.suppress(Exception):
         _logger.info(event, extra=payload)

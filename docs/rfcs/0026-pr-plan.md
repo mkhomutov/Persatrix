@@ -315,6 +315,32 @@ this PR are:
   then thread the `EpisodicMemory` connection through the existing
   `shared_db` seam and add a regression test that pins the join works
   under `:memory:`. Until such a caller exists, defer.
+- **Per-agent dimension on the rejected-predicate discovery log.**
+  PR #340 review N3 — the `_REJECTED_PREDICATES_SEEN` dedup set in
+  [`agents/persona_runtime/fact_extractor.py`](../../agents/persona_runtime/fact_extractor.py)
+  is module-global. In a multi-tenant deployment where one process
+  hosts multiple persona agents, the first agent that hits a rejection
+  swallows the second agent's identical rejection — the
+  `persatrix.facts.rejected_predicate` structured field is the
+  process-wide unique vocabulary, not a per-agent surface. The
+  per-tuple WARNING still carries the agent dimension via the
+  RFC 0018 logging contextvars (`agent_id`), so the per-agent signal
+  is recoverable from the log pipeline by joining the structured-
+  field record against the contiguous per-tuple WARNING by
+  `interaction_id`. Two options when PR 3 / PR 4 actually surface
+  multi-tenant rejection data:
+  1. **Defer indefinitely.** The per-tuple WARNING already carries
+     `agent_id`; downstream aggregation can group there.  Process-
+     scoped dedup keeps the discovery surface tight.
+  2. **Widen the dedup key to `(agent_id, predicate)`.** Trade more
+     log volume (one record per agent per verb instead of one per
+     process per verb) for direct agent-attribution on the
+     structured-field surface. Bump the cap proportionally so the
+     in-process memory bound still holds against a pathological
+     multi-tenant deployment.
+  Trigger: when PR 3 / PR 4 telemetry shows a recurring near-miss
+  verb pattern that operators want to attribute to a specific agent
+  without joining log streams. Until that demand exists, defer.
 - **Predicate-vocabulary scope — non-person / world facts.** PR 2's
   allowlist (attribute / preference / commitment / relationship +
   `self.*`) is anthropocentric — every class assumes the subject is a
