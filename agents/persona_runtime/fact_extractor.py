@@ -46,6 +46,7 @@ from ..memory.fact_predicates import (
 )
 from ..memory.facts import FactStore
 from ..observability.metrics import current_agent_id, try_get_instruments
+from ..prompt_loader import load_snippet
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction
@@ -89,32 +90,23 @@ def build_combined_prompt_suffix() -> str:
     This suffix asks the model to emit one JSON object with two
     keys — the same envelope :func:`split_combined_response` parses.
 
-    The predicate vocabulary is rendered inline so the model can
-    output valid tuples on the first round-trip.  Authors of new
-    predicates: add the verb to :data:`PREDICATE_ALLOWLIST` and the
-    prompt re-renders automatically.
+    The prompt body itself lives in
+    ``prompts/runtime/safety/fact-extractor-suffix.md`` and is
+    loaded via :func:`load_snippet` (same deny-by-default rules
+    every other runtime prompt asset uses).  The ``{predicate_list}``
+    placeholder is substituted with the sorted vocabulary so the
+    model can output valid tuples on the first round-trip —
+    authors of new predicates add the verb to
+    :data:`PREDICATE_ALLOWLIST` and the prompt re-renders
+    automatically.  The leading blank-line separator and trailing
+    newline are added here so the snippet's bytes-on-disk match
+    what the LLM ultimately sees.
     """
     predicate_list = ", ".join(sorted(PREDICATE_ALLOWLIST))
-    return (
-        "\n\n"
-        "Reply with EXACTLY one JSON object — no prose outside it — "
-        "with two top-level keys:\n"
-        "  * `summary` (string): the prose summary described above.\n"
-        "  * `facts` (list): zero or more declarative-fact tuples "
-        "extracted from the interaction.  Each tuple is an object "
-        '{"subject": str, "predicate": str, "object": str, '
-        '"certainty": float in [0, 1]}.\n'
-        "\n"
-        "Return `\"facts\": []` when the interaction yields no "
-        "extractable declarative facts (short turns, pleasantries, "
-        "and tool-only exchanges typically yield nothing — this is "
-        "the expected common case; do not invent tuples).\n"
-        "\n"
-        f"Valid predicates (use ONLY these verbs): {predicate_list}.\n"
-        "Use `self` as the subject for introspective tuples about the "
-        "agent itself (paired with a `self.*` predicate); use the "
-        "counterparty's display name for tuples about them.\n"
+    body = load_snippet("fact-extractor-suffix").format(
+        predicate_list=predicate_list,
     )
+    return "\n\n" + body + "\n"
 
 
 # ─── Response parsing ───────────────────────────────────────

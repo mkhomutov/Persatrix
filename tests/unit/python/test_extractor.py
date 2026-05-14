@@ -32,9 +32,11 @@ import pytest
 
 from _otel_test_helpers import counter_total
 
+from agents.memory.fact_predicates import PREDICATE_ALLOWLIST
 from agents.memory.facts import FactStore
 from agents.persona_runtime.fact_extractor import (
     FactsParseError,
+    build_combined_prompt_suffix,
     parse_facts_payload,
     split_combined_response,
     store_extracted_facts,
@@ -60,6 +62,62 @@ def _build_meter():
     reader = InMemoryMetricReader()
     metrics_mod.init_metrics(reader=reader)
     return reader, metrics_mod
+
+
+# ─── build_combined_prompt_suffix ───────────────────────────
+
+
+class TestBuildCombinedPromptSuffix:
+    """Pin the rendered output of the combined-prompt suffix.
+
+    The prompt body lives at
+    ``prompts/runtime/safety/fact-extractor-suffix.md`` (loaded via
+    :func:`agents.prompt_loader.load_snippet`).  The markdown contains
+    ``{{ }}`` brace escapes — ``.format()`` collapses them to literal
+    single braces in the JSON-shape example — and a
+    ``{predicate_list}`` placeholder which is substituted with the
+    sorted vocabulary at call time.
+
+    Pinning the rendered bytes here catches drift in either the
+    markdown file OR the call-site ``.format()`` invocation that the
+    raw byte-identity guard in ``test_prompt_loader.py`` would miss.
+    """
+
+    def test_renders_to_expected_bytes(self) -> None:
+        predicate_list = ", ".join(sorted(PREDICATE_ALLOWLIST))
+        expected = (
+            "\n\n"
+            "Reply with EXACTLY one JSON object — no prose outside it — "
+            "with two top-level keys:\n"
+            "  * `summary` (string): the prose summary described above.\n"
+            "  * `facts` (list): zero or more declarative-fact tuples "
+            "extracted from the interaction.  Each tuple is an object "
+            '{"subject": str, "predicate": str, "object": str, '
+            '"certainty": float in [0, 1]}.\n'
+            "\n"
+            "Return `\"facts\": []` when the interaction yields no "
+            "extractable declarative facts (short turns, pleasantries, "
+            "and tool-only exchanges typically yield nothing — this is "
+            "the expected common case; do not invent tuples).\n"
+            "\n"
+            f"Valid predicates (use ONLY these verbs): {predicate_list}.\n"
+            "Use `self` as the subject for introspective tuples about the "
+            "agent itself (paired with a `self.*` predicate); use the "
+            "counterparty's display name for tuples about them.\n"
+        )
+        assert build_combined_prompt_suffix() == expected
+
+    def test_includes_every_allowlisted_predicate(self) -> None:
+        """A new predicate added to :data:`PREDICATE_ALLOWLIST` must
+        surface in the prompt automatically — otherwise the model
+        cannot emit tuples using the new verb on the first turn after
+        the constant is updated.
+        """
+        rendered = build_combined_prompt_suffix()
+        for predicate in PREDICATE_ALLOWLIST:
+            assert predicate in rendered, (
+                f"predicate {predicate!r} missing from rendered prompt"
+            )
 
 
 # ─── parse_facts_payload ────────────────────────────────────
