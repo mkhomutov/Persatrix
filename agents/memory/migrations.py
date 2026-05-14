@@ -4,10 +4,12 @@ Schema migrations and shared scoring SQL fragments.
 Forward-only migrations applied by ``_apply_migrations()`` and shared
 scoring constants used by ``episodic.py``.
 
-The two callable migration handlers (v4 relationships rewrite, v5 RFC
-0020 episodes columns) live in :mod:`agents.memory._migration_handlers`
-and are re-exported below for backwards compatibility — call sites and
-tests should keep importing them from this module.
+The callable migration handlers (currently ``v4`` through ``v8``) live
+in :mod:`agents.memory._migration_handlers` — itself split across that
+module and :mod:`agents.memory._migration_facts` to stay under the
+500-line soft cap.  All handlers are re-exported below for backwards
+compatibility, so call sites and tests should keep importing them from
+this module.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from ._migration_handlers import (
     _apply_migration_5,
     _apply_migration_6,
     _apply_migration_7,
+    _apply_migration_8,
 )
 
 __all__ = [
@@ -38,6 +41,7 @@ __all__ = [
     "_apply_migration_5",
     "_apply_migration_6",
     "_apply_migration_7",
+    "_apply_migration_8",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -208,6 +212,18 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         7,
         "RFC 0031: session_id on episodes + relationships",
         "",  # handled by _apply_migration_7()
+    ),
+    # Migration 8 (RFC 0026 PR 1) creates the new declarative-facts
+    # ``facts`` table — schema is additive, no rewrites of existing
+    # tables.  Lives on the callable path because the handler skips the
+    # CREATE when a stub ``facts`` table is already present (partial-
+    # restore baseline shape, mirrors the v5/v6/v7 ``sqlite_master``
+    # guard).  See docs/rfcs/0026-pr-plan.md PR 1 for the column
+    # contract + the RFC 0013 erasure-traversal rationale.
+    (
+        8,
+        "RFC 0026: declarative-facts table + subject/session indexes",
+        "",  # handled by _apply_migration_8()
     ),
 ]
 

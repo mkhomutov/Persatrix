@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-14 (RFC 0031 PR plan PR 5 — Phase 1 closeout: PRs 1–4 merged, RFC status → ⚠️ Partially Implemented (Phase 1), target → `v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)`; Phases 2–4 reserved for subsequent v0.3.x patches per [0031-pr-plan §Future Phases](docs/rfcs/0031-pr-plan.md#future-phases))
+> **Last updated**: 2026-05-14 (RFC 0026 PR plan PR 1 opens — declarative-facts schema + `FactStore` + RFC 0013 erasure primitive; RFC 0026 target → `v0.3.1`, status → 🚧 Implementing per [v0.3.1-plan ROADMAP hygiene](docs/v0.3.1-plan.md#roadmap-hygiene))
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
 > **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 
@@ -57,7 +57,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)) | v0.3.x | Reserved (narrowed) |
 | 0024 | Episodic Vector Recall — deferred, gated on [MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md) data | v0.3.x or v0.4.0 | Reserved (deferred) |
 | 0025 | Thematic Episode Clustering — superseded by RFC 0027 per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md) | superseded | Reserved (superseded by 0027) |
-| [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.x | 📋 Proposed |
+| [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.1 | 🚧 Implementing |
 | [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | v0.4.0 | 📋 Proposed |
 | [0028](docs/rfcs/0028-agent-decision-policy-engine.md) | Agent Decision Policy Engine | v0.4.0 | 📋 Proposed |
 | [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.x (Phase 1) + v0.4.0 (Phases 2–6) | 📋 Proposed |

@@ -72,6 +72,16 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
             "surface": "episode",
         },
     )
+    # RFC 0026 PR 1 — exercise the declarative-facts counters.  PR 1
+    # ships the storage primitive; ``facts.stored`` increments per
+    # ``FactStore.store`` call and ``facts.superseded`` increments per
+    # latest-asserted-wins supersede write.  ``facts.extraction_failed``
+    # is reserved by PR 1 and incremented by PR 2's combined summarize +
+    # extract prompt when fact-tuple parsing fails (summary still
+    # commits — see RFC 0026 Phase 1 step 4 atomicity contract).
+    inst.facts_stored.add(1, attributes={"agent.id": "t"})
+    inst.facts_superseded.add(1, attributes={"agent.id": "t"})
+    inst.facts_extraction_failed.add(1, attributes={"agent.id": "t"})
 
 
 def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
@@ -113,6 +123,16 @@ class TestInstrumentInventory:
             # because they are per-agent metrics; ``sessions.writes`` is a
             # cross-binary RFC 0031 contract, not a per-agent metric.
             "sessions.writes",
+            # RFC 0026 PR 1 — declarative-facts tier counters.  All three
+            # ship in PR 1 even though ``facts.extraction_failed`` is only
+            # incremented by PR 2's extractor; reserving the instrument
+            # here means PR 2 is a one-line increment, not a metrics-API
+            # change.  ``agent.`` prefix retained — these are per-agent
+            # metrics (cardinality bounded by ``agent.id``), unlike the
+            # ``sessions.writes`` cross-binary contract.
+            "agent.facts.stored",
+            "agent.facts.superseded",
+            "agent.facts.extraction_failed",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -131,6 +151,9 @@ class TestInstrumentInventory:
             "agent.observability.spans.dropped": "{span}",
             "agent.observability.logs.dropped": "{record}",
             "sessions.writes": "{write}",
+            "agent.facts.stored": "{fact}",
+            "agent.facts.superseded": "{fact}",
+            "agent.facts.extraction_failed": "{failure}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"

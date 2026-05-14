@@ -61,12 +61,10 @@ _DEFAULT_EXPORT_TIMEOUT_MS = 10_000
 _provider: MeterProvider | None = None
 _instruments: _Instruments | None = None
 
-# PR-170 S5: cache ``PERSATRIX_AGENT_ID`` once at module load so hot paths
-# (per-tool-call, per-LLM-call) do not hit ``os.environ`` every invocation.
-# Read lazily via ``current_agent_id()`` so test fixtures that mutate the env
-# var *before* importing the consumer modules still observe the override —
-# re-reads after first-call are not supported by design (agent identity is
-# set at process start).
+# PR-170 S5: cache ``PERSATRIX_AGENT_ID`` once via ``current_agent_id()`` so
+# hot paths skip ``os.environ`` lookups; the cache is populated lazily on
+# first read (test-fixture friendly) and not refreshed thereafter (agent
+# identity is set at process start).
 _AGENT_ID: str | None = None
 
 
@@ -105,6 +103,11 @@ class _Instruments:
     interactions_closed_by_shutdown: Counter
     interactions_summary_failed: Counter
     interactions_janitor_failed: Counter
+    # RFC 0026 PR 1 facts-tier counters — registered via
+    # :mod:`agents.observability._metrics_facts`.
+    facts_stored: Counter
+    facts_superseded: Counter
+    facts_extraction_failed: Counter
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -172,15 +175,12 @@ class _Instruments:
             ),
         )
 
-        # Interaction-lifecycle counters (RFC 0020 Phase 1) live in
-        # ``_metrics_interactions`` so this module stays under the
-        # 500-line review-friendly cap.  Public attribute names on
-        # ``_Instruments`` are unchanged — call sites still read
-        # ``inst.interactions_opened`` etc.  See the helper module's
-        # docstring for the full counter inventory.
-        from . import _metrics_interactions
-
+        # RFC 0020 interaction-lifecycle + RFC 0026 facts counters are
+        # registered in helper modules so this file stays under the
+        # 500-line cap; public attribute surface is unchanged.
+        from . import _metrics_facts, _metrics_interactions
         _metrics_interactions.register(self, meter)
+        _metrics_facts.register(self, meter)
 
         # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
         # Two counters: now-anchor emissions (one per system-prompt build,

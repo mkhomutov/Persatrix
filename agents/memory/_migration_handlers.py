@@ -1,17 +1,24 @@
 """
 Callable migration handlers extracted from :mod:`agents.memory.migrations`.
 
-Both v4 (relationships/interactions schema rewrite) and v5 (RFC 0020
-episodes columns) need imperative Python code rather than a single
-``executescript`` block — v4 because it rewrites tables with the
-12-step ALTER TABLE pattern, v5 because ``ALTER TABLE ... ADD COLUMN``
-predates ``IF NOT EXISTS`` in SQLite < 3.35.
+Each handler covers a migration that needs imperative Python rather
+than a single ``executescript`` block — typically because the version
+rewrites tables with the 12-step ALTER TABLE pattern, performs an
+``ALTER TABLE ... ADD COLUMN`` that predates SQLite's
+``IF NOT EXISTS`` (< 3.35), or guards against partial-restore
+baselines where the migration must inspect the live schema before
+issuing DDL.  See each handler's docstring for per-version rationale.
 
-Pulled into a separate module so :mod:`agents.memory.migrations` stays
-under the 500-line repo-wide soft cap.  Public API (``_MIGRATION_HANDLERS``,
-``_apply_migration_4``, ``_apply_migration_5``) is re-exported by
-:mod:`agents.memory.migrations` for backwards compatibility — call sites
-and tests should keep importing from the migrations module.
+The registry currently covers ``v4`` through ``v8``.  Migration ``v8``
+(RFC 0026 PR 1 — declarative-facts table) lives in
+:mod:`agents.memory._migration_facts` and is re-exported below so this
+module stays under the 500-line repo-wide soft cap; the split mirrors
+:mod:`agents.observability._metrics_facts`.
+
+Public API (``_MIGRATION_HANDLERS`` plus the ``_apply_migration_N``
+callables) is re-exported by :mod:`agents.memory.migrations` for
+backwards compatibility — call sites and tests should keep importing
+from the migrations module.
 """
 
 from __future__ import annotations
@@ -19,6 +26,13 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 import aiosqlite
+
+# Migration v8 (RFC 0026 PR 1) lives in :mod:`agents.memory._migration_facts`
+# so this module stays under the 500-line cap — mirrors the
+# :mod:`agents.observability._metrics_facts` split.  Re-exported here so
+# existing call sites (``from ._migration_handlers import _apply_migration_8``)
+# continue to work without churn.
+from ._migration_facts import _apply_migration_8
 
 
 async def _apply_migration_4(db: aiosqlite.Connection) -> None:
@@ -432,4 +446,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     5: _apply_migration_5,
     6: _apply_migration_6,
     7: _apply_migration_7,
+    8: _apply_migration_8,
 }
