@@ -464,7 +464,7 @@ The items deferred to this PR are:
 
 ##### From PR 3 review
 
-Deep-review (PR #341) finding that **landed inline in PR 3**:
+Deep-review (PR #341) findings that **landed inline in PR 3**:
 
 - **M-2 — section header names the subject, not the persona.** PR 3
   initially shipped `"Known facts about you:\n"` as the
@@ -482,6 +482,48 @@ Deep-review (PR #341) finding that **landed inline in PR 3**:
   next bullet) will need to fan the section shape out — pinned in
   PR 4 scope below.  Pinned by `TestHeaderSubjectTemplated` in
   [`tests/integration/test_facts_recall.py`](../../tests/integration/test_facts_recall.py).
+- **M-1 — canonical tier-order regression test was undercovered for
+  `facts_context`.** `tests/unit/python/test_memory_context_priority_order.py`
+  filtered `add_section_order` against a hard-coded four-tier list
+  (`relationship_context`, `channel_history`, `episodic_recall`,
+  `recent_notes`); the post-PR-3 `facts_context` section was added
+  to `add_section_order` by the runtime but silently dropped by the
+  filter so a future refactor that moved facts to a different slot
+  (or out of the loop entirely) slipped past the pin.  The deep-
+  review surfaced this as distinct from the deferred `TestTierOrdering`
+  follow-up below (different file, different concern — the
+  integration test pins one shape, the unit-priority test pins the
+  canonical cross-RFC order).  Fix folded into PR 3: a
+  `seeded_fact_store` fixture wires a real
+  [`FactStore`](../../agents/memory/facts.py) with one stored fact
+  about the canonical sender so `facts_context` admits; the
+  `expected` list now reads `relationship → channel_history → facts
+  → episodic → notes`; the TICK test asserts `facts_context not in
+  order` mirroring the existing `channel_history not in order` shape
+  (the `_subject_seeds` short-circuit on `sender_id=None`).
+- **N-1 — superfluous `# type: ignore[attr-defined]` in
+  `test_facts_recall.py` fixture.** The class-level annotations on
+  `_MemoryContextMixin` (`_fact_store: FactStore | None`,
+  `_facts_enabled: bool`, `_facts_budget_tokens: int`) at
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  make the three attributes type-checker visible from the test
+  fixture; the `# type: ignore[attr-defined]` comments on the
+  assignment lines were leftover from an earlier shape before the
+  defaults landed.  Dropped in PR 3 so the next reader does not
+  assume the attributes are private to `__init__`.
+- **N-3 — schema description for `memory.facts.extraction_model`
+  overstates support.**  The earlier wording ("Phase 1 ships the
+  config surface; the PR 2 extractor honours it implicitly via the
+  inherited summariser model") invited operators to set the knob
+  expecting an override; the field has zero Python readers (the
+  combined-call wiring at
+  [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+  reads only `optimization.yaml`).  Description updated in PR 3 to
+  state the field is reserved with no v0.3.1 consumer and points
+  at PR 5 for the final-shape decision (drop / plumb / warn — see
+  the `extraction_model` deferred bullet below).  Independent of
+  PR 5's decision; the description fix is correct regardless of
+  which option lands.
 
 The items deferred to this PR are:
 
@@ -637,6 +679,129 @@ The items deferred to this PR are:
   Default: option (2) — the two contracts (allocate order vs
   render order) are distinct and worth pinning separately so a
   future regression report points at the right layer.
+
+- **L-1 — header truncation can elide the trailing `:\n`
+  separator.**
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  builds the header as `f"Known facts about {subject}:\n"` and
+  passes it to `MemoryBudget.try_add(min_tokens=MIN_TOKENS_FACTS)`.
+  `try_add` returns either the original text, a truncated form
+  with `…` ellipsis (when `count(text) > remaining` and
+  `truncated_tokens >= min_tokens`), or `None`.  When the
+  canonical subject is long enough (≈60+ chars) that the full
+  header exceeds `remaining` but the truncated form still meets
+  the 24-token floor, the returned header is something like
+  `"Known facts about very_long_user…"` — the trailing `:\n` was
+  the last thing in the source string and is lost to truncation.
+  The subsequent `admitted_header + "\n".join(items)` then glues
+  the first item directly to the truncated header with no
+  separator: `"Known facts about very_long_user…- bob
+  has_child_named Mira"`.  Reachability bound is narrow (long
+  subject AND tight remaining at the point the header is
+  admitted), so not a Phase-1 blocker, but worth a defensive fix.
+  Three options for PR 5 to pick from:
+  1. **Two-part header admission.** Admit `"Known facts about
+     {subject}:"` (subject-bearing, may truncate) plus a separate
+     guaranteed `"\n"` admission (≈1 token).  Costs one extra
+     `try_add` on the happy path.
+  2. **Drop on truncation.** After
+     `admitted_header = budget.try_add(...)`, compare to the
+     input string; if the returned form ends in `…` (truncated)
+     return `None` instead of rendering a malformed section.
+     Simplest; loses the section in a recoverable case.
+  3. **Cap subject length in `canonicalize_subject`.** E.g., 200
+     chars so the header can never exceed ≈50 tokens.  Out of
+     scope for `facts_section`; touches the storage primitive
+     ([`agents/memory/fact_predicates.py`](../../agents/memory/fact_predicates.py)).
+     Pairs with L-2 below if both are taken together.
+  Default: option (1) — keeps the rendering invariant intact
+  without dropping recoverable sections, and the cost is one
+  extra `try_add` only on the unhappy path.  Pin with a test
+  that constructs a 250-char canonical subject, pre-fills the
+  budget to leave just enough for a truncated header, and
+  asserts the rendered section either drops cleanly or contains
+  the trailing `:\n` separator (per the option PR 5 picks).
+
+- **L-2 — asymmetric subject canonicalization between
+  `FactStore.store` and the recall path.**
+  [`FactStore.store`](../../agents/memory/facts.py) accepts the
+  `subject` kwarg verbatim — only an empty-string check runs at
+  the boundary, no
+  [`canonicalize_subject`](../../agents/memory/fact_predicates.py)
+  call.  PR 3's recall side canonicalizes before issuing
+  `FactStore.recall` (via `_subject_seeds` →
+  `canonicalize_subject`), and PR 2's extractor canonicalizes
+  before storing, so the **production** write/read paths are
+  consistent today.  But three callers bypass the extractor and
+  write directly:
+  1. Test fixtures (the new
+     [`test_facts_recall.py`](../../tests/integration/test_facts_recall.py)
+     uses `await fact_store.store(subject="bob", ...)` — happens
+     to work because the canonical form of `"bob"` is also
+     `"bob"`).
+  2. Operator-seeded facts (RFC 0026 OQ #9 deferred follow-up).
+  3. Future RFC 0013 erasure backfill (PR 1's
+     `delete_by_subject` primitive is the eventual hook; an
+     ingestion path that re-asserts subjects from a snapshot
+     would need the same canonicalization).
+  All three can silently write a non-canonical subject and miss
+  recall, defeating the dementia-test invariant.  PR 3 makes
+  this newly load-bearing because recall is now the dementia-
+  test happy path.  Two options for PR 5:
+  1. **Tighten `FactStore.store` to canonicalize internally.**
+     The storage primitive becomes authoritative; direct callers
+     do not need to remember to canonicalize.  Pin with a
+     round-trip test that stores `subject="Bob "` (mixed case +
+     trailing whitespace) and asserts recall on the canonical
+     form returns the row.  Pairs naturally with L-1 option (3)
+     if the cap-length policy lives in the same canonicalizer.
+  2. **Pin the contract in the `FactStore.store` docstring** so
+     direct callers know to canonicalize themselves.  Cheapest;
+     leaves the footgun in place.
+  Default: option (1) — cleaner storage-primitive contract and
+  removes the footgun.  Pre-existing from PR 1/2 but surfaced
+  by PR 3.
+
+- **L-3 — `resolve_facts_config` not defensive against
+  `null` budget knobs.**
+  [`resolve_facts_config`](../../agents/persona_runtime/facts_section.py)
+  reads `memory.facts.budget_tokens` as
+  `int(facts_cfg.get("budget_tokens", DEFAULT_FACTS_BUDGET_TOKENS))`.
+  If the resolved value is `None` (operator wrote
+  `budget_tokens: null` in YAML and `additionalProperties` /
+  `minimum` / `type: integer` did not gate it because the config
+  bypassed schema validation), `int(None)` raises `TypeError` at
+  agent construction time.  The
+  [`schemas/agent.schema.json`](../../schemas/agent.schema.json)
+  block rejects `null` (`type: integer`, `minimum: 0`) so a
+  `make validate`-gated production config never reaches the
+  raise.  But test fixtures, programmatic configs, and any
+  path that bypasses `make validate` can hit it.  Fix is a
+  one-line collapse:
+  ```python
+  raw = facts_cfg.get("budget_tokens")
+  budget_tokens = DEFAULT_FACTS_BUDGET_TOKENS if raw is None else int(raw)
+  ```
+  Same defensive treatment applies to `extraction_model` if PR 5
+  picks option (2) (plumb-through) on that deferred follow-up.
+  Defence-in-depth; pair with a test that constructs the resolver
+  call from a dict carrying `budget_tokens: None` and asserts the
+  default falls through.
+
+- **N-2 — `recall_facts_for_event(agent_id=...)` parameter is
+  logging-only.**
+  [`FactStore.recall`](../../agents/memory/facts.py) already
+  filters by `self._agent_id` (the store is per-agent), so the
+  `agent_id` kwarg passed into
+  [`recall_facts_for_event`](../../agents/persona_runtime/facts_section.py)
+  is consumed only by the `logger.warning(...)` template at the
+  recall-failure log line.  `FactStore` exposes an `agent_id`
+  property; the helper could read it off the store and drop the
+  redundant kwarg.  Cosmetic refactor — useful because the
+  current signature suggests the helper accepts an agent
+  filter, which it does not.  Pin with no new test (signature
+  change tracked by existing call sites; mypy / ruff catch
+  drift).
 
 #### PR checklist
 

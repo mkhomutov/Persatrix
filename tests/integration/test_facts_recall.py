@@ -115,9 +115,17 @@ def _wire_mixin(
     mixin._episodic_memory = episodic
     mixin._relationship_memory = AsyncMock()
     mixin._relationship_memory.get_relationship_summary.return_value = rel
-    mixin._fact_store = fact_store  # type: ignore[attr-defined]
-    mixin._facts_enabled = facts_enabled  # type: ignore[attr-defined]
-    mixin._facts_budget_tokens = 200  # type: ignore[attr-defined]
+    # Class-level annotations on ``_MemoryContextMixin`` (see
+    # ``memory_context.py``: ``_fact_store``, ``_facts_enabled``,
+    # ``_facts_budget_tokens``) make these attributes type-checker
+    # visible.  PR #341 review N-1: the earlier shape of this fixture
+    # carried ``# type: ignore[attr-defined]`` for each line as a
+    # hold-over from before the class-level defaults landed — dropped
+    # here so the next reader does not assume the attribute surface is
+    # private.
+    mixin._fact_store = fact_store
+    mixin._facts_enabled = facts_enabled
+    mixin._facts_budget_tokens = 200
     return mixin
 
 
