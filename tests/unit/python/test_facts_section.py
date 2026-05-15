@@ -1,39 +1,24 @@
 """Unit tests for :mod:`agents.persona_runtime.facts_section` — the
-seed-derivation + section-render contracts that compose with the
-declarative-fact tier's reinforcement write.
+seed-derivation, section-render, and telemetry contracts that compose
+with the declarative-fact tier's reinforcement write.
 
-Two contracts pinned here:
+Contracts pinned here:
 
-* :func:`_subject_seeds` short-circuit on sender-less events
-  (TICK, orchestrator-internal) — the PR 4 cut briefly broke this by
-  always seeding ``["self"]`` even when ``event.sender_id`` was empty,
-  defeating the PR-5 empty-context cost guard and unconditionally
-  issuing ``fact_store.recall(subject="self")`` on every TICK.  The
-  PR #342 review M-2 finding reverted the change to gate the
-  self-seed on a non-empty sender, preserving MT-MEMORY-005 Leg 5
-  (user-facing self-consistency always carries a sender) while
-  honoring the sender-less short-circuit.
+* :func:`_subject_seeds` short-circuits on sender-less events (TICK,
+  orchestrator-internal); :func:`recall_facts_for_event` honours that
+  short-circuit one layer up — no DB round-trip for a sender-less
+  event (PR #342 review M-2; PR 5d helper-level pin).
+* :func:`render_facts_section`'s phantom-reinforcement guard — admitted
+  fact_ids reach the :class:`MemoryBudget` registry only after the
+  per-subject header admits, so a dropped header strands nothing
+  (PR #342 review M-1).  The ``agent.facts.injected`` counter mirrors
+  the guard: zero ticks when the header is dropped (PR 5d).
 
-* :func:`render_facts_section` phantom-reinforcement guard — the PR
-  4 cut briefly registered admitted fact_ids on the
-  :class:`MemoryBudget` registry inside the per-item loop, *before*
-  the per-subject header was admitted; when the header was dropped
-  (budget remainder below the truncation floor) the items stayed on
-  the registry and the downstream
-  :meth:`agents.memory.facts.FactStore.mark_recalled` write fired on
-  rows the LLM never saw.  The PR #342 review M-1 finding staged
-  the admissions per-block and committed them only after the header
-  admitted.
-
-Both classes use direct calls against the module under test rather
-than going through ``_inject_memory_context`` — the contracts are
-local to ``facts_section.py`` and the unit-level surface is
-narrower (no FactStore lifecycle, no full mixin wiring) than the
-integration pin in
-:mod:`tests.integration.test_facts_reinforcement`.  The integration
-counterpart (``TestTickEventDoesNotQueryFactStore``) is intentionally
-kept in the integration file so the cost contract is also pinned
-end-to-end at the mixin boundary.
+These use direct calls against the module under test rather than
+``_inject_memory_context`` — the contracts are local to
+``facts_section.py`` and need no FactStore lifecycle or mixin wiring.
+The integration counterpart ``TestTickEventDoesNotQueryFactStore``
+pins the cost contract end-to-end at the mixin boundary.
 """
 
 from __future__ import annotations
@@ -41,6 +26,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
+from _otel_test_helpers import build_meter, counter_total
 
 pytestmark = pytest.mark.asyncio
 
@@ -127,6 +114,41 @@ class TestSubjectSeedsSenderlessShortCircuit:
         event = MagicMock()
         event.sender_id = "self"
         assert _subject_seeds(event) == [SELF_SUBJECT]
+
+
+# ─── recall_facts_for_event no-sender short-circuit (PR 5d) ─
+
+
+class TestRecallFactsForEventNoSenderShortCircuit:
+    """``recall_facts_for_event`` returns ``[]`` and issues **zero**
+    ``FactStore.recall`` round-trips for a sender-less event.
+
+    ``TestSubjectSeedsSenderlessShortCircuit`` above pins the
+    short-circuit at the ``_subject_seeds`` boundary; this pins it one
+    layer up — the ``if not seeds: return []`` guard inside
+    :func:`recall_facts_for_event` — so the DB-cost guard cannot
+    regress for a caller reaching the helper outside the mixin.
+    """
+
+    async def test_no_sender_event_skips_recall_entirely(self) -> None:
+        from unittest.mock import AsyncMock  # noqa: PLC0415
+
+        from agents.persona_runtime.facts_section import (  # noqa: PLC0415
+            recall_facts_for_event,
+        )
+
+        fact_store = MagicMock()
+        fact_store.agent_id = "dementia-agent"
+        fact_store.recall = AsyncMock(return_value=[])
+
+        event = MagicMock()
+        event.sender_id = None
+
+        result = await recall_facts_for_event(fact_store, event)
+
+        assert result == []
+        # Cost guard: a sender-less event must not pay a DB round-trip.
+        fact_store.recall.assert_not_called()
 
 
 # ─── render_facts_section phantom-reinforcement guard (M-1) ─
@@ -296,6 +318,72 @@ class TestNoPhantomReinforcementOnHeaderDrop:
         # whether siblings admit.
         assert section is None
         assert budget.admissions_by_tier("facts") == []
+
+
+# ─── facts.injected not overcounted on header drop (PR 5d) ─
+
+
+class TestNoCounterOvercountOnHeaderDrop:
+    """``agent.facts.injected`` must count prompt-side admissions only —
+    zero increments when the per-subject header is dropped.
+
+    Sibling to :class:`TestNoPhantomReinforcementOnHeaderDrop`: that
+    class pins the *admission registry* side of the header-drop guard
+    (no phantom ``last_recalled_at`` write); this pins the *telemetry*
+    side.  PR 3 ticked the counter inside the per-item budget loop,
+    *before* the header ``try_add`` — a dropped header then returned
+    ``None`` with the counter already ticked, breaking the PR #260
+    review M-1 contract.  PR 4's M-1 fix moved the counter write into
+    the post-header ``pending`` commit loop; this is the regression
+    pin that fix lacked.
+    """
+
+    async def test_facts_injected_counter_zero_when_header_dropped(
+        self,
+    ) -> None:
+        """An 8-token budget admits the 4-token fact line but cannot
+        fit the header, so the block is dropped and the section is
+        ``None`` — same sizing as ``TestNoPhantomReinforcementOnHeaderDrop``.
+        """
+        from agents.memory.facts import Fact  # noqa: PLC0415
+        from agents.persona_runtime.facts_section import (  # noqa: PLC0415
+            render_facts_section,
+        )
+        from agents.persona_runtime.memory_budget import (  # noqa: PLC0415
+            MemoryBudget,
+        )
+
+        budget = MemoryBudget(total_tokens=8)
+        facts = [
+            Fact(
+                fact_id="overcount-fact-1",
+                agent_id="dementia-agent",
+                subject="bob",
+                predicate="prefers",
+                object="tea",
+                certainty=1.0,
+                source_interaction_id="i1",
+                asserted_at=1000.0,
+                last_recalled_at=None,
+                superseded_by=None,
+                session_id="legacy",
+            ),
+        ]
+
+        reader, metrics_mod = build_meter()
+        try:
+            section = render_facts_section(
+                facts, budget, facts_budget_tokens=200,
+            )
+            # Header dropped → block dropped → no section, and the
+            # counter must not have ticked for the discarded item.
+            assert section is None
+            assert counter_total(reader, "agent.facts.injected") == 0, (
+                "agent.facts.injected ticked for a fact whose block "
+                "was dropped on header-admission failure (PR #260 M-1)."
+            )
+        finally:
+            await metrics_mod.shutdown()
 
 
 # ─── self-first emit order under tight slice (PR #342 third-pass M-2) ─

@@ -84,15 +84,21 @@ def register(inst: _Instruments, meter: Meter) -> None:
     # RFC 0026 PR 3 — facts-tier admission counter.  Increments per
     # fact row admitted into the working-memory ``facts_context``
     # section by :func:`agents.persona_runtime.facts_section.render_facts_section`.
-    # ``tier="facts"`` is a low-cardinality dimension that lets a
-    # future provenance dashboard join this counter against the
-    # per-turn tier-provenance log RFC 0026 PR 4 emits.
+    # ``tier="facts"`` is a *constant* at v0.3.1 — single-valued, zero
+    # added cardinality — kept as a forward-compat seam.  RFC 0026 PR 4
+    # shipped per-turn tier provenance as the in-process
+    # ``MemoryBudget.admissions_by_tier`` registry (read by the
+    # reinforcement write), not an OTEL attribute join, so no sibling
+    # counter carries ``tier=`` yet.  ``tier`` is exported on every
+    # increment but is a constant, single-valued attribute — it
+    # carries no cardinality and has no join partner until a
+    # dashboard promotes the registry to OTEL.
     inst.facts_injected = meter.create_counter(
         name="agent.facts.injected",
         unit="{fact}",
         description=(
             "Declarative-fact rows admitted into the persona's "
             "working memory ``facts_context`` section (RFC 0026 PR 3). "
-            "Attributes: agent.id, tier."
+            "Attributes: agent.id; tier (constant \"facts\" at v0.3.1)."
         ),
     )
