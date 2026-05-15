@@ -60,11 +60,24 @@ def resolve_facts_config(config: dict) -> tuple[bool, int]:
     Centralised here so :class:`_LLMPersonaAgent.__init__` does not
     have to import the default constants directly and so the schema
     layer has a single place to look up Phase-1 defaults.
+
+    Null-budget defence (PR 5c — PR #341 review L-3)
+    ------------------------------------------------
+    Production configs flowing through ``make validate`` are gated
+    against :file:`schemas/agent.schema.json` (``type: integer``,
+    ``minimum: 0``), which rejects ``budget_tokens: null`` at load
+    time.  But test fixtures, programmatic dict-built configs, and
+    any path that bypasses ``make validate`` can drop a ``None``
+    through — and the prior ``int(None)`` raised ``TypeError`` at
+    agent construction.  Defence-in-depth: collapse ``None`` to the
+    default before the ``int()`` call so the post-schema-validation
+    surface stays the only place that gates the type.
     """
     facts_cfg = (config.get("memory") or {}).get("facts") or {}
     enabled = bool(facts_cfg.get("enabled", True))
-    budget_tokens = int(
-        facts_cfg.get("budget_tokens", DEFAULT_FACTS_BUDGET_TOKENS),
+    raw = facts_cfg.get("budget_tokens")
+    budget_tokens = (
+        DEFAULT_FACTS_BUDGET_TOKENS if raw is None else int(raw)
     )
     return enabled, budget_tokens
 
@@ -174,7 +187,6 @@ async def recall_facts_for_event(
     fact_store: FactStore | None,
     event: AgentEvent,
     *,
-    agent_id: str,
     limit: int = FACTS_RECALL_LIMIT,
 ) -> list[Fact]:
     """Recall declarative facts for every subject derived from *event*.
@@ -191,6 +203,16 @@ async def recall_facts_for_event(
     Each subject is recalled independently; duplicate ``fact_id`` rows
     are de-duplicated in caller order so a fact about the sender that
     is also about a mentioned entity (future RFC) is rendered once.
+
+    Signature note (PR 5c — PR #341 review N-2)
+    -------------------------------------------
+    The pre-PR-5c signature accepted an ``agent_id`` kwarg used only
+    inside the WARNING log template; :meth:`FactStore.recall` already
+    filters by ``self._agent_id`` (the store is per-agent ACL —
+    RFC 0008 §H), so the kwarg never participated in the SQL filter
+    and falsely implied the helper accepted an agent filter.  PR 5c
+    drops the kwarg and reads :attr:`FactStore.agent_id` off the
+    store at the log site.
     """
     if fact_store is None:
         return []
@@ -205,7 +227,7 @@ async def recall_facts_for_event(
         except Exception:
             logger.warning(
                 "Agent %s: facts recall for subject=%r failed; skipping",
-                agent_id, subject, exc_info=True,
+                fact_store.agent_id, subject, exc_info=True,
             )
             continue
         for fact in rows:
@@ -400,9 +422,22 @@ def render_facts_section(
         # admit the header drops this subject's block — naked lines
         # without a framing label are exactly the persona-inversion
         # footgun the M-2 review fix is meant to prevent.
-        header = f"Known facts about {subject}:\n"
-        admitted_header = budget.try_add(header, min_tokens=MIN_TOKENS_FACTS)
-        if admitted_header is None:
+        #
+        # Two-part header admission (PR 5c — PR #341 review L-1).
+        # The pre-PR-5c shape admitted ``"Known facts about <subject>:\n"``
+        # whole and let truncation strip the trailing ``:\n`` — a
+        # long-subject + tight-remaining write yielded a malformed
+        # ``"Known facts about very_long…- bob prefers tea"`` block
+        # with no separator between the (truncated) header and the
+        # first item.  PR 5c splits the admission into a subject-
+        # bearing prefix (may truncate) and a guaranteed ``"\n"``
+        # separator so the rendering invariant survives long-subject
+        # truncation.
+        header_prefix = f"Known facts about {subject}:"
+        admitted_prefix = budget.try_add(
+            header_prefix, min_tokens=MIN_TOKENS_FACTS,
+        )
+        if admitted_prefix is None:
             # Header dropped — discard the staged pending admissions
             # without touching the registry or telemetry.  The
             # already-consumed item tokens stay subtracted from the
@@ -410,7 +445,19 @@ def render_facts_section(
             # has no rollback seam); that is the deliberate trade-off
             # documented above.
             continue
-        blocks.append(admitted_header + "\n".join(items))
+        # Charge the inter-line separator explicitly so the global
+        # budget accounting matches the actual prompt-side cost.
+        # ``"\n"`` is 1 token under cl100k_base; the min_tokens=1
+        # floor admits it whole as long as ``budget.remaining >= 1``.
+        # If the budget is exhausted at this boundary, the block is
+        # dropped — the soft-overage rendering invariant requires a
+        # separator between the header and the first item.
+        admitted_sep = budget.try_add("\n", min_tokens=1)
+        if admitted_sep is None:
+            continue
+        blocks.append(
+            admitted_prefix + admitted_sep + "\n".join(items),
+        )
         # Commit the staged admissions in admit order.  Telemetry +
         # registry fire together so a future reader sees a single
         # source of truth for "what actually reached the prompt".

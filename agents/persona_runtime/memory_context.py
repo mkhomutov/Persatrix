@@ -295,9 +295,7 @@ class _MemoryContextMixin:
         # event has no resolvable sender, or when the backend raises;
         # all three branches are non-fatal here.
         if self._facts_enabled:
-            facts = await recall_facts_for_event(
-                self._fact_store, event, agent_id=self.agent_id,
-            )
+            facts = await recall_facts_for_event(self._fact_store, event)
         else:
             facts = []
 
