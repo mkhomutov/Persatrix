@@ -154,14 +154,20 @@ async def summarize_closed_interaction(
         )
         _emit_summary_failed("empty")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
-    # Try the combined-envelope path first.  Older mock clients and
-    # legacy LLM responses that emit plain prose summary still flow
-    # through the backward-compat fallback (text=text, facts=None) so
-    # the existing RFC 0020 PR 4 summarise-on-close regression suite
-    # stays green.
+    # Combined-envelope path; plain prose falls through to the
+    # backward-compat branch (commit text as summary, facts=None).
+    # PR 5b — ``exc.reason`` partitions truncated / missing-summary /
+    # invalid-envelope shapes onto a dedicated counter.
     try:
         summary, facts_raw = split_combined_response(text)
-    except FactsParseError:
+    except FactsParseError as exc:
+        if exc.reason is not None:
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.facts_envelope_parse_failed.add(1, {
+                    "agent.id": current_agent_id(),
+                    "reason": exc.reason,
+                })
         return (text, False, None)
     # PR #340 deep-review S2: a well-formed envelope with an empty
     # ``summary`` field parses cleanly today and commits ``""`` to

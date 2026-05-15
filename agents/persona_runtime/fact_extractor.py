@@ -34,7 +34,6 @@ unchanged keeps the RFC 0020 PR 4 regression suite intact.
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
@@ -47,6 +46,17 @@ from ..memory.fact_predicates import (
 from ..memory.facts import FactStore
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..prompt_loader import load_snippet
+
+# Parser surface lives in ``fact_envelope`` so the storage-dispatch
+# module stays under the 500-line review-friendly cap; re-exported
+# here so existing imports (``from agents.persona_runtime.fact_extractor
+# import FactsParseError, split_combined_response, parse_facts_payload``)
+# continue to resolve without any caller edit.
+from .fact_envelope import (
+    FactsParseError,
+    parse_facts_payload,
+    split_combined_response,
+)
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction
@@ -117,20 +127,6 @@ def _reset_rejected_predicates_seen() -> None:
     _REJECTED_PREDICATES_SEEN.clear()
 
 
-# ─── Errors ─────────────────────────────────────────────────
-
-
-class FactsParseError(ValueError):
-    """Raised when the combined LLM response can not be split into a
-    summary + facts pair, or when the facts payload is not a list of
-    dict tuples.
-
-    The caller commits the summary half (when available) and
-    increments ``agent.facts.extraction_failed`` — RFC 0026 §Phase 1
-    step 4 rollback policy.
-    """
-
-
 # ─── Prompt construction ────────────────────────────────────
 
 
@@ -161,85 +157,6 @@ def build_combined_prompt_suffix() -> str:
         predicate_list=predicate_list,
     )
     return "\n\n" + body + "\n"
-
-
-# ─── Response parsing ───────────────────────────────────────
-
-
-def split_combined_response(raw: str) -> tuple[str, str]:
-    """Split the combined LLM response into ``(summary, facts_json)``.
-
-    Returns a 2-tuple where:
-
-    * ``summary`` is the prose summary string (load-bearing — its
-      absence is treated as an LLM failure, not a facts-parse
-      failure).
-    * ``facts_json`` is the **serialised** JSON list of fact tuples.
-      Re-serialising means :func:`parse_facts_payload` remains the
-      single source of truth for fact-tuple shape validation; the
-      caller does not have to reach into the dict.
-
-    Raises :class:`FactsParseError` if the envelope itself does not
-    parse / has the wrong top-level shape / is missing ``summary``.
-    A missing ``facts`` key is **not** an error — it is treated as
-    ``[]`` so the LLM can omit the key on short interactions.
-    """
-    text = (raw or "").strip()
-    if not text:
-        raise FactsParseError("combined response is empty")
-    try:
-        envelope = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise FactsParseError(f"combined response is not JSON: {exc}") from exc
-    if not isinstance(envelope, Mapping):
-        raise FactsParseError(
-            f"combined response must be a JSON object, got "
-            f"{type(envelope).__name__}",
-        )
-    if "summary" not in envelope:
-        raise FactsParseError("combined response missing required `summary` key")
-    summary = envelope["summary"]
-    if not isinstance(summary, str):
-        raise FactsParseError(
-            f"`summary` must be a string, got {type(summary).__name__}",
-        )
-    facts = envelope.get("facts", [])
-    facts_json = json.dumps(facts)
-    return summary, facts_json
-
-
-def parse_facts_payload(raw: str) -> list[dict[str, Any]]:
-    """Parse the ``facts`` half of the combined response into tuple dicts.
-
-    Returns ``[]`` for the empty-list path (the expected common case
-    on short interactions).  Raises :class:`FactsParseError` on
-    malformed JSON / non-list payloads / list elements that aren't
-    dicts.
-
-    The shape check stops at "each element is a dict" — per-tuple
-    field validation (subject / predicate / object presence,
-    predicate allowlist, certainty range) lives in
-    :func:`store_extracted_facts` so per-tuple failures can increment
-    ``agent.facts.extraction_failed`` without aborting the batch.
-    """
-    text = (raw or "").strip()
-    if not text:
-        raise FactsParseError("facts payload is empty")
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise FactsParseError(f"facts payload is not JSON: {exc}") from exc
-    if not isinstance(payload, list):
-        raise FactsParseError(
-            f"facts payload must be a JSON list, got {type(payload).__name__}",
-        )
-    for idx, item in enumerate(payload):
-        if not isinstance(item, Mapping):
-            raise FactsParseError(
-                f"facts[{idx}] must be a JSON object, got "
-                f"{type(item).__name__}",
-            )
-    return [dict(item) for item in payload]
 
 
 # ─── Storage dispatch ───────────────────────────────────────
