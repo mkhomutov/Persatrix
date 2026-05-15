@@ -63,6 +63,24 @@ def register(inst: _Instruments, meter: Meter) -> None:
             "by PR 2.  Attribute: agent.id."
         ),
     )
+    # RFC 0026 PR 5b — envelope parse-failure observability.  Distinct
+    # bucket from ``extraction_failed`` (per-tuple loss) because envelope
+    # failures silently lose the *entire* facts batch; splitting them
+    # lets operators distinguish "model started emitting truncated
+    # envelopes" from "model started emitting bad tuples" without
+    # log-stream joins.  Fires for paths (2) + (3) + invalid-envelope
+    # shape from PR 5 plan §"From PR 2 review"; stays quiet on the
+    # plain-prose backward-compat path.
+    inst.facts_envelope_parse_failed = meter.create_counter(
+        name="agent.facts.envelope_parse_failed",
+        unit="{failure}",
+        description=(
+            "Combined summarize + extract responses where the JSON "
+            "envelope itself failed to parse — entire facts batch "
+            "lost (RFC 0026 PR 5b).  Attributes: agent.id, reason "
+            "(truncated / missing_summary / invalid_envelope)."
+        ),
+    )
     # RFC 0026 PR 3 — facts-tier admission counter.  Increments per
     # fact row admitted into the working-memory ``facts_context``
     # section by :func:`agents.persona_runtime.facts_section.render_facts_section`.

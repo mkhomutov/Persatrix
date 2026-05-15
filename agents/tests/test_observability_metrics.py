@@ -82,6 +82,9 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.facts_stored.add(1, attributes={"agent.id": "t"})
     inst.facts_superseded.add(1, attributes={"agent.id": "t"})
     inst.facts_extraction_failed.add(1, attributes={"agent.id": "t"})
+    inst.facts_envelope_parse_failed.add(
+        1, attributes={"agent.id": "t", "reason": "truncated"},
+    )
 
 
 def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
@@ -133,6 +136,7 @@ class TestInstrumentInventory:
             "agent.facts.stored",
             "agent.facts.superseded",
             "agent.facts.extraction_failed",
+            "agent.facts.envelope_parse_failed",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -154,6 +158,7 @@ class TestInstrumentInventory:
             "agent.facts.stored": "{fact}",
             "agent.facts.superseded": "{fact}",
             "agent.facts.extraction_failed": "{failure}",
+            "agent.facts.envelope_parse_failed": "{failure}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"

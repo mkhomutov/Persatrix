@@ -341,13 +341,14 @@ Deep-review (PR #340) findings that **also** landed inline in PR 2:
   RFC 0026 OQ #9 operator-seeded write path). Pinned by
   `TestWhitespaceSenderIdNormalisedAtBoundary`.
 
-The items deferred to this PR are:
+One item shipped in PR 5b — `feature/v031-rfc0026-followups-pr2`:
 
-- **Combined-envelope parse-failure observability — collapsed paths.**
-  The caller's `try: split_combined_response(text) except FactsParseError:
-  return (text, False, None)` block in
+- **Combined-envelope parse-failure observability — shipped in PR 5b.**
+  The caller's `except FactsParseError: return (text, False, None)`
+  block in
   [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
-  collapses three distinct failure shapes into one outcome:
+  used to collapse four distinct response shapes into one
+  unobservable outcome:
   1. **Plain prose response** — desired backward-compat path (older
      mock clients, legacy LLM responses without the JSON envelope).
      Commits the prose as the summary; facts half is `None`. Correct.
@@ -355,38 +356,80 @@ The items deferred to this PR are:
      shares the RFC 0020 PR 4 `max_tokens=256` cap tuned for the
      prose-only summary (~50–100 tokens); a 5-fact response is
      ~200–280 tokens, uncomfortably close to the cap. Mid-array
-     truncation yields invalid JSON that the catch falls through to
-     "commit as raw text" — broken JSON lands in the summary column;
+     truncation yields invalid JSON that the catch fell through to
+     "commit as raw text" — broken JSON in the summary column;
      facts silently lost; no counter, no log.
   3. **Valid JSON object missing the `summary` key** (PR #340 deep-
      review S1) — `{"facts": [...]}` parses as a mapping but
-     `split_combined_response` raises `FactsParseError("combined
-     response missing required `summary` key")`. Same catch, same
-     fall-through; the raw JSON envelope commits as the summary
-     text. Indistinguishable from path (1) at the surface; the
-     observability gap is identical to path (2).
+     `split_combined_response` raised `FactsParseError`. Same catch,
+     same fall-through; the raw JSON envelope committed as the
+     summary text. Indistinguishable from path (1) at the surface.
+  4. **Top-level non-object** (e.g., the model emitted a bare list).
+     Same catch, same fall-through. Rare in production today but a
+     plausible regression vector if the prompt drifts.
   The PR #340 deep-review S2 case (well-formed envelope with
-  empty `summary` field) was a fourth member of this cluster but
-  has its own signal as of PR 2:
-  `agent.interactions.summary.failed{reason=empty_field}` fires
-  from a post-parse check at the caller. Paths (2) and (3)
-  remain unsignalled — they are this follow-up's scope.
-  Two options, pick one in PR 5 review:
-  1. **Bump the combined-call cap** (e.g., 512) and **distinguish
-     "valid-envelope-shape-but-not-prose" at the catch site** —
-     simplest for path (2); needs the catch-site change to cover
-     path (3). Costs tokens even on summary-only paths.
-  2. **Add an `agent.facts.envelope_parse_failed` counter** with a
-     `reason` attribute (`truncated` for path (2), `missing_summary`
-     for path (3)) emitted at the catch site — distinguishes the
-     three shapes deterministically (path (1) is "no JSON brace at
-     all" or "valid JSON envelope round-trip"; the others trigger
-     the counter with their distinct reasons). Keeps the cap tight,
-     makes both failure paths observable separately from each other
-     and from the "no facts" case.
-  Test pins should assert the chosen signal fires for **both** the
-  deliberately-truncated envelope **and** the missing-`summary`-key
-  envelope, so a future regression in either path surfaces.
+  empty `summary` field) is a fifth member of this cluster but
+  already had its own signal as of PR 2:
+  `agent.interactions.summary.failed{reason=empty_field}` fires from
+  a post-parse check at the caller, so it stays out of the new
+  envelope counter's scope.
+
+  **Chosen option (option 2 from the plan): a new
+  `agent.facts.envelope_parse_failed` counter** with a `reason`
+  attribute, emitted at the catch site.  Distinct bucket from
+  `agent.facts.extraction_failed` (per-tuple loss) because envelope
+  failures lose the entire batch silently; splitting the two lets
+  operators distinguish "model started emitting truncated envelopes"
+  from "model started emitting bad tuples" without log-stream joins.
+  Option 1 (bump the cap to 512) was rejected: it costs tokens on
+  every summary-only path and still requires the catch-site change
+  to cover path (3); option 2 is the minimum-scope change that
+  closes the observability gap on all three failure shapes.
+
+  Implementation:
+  - The envelope parser moved from
+    [`fact_extractor.py`](../../agents/persona_runtime/fact_extractor.py)
+    into a new
+    [`fact_envelope.py`](../../agents/persona_runtime/fact_envelope.py)
+    module so the storage-dispatch file stays under the 500-line
+    review-friendly cap.  Public names (`FactsParseError`,
+    `split_combined_response`, `parse_facts_payload`) are
+    re-exported from `fact_extractor` so existing imports continue
+    to resolve.
+  - [`FactsParseError`](../../agents/persona_runtime/fact_envelope.py)
+    grew a `reason: str | None` slot.  `None` is the
+    backward-compat / empty bucket (no counter fires); string
+    values partition the observable shapes:
+    - `"truncated"` — text starts with `{`/`[` but JSON parsing
+      fails (the motivating case under the `max_tokens=256` cap).
+    - `"missing_summary"` — parses as an object but lacks the
+      load-bearing `summary` key (or the value has the wrong type).
+    - `"invalid_envelope"` — parses as JSON but the top level is
+      not an object.
+  - Catch site at
+    [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
+    inspects `exc.reason`; if non-`None`, increments
+    `agent.facts.envelope_parse_failed` with the `reason`
+    attribute.  Behaviour is unchanged — the commit-as-text
+    fall-through stays in place; only the observability surface
+    widens.  Whether to also flip the failure shapes to fall back
+    to `SUMMARY_UNAVAILABLE_TEXT` (the cleaner long-term shape)
+    is deferred — the counter surfaces the rate so the decision
+    can be data-driven once dogfood traffic accumulates.
+  - Pinned by 12 cases in
+    [`tests/unit/python/test_envelope_parse_observability.py`](../../tests/unit/python/test_envelope_parse_observability.py):
+    six on the parser (reason value per shape, including the
+    plain-prose / empty paths that must leave `reason=None`) and
+    six at the caller (counter fires for truncated / missing /
+    invalid; stays quiet on plain prose, empty-summary-field, and
+    well-formed envelope).  Both halves of the plan's "test pins
+    must assert the chosen signal fires for both the
+    deliberately-truncated envelope and the missing-`summary`-key
+    envelope" are covered.
+
+The remaining items deferred from PR 2 review — still parked under
+future-slices triage:
+
 - **`:memory:` cross-tier `JOIN` support (optional refactor).** The
   PR 2 review noted that `FactStore` and `EpisodicMemory` each open
   their own `aiosqlite` connection (see PR 1's `shared_db` seam and
@@ -1318,8 +1361,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ✅ Merged | [#340](https://github.com/mkhomutov/Persatrix/pull/340) | 2026-05-14 |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ✅ Merged | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | 2026-05-15 |
-| 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | 🔀 PR open | — | — |
-| 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ⬜ Not started | — | — |
+| 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | ✅ Merged | [#344](https://github.com/mkhomutov/Persatrix/pull/344) | 2026-05-15 |
+| 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | 🔀 PR open | — | — |
 | 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ⬜ Not started | — | — |
 | 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ⬜ Not started | — | — |
 | 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ⬜ Not started | — | — |

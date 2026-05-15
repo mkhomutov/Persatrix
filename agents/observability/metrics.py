@@ -89,11 +89,11 @@ class _Instruments:
     parity test in ``test_observability_metrics.py`` asserts this.
     """
 
-    # Interaction-lifecycle counters are registered by
-    # :func:`agents.observability._metrics_interactions.register`
-    # (split out so this module stays under the 500-line cap).  The
-    # class-level annotations make the attribute surface visible to
-    # mypy / IDEs even though the assignment happens in the helper.
+    # Interaction-lifecycle + facts-tier counters are registered by
+    # :func:`agents.observability._metrics_interactions.register` and
+    # :func:`agents.observability._metrics_facts.register` (split out
+    # so this module stays under the 500-line cap).  The annotations
+    # below keep the attribute surface visible to mypy / IDEs.
     interactions_opened: Counter
     interactions_closed: Counter
     interactions_closed_by_idle_gap: Counter
@@ -103,10 +103,10 @@ class _Instruments:
     interactions_closed_by_shutdown: Counter
     interactions_summary_failed: Counter
     interactions_janitor_failed: Counter
-    # RFC 0026 facts-tier counters — registered in ``_metrics_facts``.
     facts_stored: Counter
     facts_superseded: Counter
     facts_extraction_failed: Counter
+    facts_envelope_parse_failed: Counter
     facts_injected: Counter
 
     def __init__(self, meter: Meter) -> None:

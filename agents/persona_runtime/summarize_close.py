@@ -34,6 +34,7 @@ from .fact_extractor import (
     FactsParseError,
     build_combined_prompt_suffix,
     dispatch_facts_from_response,
+    emit_envelope_parse_failed,
     split_combined_response,
 )
 
@@ -154,14 +155,15 @@ async def summarize_closed_interaction(
         )
         _emit_summary_failed("empty")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
-    # Try the combined-envelope path first.  Older mock clients and
-    # legacy LLM responses that emit plain prose summary still flow
-    # through the backward-compat fallback (text=text, facts=None) so
-    # the existing RFC 0020 PR 4 summarise-on-close regression suite
-    # stays green.
+    # Combined-envelope path; plain prose falls through to the
+    # backward-compat branch (commit text as summary, facts=None).
+    # PR 5b — ``exc.reason`` partitions truncated / missing-summary /
+    # invalid-envelope shapes onto a dedicated counter.
     try:
         summary, facts_raw = split_combined_response(text)
-    except FactsParseError:
+    except FactsParseError as exc:
+        if exc.reason is not None:
+            emit_envelope_parse_failed(exc.reason)
         return (text, False, None)
     # PR #340 deep-review S2: a well-formed envelope with an empty
     # ``summary`` field parses cleanly today and commits ``""`` to
@@ -411,13 +413,14 @@ async def finalize_closed_interaction(
         # the audit ordering matches the data ordering: summary
         # always exists before any facts.store row pointing back at
         # this ``interaction_id``.  Per-tuple failures (allowlist
-        # miss, missing field, certainty range) are caught inside
-        # :func:`store_extracted_facts` and increment
-        # ``agent.facts.extraction_failed`` — one bad tuple does
-        # not drop the rest of the batch.  An *envelope* parse
-        # failure on the facts half is caught here and bumps the
-        # same counter once (RFC 0026 §Phase 1 step 4 rollback —
-        # summary commits, facts do not).
+        # miss, missing field, certainty range) increment
+        # ``agent.facts.extraction_failed`` inside
+        # :func:`store_extracted_facts` — one bad tuple does not drop
+        # the rest of the batch.  Inner facts-list parse failure
+        # bumps the same counter once inside
+        # :func:`dispatch_facts_from_response`.  Outer-envelope parse
+        # failures are a distinct signal (``envelope_parse_failed``,
+        # RFC 0026 PR 5b) emitted at the split catch above.
         if (
             not summary_failed
             and facts_raw is not None
