@@ -475,46 +475,70 @@ v0.3.1.
 
 ## Open Questions
 
+> **Status (2026-05-15)**: all four open questions resolved at PR-plan
+> authoring time. Resolutions are recorded inline below and cross-cited
+> from [`docs/rfcs/0034-pr-plan.md` §Open-question resolutions](0034-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time).
+> Phase 1 PRs may open against these resolutions.
+
 1. **Per-session vs. per-channel transcript window.** Should the
    fetched window filter on `chat_session_id` (or `persatrix_session_id`,
-   RFC 0031) or include all channel turns regardless of session? The
-   proposed default is **per-channel** — it preserves continuity
-   across `bin/persatrix chat` restarts on the same DM and matches
-   the durable identity of the channel. If RFC 0031 Phase 2's
-   default-recall semantics resolve to per-session, RFC 0034 picks
-   up the same default at that time. **Hard gate**: this question
-   must resolve in the RFC 0034 PR plan review thread before
-   Phase 1 PR 1 merges, since the wire format implicitly commits.
+   RFC 0031) or include all channel turns regardless of session?
 
-   *Resolution checklist (policy-anchor first):*
-   - **Privacy-vs-hygiene framing.** If RFC 0031 Phase 2 is positioned
-     as a *privacy boundary* (operators can rely on
-     `PERSATRIX_SESSION_ID` to keep one user's prompt content out of
-     another's), the Conversation Window MUST filter on
-     `chat_session_id` / `persatrix_session_id`. If Phase 2 is
-     *hygiene-only* (test-run isolation at the storage layer, not a
-     prompt-content boundary), per-channel default stands. The decision
-     follows the policy, not the other way around.
-   - Confirm the policy reading with RFC 0031's author in the PR plan
-     review thread; cite the resolved framing in the v0.3.1 plan
-     amendment so it is auditable.
-   - If the answer is "privacy", add a unit test asserting two events
-     on the same channel under different session ids do not share a
-     window.
+   **Resolution (1a — per-channel, no session filter).** The window
+   filters on `event.channel_id` only; rows are admitted regardless of
+   `chat_session_id` or `persatrix_session_id`. Justification:
+   - **Policy anchor.** [RFC 0031 PR plan §OQ #1 resolution 1a](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)
+     records single-session default-recall semantics as a Phase-2
+     load-bearing decision and explicitly notes "Phase 1 lands no
+     recall changes; the resolution is informational here." RFC 0031
+     Phase 1 is column-add only, so no prompt-content privacy contract
+     attaches to the session columns in v0.3.1. The Conversation Window
+     is free to ignore them in Phase 1; no prompt-content filter is
+     required.
+   - **User-visible continuity.** Restarting `bin/persatrix chat` on a
+     DM channel under a fresh `PERSATRIX_SESSION_ID` should preserve
+     in-channel transcript continuity — the channel is the durable
+     identity, the session is a process-lifetime tag.
+   - **Forward compatibility.** If RFC 0031 Phase 2 (recall filtering)
+     ever re-frames the session boundary as privacy-bearing, the
+     Conversation Window picks up the same `persatrix_session_id`
+     filter at that time. Phase 1 of this RFC reserves but does not
+     consume the column; the change is additive, non-breaking.
+   - **Test obligation.** Phase 1 unit tests cover the no-filter
+     contract explicitly: two events on the same channel under
+     different `persatrix_session_id` values share one window.
+
 2. **Window size N and budget interaction.** Defaults `N=20`,
    `max_tokens=2048` are guesses. Phase 3 telemetry retunes them.
-   Open whether the default should be `N` *or* `max_tokens` (one
-   binding constraint vs. both; the proposal is both, with the
-   tighter one winning per turn).
+
+   **Resolution (2a — both bind, tighter wins per turn).** Phase 1
+   ships both bounds; the per-turn admission loop applies the tighter
+   constraint at each step (FIFO drop on token-overflow first; if the
+   surviving turns still exceed `N`, drop oldest until count ≤ `N`).
+   `N=20` and `max_tokens=2048` are the committed Phase 1 defaults.
+   Retuning is a one-line constant change in Phase 3 once the
+   `cache_hit_rate` / `fetch_latency` / `fallback_to_empty` metrics
+   land — no schema or config-shape implication.
+
 3. **Per-peer disambiguation in group channels.** Inline prefix
-   (`[<peer_id>]: ...`) vs. `messages[i].name`. The proposal is
-   inline prefix per §C. Worth re-confirming once we have a
-   group-channel integration test running.
+   (`[<peer_id>]: ...`) vs. `messages[i].name`.
+
+   **Resolution (3a — inline prefix, deferred to Phase 2).** Phase 1
+   ships DM channels only (one peer); the disambiguation question
+   does not bind. Phase 2 implements the inline-prefix form per §C
+   (no `messages[i].name`); Phase 2's group-channel integration test
+   exercises the disambiguation explicitly. This RFC's role-mapping
+   contract (§C) does not change between Phase 1 and Phase 2 — the
+   prefix is a sanitization-step concern, not a role-mapping one.
+
 4. **Fact extractor conversational context.** Out of scope per
-   [Non-Goals](#non-goals), but RFC 0026 needs to consume RFC 0034's
-   substrate before referential facts (`"I like it"` →
-   `(Max, likes, coffee)`) become extractable. Tracked as an RFC 0026
-   follow-up; flagged here so the surface is co-designed.
+   [Non-Goals](#non-goals).
+
+   **Resolution (4a — deferred to RFC 0026 follow-up).** RFC 0034
+   Phase 1 ships the substrate (`build_conversation_messages`); RFC
+   0026's extractor consumes it as a follow-up tracked under that
+   RFC's PR plan. This RFC closes when its Phase 1 lands; the
+   RFC 0026 consumer side is not a Phase 1 acceptance gate.
 
 ## Decision / Next Steps
 

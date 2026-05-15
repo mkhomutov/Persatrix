@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v031-rfc0031p1-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.1-plan.md Phase 1 (combined plans PR)](../v0.3.1-plan.md#phase-1--author-the-two-rfc-pr-plans)
+**Master plan**: [v0.3.1-plan.md Phase 1 (combined plans PR)](../v0.3.1-plan.md#phase-1--author-the-three-rfc-pr-plans)
 
 ---
 
@@ -154,7 +154,7 @@ PR 1 is logically independent of PRs 2–3 (renaming `ChatRequest.session_id` do
 | `tests/unit/python/test_session_id_migration.py` | **New** — fresh + upgrade migration paths; idempotence; no-op early-return. |
 | `tests/unit/python/test_episodic_memory.py`, `tests/unit/python/test_relationship_memory.py` | Add `session_id` round-trip cases on store paths; default `"legacy"` semantics. |
 | `tests/integration/test_session_id_cross_process.py` | **New** — orchestrator + persona runtime started under `PERSATRIX_SESSION_ID=run-a`, write a channel + message + persona episode; restart both under `PERSATRIX_SESSION_ID=run-b`; verify at the storage layer that both sets of rows exist, each tagged with its own session_id. (Recall-side filtering ships in Phase 2 — this test asserts the *write* contract only.) |
-| `docs/manual-tests/MT-SESSION-001.md` | **New** (deliverable of this PR) — per [v0.3.1-plan Phase 2 cross-cutting acceptance](../v0.3.1-plan.md#phase-2--implement-the-two-rfcs): two stack starts under different `PERSATRIX_SESSION_ID` values; assert via raw SQLite query that the second run's rows carry the new session_id and the first run's are untouched at the storage layer. Execution lives in [Phase 4 PR 1](../v0.3.1-plan.md#phase-4--v031-release-prep-execution). |
+| `docs/manual-tests/MT-SESSION-001.md` | **New** (deliverable of this PR) — per [v0.3.1-plan Phase 2 cross-cutting acceptance](../v0.3.1-plan.md#phase-2--implement-the-three-rfcs): two stack starts under different `PERSATRIX_SESSION_ID` values; assert via raw SQLite query that the second run's rows carry the new session_id and the first run's are untouched at the storage layer. Execution lives in [Phase 4 PR 1](../v0.3.1-plan.md#phase-4--v031-release-prep-execution). |
 
 #### Key implementation details
 
