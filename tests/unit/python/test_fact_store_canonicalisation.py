@@ -24,22 +24,24 @@ read path) closes the footgun at the storage boundary.
 Contract pinned: a write with a non-canonical subject is normalised
 internally, and a recall using the canonical form returns the row.
 
-PR 5d M-1 — :meth:`FactStore.delete_by_subject` canonicalisation
-----------------------------------------------------------------
-PR 5c hardened ``store`` + ``recall`` but left ``delete_by_subject``
-on raw input.  After 5c every persisted row carries the canonical
-subject (e.g. ``"bob"``), so a caller passing ``"Bob"`` to
-:meth:`delete_by_subject` would run ``DELETE … WHERE subject = 'Bob'``
-and match zero rows — a silent miss indistinguishable from "no facts
-about this subject."  This is exactly the GDPR / CCPA failure mode
-the L-2 docstring on ``store`` names ("the future RFC 0013 erasure
-backfill") and the storage primitive is meant to fence off.
+PR #346 review M-1 — :meth:`FactStore.delete_by_subject` canonicalisation
+-------------------------------------------------------------------------
+PR 5c's L-2 fix hardened ``store`` + ``recall`` but left
+``delete_by_subject`` on raw input.  Once L-2 lands, every persisted
+row carries the canonical subject (e.g. ``"bob"``), so a caller
+passing ``"Bob"`` to :meth:`delete_by_subject` would run
+``DELETE … WHERE subject = 'Bob'`` and match zero rows — a silent
+miss indistinguishable from "no facts about this subject."  This is
+exactly the GDPR / CCPA failure mode the L-2 docstring on ``store``
+names ("the future RFC 0013 erasure backfill") and the storage
+primitive is meant to fence off.
 
-PR 5d closes the gap by canonicalising the ``subject`` traversal in
-:meth:`delete_by_subject`.  The ``source_interaction_id`` traversal
-deliberately stays un-canonicalised — that column holds opaque UUIDs,
-not subject strings, and ``canonicalize_subject`` would be a category
-error (it would casefold the UUID and silently miss).
+The PR #346 review M-1 follow-up closes the gap by canonicalising the
+``subject`` traversal in :meth:`delete_by_subject`.  The
+``source_interaction_id`` traversal deliberately stays
+un-canonicalised — that column holds opaque UUIDs, not subject
+strings, and ``canonicalize_subject`` would be a category error (it
+would casefold the UUID and silently miss).
 """
 
 from __future__ import annotations
@@ -188,7 +190,7 @@ class TestStoreCanonicalisesSubject:
 
 
 class TestDeleteBySubjectCanonicalisesSubject:
-    """PR 5d M-1 — :meth:`FactStore.delete_by_subject` canonicalises
+    """PR #346 review M-1 — :meth:`FactStore.delete_by_subject` canonicalises
     its ``subject_id`` argument before the DELETE so an erasure call
     with a non-canonical spelling hits the row a canonical write
     persisted.

@@ -603,6 +603,10 @@ render defensive fixes) and PR 5d (tests + counter polish):
   `TestHeaderTruncationPreservesItemSeparator.test_truncated_header_does_not_glue_to_first_item`
   in
   [`test_facts_section_defensive.py`](../../tests/unit/python/test_facts_section_defensive.py).
+  Note: `MemoryBudget.try_add` truncates an oversized item to exactly
+  `remaining` tokens, so whenever the prefix truncates the separator
+  admission always fails — the truncation case always resolves to a
+  drop, and the emit-after-truncated-prefix branch is defensive-only.
 
 - **L-2 — asymmetric subject canonicalisation between
   `FactStore.store` and the recall path.** Resolved with **option
@@ -617,7 +621,12 @@ render defensive fixes) and PR 5d (tests + counter polish):
   [`TestStoreCanonicalisesSubject`](../../tests/unit/python/test_fact_store_canonicalisation.py)
   — five cases: mixed-case write, trailing-whitespace write,
   internal-whitespace collapse, non-canonical recall query, and the
-  supersede chain dedup invariant across canonical form.
+  supersede chain dedup invariant across canonical form.  No backfill
+  migration ships for rows written before PR 5c — the only v0.3.1
+  writer (PR 2's extractor) already canonicalised pre-store, so
+  non-canonical rows can only originate from fixtures / operator
+  seeding / the future RFC 0013 backfill, none of which exist in a
+  deployed DB.
 
 - **L-3 — `resolve_facts_config` not defensive against `null` budget
   knobs.** One-line collapse — the resolver reads `raw =
@@ -655,6 +664,21 @@ render defensive fixes) and PR 5d (tests + counter polish):
   and [`config/agents.yaml`](../../config/agents.yaml).  Pinned
   by
   [`TestExtractionModelFieldDropped`](../../tests/unit/python/test_facts_section_defensive.py).
+
+- **M-1 (PR #346 review follow-up) — `FactStore.delete_by_subject`
+  left raw while `store` / `recall` canonicalise.**  After L-2 every
+  persisted row carries the canonical subject, so a
+  `delete_by_subject("Bob")` erasure ran `DELETE … WHERE subject =
+  'Bob'` and matched zero rows — the silent GDPR / CCPA erasure miss
+  RFC 0026 §H fences off.  Resolved by canonicalising the `subject`
+  column traversal in
+  [`delete_by_subject`](../../agents/memory/facts.py); the
+  `source_interaction_id` traversal stays raw (opaque UUIDs, not
+  subject strings).  `store` + `recall` + `delete_by_subject` are now
+  all canonical.  Pinned by
+  [`TestDeleteBySubjectCanonicalisesSubject`](../../tests/unit/python/test_fact_store_canonicalisation.py)
+  — four cases plus `test_source_interaction_id_traversal_not_canonicalised`,
+  which proves the UUID column is not casefolded.
 
 **Remaining for PR 5d** — `feature/v031-rfc0026-followups-pr3b`:
 

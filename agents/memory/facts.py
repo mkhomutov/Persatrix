@@ -349,13 +349,12 @@ class FactStore:
         compose this with the ``MemoryBudget`` allocator's per-tier
         token slice; this floor is the hard upper bound on row count.
 
-        Subject canonicalisation (PR 5c — PR #341 review L-2)
-        -----------------------------------------------------
-        Symmetric with :meth:`store`: a non-canonical query subject
-        (e.g. ``"Bob "`` from a test fixture) canonicalises before
-        the SELECT so the round-trip works for callers that bypass
-        the persona runtime's ``_subject_seeds → canonicalize_subject``
-        pre-step.
+        Subject canonicalisation (PR 5c — PR #341 review L-2):
+        symmetric with :meth:`store`, a non-canonical query subject
+        (``"Bob "`` from a fixture that bypasses the runtime's
+        ``_subject_seeds`` pre-step) canonicalises before the SELECT.
+        Empty / whitespace-only subjects raise ``ValueError`` first,
+        symmetric with :meth:`store`'s explicit empty-check.
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -462,7 +461,8 @@ class FactStore:
         Subject canonicalisation (PR #346 review M-1): the ``subject``
         traversal canonicalises so a mixed-case erasure hits the
         canonical rows :meth:`store` persists; ``source_interaction_id``
-        stays raw — it holds opaque UUIDs, not subject strings.
+        stays raw (opaque UUIDs, not subject strings).  Empty subjects
+        raise ``ValueError`` before either DELETE.
         """
         db = self._ensure_db()
         cursor = await db.execute(
