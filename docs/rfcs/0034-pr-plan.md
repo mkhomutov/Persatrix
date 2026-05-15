@@ -66,8 +66,8 @@ PR 1 is a pure refactor; no behaviour change. Catch-up (`channel_catchup.py`) ke
 |------|--------|
 | `agents/channel_history_fetcher.py` | **New**. Module exposes (a) a `ChannelHistoryFetcher` `typing.Protocol` with one method `async fetch(channel_id: str, *, limit: int) -> list[dict[str, Any]] \| None`, and (b) a default production implementation `HttpChannelHistoryFetcher` backed by `aiohttp` with the same 10s timeout the catch-up path uses today. The implementation is the verbatim body of the existing [`_fetch_channel_history`](../../agents/channel_catchup.py#L352) helper, lifted unchanged — same `None`-on-error / list-on-success contract so the catch-up call site at [agents/channel_catchup.py L237](../../agents/channel_catchup.py#L237) (`if messages is None: continue`) keeps its branch verbatim. |
 | [`agents/channel_catchup.py`](../../agents/channel_catchup.py) | Replace the inline `_fetch_channel_history` definition with an import of `HttpChannelHistoryFetcher` and call through it at the existing call site (line 237). The private helper symbol is removed; no other catch-up code paths shift. |
-| `agents/tests/test_channel_history_fetcher.py` | **New** — unit tests on the Protocol contract (empty channel returns `[]`; HTTP failure raises a typed error the caller can catch; 10s timeout boundary). |
-| `agents/tests/test_channel_catchup.py` | Update fixtures to inject a `FakeChannelHistoryFetcher` instead of monkey-patching the private helper. Catch-up assertions are unchanged. |
+| `tests/unit/python/test_channel_history_fetcher.py` | **New** — unit tests on the Protocol contract (empty channel returns `[]`; HTTP 4xx/5xx and transport failure return `None` with a WARN, never raise — the `if messages is None: continue` guard depends on it; 10s default-timeout boundary; a duck-typed fake satisfies the Protocol). Sits beside `test_channel_catchup.py` to share the `orchestrator` loopback fixture. (Plan authored with an `agents/tests/` path; the catch-up suites actually live under `tests/unit/python/`.) |
+| `tests/unit/python/test_channel_catchup.py` / `test_channel_catchup_followups.py` | No change. These suites exercise the fetcher end-to-end *through* `replay_channel_history` against the loopback `orchestrator` fixture — they never monkey-patched the private `_fetch_channel_history`, so the refactor is covered by the existing assertions passing unchanged. (Plan anticipated a `FakeChannelHistoryFetcher` fixture migration; none was needed.) |
 
 #### Key implementation details
 
@@ -81,16 +81,16 @@ PR 1 is a pure refactor; no behaviour change. Catch-up (`channel_catchup.py`) ke
 - `HttpChannelHistoryFetcher.fetch(channel_id="c1", limit=20)` against a stub aiohttp server returns the JSON payload's `messages` array.
 - Network timeout (simulated via a slow stub) returns `None` and logs a WARN — verbatim from the lifted helper.
 - HTTP 404 / 5xx returns `None` and logs a WARN — same behaviour as the lifted helper today.
-- Catch-up regression: `test_channel_catchup.py` suite still passes after switching to the injected fake; the `messages is None: continue` branch at [L237](../../agents/channel_catchup.py#L237) is exercised unchanged.
+- Catch-up regression: the `test_channel_catchup.py` / `test_channel_catchup_followups.py` suites still pass unchanged; the `messages is None: continue` branch at [L237](../../agents/channel_catchup.py#L237) is exercised verbatim through `replay_channel_history`.
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_channel_history_fetcher.py agents/tests/test_channel_catchup.py -q` passes.
-- [ ] `ruff check agents/` clean.
-- [ ] `mypy agents/` clean.
-- [ ] `_fetch_channel_history` private helper removed from `channel_catchup.py`; one import added.
-- [ ] No call sites of the new Protocol outside `channel_catchup.py` (PR 2 / PR 3 add the persona-runtime call site).
-- [ ] [v0.3.1-plan Master Progress Overview](../v0.3.1-plan.md#master-progress-overview) row 3b → 🔄 In progress on this PR opening.
+- [x] `pytest tests/unit/python/test_channel_history_fetcher.py tests/unit/python/test_channel_catchup.py tests/unit/python/test_channel_catchup_followups.py -q` passes.
+- [x] `ruff check agents/` clean.
+- [x] `mypy agents/` clean.
+- [x] `_fetch_channel_history` private helper removed from `channel_catchup.py`; one import added.
+- [x] No call sites of the new Protocol outside `channel_catchup.py` (PR 2 / PR 3 add the persona-runtime call site).
+- [x] [v0.3.1-plan Master Progress Overview](../v0.3.1-plan.md#master-progress-overview) row 3b → 🔄 In progress on this PR opening.
 
 ---
 
@@ -281,7 +281,7 @@ Cache-hit rate, fetch latency, fallback-to-empty-window count exposed as OTEL me
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Factor channel-history fetcher behind Protocol | `feature/v031-rfc0034p1-history-fetcher` | ⬜ Not started | — | — |
+| 1 | Factor channel-history fetcher behind Protocol | `feature/v031-rfc0034p1-history-fetcher` | 🔀 PR open | — | — |
 | 2 | Conversation Window module + config + schema | `feature/v031-rfc0034p1-conversation-window` | ⬜ Not started | — | — |
 | 3 | Wire call site + DM integration test + manual-test doc | `feature/v031-rfc0034p1-wire-and-itest` | ⬜ Not started | — | — |
 | 4 | Review follow-ups | `feature/v031-rfc0034p1-followups` | ⬜ Not started | — | — |
