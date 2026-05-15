@@ -803,6 +803,115 @@ The items deferred to this PR are:
   change tracked by existing call sites; mypy / ruff catch
   drift).
 
+##### From PR 4 review
+
+Deep-review (PR #342) findings that **landed inline in PR 4**:
+
+- **M-1 — phantom reinforcement when a per-subject header is
+  dropped.** PR 4's initial cut called
+  `MemoryBudget.record_admission` inside the per-item loop in
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  and admitted the `"Known facts about <subject>:\n"` header
+  *after* the loop.  When the budget remainder after the items
+  fell below the truncation floor (`MIN_TOKENS_FACTS = 24`),
+  the header was dropped and the block was `continue`'d — but
+  the per-item `record_admission` calls had already mutated
+  `_admissions["facts"]`, so the subsequent
+  `FactStore.mark_recalled` write at
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  targeted rows the LLM never saw.  Directly contradicted the
+  PR description's contract ("the registry is the source of
+  truth the reinforcement write reads off to target only the
+  rows that reached the prompt").  Fix folded into PR 4: per-
+  block `pending: list[tuple[fact_id, tokens_admitted]]` stages
+  admissions locally; the registry + the `agent.facts.injected`
+  telemetry counter fire only after the header admits
+  successfully.  Pinned by
+  `TestNoPhantomReinforcementOnHeaderDrop` (single-subject and
+  multi-subject variants) in
+  [`tests/integration/test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py).
+
+- **M-2 — TICK / sender-less events newly paid a DB cost.**
+  PR 4's initial `_subject_seeds` shape always seeded
+  `["self"]` so MT-MEMORY-005 Leg 5 (self-consistency) could
+  read introspective `self.*` rows.  Side-effect: events with
+  no resolvable sender (TICK, orchestrator-internal) now
+  issued an unconditional `fact_store.recall(subject="self")`
+  and defeated the PR-5 empty-context cost guard
+  ([`memory_context.py` docstring §"Zero-admission events"](../../agents/persona_runtime/memory_context.py)).
+  Fix folded into PR 4: `_subject_seeds` returns `[]` for
+  sender-less events (restoring the pre-PR-4 short-circuit)
+  and returns `[SELF_SUBJECT, canonical_sender]` for sender-
+  bearing events.  User-facing legs always carry a sender so
+  Leg 5 still flips green; TICK events stay free.  Pinned by
+  `TestSubjectSeedsSenderlessShortCircuit` (unit) and
+  `TestTickEventDoesNotQueryFactStore` (integration).  The
+  pre-existing
+  `test_priority_order_..._for_tick` assertion that
+  `"facts_context" not in order` now passes for the right
+  reason (the short-circuit) rather than incidentally
+  (recall returned `[]` because no `self.*` rows existed).
+
+- **M-3 — soft per-tier slice overage scales with subject
+  count.**  `facts_tokens_used` in
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  accumulates item-line tokens only; the per-subject header is
+  charged against the global budget but *not* against the
+  slice.  With PR 4's multi-subject fan-out, the real upper
+  bound on the tier's global-budget consumption is
+  `facts_budget_tokens + N_subjects × header_tokens`, not the
+  slice alone.  Today the overage is at most ~10 tokens (two
+  seeds: `self` + sender, ~5 tokens each).  Documented inline
+  in the `render_facts_section` docstring under a new
+  "Soft-slice overage scales with subject count" section so a
+  future operator tuning `memory.facts.budget_tokens` knows
+  the slice is a soft floor on item-line tokens, not a hard
+  cap on the tier.  No behaviour change.
+
+- **N-1 — typo `"dianostics"` → `"diagnostics"`** in the
+  module-level comment above `_provenance_logger` in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py).
+
+- **N-2 — inverted test fixture.** The bulk-load loop in
+  `test_dropped_fact_does_not_get_reinforced` stored 40 rows
+  with `subject="bob"` paired with
+  `predicate="self.has_attribute"`.  The `self.*` predicate
+  namespace is conventionally paired with `subject="self"`
+  rows (see
+  [`agents/memory/fact_predicates.py`](../../agents/memory/fact_predicates.py)),
+  and the predicate validator allows the mismatch (it checks
+  the predicate alone), so the fixture worked but muddied the
+  subject/predicate semantics it leaned on incidentally.
+  Switched to `predicate="prefers"` (also allowlisted).
+
+- **N-4 — docstring on
+  `MemoryBudget.record_admission` overstated the env-gate
+  scope.** Original wording said *"Side-effects are best-
+  effort — a logging hiccup must never corrupt the registry
+  the caller is about to read."*  True in spirit, but the
+  registry mutation runs *unconditionally* before the env
+  check; only the structured-log emission is best-effort.
+  Reworded to make the asymmetry explicit so a future reader
+  does not assume the registry write is gated too.
+
+- **N-5 — dedup-location comment in `_subject_seeds` was
+  slightly off.**  Original wording claimed duplicates were
+  de-duplicated downstream by `recall_facts_for_event`'s
+  `seen_ids` set; but the `if canonical == SELF_SUBJECT`
+  branch in `_subject_seeds` *does* dedupe at the seed-list
+  level (the downstream `seen_ids` covers fact-row dedup, not
+  seed dedup).  Tightened the comment under the M-2 docstring
+  rewrite.
+
+No items deferred from PR 4 review — the seven findings above
+all landed inline.  The phantom-reinforcement guard (M-1) and
+the TICK short-circuit (M-2) are the two contracts the PR
+description made explicit; both are now pinned by regression
+tests.  (The PR 3 review's "Header-dropped case" deferred item
+under "Negative-path test coverage" is now satisfied by the
+M-1 fix's regression test; that deferred bullet can be marked
+addressed when PR 5 sweeps the residual PR 3 follow-ups.)
+
 #### PR checklist
 
 - [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
@@ -862,7 +971,7 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ✅ Merged | [#340](https://github.com/mkhomutov/Persatrix/pull/340) | 2026-05-14 |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
-| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | 🔀 PR open | — | — |
+| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | 🔀 PR open | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | — |
 | 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 

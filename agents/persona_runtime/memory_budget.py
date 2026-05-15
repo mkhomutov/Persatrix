@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Provenance records emit through the persona-runtime namespace so
 # operators filtering structured logs by source can scope to a single
 # dotted prefix.  Splitting the logger from ``__name__`` keeps the
-# allocator's own DEBUG output separate from MT-MEMORY-005 dianostics.
+# allocator's own DEBUG output separate from MT-MEMORY-005 diagnostics.
 _provenance_logger = logging.getLogger("agents.persona_runtime.memory_budget.provenance")
 
 
@@ -246,11 +246,12 @@ class MemoryBudget:
           same call emits a structured ``persatrix.memory.tier_admitted``
           log record for MT-MEMORY-005 leg-failure analysis (MQ-11).
 
-        The env gate keeps the structured-log surface off in production
-        deploys; the in-memory registry is always populated because the
-        facts-tier reinforcement read does not depend on the env var.
-        Side-effects are best-effort — a logging hiccup must never
-        corrupt the registry the caller is about to read.
+        The env gate scopes only the structured-log emission; the
+        in-memory registry is populated unconditionally and
+        synchronously, because the facts-tier reinforcement read
+        does not depend on the env var.  The log emission alone is
+        best-effort — a custom log-handler hiccup must never corrupt
+        the registry the caller is about to read.
         """
         self._admissions.setdefault(tier, []).append(item_id)
         if _provenance_enabled():

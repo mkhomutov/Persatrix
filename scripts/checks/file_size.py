@@ -116,6 +116,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # plan; remove this entry if a future maintenance PR splits the
     # per-PR review captures into a separate document.
     "docs/rfcs/0019-pr-plan.md",
+    # Same per-PR review residual accumulator pattern as 0008-pr-plan.md
+    # and 0019-pr-plan.md above. The plan exited PR 3's review window
+    # with ~7 470 words; the PR 4 (RFC 0026 PR 4) deep-review captures
+    # — phantom-reinforcement / TICK-cost / soft-slice overage findings,
+    # each justified inline so the next reader sees the rationale
+    # alongside the contract — pushed the doc over the 8 000-word
+    # threshold. Trimming the per-PR review captures would defeat the
+    # purpose of co-locating residuals with the plan; remove this
+    # entry when the remaining 2-PR sequence (PR 5 / PR 6) closes out
+    # and the plan is sealed at v0.3.1 release tag.
+    "docs/rfcs/0026-pr-plan.md",
     # docs/observability.md tipped over the 3 000-word prose limit when
     # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert
     # templates to §13. The new content is already trimmed (a one-line

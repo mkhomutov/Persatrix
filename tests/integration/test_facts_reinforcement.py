@@ -184,7 +184,7 @@ class TestReinforcement:
         for i in range(40):
             fid = await fact_store.store(
                 subject="bob",
-                predicate="self.has_attribute",
+                predicate="prefers",
                 object=f"detail #{i}: " + ("alpha bravo charlie " * 8),
                 source_interaction_id=f"i{i}",
                 asserted_at=ts + i,
@@ -462,6 +462,38 @@ class TestTierProvenance:
         admitted_facts = budget.admissions_by_tier("facts")
         # Both fact_ids must appear in admission order.
         assert set(admitted_facts) == {fid_1, fid_2}
+
+
+# ─── 6. TICK short-circuit end-to-end DB-cost pin (review M-2) ─
+# Unit pins for ``_subject_seeds`` + ``render_facts_section``
+# phantom-reinforcement guard live in
+# :mod:`tests.unit.python.test_facts_section`.
+
+
+class TestTickEventDoesNotQueryFactStore:
+    async def test_tick_skips_fact_store_recall(
+        self, fact_store: FactStore, empty_episodic: EpisodicMemory,
+    ) -> None:
+        # Seed a self.* row so a regression to "always seed self"
+        # would admit a section — otherwise the pin is vacuous.
+        await fact_store.store(
+            subject="self", predicate="self.has_preference",
+            object="sci-fi", source_interaction_id="i1",
+            asserted_at=1000.0,
+        )
+        original_recall = fact_store.recall
+        recall_spy = AsyncMock(side_effect=original_recall)
+        fact_store.recall = recall_spy  # type: ignore[method-assign]
+        mixin = _wire_mixin(
+            fact_store=fact_store, episodic=empty_episodic,
+            format_query="tick payload",
+        )
+        tick = _make_event(
+            sender_id=None, content="tick payload",
+            event_type=EventType.TICK,
+        )
+        await mixin._inject_memory_context(tick)
+        recall_spy.assert_not_called()
 
 
 if __name__ == "__main__":
