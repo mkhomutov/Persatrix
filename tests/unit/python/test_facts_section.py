@@ -209,6 +209,23 @@ class TestNoPhantomReinforcementOnHeaderDrop:
             "reinforcement write would target a row that never "
             "reached the prompt (PR #342 review M-1)."
         )
+        # PR #342 third-pass review M-1 — pin the documented soft-overage
+        # trade-off.  The fact line admitted into the budget BEFORE the
+        # header was tried, so the budget is now down by the item-line
+        # cost even though the block was dropped.  ``try_add`` has no
+        # rollback seam by design (RFC 0017 §B keeps the greedy
+        # allocator stateless across reverts), so downstream tiers
+        # (episodic, notes) see the reduced ``budget.remaining``.  This
+        # is the deliberate trade-off the ``render_facts_section``
+        # docstring documents — pinning the side-effect here so a
+        # future peek-then-commit refactor surfaces as a deliberate
+        # test update, not silent allocator drift.
+        assert budget.remaining < 8, (
+            "expected the fact-line token cost to remain debited from "
+            "the budget after the dropped-header path; if this passes "
+            "with remaining == 8, the allocator has grown a rollback "
+            "seam — update the docstring and this pin together"
+        )
 
     async def test_first_subject_block_dropped_does_not_strand_admissions(
         self,
@@ -279,6 +296,100 @@ class TestNoPhantomReinforcementOnHeaderDrop:
         # whether siblings admit.
         assert section is None
         assert budget.admissions_by_tier("facts") == []
+
+
+# ─── self-first emit order under tight slice (PR #342 third-pass M-2) ─
+
+
+class TestFirstSubjectBlockSurvivesUnderTightSlice:
+    """Pin the per-block fan-out ordering contract:
+    :func:`render_facts_section` admits blocks in
+    ``groups.items()`` order (which is caller-order from the
+    ``facts`` list).  Under a slice tight enough that only one block
+    fits, the FIRST-ordered subject's block must be the survivor.
+
+    Composes with the
+    :func:`agents.persona_runtime.facts_section._subject_seeds`
+    contract (``self``-first, pinned by
+    :class:`TestSubjectSeedsSenderlessShortCircuit.
+    test_self_and_sender_both_seeded_when_sender_present`) to give the
+    "self survives under budget pressure" guarantee
+    :func:`render_facts_section`'s docstring calls out as load-bearing
+    for :doc:`MT-MEMORY-005
+    <../../../docs/manual-tests/MT-MEMORY-005-dementia-test>` Leg 5.
+
+    Why this is a unit test and not an integration test: the
+    integration suite at
+    :class:`tests.integration.test_facts_reinforcement.
+    TestMultiSubjectSection.test_both_subjects_labelled_in_their_own_block`
+    exercises a loose slice where both blocks admit comfortably, so a
+    regression flipping the fan-out order leaves it green.  A
+    tight-slice integration test would re-test what
+    ``_subject_seeds`` + ``render_facts_section`` already pin at the
+    unit level, and the integration file is bumping the file_size cap.
+    The two unit tests together cover the regression surface:
+
+    * ``_subject_seeds`` returns ``[self, sender]`` (above).
+    * ``render_facts_section`` honors caller order under tight slice
+      (here).
+    """
+
+    async def test_first_block_admits_second_dropped_under_tight_slice(
+        self,
+    ) -> None:
+        """At slice=20 with 7-token lines (verified under tiktoken
+        cl100k_base), the first subject's block admits ~2 rows and
+        the second subject's block is excluded by the outer-loop
+        slice break.  A regression to reversing the iteration order
+        would flip the survivor and fail the section-contents
+        assertions.
+
+        Keep slice value and per-line token cost in sync if either
+        the line format or the inner-loop break condition changes.
+        """
+        from agents.memory.facts import Fact  # noqa: PLC0415
+        from agents.persona_runtime.facts_section import (  # noqa: PLC0415
+            render_facts_section,
+        )
+        from agents.persona_runtime.memory_budget import (  # noqa: PLC0415
+            MemoryBudget,
+        )
+
+        # Caller-order matches the ``_subject_seeds`` contract:
+        # ``self`` rows first, sender rows second.  Each line costs
+        # 7 tokens under cl100k_base.
+        facts = [
+            Fact(
+                fact_id="self-1", agent_id="dementia-agent",
+                subject="self", predicate="self.has_preference",
+                object="sci-fi", certainty=1.0,
+                source_interaction_id="i1", asserted_at=1000.0,
+                last_recalled_at=None, superseded_by=None,
+                session_id="legacy",
+            ),
+        ]
+        for i, pred in enumerate(["prefers", "dislikes", "loves"]):
+            facts.append(Fact(
+                fact_id=f"bob-{i}", agent_id="dementia-agent",
+                subject="bob", predicate=pred,
+                object="something something something something",
+                certainty=1.0, source_interaction_id=f"i{i+2}",
+                asserted_at=1000.0 + i + 1, last_recalled_at=None,
+                superseded_by=None, session_id="legacy",
+            ))
+
+        budget = MemoryBudget(total_tokens=1500)
+        section = render_facts_section(
+            facts, budget, facts_budget_tokens=20,
+        )
+
+        assert section is not None
+        # First-block-survives: the self row reached the prompt;
+        # under reversed iteration the bob block would consume the
+        # 20-token slice with three 7-token rows and the self block
+        # would never be entered.
+        assert "self.has_preference" in section.content
+        assert "sci-fi" in section.content
 
 
 if __name__ == "__main__":

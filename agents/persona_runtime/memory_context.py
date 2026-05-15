@@ -384,7 +384,11 @@ class _MemoryContextMixin:
             if facts_section is not None:
                 self._working_memory.add_section(facts_section)
                 # RFC 0026 PR 4 — use-based reinforcement; failure is
-                # non-fatal (the prompt already shipped).
+                # non-fatal because the section is already staged in
+                # ``_working_memory`` and the caller builds the LLM
+                # prompt after ``_inject_memory_context`` returns
+                # (PR #342 third-pass M-3 — fixes earlier misleading
+                # "prompt already shipped" wording).
                 admitted_fact_ids = budget.admissions_by_tier("facts")
                 if admitted_fact_ids and self._fact_store is not None:
                     try:

@@ -155,11 +155,15 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
     try:
         canonical = canonicalize_subject(sender_id)
     except ValueError:
-        # Defensive: sender_id should already be non-empty per the
-        # truthiness check above, but if a caller injects a payload
-        # that canonicalises to empty (e.g. a string of only Unicode
-        # whitespace), short-circuit to the no-seed path so the
-        # facts tier is consistent with the no-sender branch above.
+        # Defensive forward-guard (PR #342 third-pass review L-2).
+        # ``canonicalize_subject`` currently raises only on empty /
+        # whitespace-only input, which the truthiness check above
+        # already filters — so this branch is unreachable today.
+        # Retained so that future :data:`PREDICATE_ALLOWLIST`-adjacent
+        # validation in ``canonicalize_subject`` (max-length checks,
+        # codepoint allowlist, etc.) cannot crash the persona's hot
+        # path; the facts tier falls back to the no-seed path,
+        # consistent with the no-sender branch above.
         return []
     if canonical == SELF_SUBJECT:
         return [SELF_SUBJECT]

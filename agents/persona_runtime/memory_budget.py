@@ -267,8 +267,8 @@ class MemoryBudget:
         """Register an admitted item against the per-turn provenance log.
 
         Callers invoke this immediately after a successful
-        :meth:`try_add` so the (tier, item_id, tokens_admitted) triple
-        lands on the budget's internal registry.  Two downstream uses:
+        :meth:`try_add` so the admission is captured for two downstream
+        uses:
 
         * :meth:`admissions_by_tier` is read by the facts tier to drive
           :meth:`agents.memory.facts.FactStore.mark_recalled` — the
@@ -276,6 +276,18 @@ class MemoryBudget:
         * When the ``PERSATRIX_MEMORY_PROVENANCE`` env gate is set, the
           same call emits a structured ``persatrix.memory.tier_admitted``
           log record for MT-MEMORY-005 leg-failure analysis (MQ-11).
+
+        Registry shape (PR #342 third-pass review L-1)
+        ----------------------------------------------
+        Only ``item_id`` lands on the in-memory registry — keyed by
+        ``tier``, the per-tier list stores bare ID strings so the facts
+        tier's reinforcement read is a flat ``list[str]``.
+        ``tokens_admitted`` is consumed by the structured-log emission
+        only.  A future caller that needs the per-item token count off
+        the registry will need to widen :attr:`_admissions` to
+        ``dict[str, list[tuple[str, int]]]``; today no caller does, and
+        the bare-string shape keeps :meth:`admissions_by_tier`'s
+        contract narrow.
 
         The env gate scopes only the structured-log emission; the
         in-memory registry is populated unconditionally and

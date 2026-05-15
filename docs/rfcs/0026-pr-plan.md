@@ -1115,18 +1115,131 @@ sequenced individually rather than batched.
   auto-commit per call (`store`, `supersede`, `prune`,
   `delete_by_subject` all commit before returning).  The
   reinforcement write therefore commits at the very end of
-  every `_inject_memory_context` call, after the prompt is
-  built and the section added — a small write-amplification
+  every `_inject_memory_context` call — after the facts
+  section has been added to working memory but before the
+  caller builds the LLM prompt — a small write-amplification
   cost the persona's hot path now pays.  Today's call-site
-  comment makes the trade explicit ("failure is non-fatal —
-  the prompt already shipped"), but the write-cost is
-  unmentioned.  PR 5 decision: calibrate against the MQ-12
+  comment frames the failure as non-fatal because the section
+  is already staged in working memory (so the LLM call still
+  succeeds), but the write-cost is unmentioned.  PR 5 decision:
+  calibrate against the MQ-12
   per-turn-cost budget; if the reinforcement commit shows
   up in the trace, either batch it with a future facts-tier
   write (RFC 0026 OQ #9 operator-seeded path is the most
   natural pair) or expose an explicit
   `FactStore.transaction()` context manager.  No-op if the
   calibration shows the commit is in the noise floor.
+
+##### From PR 4 review — third-pass deferrals
+
+Four low-priority findings from the third deep-review pass
+(PR #342, `d241195`-onward) that did not block merge.  Each
+was small enough that the PR-4 deliverable absorbed the three
+medium findings inline:
+
+* **M-1** — `budget.remaining < 8` assertion added to
+  `TestNoPhantomReinforcementOnHeaderDrop` in
+  [`test_facts_section.py`](../../tests/unit/python/test_facts_section.py),
+  pinning the documented soft-overage trade-off so a future
+  peek-then-commit refactor surfaces as a deliberate test update.
+* **M-2** — `TestFirstSubjectBlockSurvivesUnderTightSlice` added
+  to
+  [`test_facts_section.py`](../../tests/unit/python/test_facts_section.py)
+  (composed with the existing `_subject_seeds` unit pin) for the
+  load-bearing self-first emit ordering claim.  Routed to the unit
+  suite rather than the loose-slice integration pin at
+  [`test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  to keep the integration file under the file_size cap; the
+  integration site carries a pointer note to the unit pin so the
+  next reader finds it.
+* **M-3** — comment correction in
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  reframing the reinforcement-failure rationale around "section
+  is staged in working memory" rather than the stale "prompt
+  already shipped" wording (the prompt is built downstream of
+  `_inject_memory_context`).
+
+And the two zero-risk doc nits:
+
+* **L-1** — registry-shape docstring correction in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py)
+  (the registry stores ``item_id`` only; ``tokens_admitted`` rides
+  the structured-log emission).
+* **L-2** — forward-guard comment in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  re-framing the `_subject_seeds` `except ValueError` as a
+  forward-guard against future `canonicalize_subject` validation
+  rather than a present-day path.
+
+The remaining four ride PR 5.
+
+- **DR3-L-3 — `mark_recalled` ``at=0.0`` and negative ``at``
+  edge cases are uncovered.**  The monotonicity clamp in
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  uses ``MAX(COALESCE(last_recalled_at, 0), ?)``; ``at=0.0``
+  on a NULL column flips the column to 0.0 (a state change),
+  and ``at=-1.0`` collapses to ``MAX(0, -1) = 0`` regardless
+  of existing value.  Neither case is reachable in production
+  (``time.time()`` is monotone non-negative per-process), but
+  the contracts pinned at
+  [`test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
+  `test_older_at_does_not_clobber_newer` / `test_first_call_sets_from_null` /
+  `test_equal_at_is_idempotent` leave a small gap where future SQL
+  evolution could regress silently.  PR 5 decision: parameterise
+  `test_first_call_sets_from_null` over ``[1.0, 0.0]`` and
+  add a one-line ``at=-1.0`` no-op test against an already-
+  populated column.  Low priority — the gap is academic until
+  the OQ #9 operator-seeded-facts path or RFC 0013 erasure
+  backfill starts supplying ``at`` values from sources other
+  than ``time.time()``.
+
+- **DR3-L-4 — `"Known facts about self:"` header label may
+  invite persona-inversion in the LLM's output.**  The header
+  in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  was chosen at PR 3 to avoid the inverse ``"you"`` footgun
+  when both ``self.*`` and sender rows are present.  The
+  literal ``"self"`` label still risks the LLM reading it as
+  a third-party entity called "Self," especially under the
+  multi-block render where both ``"Known facts about self:"``
+  and ``"Known facts about bob:"`` appear side-by-side.  No
+  evidence from the third-pass review that the wording was
+  empirically validated against a real persona — the choice
+  is grounded in the inverse hazard, not in a measured
+  MT-MEMORY-005 pass-rate.  PR 5 decision: spike whether
+  ``"Known facts about you (the persona):"`` or
+  ``"Known facts about yourself:"`` for the ``self`` block (and
+  ``"Known facts about <canonical_sender>:"`` unchanged for the
+  counterparty block) does better than the current header
+  against MT-MEMORY-005 Leg 5 pass rate over a small set of
+  seeded turns.  Defer the change unless the spike shows a
+  measurable improvement — the PR-4 contribution to Leg 5
+  (the seed + the reinforcement write) is the load-bearing fix
+  and the label wording is a follow-on optimisation.
+
+- **DR3-L-5 — `test_admitted_fact_ids_are_recorded_on_budget`
+  uses raw module-attribute mutation with try/finally instead
+  of `pytest.monkeypatch.setattr`.**  The try/finally restore
+  in
+  [`test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  is correct under exceptions, so this is purely stylistic.
+  `monkeypatch.setattr(mc_mod, "MemoryBudget", _CapturingBudget)`
+  would let pytest handle the restore as fixture teardown and
+  drop the explicit dance.  PR 5 decision: refactor when
+  next touching the file.  No standalone PR-5 work item — fold
+  into whichever PR-5 change next edits the test.
+
+- **DR3-L-6 — `facts_section.py` is at 439 lines (88% of the
+  500-line `--strict` cap).**  PR 4's multi-subject fan-out
+  added ~150 lines to
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py);
+  PR 5's deferred items do not touch this file, but PR 6's RFC
+  close + future RFC 0027 §F end-state work may.  PR 5
+  decision: monitor only, no action.  When the file does cross
+  the cap, the natural split mirrors the storage-layer
+  `_facts_audit.py` / `_facts_reinforce.py` carve-outs — pull
+  the `render_facts_section` body (or the per-block staging
+  helpers) into a sibling module.
 
 #### PR checklist
 

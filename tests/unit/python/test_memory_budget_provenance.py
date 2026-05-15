@@ -3,9 +3,11 @@ per-turn tier-provenance instrumentation (RFC 0026 PR 4 — MQ-11).
 
 PR 4 routes every successful :meth:`MemoryBudget.try_add` admission
 through a tier-aware companion call,
-:meth:`MemoryBudget.record_admission`, so the allocator owns a single
-list of ``(tier, item_id, tokens_admitted)`` records per turn.  Two
-consumers ride on this list:
+:meth:`MemoryBudget.record_admission`, so the allocator owns a per-tier
+list of admitted ``item_id`` strings per turn (PR #342 third-pass
+review L-1 — ``tokens_admitted`` is consumed by the structured-log
+emission only, it does not land on the registry).  Two consumers ride
+on this list:
 
 * :doc:`MT-MEMORY-005 dementia test
   <../../../docs/manual-tests/MT-MEMORY-005-dementia-test>`
