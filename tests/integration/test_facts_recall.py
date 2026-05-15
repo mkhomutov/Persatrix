@@ -1,30 +1,21 @@
-"""RFC 0026 PR 3 — FactStore.recall wired into the MemoryBudget allocator.
+"""RFC 0026 — FactStore.recall wired into the MemoryBudget allocator.
 
-Pins the PR 3 deliverables called out in
-:doc:`docs/rfcs/0026-pr-plan.md` §PR 3: the facts tier slots between
-relationship and notes in the canonical cross-RFC priority order, calls
-:meth:`agents.memory.facts.FactStore.recall` for each of ``(sender,
-*mentioned_entities)``, and routes admitted rows through
+Pins the facts tier's recall + admission contracts: the tier slots
+between relationship and notes in the canonical cross-RFC priority
+order, recalls per derived subject, and routes admitted rows through
 :class:`agents.persona_runtime.memory_budget.MemoryBudget` with a
-per-tier floor.  The dementia-test core (fact in turn N injected at turn
-N+1 *without* the subject string appearing in the query) is the
-load-bearing leg of MT-MEMORY-005 and pinned here.
+per-tier floor.  The dementia-test core — a fact stored at interaction
+N injected at N+1 *without* the subject string appearing in the query
+— is the load-bearing leg of MT-MEMORY-005 and pinned here.
 
 Contracts asserted:
 
-* Subject-indexed recall round-trip on a fresh DB.
-* Dementia-test core: a fact stored at interaction N is injected at
-  N+1 even when the next event's natural-language query does not
-  mention the subject string (the dementia test that fails today is
-  the one where ``query`` is a follow-up question that does not name
-  the entity).
-* Tier ordering: facts admitted before notes when the budget is tight.
-* ``memory.facts.enabled: false`` skips the tier entirely; no
-  ``agent.facts.injected`` increment.
-* RFC 0017's 1500-token allocator cap still holds with the facts tier
-  wired in.
-* Per-tier header tokens are charged against the budget (PR 3 review
-  precedent — the prepended header is not free).
+* Subject-indexed recall round-trip; dementia-test core injection.
+* Tier ordering — both the ``add_section`` call sequence and the
+  ``build_context`` priority-sorted render order (PR 5d).
+* ``memory.facts.enabled: false`` skips the tier; no counter tick.
+* RFC 0017's 1500-token allocator cap holds with the tier wired in.
+* Per-tier header tokens are charged against the budget.
 """
 
 from __future__ import annotations
@@ -219,38 +210,42 @@ class TestDementiaCore:
 # ─── 3. Tier ordering: facts before notes ──────────────────
 
 
+async def _seed_three_tier_mixin(
+    fact_store: FactStore, episodic: EpisodicMemory,
+) -> _ConcreteMemoryMixin:
+    """Seed one fact + one note + a relationship summary and wire a
+    mixin so the relationship / facts / notes tiers all admit — shared
+    setup for the two tier-ordering pins below.
+    """
+    await fact_store.store(
+        subject="bob", predicate="prefers", object="tea",
+        source_interaction_id="i1", asserted_at=time.time(),
+    )
+    await episodic.store_note(
+        topic="rollout", content="bob asked about rollout planning",
+    )
+    rel = _FakeRelSummary(
+        other_participant_id="bob", other_participant_type="user",
+        interaction_count=3, trust_score=0.6,
+        notes="bob is detail-focused",
+        last_interaction_at=time.time() - 60,
+        first_interaction_at=time.time() - 3600,
+    )
+    return _wire_mixin(
+        fact_store=fact_store, episodic=episodic, rel=rel,
+        format_query="rollout",
+    )
+
+
 class TestTierOrdering:
     async def test_facts_admitted_before_notes_section_added(
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
     ) -> None:
-        """The five-tier order matches RFC 0027 §F end-state:
-        relationship → channel_history → facts → episodic → notes.
-
-        Pinned via the ``add_section`` call sequence; the facts
-        section must be added between relationship_context and
-        recent_notes.
+        """Insertion-order pin: ``add_section`` is called for the facts
+        section between ``relationship_context`` and ``recent_notes``.
+        The rendered prompt order is pinned separately below.
         """
-        await fact_store.store(
-            subject="bob", predicate="prefers", object="tea",
-            source_interaction_id="i1", asserted_at=time.time(),
-        )
-        await empty_episodic.store_note(
-            topic="rollout", content="bob asked about rollout planning",
-        )
-
-        rel = _FakeRelSummary(
-            other_participant_id="bob",
-            other_participant_type="user",
-            interaction_count=3,
-            trust_score=0.6,
-            notes="bob is detail-focused",
-            last_interaction_at=time.time() - 60,
-            first_interaction_at=time.time() - 3600,
-        )
-        mixin = _wire_mixin(
-            fact_store=fact_store, episodic=empty_episodic, rel=rel,
-            format_query="rollout",
-        )
+        mixin = await _seed_three_tier_mixin(fact_store, empty_episodic)
 
         order: list[str] = []
         real_add = mixin._working_memory.add_section
@@ -261,18 +256,41 @@ class TestTierOrdering:
 
         mixin._working_memory.add_section = _record  # type: ignore[assignment]
 
-        event = _make_event(sender_id="bob", content="rollout")
-        await mixin._inject_memory_context(event)
+        await mixin._inject_memory_context(
+            _make_event(sender_id="bob", content="rollout"),
+        )
 
-        # The facts section must sit between relationship_context and recent_notes.
-        assert "facts_context" in order
-        assert "relationship_context" in order
-        assert "recent_notes" in order
         rel_idx = order.index("relationship_context")
         facts_idx = order.index("facts_context")
         notes_idx = order.index("recent_notes")
+        assert rel_idx < facts_idx < notes_idx, f"tier order drifted: {order}"
+
+    async def test_facts_rendered_between_relationship_and_notes(
+        self, fact_store: FactStore, empty_episodic: EpisodicMemory,
+    ) -> None:
+        """Render-order pin (PR 5d).  The insertion-order test above
+        pins the ``add_section`` call sequence; the prompt the LLM sees
+        is ``build_context``'s priority-sorted output.  ``facts``
+        (priority 7) ties with ``channel_history`` / ``episodic``, so
+        the insertion pin matches the prompt only by stable-sort
+        coincidence — a ``FACTS_SECTION_PRIORITY`` nudge would leave it
+        green while flipping the prompt.  Pins the rendered boundary:
+        relationship (8) → facts (7) → notes (6).
+        """
+        mixin = await _seed_three_tier_mixin(fact_store, empty_episodic)
+        await mixin._inject_memory_context(
+            _make_event(sender_id="bob", content="rollout"),
+        )
+
+        rendered = [
+            entry["role"]
+            for entry in mixin._working_memory.build_context()
+        ]
+        rel_idx = rendered.index("relationship_context")
+        facts_idx = rendered.index("facts_context")
+        notes_idx = rendered.index("recent_notes")
         assert rel_idx < facts_idx < notes_idx, (
-            f"tier order drifted: {order}"
+            f"rendered tier order drifted: {rendered}"
         )
 
 

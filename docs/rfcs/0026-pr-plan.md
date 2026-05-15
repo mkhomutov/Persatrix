@@ -680,130 +680,85 @@ render defensive fixes) and PR 5d (tests + counter polish):
   — four cases plus `test_source_interaction_id_traversal_not_canonicalised`,
   which proves the UUID column is not casefolded.
 
-**Remaining for PR 5d** — `feature/v031-rfc0026-followups-pr3b`:
+**Shipped in PR 5d** — `feature/v031-rfc0026-followups-pr3b`:
 
-- **`agent.facts.injected` overcount when the section is dropped on
-  header admission failure.** PR 3 increments the
-  `agent.facts.injected` counter inside the per-item budget loop in
-  [`render_facts_section`](../../agents/persona_runtime/facts_section.py),
-  but the section is only added to working memory if the
-  `"Known facts about {subject}:\n"` header *also* admits — and the
-  header `try_add` runs **after** the loop.  When the per-item
-  passes drain the budget to `<= MIN_TOKENS_FACTS` and the header
-  subsequently fails admission, the function returns `None`, no
-  section reaches the prompt, but the counter has already ticked
-  once per admitted item — silently violating the docstring
-  contract ("counter reflects what reached the prompt, not what
-  the recall layer returned") inherited from PR #260 review M-1.
-  Latent today because the relationship + channel_history tiers
-  rarely leave the global allocator close enough to its floor for
-  the header pass to fail.  Two implementation options to pick in
-  PR 5 review:
-  1. **Reserve the header tokens up-front.** Move the header
-     `try_add` to *before* the per-item loop; if the header itself
-     cannot be admitted, return `None` immediately with no
-     counter writes and no items consumed.  Aligns the
-     cost-attribution order with the read order of the rendered
-     section.  Cost: the per-tier soft-slice
-     (`facts_budget_tokens`) accounting becomes slightly
-     trickier — the header eats a slice the items had counted on.
-  2. **Defer the counter writes until after `add_section`
-     succeeds.** Keep a local pre-add tally inside the function
-     and emit one `facts_injected.add(N, ...)` call after the
-     header lands.  Keeps the per-item ordering as-is; trades one
-     batched `add(N)` for N individual `add(1)` calls (no
-     observable behaviour change for OpenTelemetry counter
-     semantics).  Pairs naturally with PR 4's tier-provenance
-     instrumentation since it already needs to record admitted
-     items in a structured shape.
-  Test pin should pre-fill `MemoryBudget` so the loop admits N
-  fact lines but leaves no room for the header, then assert
-  `counter_total(reader, "agent.facts.injected") == 0` *and*
-  `get_section("facts_context") is None`.
+PR 5d is a test-hardening + counter-polish slice — it adds three
+regression pins and one comment fix, with **no production behaviour
+change** (`facts_section.py` is untouched).  The PR 3-review items
+deferred here resolve as follows:
 
-- **`self.*` subject seed — extend `_subject_seeds` to include
-  `"self"`.** PR 2's extractor can write `subject="self"` rows
-  for the OQ #10 introspection predicates
-  (`self.has_preference`, `self.holds_value`, `self.committed_to`,
-  `self.has_attribute`); PR 3's `_subject_seeds` derives seeds
-  only from `event.sender_id`, so introspective facts are
-  write-only until the seed list grows.  The seam in
-  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
-  is narrow (a one-line append in `_subject_seeds`), but the
-  feature sequences naturally with PR 4's reinforcement /
-  retraction work because the `last_recalled_at` write must fire
-  on `"self"` rows too for the MT-MEMORY-005 Leg 5
-  (self-consistency) outcome to flip green.  Per the PR 4 scope
-  table below, this PR formally moves "self-subject seed" into
-  PR 4 acceptance.  Pinned by an explicit test that stores a
-  `self.has_preference` row and asserts it admits at the next
-  event with the same agent.
+- **`agent.facts.injected` overcount on header drop — regression
+  pinned.**  PR 3 ticked the counter inside the per-item budget loop
+  in [`render_facts_section`](../../agents/persona_runtime/facts_section.py),
+  before the per-subject header's `try_add`; a subsequently dropped
+  header returned `None` with the counter already ticked once per
+  admitted item — violating the PR #260 review M-1 contract ("the
+  counter reflects what reached the prompt, not what the recall layer
+  returned").  The *fix* already landed in **PR 4**: the M-1
+  phantom-reinforcement guard moved both the registry
+  `record_admission` **and** the `facts_injected` telemetry write
+  into the post-header `pending` commit loop — effectively option (2)
+  of the two the plan offered (defer the counter writes until the
+  header admits).  PR 5d adds the regression pin that fix lacked:
+  `TestNoCounterOvercountOnHeaderDrop.test_facts_injected_counter_zero_when_header_dropped`
+  in [`test_facts_section.py`](../../tests/unit/python/test_facts_section.py)
+  initialises an in-memory OTEL reader, drives the same tight-budget
+  header-drop path as `TestNoPhantomReinforcementOnHeaderDrop`, and
+  asserts `counter_total(reader, "agent.facts.injected") == 0` with
+  `section is None`.  Verified to bite by mutation (counter write
+  re-added to the per-item loop → red).
 
-- **`tier="facts"` counter attribute is a constant in PR 3.**
-  Every `agent.facts.injected` increment carries the same
-  `tier="facts"` value — the dimension adds zero cardinality at
-  Phase 1.  The justification at
-  [`agents/observability/_metrics_facts.py`](../../agents/observability/_metrics_facts.py)
-  is forward-compat with PR 4's per-turn tier-provenance
-  dashboard, which adds `tier=` to the other tier counters
-  (`agent.episodic.retrieved`, `agent.notes.injected`, …) so they
-  all join on the same attribute key.  PR 5 picks one:
-  1. **Add a one-line comment naming PR 4 as the consumer** so a
-     future operator reading the metric definition does not
-     assume the attribute is alive.  Keeps the forward-compat
-     surface intact at zero behaviour cost.
-  2. **Drop the attribute until PR 4 emits the second value.**
-     Cleaner Phase-1 surface; PR 4 re-adds the attribute when
-     it acquires meaningful cardinality.  Risk: dashboards
-     written against `tier="facts"` between PR 3 and PR 4 break
-     when the attribute reappears with a different lineage.
-  Default in absence of operator demand: option (1).
+- **`self.*` subject seed — already shipped in PR 4.**  PR 4's M-2
+  finding made `_subject_seeds` return `[SELF_SUBJECT, sender]` for
+  sender-bearing events, so introspective `self.*` rows admit at
+  recall time.  No residual code work for PR 5d; the sender-less
+  short-circuit it introduced is pinned by the negative-path test
+  below.
 
-- **Negative-path test coverage in
-  [`tests/integration/test_facts_recall.py`](../../tests/integration/test_facts_recall.py).**
-  PR 3 ships 9 tests (post-M-2 fold-in), covering the happy
-  paths and the dementia-core leg, but three negative-path
-  branches are unpinned:
-  1. **`fact_store.recall` raises.** `recall_facts_for_event`
-     catches `Exception`, logs `WARNING`, and returns `[]` —
-     the log-and-continue idiom that parallels the relationship
-     and episodic tiers.  Both tiers have explicit negative-path
-     tests; the facts tier does not.  Add a test with
-     `AsyncMock(side_effect=RuntimeError(...))` and assert the
-     section is absent and the dementia-core invariant on other
-     events is unaffected.
-  2. **TICK / orchestrator event with no sender.**
-     `_subject_seeds` returns `[]` when `event.sender_id` is
-     `None` / empty / whitespace-only; `recall_facts_for_event`
-     short-circuits.  Pin with an explicit `sender_id=None`
-     event.
-  3. **Header-dropped case** (pairs with the M-1 follow-up
-     above) — also pins the counter-overcount regression.
+- **`tier="facts"` counter attribute — comment polished (option
+  (1)).**  The attribute is a single-valued constant at v0.3.1 (zero
+  added cardinality).  PR 4 shipped per-turn tier provenance as the
+  in-process `MemoryBudget.admissions_by_tier` registry, **not** as
+  an OTEL attribute join — no sibling counter (`agent.episodic.*`,
+  `agent.notes.*`) carries `tier=`.  The registration comment in
+  [`_metrics_facts.py`](../../agents/observability/_metrics_facts.py)
+  is updated to state the attribute is a forward-compat placeholder
+  and to name the registry as PR 4's actual provenance surface, so a
+  future operator does not assume the dimension is live.  Option (2)
+  (drop the attribute) was rejected: the description string already
+  documents `tier`, and dropping then re-adding it risks the
+  dashboard-lineage break the plan flagged.
 
-- **`TestTierOrdering` asserts `add_section` call order, not the
-  rendered prompt order.** The test wraps `add_section` and
-  asserts the call sequence is `relationship → facts → notes`.
-  That validates the allocate-loop's insertion order, but the
-  actual prompt order is determined by
-  `WorkingMemory.build_context`'s stable sort by `priority`
-  (descending).  Today facts (7), channel_history (7), and
-  episodic (7) share priority and Python's stable sort breaks
-  ties on insertion order, so the test invariant matches the
-  prompt output by happy coincidence.  If a future PR nudges
-  `FACTS_SECTION_PRIORITY` to 6, the existing test still passes
-  but the prompt order silently flips facts below notes — a
-  regression the dementia-core leg would catch only on the
-  Mira-style follow-up where notes prose displaces a fact.
-  Either:
-  1. **Assert against `_working_memory.build_context()` output**
-     so the priority sort is exercised end-to-end.
-  2. **Add a second test that snapshots `build_context()`** and
-     pins the rendered tier order at the prompt boundary; keep
-     the existing `add_section` test as a separate insertion-
-     order pin.
-  Default: option (2) — the two contracts (allocate order vs
-  render order) are distinct and worth pinning separately so a
-  future regression report points at the right layer.
+- **Negative-path test coverage.**  Of the three branches the plan
+  enumerated: (1) **`fact_store.recall` raises** — already pinned by
+  PR 5c's
+  `TestRecallFactsForEventSignature.test_helper_logs_agent_id_from_store_on_failure`
+  (`AsyncMock(side_effect=RuntimeError(...))`, asserts `[]` + WARNING
+  log); (2) **sender-less event** — PR 5d adds
+  `TestRecallFactsForEventNoSenderShortCircuit.test_no_sender_event_skips_recall_entirely`,
+  a helper-level pin that `recall_facts_for_event` issues zero
+  `FactStore.recall` round-trips for a `sender_id=None` event
+  (complements the `_subject_seeds`-level
+  `TestSubjectSeedsSenderlessShortCircuit` and the integration-level
+  `TestTickEventDoesNotQueryFactStore`); (3) **header-dropped case**
+  — satisfied jointly by PR 4's `TestNoPhantomReinforcementOnHeaderDrop`
+  (registry side) and PR 5d's counter pin above (telemetry side).
+
+- **`TestTierOrdering` render-order pin (option (2)).**  The existing
+  `test_facts_admitted_before_notes_section_added` asserts the
+  `add_section` *call* order, which matches the rendered prompt only
+  by stable-sort coincidence — facts / channel_history / episodic all
+  share priority 7.  PR 5d adds
+  `test_facts_rendered_between_relationship_and_notes` in
+  [`test_facts_recall.py`](../../tests/integration/test_facts_recall.py),
+  which snapshots `WorkingMemory.build_context()` and pins the
+  rendered boundary `relationship_context` (8) → `facts_context` (7)
+  → `recent_notes` (6).  The shared three-tier setup is extracted to
+  a `_seed_three_tier_mixin` helper so both pins read off one
+  fixture; the existing `add_section` test is kept as the distinct
+  insertion-order pin.  Verified to bite by mutation
+  (`FACTS_SECTION_PRIORITY` nudged to 5 → render-order pin red while
+  the insertion-order pin stays green).
 
 ##### From PR 4 review
 
@@ -1305,8 +1260,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ✅ Merged | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | 2026-05-15 |
 | 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | ✅ Merged | [#344](https://github.com/mkhomutov/Persatrix/pull/344) | 2026-05-15 |
 | 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ✅ Merged | [#345](https://github.com/mkhomutov/Persatrix/pull/345) | 2026-05-15 |
-| 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | 🔀 PR open | — | — |
-| 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ⬜ Not started | — | — |
+| 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ✅ Merged | [#346](https://github.com/mkhomutov/Persatrix/pull/346) | 2026-05-15 |
+| 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | 🔀 PR open | — | — |
 | 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 
