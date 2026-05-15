@@ -34,6 +34,7 @@ from .fact_extractor import (
     FactsParseError,
     build_combined_prompt_suffix,
     dispatch_facts_from_response,
+    emit_envelope_parse_failed,
     split_combined_response,
 )
 
@@ -162,12 +163,7 @@ async def summarize_closed_interaction(
         summary, facts_raw = split_combined_response(text)
     except FactsParseError as exc:
         if exc.reason is not None:
-            inst = try_get_instruments()
-            if inst is not None:
-                inst.facts_envelope_parse_failed.add(1, {
-                    "agent.id": current_agent_id(),
-                    "reason": exc.reason,
-                })
+            emit_envelope_parse_failed(exc.reason)
         return (text, False, None)
     # PR #340 deep-review S2: a well-formed envelope with an empty
     # ``summary`` field parses cleanly today and commits ``""`` to
@@ -417,13 +413,14 @@ async def finalize_closed_interaction(
         # the audit ordering matches the data ordering: summary
         # always exists before any facts.store row pointing back at
         # this ``interaction_id``.  Per-tuple failures (allowlist
-        # miss, missing field, certainty range) are caught inside
-        # :func:`store_extracted_facts` and increment
-        # ``agent.facts.extraction_failed`` — one bad tuple does
-        # not drop the rest of the batch.  An *envelope* parse
-        # failure on the facts half is caught here and bumps the
-        # same counter once (RFC 0026 §Phase 1 step 4 rollback —
-        # summary commits, facts do not).
+        # miss, missing field, certainty range) increment
+        # ``agent.facts.extraction_failed`` inside
+        # :func:`store_extracted_facts` — one bad tuple does not drop
+        # the rest of the batch.  Inner facts-list parse failure
+        # bumps the same counter once inside
+        # :func:`dispatch_facts_from_response`.  Outer-envelope parse
+        # failures are a distinct signal (``envelope_parse_failed``,
+        # RFC 0026 PR 5b) emitted at the split catch above.
         if (
             not summary_failed
             and facts_raw is not None

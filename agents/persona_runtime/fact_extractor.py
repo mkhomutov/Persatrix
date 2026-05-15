@@ -67,6 +67,7 @@ __all__ = [
     "FactsParseError",
     "build_combined_prompt_suffix",
     "dispatch_facts_from_response",
+    "emit_envelope_parse_failed",
     "parse_facts_payload",
     "split_combined_response",
     "store_extracted_facts",
@@ -342,6 +343,24 @@ def _emit_extraction_failed(count: int) -> None:
         if inst is not None:
             inst.facts_extraction_failed.add(
                 count, attributes={"agent.id": current_agent_id()},
+            )
+
+
+def emit_envelope_parse_failed(reason: str) -> None:
+    """Increment ``agent.facts.envelope_parse_failed{reason=...}`` (RFC 0026 PR 5b).
+
+    Public so the catch site in
+    :func:`agents.persona_runtime.summarize_close.summarize_closed_interaction`
+    can call without a leading-underscore import; suppressed so a
+    metrics-backend hiccup cannot propagate back into the close path
+    (parity with :func:`_emit_extraction_failed`).
+    """
+    with contextlib.suppress(Exception):
+        inst = try_get_instruments()
+        if inst is not None:
+            inst.facts_envelope_parse_failed.add(
+                1,
+                attributes={"agent.id": current_agent_id(), "reason": reason},
             )
 
 

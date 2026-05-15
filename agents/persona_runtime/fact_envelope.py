@@ -32,15 +32,24 @@ class FactsParseError(ValueError):
     summary + facts pair, or when the facts payload is not a list of
     dict tuples.
 
-    The caller commits the summary half (when available) and
-    increments ``agent.facts.extraction_failed`` — RFC 0026 §Phase 1
-    step 4 rollback policy.
+    Two raise sites; each routes to a distinct counter:
 
-    ``reason`` (PR 5b) routes to the new
-    ``agent.facts.envelope_parse_failed`` counter:
+    * :func:`split_combined_response` — outer envelope failure.  The
+      caller in :mod:`agents.persona_runtime.summarize_close` reads
+      ``reason`` and (when non-``None``) increments
+      ``agent.facts.envelope_parse_failed`` — the entire facts batch
+      is lost and the raw text commits as the summary.
+    * :func:`parse_facts_payload` — inner facts-list failure.  The
+      caller in :func:`agents.persona_runtime.fact_extractor.dispatch_facts_from_response`
+      increments ``agent.facts.extraction_failed`` once; ``reason``
+      stays ``None`` because the partition only matters at the
+      outer envelope.
 
-    * ``None`` — plain-prose backward-compat / empty input.  Counter
-      stays quiet (the empty path is already signalled upstream on
+    ``reason`` value semantics (only set by the outer-envelope path):
+
+    * ``None`` — plain-prose backward-compat / empty input / inner
+      facts-list failure.  Counter stays quiet (the empty path is
+      already signalled upstream on
       ``agent.interactions.summary.failed{reason=empty}``).
     * ``"truncated"`` — text starts with ``{``/``[`` but JSON parsing
       fails — the motivating case under the combined-prompt
@@ -75,9 +84,11 @@ def split_combined_response(raw: str) -> tuple[str, str]:
     ``[]`` so the LLM can omit the key on short interactions.
 
     PR 5b — the raised :class:`FactsParseError` carries a ``reason``
-    slot so the caller can route the four failure shapes to distinct
-    counter buckets (or skip the counter entirely on the plain-prose
-    backward-compat path).
+    slot so the caller can route the three observable failure shapes
+    (``truncated`` / ``missing_summary`` / ``invalid_envelope``) to
+    distinct counter buckets, plus a silent backward-compat path
+    (``reason=None``) for plain prose / empty input where the counter
+    stays quiet.
     """
     text = (raw or "").strip()
     if not text:
