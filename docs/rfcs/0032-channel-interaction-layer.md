@@ -18,7 +18,7 @@ depends_on:
 # RFC 0032 — Wire-Level Channel Interaction Layer and Chat-Façade Unification
 
 **Type**: architecture
-**Status**: 📝 Draft (stub)
+**Status**: 🔨 Draft (stub)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
 **Target**: v0.4.0+
@@ -152,7 +152,7 @@ RFC 0020 §A defines `Interaction` as the unit of summarization, episodic storag
 - **Cross-participant disagreement.** Two agents on the same DM may close their local interactions at different turns. The wire-level `interaction_id` does not force them to agree on lifecycle — agents may still close locally early — but it gives a shared anchor for cross-agent correlation (relationship memory, structured logs, OTEL spans).
 - **Group-channel topic-shift (RFC 0020 §G's deferred item).** With a wire identifier, topic-shift becomes "router rolls the `interaction_id` over." Agents observe the change and close their local interactions in response, rather than each detecting topic-shift independently from their own message buffers.
 
-The per-agent `interactions` table from [RFC 0020 §D](0020-interaction-lifecycle.md) gains a foreign-key-style reference to the wire `interaction_id` so that recall and reflection can cross-reference. Final shape pending OQ 6.
+Pending **OQ 3** resolution, the per-agent `interactions` table from [RFC 0020 §D](0020-interaction-lifecycle.md) either gains a cross-reference column to the wire `interaction_id` (two-distinct-ids branch — wire id and agent-local id linked) or simply carries the wire value in its existing `interaction_id` column (one-id branch — same value flows wire→agent). Either way, recall and reflection can cross-reference. **OQ 6** commits the column shape once OQ 3 lands.
 
 ---
 
@@ -225,13 +225,13 @@ Estimates are structural, not commitments — they shift with OQ resolutions.
 
 ## Decision / Next Steps
 
-This RFC is **📝 Draft (stub)**. Before moving to `📋 Proposed`:
+This RFC is **🔨 Draft (stub)**. Before moving to `📋 Proposed`:
 
 1. Resolve **Open Question 1** (chat façade fate). This determines whether the RFC is additive (3a) or deprecating (3b) and re-shapes the phased plan accordingly.
 2. Resolve **Open Question 2** (field name). Touches every wire surface.
 3. Confirm **Open Question 3** (wire-id ↔ RFC 0020 per-agent id relationship) with the memory subsystem owner. Composes with [RFC 0029](0029-personal-society-storage-split.md) facade signatures.
 
-Open Questions 4–7 may be resolved during phased-implementation review without blocking proposal.
+Open Questions 4–7 may be resolved during phased-implementation review without blocking promotion to `📋 Proposed`. Note that OQ 4 (generator/identifier shape) and OQ 7 (historical-row migration) gate **Phase 1 implementation** even though they do not gate proposal — they must land before Phase 1 ships, not before the document promotes.
 
 This stub does not commit to wire field numbers, schema deltas, or migration sequencing. Once OQs 1–3 resolve, this document is rewritten as a full proposal with the canonical phased plan.
 
