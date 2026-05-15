@@ -488,10 +488,13 @@ v0.3.1.
    filters on `event.channel_id` only; rows are admitted regardless of
    `chat_session_id` or `persatrix_session_id`. Justification:
    - **Policy anchor.** [RFC 0031 PR plan §OQ #1 resolution 1a](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)
-     positions Phase 1's session columns as **operational hygiene**
-     (test-run isolation + future recall scoping), not a
-     **prompt-content privacy boundary**. The Conversation Window
-     follows the policy: no prompt-content filter is required.
+     records single-session default-recall semantics as a Phase-2
+     load-bearing decision and explicitly notes "Phase 1 lands no
+     recall changes; the resolution is informational here." RFC 0031
+     Phase 1 is column-add only, so no prompt-content privacy contract
+     attaches to the session columns in v0.3.1. The Conversation Window
+     is free to ignore them in Phase 1; no prompt-content filter is
+     required.
    - **User-visible continuity.** Restarting `bin/persatrix chat` on a
      DM channel under a fresh `PERSATRIX_SESSION_ID` should preserve
      in-channel transcript continuity — the channel is the durable
