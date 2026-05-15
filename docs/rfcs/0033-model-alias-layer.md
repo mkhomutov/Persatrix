@@ -40,6 +40,7 @@ depends_on:
   - [G. Telemetry](#g-telemetry)
   - [H. Multi-Provider Extensibility](#h-multi-provider-extensibility)
   - [I. Retirement of `_infer_provider`](#i-retirement-of-_infer_provider)
+  - [J. Persona and Sub-Agent Model Selection](#j-persona-and-sub-agent-model-selection)
 - [Security Considerations](#security-considerations)
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
@@ -246,6 +247,47 @@ No heuristic-table maintenance, no per-vendor string-prefix rules, no `_infer_pr
 
 The string-prefix routing heuristic at [`agents/llm_client.py:232-244`](../../agents/llm_client.py) is preserved only for the duration of the raw-ID pass-through (§E). When raw-ID usage drops to zero (measured by the startup deprecation warning counter), the heuristic and the `provider_inference` config block are removed in a follow-up PR. Removal is **not** gated by a calendar date — it's gated by observed traffic.
 
+### J. Persona and Sub-Agent Model Selection
+
+Personas, task agents, and code-spawned sub-agents pick their model through three distinct paths today. All three converge on the alias surface under this RFC:
+
+**1. Personas and task agents — uniform schema.** Personas live in [`config/agents.yaml`](../../config/agents.yaml) as entries with `type: "persona"` alongside `type: "task"` entries; both carry a top-level `model:` field with identical semantics ([`config/agents.yaml:98`](../../config/agents.yaml) `ember-owl` persona vs [`config/agents.yaml:11`](../../config/agents.yaml) `planner` task agent). **The `model:` field on any agent entry accepts an alias.** No type-level distinction. The resolver doesn't know or care whether the caller is a persona or a task agent — it returns the same `ResolvedModel` either way. Phase 1's sweep of `agents.yaml` covers both kinds of entries with one pass.
+
+**2. Operators who want persona-specific knobs use alias naming, not schema.** If an operator wants a distinct dial for personas (e.g., "personas should run on a chattier model than task agents"), they declare a `persona-default` alias in `models.aliases` and reference it from persona entries:
+
+```yaml
+# config/optimization.yaml
+models:
+  aliases:
+    quality:         { provider: anthropic, model: claude-sonnet-4-6, ... }
+    persona-default: { provider: anthropic, model: claude-sonnet-4-6, input_per_1m_tokens: 3.00, output_per_1m_tokens: 15.00 }
+    # ^ Today identical to `quality`; the operator can pivot one without affecting the other.
+
+# config/agents.yaml
+agents:
+  - id: "ember-owl"
+    type: "persona"
+    model: persona-default      # operator chose a dedicated knob
+```
+
+The alias map has no special "persona" type — it's pure data. This keeps the schema uniform and the indirection composable.
+
+**3. Code-spawned sub-agents — drop the literal default.** [`SubAgentRequest.model`](../../agents/persona_types.py) at line 118 currently carries a hardcoded vendor ID as a dataclass default. This is the *only* code-level model literal in the runtime; every other reference flows through config. Phase 1 changes it to:
+
+```python
+@dataclass
+class SubAgentRequest:
+    ...
+    model: str | None = None     # was: "claude-sonnet-4-20250514"
+    ...
+```
+
+The sub-agent factory resolves `None` at construction time to the active profile's `default.model_routing.defaults.sub_agents` alias (today's literal value migrates to the alias `quality` in the same PR — see §D). Callers that want a specific model can still pass an alias string (`SubAgentRequest(..., model="fast")`), but the *default* lives in config alongside every other routing knob. After Phase 1, the runtime carries zero hardcoded vendor model IDs.
+
+**Why not introduce a persona-only `behavior.model` field?** Two reasons. First, the existing `model:` at agent-entry top level already covers it — adding a second knob doubles the surface for no new capability. Second, it would break the "one source of truth per agent" principle: which wins, top-level `model:` or `behavior.model`? Resolving that requires precedence rules that the uniform-field design avoids entirely.
+
+**Open Question** (added to the OQ section): should the **active profile** (cost / speed / quality / simulation per [`config/optimization.yaml:5`](../../config/optimization.yaml)) be able to override the alias a persona declares? E.g., if `ember-owl` declares `model: quality` but the operator sets `active_profile: cost_optimized`, does the persona silently downgrade? Tentative answer for Phase 1: **no override** — agent-declared aliases are authoritative; profiles only control the resolver's *defaults* table (the values referenced when an entry says `task_agents` / `sub_agents` / `evaluators`). Persona-by-persona profile overrides can layer in later if dogfood demands.
+
 ## Security Considerations
 
 - **No new attack surface.** The alias map is a config file like any other; it doesn't introduce new network egress, new credential flows, or new permission gates.
@@ -265,9 +307,10 @@ Each phase ships as an independent PR under the v0.3.x umbrella, branch prefix `
 2. `config/optimization.yaml` — add `models.aliases` block with `quality`, `fast`, `summarizer` entries pointing at `claude-sonnet-4-6` / `claude-haiku-4-5-20251001`; bump `schema_version` to `"0.2"`.
 3. [`agents/llm_client.py`](../../agents/llm_client.py) `create_provider` — return `(provider, physical_model)` tuple, consume `resolve()` output.
 4. Update all `create_provider` call sites to use the returned physical model.
-5. Migrate [`config/agents.yaml`](../../config/agents.yaml) (6 entries) and [`agents/persona_types.py:118`](../../agents/persona_types.py) default to use aliases. The Anthropic Sonnet 4 → 4.6 migration is **absorbed by changing only the `quality` alias entry's `model:` field** — no per-agent sweep.
-6. Unit tests for the resolver (alias hit, raw-ID fallthrough, deprecation warning emission).
-7. Deprecation warning at startup if any agent config uses a raw vendor model ID.
+5. Migrate [`config/agents.yaml`](../../config/agents.yaml) (6 entries — covers both `type: task` and `type: persona`; see §J) to alias references. The Anthropic Sonnet 4 → 4.6 migration is **absorbed by changing only the `quality` alias entry's `model:` field** — no per-agent sweep.
+6. Drop the hardcoded vendor ID from [`agents/persona_types.py:118`](../../agents/persona_types.py): `SubAgentRequest.model: str | None = None`; the sub-agent factory resolves `None` to the active profile's `default.model_routing.defaults.sub_agents` alias at construction time (§J). After Phase 1, no runtime code carries a literal vendor model ID.
+7. Unit tests for the resolver (alias hit, raw-ID fallthrough, deprecation warning emission) and for the sub-agent factory's `None`-default resolution path (§J).
+8. Deprecation warning at startup if any agent config uses a raw vendor model ID.
 
 **Dependencies**: none external. Sits between RFC 0026 PRs in flight; no shared files.
 
@@ -345,6 +388,8 @@ Protos: **no change** — wire format unchanged.
 5. **Operator override at run time?** Currently agents declare their model in YAML; there's no runtime override. Out of scope.
 
 6. **Should Phase 1 include a CI lint that fails on new raw-ID introductions in `agents.yaml`?** Arguably yes — it prevents regression during the Phase 1 → Phase 2 window. **Tentative**: include in Phase 1.
+
+7. **Should `active_profile` override per-agent aliases?** §J's tentative position is *no* — agent-declared aliases are authoritative; profiles only swap the routing-table defaults (the values referenced when an entry uses `task_agents` / `sub_agents` / `evaluators`). A persona that explicitly declares `model: quality` runs on `quality` regardless of whether the active profile is `cost_optimized` or `quality_optimized`. Revisit if dogfood shows operators want a per-profile downgrade knob (e.g., "save money on a side branch by demoting personas to `fast`").
 
 ## Decision / Next Steps
 
