@@ -77,6 +77,19 @@ they belong semantically.
 ISSUE-0052 is the operational report; this RFC is the proper fix that
 closes it.
 
+> **Terminology.** This RFC's title uses "Conversational Working Memory"
+> as the human-readable description of the defect class, but the
+> canonical project term for the live in-channel transcript surfaced
+> through the LLM `messages` array is **Conversation Window**
+> ([glossary](../ai-glossary.md#conversation-window)). The remainder of
+> this document and the per-RFC PR plan use "Conversation Window" for
+> the runtime concept. The phrase "working memory" elsewhere in the
+> codebase refers to the in-RAM bridged memory tier
+> ([Memory](../ai-glossary.md#memory) /
+> [Scratchpad](../ai-glossary.md#scratchpad-memory-tier)) and is
+> deliberately kept out of the runtime module name
+> (`conversation_window.py`) to avoid the collision.
+
 ## Motivation
 
 ### The defect
@@ -258,6 +271,16 @@ synthetic prior turns past the wrapper. The wrapper escapes the
 literal in replayed content before wrapping, identical to today's
 single-event path.
 
+**Verified against current code (2026-05-15).** The escape lives at
+[`agents/persona_runtime/prompt_assembly.py` lines 355–362](../../agents/persona_runtime/prompt_assembly.py#L355-L362)
+inside the `EventType.CHANNEL_MESSAGE` branch of `_format_event`:
+`safe_content = content.replace("<|", "\\<|").replace("|>", "\\|>")` runs
+before the `<|user_message ...|> ... <|/user_message|>` wrapping. Phase 1
+must call `_format_event` per replayed turn (not duplicate the wrapping
+logic) so this escape is inherited by construction; the unit test in
+§Test Strategy ("a peer message containing `<|user_message|>` literal is
+escaped before wrapping") asserts the round-trip on replayed content.
+
 ### E. Token-budget interaction
 
 The transcript window has its own budget separate from the system-
@@ -292,6 +315,22 @@ Per-turn fetches dominate the cost. Mitigations:
   a WARNING with `reason="conversation_window_fetch_failed"`. The
   persona is no worse off than it is today.
 
+> **Known gap — cache hit rate in steady state.** As specified above the
+> cache key advances with every inbound event (`last_known_message_id`
+> moves on each turn), so back-to-back events on the same channel each
+> compute a *new* key and miss. The optimization the cache buys is
+> therefore "skip the fetch when no new message arrived between two
+> wake-ups of the same persona on the same channel" (e.g. retries,
+> sub-agent return paths) — *not* steady-state turn-over-turn
+> short-circuiting. The Phase 1 PR plan must either (a) accept this
+> framing and document the expected steady-state hit rate as low, or
+> (b) re-spec the cache to short-circuit *window assembly* on
+> `(channel_id, last_message_id_in_returned_window)` while still
+> issuing the fetch, separating "did the channel change?" from "do I
+> have to re-render the window?". Phase 3 telemetry
+> (`persatrix.persona.conversation_window.cache_hit_rate`) is the
+> arbiter; the default is (a) until measurement justifies (b).
+
 A measurement harness is part of [Phase 3](#phase-3-instrumentation-and-tuning):
 the cache-hit rate, fetch latency, and the share of LLM calls that
 fall back to "current event only" are exposed as metrics so the
@@ -313,6 +352,19 @@ and short-circuit before reaching `_on_event_inner`'s LLM call. RFC
 window is reconstructed only on live, non-replay `CHANNEL_MESSAGE`
 events. Catch-up continues to seed episodic memory; the conversation
 window seeds the live prompt. The two paths remain independent.
+
+**Verified against current code (2026-05-15).** The short-circuit is at
+[`agents/persona_runtime/action_loop.py` lines 280–289](../../agents/persona_runtime/action_loop.py#L280-L289):
+on `event.metadata.get("replay_mode") is True` the handler stores the
+event into episodic memory (when `sender_id != agent_id`) and returns
+`[AgentAction(action_type=ActionType.DO_NOTHING, ...)]` — well before
+the `messages: list[dict[str, Any]] = [...]` LLM seed (~line 402) and
+before any tool-use loop or LLM call. Phase 1 places the
+`build_conversation_messages` call at the seed line, so it inherits
+this guard by construction; no additional `replay_mode` check is
+required inside `conversation_window.py`. The marker is set on the
+catchup-emitted event payload at
+[`agents/channel_catchup.py` line 494](../../agents/channel_catchup.py#L494).
 
 ## Security Considerations
 
@@ -433,6 +485,22 @@ v0.3.1.
    up the same default at that time. **Hard gate**: this question
    must resolve in the RFC 0034 PR plan review thread before
    Phase 1 PR 1 merges, since the wire format implicitly commits.
+
+   *Resolution checklist (policy-anchor first):*
+   - **Privacy-vs-hygiene framing.** If RFC 0031 Phase 2 is positioned
+     as a *privacy boundary* (operators can rely on
+     `PERSATRIX_SESSION_ID` to keep one user's prompt content out of
+     another's), the Conversation Window MUST filter on
+     `chat_session_id` / `persatrix_session_id`. If Phase 2 is
+     *hygiene-only* (test-run isolation at the storage layer, not a
+     prompt-content boundary), per-channel default stands. The decision
+     follows the policy, not the other way around.
+   - Confirm the policy reading with RFC 0031's author in the PR plan
+     review thread; cite the resolved framing in the v0.3.1 plan
+     amendment so it is auditable.
+   - If the answer is "privacy", add a unit test asserting two events
+     on the same channel under different session ids do not share a
+     window.
 2. **Window size N and budget interaction.** Defaults `N=20`,
    `max_tokens=2048` are guesses. Phase 3 telemetry retunes them.
    Open whether the default should be `N` *or* `max_tokens` (one

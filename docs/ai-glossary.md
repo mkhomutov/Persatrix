@@ -158,9 +158,29 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Disallowed:** "store", "history", "context cache"
 - **Definition:** Persona-agent state with three tiers: **episodic**
   (interaction events), **relationship** (per-agent trust and history), and
-  **working** (in-context scratch memory). See RFC 0008.
+  **working** (in-context scratch memory). See RFC 0008. The **working** tier
+  here is the in-RAM bridged scratch tier (see also `Scratchpad (memory tier)`),
+  *not* the live in-channel transcript the persona runtime feeds the LLM each
+  turn — the latter is the `Conversation Window` and rides the LLM `messages`
+  array, not a memory tier.
 - **Example:** "Conversation summaries are written to episodic memory via
   `EpisodicMemory.store_episode` in `agents/memory/episodic.py`."
+
+### Conversation Window
+- **Aliases:** —
+- **Disallowed:** "conversational working memory", "transcript window",
+  "in-conversation memory", "in-progress conversation memory" (all when
+  meaning the live `messages`-array transcript)
+- **Definition:** The last N turns of the current channel reconstructed from
+  the channel store on every persona turn and rendered into the LLM
+  `messages` array (peer turns → `role="user"`, the persona's own turns →
+  `role="assistant"`). Owned by `agents/persona_runtime/conversation_window.py`
+  (introduced by [RFC 0034](rfcs/0034-persona-conversational-working-memory.md)).
+  Distinct from the working-memory tier under `Memory`: the Conversation
+  Window is not persisted as a tier and does not consume the system-prompt
+  memory budget ([RFC 0017](rfcs/0017-persona-memory-injection-budget.md)).
+- **Example:** "The Conversation Window holds the last 20 turns; episode
+  summaries continue to ride the system prompt."
 
 ### Episode
 - **Aliases:** —
@@ -421,7 +441,9 @@ Terms introduced by [docs/storage-architecture-roadmap.md](storage-architecture-
 
 ### Scratchpad (memory tier)
 - **Aliases:** —
-- **Disallowed:** "working memory" (when meaning the bridged tier; see Memory)
+- **Disallowed:** "working memory" (when meaning the bridged tier; see Memory),
+  "conversational working memory" (which means the live `messages`-array
+  transcript — see `Conversation Window`)
 - **Definition:** The proposed v0.4 successor name for the working-memory tier: volatile in-RAM context with a small SQLite snapshot that bridges across exactly one prior interaction-close boundary. Replaces today's purely-volatile working memory ([memory-quality-roadmap.md §B](memory-quality-roadmap.md#b-continuity-bridge-across-interaction-close)). Tracked as SA-2.
 - **Example:** "The Scratchpad survives interaction close once; after the next close it is overwritten."
 

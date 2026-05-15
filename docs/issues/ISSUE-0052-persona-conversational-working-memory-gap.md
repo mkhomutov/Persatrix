@@ -21,6 +21,13 @@ the session. Self-contained statements still survive (the fact tier
 extracts them turn-locally), but anything that depends on conversational
 continuity does not.
 
+> **Terminology.** This issue's title uses "conversational working memory"
+> as the human-readable description of the defect; the canonical project
+> term for the live in-channel transcript surfaced through the LLM
+> `messages` array is **Conversation Window**
+> ([glossary](../ai-glossary.md#conversation-window)). The body below uses
+> the canonical term for the runtime concept.
+
 ## Context
 
 Reproduced repeatedly against a long-running `ember-owl` persona over a
