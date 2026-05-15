@@ -19,15 +19,14 @@ primitive enforces that no happy-path test exercises:
 * ``TestPrune`` — :meth:`FactStore.prune` retention primitive: live
   rows are never silently dropped, and the per-agent ACL is honoured.
   Backfills coverage flagged by PR #339 review F-5.
-* ``TestAssertedAtMonotonicity`` — pins the current
-  latest-asserted-wins semantics so a future change to the strict
-  less-than SELECT predicate surfaces as a deliberate test update,
-  not a silent semantic shift.  Documents the precondition flagged
-  by PR #339 review F-3; the symmetric latest-wins variant lives on
-  the PR 5 ("From PR 1 review") follow-up list.
 * ``TestFactImmutability`` — pins ``@dataclass(frozen=True)`` on
   :class:`Fact` per RFC 0026 §A.  Closes the spec-drift item flagged
   by PR #339 review F-4.
+
+The symmetric latest-asserted-wins retraction-policy cases (PR 5a
+"From PR 1 review") live in
+:mod:`tests.unit.python.test_fact_store_supersede` — split out once
+the PR 5a follow-up scope pushed this file past the 500-line cap.
 """
 
 from __future__ import annotations
@@ -348,79 +347,6 @@ class TestPrune:
         # Verify the other agent's superseded row is still present.
         all_rows = await other.recall(subject="bob", include_superseded=True)
         assert len(all_rows) == 2
-
-
-# ─── Monotonic asserted_at precondition (PR 339 review F-3) ─
-
-
-class TestAssertedAtMonotonicity:
-    """Pin the current latest-asserted-wins semantics in
-    :meth:`FactStore.store`.
-
-    The storage primitive's supersede-on-insert path uses
-    ``asserted_at < ?`` (strict less-than), so out-of-order or
-    equal-timestamp writes leave two live rows for the same
-    ``(agent_id, subject, predicate)`` key.  PR 1's callers (PR 2's
-    extractor uses ``interaction.closed_at``, monotonic per-agent) do
-    not exercise this path; the precondition is documented on
-    :meth:`FactStore.store`.  PR 4 may revisit symmetric latest-wins
-    when the retraction policy lands — tracked under the
-    ``feature/v031-rfc0026-followups`` "From PR 1 review" item in
-    :doc:`docs/rfcs/0026-pr-plan.md <../../../docs/rfcs/0026-pr-plan>`.
-
-    These tests assert the *current* behaviour so a future change to
-    the SELECT comparison surfaces as a deliberate test update rather
-    than a silent semantic shift.
-    """
-
-    async def test_older_asserted_at_does_not_supersede_newer_live_row(
-        self, fact_store: FactStore,
-    ):
-        new_id = await fact_store.store(
-            subject="bob",
-            predicate="prefers",
-            object="tea",
-            source_interaction_id="ix-new",
-            asserted_at=2000.0,
-        )
-        old_id = await fact_store.store(
-            subject="bob",
-            predicate="prefers",
-            object="coffee",
-            source_interaction_id="ix-old",
-            asserted_at=1000.0,
-        )
-        # Both rows are live — the older write does not supersede the
-        # newer row, and the newer row has no candidate older live row
-        # to supersede (its asserted_at predates the search predicate).
-        rows = await fact_store.recall(subject="bob", include_superseded=True)
-        by_id = {r.fact_id: r for r in rows}
-        assert by_id[new_id].superseded_by is None
-        assert by_id[old_id].superseded_by is None
-        live = await fact_store.recall(subject="bob")
-        assert len(live) == 2
-
-    async def test_equal_asserted_at_does_not_supersede(
-        self, fact_store: FactStore,
-    ):
-        a_id = await fact_store.store(
-            subject="bob",
-            predicate="prefers",
-            object="tea",
-            source_interaction_id="ix-a",
-            asserted_at=1000.0,
-        )
-        b_id = await fact_store.store(
-            subject="bob",
-            predicate="prefers",
-            object="coffee",
-            source_interaction_id="ix-b",
-            asserted_at=1000.0,  # exact same timestamp
-        )
-        rows = await fact_store.recall(subject="bob", include_superseded=True)
-        by_id = {r.fact_id: r for r in rows}
-        assert by_id[a_id].superseded_by is None
-        assert by_id[b_id].superseded_by is None
 
 
 # ─── Fact dataclass immutability (PR 339 review F-4) ────────

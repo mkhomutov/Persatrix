@@ -92,13 +92,21 @@ class Fact:
     predicate: str                # short verb phrase, e.g. "has_child_named", "prefers", "committed_to"
     object: str                   # short value, ≤ 200 chars
     certainty: float              # [0.0, 1.0]; seeded by extractor, updated by reinforcement (§F)
-    source_interaction_id: str    # foreign key to interactions table (RFC 0020 §B)
+    source_interaction_id: str | None  # FK to interactions (RFC 0020 §B); NULL permitted — see below
     asserted_at: datetime         # timestamp of assertion (typically interaction.closed_at)
     last_recalled_at: datetime | None  # set by §F use-based reinforcement
     superseded_by: str | None     # fact_id of replacing fact (retraction policy — see §F)
 ```
 
 Schema is additive — new `facts` table; no changes to `episodes` or `notes`.
+
+**`source_interaction_id` nullability** (PR 5a amendment, 2026-05-15): the field is typed `str | None` and the DDL column is nullable. The production extractor (RFC 0026 PR 2) always populates it, but three legitimate callers commit rows without one and tightening the column would force them to fabricate a synthetic id:
+
+1. Test fixtures that exercise the storage primitive in isolation.
+2. The future RFC 0013 erasure backfill, which may re-assert subjects from a snapshot without a source-interaction context.
+3. The OQ #9 operator-seeded facts path — config-driven cold-start seeds have no originating interaction.
+
+The audit-log surface still records `source_interaction_id` (as `NULL` when absent) so provenance traceability is preserved on the production write path. Decision was deferred from the PR 1 review for explicit lock in PR 5a per [`docs/rfcs/0026-pr-plan.md` PR 5a §From PR 1 review](0026-pr-plan.md#from-pr-1-review).
 
 ### B. Extraction at interaction close
 
@@ -144,7 +152,13 @@ The `claude-haiku-4-5` value is a model alias that resolves at runtime via `opti
 
 Each fact's `certainty` evolves under the [§C use-based reinforcement rule](../memory-quality-roadmap.md#c-salience-score-with-use-based-reinforcement) — a fact admitted into a prompt by `MemoryBudget` resets its decay timer. The full reinforcement formula lands in the [RFC 0008 calibration review](0008-calibration-review.md); this RFC consumes that contract.
 
-Retraction policy: **latest-asserted-wins**. A new fact tuple with the same `(subject, predicate)` and a later `asserted_at` writes a `superseded_by` pointer on the older row. Recall filters out superseded rows by default. This composes with reinforcement — a fact contradicted at the next interaction loses its salience boost.
+Retraction policy: **symmetric latest-asserted-wins**. Within a single `(agent_id, subject, predicate)` key, only one row stays live and the row with the greatest `asserted_at` wins. On every write:
+
+* Existing live rows with `asserted_at <= new.asserted_at` are marked superseded by the new row.
+* If a strictly-newer live row already exists, the new row is itself marked superseded by it — an out-of-order older write does not leave two live rows.
+* Equal-timestamp ties break in favour of the later arrival (the row being inserted). The production extractor uses monotonic `interaction.closed_at` so ties are unreachable in the hot path; the rule exists for fixtures, the OQ #9 operator-seeded path, and the future RFC 0013 erasure backfill.
+
+Recall filters out superseded rows by default. This composes with reinforcement — a fact contradicted at the next interaction loses its salience boost. The symmetric shape was settled by PR 5a per [`docs/rfcs/0026-pr-plan.md` PR 5a §From PR 1 review](0026-pr-plan.md#from-pr-1-review); the PR 1 implementation initially shipped a strict-less-than SELECT that left two live rows on out-of-order or equal-timestamp writes.
 
 ### G. Audit and provenance
 

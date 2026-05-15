@@ -41,7 +41,7 @@ This plan splits the work into **6 PRs**. Each stays under the [BRANCHING.md](..
 
 ### Sequencing
 
-**Recommended merge order**: **PR 1 → PR 2 → PR 3 → PR 4 → PR 5 → PR 6**.
+**Recommended merge order**: **PR 1 → PR 2 → PR 3 → PR 4 → PR 5a → PR 5b → PR 5c → PR 5d → PR 5e → PR 6**. PR 5 was sliced into five sub-PRs once the aggregate deferred surface from PR 1 → PR 4 reviews crossed three concern boundaries — see [PR 5: Review Follow-Ups](#pr-5-review-follow-ups--sliced-into-pr-5a--pr-5e) for the slice table. PR 6 (RFC close) depends on every slice merged.
 
 ---
 
@@ -58,7 +58,15 @@ PR 3 (FactStore.recall + MemoryBudget tier slot + config knobs + tier ordering)
   ↓
 PR 4 (Reinforcement + retraction + tier-provenance instrumentation + MT-MEMORY-005 expected-outcomes update)
   ↓
-PR 5 (Review follow-ups)
+PR 5a (PR 1 review — symmetric latest-asserted-wins + source_interaction_id nullability)
+  ↓
+PR 5b (PR 2 review — envelope parse-failure observability)
+  ↓
+PR 5c (PR 3 review — storage / render defensive fixes)
+  ↓
+PR 5d (PR 3 review — tests + counter polish)
+  ↓
+PR 5e (PR 4 review — audit, chunking, edge cases)
   ↓
 PR 6 (RFC close)
 ```
@@ -228,52 +236,61 @@ PR 6 (RFC close)
 
 ---
 
-### PR 5: `feature/v031-rfc0026-followups` — Review Follow-Ups
+### PR 5: Review Follow-Ups — sliced into PR 5a → PR 5e
 
 **Depends on**: PR 4 merged.
 **Purpose**: Apply review findings from PRs 1–4. Follows the [RFC 0017 PR plan §PR 6 precedent](0017-pr-plan.md) — "From PR N review" subsections, each finding paraphrased inline (no link to local review reports per [.github/copilot-instructions.md](../../.github/copilot-instructions.md)).
 
-#### Scope
+#### Why this PR is sliced
 
-Items populated during review. Reserved skeleton:
+The aggregated deferred surface from the PR 1 → PR 4 reviews crosses three concern boundaries (storage primitive, recall-side rendering, telemetry / audit) and several thousand lines of test coverage. Landing it as one PR would push individual files past the 500-line review-friendly cap and bundle independent decisions into one review thread. PR 5 ships as **five tightly-scoped slices** (5a → 5e), each closing one concern and ≲ 500 LOC:
 
-- "From PR 1 review" — schema / FactStore findings.
-- "From PR 2 review" — extractor / allowlist / audit findings.
-- "From PR 3 review" — recall / budget integration findings.
-- "From PR 4 review" — reinforcement / retraction / provenance findings.
+| Slice | Branch | Scope |
+|-------|--------|-------|
+| **PR 5a** | `feature/v031-rfc0026-followups-pr1` | From PR 1 review — storage primitive: symmetric latest-asserted-wins + `source_interaction_id` nullability lock. |
+| **PR 5b** | `feature/v031-rfc0026-followups-pr2` | From PR 2 review — combined-envelope parse-failure observability (truncated JSON + missing-summary-key paths). |
+| **PR 5c** | `feature/v031-rfc0026-followups-pr3a` | From PR 3 review — storage / render defensive fixes: L-1 header truncation, L-2 canonicalize in `FactStore.store`, L-3 null-budget guard, N-2 `recall_facts_for_event` cleanup, `extraction_model` config decision. |
+| **PR 5d** | `feature/v031-rfc0026-followups-pr3b` | From PR 3 review — tests + counter polish: negative-path coverage, `TestTierOrdering` at prompt boundary, `tier="facts"` attribute decision, `agent.facts.injected` overcount fix. |
+| **PR 5e** | `feature/v031-rfc0026-followups-pr4` | From PR 4 review — reinforcement audit (DR2-N-2), IN-list chunking (DR2-N-3), `at=0.0` edge cases (DR3-L-3), `enc.encode` caching (DR2-N-6), commit-cost calibration (DR2-N-8). |
+
+Each slice opens its own PR and updates the Progress Overview row for PR 5 separately. PR 6 (RFC close) depends on **all five slices merged**.
+
+#### Scope (across all slices)
 
 ##### From PR 1 review
 
 The bulk of PR #339's review findings landed in PR 1 itself (docstring
 refreshes, validation reordering, frozen `Fact`, `delete_by_subject` +
 input-validation backfill tests, `agents/memory/__init__.py` re-exports).
-The two items deferred to this PR are:
+The two items deferred from PR 1 review **both shipped in PR 5a** —
+`feature/v031-rfc0026-followups-pr1`:
 
-- **Symmetric latest-asserted-wins on insert.** PR 1 ships
-  `asserted_at < ?` (strict less-than) on the supersede-on-insert
-  SELECT, so out-of-order or equal-timestamp writes to the same
-  `(agent_id, subject, predicate)` leave two live rows.  The
-  precondition is documented on `FactStore.store` and pinned by
-  `tests.unit.python.test_fact_store_invariants.TestAssertedAtMonotonicity`,
-  and the PR 2 extractor uses monotonic `interaction.closed_at` so the
-  edge case is unreachable in the production write path.  Once PR 4's
-  retraction-policy implementation lands, tighten the SELECT to
-  `asserted_at <= ?` plus a "find newer live row" forward pass that
-  marks the new row as superseded if a strictly-newer live row already
-  exists — symmetric latest-wins.  Update `TestAssertedAtMonotonicity`
-  to assert the new semantics rather than the current edge-case
-  behaviour.
-- **`source_interaction_id` nullability.** RFC 0026 §A names this
-  field non-nullable; PR 1's implementation types it `str | None`
-  (DDL column nullable too) because Phase 1 has no extractor and
-  callers (test fixtures, the future RFC 0013 erasure backfill, and
-  the OQ #9 operator-seeded fact follow-up) may legitimately commit
-  rows without a source interaction.  PR 2 always populates the field.
-  Decision: either tighten the column + annotation in this PR (drop
-  the `| None` and add a CHECK constraint, paired with backfill
-  semantics for fixtures), or amend RFC §A in PR 6 to permit `NULL`
-  for the operator-seeded / backfill paths.  Lock the decision during
-  PR 5 review.
+- **Symmetric latest-asserted-wins on insert.** PR 5a tightened the
+  supersede-on-insert SELECT from `asserted_at < ?` (strict less-than)
+  to `asserted_at <= ?` and added a forward-pass that finds any
+  strictly-newer live row to mark the new row as self-superseded.
+  Net effect: only one row per `(agent_id, subject, predicate)` stays
+  live regardless of insert order, and equal-timestamp ties break in
+  favour of the newer arrival.  The chain logic lives in the new
+  [`agents/memory/_facts_supersede.py`](../../agents/memory/_facts_supersede.py)
+  helper so [`agents/memory/facts.py`](../../agents/memory/facts.py)
+  stays under the 500-line cap.  The earlier
+  `TestAssertedAtMonotonicity` precondition pin was replaced by the
+  symmetric-semantics test class
+  [`TestSymmetricLatestAssertedWins`](../../tests/unit/python/test_fact_store_supersede.py)
+  — six cases: chronological writes, older-arrival self-supersedes,
+  equal-timestamp later-arrival wins, three-write out-of-order chain,
+  cross-predicate isolation, per-agent ACL.  RFC §F was amended in the
+  same PR to describe the symmetric shape.
+- **`source_interaction_id` nullability.** Decision locked in PR 5a:
+  amend RFC §A to permit `NULL` rather than tighten the column.
+  Rationale: three legitimate callers (test fixtures, future RFC 0013
+  erasure backfill, OQ #9 operator-seeded path) commit rows without a
+  source interaction; tightening would force them to fabricate a
+  synthetic id.  The audit-log surface still records the field (as
+  `NULL` when absent) so provenance traceability is preserved on the
+  production write path.  RFC §A amendment landed in PR 5a; `Fact`
+  dataclass docstring updated to point at the amendment.
 
 ##### From PR 2 review
 
@@ -1250,7 +1267,7 @@ The remaining four ride PR 5.
 
 ### PR 6: `feature/v031-rfc0026-close` — RFC Close
 
-**Depends on**: PR 5 merged.
+**Depends on**: PR 5a → 5e all merged.
 
 #### Scope
 
@@ -1300,8 +1317,12 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ✅ Merged | [#340](https://github.com/mkhomutov/Persatrix/pull/340) | 2026-05-14 |
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
-| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | 🔀 PR open | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | — |
-| 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |
+| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ✅ Merged | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | 2026-05-15 |
+| 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | 🔀 PR open | — | — |
+| 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ⬜ Not started | — | — |
+| 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ⬜ Not started | — | — |
+| 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ⬜ Not started | — | — |
+| 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 
 ---
