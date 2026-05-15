@@ -15,9 +15,16 @@ carrying the greatest ``asserted_at`` winning.  Two cases:
 
 * **Older / equal live rows** (``asserted_at <= new.asserted_at``) are
   marked superseded by the new row.  Pulling all qualifying rows
-  cleans up legacy multi-live invariant violations from the
+  cleans up older-side legacy multi-live invariant violations from the
   pre-PR-5a ``<`` semantics on the same write, not just the most
-  recent one.
+  recent one.  Newer-side legacy violations (multiple strictly-newer
+  live rows for the same key) are *not* healed by an in-band write —
+  the forward-pass ``LIMIT 1`` only points the new row at the topmost
+  dominator; the lower-but-still-newer siblings remain live alongside.
+  The production extractor (PR 2) uses monotonic
+  ``interaction.closed_at`` so newer-side legacy state is unreachable
+  in the hot path; an explicit reassertion sweep would be needed if a
+  fixture / seed path ever creates one.
 * **Strictly-newer live row** (``asserted_at > new.asserted_at``)
   dominates the new row: the new row is itself marked superseded by
   that newer row.  An out-of-order older write therefore self-

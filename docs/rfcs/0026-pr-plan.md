@@ -277,11 +277,11 @@ The two items deferred from PR 1 review **both shipped in PR 5a** —
   stays under the 500-line cap.  The earlier
   `TestAssertedAtMonotonicity` precondition pin was replaced by the
   symmetric-semantics test class
-  [`TestSymmetricLatestAssertedWins`](../../tests/unit/python/test_fact_store_invariants.py)
-  — five cases: chronological writes, older-arrival self-supersedes,
+  [`TestSymmetricLatestAssertedWins`](../../tests/unit/python/test_fact_store_supersede.py)
+  — six cases: chronological writes, older-arrival self-supersedes,
   equal-timestamp later-arrival wins, three-write out-of-order chain,
-  cross-predicate isolation.  RFC §F was amended in the same PR to
-  describe the symmetric shape.
+  cross-predicate isolation, per-agent ACL.  RFC §F was amended in the
+  same PR to describe the symmetric shape.
 - **`source_interaction_id` nullability.** Decision locked in PR 5a:
   amend RFC §A to permit `NULL` rather than tighten the column.
   Rationale: three legitimate callers (test fixtures, future RFC 0013

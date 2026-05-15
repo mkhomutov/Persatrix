@@ -219,7 +219,7 @@ class FactStore:
         and the row with the greatest ``asserted_at`` wins.  Out-of-order
         and equal-timestamp writes resolve deterministically — see
         :mod:`agents.memory._facts_supersede` for the chain rule and
-        :class:`tests.unit.python.test_fact_store_invariants.TestSymmetricLatestAssertedWins`
+        :class:`tests.unit.python.test_fact_store_supersede.TestSymmetricLatestAssertedWins`
         for the pinned cases.
 
         Predicate validation runs through the injected validator
