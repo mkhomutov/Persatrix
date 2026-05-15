@@ -23,28 +23,13 @@ pins the cost contract end-to-end at the mixin boundary.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from _otel_test_helpers import counter_total
+from _otel_test_helpers import build_meter, counter_total
 
 pytestmark = pytest.mark.asyncio
-
-
-def _build_meter() -> tuple[Any, Any]:
-    """Initialise OTel metrics against an in-memory reader so the
-    ``agent.facts.injected`` counter is live (``try_get_instruments``
-    returns ``None`` until ``init_metrics`` runs) and assertable.
-    """
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader  # noqa: PLC0415
-
-    from agents.observability import metrics as metrics_mod  # noqa: PLC0415
-
-    reader = InMemoryMetricReader()
-    metrics_mod.init_metrics(reader=reader)
-    return reader, metrics_mod
 
 
 # ─── _subject_seeds short-circuit (PR #342 review M-2) ─────
@@ -385,7 +370,7 @@ class TestNoCounterOvercountOnHeaderDrop:
             ),
         ]
 
-        reader, metrics_mod = _build_meter()
+        reader, metrics_mod = build_meter()
         try:
             section = render_facts_section(
                 facts, budget, facts_budget_tokens=200,

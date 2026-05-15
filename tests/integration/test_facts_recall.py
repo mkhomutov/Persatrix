@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from _otel_test_helpers import counter_total
+from _otel_test_helpers import build_meter, counter_total
 
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.facts import FactStore
@@ -135,16 +135,6 @@ def _make_event(
     event.payload = {"content": content}
     event.timestamp = 0.0
     return event
-
-
-def _build_meter() -> Any:
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader  # noqa: PLC0415
-
-    from agents.observability import metrics as metrics_mod  # noqa: PLC0415
-
-    reader = InMemoryMetricReader()
-    metrics_mod.init_metrics(reader=reader)
-    return reader, metrics_mod
 
 
 # ─── 1. Subject-indexed recall round-trip ───────────────────
@@ -306,7 +296,7 @@ class TestConfigDisable:
             source_interaction_id="i1", asserted_at=time.time(),
         )
 
-        reader, metrics_mod = _build_meter()
+        reader, metrics_mod = build_meter()
         try:
             mixin = _wire_mixin(
                 fact_store=fact_store, episodic=empty_episodic,
@@ -375,7 +365,7 @@ class TestInjectionCounter:
             source_interaction_id="i2", asserted_at=ts + 1,
         )
 
-        reader, metrics_mod = _build_meter()
+        reader, metrics_mod = build_meter()
         try:
             mixin = _wire_mixin(
                 fact_store=fact_store, episodic=empty_episodic,

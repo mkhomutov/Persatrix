@@ -89,8 +89,9 @@ def register(inst: _Instruments, meter: Meter) -> None:
     # shipped per-turn tier provenance as the in-process
     # ``MemoryBudget.admissions_by_tier`` registry (read by the
     # reinforcement write), not an OTEL attribute join, so no sibling
-    # counter carries ``tier=`` yet; a reader should treat the
-    # attribute as a placeholder, not a live dimension, until a
+    # counter carries ``tier=`` yet.  ``tier`` is exported on every
+    # increment but is a constant, single-valued attribute — it
+    # carries no cardinality and has no join partner until a
     # dashboard promotes the registry to OTEL.
     inst.facts_injected = meter.create_counter(
         name="agent.facts.injected",
