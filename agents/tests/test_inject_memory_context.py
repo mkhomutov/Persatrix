@@ -38,6 +38,12 @@ class _FakeEpisode:
 class _FakeNote:
     topic: str
     content: str
+    # RFC 0026 PR 4 wired ``record_admission(item_id=note.id)`` into the
+    # notes tier of ``_inject_memory_context``; this fake predates that
+    # and must carry an ``id`` or every admitted-note path raises
+    # ``AttributeError``.  Default keeps the existing keyword-only
+    # constructors (``_FakeNote(topic=…, content=…)``) working.
+    id: str = "note-fake"
 
 
 @dataclass

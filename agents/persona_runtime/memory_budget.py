@@ -146,33 +146,52 @@ MAX_NOTE_CONTENT_CHARS: int = 500
 # ─── Internal token helpers ────────────────────────────────
 
 
-def _count_tokens(text: str) -> int:
-    """Count tokens in *text* using tiktoken ``cl100k_base``, falling back to chars/4.
+def _encode_text(text: str) -> tuple[int, list[int] | None]:
+    """Encode *text* once, returning ``(token_count, token_ids)``.
 
-    Identical to the ``accurate=True`` path in :func:`~agents.memory.working.estimate_tokens`
-    but kept local to avoid an import that would create a circular dependency
-    once ``memory_context.py`` imports ``MemoryBudget`` in PR 2.
+    ``token_ids`` is the tiktoken ``cl100k_base`` token list when
+    tiktoken is available, and ``None`` in the chars/4 fallback.
+
+    DR2-N-6 (PR #342 second-pass review): :meth:`MemoryBudget.try_add`
+    caches the result of this single encode and threads ``token_ids``
+    into :func:`_truncate_to_token_limit`, so an oversized item's full
+    text is tokenised once per admission rather than re-encoded by the
+    counter and the truncator separately.
+
+    ``max(0, …)`` (not ``max(1, …)``) so empty input returns 0,
+    matching the tiktoken path (``enc.encode("") == []``).
     """
     try:
         import tiktoken  # type: ignore[import-untyped]
 
         enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
+        tokens = enc.encode(text)
+        return len(tokens), tokens
     except ImportError:
         logger.debug("tiktoken not available, using chars/4 token estimate")
     except Exception:
         logger.warning(
             "tiktoken encoding failed, falling back to chars/4", exc_info=True
         )
-    # ``max(0, …)`` (not ``max(1, …)``) so empty input returns 0, matching
-    # the tiktoken path (``enc.encode("") == []``).  ``try_add`` short-
-    # circuits on ``if not text:`` before reaching this helper, so no caller
-    # currently observes the difference, but the contracts now agree.
-    # (PR 6 — RFC 0017 PR 1 review finding 1.)
-    return max(0, len(text) // 4)
+    return max(0, len(text) // 4), None
 
 
-def _truncate_to_token_limit(text: str, token_limit: int) -> str:
+def _count_tokens(text: str) -> int:
+    """Count tokens in *text* using tiktoken ``cl100k_base``, falling back to chars/4.
+
+    Identical to the ``accurate=True`` path in :func:`~agents.memory.working.estimate_tokens`
+    but kept local to avoid an import that would create a circular dependency
+    once ``memory_context.py`` imports ``MemoryBudget`` in PR 2.
+
+    Thin wrapper over :func:`_encode_text` — callers that only need the
+    count (and not the token list) keep the original one-int signature.
+    """
+    return _encode_text(text)[0]
+
+
+def _truncate_to_token_limit(
+    text: str, token_limit: int, *, _token_ids: list[int] | None = None,
+) -> str:
     """Truncate *text* to fit within *token_limit* tokens, including the ellipsis ``…``.
 
     Uses tiktoken for exact token-boundary truncation when available.  Falls
@@ -180,6 +199,13 @@ def _truncate_to_token_limit(text: str, token_limit: int) -> str:
     on missing tiktoken.
 
     The ellipsis character ``…`` (U+2026) counts toward the token budget.
+
+    ``_token_ids`` (internal) — when the caller has already encoded
+    *text* (:meth:`MemoryBudget.try_add` does, on the oversized path),
+    it passes the token list here so the truncator decodes against it
+    instead of re-encoding the full text.  ``None`` means "encode
+    here", the behaviour every external caller and the chars/4
+    fallback rely on.  (PR #342 second-pass review DR2-N-6.)
     """
     ellipsis = "…"
 
@@ -190,7 +216,7 @@ def _truncate_to_token_limit(text: str, token_limit: int) -> str:
         import tiktoken  # type: ignore[import-untyped]
 
         enc = tiktoken.get_encoding("cl100k_base")
-        tokens = enc.encode(text)
+        tokens = enc.encode(text) if _token_ids is None else _token_ids
         if len(tokens) <= token_limit:
             return text
         ellipsis_tokens = len(enc.encode(ellipsis))
@@ -370,18 +396,21 @@ class MemoryBudget:
         if self._remaining <= 0:
             return None
 
-        count = _count_tokens(text)
+        count, token_ids = _encode_text(text)
         if count <= self._remaining:
             self._remaining -= count
             return text
 
-        # Item exceeds remaining budget; try a truncated form.
-        # Note: enc.encode() is invoked 3× for oversized items — once in
-        # _count_tokens(text) above, once inside _truncate_to_token_limit
-        # (encode + decode), and once in _count_tokens(truncated) below.
-        # Acceptable for typical memory-snippet sizes; profile here first
-        # if allocation becomes a hotspot.
-        truncated = _truncate_to_token_limit(text, self._remaining)
+        # Item exceeds remaining budget; try a truncated form.  The
+        # token list cached from the encode above is threaded into
+        # _truncate_to_token_limit so the full text is tokenised once,
+        # not re-encoded by the truncator (PR #342 second-pass review
+        # DR2-N-6).  The short truncated string is still counted below
+        # and the one-char ellipsis encoded inside the truncator —
+        # both cheap; only the full-text re-encode is eliminated.
+        truncated = _truncate_to_token_limit(
+            text, self._remaining, _token_ids=token_ids,
+        )
         truncated_count = _count_tokens(truncated)
         if truncated_count >= min_tokens:
             self._remaining -= truncated_count
