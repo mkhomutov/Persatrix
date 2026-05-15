@@ -161,7 +161,7 @@ Recall filters out superseded rows by default. This composes with reinforcement 
 
 ### G. Audit and provenance
 
-Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-security-sandboxing.md) records fact extraction events at `INFO` level; redaction policy follows the existing `RedactStruct` rules (no raw PII in audit metadata). A `superseded_by` write is also audited.
+Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-security-sandboxing.md) records fact extraction events at `INFO` level; redaction policy follows the existing `RedactStruct` rules (no raw PII in audit metadata). A `superseded_by` write is also audited. Use-based reinforcement (`mark_recalled`) emits one bounded `fact.recalled` audit record per call — naming every reinforced `fact_id` as a field rather than one record per id — so the audit log is not blind to which facts a turn reinforced. The reinforcement-audit event was added by PR 5e per [`docs/rfcs/0026-pr-plan.md` PR 5e §From PR 4 review — second-pass deferrals](0026-pr-plan.md#from-pr-4-review--second-pass-deferrals); the PR 4 implementation initially shipped the `last_recalled_at` write with no audit emission.
 
 ### H. Subject erasure (RFC 0013 traversal)
 

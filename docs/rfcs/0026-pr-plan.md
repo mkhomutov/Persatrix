@@ -990,102 +990,91 @@ commit):
 
 ##### From PR 4 review — second-pass deferrals
 
+**Shipped in PR 5e** — `feature/v031-rfc0026-followups-pr4`:
+
 Four nice-to-have findings from the second deep-review pass
-(PR #342) that did not block PR 4 merge and are tracked here
-for PR 5 to pick up.  Each is small in code surface but
-touches a different concern (audit, defense-in-depth bound,
-allocator amortisation, write-cost calibration), so they are
-sequenced individually rather than batched.
+(PR #342) that did not block PR 4 merge.  Each is small in
+code surface but touches a different concern (audit,
+defense-in-depth bound, allocator amortisation, write-cost
+calibration).  PR 5e is the storage-layer reinforcement slice
+and adds **no production behaviour change beyond the audit
+emission** — the chunk loop is inert on today's hot path
+(≤40 ids, one chunk) and the single-encode change is a pure
+allocator-internal optimisation.  The findings resolve as
+follows:
 
-- **DR2-N-2 — reinforcement writes are not audited.**
-  [`FactStore.store`](../../agents/memory/facts.py) and
-  `FactStore.supersede` both emit
-  `_emit_audit("fact.store", …)` /
-  `_emit_audit("fact.supersede", …)` via the RFC 0026 §G
-  audit hook.
+- **DR2-N-2 — reinforcement writes are now audited.**  Before
+  this slice [`FactStore.store`](../../agents/memory/facts.py)
+  and `FactStore.supersede` emitted `fact.store` /
+  `fact.supersede` via the RFC 0026 §G audit hook but
   [`FactStore.mark_recalled`](../../agents/memory/facts.py)
-  does not.  The audit log is therefore blind to which facts
-  were reinforced this turn, even though MT-MEMORY-005
-  leg-failure analysis is one of the two consumers PR 4
-  named.  The structured-log emission under
-  `PERSATRIX_MEMORY_PROVENANCE=1` partially fills this gap,
-  but it is env-gated and emits from the budget allocator,
-  not from the storage layer — so an audit-log reader has no
-  `FactStore`-level signal that reinforcement occurred.
-  PR 5 decision: either emit
-  `_emit_audit("fact.recalled", agent_id=…, fact_ids=ids,
-  at=timestamp)` once per call (not per fact_id — audit
-  volume stays bounded), or amend RFC 0026 §G to formally
-  exclude reinforcement events from the audit surface.  Pair
-  with a unit test in
-  [`tests/unit/python/test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
-  that asserts a `fact.recalled` audit row lands after a
-  `mark_recalled` call (path #1), or with an inline note in
-  the `mark_recalled` docstring naming the audit-excluded
-  contract (path #2).
+  emitted nothing, leaving the audit log blind to which facts
+  a turn reinforced — even though MT-MEMORY-005 leg-failure
+  analysis is a named consumer.  The env-gated
+  `PERSATRIX_MEMORY_PROVENANCE` structured-log emission only
+  partially filled the gap (it fires from the budget
+  allocator, not the storage layer).  PR 5e takes **path #1**
+  of the two the plan offered:
+  [`_facts_reinforce.mark_recalled_for_agent`](../../agents/memory/_facts_reinforce.py)
+  emits one `_emit_audit("fact.recalled", agent_id=…,
+  fact_ids=ids, at=timestamp)` record per call — after commit,
+  carrying the whole id list as a field rather than one
+  record per id, so audit volume stays bounded.  RFC §G was
+  amended in the same PR to name the reinforcement event.
+  Pinned by `TestMarkRecalledAudit` in
+  [`test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
+  — one record per non-empty call, the whole id list on that
+  one record, no record on an empty call.
 
-- **DR2-N-3 — `mark_recalled_for_agent` does not chunk the
-  IN-list.**  SQLite caps the parameter count per query at
+- **DR2-N-3 — `mark_recalled_for_agent` now chunks the
+  IN-list.**  SQLite caps host parameters per statement at
   `SQLITE_MAX_VARIABLE_NUMBER` (32 766 in v3.32+, 999 in
-  older builds).  Today the call site in
+  older builds).  The helper now splits its `fact_id` list
+  into `_MAX_IDS_PER_UPDATE` (900) chunks, one UPDATE per
+  chunk, sharing a single trailing `commit`; 900 stays clear
+  of the conservative pre-3.32 cap after the two fixed binds.
+  Today's call site in
   [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
-  pulls IDs from `budget.admissions_by_tier("facts")`,
-  bounded by `FACTS_RECALL_LIMIT=20` × ≤2 seeds = 40 IDs —
-  orders of magnitude below either limit.  But the helper
-  accepts an arbitrary `Iterable[str]` and is callable from
-  other paths (RFC 0013 erasure backfill, RFC 0008
-  calibration); a single-line chunk loop
-  (`for chunk in chunks(ids, 900): …`) future-proofs the
-  API without affecting today's hot path.  PR 5 decision:
-  add the chunk loop to
-  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
-  and bump the docstring's "bounded by call-site" note to
-  "bounded by helper-internal chunking".  Pin with a unit
-  test that passes 1 500 IDs and asserts the call succeeds
-  on a sqlite build with the older 999-variable cap (or that
-  asserts the helper issues ≥2 UPDATE statements).
+  pulls ≤40 ids from `budget.admissions_by_tier("facts")` —
+  one chunk, inert — so this future-proofs the API for the
+  RFC 0013 erasure backfill and RFC 0008 calibration callers
+  that pass the helper an arbitrary `Iterable[str]`.  Pinned
+  by `TestMarkRecalledChunking`: a 1 503-id list issues ≥2
+  UPDATEs and still reinforces the real rows; a list one id
+  past the chunk boundary issues exactly two.
 
-- **DR2-N-6 — triple `enc.encode` re-cost on oversized
-  items.**  Pre-existing in
-  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py),
-  called out by the inline comment ("enc.encode() is invoked
-  3× for oversized items").  With PR 4's new admission
-  registry and the multi-block render, a tight budget can
-  amplify this — a 200-token per-tier slice with a fact line
-  that costs 60 tokens will see the oversized path on the
-  third or fourth item, multiplied across the per-block
-  fan-out.  Out of scope for PR 4 (the path existed before
-  this PR), but the multi-block render makes it more
-  reachable.  PR 5 decision: cache the token count off the
-  first `enc.encode(text)` call in `try_add` and pass it to
-  `_truncate_to_token_limit` so the truncation path can
-  decode against the same token list rather than re-encoding.
-  Pin with a benchmark / micro-bench under
-  `tests/bench/` (RFC 0017 §B notes the bench-suite seam) or
-  with an instrumented test that asserts `enc.encode` is
-  called at most once per `try_add`.
+- **DR2-N-6 — oversized budget items are now encoded once.**
+  [`MemoryBudget.try_add`](../../agents/persona_runtime/memory_budget.py)
+  used to tokenise an oversized item's full text twice — once
+  in `_count_tokens(text)` and again inside
+  `_truncate_to_token_limit` — the "enc.encode() invoked 3×"
+  the pre-fix inline comment flagged.  PR 4's multi-block
+  render makes the oversized path more reachable under a tight
+  per-tier slice.  PR 5e adds `_encode_text`, returning
+  `(count, token_ids)`; `try_add` caches that single encode
+  and threads `token_ids` into `_truncate_to_token_limit`,
+  which decodes against the same list instead of re-encoding.
+  `_count_tokens` is now a thin wrapper over `_encode_text`,
+  so its one-int signature and every external caller are
+  unchanged.  The short truncated string and the one-char
+  ellipsis are still encoded separately — cheap, out of scope.
+  Pinned by `TestEncodeOnceOnOversizedItem` in
+  [`test_memory_budget.py`](../../agents/tests/test_memory_budget.py),
+  which spies `tiktoken.Encoding.encode` and asserts the full
+  text is passed exactly once (pre-fix: twice).
 
-- **DR2-N-8 — `mark_recalled_for_agent` issues its own
-  `db.commit()` even when called inside an outer
-  transactional caller.**  `FactStore` does not currently
-  expose a transaction-scope manager, so all writes
-  auto-commit per call (`store`, `supersede`, `prune`,
-  `delete_by_subject` all commit before returning).  The
-  reinforcement write therefore commits at the very end of
-  every `_inject_memory_context` call — after the facts
-  section has been added to working memory but before the
-  caller builds the LLM prompt — a small write-amplification
-  cost the persona's hot path now pays.  Today's call-site
-  comment frames the failure as non-fatal because the section
-  is already staged in working memory (so the LLM call still
-  succeeds), but the write-cost is unmentioned.  PR 5 decision:
-  calibrate against the MQ-12
-  per-turn-cost budget; if the reinforcement commit shows
-  up in the trace, either batch it with a future facts-tier
-  write (RFC 0026 OQ #9 operator-seeded path is the most
-  natural pair) or expose an explicit
-  `FactStore.transaction()` context manager.  No-op if the
-  calibration shows the commit is in the noise floor.
+- **DR2-N-8 — reinforcement commit cost: no-op resolution.**
+  `FactStore` exposes no transaction-scope manager, so every
+  write auto-commits — the reinforcement UPDATE included, once
+  per `_inject_memory_context` call.  The plan asked for a
+  calibration against the MQ-12 per-turn-cost budget.  A
+  single small UPDATE + commit sits in the noise floor next to
+  the LLM round-trip that immediately follows, so PR 5e takes
+  the **documented no-op branch**: no `FactStore.transaction()`
+  manager is introduced — adding one would be speculative.
+  The reasoning is recorded in the `mark_recalled_for_agent`
+  docstring so a future trace that *does* surface the commit
+  on the hot path has a named revisit point.
 
 ##### From PR 4 review — third-pass deferrals
 
@@ -1131,7 +1120,7 @@ And the two zero-risk doc nits:
 The remaining four ride PR 5.
 
 - **DR3-L-3 — `mark_recalled` ``at=0.0`` and negative ``at``
-  edge cases are uncovered.**  The monotonicity clamp in
+  edge cases — shipped in PR 5e.**  The monotonicity clamp in
   [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
   uses ``MAX(COALESCE(last_recalled_at, 0), ?)``; ``at=0.0``
   on a NULL column flips the column to 0.0 (a state change),
@@ -1141,14 +1130,15 @@ The remaining four ride PR 5.
   the contracts pinned at
   [`test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
   `test_older_at_does_not_clobber_newer` / `test_first_call_sets_from_null` /
-  `test_equal_at_is_idempotent` leave a small gap where future SQL
-  evolution could regress silently.  PR 5 decision: parameterise
+  `test_equal_at_is_idempotent` left a small gap where future SQL
+  evolution could regress silently.  PR 5e parameterised
   `test_first_call_sets_from_null` over ``[1.0, 0.0]`` and
-  add a one-line ``at=-1.0`` no-op test against an already-
-  populated column.  Low priority — the gap is academic until
-  the OQ #9 operator-seeded-facts path or RFC 0013 erasure
-  backfill starts supplying ``at`` values from sources other
-  than ``time.time()``.
+  added `test_negative_at_is_noop_on_populated_column` — a
+  one-line ``at=-1.0`` no-op pin against an already-populated
+  column.  The gap was academic until the OQ #9
+  operator-seeded-facts path or RFC 0013 erasure backfill
+  starts supplying ``at`` values from sources other than
+  ``time.time()``; the pins close it ahead of those callers.
 
 - **DR3-L-4 — `"Known facts about self:"` header label may
   invite persona-inversion in the LLM's output.**  The header
@@ -1261,8 +1251,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | ✅ Merged | [#344](https://github.com/mkhomutov/Persatrix/pull/344) | 2026-05-15 |
 | 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ✅ Merged | [#345](https://github.com/mkhomutov/Persatrix/pull/345) | 2026-05-15 |
 | 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ✅ Merged | [#346](https://github.com/mkhomutov/Persatrix/pull/346) | 2026-05-15 |
-| 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | 🔀 PR open | — | — |
-| 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ⬜ Not started | — | — |
+| 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ✅ Merged | [#347](https://github.com/mkhomutov/Persatrix/pull/347) | 2026-05-15 |
+| 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | 🔀 PR open | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 
 ---

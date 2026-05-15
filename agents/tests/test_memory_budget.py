@@ -330,3 +330,70 @@ class TestPR6Followups:
         result_small = budget.try_add(small, min_tokens=1)
         assert result_small == small
         assert budget.remaining < remaining_before
+
+
+# ─── PR #342 second-pass review DR2-N-6 ───────────────────────────────────────
+
+
+class TestEncodeOnceOnOversizedItem:
+    """DR2-N-6 — ``try_add`` tokenises the full item text only once.
+
+    The oversized path used to re-encode the full text: once in
+    ``_count_tokens(text)`` and again inside ``_truncate_to_token_limit``.
+    With PR 4's multi-block facts render a tight per-tier slice reaches
+    the oversized branch more often, so the redundant re-encode is now
+    worth removing.  ``try_add`` caches the token list off the first
+    encode and threads it into the truncator, which decodes against the
+    same list instead of re-encoding.
+    """
+
+    def test_oversized_item_encodes_full_text_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The long original text is passed to ``enc.encode`` exactly once.
+
+        Regression guard for the redundant re-encode: pre-fix this count
+        was 2 (counter + truncator).  The short truncated string and the
+        one-char ellipsis are still encoded separately — those are cheap
+        and out of scope; only the full-text re-encode is eliminated.
+        """
+        tiktoken = pytest.importorskip("tiktoken")
+
+        encoded_texts: list[str] = []
+        real_encode = tiktoken.Encoding.encode
+
+        def _spy(self, text, *args, **kwargs):  # type: ignore[no-untyped-def]
+            encoded_texts.append(text)
+            return real_encode(self, text, *args, **kwargs)
+
+        monkeypatch.setattr(tiktoken.Encoding, "encode", _spy)
+
+        budget = MemoryBudget(total_tokens=20)
+        long_text = "word " * 200  # far exceeds the 20-token budget
+        result = budget.try_add(long_text, min_tokens=1)
+
+        assert result is not None  # admitted in truncated form
+        assert result.endswith("…")
+        assert encoded_texts.count(long_text) == 1
+
+    def test_whole_fit_item_encodes_text_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An item that fits whole is also encoded only once (no truncation)."""
+        tiktoken = pytest.importorskip("tiktoken")
+
+        encoded_texts: list[str] = []
+        real_encode = tiktoken.Encoding.encode
+
+        def _spy(self, text, *args, **kwargs):  # type: ignore[no-untyped-def]
+            encoded_texts.append(text)
+            return real_encode(self, text, *args, **kwargs)
+
+        monkeypatch.setattr(tiktoken.Encoding, "encode", _spy)
+
+        budget = MemoryBudget(total_tokens=500)
+        text = "the quick brown fox jumps over the lazy dog"
+        result = budget.try_add(text)
+
+        assert result == text
+        assert encoded_texts.count(text) == 1
