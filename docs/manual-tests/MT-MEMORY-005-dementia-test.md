@@ -165,15 +165,17 @@ Leg 5 measures the persona's stability *as a subject of its own facts* — ortho
 
 ## Expected Results Summary
 
-| Leg | Established at | Triggered at | Pass criterion | Variant gate | Pass/Fail |
-|-----|----------------|--------------|----------------|--------------|-----------|
-| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | V2+ | ☐ |
-| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | V2+ | ☐ |
-| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | V2 (fact form) / V4 (commitment form) | ☐ |
-| 4 — Paraphrase Recall | Interaction 1 | Interaction 5 | Rate-card / pricing thread surfaced via paraphrase | V2+ (fail = MQ-8 signal) | ☐ |
-| 5 — Self-Consistency | Interaction 1 | Interaction 5 | Persona's self-claim stable across the window | V2+ | ☐ |
+| Leg | Established at | Triggered at | Pass criterion | Variant gate | V2 expectation (post-RFC 0026 PR 4) | Pass/Fail |
+|-----|----------------|--------------|----------------|--------------|-------------------------------------|-----------|
+| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | V2+ | ✅ Expected pass — `(sender, has_child_named, "Mira")` admits via facts tier on the trigger turn | ☐ |
+| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | V2+ | ✅ Expected pass — `(sender, dislikes, "phone calls")` / `(sender, prefers, "text or async")` admits | ☐ |
+| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | V2 (fact form) / V4 (commitment form) | ⚠️ V2 partial — `(sender, committed_to, ...)` may admit; structured commitment tracking is v0.4.0 (RFC 0021 P2) | ☐ |
+| 4 — Paraphrase Recall | Interaction 1 | Interaction 5 | Rate-card / pricing thread surfaced via paraphrase | V2+ (fail = MQ-8 signal) | ↔️ Unchanged from V1 — facts tier does not cover paraphrase recall; consistent V2/V3 fails escalate to RFC 0024 | ☐ |
+| 5 — Self-Consistency | Interaction 1 | Interaction 5 | Persona's self-claim stable across the window | V2+ | ✅ Expected pass — `(self, self.has_preference, ...)` admits via the PR 4 `self`-subject seed | ☐ |
 
 **Overall pass per variant**: all variant-gated legs pass. A pass on N-1 of N is partial — investigate which deliverable hasn't landed yet. Two or more fails = fail. Per-leg telemetry (recall miss vs. reasoning miss) determines the next action.
+
+**Expected V2 outcomes (post-RFC 0026 PR 4)**: Legs 1, 2, and 5 flip from V1 baseline-fail to V2 pass. Legs 3, 4 hold unchanged — Leg 3 because structured commitment tracking is v0.4.0 scope (RFC 0021 P2), Leg 4 because paraphrase recall is the MQ-8 trigger for RFC 0024 (deferred to v0.3.x). RFC 0026 PR 4 ships the `last_recalled_at` reinforcement write and the `self` subject seed needed for Leg 5; the per-turn tier-provenance log under `PERSATRIX_MEMORY_PROVENANCE=1` (MQ-11) is the diagnostic that distinguishes a recall miss from a reasoning miss on any leg fail.
 
 ---
 

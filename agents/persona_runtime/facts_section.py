@@ -101,16 +101,53 @@ DEFAULT_FACTS_BUDGET_TOKENS: int = 200
 FACTS_RECALL_LIMIT: int = 20
 
 
+#: Literal subject key for the persona's own ``self.*`` facts
+#: (RFC 0026 §C.4 + OQ #10).  Stays a constant rather than a magic
+#: string so a future rename — e.g. to a per-agent ``self::<agent_id>``
+#: scheme for shared deployments — has one site to edit.
+SELF_SUBJECT: str = "self"
+
+
 def _subject_seeds(event: AgentEvent) -> list[str]:
     """Derive the canonical subject set for ``event``.
 
-    v0.3.1 ships the sender-only seed.  Future RFCs (mentioned-entity
-    extraction, multi-subject queries) extend this list; PR 3 keeps the
-    seam narrow so the unit-test surface stays predictable.
+    Seed shape:
 
-    Returns canonicalised subjects (post :func:`canonicalize_subject`).
-    A ``None`` / empty / whitespace-only sender yields an empty list
-    so the tier short-circuits at the caller.
+    * Sender-less events (TICK, orchestrator-internal — ``sender_id``
+      ``None`` / empty / whitespace-only) return ``[]``.  The facts
+      tier then short-circuits inside :func:`recall_facts_for_event`
+      before any DB round-trip, honouring the PR-5 empty-context
+      guard for zero-admission events.  This is the path the
+      ``test_priority_order_..._for_tick`` pin asserts on.
+    * Sender-bearing events seed two subjects in admit-priority
+      order:
+
+      - ``SELF_SUBJECT`` (``"self"``) first — admits introspective
+        ``self.*`` facts (RFC 0026 OQ #10) so MT-MEMORY-005 Leg 5
+        (self-consistency on the persona's reply to a counterparty)
+        flips green.  PR 3 wrote ``self.*`` rows but seeded only
+        from ``event.sender_id``, leaving self facts write-only;
+        PR 4 unblocks the read by always pairing ``self`` with the
+        sender seed.
+      - The canonicalised ``event.sender_id`` second — facts about
+        the counterparty.
+
+    The "always seed self even when sender is missing" shape was
+    tried in the initial PR 4 cut and reverted under the PR #342
+    review M-2 finding: it issued an unconditional
+    ``fact_store.recall(subject="self")`` on every TICK and
+    defeated the PR-5 empty-context cost guard.  Gating the self
+    seed on sender presence preserves the Leg-5 admit (user-facing
+    legs always carry a sender) without paying the cost on internal
+    events.
+
+    Returns canonicalised subjects in admit-priority order (self
+    first so introspective rows survive when the per-tier slice is
+    tight).  Duplicates between the two are de-duplicated here at
+    the seed-list level (``self`` plus a sender that canonicalises
+    to ``"self"`` collapses to one seed); the downstream
+    :func:`recall_facts_for_event` ``seen_ids`` set dedupes fact
+    rows, not seeds.
     """
     sender_id = event.sender_id
     if not sender_id or not sender_id.strip():
@@ -118,13 +155,19 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
     try:
         canonical = canonicalize_subject(sender_id)
     except ValueError:
-        # Defensive: sender_id should already be non-empty per the
-        # truthiness check above, but if a caller injects a payload
-        # that canonicalises to empty (e.g. a string of only Unicode
-        # whitespace), drop the seed rather than raising into the
-        # allocator path.
+        # Defensive forward-guard (PR #342 third-pass review L-2).
+        # ``canonicalize_subject`` currently raises only on empty /
+        # whitespace-only input, which the truthiness check above
+        # already filters — so this branch is unreachable today.
+        # Retained so that future :data:`PREDICATE_ALLOWLIST`-adjacent
+        # validation in ``canonicalize_subject`` (max-length checks,
+        # codepoint allowlist, etc.) cannot crash the persona's hot
+        # path; the facts tier falls back to the no-seed path,
+        # consistent with the no-sender branch above.
         return []
-    return [canonical]
+    if canonical == SELF_SUBJECT:
+        return [SELF_SUBJECT]
+    return [SELF_SUBJECT, canonical]
 
 
 async def recall_facts_for_event(
@@ -207,24 +250,90 @@ def render_facts_section(
     :meth:`MemoryBudget.try_add` so ``memory_admitted_tokens`` does
     not under-report the prompt-side cost.  If the header itself
     cannot be admitted (every other tier already saturated the
-    budget), the section is dropped — the per-item lines without a
+    budget), that subject's block is dropped — naked lines without a
     framing header are useless to the LLM.
 
     Subject-templated header (PR #341 review M-2)
     ---------------------------------------------
     The header names the canonical subject of the facts rather than
-    addressing the LLM persona as ``"you"``.  Reason: PR 3 admits
-    facts about the counterparty (the canonical ``event.sender_id``),
-    so a literal ``"Known facts about you:"`` invites the persona to
-    interpret a row like ``- bob has_child_named Mira`` as a fact
-    about *itself* — the persona-inversion footgun that the dementia
-    test is meant to fence off.  Phase 1 invariant: every admitted
-    fact shares one subject because :func:`_subject_seeds` yields a
-    single seed (the canonical sender); the subject is read off
-    ``facts[0].subject`` (the storage form, identical across the
-    list).  When PR 4 lands multi-subject seeding the section shape
-    will need to fan out (one block per subject, or a pluralised
-    header) — tracked in :doc:`docs/rfcs/0026-pr-plan.md` PR 4 scope.
+    addressing the LLM persona as ``"you"``.  Reason: facts admitted
+    here include both the counterparty's rows (subject = canonical
+    sender) **and** the persona's own ``self.*`` rows (subject =
+    ``"self"`` per OQ #10), so a literal ``"Known facts about you:"``
+    invites the persona to interpret a row like
+    ``- bob has_child_named Mira`` as a fact about *itself* — the
+    persona-inversion footgun that the dementia test is meant to
+    fence off.
+
+    Multi-subject fan-out (RFC 0026 PR 4)
+    -------------------------------------
+    Once :func:`_subject_seeds` yields more than one seed (PR 4 adds
+    ``"self"`` to the previous sender-only shape), facts arrive with
+    mixed subjects.  The render groups by subject in caller order and
+    emits one ``"Known facts about <subject>:"`` block per subject so
+    a ``self.*`` row is never silently labelled under the sender's
+    banner.
+
+    Per-block slice consumption is **sequential, not even** (PR #342
+    review N-5).  The outer loop iterates blocks in
+    ``_subject_seeds``-emit order (``self`` first, sender second);
+    each block drains the slice until either (a) its facts are
+    exhausted or (b) ``facts_tokens_used`` reaches
+    ``facts_budget_tokens``.  Once the slice is exhausted inside one
+    block the next block's outer-loop guard fires and the rest of the
+    section is skipped — there is no per-block share.
+
+    The ``self``-first emit order is **load-bearing for Leg 5**.  A
+    chatty sender with many facts ordered first would crowd out the
+    persona's introspective rows when the slice is tight, re-opening
+    the persona-inversion hazard the M-2 review fix is meant to
+    fence off.  Keeping ``self`` first means introspective rows
+    always have first claim on the slice; the sender block competes
+    for the **remainder**, which matches the dementia-test framing
+    (the persona's own claims about itself stay stable across
+    interactions, even when the counterparty's fact set grows).
+    Operators tuning ``memory.facts.budget_tokens`` should size it
+    generously enough that the sender's block has headroom after
+    a typical ``self.*`` load (~3-5 rows) — under-sizing here will
+    show up as missing sender rows under tight budgets, not as
+    missing ``self.*`` rows.
+
+    Soft-slice overage scales with subject count
+    --------------------------------------------
+    ``facts_tokens_used`` accumulates item-line tokens only; each
+    per-subject header is charged against the global
+    :class:`MemoryBudget` but *not* against the slice.  The real
+    upper bound on the tier's global-budget consumption is therefore
+    ``facts_budget_tokens + N_subjects × header_tokens`` rather than
+    the slice alone.  Today that overage is at most ~10 tokens (two
+    seeds: ``self`` + sender, ~5 tokens each); future RFCs that add
+    mentioned-entity seeds will widen it linearly with seed count.
+    Operators tuning ``memory.facts.budget_tokens`` should account
+    for this overhead — the slice is a soft floor on item-line
+    tokens, not a hard cap on the tier.
+
+    Tier-provenance registration (RFC 0026 PR 4 / MQ-11)
+    ----------------------------------------------------
+    Each admitted fact_id is registered against the
+    :class:`MemoryBudget` via :meth:`record_admission` so
+    :meth:`agents.memory.facts.FactStore.mark_recalled` can write
+    ``last_recalled_at`` after the section is built, and so MT-MEMORY-
+    005 leg-failure analyses can read the per-turn admission set off
+    a single registry.  The structured-log emission half is gated on
+    ``PERSATRIX_MEMORY_PROVENANCE=1`` (see memory_budget.py); the
+    registry is always populated because the facts-tier reinforcement
+    read does not depend on the env var.
+
+    Admissions are staged per block and committed only after the
+    block's header successfully admits — a dropped header (tight
+    budget remainder) discards the staged pending admissions so the
+    reinforcement write never targets rows that did not reach the
+    prompt.  (PR #342 review M-1 regression guard.)  Item tokens
+    consumed before the header drop stay subtracted from the
+    budget; ``try_add`` has no rollback seam by design (RFC 0017
+    §B keeps the greedy allocator stateless across reverts), and
+    this is the cost of the soft-overage shape M-3 documents
+    below.
 
     Telemetry
     ---------
@@ -241,45 +350,89 @@ def render_facts_section(
     instruments = try_get_instruments()
     agent_attr = current_agent_id()
 
-    items: list[str] = []
-    facts_tokens_used = 0
+    # Group facts by subject preserving first-seen order so the rendered
+    # block sequence is deterministic across runs (insertion-ordered
+    # ``dict`` since Py3.7 is a documented contract).  Caller-order
+    # preservation matches the priority order ``_subject_seeds`` emits.
+    groups: dict[str, list[Fact]] = {}
     for fact in facts:
+        groups.setdefault(fact.subject, []).append(fact)
+
+    blocks: list[str] = []
+    facts_tokens_used = 0
+    for subject, subject_facts in groups.items():
         if facts_tokens_used >= facts_budget_tokens:
             break
         if budget.remaining <= 0:
             break
-        remaining_before = budget.remaining
-        line = _format_fact_line(fact)
-        admitted = budget.try_add(line, min_tokens=MIN_TOKENS_FACTS)
-        if admitted is None:
+
+        # Build the per-subject item list first so an empty subject
+        # block (every line dropped) does not consume a header.
+        # ``pending`` stages the per-item (fact_id, tokens_admitted)
+        # pairs locally — they are committed to the budget's tier
+        # registry (and the telemetry counter) only AFTER the header
+        # admits successfully, so a dropped header cannot leak
+        # phantom reinforcement on rows the LLM never saw.  (PR #342
+        # review M-1 regression guard — pinned by
+        # ``TestNoPhantomReinforcementOnHeaderDrop``.)
+        items: list[str] = []
+        pending: list[tuple[str, int]] = []
+        for fact in subject_facts:
+            if facts_tokens_used >= facts_budget_tokens:
+                break
+            if budget.remaining <= 0:
+                break
+            remaining_before = budget.remaining
+            line = _format_fact_line(fact)
+            admitted = budget.try_add(line, min_tokens=MIN_TOKENS_FACTS)
+            if admitted is None:
+                continue
+            tokens_admitted = remaining_before - budget.remaining
+            items.append(admitted)
+            facts_tokens_used += tokens_admitted
+            pending.append((fact.fact_id, tokens_admitted))
+
+        if not items:
             continue
-        items.append(admitted)
-        facts_tokens_used += remaining_before - budget.remaining
-        if instruments is not None:
-            instruments.facts_injected.add(
-                1, attributes={"agent.id": agent_attr, "tier": "facts"},
+
+        # Charge the header against the global budget so admitted-token
+        # accounting matches the actual prompt-side cost.  Failure to
+        # admit the header drops this subject's block — naked lines
+        # without a framing label are exactly the persona-inversion
+        # footgun the M-2 review fix is meant to prevent.
+        header = f"Known facts about {subject}:\n"
+        admitted_header = budget.try_add(header, min_tokens=MIN_TOKENS_FACTS)
+        if admitted_header is None:
+            # Header dropped — discard the staged pending admissions
+            # without touching the registry or telemetry.  The
+            # already-consumed item tokens stay subtracted from the
+            # budget (the allocator is greedy by design and try_add
+            # has no rollback seam); that is the deliberate trade-off
+            # documented above.
+            continue
+        blocks.append(admitted_header + "\n".join(items))
+        # Commit the staged admissions in admit order.  Telemetry +
+        # registry fire together so a future reader sees a single
+        # source of truth for "what actually reached the prompt".
+        for fact_id, tokens_admitted in pending:
+            budget.record_admission(
+                tier="facts",
+                item_id=fact_id,
+                tokens_admitted=tokens_admitted,
             )
+            if instruments is not None:
+                instruments.facts_injected.add(
+                    1,
+                    attributes={"agent.id": agent_attr, "tier": "facts"},
+                )
 
-    if not items:
+    if not blocks:
         return None
 
-    # Phase 1 invariant: every fact in ``facts`` shares one subject (the
-    # canonical sender from :func:`_subject_seeds`); ``facts[0].subject``
-    # is the storage form (casefold + whitespace-folded by
-    # :func:`canonicalize_subject`), so the header tracks the row's
-    # join key rather than the raw ``event.sender_id`` casing — see
-    # the "Subject-templated header" section of the function docstring.
-    subject = facts[0].subject
-    header = f"Known facts about {subject}:\n"
-    # Charge the header against the global budget so admitted-token
-    # accounting matches the actual prompt-side cost.  If the header
-    # cannot be admitted at the per-tier floor, the section would
-    # render naked lines without a framing — drop instead.
-    admitted_header = budget.try_add(header, min_tokens=MIN_TOKENS_FACTS)
-    if admitted_header is None:
-        return None
-
-    text = admitted_header + "\n".join(items)
+    # Blank line between blocks so the LLM sees a clear visual break
+    # between different subjects' fact sets — matches the relationship
+    # / episodic tier rendering convention.
+    text = "\n\n".join(blocks)
     return ContextSection(
         name=FACTS_SECTION_NAME,
         content=text,

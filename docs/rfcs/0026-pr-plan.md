@@ -803,6 +803,444 @@ The items deferred to this PR are:
   change tracked by existing call sites; mypy / ruff catch
   drift).
 
+##### From PR 4 review
+
+Deep-review (PR #342) findings that **landed inline in PR 4**:
+
+- **M-1 — phantom reinforcement when a per-subject header is
+  dropped.** PR 4's initial cut called
+  `MemoryBudget.record_admission` inside the per-item loop in
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  and admitted the `"Known facts about <subject>:\n"` header
+  *after* the loop.  When the budget remainder after the items
+  fell below the truncation floor (`MIN_TOKENS_FACTS = 24`),
+  the header was dropped and the block was `continue`'d — but
+  the per-item `record_admission` calls had already mutated
+  `_admissions["facts"]`, so the subsequent
+  `FactStore.mark_recalled` write at
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  targeted rows the LLM never saw.  Directly contradicted the
+  PR description's contract ("the registry is the source of
+  truth the reinforcement write reads off to target only the
+  rows that reached the prompt").  Fix folded into PR 4: per-
+  block `pending: list[tuple[fact_id, tokens_admitted]]` stages
+  admissions locally; the registry + the `agent.facts.injected`
+  telemetry counter fire only after the header admits
+  successfully.  Pinned by
+  `TestNoPhantomReinforcementOnHeaderDrop` (single-subject and
+  multi-subject variants) in
+  [`tests/integration/test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py).
+
+- **M-2 — TICK / sender-less events newly paid a DB cost.**
+  PR 4's initial `_subject_seeds` shape always seeded
+  `["self"]` so MT-MEMORY-005 Leg 5 (self-consistency) could
+  read introspective `self.*` rows.  Side-effect: events with
+  no resolvable sender (TICK, orchestrator-internal) now
+  issued an unconditional `fact_store.recall(subject="self")`
+  and defeated the PR-5 empty-context cost guard
+  ([`memory_context.py` docstring §"Zero-admission events"](../../agents/persona_runtime/memory_context.py)).
+  Fix folded into PR 4: `_subject_seeds` returns `[]` for
+  sender-less events (restoring the pre-PR-4 short-circuit)
+  and returns `[SELF_SUBJECT, canonical_sender]` for sender-
+  bearing events.  User-facing legs always carry a sender so
+  Leg 5 still flips green; TICK events stay free.  Pinned by
+  `TestSubjectSeedsSenderlessShortCircuit` (unit) and
+  `TestTickEventDoesNotQueryFactStore` (integration).  The
+  pre-existing
+  `test_priority_order_..._for_tick` assertion that
+  `"facts_context" not in order` now passes for the right
+  reason (the short-circuit) rather than incidentally
+  (recall returned `[]` because no `self.*` rows existed).
+
+- **M-3 — soft per-tier slice overage scales with subject
+  count.**  `facts_tokens_used` in
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  accumulates item-line tokens only; the per-subject header is
+  charged against the global budget but *not* against the
+  slice.  With PR 4's multi-subject fan-out, the real upper
+  bound on the tier's global-budget consumption is
+  `facts_budget_tokens + N_subjects × header_tokens`, not the
+  slice alone.  Today the overage is at most ~10 tokens (two
+  seeds: `self` + sender, ~5 tokens each).  Documented inline
+  in the `render_facts_section` docstring under a new
+  "Soft-slice overage scales with subject count" section so a
+  future operator tuning `memory.facts.budget_tokens` knows
+  the slice is a soft floor on item-line tokens, not a hard
+  cap on the tier.  No behaviour change.
+
+- **N-1 — typo `"dianostics"` → `"diagnostics"`** in the
+  module-level comment above `_provenance_logger` in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py).
+
+- **N-2 — inverted test fixture.** The bulk-load loop in
+  `test_dropped_fact_does_not_get_reinforced` stored 40 rows
+  with `subject="bob"` paired with
+  `predicate="self.has_attribute"`.  The `self.*` predicate
+  namespace is conventionally paired with `subject="self"`
+  rows (see
+  [`agents/memory/fact_predicates.py`](../../agents/memory/fact_predicates.py)),
+  and the predicate validator allows the mismatch (it checks
+  the predicate alone), so the fixture worked but muddied the
+  subject/predicate semantics it leaned on incidentally.
+  Switched to `predicate="prefers"` (also allowlisted).
+
+- **N-4 — docstring on
+  `MemoryBudget.record_admission` overstated the env-gate
+  scope.** Original wording said *"Side-effects are best-
+  effort — a logging hiccup must never corrupt the registry
+  the caller is about to read."*  True in spirit, but the
+  registry mutation runs *unconditionally* before the env
+  check; only the structured-log emission is best-effort.
+  Reworded to make the asymmetry explicit so a future reader
+  does not assume the registry write is gated too.
+
+- **N-5 — dedup-location comment in `_subject_seeds` was
+  slightly off.**  Original wording claimed duplicates were
+  de-duplicated downstream by `recall_facts_for_event`'s
+  `seen_ids` set; but the `if canonical == SELF_SUBJECT`
+  branch in `_subject_seeds` *does* dedupe at the seed-list
+  level (the downstream `seen_ids` covers fact-row dedup, not
+  seed dedup).  Tightened the comment under the M-2 docstring
+  rewrite.
+
+The first-pass findings above (M-1, M-2, M-3, N-1, N-2, N-4,
+N-5) all landed in the initial review-fix commit (`529e646`).
+The phantom-reinforcement guard (M-1) and the TICK short-
+circuit (M-2) are the two contracts the PR description made
+explicit; both are now pinned by regression tests.  (The PR 3
+review's "Header-dropped case" deferred item under "Negative-
+path test coverage" is now satisfied by the M-1 fix's
+regression test; that deferred bullet can be marked addressed
+when PR 5 sweeps the residual PR 3 follow-ups.)
+
+##### From PR 4 review — second deep-review pass (PR #342)
+
+A second deep-review pass over the squashed PR 4 (`feature`
++ `review-fix`) caught one **Should-Fix** test-fixture bug
+plus eight nice-to-have polish items.  Five of the eight
+landed in this PR; four are deferred to PR 5 as documented
+under PR 5 §"From PR 4 review — second-pass deferrals" below.
+
+Findings that **landed inline** in PR 4 (second-pass review-fix
+commit):
+
+- **DR2-S-1 — `test_dropped_fact_does_not_get_reinforced`
+  exercised supersession, not the per-tier slice.**  The
+  original fixture in
+  [`tests/integration/test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  stored 40 rows sharing `(subject="bob", predicate="prefers")`.
+  [`FactStore.store`](../../agents/memory/facts.py)'s
+  supersede-on-insert branch keys on `(agent_id, subject,
+  predicate)`, so each successive store superseded its
+  predecessor — only the last row was live, and the other 39
+  were excluded by `recall`'s default `superseded_by IS NULL`
+  filter **before** the allocator saw them.  The "no fact was
+  dropped" assertion silently passed against the retraction
+  filter, not the per-tier slice; a regression that broke the
+  budget allocator's drop behaviour (e.g. raising
+  `facts_budget_tokens` to 100 000 or removing the
+  `if facts_tokens_used >= facts_budget_tokens: break` guard)
+  would not flip this test red.  Fix folded in: cycle 17
+  allowlisted predicates (each `(subject, predicate)` pair
+  distinct) so every stored row stays live; add a sanity
+  pre-check that `len(all_rows) == len(predicates)` so a
+  future regression to colliding keys flips red before the
+  allocator assertions degrade into a retraction-filter test;
+  add `len(admitted) < len(all_rows)` to pin "budget did
+  drop", not just "something was dropped".  This was the
+  first-pass N-2 fix's residual — switching the predicate
+  from `self.has_attribute` to `prefers` addressed the
+  subject/predicate-namespace inconsistency but did not
+  address the deeper supersession-masks-allocator-drop
+  problem.
+
+- **DR2-N-1 — `mark_recalled_for_agent` overwrote
+  `last_recalled_at` unconditionally.**  The UPDATE in
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  wrote whatever `at` argument was passed, even when older
+  than the existing column value.  RFC 0008 §G decay /
+  validation composes with this column on a "newest recall
+  wins" model — an older `at` clobbering a newer one would
+  silently age the fact out.  Production `time.time()` is
+  monotonic per-process so the failure mode is narrow (NTP
+  step-back, the OQ #9 operator-seeded path replaying an
+  older interaction, or test fixtures passing explicit `at`
+  out of order), but the `MAX(COALESCE(last_recalled_at, 0),
+  ?)` clamp is cheap insurance.  Fix folded in: tighten the
+  UPDATE to clamp via `MAX`; the `COALESCE(..., 0)` is
+  load-bearing because SQLite's `MAX(NULL, x) = NULL` would
+  otherwise silently no-op the first call (column starts
+  NULL).  Pinned by `test_older_at_does_not_clobber_newer`,
+  `test_first_call_sets_from_null`, and
+  `test_equal_at_is_idempotent` in
+  [`tests/unit/python/test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py).
+
+- **DR2-N-4 — `MemoryBudget.record_admission(tier=…)` accepted
+  arbitrary strings.**  Three call sites used `"facts"`,
+  `"episodic"`, `"notes"`.  A typo at a future call site
+  (`tier="fact"`) would silently populate an unread bucket —
+  the facts-tier reinforcement read at
+  [`FactStore.mark_recalled`](../../agents/memory/facts.py)
+  looks up `admissions_by_tier("facts")`, sees `[]`, and
+  skips the `last_recalled_at` write without surfacing
+  anywhere.  Fix folded in: add a frozen `KNOWN_TIERS`
+  allowlist (`{"facts", "episodic", "notes", "relationship",
+  "channel_history"}` covering all canonical RFC 0027 §F
+  tier names, even tiers not currently calling
+  `record_admission` so future wiring lands on a known
+  name); `record_admission` raises `ValueError` on
+  unknown tiers.  The reader side (`admissions_by_tier`)
+  stays permissive — a typo at a *read* site returns the
+  empty-default, because the bug lives on the writer side.
+  Pinned by `TestKnownTierAllowlist` in
+  [`tests/unit/python/test_memory_budget_provenance.py`](../../tests/unit/python/test_memory_budget_provenance.py).
+
+- **DR2-N-5 — soft-slice docstring implied even-share
+  consumption across subjects.**  The M-3 docstring rewrite
+  said *"the per-tier slice is shared across all blocks so
+  a chatty sender cannot starve the persona's self-claims
+  at the global allocator level"*, which is true at the
+  **global** allocator (1500-token budget) but misleading at
+  the **slice** level: once `facts_tokens_used` crosses
+  `facts_budget_tokens` inside one block, the next block's
+  outer-loop guard fires and the rest of the section is
+  skipped.  With `_subject_seeds` returning
+  `[SELF_SUBJECT, canonical_sender]` and `groups` preserving
+  caller order, `self` blocks always render first, so this
+  isn't a Leg-5 hazard in practice — but the docstring
+  didn't say so out loud.  Fix folded in: spell out the
+  per-block-sequential consumption shape and the
+  `self`-first emit ordering as **load-bearing for Leg 5**
+  in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  under a new "Per-block slice consumption is sequential,
+  not even" paragraph in `render_facts_section`'s
+  docstring.  No behaviour change.
+
+- **DR2-N-7 — provenance event name was carried only in the
+  log message text.**  The
+  `_provenance_logger.info("persatrix.memory.tier_admitted",
+  extra=…)` call shipped the event identifier as the format
+  string; structured fields (`tier`, `item_id`,
+  `tokens_admitted`) landed on the LogRecord as attributes,
+  but the event name itself was only grep-able via the
+  human-readable message — brittle to future message-format
+  changes.  Fix folded in: promote the event name to an
+  `extra["event"]` field too, so downstream structured-log
+  pipelines (Loki, ELK) can index on a stable key.  Message
+  field stays populated for terminal-tailing.  Pinned by
+  `test_event_name_is_promoted_to_structured_field`.
+
+##### From PR 4 review — second-pass deferrals
+
+Four nice-to-have findings from the second deep-review pass
+(PR #342) that did not block PR 4 merge and are tracked here
+for PR 5 to pick up.  Each is small in code surface but
+touches a different concern (audit, defense-in-depth bound,
+allocator amortisation, write-cost calibration), so they are
+sequenced individually rather than batched.
+
+- **DR2-N-2 — reinforcement writes are not audited.**
+  [`FactStore.store`](../../agents/memory/facts.py) and
+  `FactStore.supersede` both emit
+  `_emit_audit("fact.store", …)` /
+  `_emit_audit("fact.supersede", …)` via the RFC 0026 §G
+  audit hook.
+  [`FactStore.mark_recalled`](../../agents/memory/facts.py)
+  does not.  The audit log is therefore blind to which facts
+  were reinforced this turn, even though MT-MEMORY-005
+  leg-failure analysis is one of the two consumers PR 4
+  named.  The structured-log emission under
+  `PERSATRIX_MEMORY_PROVENANCE=1` partially fills this gap,
+  but it is env-gated and emits from the budget allocator,
+  not from the storage layer — so an audit-log reader has no
+  `FactStore`-level signal that reinforcement occurred.
+  PR 5 decision: either emit
+  `_emit_audit("fact.recalled", agent_id=…, fact_ids=ids,
+  at=timestamp)` once per call (not per fact_id — audit
+  volume stays bounded), or amend RFC 0026 §G to formally
+  exclude reinforcement events from the audit surface.  Pair
+  with a unit test in
+  [`tests/unit/python/test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
+  that asserts a `fact.recalled` audit row lands after a
+  `mark_recalled` call (path #1), or with an inline note in
+  the `mark_recalled` docstring naming the audit-excluded
+  contract (path #2).
+
+- **DR2-N-3 — `mark_recalled_for_agent` does not chunk the
+  IN-list.**  SQLite caps the parameter count per query at
+  `SQLITE_MAX_VARIABLE_NUMBER` (32 766 in v3.32+, 999 in
+  older builds).  Today the call site in
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  pulls IDs from `budget.admissions_by_tier("facts")`,
+  bounded by `FACTS_RECALL_LIMIT=20` × ≤2 seeds = 40 IDs —
+  orders of magnitude below either limit.  But the helper
+  accepts an arbitrary `Iterable[str]` and is callable from
+  other paths (RFC 0013 erasure backfill, RFC 0008
+  calibration); a single-line chunk loop
+  (`for chunk in chunks(ids, 900): …`) future-proofs the
+  API without affecting today's hot path.  PR 5 decision:
+  add the chunk loop to
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  and bump the docstring's "bounded by call-site" note to
+  "bounded by helper-internal chunking".  Pin with a unit
+  test that passes 1 500 IDs and asserts the call succeeds
+  on a sqlite build with the older 999-variable cap (or that
+  asserts the helper issues ≥2 UPDATE statements).
+
+- **DR2-N-6 — triple `enc.encode` re-cost on oversized
+  items.**  Pre-existing in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py),
+  called out by the inline comment ("enc.encode() is invoked
+  3× for oversized items").  With PR 4's new admission
+  registry and the multi-block render, a tight budget can
+  amplify this — a 200-token per-tier slice with a fact line
+  that costs 60 tokens will see the oversized path on the
+  third or fourth item, multiplied across the per-block
+  fan-out.  Out of scope for PR 4 (the path existed before
+  this PR), but the multi-block render makes it more
+  reachable.  PR 5 decision: cache the token count off the
+  first `enc.encode(text)` call in `try_add` and pass it to
+  `_truncate_to_token_limit` so the truncation path can
+  decode against the same token list rather than re-encoding.
+  Pin with a benchmark / micro-bench under
+  `tests/bench/` (RFC 0017 §B notes the bench-suite seam) or
+  with an instrumented test that asserts `enc.encode` is
+  called at most once per `try_add`.
+
+- **DR2-N-8 — `mark_recalled_for_agent` issues its own
+  `db.commit()` even when called inside an outer
+  transactional caller.**  `FactStore` does not currently
+  expose a transaction-scope manager, so all writes
+  auto-commit per call (`store`, `supersede`, `prune`,
+  `delete_by_subject` all commit before returning).  The
+  reinforcement write therefore commits at the very end of
+  every `_inject_memory_context` call — after the facts
+  section has been added to working memory but before the
+  caller builds the LLM prompt — a small write-amplification
+  cost the persona's hot path now pays.  Today's call-site
+  comment frames the failure as non-fatal because the section
+  is already staged in working memory (so the LLM call still
+  succeeds), but the write-cost is unmentioned.  PR 5 decision:
+  calibrate against the MQ-12
+  per-turn-cost budget; if the reinforcement commit shows
+  up in the trace, either batch it with a future facts-tier
+  write (RFC 0026 OQ #9 operator-seeded path is the most
+  natural pair) or expose an explicit
+  `FactStore.transaction()` context manager.  No-op if the
+  calibration shows the commit is in the noise floor.
+
+##### From PR 4 review — third-pass deferrals
+
+Four low-priority findings from the third deep-review pass
+(PR #342, `d241195`-onward) that did not block merge.  Each
+was small enough that the PR-4 deliverable absorbed the three
+medium findings inline:
+
+* **M-1** — `budget.remaining < 8` assertion added to
+  `TestNoPhantomReinforcementOnHeaderDrop` in
+  [`test_facts_section.py`](../../tests/unit/python/test_facts_section.py),
+  pinning the documented soft-overage trade-off so a future
+  peek-then-commit refactor surfaces as a deliberate test update.
+* **M-2** — `TestFirstSubjectBlockSurvivesUnderTightSlice` added
+  to
+  [`test_facts_section.py`](../../tests/unit/python/test_facts_section.py)
+  (composed with the existing `_subject_seeds` unit pin) for the
+  load-bearing self-first emit ordering claim.  Routed to the unit
+  suite rather than the loose-slice integration pin at
+  [`test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  to keep the integration file under the file_size cap; the
+  integration site carries a pointer note to the unit pin so the
+  next reader finds it.
+* **M-3** — comment correction in
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  reframing the reinforcement-failure rationale around "section
+  is staged in working memory" rather than the stale "prompt
+  already shipped" wording (the prompt is built downstream of
+  `_inject_memory_context`).
+
+And the two zero-risk doc nits:
+
+* **L-1** — registry-shape docstring correction in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py)
+  (the registry stores ``item_id`` only; ``tokens_admitted`` rides
+  the structured-log emission).
+* **L-2** — forward-guard comment in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  re-framing the `_subject_seeds` `except ValueError` as a
+  forward-guard against future `canonicalize_subject` validation
+  rather than a present-day path.
+
+The remaining four ride PR 5.
+
+- **DR3-L-3 — `mark_recalled` ``at=0.0`` and negative ``at``
+  edge cases are uncovered.**  The monotonicity clamp in
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  uses ``MAX(COALESCE(last_recalled_at, 0), ?)``; ``at=0.0``
+  on a NULL column flips the column to 0.0 (a state change),
+  and ``at=-1.0`` collapses to ``MAX(0, -1) = 0`` regardless
+  of existing value.  Neither case is reachable in production
+  (``time.time()`` is monotone non-negative per-process), but
+  the contracts pinned at
+  [`test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
+  `test_older_at_does_not_clobber_newer` / `test_first_call_sets_from_null` /
+  `test_equal_at_is_idempotent` leave a small gap where future SQL
+  evolution could regress silently.  PR 5 decision: parameterise
+  `test_first_call_sets_from_null` over ``[1.0, 0.0]`` and
+  add a one-line ``at=-1.0`` no-op test against an already-
+  populated column.  Low priority — the gap is academic until
+  the OQ #9 operator-seeded-facts path or RFC 0013 erasure
+  backfill starts supplying ``at`` values from sources other
+  than ``time.time()``.
+
+- **DR3-L-4 — `"Known facts about self:"` header label may
+  invite persona-inversion in the LLM's output.**  The header
+  in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  was chosen at PR 3 to avoid the inverse ``"you"`` footgun
+  when both ``self.*`` and sender rows are present.  The
+  literal ``"self"`` label still risks the LLM reading it as
+  a third-party entity called "Self," especially under the
+  multi-block render where both ``"Known facts about self:"``
+  and ``"Known facts about bob:"`` appear side-by-side.  No
+  evidence from the third-pass review that the wording was
+  empirically validated against a real persona — the choice
+  is grounded in the inverse hazard, not in a measured
+  MT-MEMORY-005 pass-rate.  PR 5 decision: spike whether
+  ``"Known facts about you (the persona):"`` or
+  ``"Known facts about yourself:"`` for the ``self`` block (and
+  ``"Known facts about <canonical_sender>:"`` unchanged for the
+  counterparty block) does better than the current header
+  against MT-MEMORY-005 Leg 5 pass rate over a small set of
+  seeded turns.  Defer the change unless the spike shows a
+  measurable improvement — the PR-4 contribution to Leg 5
+  (the seed + the reinforcement write) is the load-bearing fix
+  and the label wording is a follow-on optimisation.
+
+- **DR3-L-5 — `test_admitted_fact_ids_are_recorded_on_budget`
+  uses raw module-attribute mutation with try/finally instead
+  of `pytest.monkeypatch.setattr`.**  The try/finally restore
+  in
+  [`test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  is correct under exceptions, so this is purely stylistic.
+  `monkeypatch.setattr(mc_mod, "MemoryBudget", _CapturingBudget)`
+  would let pytest handle the restore as fixture teardown and
+  drop the explicit dance.  PR 5 decision: refactor when
+  next touching the file.  No standalone PR-5 work item — fold
+  into whichever PR-5 change next edits the test.
+
+- **DR3-L-6 — `facts_section.py` is at 439 lines (88% of the
+  500-line `--strict` cap).**  PR 4's multi-subject fan-out
+  added ~150 lines to
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py);
+  PR 5's deferred items do not touch this file, but PR 6's RFC
+  close + future RFC 0027 §F end-state work may.  PR 5
+  decision: monitor only, no action.  When the file does cross
+  the cap, the natural split mirrors the storage-layer
+  `_facts_audit.py` / `_facts_reinforce.py` carve-outs — pull
+  the `render_facts_section` body (or the per-block staging
+  helpers) into a sibling module.
+
 #### PR checklist
 
 - [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
@@ -861,8 +1299,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 |---|-------|--------|--------|-----------|--------|
 | 1 | Facts schema + FactStore + erasure primitive | `feature/v031-rfc0026-facts-schema-store` | ✅ Merged | [#339](https://github.com/mkhomutov/Persatrix/pull/339) | 2026-05-14 |
 | 2 | Extractor + predicate allowlist + audit | `feature/v031-rfc0026-extractor` | ✅ Merged | [#340](https://github.com/mkhomutov/Persatrix/pull/340) | 2026-05-14 |
-| 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | 🔀 PR open | — | — |
-| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ⬜ Not started | — | — |
+| 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
+| 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | 🔀 PR open | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | — |
 | 5 | Review follow-ups | `feature/v031-rfc0026-followups` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
 

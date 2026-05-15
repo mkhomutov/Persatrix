@@ -371,13 +371,11 @@ class _MemoryContextMixin:
         if ch_section is not None:
             self._working_memory.add_section(ch_section)
 
-        # Facts tier (RFC 0026 PR 3).  Admitted between
-        # channel_history and episodic so a high-signal fact about
-        # the sender displaces lower-signal episodic / notes prose
-        # under budget pressure.  The render helper enforces the
-        # per-tier soft slice (``_facts_budget_tokens``) and charges
-        # the section header against the global budget (RFC 0017 PR 2
-        # finding #2 regression guard).
+        # Facts tier (RFC 0026 PR 3).  Admitted between channel_history
+        # and episodic so a high-signal fact displaces lower-signal
+        # prose under budget pressure.  Header charged against the
+        # global budget; admitted fact_ids land on the per-turn
+        # registry for the PR 4 reinforcement write below (MQ-11).
         if facts:
             facts_section = render_facts_section(
                 facts, budget,
@@ -385,6 +383,21 @@ class _MemoryContextMixin:
             )
             if facts_section is not None:
                 self._working_memory.add_section(facts_section)
+                # RFC 0026 PR 4 — use-based reinforcement; failure is
+                # non-fatal because the section is already staged in
+                # ``_working_memory`` and the caller builds the LLM
+                # prompt after ``_inject_memory_context`` returns
+                # (PR #342 third-pass M-3 — fixes earlier misleading
+                # "prompt already shipped" wording).
+                admitted_fact_ids = budget.admissions_by_tier("facts")
+                if admitted_fact_ids and self._fact_store is not None:
+                    try:
+                        await self._fact_store.mark_recalled(admitted_fact_ids)
+                    except Exception:
+                        logger.warning(
+                            "Agent %s: fact reinforcement write failed; skipping",
+                            self.agent_id, exc_info=True,
+                        )
 
         # Episodic tier (priority 7).
         if episodes:
@@ -404,11 +417,17 @@ class _MemoryContextMixin:
                     prefix = f"[{tag}, {dur}]"
                 else:
                     prefix = f"[{tag}]"
+                remaining_before = budget.remaining
                 admitted = budget.try_add(
                     f"- {prefix} {summary}", min_tokens=MIN_TOKENS_EPISODIC,
                 )
                 if admitted is not None:
                     ep_items.append(admitted)
+                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
+                    budget.record_admission(
+                        tier="episodic", item_id=ep.id,
+                        tokens_admitted=remaining_before - budget.remaining,
+                    )
                     # PR #260 review M-1: count one per admitted item
                     # rather than ``len(episodes)`` after the loop.  The
                     # recall set may include items the budget drops; the
@@ -449,12 +468,18 @@ class _MemoryContextMixin:
                 content = _truncate_with_ellipsis(
                     note.content, MAX_NOTE_CONTENT_CHARS,
                 )
+                remaining_before = budget.remaining
                 admitted = budget.try_add(
                     f"- [{note.topic}] {content}",
                     min_tokens=MIN_TOKENS_NOTES,
                 )
                 if admitted is not None:
                     note_items.append(admitted)
+                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
+                    budget.record_admission(
+                        tier="notes", item_id=note.id,
+                        tokens_admitted=remaining_before - budget.remaining,
+                    )
             if note_items:
                 # See episodic tier above re: untracked header overhead.
                 text = "Relevant notes:\n" + "\n".join(note_items)
