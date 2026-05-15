@@ -31,6 +31,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
+import pytest
 from aiohttp import web
 
 from agents.channel_history_fetcher import (
@@ -144,6 +145,87 @@ class TestHttpChannelHistoryFetcherHappyPath:
         assert messages == [{"id": "m1"}]
         assert all("//api/v1" not in p for p in state["log"])
 
+    async def test_fetch_round_trips_colon_bearing_channel_id(
+        self, orchestrator,
+    ):
+        """RFC 0011 channel ids carry colons (``group:name``,
+        ``dm:a:b``). ``quote(channel_id, safe='')`` percent-encodes them
+        into a single path segment; the round-trip proves the encoded
+        request decoded back to exactly the channel the history was
+        stored under. DM channels are RFC 0034 Phase 1's whole scope, so
+        a colon id must not mis-route."""
+        base_url, state = orchestrator
+        state["history"]["dm:ember-owl:iron-fox"] = [
+            {"id": "m1", "content": "quick q"},
+        ]
+
+        async with aiohttp.ClientSession() as session:
+            fetcher = HttpChannelHistoryFetcher(
+                session=session, orchestrator_url=base_url,
+            )
+            messages = await fetcher.fetch("dm:ember-owl:iron-fox", limit=20)
+
+        assert messages == [{"id": "m1", "content": "quick q"}]
+        assert (
+            "/api/v1/channels/dm:ember-owl:iron-fox/messages?limit=20"
+            in state["log"]
+        )
+
+    async def test_fetcher_is_reusable_across_calls(self, orchestrator):
+        """One fetcher serves many ``fetch`` calls — PR 3 constructs it
+        once per agent and calls it per turn. The caller-owned
+        ``aiohttp`` session is not closed between (or after) calls."""
+        base_url, state = orchestrator
+        state["history"]["c1"] = [{"id": "m1"}]
+        state["history"]["c2"] = [{"id": "m2"}, {"id": "m3"}]
+
+        async with aiohttp.ClientSession() as session:
+            fetcher = HttpChannelHistoryFetcher(
+                session=session, orchestrator_url=base_url,
+            )
+            first = await fetcher.fetch("c1", limit=10)
+            second = await fetcher.fetch("c2", limit=10)
+            assert not session.closed
+
+        assert first == [{"id": "m1"}]
+        assert second == [{"id": "m2"}, {"id": "m3"}]
+
+
+class TestHttpChannelHistoryFetcherMalformedPayload:
+    """A 2xx response whose ``messages`` field is absent or not a JSON
+    array degrades to ``[]`` — the verbatim ``isinstance(..., list)``
+    guard lifted from the catch-up helper.
+
+    ``[]`` and not ``None`` because the request *succeeded*: ``None`` is
+    reserved for the transport / HTTP-error path so a caller can tell
+    "the channel has nothing" apart from "the fetch failed".
+    """
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({}, id="messages-key-absent"),
+            pytest.param({"messages": None}, id="messages-null"),
+            pytest.param({"messages": "oops"}, id="messages-string"),
+            pytest.param({"messages": {"m1": {}}}, id="messages-object"),
+            pytest.param({"messages": 7}, id="messages-int"),
+        ],
+    )
+    async def test_shapeless_messages_field_returns_empty_list(
+        self, payload,
+    ):
+        async def handler(_request: web.Request) -> web.StreamResponse:
+            return web.json_response(payload)
+
+        async with _serve(handler) as base_url, \
+                aiohttp.ClientSession() as session:
+            fetcher = HttpChannelHistoryFetcher(
+                session=session, orchestrator_url=base_url,
+            )
+            messages = await fetcher.fetch("c1", limit=50)
+
+        assert messages == []
+
 
 class TestHttpChannelHistoryFetcherFailures:
     async def test_http_5xx_returns_none_and_logs_warning(
@@ -166,6 +248,30 @@ class TestHttpChannelHistoryFetcherFailures:
             "c1" in rec.message and "HTTP 500" in rec.message
             for rec in caplog.records
         ), f"expected HTTP-500 WARN; got {[r.message for r in caplog.records]!r}"
+
+    async def test_oversize_error_body_is_truncated_in_warning(self, caplog):
+        """An error response with a large body (e.g. an orchestrator
+        stack trace) is truncated to 256 chars before it reaches the
+        WARN log — the verbatim ``body[:256]`` cap keeps one bad
+        response from flooding the boot log."""
+
+        async def big_error(_request: web.Request) -> web.StreamResponse:
+            return web.Response(text="E" * 1000, status=500)
+
+        with caplog.at_level("WARNING", logger="agents.channel_history_fetcher"):
+            async with _serve(big_error) as base_url, \
+                    aiohttp.ClientSession() as session:
+                fetcher = HttpChannelHistoryFetcher(
+                    session=session, orchestrator_url=base_url,
+                )
+                messages = await fetcher.fetch("c1", limit=50)
+
+        assert messages is None
+        warns = [r.message for r in caplog.records if "HTTP 500" in r.message]
+        assert warns, "expected an HTTP-500 WARN"
+        # Exactly 256 body chars survive — not 257, not the full 1000.
+        assert "E" * 256 in warns[0]
+        assert "E" * 257 not in warns[0]
 
     async def test_http_404_returns_none_and_logs_warning(self, caplog):
         """A 404 takes the same ``resp.status >= 400`` branch as a 5xx —
