@@ -33,6 +33,7 @@ import aiosqlite
 from ..observability.metrics import try_get_instruments
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
+from ._facts_supersede import apply_supersession as _apply_supersession
 from .fact_predicates import validate_predicate
 from .migrations import _apply_migrations
 
@@ -66,14 +67,12 @@ class Fact:
     chronological ordering, so the ULID time-prefix property is not
     load-bearing here.
 
-    ``source_interaction_id`` is typed ``str | None``; RFC §A names it
-    non-nullable.  PR 1 ships the storage primitive without the
-    extractor, so a caller (test fixture, RFC 0013 backfill, future
-    operator-seeded fact in OQ #9) may legitimately commit a row with
-    no source interaction.  PR 2's extractor will always populate it;
-    a definitive "tighten the column" decision is tracked under the
-    PR 5 follow-up list and may move into the RFC §A amendment in
-    PR 6.
+    ``source_interaction_id`` is typed ``str | None`` and the DDL
+    column is nullable.  PR 5a amended RFC §A to permit ``NULL`` —
+    three legitimate callers (test fixtures, the future RFC 0013
+    erasure backfill, and the OQ #9 operator-seeded fact path) commit
+    rows without a source interaction; the PR 2 extractor always
+    populates it on the production write path.
 
     ``asserted_at`` is ``float`` (epoch seconds) rather than the RFC's
     ``datetime`` — matches the codebase convention (``episodes.created_at``,
@@ -215,46 +214,22 @@ class FactStore:
     ) -> str:
         """Persist a new fact tuple.  Returns the generated ``fact_id``.
 
-        If a row with the same ``(agent_id, subject, predicate)`` and an
-        **older** ``asserted_at`` already exists and is not yet
-        superseded, the older row's ``superseded_by`` column is updated
-        to point at the new row — RFC 0026 §F latest-asserted-wins
-        retraction (storage half).  The recall-side filter that hides
-        superseded rows by default ships in PR 4; PR 1 lands the data
-        shape.
+        Enforces RFC 0026 §F **symmetric latest-asserted-wins**: only
+        one live row per ``(agent_id, subject, predicate)`` survives,
+        and the row with the greatest ``asserted_at`` wins.  Out-of-order
+        and equal-timestamp writes resolve deterministically — see
+        :mod:`agents.memory._facts_supersede` for the chain rule and
+        :class:`tests.unit.python.test_fact_store_invariants.TestSymmetricLatestAssertedWins`
+        for the pinned cases.
 
-        Monotonic ``asserted_at`` precondition
-        --------------------------------------
-        Subsequent writes for the same ``(agent_id, subject, predicate)``
-        key MUST use a **strictly greater** ``asserted_at`` than any
-        existing live row.  Out-of-order or equal-timestamp writes do
-        not supersede the existing live row and leave two live rows for
-        the same key.  This is the storage primitive's documented
-        behaviour:
-
-        * PR 2's extractor uses ``interaction.closed_at`` which is
-          monotonic per-agent (the per-agent ``asyncio.Lock`` on
-          ``_LLMPersonaAgent`` serialises summarize-on-close calls), so
-          the precondition holds for the production write path.
-        * The behaviour is pinned by
-          :class:`tests.unit.python.test_fact_store.TestAssertedAtMonotonicity`
-          so a future change to the comparison surfaces as a deliberate
-          test update.
-        * PR 4 may revisit symmetric latest-wins (tighten the SELECT
-          to ``<=`` plus a "find newer live row" pass) when the
-          retraction policy lands — tracked under the PR 5 follow-up
-          list.
-
-        Predicate validation runs through the injected validator (PR 2
-        wires the allowlist; PR 1 default is permissive but still
-        rejects empty strings).
+        Predicate validation runs through the injected validator
+        (PR 2 wires the enumerated allowlist).
         """
         # Cheap value checks first — surfacing "subject must not be
         # empty" or a certainty-range error before the (potentially
         # PR 2 allowlist-backed) predicate validator means a caller
         # that violates two preconditions sees the more obviously-wrong
-        # one first.  Pure ordering preference; no behaviour change for
-        # the default permissive validator.
+        # one first.
         if not subject or not subject.strip():
             raise ValueError("subject must not be empty")
         if not 0.0 <= certainty <= 1.0:
@@ -265,22 +240,6 @@ class FactStore:
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
-
-        async with db.execute(
-            """
-            SELECT fact_id FROM facts
-            WHERE agent_id = ?
-              AND subject = ?
-              AND predicate = ?
-              AND superseded_by IS NULL
-              AND asserted_at < ?
-            ORDER BY asserted_at DESC
-            LIMIT 1
-            """,
-            (self._agent_id, subject, predicate, asserted_at),
-        ) as cursor:
-            row = await cursor.fetchone()
-        older_fact_id = row[0] if row else None
 
         await db.execute(
             """
@@ -303,15 +262,14 @@ class FactStore:
             ),
         )
 
-        superseded = False
-        if older_fact_id is not None:
-            await db.execute(
-                "UPDATE facts SET superseded_by = ? "
-                "WHERE fact_id = ? AND agent_id = ?",
-                (fact_id, older_fact_id, self._agent_id),
-            )
-            superseded = True
-
+        result = await _apply_supersession(
+            db,
+            agent_id=self._agent_id,
+            subject=subject,
+            predicate=predicate,
+            asserted_at=asserted_at,
+            new_fact_id=fact_id,
+        )
         await db.commit()
 
         # Telemetry counters live outside the persistence path — a
@@ -324,9 +282,12 @@ class FactStore:
                 inst.facts_stored.add(
                     1, attributes={"agent.id": self._agent_id},
                 )
-                if superseded:
+                n_superseded = len(result.superseded_older_ids) + (
+                    1 if result.self_superseded_by else 0
+                )
+                if n_superseded:
                     inst.facts_superseded.add(
-                        1, attributes={"agent.id": self._agent_id},
+                        n_superseded, attributes={"agent.id": self._agent_id},
                     )
 
         # RFC 0026 §G audit emission — after commit so the log cannot
@@ -336,10 +297,16 @@ class FactStore:
             subject=subject, predicate=predicate, object=object,
             source_interaction_id=source_interaction_id,
         )
-        if superseded and older_fact_id is not None:
+        for older_id in result.superseded_older_ids:
             _emit_audit(
                 "fact.supersede", agent_id=self._agent_id,
-                superseded_fact_id=older_fact_id, by_fact_id=fact_id,
+                superseded_fact_id=older_id, by_fact_id=fact_id,
+            )
+        if result.self_superseded_by is not None:
+            _emit_audit(
+                "fact.supersede", agent_id=self._agent_id,
+                superseded_fact_id=fact_id,
+                by_fact_id=result.self_superseded_by,
             )
         return fact_id
 
