@@ -401,11 +401,6 @@
               "minimum": 0,
               "default": 200,
               "description": "Per-tier soft slice of the RFC 0017 1500-token allocator (default ≈13% per RFC 0026 OQ #2). The shared allocator still owns the 1500-token cap; this knob bounds how much of that cap the facts tier may consume on a single event so the notes / episodic tiers downstream still receive their share when many facts apply to the sender."
-            },
-            "extraction_model": {
-              "type": ["string", "null"],
-              "default": null,
-              "description": "Override the model used for the combined summarize + extract LLM call at interaction close (RFC 0026 OQ #5). When null (default), inherits from optimization.yaml → context_management.summarization.model so the prose-summary and fact-tuple halves of the response share a model. Reserved by PR 3: no Python consumer in v0.3.1 (the combined-call wiring at agents/persona_runtime/summarize_close.py reads only the optimization.yaml field). Setting a non-null value today is a silent no-op; PR 5 decides the final shape (drop the field, plumb it through summarize_close, or warn at config load) per docs/rfcs/0026-pr-plan.md §PR 5 › From PR 3 review."
             }
           }
         },

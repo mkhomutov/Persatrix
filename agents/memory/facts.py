@@ -34,7 +34,7 @@ from ..observability.metrics import try_get_instruments
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
-from .fact_predicates import validate_predicate
+from .fact_predicates import canonicalize_subject, validate_predicate
 from .migrations import _apply_migrations
 
 logger = logging.getLogger(__name__)
@@ -224,6 +224,20 @@ class FactStore:
 
         Predicate validation runs through the injected validator
         (PR 2 wires the enumerated allowlist).
+
+        Subject canonicalisation (PR 5c — PR #341 review L-2)
+        -----------------------------------------------------
+        The production write path (PR 2 extractor) canonicalises
+        before calling here, but three classes of direct caller
+        bypass that discipline — test fixtures, operator-seeded
+        facts (RFC 0026 OQ #9), and the future RFC 0013 erasure
+        backfill.  Without canonicalisation at this layer they
+        silently write rows under non-canonical subjects and miss
+        the recall path that PR 3 wired to ``_subject_seeds →
+        canonicalize_subject``, defeating the MT-MEMORY-005
+        dementia-test invariant.  The storage primitive is now
+        authoritative — every persisted row carries the canonical
+        subject regardless of caller discipline.
         """
         # Cheap value checks first — surfacing "subject must not be
         # empty" or a certainty-range error before the (potentially
@@ -237,6 +251,11 @@ class FactStore:
                 f"certainty must be in [0.0, 1.0], got {certainty}",
             )
         self._predicate_validator(predicate)
+        # Canonicalise after the empty-check so the ValueError text
+        # stays familiar; ``canonicalize_subject`` is idempotent so
+        # the production write path (extractor pre-canonicalises) is
+        # unaffected.
+        subject = canonicalize_subject(subject)
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
@@ -329,10 +348,18 @@ class FactStore:
         ``limit`` is clamped to ``_MAX_RECALL_LIMIT`` (100).  PR 3 will
         compose this with the ``MemoryBudget`` allocator's per-tier
         token slice; this floor is the hard upper bound on row count.
+
+        Subject canonicalisation (PR 5c — PR #341 review L-2):
+        symmetric with :meth:`store`, a non-canonical query subject
+        (``"Bob "`` from a fixture that bypasses the runtime's
+        ``_subject_seeds`` pre-step) canonicalises before the SELECT.
+        Empty / whitespace-only subjects raise ``ValueError`` first,
+        symmetric with :meth:`store`'s explicit empty-check.
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
         limit = min(limit, _MAX_RECALL_LIMIT)
+        subject = canonicalize_subject(subject)
 
         db = self._ensure_db()
         if include_superseded:
@@ -430,11 +457,17 @@ class FactStore:
         umbrella ``records_deleted`` audit map.  Without this primitive,
         the first GDPR / CCPA request after v0.3.1 ships would silently
         miss extracted facts — see RFC 0026 §H.
+
+        Subject canonicalisation (PR #346 review M-1): the ``subject``
+        traversal canonicalises so a mixed-case erasure hits the
+        canonical rows :meth:`store` persists; ``source_interaction_id``
+        stays raw (opaque UUIDs, not subject strings).  Empty subjects
+        raise ``ValueError`` before either DELETE.
         """
         db = self._ensure_db()
         cursor = await db.execute(
             "DELETE FROM facts WHERE agent_id = ? AND subject = ?",
-            (self._agent_id, subject_id),
+            (self._agent_id, canonicalize_subject(subject_id)),
         )
         by_subject = cursor.rowcount
         cursor = await db.execute(

@@ -159,7 +159,6 @@ agents:
       facts:
         enabled: true
         budget_tokens: 200
-        extraction_model: null          # null = inherit from optimization.yaml
       # RFC 0008 PR plan PR 5 (Phase 4b): procedural-tier confidence-decay
       # knobs.  Defaults match agents.memory.decay; the example block is
       # included so operators see the surface, even though removing it

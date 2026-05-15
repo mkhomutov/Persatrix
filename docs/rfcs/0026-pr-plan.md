@@ -585,7 +585,102 @@ Deep-review (PR #341) findings that **landed inline in PR 3**:
   PR 5's decision; the description fix is correct regardless of
   which option lands.
 
-The items deferred to this PR are:
+The items deferred to this PR are split across PR 5c (storage /
+render defensive fixes) and PR 5d (tests + counter polish):
+
+**Shipped in PR 5c** — `feature/v031-rfc0026-followups-pr3a`:
+
+- **L-1 — header truncation can elide the trailing `:\n` separator.**
+  Resolved with **option (1)** (two-part header admission):
+  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
+  now admits the subject-bearing prefix `"Known facts about {subject}:"`
+  through `MemoryBudget.try_add` (may truncate to keep `MIN_TOKENS_FACTS`)
+  and then admits a separate `"\n"` separator with `min_tokens=1`.
+  If the separator admission fails (budget exhausted at the boundary)
+  the block is dropped with the same staged-admission discard the
+  pre-existing header-drop path uses, so phantom reinforcement is
+  still avoided.  Pinned by
+  `TestHeaderTruncationPreservesItemSeparator.test_truncated_header_does_not_glue_to_first_item`
+  in
+  [`test_facts_section_defensive.py`](../../tests/unit/python/test_facts_section_defensive.py).
+  Note: `MemoryBudget.try_add` truncates an oversized item to exactly
+  `remaining` tokens, so whenever the prefix truncates the separator
+  admission always fails — the truncation case always resolves to a
+  drop, and the emit-after-truncated-prefix branch is defensive-only.
+
+- **L-2 — asymmetric subject canonicalisation between
+  `FactStore.store` and the recall path.** Resolved with **option
+  (1)** (tighten the storage primitive):
+  [`FactStore.store`](../../agents/memory/facts.py) now canonicalises
+  `subject` via
+  [`canonicalize_subject`](../../agents/memory/fact_predicates.py)
+  after the empty-check and before the INSERT.  `FactStore.recall`
+  canonicalises symmetrically so a fixture-style call with a
+  non-canonical query (`recall(subject="Bob ")`) hits the canonical
+  row.  Pinned by
+  [`TestStoreCanonicalisesSubject`](../../tests/unit/python/test_fact_store_canonicalisation.py)
+  — five cases: mixed-case write, trailing-whitespace write,
+  internal-whitespace collapse, non-canonical recall query, and the
+  supersede chain dedup invariant across canonical form.  No backfill
+  migration ships for rows written before PR 5c — the only v0.3.1
+  writer (PR 2's extractor) already canonicalised pre-store, so
+  non-canonical rows can only originate from fixtures / operator
+  seeding / the future RFC 0013 backfill, none of which exist in a
+  deployed DB.
+
+- **L-3 — `resolve_facts_config` not defensive against `null` budget
+  knobs.** One-line collapse — the resolver reads `raw =
+  facts_cfg.get("budget_tokens")` then `DEFAULT_FACTS_BUDGET_TOKENS
+  if raw is None else int(raw)` so a `budget_tokens: null` write
+  no longer raises `TypeError` at agent construction.  Pinned by
+  [`TestResolveFactsConfigNullBudgetGuard`](../../tests/unit/python/test_facts_section_defensive.py)
+  — three cases (null, missing, explicit-int).
+
+- **N-2 — `recall_facts_for_event(agent_id=...)` parameter cleanup.**
+  Signature change at
+  [`recall_facts_for_event`](../../agents/persona_runtime/facts_section.py)
+  — the `agent_id` kwarg is dropped; the helper reads
+  `fact_store.agent_id` off the store at the WARNING log site.
+  Call site at
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  updated to match.  Pinned by
+  [`TestRecallFactsForEventSignature`](../../tests/unit/python/test_facts_section_defensive.py)
+  — two cases (no-kwarg call shape, store-sourced agent_id in
+  WARNING).
+
+- **`memory.facts.extraction_model` decision — drop the field.**
+  Resolved with **option (1)** (drop).  Rationale: the combined
+  summarize + extract call is a single LLM call, so an
+  `extraction_model` knob distinct from the summariser model is a
+  category error.  No Python consumer exists, so dropping is
+  additive-compatible — configs that do not set the key remain
+  valid; configs that explicitly set `extraction_model: null`
+  start failing `additionalProperties: false` validation, which
+  is the correct failure mode for operators who were depending on
+  the no-op.  Option (2) (plumb through) would silently change
+  the summariser model under a misleading name; option (3) (warn)
+  is a hold-over, not a steady state.  The field is removed from
+  both [`schemas/agent.schema.json`](../../schemas/agent.schema.json)
+  and [`config/agents.yaml`](../../config/agents.yaml).  Pinned
+  by
+  [`TestExtractionModelFieldDropped`](../../tests/unit/python/test_facts_section_defensive.py).
+
+- **M-1 (PR #346 review follow-up) — `FactStore.delete_by_subject`
+  left raw while `store` / `recall` canonicalise.**  After L-2 every
+  persisted row carries the canonical subject, so a
+  `delete_by_subject("Bob")` erasure ran `DELETE … WHERE subject =
+  'Bob'` and matched zero rows — the silent GDPR / CCPA erasure miss
+  RFC 0026 §H fences off.  Resolved by canonicalising the `subject`
+  column traversal in
+  [`delete_by_subject`](../../agents/memory/facts.py); the
+  `source_interaction_id` traversal stays raw (opaque UUIDs, not
+  subject strings).  `store` + `recall` + `delete_by_subject` are now
+  all canonical.  Pinned by
+  [`TestDeleteBySubjectCanonicalisesSubject`](../../tests/unit/python/test_fact_store_canonicalisation.py)
+  — four cases plus `test_source_interaction_id_traversal_not_canonicalised`,
+  which proves the UUID column is not casefolded.
+
+**Remaining for PR 5d** — `feature/v031-rfc0026-followups-pr3b`:
 
 - **`agent.facts.injected` overcount when the section is dropped on
   header admission failure.** PR 3 increments the
@@ -643,36 +738,6 @@ The items deferred to this PR are:
   PR 4 acceptance.  Pinned by an explicit test that stores a
   `self.has_preference` row and asserts it admits at the next
   event with the same agent.
-
-- **`memory.facts.extraction_model` is a config knob with no
-  consumer.** [`config/agents.yaml`](../../config/agents.yaml)
-  and [`schemas/agent.schema.json`](../../schemas/agent.schema.json)
-  ship the field; no Python code reads it.  PR 5 picks one of
-  three options:
-  1. **Drop the field.** Smallest surface — until a real
-     consumer exists, the knob is a footgun (operator sets
-     `extraction_model: "claude-haiku-4-5"` expecting an
-     override; gets a silent no-op).  Schema-removal is
-     additive-compatible (existing configs without the key are
-     still valid); existing configs *with* a non-null value
-     would fail `additionalProperties: false` validation, which
-     is the correct failure mode (an operator who wrote that
-     value would otherwise believe it was honoured).
-  2. **Plumb it through `summarize_close.py`.** Read the field
-     in [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)
-     and pass it as the `model=` override on the combined
-     summarize + extract LLM call when non-null; fall back to
-     the inherited `optimization.yaml` summariser model
-     otherwise (preserves OQ #5).  Highest fidelity to the RFC
-     wording — gives operators a per-persona extraction-model
-     knob distinct from the summariser default.
-  3. **`logger.warning` at config-load time when set non-null.**
-     Cheapest non-disruptive option; turns a silent no-op into a
-     loud one-record-per-startup signal without changing the
-     schema surface.  Defensible as a hold-over while a real
-     consumer lands, but not a steady state — pick (1) or (2)
-     for the final shape.
-  Decision lock during PR 5 review.
 
 - **`tier="facts"` counter attribute is a constant in PR 3.**
   Every `agent.facts.injected` increment carries the same
@@ -739,129 +804,6 @@ The items deferred to this PR are:
   Default: option (2) — the two contracts (allocate order vs
   render order) are distinct and worth pinning separately so a
   future regression report points at the right layer.
-
-- **L-1 — header truncation can elide the trailing `:\n`
-  separator.**
-  [`render_facts_section`](../../agents/persona_runtime/facts_section.py)
-  builds the header as `f"Known facts about {subject}:\n"` and
-  passes it to `MemoryBudget.try_add(min_tokens=MIN_TOKENS_FACTS)`.
-  `try_add` returns either the original text, a truncated form
-  with `…` ellipsis (when `count(text) > remaining` and
-  `truncated_tokens >= min_tokens`), or `None`.  When the
-  canonical subject is long enough (≈60+ chars) that the full
-  header exceeds `remaining` but the truncated form still meets
-  the 24-token floor, the returned header is something like
-  `"Known facts about very_long_user…"` — the trailing `:\n` was
-  the last thing in the source string and is lost to truncation.
-  The subsequent `admitted_header + "\n".join(items)` then glues
-  the first item directly to the truncated header with no
-  separator: `"Known facts about very_long_user…- bob
-  has_child_named Mira"`.  Reachability bound is narrow (long
-  subject AND tight remaining at the point the header is
-  admitted), so not a Phase-1 blocker, but worth a defensive fix.
-  Three options for PR 5 to pick from:
-  1. **Two-part header admission.** Admit `"Known facts about
-     {subject}:"` (subject-bearing, may truncate) plus a separate
-     guaranteed `"\n"` admission (≈1 token).  Costs one extra
-     `try_add` on the happy path.
-  2. **Drop on truncation.** After
-     `admitted_header = budget.try_add(...)`, compare to the
-     input string; if the returned form ends in `…` (truncated)
-     return `None` instead of rendering a malformed section.
-     Simplest; loses the section in a recoverable case.
-  3. **Cap subject length in `canonicalize_subject`.** E.g., 200
-     chars so the header can never exceed ≈50 tokens.  Out of
-     scope for `facts_section`; touches the storage primitive
-     ([`agents/memory/fact_predicates.py`](../../agents/memory/fact_predicates.py)).
-     Pairs with L-2 below if both are taken together.
-  Default: option (1) — keeps the rendering invariant intact
-  without dropping recoverable sections, and the cost is one
-  extra `try_add` only on the unhappy path.  Pin with a test
-  that constructs a 250-char canonical subject, pre-fills the
-  budget to leave just enough for a truncated header, and
-  asserts the rendered section either drops cleanly or contains
-  the trailing `:\n` separator (per the option PR 5 picks).
-
-- **L-2 — asymmetric subject canonicalization between
-  `FactStore.store` and the recall path.**
-  [`FactStore.store`](../../agents/memory/facts.py) accepts the
-  `subject` kwarg verbatim — only an empty-string check runs at
-  the boundary, no
-  [`canonicalize_subject`](../../agents/memory/fact_predicates.py)
-  call.  PR 3's recall side canonicalizes before issuing
-  `FactStore.recall` (via `_subject_seeds` →
-  `canonicalize_subject`), and PR 2's extractor canonicalizes
-  before storing, so the **production** write/read paths are
-  consistent today.  But three callers bypass the extractor and
-  write directly:
-  1. Test fixtures (the new
-     [`test_facts_recall.py`](../../tests/integration/test_facts_recall.py)
-     uses `await fact_store.store(subject="bob", ...)` — happens
-     to work because the canonical form of `"bob"` is also
-     `"bob"`).
-  2. Operator-seeded facts (RFC 0026 OQ #9 deferred follow-up).
-  3. Future RFC 0013 erasure backfill (PR 1's
-     `delete_by_subject` primitive is the eventual hook; an
-     ingestion path that re-asserts subjects from a snapshot
-     would need the same canonicalization).
-  All three can silently write a non-canonical subject and miss
-  recall, defeating the dementia-test invariant.  PR 3 makes
-  this newly load-bearing because recall is now the dementia-
-  test happy path.  Two options for PR 5:
-  1. **Tighten `FactStore.store` to canonicalize internally.**
-     The storage primitive becomes authoritative; direct callers
-     do not need to remember to canonicalize.  Pin with a
-     round-trip test that stores `subject="Bob "` (mixed case +
-     trailing whitespace) and asserts recall on the canonical
-     form returns the row.  Pairs naturally with L-1 option (3)
-     if the cap-length policy lives in the same canonicalizer.
-  2. **Pin the contract in the `FactStore.store` docstring** so
-     direct callers know to canonicalize themselves.  Cheapest;
-     leaves the footgun in place.
-  Default: option (1) — cleaner storage-primitive contract and
-  removes the footgun.  Pre-existing from PR 1/2 but surfaced
-  by PR 3.
-
-- **L-3 — `resolve_facts_config` not defensive against
-  `null` budget knobs.**
-  [`resolve_facts_config`](../../agents/persona_runtime/facts_section.py)
-  reads `memory.facts.budget_tokens` as
-  `int(facts_cfg.get("budget_tokens", DEFAULT_FACTS_BUDGET_TOKENS))`.
-  If the resolved value is `None` (operator wrote
-  `budget_tokens: null` in YAML and `additionalProperties` /
-  `minimum` / `type: integer` did not gate it because the config
-  bypassed schema validation), `int(None)` raises `TypeError` at
-  agent construction time.  The
-  [`schemas/agent.schema.json`](../../schemas/agent.schema.json)
-  block rejects `null` (`type: integer`, `minimum: 0`) so a
-  `make validate`-gated production config never reaches the
-  raise.  But test fixtures, programmatic configs, and any
-  path that bypasses `make validate` can hit it.  Fix is a
-  one-line collapse:
-  ```python
-  raw = facts_cfg.get("budget_tokens")
-  budget_tokens = DEFAULT_FACTS_BUDGET_TOKENS if raw is None else int(raw)
-  ```
-  Same defensive treatment applies to `extraction_model` if PR 5
-  picks option (2) (plumb-through) on that deferred follow-up.
-  Defence-in-depth; pair with a test that constructs the resolver
-  call from a dict carrying `budget_tokens: None` and asserts the
-  default falls through.
-
-- **N-2 — `recall_facts_for_event(agent_id=...)` parameter is
-  logging-only.**
-  [`FactStore.recall`](../../agents/memory/facts.py) already
-  filters by `self._agent_id` (the store is per-agent), so the
-  `agent_id` kwarg passed into
-  [`recall_facts_for_event`](../../agents/persona_runtime/facts_section.py)
-  is consumed only by the `logger.warning(...)` template at the
-  recall-failure log line.  `FactStore` exposes an `agent_id`
-  property; the helper could read it off the store and drop the
-  redundant kwarg.  Cosmetic refactor — useful because the
-  current signature suggests the helper accepts an agent
-  filter, which it does not.  Pin with no new test (signature
-  change tracked by existing call sites; mypy / ruff catch
-  drift).
 
 ##### From PR 4 review
 
@@ -1362,8 +1304,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 3 | Recall + MemoryBudget tier slot + config | `feature/v031-rfc0026-recall-budget` | ✅ Merged | [#341](https://github.com/mkhomutov/Persatrix/pull/341) | 2026-05-14 |
 | 4 | Reinforcement + retraction + tier provenance + MT update | `feature/v031-rfc0026-reinforcement-retraction` | ✅ Merged | [#342](https://github.com/mkhomutov/Persatrix/pull/342) | 2026-05-15 |
 | 5a | Review follow-ups slice 1 — PR 1 review (symmetric latest-wins + nullability) | `feature/v031-rfc0026-followups-pr1` | ✅ Merged | [#344](https://github.com/mkhomutov/Persatrix/pull/344) | 2026-05-15 |
-| 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | 🔀 PR open | — | — |
-| 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ⬜ Not started | — | — |
+| 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ✅ Merged | [#345](https://github.com/mkhomutov/Persatrix/pull/345) | 2026-05-15 |
+| 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | 🔀 PR open | — | — |
 | 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ⬜ Not started | — | — |
 | 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ⬜ Not started | — | — |
 | 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |

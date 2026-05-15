@@ -106,6 +106,13 @@ class TestSenderIdSubstitutionReturnsCanonical:
         LLM-emitted subject (``"Bob_User_123"``) that fold to the same
         canonical form; the resulting row's subject column must be the
         canonical form (post-S1-fix), not the raw ``sender_id``.
+
+        PR 5c L-2 update: :meth:`FactStore.recall` now canonicalises
+        its query subject too, so both the canonical and raw mixed-
+        case forms hit the same row — pinning the dementia-test
+        round-trip invariant ("a single canonical row per
+        counterparty regardless of caller spelling") at both the
+        write and read seams.
         """
         await store_extracted_facts(
             fact_store,
@@ -124,18 +131,22 @@ class TestSenderIdSubstitutionReturnsCanonical:
             session_id="legacy",
             sender_id="Bob_user_123",
         )
-        # The canonical key the row must live under — recall with the
-        # mixed-case raw form must miss, recall with the canonical
-        # form must hit.  Without the S1 fix, the row would land
-        # under the raw ``"Bob_user_123"`` and this assertion would
-        # invert.
+        # The row lives under the canonical form regardless of the
+        # caller-supplied spelling.  PR 5c's L-2 fix means recall
+        # canonicalises its query too, so a mixed-case query hits
+        # the same row — the single-row-per-counterparty invariant
+        # is preserved at both the store and the recall seams.
         canonical_hits = await fact_store.recall(subject="bob_user_123")
-        raw_hits = await fact_store.recall(subject="Bob_user_123")
         assert len(canonical_hits) == 1, (
             "row must land under canonical sender_id"
         )
-        assert raw_hits == [], (
-            "row must NOT land under raw mixed-case sender_id"
+        assert canonical_hits[0].subject == "bob_user_123", (
+            "row must be stored under the canonical sender_id"
+        )
+        raw_hits = await fact_store.recall(subject="Bob_user_123")
+        assert len(raw_hits) == 1 and raw_hits[0].subject == "bob_user_123", (
+            "recall query canonicalises so the mixed-case form hits "
+            "the same canonical row (PR 5c L-2)"
         )
 
 
