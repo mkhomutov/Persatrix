@@ -53,6 +53,7 @@ def _provenance_enabled() -> bool:
 
 __all__ = [
     "MemoryBudget",
+    "KNOWN_TIERS",
     # Budget and per-tier constants consumed by memory_context.py.
     # Defined here because they govern MemoryBudget.try_add() call sites
     # — keeping them co-located makes tuning self-contained.
@@ -66,6 +67,36 @@ __all__ = [
     "MAX_EPISODE_SUMMARY_CHARS",
     "MAX_NOTE_CONTENT_CHARS",
 ]
+
+
+# RFC 0026 PR 4 / PR #342 review N-4 — frozen tier-name allowlist for
+# :meth:`MemoryBudget.record_admission`.  Two reasons the validation
+# lives here at module scope:
+#
+# * Single source of truth for the canonical tier vocabulary.  A typo
+#   at a future call site (``tier="fact"`` instead of ``"facts"``)
+#   would silently populate an unread bucket — the facts-tier
+#   reinforcement read at
+#   :meth:`agents.memory.facts.FactStore.mark_recalled` looks up
+#   ``admissions_by_tier("facts")``, sees ``[]``, and skips the
+#   ``last_recalled_at`` write without surfacing anywhere.
+# * Tests can re-use the constant instead of duplicating string
+#   literals.  Same pattern :data:`agents.memory.fact_predicates.
+#   PREDICATE_ALLOWLIST` establishes for the storage layer.
+#
+# The membership covers all five canonical tier names appearing in
+# the RFC 0027 §F priority order, even tiers that do not currently
+# call ``record_admission`` (``relationship``, ``channel_history``) —
+# future wiring lands on a known name rather than coining a new one
+# in a follow-up PR.  Adding a tier is a deliberate amendment + test
+# update at :class:`TestKnownTierAllowlist`.
+KNOWN_TIERS: frozenset[str] = frozenset({
+    "facts",
+    "episodic",
+    "notes",
+    "relationship",
+    "channel_history",
+})
 
 
 # ─── Budget and per-tier token limits ─────────────────────
@@ -252,13 +283,34 @@ class MemoryBudget:
         does not depend on the env var.  The log emission alone is
         best-effort — a custom log-handler hiccup must never corrupt
         the registry the caller is about to read.
+
+        Tier-name validation (PR #342 review N-4)
+        -----------------------------------------
+        ``tier`` is validated against :data:`KNOWN_TIERS` so a typo at
+        the call site fails loudly with a :class:`ValueError` rather
+        than silently populating an unread bucket.  The reader side
+        (:meth:`admissions_by_tier`) stays permissive — a lookup on a
+        typo returns the empty-default list, because the bug lives on
+        the writer side (an orphaned bucket) not the reader side
+        (a harmless empty read).
         """
+        if tier not in KNOWN_TIERS:
+            raise ValueError(
+                f"tier={tier!r} is not a known tier; "
+                f"expected one of {sorted(KNOWN_TIERS)}",
+            )
         self._admissions.setdefault(tier, []).append(item_id)
         if _provenance_enabled():
             try:
+                # ``event`` lifts the event identifier off the message
+                # field so downstream structured-log pipelines (Loki,
+                # ELK) can index on a stable key instead of grepping
+                # the human-readable message.  Message stays populated
+                # for terminal-tailing.  (PR #342 review N-7.)
                 _provenance_logger.info(
                     "persatrix.memory.tier_admitted",
                     extra={
+                        "event": "persatrix.memory.tier_admitted",
                         "tier": tier,
                         "item_id": item_id,
                         "tokens_admitted": tokens_admitted,

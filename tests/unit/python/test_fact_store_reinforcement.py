@@ -24,6 +24,14 @@ Contracts pinned here:
   agent's fact_id silently skips that row (no cross-tenant writes).
 * Empty / missing fact_ids are no-ops (no error raised).
 * The ``at`` argument defaults to :func:`time.time` at call time.
+* ``last_recalled_at`` is **monotone non-decreasing**: an older ``at``
+  value never clobbers a newer one (PR #342 review N-1).  The decay /
+  validation seam in :doc:`RFC 0008 §G
+  <../../../docs/rfcs/0008-agent-memory-context-optimization>`
+  composes with this column on a "newest recall wins" model, so a
+  backwards step (NTP step-back, operator-supplied ``at`` from an
+  older interaction) must not silently age the fact out by resetting
+  the column to a stale timestamp.
 """
 
 from __future__ import annotations
@@ -104,6 +112,79 @@ class TestMarkRecalled:
         await fact_store.mark_recalled([fact_id], at=3000.0)
         rows = await fact_store.recall(subject="bob")
         assert rows[0].last_recalled_at == 3000.0
+
+    async def test_older_at_does_not_clobber_newer(
+        self, fact_store: FactStore,
+    ) -> None:
+        """Monotone non-decreasing contract (PR #342 review N-1).
+
+        ``last_recalled_at`` composes with RFC 0008 §G decay on a
+        "newest recall wins" basis.  Calling :meth:`mark_recalled`
+        with an older ``at`` than the column's current value would
+        silently age the fact out under that model, so the UPDATE
+        clamps to ``MAX(existing, supplied)``.  In production
+        ``time.time()`` is monotonic per-process and the issue is
+        unreachable; the failure modes are NTP step-back, an operator
+        replaying an older interaction's timestamp via the OQ #9
+        seeded-facts path, and any test fixture that exercises an
+        explicit ``at`` kwarg out of order.
+        """
+        fact_id = await fact_store.store(
+            subject="bob",
+            predicate="prefers",
+            object="tea",
+            source_interaction_id="i1",
+            asserted_at=1000.0,
+        )
+        await fact_store.mark_recalled([fact_id], at=3000.0)
+        await fact_store.mark_recalled([fact_id], at=2500.0)
+        rows = await fact_store.recall(subject="bob")
+        assert rows[0].last_recalled_at == 3000.0
+
+    async def test_equal_at_is_idempotent(
+        self, fact_store: FactStore,
+    ) -> None:
+        """The ``MAX`` guard treats equal timestamps as a no-op write
+        (the existing value is also the max).  Important so the
+        idempotent retry surface in :meth:`test_idempotent` survives
+        the monotonicity tightening — a recall path that fires twice
+        on the same turn must converge to the same column value, not
+        accumulate side-effects.
+        """
+        fact_id = await fact_store.store(
+            subject="bob",
+            predicate="prefers",
+            object="tea",
+            source_interaction_id="i1",
+            asserted_at=1000.0,
+        )
+        await fact_store.mark_recalled([fact_id], at=2500.0)
+        await fact_store.mark_recalled([fact_id], at=2500.0)
+        rows = await fact_store.recall(subject="bob")
+        assert rows[0].last_recalled_at == 2500.0
+
+    async def test_first_call_sets_from_null(
+        self, fact_store: FactStore,
+    ) -> None:
+        """``last_recalled_at`` starts ``NULL``; the first
+        :meth:`mark_recalled` must succeed regardless of how small
+        ``at`` is — the ``MAX(COALESCE(existing, 0), supplied)`` shape
+        means a NULL existing value collapses to 0, so any positive
+        ``at`` (including small ones like ``1.0``) wins.  Regression
+        guard: a naive ``MAX(existing, supplied)`` without ``COALESCE``
+        would yield ``NULL`` on the first call under SQLite's NULL
+        propagation rules.
+        """
+        fact_id = await fact_store.store(
+            subject="bob",
+            predicate="prefers",
+            object="tea",
+            source_interaction_id="i1",
+            asserted_at=1000.0,
+        )
+        await fact_store.mark_recalled([fact_id], at=1.0)
+        rows = await fact_store.recall(subject="bob")
+        assert rows[0].last_recalled_at == 1.0
 
     async def test_does_not_touch_other_columns(
         self, fact_store: FactStore,

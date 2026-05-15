@@ -30,7 +30,7 @@ import logging
 
 import pytest
 
-from agents.persona_runtime.memory_budget import MemoryBudget
+from agents.persona_runtime.memory_budget import KNOWN_TIERS, MemoryBudget
 
 
 # ─── Registry shape ────────────────────────────────────────────
@@ -79,6 +79,86 @@ class TestRecordAdmissionRegistry:
                 tier="facts", item_id=fid, tokens_admitted=10,
             )
         assert budget.admissions_by_tier("facts") == ["f3", "f1", "f2"]
+
+
+# ─── Tier-name allowlist (PR #342 review N-4) ────────────────
+
+
+class TestKnownTierAllowlist:
+    """The ``tier`` kwarg to :meth:`record_admission` is checked against a
+    frozen allowlist so a typo at a future call site fails loudly rather
+    than silently populating an unread bucket.  Two failure modes the
+    allowlist closes:
+
+    1. ``record_admission(tier="fact", …)`` (singular typo) silently
+       populates ``_admissions["fact"]`` while the facts-tier
+       reinforcement read at
+       :meth:`agents.memory.facts.FactStore.mark_recalled` looks up
+       ``admissions_by_tier("facts")`` (plural) — returns ``[]`` —
+       and the reinforcement write is skipped without surfacing
+       anywhere.  The MT-MEMORY-005 leg-failure attribution log would
+       then show "0 facts admitted" even when the section was
+       successfully built and rendered.
+    2. The shared :data:`KNOWN_TIERS` constant gives tests a single
+       source of truth for the canonical names instead of bare string
+       literals scattered across the codebase, matching the pattern
+       :data:`agents.memory.fact_predicates.PREDICATE_ALLOWLIST`
+       establishes for the storage layer.
+    """
+
+    def test_known_tiers_constant_covers_all_canonical_names(self) -> None:
+        """:data:`KNOWN_TIERS` is the single source of truth.  This test
+        pins the membership so adding a new tier in production code
+        without updating the allowlist surfaces as a deliberate
+        review touch-point rather than slipping through silently.
+        """
+        # All five tier names appearing in the canonical RFC 0027 §F
+        # priority order, plus the relationship tier that does not
+        # currently call ``record_admission`` but is part of the same
+        # vocab so future wiring lands on a known name.
+        assert KNOWN_TIERS == frozenset({
+            "facts",
+            "episodic",
+            "notes",
+            "relationship",
+            "channel_history",
+        })
+
+    @pytest.mark.parametrize("tier", sorted({
+        "facts", "episodic", "notes", "relationship", "channel_history",
+    }))
+    def test_known_tier_admits_silently(self, tier: str) -> None:
+        budget = MemoryBudget(total_tokens=1500)
+        budget.record_admission(
+            tier=tier, item_id="item-1", tokens_admitted=10,
+        )
+        assert budget.admissions_by_tier(tier) == ["item-1"]
+
+    @pytest.mark.parametrize("typo", [
+        "fact",          # singular drift from "facts"
+        "Facts",         # case drift
+        "episodic_recall",  # section name vs tier name confusion
+        "rel",           # abbreviation drift
+        "",              # empty string
+    ])
+    def test_unknown_tier_raises(self, typo: str) -> None:
+        budget = MemoryBudget(total_tokens=1500)
+        with pytest.raises(ValueError, match="not a known tier"):
+            budget.record_admission(
+                tier=typo, item_id="item-1", tokens_admitted=10,
+            )
+
+    def test_admissions_by_tier_does_not_validate_reader_side(self) -> None:
+        """The reader side is intentionally permissive — a typo at a
+        *read* site returns ``[]`` (the empty-tier default), not a
+        raise.  Only :meth:`record_admission` validates, because the
+        write side is where the bug lives: a reader that fishes for
+        ``admissions_by_tier("fact")`` and gets ``[]`` is harmless;
+        a writer that puts items into ``"fact"`` orphans them.
+        """
+        budget = MemoryBudget(total_tokens=1500)
+        # Must not raise — readers see the empty-default contract.
+        assert budget.admissions_by_tier("not-a-tier") == []
 
 
 # ─── Env-gated structured-log emission ───────────────────────
@@ -132,6 +212,36 @@ class TestProvenanceLogEmission:
         assert getattr(rec, "tier", None) == "facts"
         assert getattr(rec, "item_id", None) == "f1"
         assert getattr(rec, "tokens_admitted", None) == 10
+
+    def test_event_name_is_promoted_to_structured_field(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The event name is exposed as a structured ``event`` attribute
+        on the LogRecord (PR #342 review N-7).
+
+        Operators ingesting these records into structured log pipelines
+        (Loki, ELK) can then grep on the ``event`` field instead of
+        matching the human-readable message text, which is brittle to
+        future message-format changes.  The message field stays
+        populated so terminal-tailing the log still works for ad-hoc
+        debugging — promoting the event into ``extra`` is additive, not
+        a swap.
+        """
+        monkeypatch.setenv("PERSATRIX_MEMORY_PROVENANCE", "1")
+        budget = MemoryBudget(total_tokens=1500)
+        with caplog.at_level(logging.INFO, logger="agents.persona_runtime"):
+            budget.record_admission(
+                tier="facts", item_id="f1", tokens_admitted=10,
+            )
+        provenance_records = [
+            r for r in caplog.records
+            if "tier_admitted" in r.getMessage()
+        ]
+        assert len(provenance_records) == 1
+        rec = provenance_records[0]
+        assert getattr(rec, "event", None) == "persatrix.memory.tier_admitted"
 
 
 if __name__ == "__main__":

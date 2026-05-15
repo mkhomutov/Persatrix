@@ -268,9 +268,31 @@ def render_facts_section(
     mixed subjects.  The render groups by subject in caller order and
     emits one ``"Known facts about <subject>:"`` block per subject so
     a ``self.*`` row is never silently labelled under the sender's
-    banner.  The per-tier slice (``facts_budget_tokens``) is shared
-    across all blocks so a chatty sender cannot starve the persona's
-    self-claims at the global allocator level.
+    banner.
+
+    Per-block slice consumption is **sequential, not even** (PR #342
+    review N-5).  The outer loop iterates blocks in
+    ``_subject_seeds``-emit order (``self`` first, sender second);
+    each block drains the slice until either (a) its facts are
+    exhausted or (b) ``facts_tokens_used`` reaches
+    ``facts_budget_tokens``.  Once the slice is exhausted inside one
+    block the next block's outer-loop guard fires and the rest of the
+    section is skipped — there is no per-block share.
+
+    The ``self``-first emit order is **load-bearing for Leg 5**.  A
+    chatty sender with many facts ordered first would crowd out the
+    persona's introspective rows when the slice is tight, re-opening
+    the persona-inversion hazard the M-2 review fix is meant to
+    fence off.  Keeping ``self`` first means introspective rows
+    always have first claim on the slice; the sender block competes
+    for the **remainder**, which matches the dementia-test framing
+    (the persona's own claims about itself stay stable across
+    interactions, even when the counterparty's fact set grows).
+    Operators tuning ``memory.facts.budget_tokens`` should size it
+    generously enough that the sender's block has headroom after
+    a typical ``self.*`` load (~3-5 rows) — under-sizing here will
+    show up as missing sender rows under tight budgets, not as
+    missing ``self.*`` rows.
 
     Soft-slice overage scales with subject count
     --------------------------------------------

@@ -903,14 +903,230 @@ Deep-review (PR #342) findings that **landed inline in PR 4**:
   seed dedup).  Tightened the comment under the M-2 docstring
   rewrite.
 
-No items deferred from PR 4 review — the seven findings above
-all landed inline.  The phantom-reinforcement guard (M-1) and
-the TICK short-circuit (M-2) are the two contracts the PR
-description made explicit; both are now pinned by regression
-tests.  (The PR 3 review's "Header-dropped case" deferred item
-under "Negative-path test coverage" is now satisfied by the
-M-1 fix's regression test; that deferred bullet can be marked
-addressed when PR 5 sweeps the residual PR 3 follow-ups.)
+The first-pass findings above (M-1, M-2, M-3, N-1, N-2, N-4,
+N-5) all landed in the initial review-fix commit (`529e646`).
+The phantom-reinforcement guard (M-1) and the TICK short-
+circuit (M-2) are the two contracts the PR description made
+explicit; both are now pinned by regression tests.  (The PR 3
+review's "Header-dropped case" deferred item under "Negative-
+path test coverage" is now satisfied by the M-1 fix's
+regression test; that deferred bullet can be marked addressed
+when PR 5 sweeps the residual PR 3 follow-ups.)
+
+##### From PR 4 review — second deep-review pass (PR #342)
+
+A second deep-review pass over the squashed PR 4 (`feature`
++ `review-fix`) caught one **Should-Fix** test-fixture bug
+plus eight nice-to-have polish items.  Five of the eight
+landed in this PR; four are deferred to PR 5 as documented
+under PR 5 §"From PR 4 review — second-pass deferrals" below.
+
+Findings that **landed inline** in PR 4 (second-pass review-fix
+commit):
+
+- **DR2-S-1 — `test_dropped_fact_does_not_get_reinforced`
+  exercised supersession, not the per-tier slice.**  The
+  original fixture in
+  [`tests/integration/test_facts_reinforcement.py`](../../tests/integration/test_facts_reinforcement.py)
+  stored 40 rows sharing `(subject="bob", predicate="prefers")`.
+  [`FactStore.store`](../../agents/memory/facts.py)'s
+  supersede-on-insert branch keys on `(agent_id, subject,
+  predicate)`, so each successive store superseded its
+  predecessor — only the last row was live, and the other 39
+  were excluded by `recall`'s default `superseded_by IS NULL`
+  filter **before** the allocator saw them.  The "no fact was
+  dropped" assertion silently passed against the retraction
+  filter, not the per-tier slice; a regression that broke the
+  budget allocator's drop behaviour (e.g. raising
+  `facts_budget_tokens` to 100 000 or removing the
+  `if facts_tokens_used >= facts_budget_tokens: break` guard)
+  would not flip this test red.  Fix folded in: cycle 17
+  allowlisted predicates (each `(subject, predicate)` pair
+  distinct) so every stored row stays live; add a sanity
+  pre-check that `len(all_rows) == len(predicates)` so a
+  future regression to colliding keys flips red before the
+  allocator assertions degrade into a retraction-filter test;
+  add `len(admitted) < len(all_rows)` to pin "budget did
+  drop", not just "something was dropped".  This was the
+  first-pass N-2 fix's residual — switching the predicate
+  from `self.has_attribute` to `prefers` addressed the
+  subject/predicate-namespace inconsistency but did not
+  address the deeper supersession-masks-allocator-drop
+  problem.
+
+- **DR2-N-1 — `mark_recalled_for_agent` overwrote
+  `last_recalled_at` unconditionally.**  The UPDATE in
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  wrote whatever `at` argument was passed, even when older
+  than the existing column value.  RFC 0008 §G decay /
+  validation composes with this column on a "newest recall
+  wins" model — an older `at` clobbering a newer one would
+  silently age the fact out.  Production `time.time()` is
+  monotonic per-process so the failure mode is narrow (NTP
+  step-back, the OQ #9 operator-seeded path replaying an
+  older interaction, or test fixtures passing explicit `at`
+  out of order), but the `MAX(COALESCE(last_recalled_at, 0),
+  ?)` clamp is cheap insurance.  Fix folded in: tighten the
+  UPDATE to clamp via `MAX`; the `COALESCE(..., 0)` is
+  load-bearing because SQLite's `MAX(NULL, x) = NULL` would
+  otherwise silently no-op the first call (column starts
+  NULL).  Pinned by `test_older_at_does_not_clobber_newer`,
+  `test_first_call_sets_from_null`, and
+  `test_equal_at_is_idempotent` in
+  [`tests/unit/python/test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py).
+
+- **DR2-N-4 — `MemoryBudget.record_admission(tier=…)` accepted
+  arbitrary strings.**  Three call sites used `"facts"`,
+  `"episodic"`, `"notes"`.  A typo at a future call site
+  (`tier="fact"`) would silently populate an unread bucket —
+  the facts-tier reinforcement read at
+  [`FactStore.mark_recalled`](../../agents/memory/facts.py)
+  looks up `admissions_by_tier("facts")`, sees `[]`, and
+  skips the `last_recalled_at` write without surfacing
+  anywhere.  Fix folded in: add a frozen `KNOWN_TIERS`
+  allowlist (`{"facts", "episodic", "notes", "relationship",
+  "channel_history"}` covering all canonical RFC 0027 §F
+  tier names, even tiers not currently calling
+  `record_admission` so future wiring lands on a known
+  name); `record_admission` raises `ValueError` on
+  unknown tiers.  The reader side (`admissions_by_tier`)
+  stays permissive — a typo at a *read* site returns the
+  empty-default, because the bug lives on the writer side.
+  Pinned by `TestKnownTierAllowlist` in
+  [`tests/unit/python/test_memory_budget_provenance.py`](../../tests/unit/python/test_memory_budget_provenance.py).
+
+- **DR2-N-5 — soft-slice docstring implied even-share
+  consumption across subjects.**  The M-3 docstring rewrite
+  said *"the per-tier slice is shared across all blocks so
+  a chatty sender cannot starve the persona's self-claims
+  at the global allocator level"*, which is true at the
+  **global** allocator (1500-token budget) but misleading at
+  the **slice** level: once `facts_tokens_used` crosses
+  `facts_budget_tokens` inside one block, the next block's
+  outer-loop guard fires and the rest of the section is
+  skipped.  With `_subject_seeds` returning
+  `[SELF_SUBJECT, canonical_sender]` and `groups` preserving
+  caller order, `self` blocks always render first, so this
+  isn't a Leg-5 hazard in practice — but the docstring
+  didn't say so out loud.  Fix folded in: spell out the
+  per-block-sequential consumption shape and the
+  `self`-first emit ordering as **load-bearing for Leg 5**
+  in
+  [`facts_section.py`](../../agents/persona_runtime/facts_section.py)
+  under a new "Per-block slice consumption is sequential,
+  not even" paragraph in `render_facts_section`'s
+  docstring.  No behaviour change.
+
+- **DR2-N-7 — provenance event name was carried only in the
+  log message text.**  The
+  `_provenance_logger.info("persatrix.memory.tier_admitted",
+  extra=…)` call shipped the event identifier as the format
+  string; structured fields (`tier`, `item_id`,
+  `tokens_admitted`) landed on the LogRecord as attributes,
+  but the event name itself was only grep-able via the
+  human-readable message — brittle to future message-format
+  changes.  Fix folded in: promote the event name to an
+  `extra["event"]` field too, so downstream structured-log
+  pipelines (Loki, ELK) can index on a stable key.  Message
+  field stays populated for terminal-tailing.  Pinned by
+  `test_event_name_is_promoted_to_structured_field`.
+
+##### From PR 4 review — second-pass deferrals
+
+Four nice-to-have findings from the second deep-review pass
+(PR #342) that did not block PR 4 merge and are tracked here
+for PR 5 to pick up.  Each is small in code surface but
+touches a different concern (audit, defense-in-depth bound,
+allocator amortisation, write-cost calibration), so they are
+sequenced individually rather than batched.
+
+- **DR2-N-2 — reinforcement writes are not audited.**
+  [`FactStore.store`](../../agents/memory/facts.py) and
+  `FactStore.supersede` both emit
+  `_emit_audit("fact.store", …)` /
+  `_emit_audit("fact.supersede", …)` via the RFC 0026 §G
+  audit hook.
+  [`FactStore.mark_recalled`](../../agents/memory/facts.py)
+  does not.  The audit log is therefore blind to which facts
+  were reinforced this turn, even though MT-MEMORY-005
+  leg-failure analysis is one of the two consumers PR 4
+  named.  The structured-log emission under
+  `PERSATRIX_MEMORY_PROVENANCE=1` partially fills this gap,
+  but it is env-gated and emits from the budget allocator,
+  not from the storage layer — so an audit-log reader has no
+  `FactStore`-level signal that reinforcement occurred.
+  PR 5 decision: either emit
+  `_emit_audit("fact.recalled", agent_id=…, fact_ids=ids,
+  at=timestamp)` once per call (not per fact_id — audit
+  volume stays bounded), or amend RFC 0026 §G to formally
+  exclude reinforcement events from the audit surface.  Pair
+  with a unit test in
+  [`tests/unit/python/test_fact_store_reinforcement.py`](../../tests/unit/python/test_fact_store_reinforcement.py)
+  that asserts a `fact.recalled` audit row lands after a
+  `mark_recalled` call (path #1), or with an inline note in
+  the `mark_recalled` docstring naming the audit-excluded
+  contract (path #2).
+
+- **DR2-N-3 — `mark_recalled_for_agent` does not chunk the
+  IN-list.**  SQLite caps the parameter count per query at
+  `SQLITE_MAX_VARIABLE_NUMBER` (32 766 in v3.32+, 999 in
+  older builds).  Today the call site in
+  [`memory_context.py`](../../agents/persona_runtime/memory_context.py)
+  pulls IDs from `budget.admissions_by_tier("facts")`,
+  bounded by `FACTS_RECALL_LIMIT=20` × ≤2 seeds = 40 IDs —
+  orders of magnitude below either limit.  But the helper
+  accepts an arbitrary `Iterable[str]` and is callable from
+  other paths (RFC 0013 erasure backfill, RFC 0008
+  calibration); a single-line chunk loop
+  (`for chunk in chunks(ids, 900): …`) future-proofs the
+  API without affecting today's hot path.  PR 5 decision:
+  add the chunk loop to
+  [`_facts_reinforce.py`](../../agents/memory/_facts_reinforce.py)
+  and bump the docstring's "bounded by call-site" note to
+  "bounded by helper-internal chunking".  Pin with a unit
+  test that passes 1 500 IDs and asserts the call succeeds
+  on a sqlite build with the older 999-variable cap (or that
+  asserts the helper issues ≥2 UPDATE statements).
+
+- **DR2-N-6 — triple `enc.encode` re-cost on oversized
+  items.**  Pre-existing in
+  [`memory_budget.py`](../../agents/persona_runtime/memory_budget.py),
+  called out by the inline comment ("enc.encode() is invoked
+  3× for oversized items").  With PR 4's new admission
+  registry and the multi-block render, a tight budget can
+  amplify this — a 200-token per-tier slice with a fact line
+  that costs 60 tokens will see the oversized path on the
+  third or fourth item, multiplied across the per-block
+  fan-out.  Out of scope for PR 4 (the path existed before
+  this PR), but the multi-block render makes it more
+  reachable.  PR 5 decision: cache the token count off the
+  first `enc.encode(text)` call in `try_add` and pass it to
+  `_truncate_to_token_limit` so the truncation path can
+  decode against the same token list rather than re-encoding.
+  Pin with a benchmark / micro-bench under
+  `tests/bench/` (RFC 0017 §B notes the bench-suite seam) or
+  with an instrumented test that asserts `enc.encode` is
+  called at most once per `try_add`.
+
+- **DR2-N-8 — `mark_recalled_for_agent` issues its own
+  `db.commit()` even when called inside an outer
+  transactional caller.**  `FactStore` does not currently
+  expose a transaction-scope manager, so all writes
+  auto-commit per call (`store`, `supersede`, `prune`,
+  `delete_by_subject` all commit before returning).  The
+  reinforcement write therefore commits at the very end of
+  every `_inject_memory_context` call, after the prompt is
+  built and the section added — a small write-amplification
+  cost the persona's hot path now pays.  Today's call-site
+  comment makes the trade explicit ("failure is non-fatal —
+  the prompt already shipped"), but the write-cost is
+  unmentioned.  PR 5 decision: calibrate against the MQ-12
+  per-turn-cost budget; if the reinforcement commit shows
+  up in the trace, either batch it with a future facts-tier
+  write (RFC 0026 OQ #9 operator-seeded path is the most
+  natural pair) or expose an explicit
+  `FactStore.transaction()` context manager.  No-op if the
+  calibration shows the commit is in the noise floor.
 
 #### PR checklist
 

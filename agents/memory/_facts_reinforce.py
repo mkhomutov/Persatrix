@@ -44,6 +44,21 @@ async def mark_recalled_for_agent(
     skipped.  Empty / missing fact_ids no-op without a DB round-trip;
     the recall-time reinforcement path must never raise.  ``at``
     defaults to :func:`time.time`.
+
+    Monotonicity (PR #342 review N-1)
+    ---------------------------------
+    ``last_recalled_at`` is monotone non-decreasing.  The UPDATE
+    clamps the column to ``MAX(COALESCE(last_recalled_at, 0), ?)``
+    so an older ``at`` argument never clobbers a newer existing
+    value.  Composes with :doc:`RFC 0008 §G
+    <../../docs/rfcs/0008-agent-memory-context-optimization>` decay /
+    validation on a "newest recall wins" basis; the failure modes a
+    naive overwrite would expose are NTP step-back, operators
+    replaying older interactions via the OQ #9 seeded-facts path,
+    and test fixtures that pass an explicit ``at`` out of order.
+    ``COALESCE(..., 0)`` matters because the column starts ``NULL``
+    and SQLite's ``MAX(NULL, x) = NULL``, which would silently no-op
+    the first call.
     """
     ids = list(fact_ids)
     if not ids:
@@ -51,7 +66,8 @@ async def mark_recalled_for_agent(
     timestamp = at if at is not None else time.time()
     placeholders = ",".join("?" for _ in ids)
     await db.execute(
-        f"UPDATE facts SET last_recalled_at = ? "  # noqa: S608 — placeholders are literal '?'.
+        f"UPDATE facts "  # noqa: S608 — placeholders are literal '?'.
+        f"SET last_recalled_at = MAX(COALESCE(last_recalled_at, 0), ?) "
         f"WHERE agent_id = ? AND fact_id IN ({placeholders})",
         (timestamp, agent_id, *ids),
     )

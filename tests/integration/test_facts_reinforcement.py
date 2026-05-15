@@ -3,38 +3,27 @@
 Pins the PR 4 deliverables called out in :doc:`docs/rfcs/0026-pr-plan.md`
 §PR 4:
 
-* **Reinforcement**: ``last_recalled_at`` advances on every
+* **Reinforcement** — ``last_recalled_at`` advances on every
   :class:`~agents.persona_runtime.memory_budget.MemoryBudget`-admitted
   fact.  Composes with :doc:`RFC 0008 §G
   <../../docs/rfcs/0008-agent-memory-context-optimization>` decay /
-  validation via the same scoring seam; the calibration formula lands
-  in :doc:`RFC 0008 calibration review
-  <../../docs/rfcs/0008-calibration-review>`, this PR ships only the
-  write.
+  validation via the same scoring seam.
 
-* **Retraction**: latest-asserted-wins via the
-  :meth:`agents.memory.facts.FactStore.store` supersede-on-insert
-  branch (already in PR 1).  Superseded rows are absent from default
-  recall, so the admission set surfaces only the live row — the
-  dementia-test invariant that a contradicted fact never leaks back
-  into the prompt.
+* **Retraction** — latest-asserted-wins; superseded rows are absent
+  from default recall, so the admission set surfaces only live rows
+  (the dementia-test invariant).
 
-* **Self admission** (OQ #10): ``self.*`` facts admit at recall time
-  alongside facts about the sender.  Required so MT-MEMORY-005 Leg 5
-  (self-consistency) flips green — the previous shape seeded only
-  from ``event.sender_id``, leaving introspective rows write-only.
+* **Self admission** (OQ #10) — ``self.*`` facts admit at recall
+  time alongside facts about the sender, required for MT-MEMORY-005
+  Leg 5 (self-consistency).
 
-* **Multi-subject section shape**: once two seeds (``self`` + sender)
-  produce facts, the section renders one block per subject so a
-  ``self.has_preference`` row is not silently labelled under the
-  sender's header (the persona-inversion footgun the dementia test
-  is meant to fence off — see :doc:`docs/rfcs/0026-pr-plan.md`
-  PR 3 review M-2 carry-over).
+* **Multi-subject section shape** — once two seeds (``self`` +
+  sender) produce facts, the section renders one block per subject
+  so ``self.*`` rows are never silently labelled under the sender's
+  header (persona-inversion footgun, PR 3 review M-2 carry-over).
 
-* **Tier-provenance instrumentation**: every admitted fact appears
-  in :meth:`MemoryBudget.admissions_by_tier` so MT-MEMORY-005 leg-
-  failure analyses can disambiguate recall miss from reasoning miss
-  (the MQ-11 deliverable).
+* **Tier-provenance instrumentation** — every admitted fact appears
+  in :meth:`MemoryBudget.admissions_by_tier` (MQ-11).
 """
 
 from __future__ import annotations
@@ -175,21 +164,31 @@ class TestReinforcement:
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
     ) -> None:
         """A fact the budget drops (per-tier slice exhausted) must not
-        have ``last_recalled_at`` written — reinforcement counts admits,
-        not recalls."""
+        have ``last_recalled_at`` written.
+
+        Targets the allocator drop path; each row uses a distinct
+        ``(subject, predicate)`` key so :meth:`FactStore.store` never
+        supersedes a predecessor.  Without that, recall's default
+        ``superseded_by IS NULL`` filter would cull all-but-the-last
+        row *before* the allocator saw them and the test would
+        silently exercise retraction (PR #342 review S-1).
+        """
         ts = time.time()
-        # Pump enough facts to overflow the 200-token per-tier slice;
-        # the tail of the list will be dropped by the allocator.
-        fact_ids: list[str] = []
-        for i in range(40):
-            fid = await fact_store.store(
-                subject="bob",
-                predicate="prefers",
+        # 17 allowlisted predicates × 1 subject = 17 live rows; ~35-45
+        # tokens per line → slice admits ~5, drops ~12.
+        predicates = [
+            "prefers", "dislikes", "loves", "avoids",
+            "committed_to", "plans_to", "agreed_to",
+            "has_name", "lives_in", "works_at", "has_age",
+            "speaks_language", "has_child_named", "has_partner_named",
+            "has_parent_named", "works_with", "knows",
+        ]
+        for i, predicate in enumerate(predicates):
+            await fact_store.store(
+                subject="bob", predicate=predicate,
                 object=f"detail #{i}: " + ("alpha bravo charlie " * 8),
-                source_interaction_id=f"i{i}",
-                asserted_at=ts + i,
+                source_interaction_id=f"i{i}", asserted_at=ts + i,
             )
-            fact_ids.append(fid)
 
         mixin = _wire_mixin(
             fact_store=fact_store, episodic=empty_episodic,
@@ -198,17 +197,25 @@ class TestReinforcement:
         event = _make_event(sender_id="bob", content="what's new")
         await mixin._inject_memory_context(event)
 
-        # Inspect every stored row.  At least one row must have been
-        # dropped (the 40-fact load is larger than the per-tier slice)
-        # and at least one must have been admitted; the dropped row's
-        # ``last_recalled_at`` stays ``None``.
         all_rows = await fact_store.recall(
             subject="bob", limit=100, include_superseded=True,
+        )
+        # Sanity: no supersession.  A regression to colliding keys
+        # would flip this red before the allocator assertions
+        # silently degrade into a retraction-filter test.
+        assert len(all_rows) == len(predicates), (
+            "supersession culled rows — fixture lost allocator-drop "
+            "coverage (PR #342 review S-1)"
         )
         admitted = [r for r in all_rows if r.last_recalled_at is not None]
         dropped = [r for r in all_rows if r.last_recalled_at is None]
         assert admitted, "no fact was reinforced — allocator regressed"
         assert dropped, "no fact was dropped — per-tier slice broken"
+        # All rows live → any drop is the slice cap firing; a
+        # regression removing the slice break would admit everything.
+        assert len(admitted) < len(all_rows), (
+            "every live row admitted — per-tier slice cap not enforced"
+        )
 
 
 # ─── 2. Retraction: latest-asserted-wins ───────────────────
@@ -264,10 +271,9 @@ class TestRetraction:
 
 class TestSelfAdmission:
     """The ``self`` seed flows through ``_subject_seeds`` so introspective
-    ``self.*`` rows admit at recall time — required so MT-MEMORY-005 Leg
-    5 (self-consistency) is testable.  PR 3 wrote ``self.*`` rows but
-    did not seed ``self`` at recall time.
-    """
+    ``self.*`` rows admit at recall time — required for MT-MEMORY-005
+    Leg 5 (self-consistency).  PR 3 wrote ``self.*`` rows but did not
+    seed ``self`` at recall time."""
 
     async def test_self_fact_admits_when_sender_has_no_facts(
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
@@ -324,13 +330,11 @@ class TestSelfAdmission:
 
 
 class TestMultiSubjectSection:
-    """Once ``_subject_seeds`` yields more than one seed (``self`` plus
-    the canonical sender), the rendered section must split into one
-    labelled block per subject.  A single ``"Known facts about bob:"``
-    header over a list that also contains ``- self self.has_preference
-    sci-fi`` invites the LLM to read the sci-fi preference as a fact
-    about *bob* — the dementia-test fence is exactly this kind of
-    persona-inversion gap."""
+    """Once ``_subject_seeds`` yields ``self`` + the canonical sender,
+    the rendered section splits into one labelled block per subject.
+    A single shared header (``Known facts about bob:``) over a mixed
+    list invites the LLM to read a ``self.*`` row as a fact about
+    *bob* — the persona-inversion gap the dementia-test fences off."""
 
     async def test_both_subjects_labelled_in_their_own_block(
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
@@ -382,9 +386,8 @@ class TestMultiSubjectSection:
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
     ) -> None:
         """Regression guard: when only one seed has facts, the section
-        still has exactly one header — the multi-subject fan-out must
-        not add an empty ``"Known facts about self:"`` block when no
-        ``self.*`` rows exist."""
+        has exactly one header — the multi-subject fan-out must not
+        add an empty ``self`` block when no ``self.*`` rows exist."""
         await fact_store.store(
             subject="bob", predicate="prefers", object="tea",
             source_interaction_id="i1", asserted_at=1000.0,
@@ -409,9 +412,7 @@ class TestMultiSubjectSection:
 class TestTierProvenance:
     """Every admitted fact lands on
     :meth:`MemoryBudget.admissions_by_tier` so MT-MEMORY-005 leg-failure
-    analyses can grep the per-turn admission set without re-walking the
-    storage layer.  The MQ-11 deliverable.
-    """
+    analyses can grep the per-turn admission set (MQ-11)."""
 
     async def test_admitted_fact_ids_are_recorded_on_budget(
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
@@ -465,9 +466,8 @@ class TestTierProvenance:
 
 
 # ─── 6. TICK short-circuit end-to-end DB-cost pin (review M-2) ─
-# Unit pins for ``_subject_seeds`` + ``render_facts_section``
-# phantom-reinforcement guard live in
-# :mod:`tests.unit.python.test_facts_section`.
+# Unit pins for ``_subject_seeds`` + phantom-reinforcement guard
+# live in :mod:`tests.unit.python.test_facts_section`.
 
 
 class TestTickEventDoesNotQueryFactStore:
