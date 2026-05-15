@@ -458,11 +458,16 @@ class FactStore:
         umbrella ``records_deleted`` audit map.  Without this primitive,
         the first GDPR / CCPA request after v0.3.1 ships would silently
         miss extracted facts — see RFC 0026 §H.
+
+        Subject canonicalisation (PR #346 review M-1): the ``subject``
+        traversal canonicalises so a mixed-case erasure hits the
+        canonical rows :meth:`store` persists; ``source_interaction_id``
+        stays raw — it holds opaque UUIDs, not subject strings.
         """
         db = self._ensure_db()
         cursor = await db.execute(
             "DELETE FROM facts WHERE agent_id = ? AND subject = ?",
-            (self._agent_id, subject_id),
+            (self._agent_id, canonicalize_subject(subject_id)),
         )
         by_subject = cursor.rowcount
         cursor = await db.execute(

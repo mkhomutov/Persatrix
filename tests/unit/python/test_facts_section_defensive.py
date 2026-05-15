@@ -134,15 +134,20 @@ class TestHeaderTruncationPreservesItemSeparator:
 
         # Two acceptable outcomes:
         #   (a) Header truncated cleanly with separator preserved →
-        #       section non-None, item line starts on its own
-        #       newline regardless of whether the header was
-        #       truncated.
-        #   (b) Header dropped entirely → section is None (the
-        #       option-(2) fallback path the docstring permits).
-        # The bug signature this test rejects is a non-None section
-        # whose content does NOT contain "\n- " — that means the
-        # item was glued directly to the (possibly truncated) header
-        # with no separator.
+        #       section non-None, item line starts on its own newline.
+        #   (b) Header dropped entirely → section is None.
+        # The bug signature rejected is a non-None section whose
+        # content lacks "\n- " — the item glued to the truncated
+        # header with no separator.
+        #
+        # Note (PR #346 review L-2): under this sizing the exit is
+        # always branch (b) — the prefix's ``try_add`` consumes the
+        # truncation remainder exactly, leaving ``remaining == 0`` so
+        # the separator's ``try_add`` fails and the block is dropped.
+        # The ``"\n- "`` assertion below therefore never executes;
+        # this test's value is the bug-shape rejection (non-None
+        # section without ``"\n- "``).  The happy-path success branch
+        # is pinned by the complementary test below.
         if section is not None:
             assert "\n- " in section.content, (
                 "L-1 regression: item line is not framed by a newline "
@@ -150,6 +155,97 @@ class TestHeaderTruncationPreservesItemSeparator:
                 "header's trailing separator.  Bug signature: "
                 f"section.content={section.content!r}"
             )
+
+    async def test_two_part_admission_emits_separator_when_budget_fits(
+        self,
+    ) -> None:
+        """Complementary happy-path pin (PR #346 review L-2).
+
+        :meth:`test_truncated_header_does_not_glue_to_first_item`
+        above pins only the *bug-shape rejection* branch — under its
+        sizing ``section`` is always ``None`` so its ``"\\n- "``
+        assertion never runs.  This test pins the *success path*:
+        under a comfortable budget the new ``prefix + "\\n" + items``
+        admission produces a well-formed block with the separator
+        preserved.  Without it the two-part admission idiom is
+        exercised only on its drop-the-block branch — a refactor
+        breaking the ``admitted_prefix + admitted_sep +
+        "\\n".join(items)`` concatenation would ship green.
+
+        No "truncated prefix + separator preserved" case is added:
+        ``MemoryBudget`` truncates oversized text to exactly
+        ``remaining`` tokens, decrementing ``remaining`` to ``0`` so
+        the separator's ``try_add`` always fails.  That branch is
+        present in the admission code but practically unreachable,
+        and a test depending on the tokeniser leaving slack would be
+        brittle.  The two reachable outcomes — drop and clean-emit —
+        are both pinned.
+        """
+        from agents.memory.facts import Fact  # noqa: PLC0415
+        from agents.persona_runtime.facts_section import (  # noqa: PLC0415
+            render_facts_section,
+        )
+        from agents.persona_runtime.memory_budget import (  # noqa: PLC0415
+            MemoryBudget,
+        )
+
+        facts = [
+            Fact(
+                fact_id="fact-1",
+                agent_id="dementia-agent",
+                subject="bob",
+                predicate="prefers",
+                object="tea",
+                certainty=1.0,
+                source_interaction_id="i1",
+                asserted_at=1000.0,
+                last_recalled_at=None,
+                superseded_by=None,
+                session_id="legacy",
+            ),
+            Fact(
+                fact_id="fact-2",
+                agent_id="dementia-agent",
+                subject="bob",
+                predicate="lives_in",
+                object="Berlin",
+                certainty=1.0,
+                source_interaction_id="i2",
+                asserted_at=1001.0,
+                last_recalled_at=None,
+                superseded_by=None,
+                session_id="legacy",
+            ),
+        ]
+
+        # Comfortable budget — header + items fit whole with
+        # headroom; no truncation pressure on any admission.
+        budget = MemoryBudget(total_tokens=500)
+        section = render_facts_section(
+            facts, budget, facts_budget_tokens=500,
+        )
+
+        assert section is not None, (
+            "expected the section to emit under a comfortable budget"
+        )
+        # The new two-part admission idiom: prefix (header sans
+        # newline) + "\n" separator + items joined by "\n".  The
+        # rendered block must therefore start with the header text
+        # and contain a "\n- " separator framing each item.
+        assert section.content.startswith("Known facts about bob:"), (
+            "rendered block must lead with the canonical header "
+            f"prefix; got {section.content!r}"
+        )
+        assert "\n- bob prefers tea" in section.content, (
+            "first item must be framed on its own line — the two-"
+            "part admission must place a newline between the header "
+            f"prefix and the first item.  Got {section.content!r}"
+        )
+        assert "\n- bob lives_in Berlin" in section.content, (
+            "subsequent items keep the same \"\\n- \" framing; the "
+            "items list is joined by \"\\n\" so the second item is "
+            f"also separator-prefixed.  Got {section.content!r}"
+        )
 
 
 # ─── L-3: resolve_facts_config null-budget guard (PR 5c) ─────

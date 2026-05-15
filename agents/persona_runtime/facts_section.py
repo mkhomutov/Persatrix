@@ -166,6 +166,10 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
     if not sender_id or not sender_id.strip():
         return []
     try:
+        # Load-bearing, not redundant — though FactStore.recall also
+        # canonicalises its query (PR 5c), the canonical form is used
+        # locally for the ``== SELF_SUBJECT`` check and seed dedup
+        # below.  Removing it breaks the self-collapse. (PR #346 N-2)
         canonical = canonicalize_subject(sender_id)
     except ValueError:
         # Defensive forward-guard (PR #342 third-pass review L-2).
@@ -454,6 +458,12 @@ def render_facts_section(
         # separator between the header and the first item.
         admitted_sep = budget.try_add("\n", min_tokens=1)
         if admitted_sep is None:
+            # Separator dropped — block discarded.  Same greedy-
+            # allocator trade-off the header-drop path above documents,
+            # plus one term: the already-admitted ``admitted_prefix``
+            # tokens also stay charged (try_add has no rollback seam).
+            # Leak is one block's prefix cost — accepted, not worth a
+            # rollback path the allocator otherwise lacks. (PR #346 N-1)
             continue
         blocks.append(
             admitted_prefix + admitted_sep + "\n".join(items),

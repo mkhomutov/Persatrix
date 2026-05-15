@@ -143,10 +143,9 @@ memory:
   facts:
     enabled: true
     budget_tokens: 200
-    extraction_model: claude-haiku-4-5  # or null to inherit context_management.summarization.model
 ```
 
-The `claude-haiku-4-5` value is a model alias that resolves at runtime via `optimization.yaml` to the dated model id (e.g. `claude-haiku-4-5-20251001`). Using the alias keeps the example stable across model-id rotations.
+Fact extraction has no model knob of its own. It rides the interaction-close LLM call that already produces the conversation summary — a single combined `summarize + extract` call — so the extractor always runs on whatever `context_management.summarization.model` selects. An earlier draft of this RFC proposed a `memory.facts.extraction_model` override; it was dropped during the PR 5c review follow-ups because a knob distinct from the summariser model is a category error when the two share one call. See the [`extraction_model` decision in `0026-pr-plan.md`](0026-pr-plan.md) for the full rationale and the `additionalProperties: false` migration note.
 
 ### F. Salience and reinforcement
 
