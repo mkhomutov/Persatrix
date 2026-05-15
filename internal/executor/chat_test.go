@@ -61,11 +61,11 @@ func setupChatTestEnv(t *testing.T, handler func(context.Context, *taskpb.ChatRe
 func TestSendChatMessage_Success(t *testing.T) {
 	exec, reg := setupChatTestEnv(t, func(_ context.Context, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
 		return &taskpb.ChatResponse{
-			Reply:       "Hello, human!",
-			SessionId:   "sess-123",
-			AgentId:     req.AgentId,
-			Timestamp:   1713600000,
-			ReplyStatus: "ok",
+			Reply:         "Hello, human!",
+			ChatSessionId: "sess-123",
+			AgentId:       req.AgentId,
+			Timestamp:     1713600000,
+			ReplyStatus:   "ok",
 		}, nil
 	})
 
@@ -79,7 +79,7 @@ func TestSendChatMessage_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "Hello, human!", resp.Reply)
-	assert.Equal(t, "sess-123", resp.SessionId)
+	assert.Equal(t, "sess-123", resp.ChatSessionId)
 	assert.Equal(t, "test-agent", resp.AgentId)
 	assert.Equal(t, "ok", resp.ReplyStatus)
 }
@@ -185,9 +185,9 @@ func TestSendChatMessage_RequestTimeoutOverridesDefault(t *testing.T) {
 func TestSendChatMessage_EmptyReply(t *testing.T) {
 	exec, reg := setupChatTestEnv(t, func(_ context.Context, _ *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
 		return &taskpb.ChatResponse{
-			Reply:       "",
-			ReplyStatus: "empty",
-			SessionId:   "sess-456",
+			Reply:         "",
+			ReplyStatus:   "empty",
+			ChatSessionId: "sess-456",
 		}, nil
 	})
 
@@ -245,10 +245,10 @@ func TestSendChatMessage_TimeoutCappedAtMax(t *testing.T) {
 func TestSendChatMessage_Concurrent(t *testing.T) {
 	exec, reg := setupChatTestEnv(t, func(_ context.Context, req *taskpb.ChatRequest) (*taskpb.ChatResponse, error) {
 		return &taskpb.ChatResponse{
-			Reply:       "Hello, " + req.UserId,
-			SessionId:   "sess-concurrent",
-			AgentId:     req.AgentId,
-			ReplyStatus: "ok",
+			Reply:         "Hello, " + req.UserId,
+			ChatSessionId: "sess-concurrent",
+			AgentId:       req.AgentId,
+			ReplyStatus:   "ok",
 		}, nil
 	})
 

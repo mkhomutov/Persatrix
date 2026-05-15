@@ -165,15 +165,17 @@ Leg 5 measures the persona's stability *as a subject of its own facts* — ortho
 
 ## Expected Results Summary
 
-| Leg | Established at | Triggered at | Pass criterion | Variant gate | Pass/Fail |
-|-----|----------------|--------------|----------------|--------------|-----------|
-| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | V2+ | ☐ |
-| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | V2+ | ☐ |
-| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | V2 (fact form) / V4 (commitment form) | ☐ |
-| 4 — Paraphrase Recall | Interaction 1 | Interaction 5 | Rate-card / pricing thread surfaced via paraphrase | V2+ (fail = MQ-8 signal) | ☐ |
-| 5 — Self-Consistency | Interaction 1 | Interaction 5 | Persona's self-claim stable across the window | V2+ | ☐ |
+| Leg | Established at | Triggered at | Pass criterion | Variant gate | V2 expectation (post-RFC 0026 PR 4) | Pass/Fail |
+|-----|----------------|--------------|----------------|--------------|-------------------------------------|-----------|
+| 1 — Named Entity | Interaction 1 | Interaction 4 | "Mira" or "your daughter" referenced without keyword overlap | V2+ | ✅ Expected pass — `(sender, has_child_named, "Mira")` admits via facts tier on the trigger turn | ☐ |
+| 2 — Stated Preference | Interaction 2 | Interaction 5 | Recommendation honors preference (no phone-call suggestion) | V2+ | ✅ Expected pass — `(sender, dislikes, "phone calls")` / `(sender, prefers, "text or async")` admits | ☐ |
+| 3 — Explicit Commitment | Interaction 3 | Interaction 5 | Open commitment referenced or correctly handled | V2 (fact form) / V4 (commitment form) | ⚠️ V2 partial — `(sender, committed_to, ...)` may admit; structured commitment tracking is v0.4.0 (RFC 0021 P2) | ☐ |
+| 4 — Paraphrase Recall | Interaction 1 | Interaction 5 | Rate-card / pricing thread surfaced via paraphrase | V2+ (fail = MQ-8 signal) | ↔️ Unchanged from V1 — facts tier does not cover paraphrase recall; consistent V2/V3 fails escalate to RFC 0024 | ☐ |
+| 5 — Self-Consistency | Interaction 1 | Interaction 5 | Persona's self-claim stable across the window | V2+ | ✅ Expected pass — `(self, self.has_preference, ...)` admits via the PR 4 `self`-subject seed | ☐ |
 
 **Overall pass per variant**: all variant-gated legs pass. A pass on N-1 of N is partial — investigate which deliverable hasn't landed yet. Two or more fails = fail. Per-leg telemetry (recall miss vs. reasoning miss) determines the next action.
+
+**Expected V2 outcomes (post-RFC 0026 PR 4)**: Legs 1, 2, and 5 flip from V1 baseline-fail to V2 pass. Legs 3, 4 hold unchanged — Leg 3 because structured commitment tracking is v0.4.0 scope (RFC 0021 P2), Leg 4 because paraphrase recall is the MQ-8 trigger for RFC 0024 (deferred to v0.3.x). RFC 0026 PR 4 ships the `last_recalled_at` reinforcement write and the `self` subject seed needed for Leg 5; the per-turn tier-provenance log under `PERSATRIX_MEMORY_PROVENANCE=1` (MQ-11) is the diagnostic that distinguishes a recall miss from a reasoning miss on any leg fail.
 
 ---
 
@@ -186,7 +188,7 @@ Run the full procedure against `main` *before* RFC 0026 Phase 1 lands. Record re
 ### V2 — Post-RFC 0026 Phase 1 (facts tier shipped)
 
 Re-run after [RFC 0026](../rfcs/0026-declarative-facts-tier.md) Phase 1 + Phase 2. Legs 1, 2, 4, 5 should pass:
-- **Leg 1 / 2**: extractable as facts (`(subject=<sender_id>, predicate="has_daughter_named", object="Mira")` and `(subject=<sender_id>, predicate="prefers", object="text or async")`). `<sender_id>` is the canonical entity key resolved by [RFC 0026 §C](../rfcs/0026-declarative-facts-tier.md#c-subject-canonicalization) at write time — not a literal `"user"` string. Tests asserting on these tuples must use the resolved `sender_id`, not a hard-coded placeholder.
+- **Leg 1 / 2**: extractable as facts (`(subject=<sender_id>, predicate="has_child_named", object="Mira")` and `(subject=<sender_id>, predicate="prefers", object="text or async")`). `<sender_id>` is the canonical entity key resolved by [RFC 0026 §C](../rfcs/0026-declarative-facts-tier.md#c-subject-canonicalization) at write time — not a literal `"user"` string. Tests asserting on these tuples must use the resolved `sender_id`, not a hard-coded placeholder. The relationship predicate is gender-neutral by design ([RFC 0026 §B](../rfcs/0026-declarative-facts-tier.md#b-extraction-at-interaction-close)) — a daughter-vs-son distinction, when load-bearing, surfaces in the prose summary that ships in the same close-path round-trip.
 - **Leg 4 (paraphrase)**: passes if BM25 over interaction summaries is sufficient. A consistent **V2 or V3** fail on Leg 4 — with provenance showing the relevant episode is absent from the `episodic` slice — is the [MQ-8](../v0.3.0-plan.md#memory-quality-follow-ups-v03x-and-beyond) trigger for RFC 0024. V4 fails do not count: post-RFC 0027 consolidation can mask vector-recall need behind consolidation notes (see §Notes coda).
 - **Leg 5 (self-consistency)**: passes if `subject = "self"` predicates are in the Phase-1 vocabulary (RFC 0026 OQ #10). If Phase 1 ships without self-predicates, Leg 5 is a V4 leg, not V2.
 

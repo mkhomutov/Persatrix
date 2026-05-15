@@ -70,7 +70,7 @@ sequenceDiagram
     participant LLM as LLM Provider
 
     Human->>CLI: persatrix chat <agent_id> [--user <user_id>]
-    CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, session_id? }
+    CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, chat_session_id? }
     Srv->>Reg: look up agent endpoint
     Reg-->>Srv: gRPC address
     Srv->>ChatExec: dispatch SendChatMessage
@@ -82,15 +82,15 @@ sequenceDiagram
     LLM-->>Agent: reply text + usage
     Agent->>Mem: store episodic episode (user msg + reply)
     Agent->>Mem: update relationship memory (trust score, interaction count)
-    Agent-->>ChatExec: ChatResponse { reply, session_id, reply_status }
+    Agent-->>ChatExec: ChatResponse { reply, chat_session_id, reply_status }
     ChatExec-->>Srv: ChatResponse
-    Srv-->>CLI: 200 { reply, session_id, agent_display_name }
+    Srv-->>CLI: 200 { reply, chat_session_id, agent_display_name }
     CLI-->>Human: print reply
 
     loop User continues chatting
         Human->>CLI: next message
-        Note over CLI,Srv: same session_id re-used
-        CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, session_id }
+        Note over CLI,Srv: same chat_session_id re-used
+        CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, chat_session_id }
     end
 
     Human->>CLI: exit (or Ctrl-C)

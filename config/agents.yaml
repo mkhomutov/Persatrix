@@ -150,6 +150,16 @@ agents:
         max_notes: 500
         auto_reflect_after: 5
         inject_recent_notes: 3
+      # RFC 0026 PR 3: declarative-fact tier configuration.  Operators
+      # can disable the recall/injection path for diagnostic purposes;
+      # the extractor (PR 2) keeps writing facts regardless of this
+      # knob.  ``budget_tokens`` carves out the per-event soft slice
+      # from RFC 0017's 1500-token allocator.  Defaults match RFC 0026
+      # OQ #2; removing the block changes nothing.
+      facts:
+        enabled: true
+        budget_tokens: 200
+        extraction_model: null          # null = inherit from optimization.yaml
       # RFC 0008 PR plan PR 5 (Phase 4b): procedural-tier confidence-decay
       # knobs.  Defaults match agents.memory.decay; the example block is
       # included so operators see the surface, even though removing it

@@ -79,6 +79,10 @@ func main() {
 	// is not consumed by the future persatrix logs endpoint.
 	logFormat := os.Getenv(zapenc.PrettyEnvVar)
 
+	// RFC 0031 Phase 1: PERSATRIX_SESSION_ID resolution is deferred until
+	// after buildLogger so the INFO/WARN fallback line lands in the same
+	// log destination as every other startup event. See [resolveSessionID].
+
 	// Validate --env (PR #12 F-06), --deadline-mode (PR #84 F-02), and
 	// PERSATRIX_LOG_FORMAT in one place so a typo surfaces at startup with
 	// a clean non-zero exit instead of silently falling through to a
@@ -319,8 +323,10 @@ func main() {
 		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
 	}
 
+	sessionID := resolveSessionID(logger)
+
 	// RFC 0011 PR 2 — channels subsystem (see channels.go).
-	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, orchMetrics, reg, logger)
+	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, orchMetrics, reg, logger)
 	if chanErr != nil {
 		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
 	}

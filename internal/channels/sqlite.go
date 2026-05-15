@@ -10,10 +10,37 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; matches CGO_ENABLED=0 build (Dockerfile.orchestrator)
 )
+
+// DefaultSessionID is the synthetic carve-out applied to every channel /
+// message write that arrives without an explicit session_id (RFC 0031
+// Phase 1). Phase 2 makes this carve-out a tested invariant of the recall
+// path; Phase 1 only pins the storage shape.
+//
+// Exported so callers outside this package (notably the orchestrator's
+// boot-time `resolveSessionID` fallback) reference a single source of
+// truth — PR #335 review L2.
+const DefaultSessionID = "legacy"
+
+// SessionMetrics is the subset of orchestrator OTEL handles the channel
+// store needs for the RFC 0031 `sessions.writes` counter. Defined locally
+// so the channels package does not take a dependency on the orchestrator-
+// wide instrument struct.
+//
+// Nil-safe: a nil SessionMetrics value disables emission so unit tests and
+// minimal deployments run without OTEL wiring.
+type SessionMetrics struct {
+	// Writes counts each `CreateChannel` / `CreateChannelWithMembers` /
+	// `GetOrCreateDM` / `PublishMessage` write attributed to a
+	// session_id. Phase 1 inserts the env-var value verbatim, so
+	// cardinality is bounded by the operator-controlled session count.
+	Writes metric.Int64Counter
+}
 
 // DefaultMaxMessagesPerChannel is the per-channel oldest-first prune cap when
 // a config value is not supplied (RFC 0011 §B).
@@ -38,6 +65,9 @@ type SQLiteOptions struct {
 	MaxChannels           int
 	MaxMessagesPerChannel int
 	Logger                *zap.Logger
+	// SessionMetrics is optional; nil disables `sessions.writes`
+	// emission. RFC 0031 Phase 1.
+	SessionMetrics *SessionMetrics
 }
 
 // NewSQLiteStore opens (or creates) the channel database at `path` and
@@ -96,6 +126,7 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		maxChannels:           opts.MaxChannels,
 		maxMessagesPerChannel: opts.MaxMessagesPerChannel,
 		logger:                logger,
+		sessionMetrics:        opts.SessionMetrics,
 	}, nil
 }
 
@@ -140,8 +171,19 @@ type sqliteStore struct {
 	maxChannels           int
 	maxMessagesPerChannel int
 	logger                *zap.Logger
+	sessionMetrics        *SessionMetrics
 
 	dmMu sync.Mutex
+}
+
+// recordSessionWrite increments the `sessions.writes` counter with the
+// `session_id` attribute set. No-op when SessionMetrics is unset (test
+// fixtures / channels-disabled deployments).
+func (s *sqliteStore) recordSessionWrite(ctx context.Context, sessionID string) {
+	if s.sessionMetrics == nil || s.sessionMetrics.Writes == nil {
+		return
+	}
+	s.sessionMetrics.Writes.Add(ctx, 1, metric.WithAttributes(attribute.String("session_id", sessionID)))
 }
 
 // Close implements [ChannelStore.Close].
@@ -194,6 +236,11 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	if ch.CreatedAt.IsZero() {
 		ch.CreatedAt = time.Now().UTC()
 	}
+	// RFC 0031 Phase 1: rewrite the empty default at the store boundary
+	// so session-unaware callers persist a queryable row.
+	if ch.SessionID == "" {
+		ch.SessionID = DefaultSessionID
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -225,9 +272,9 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
+		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt, ch.SessionID,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -244,7 +291,9 @@ func (s *sqliteStore) CreateChannel(ctx context.Context, ch Channel) error {
 	// (one event per declared channel + one per implicit DM/thread).
 	s.logger.Info("channels: channel created",
 		zap.String("channel_id", ch.ID),
-		zap.String("channel_type", string(ch.Type)))
+		zap.String("channel_type", string(ch.Type)),
+		zap.String("session_id", ch.SessionID))
+	s.recordSessionWrite(ctx, ch.SessionID)
 	return nil
 }
 
@@ -291,6 +340,9 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 	if ch.CreatedAt.IsZero() {
 		ch.CreatedAt = time.Now().UTC()
 	}
+	if ch.SessionID == "" {
+		ch.SessionID = DefaultSessionID
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -318,9 +370,9 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt,
+		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		ch.ID, nameArg, string(ch.Type), ch.Description, ch.CreatedAt, ch.SessionID,
 	); err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: %s", ErrChannelExists, ch.ID)
@@ -366,6 +418,8 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 	s.logger.Info("channels: channel created with members",
 		zap.String("channel_id", ch.ID),
 		zap.String("channel_type", string(ch.Type)),
+		zap.String("session_id", ch.SessionID),
 		zap.Int("member_count", len(members)))
+	s.recordSessionWrite(ctx, ch.SessionID)
 	return nil
 }

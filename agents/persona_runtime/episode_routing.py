@@ -81,6 +81,11 @@ class _EpisodeRoutingMixin:
     _memory_ns: MemoryNamespace
     # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
     _pending_summarize_tasks: set[asyncio.Task[None]]
+    # RFC 0031 Phase 1: per-process operator-namespace tag stamped on
+    # every ``store_episode`` / ``record_interaction`` call.  Set in
+    # ``PersonaAgent.__init__`` (``agents/persona.py``) from
+    # ``PERSATRIX_SESSION_ID``; defaults to ``"legacy"`` when unset.
+    _session_id: str
 
     # RFC 0020 §G event-type routing.  Both sets are *positive lists* —
     # PR-215 review (Should-Fix #2): unknown event types hit the legacy
@@ -161,7 +166,8 @@ class _EpisodeRoutingMixin:
                     "_EpisodeRoutingMixin._{MULTI,SINGLE}_TURN_EVENT_TYPES.",
                     event.event_type.value,
                 )
-                await self._episodic_memory.store_episode(summary=summary, context=ctx)
+                await self._episodic_memory.store_episode(
+                    summary=summary, context=ctx, session_id=self._session_id)
                 return
             scope = (
                 SCOPE_TICK
@@ -196,13 +202,12 @@ class _EpisodeRoutingMixin:
                     "call — tracker invariant violated.",
                 )
             await self._episodic_memory.store_episode(
-                summary=summary,
-                context=ctx,
+                summary=summary, context=ctx,
                 interaction_id=structural_close.interaction_id,
                 started_at=structural_close.started_at,
                 closed_at=structural_close.closed_at,
                 turn_count=structural_close.turn_count,
-                scope=structural_close.scope,
+                scope=structural_close.scope, session_id=self._session_id,
             )
         except Exception:
             # PR 6 slice 4 #6 + slice 5 #13: this try guards the
@@ -339,7 +344,8 @@ class _EpisodeRoutingMixin:
                 "sender_id; storing as legacy NULL-interaction episode",
                 self.agent_id, event.event_type.value,
             )
-            await self._episodic_memory.store_episode(summary=summary, context=ctx)
+            await self._episodic_memory.store_episode(
+                summary=summary, context=ctx, session_id=self._session_id)
             return
         # PR-216 review (High #1): RFC 0020 §D pins
         # *"Per-turn message text is not stored in episodes"*, and PR 1's
@@ -426,7 +432,7 @@ class _EpisodeRoutingMixin:
                 started_at=interaction.started_at,
                 closed_at=interaction.closed_at,
                 turn_count=interaction.turn_count, scope=interaction.scope,
-            )
+                session_id=self._session_id)
         except Exception:
             logger.warning(
                 "Failed to persist closed interaction for agent %s (scope=%s)",
@@ -441,6 +447,7 @@ class _EpisodeRoutingMixin:
                 episodic=self._episodic_memory, agent_id=self.agent_id,
                 interaction=interaction,
                 on_finalized=self._tick_auto_reflect_counter,
+                session_id=self._session_id,
             ),
         )
         self._pending_summarize_tasks.add(task)

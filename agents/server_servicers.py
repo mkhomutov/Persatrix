@@ -218,18 +218,18 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 reply_status="error",
             )
 
-        # Generate or reuse session_id (OQ 9).
-        # Cap length to prevent oversized values propagating into metadata/
-        # logs. (Review fix: defence-in-depth for client-supplied session_id.)
-        if request.session_id and len(request.session_id) > 128:
+        # Generate or reuse the chat-session id (RFC 0016, OQ 9). Wire field
+        # was `session_id` pre-v0.3.1; renamed for RFC 0031 OQ #8. Cap
+        # length to prevent oversized values propagating into metadata/logs.
+        if request.chat_session_id and len(request.chat_session_id) > 128:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("session_id exceeds 128 characters")
+            context.set_details("chat_session_id exceeds 128 characters")
             return task_pb2.ChatResponse(
                 agent_id=agent_id,
                 reply="",
                 reply_status="error",
             )
-        session_id = request.session_id or str(uuid.uuid4())
+        session_id = request.chat_session_id or str(uuid.uuid4())
 
         # Clamp timeout: at least 1s, at most 300s, default 30s (OQ 6/13).
         # `or 30` treats protobuf zero-default as "use server default".
@@ -273,7 +273,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             },
             sender_id=user_id or None,
             metadata={
-                "session_id": session_id,
+                "chat_session_id": session_id,  # RFC 0031 OQ #8
                 "sender_participant_type": participant_type,
             },
         )
@@ -290,7 +290,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             context.set_details("Chat dispatch timed out")
             return task_pb2.ChatResponse(
                 agent_id=agent_id,
-                session_id=session_id,
+                chat_session_id=session_id,
                 reply="",
                 reply_status="error",
             )
@@ -300,7 +300,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             context.set_details("Internal error")
             return task_pb2.ChatResponse(
                 agent_id=agent_id,
-                session_id=session_id,
+                chat_session_id=session_id,
                 reply="",
                 reply_status="error",
             )
@@ -334,7 +334,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
 
         return task_pb2.ChatResponse(
             reply=reply,
-            session_id=session_id,
+            chat_session_id=session_id,
             agent_id=agent_id,
             timestamp=int(time.time()),
             agent_display_name="",  # orchestrator fills from Registry (OQ 8/15)

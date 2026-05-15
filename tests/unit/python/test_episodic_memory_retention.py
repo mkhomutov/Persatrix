@@ -164,39 +164,40 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v5_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v7 entry, verify v1–v7 applied.
+    async def test_hypothetical_v9_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v9 entry, verify v1–v9 applied.
 
         Original test asserted v1–v5; v5 is now occupied by RFC 0020's
-        episodes-interaction migration and v6 by RFC 0008 PR 5's
-        procedural-tier columns, so the forward-compat probe is bumped
-        to v7.  Behaviour under test (forward-compat for new
-        migration tail entries) is unchanged.
+        episodes-interaction migration, v6 by RFC 0008 PR 5's
+        procedural-tier columns, v7 by RFC 0031 Phase 1's session_id
+        columns, and v8 by RFC 0026 PR 1's declarative-facts table, so
+        the forward-compat probe is bumped to v9.  Behaviour under test
+        (forward-compat for new migration tail entries) is unchanged.
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v7 = (
-            7,
+        v9 = (
+            9,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v7 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v9 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v7)
+            MIGRATIONS.append(v9)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All seven versions should be recorded
+            # All nine versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4, 5, 6, 7]
+            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-            # v7 table should exist
+            # v9 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v7'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v9'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 

@@ -141,11 +141,9 @@ type ChannelRouter struct {
 	// `Notify` unconditionally without a nil check.
 	waiter *replyWaiter
 
-	// maxCascadeDepth is the primary-enforcement cap on the cooperative-
-	// path cascade backstop (RFC 0011 amendment 'Cascade-depth wire
-	// propagation'). Defaults to [defaults.DefaultMaxCascadeDepth];
-	// operators override via [ChannelRouter.SetMaxCascadeDepth].
-	maxCascadeDepth int
+	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
+	maxCascadeDepth  int
+	defaultSessionID string
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -454,6 +452,9 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 				Name:        decl.Name,
 				Type:        ChannelTypeGroup,
 				Description: decl.Description,
+				// RFC 0031 Phase 1: tag config-declared channels with
+				// the boot session_id. Empty falls through to legacy.
+				SessionID: r.defaultSessionID,
 			}, members); err != nil {
 				return fmt.Errorf("channels: reconcile create %s: %w", canonicalID, err)
 			}

@@ -94,7 +94,7 @@ class TestChatEndpointIntegration:
             assert resp.reply == "Hello, human!"
             assert resp.reply_status == "ok"
             assert resp.agent_id == "test-agent"
-            assert resp.session_id  # Should be non-empty (server-generated)
+            assert resp.chat_session_id  # Should be non-empty (server-generated)
 
             await channel.close()
         finally:
@@ -129,7 +129,7 @@ class TestChatEndpointIntegration:
             await server.stop(grace=0)
 
     async def test_chat_session_continuity(self):
-        """Second message with same session_id continues conversation."""
+        """Second message with same chat_session_id continues conversation."""
         actions = [
             AgentAction(
                 action_type=ActionType.SEND_CHANNEL_MESSAGE,
@@ -147,7 +147,7 @@ class TestChatEndpointIntegration:
             channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
             stub = task_pb2_grpc.AgentServiceStub(channel)
 
-            # First message — get server-generated session ID.
+            # First message — get server-generated chat session ID.
             resp1 = await stub.SendChatMessage(
                 task_pb2.ChatRequest(
                     agent_id="chat-agent",
@@ -155,19 +155,19 @@ class TestChatEndpointIntegration:
                     message="first message",
                 )
             )
-            session_id = resp1.session_id
-            assert session_id
+            chat_session_id = resp1.chat_session_id
+            assert chat_session_id
 
-            # Second message — provide same session ID.
+            # Second message — provide same chat session ID.
             resp2 = await stub.SendChatMessage(
                 task_pb2.ChatRequest(
                     agent_id="chat-agent",
                     user_id="local",
                     message="second message",
-                    session_id=session_id,
+                    chat_session_id=chat_session_id,
                 )
             )
-            assert resp2.session_id == session_id
+            assert resp2.chat_session_id == chat_session_id
 
             await channel.close()
         finally:

@@ -525,13 +525,18 @@ func (x *HealthCheckResponse) GetStatus() HealthStatus {
 }
 
 type ChatRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	AgentId         string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Message         string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                        // max 4000 chars enforced server-side
-	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // empty → server generates UUID; max 128 chars
-	TimeoutSeconds  int32                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`   // 0 or negative → server default (30s); max 300s
-	ParticipantType string                 `protobuf:"bytes,6,opt,name=participant_type,json=participantType,proto3" json:"participant_type,omitempty"` // defaults to "user" when empty
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	AgentId string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	UserId  string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Message string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"` // max 4000 chars enforced server-side
+	// RFC 0016 chat-conversation token. Renamed from `session_id` in v0.3.1
+	// to disambiguate from RFC 0031's operator-namespace `session_id`
+	// landing on channels/messages/episodes/relationships. Field number
+	// unchanged (binary-proto consumers unaffected); JSON/proto-text
+	// consumers must migrate. Resolves RFC 0031 OQ #8.
+	ChatSessionId   string `protobuf:"bytes,4,opt,name=chat_session_id,json=chatSessionId,proto3" json:"chat_session_id,omitempty"`     // empty → server generates UUID; max 128 chars
+	TimeoutSeconds  int32  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`   // 0 or negative → server default (30s); max 300s
+	ParticipantType string `protobuf:"bytes,6,opt,name=participant_type,json=participantType,proto3" json:"participant_type,omitempty"` // defaults to "user" when empty
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -587,9 +592,9 @@ func (x *ChatRequest) GetMessage() string {
 	return ""
 }
 
-func (x *ChatRequest) GetSessionId() string {
+func (x *ChatRequest) GetChatSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.ChatSessionId
 	}
 	return ""
 }
@@ -609,10 +614,11 @@ func (x *ChatRequest) GetParticipantType() string {
 }
 
 type ChatResponse struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Reply     string                 `protobuf:"bytes,1,opt,name=reply,proto3" json:"reply,omitempty"`
-	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	AgentId   string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Reply string                 `protobuf:"bytes,1,opt,name=reply,proto3" json:"reply,omitempty"`
+	// RFC 0016 chat-conversation token; see ChatRequest.chat_session_id.
+	ChatSessionId string `protobuf:"bytes,2,opt,name=chat_session_id,json=chatSessionId,proto3" json:"chat_session_id,omitempty"`
+	AgentId       string `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	// Unix epoch seconds. NOTE: ChannelMessageEvent.timestamp is RFC 3339
 	// string by deliberate exception (forwarded verbatim to the channel
 	// store's messages.created_at column — see field doc). Do not
@@ -661,9 +667,9 @@ func (x *ChatResponse) GetReply() string {
 	return ""
 }
 
-func (x *ChatResponse) GetSessionId() string {
+func (x *ChatResponse) GetChatSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.ChatSessionId
 	}
 	return ""
 }
@@ -736,7 +742,7 @@ type ChannelMessageEvent struct {
 	// as a drop reason. See PR #246 deep review finding M4.
 	Timestamp string `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	// Empty string if not a reply. Max 128 chars when set (mirrors
-	// `ChatRequest.session_id` bound). PR #246 deep review M1.
+	// `ChatRequest.chat_session_id` bound). PR #246 deep review M1.
 	ThreadId string `protobuf:"bytes,7,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
 	// Max 10 entries per event (mirrors `_MAX_MENTIONS_PER_ACTION` in
 	// `agents/dispatch.py`); each entry is an agent_id constrained by
@@ -999,19 +1005,17 @@ const file_task_proto_rawDesc = "" +
 	"\x12HealthCheckRequest\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\"I\n" +
 	"\x13HealthCheckResponse\x122\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1a.persatrix.v1.HealthStatusR\x06status\"\xce\x01\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1a.persatrix.v1.HealthStatusR\x06status\"\xd7\x01\n" +
 	"\vChatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\x12'\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12&\n" +
+	"\x0fchat_session_id\x18\x04 \x01(\tR\rchatSessionId\x12'\n" +
 	"\x0ftimeout_seconds\x18\x05 \x01(\x05R\x0etimeoutSeconds\x12)\n" +
-	"\x10participant_type\x18\x06 \x01(\tR\x0fparticipantType\"\xcd\x01\n" +
+	"\x10participant_type\x18\x06 \x01(\tR\x0fparticipantType\"\xd6\x01\n" +
 	"\fChatResponse\x12\x14\n" +
-	"\x05reply\x18\x01 \x01(\tR\x05reply\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x19\n" +
+	"\x05reply\x18\x01 \x01(\tR\x05reply\x12&\n" +
+	"\x0fchat_session_id\x18\x02 \x01(\tR\rchatSessionId\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +

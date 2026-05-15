@@ -24,6 +24,12 @@ from .channel_history import (
     recall_channel_episodes,
     render_channel_history_section,
 )
+from .facts_section import (
+    DEFAULT_FACTS_BUDGET_TOKENS,
+    FACTS_SECTION_NAME,
+    recall_facts_for_event,
+    render_facts_section,
+)
 from .memory_budget import (
     MAX_EPISODE_SUMMARY_CHARS,
     MAX_NOTE_CONTENT_CHARS,
@@ -47,6 +53,7 @@ if TYPE_CHECKING:
     # TCH001 suppression on the runtime import.
     # (PR #148 review finding L-1: resolve TCH001 suppression.)
     from ..clock import Clock
+    from ..memory.facts import FactStore
     from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -169,6 +176,22 @@ class _MemoryContextMixin:
     # RFC 0021 PR 2: temporal seam, set by ``_LLMPersonaAgent.__init__``.
     _clock: Clock
     _timezone: str
+    # RFC 0026 PR 3 — facts tier seam.  ``_fact_store`` is the
+    # per-agent FactStore created by ``create_persona_agent``; ``None``
+    # is the diagnostic-disable path (``memory.facts.enabled: false``)
+    # **and** the back-compat default for legacy mixin harnesses that
+    # subclass :class:`_MemoryContextMixin` without wiring a fact
+    # store.  ``_facts_budget_tokens`` is the per-tier soft slice from
+    # ``memory.facts.budget_tokens`` (default
+    # :data:`agents.persona_runtime.facts_section.DEFAULT_FACTS_BUDGET_TOKENS`).
+    # Class-level defaults keep the older
+    # ``tests/unit/python/test_memory_context_*`` harnesses (built
+    # before PR 3) green — they assemble a mixin without going through
+    # ``create_persona_agent`` and would otherwise hit
+    # ``AttributeError`` on the new attributes.
+    _fact_store: FactStore | None = None
+    _facts_enabled: bool = True
+    _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
 
     # Stub declaration for method provided by concrete class (via composition).
     if TYPE_CHECKING:
@@ -238,6 +261,7 @@ class _MemoryContextMixin:
         self._working_memory.remove_section("recent_notes")
         self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
+        self._working_memory.remove_section(FACTS_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
         # Sequential, not concurrent: all three share the same aiosqlite
@@ -261,6 +285,21 @@ class _MemoryContextMixin:
         channel_episodes = await recall_channel_episodes(
             self._episodic_memory, event, agent_id=self.agent_id,
         )
+
+        # Facts tier (RFC 0026 PR 3) — recall declarative facts about
+        # the canonical sender so the dementia-test core invariant
+        # holds (fact stored at N injected at N+1 even when the
+        # follow-up query does not mention the subject string).
+        # ``recall_facts_for_event`` returns ``[]`` when the tier is
+        # disabled via config (``_fact_store is None``), when the
+        # event has no resolvable sender, or when the backend raises;
+        # all three branches are non-fatal here.
+        if self._facts_enabled:
+            facts = await recall_facts_for_event(
+                self._fact_store, event, agent_id=self.agent_id,
+            )
+        else:
+            facts = []
 
         # Tier 2 (priority 7): Episodic recall.
         # PR 4: TICK skip removed — the recall-layer min_score threshold
@@ -332,6 +371,34 @@ class _MemoryContextMixin:
         if ch_section is not None:
             self._working_memory.add_section(ch_section)
 
+        # Facts tier (RFC 0026 PR 3).  Admitted between channel_history
+        # and episodic so a high-signal fact displaces lower-signal
+        # prose under budget pressure.  Header charged against the
+        # global budget; admitted fact_ids land on the per-turn
+        # registry for the PR 4 reinforcement write below (MQ-11).
+        if facts:
+            facts_section = render_facts_section(
+                facts, budget,
+                facts_budget_tokens=self._facts_budget_tokens,
+            )
+            if facts_section is not None:
+                self._working_memory.add_section(facts_section)
+                # RFC 0026 PR 4 — use-based reinforcement; failure is
+                # non-fatal because the section is already staged in
+                # ``_working_memory`` and the caller builds the LLM
+                # prompt after ``_inject_memory_context`` returns
+                # (PR #342 third-pass M-3 — fixes earlier misleading
+                # "prompt already shipped" wording).
+                admitted_fact_ids = budget.admissions_by_tier("facts")
+                if admitted_fact_ids and self._fact_store is not None:
+                    try:
+                        await self._fact_store.mark_recalled(admitted_fact_ids)
+                    except Exception:
+                        logger.warning(
+                            "Agent %s: fact reinforcement write failed; skipping",
+                            self.agent_id, exc_info=True,
+                        )
+
         # Episodic tier (priority 7).
         if episodes:
             ep_items: list[str] = []
@@ -350,11 +417,17 @@ class _MemoryContextMixin:
                     prefix = f"[{tag}, {dur}]"
                 else:
                     prefix = f"[{tag}]"
+                remaining_before = budget.remaining
                 admitted = budget.try_add(
                     f"- {prefix} {summary}", min_tokens=MIN_TOKENS_EPISODIC,
                 )
                 if admitted is not None:
                     ep_items.append(admitted)
+                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
+                    budget.record_admission(
+                        tier="episodic", item_id=ep.id,
+                        tokens_admitted=remaining_before - budget.remaining,
+                    )
                     # PR #260 review M-1: count one per admitted item
                     # rather than ``len(episodes)`` after the loop.  The
                     # recall set may include items the budget drops; the
@@ -395,12 +468,18 @@ class _MemoryContextMixin:
                 content = _truncate_with_ellipsis(
                     note.content, MAX_NOTE_CONTENT_CHARS,
                 )
+                remaining_before = budget.remaining
                 admitted = budget.try_add(
                     f"- [{note.topic}] {content}",
                     min_tokens=MIN_TOKENS_NOTES,
                 )
                 if admitted is not None:
                     note_items.append(admitted)
+                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
+                    budget.record_admission(
+                        tier="notes", item_id=note.id,
+                        tokens_admitted=remaining_before - budget.remaining,
+                    )
             if note_items:
                 # See episodic tier above re: untracked header overhead.
                 text = "Relevant notes:\n" + "\n".join(note_items)

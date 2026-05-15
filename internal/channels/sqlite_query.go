@@ -19,13 +19,13 @@ import (
 // GetChannel implements [ChannelStore.GetChannel].
 func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, channel_type, description, created_at
+		`SELECT id, name, channel_type, description, created_at, session_id
 		   FROM channels WHERE id = ?`, id)
 	var ch Channel
 	var typ string
 	// SF-4: name is nullable post-v2 — DM/thread rows hold NULL.
 	var name sql.NullString
-	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
+	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Channel{}, fmt.Errorf("%w: %s", ErrChannelNotFound, id)
 		}
@@ -49,7 +49,7 @@ func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error
 // shape for non-paginated callers — the handler always passes a
 // positive limit (and over-cap silently capped at parse time).
 func (s *sqliteStore) ListChannels(ctx context.Context, limit int, afterID string) ([]Channel, error) {
-	const baseQuery = `SELECT id, name, channel_type, description, created_at
+	const baseQuery = `SELECT id, name, channel_type, description, created_at, session_id
 		   FROM channels`
 
 	var (
@@ -81,7 +81,7 @@ func (s *sqliteStore) ListChannels(ctx context.Context, limit int, afterID strin
 		var ch Channel
 		var typ string
 		var name sql.NullString
-		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt); err != nil {
+		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID); err != nil {
 			return nil, fmt.Errorf("channels: scan list: %w", err)
 		}
 		ch.Type = ChannelType(typ)
@@ -336,10 +336,13 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// RFC 0031 Phase 1: DM rows created implicitly carry the legacy
+	// carve-out. Operators can promote a DM into a named session via
+	// Phase 3 CLI's `persatrix session use <id>` after the fact.
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at)
-		 VALUES (?, NULL, ?, '', ?)`,
-		id, string(ChannelTypeDM), now); err != nil {
+		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
+		 VALUES (?, NULL, ?, '', ?, ?)`,
+		id, string(ChannelTypeDM), now, DefaultSessionID); err != nil {
 		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
 	}
 	for _, p := range []string{pa, pb} {
@@ -353,10 +356,12 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	if err := tx.Commit(); err != nil {
 		return Channel{}, err
 	}
+	s.recordSessionWrite(ctx, DefaultSessionID)
 
 	return Channel{
 		ID:        id,
 		Type:      ChannelTypeDM,
 		CreatedAt: now,
+		SessionID: DefaultSessionID,
 	}, nil
 }

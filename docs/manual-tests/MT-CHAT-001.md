@@ -86,7 +86,7 @@ Example response shape:
 ```json
 {
   "reply": "...",
-  "session_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "chat_session_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "agent_id": "ember-owl",
   "timestamp": 1745107200,
   "agent_display_name": "ember-owl",
@@ -97,7 +97,7 @@ Example response shape:
 **Verification**:
 - [ ] HTTP status is `200`
 - [ ] `reply` is a non-empty string
-- [ ] `session_id` is a non-empty UUID-like string
+- [ ] `chat_session_id` is a non-empty UUID-like string
 - [ ] `agent_id` matches the requested agent (`ember-owl`)
 - [ ] `timestamp` is a positive integer (Unix epoch seconds)
 - [ ] `agent_display_name` is non-empty
@@ -107,20 +107,20 @@ Example response shape:
 
 ### Step 2: Reuse Session ID for Follow-up Message
 
-**Action**: Copy the `session_id` from Step 1 and include it in a follow-up request:
+**Action**: Copy the `chat_session_id` from Step 1 and include it in a follow-up request:
 
 ```bash
 curl -s -w "\nHTTP %{http_code}\n" \
   -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Can you remember what I just said?", "user_id": "test-user", "session_id": "<SESSION_ID_FROM_STEP_1>"}'
+  -d '{"message": "Can you remember what I just said?", "user_id": "test-user", "chat_session_id": "<CHAT_SESSION_ID_FROM_STEP_1>"}'
 ```
 
-**Expected Result**: HTTP 200. The response `session_id` matches the one sent.
+**Expected Result**: HTTP 200. The response `chat_session_id` matches the one sent.
 
 **Verification**:
 - [ ] HTTP status is `200`
-- [ ] `session_id` in response equals the value sent in the request
+- [ ] `chat_session_id` in response equals the value sent in the request
 - [ ] `reply_status` is `"ok"`
 
 ---
@@ -137,11 +137,11 @@ curl -s -w "\nHTTP %{http_code}\n" \
 ```
 
 **Expected Result**: HTTP 200. Server assigns defaults: `user_id` defaults to `"local"`,
-`session_id` is server-generated, `participant_type` defaults to `"user"`.
+`chat_session_id` is server-generated, `participant_type` defaults to `"user"`.
 
 **Verification**:
 - [ ] HTTP status is `200`
-- [ ] `session_id` is present and non-empty (server-generated)
+- [ ] `chat_session_id` is present and non-empty (server-generated)
 - [ ] `reply_status` is `"ok"` or `"empty"`
 
 ---
@@ -230,7 +230,7 @@ curl -s -w "\nHTTP %{http_code}\n" \
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
 | 1 | HTTP 200 with well-formed chat response | ☐ |
-| 2 | HTTP 200 with matching session_id | ☐ |
+| 2 | HTTP 200 with matching chat_session_id | ☐ |
 | 3 | HTTP 200 with server-assigned defaults | ☐ |
 | 4 | HTTP 404 for unknown agent | ☐ |
 | 5 | HTTP 400 for empty message | ☐ |

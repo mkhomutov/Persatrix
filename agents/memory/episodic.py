@@ -11,6 +11,7 @@ structured knowledge the agent chooses to persist, delegated to
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -22,6 +23,7 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..observability.metrics import try_get_instruments
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
@@ -188,6 +190,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         closed_at: float | None = None,
         turn_count: int | None = None,
         scope: str | None = None,
+        session_id: str = "legacy",
+        surface: str = "episode",
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -196,6 +200,13 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         added in migration v5.  Pre-RFC callers omit them and the row keeps
         ``NULL`` in those columns — recall code treats the NULLs as legacy
         single-turn episodes per RFC 0020 §I.
+
+        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with
+        the operator-namespace active at write time; default ``"legacy"``
+        matches ``channels.DefaultSessionID`` so pre-RFC callers produce
+        queryable rows.  Phase 1 ships no recall-side filtering.
+
+        ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -227,9 +238,11 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         (id, agent_id, summary, context_json, outcome,
                          importance, access_count, last_accessed_at,
                          tags_json, created_at, compressed_at, compression_level,
-                         interaction_id, started_at, closed_at, turn_count, scope)
+                         interaction_id, started_at, closed_at, turn_count, scope,
+                         session_id)
                     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
-                            ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?,
+                            ?)
                     """,
                     (
                         episode_id,
@@ -245,14 +258,30 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         closed_at,
                         turn_count,
                         scope,
+                        session_id,
                     ),
                 )
                 await db.commit()
-                return episode_id
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
+            # RFC 0031 Phase 1 sessions.writes (PR #337 M1) — outside
+            # the persistence try; suppress OTEL exceptions so a metric
+            # backend failure cannot mark the span ERROR or surface as a
+            # write failure (row is already persisted).
+            with contextlib.suppress(Exception):
+                inst = try_get_instruments()
+                if inst is not None:
+                    inst.sessions_writes.add(
+                        1,
+                        attributes={
+                            "session_id": session_id,
+                            "agent.id": self._agent_id,
+                            "surface": surface,
+                        },
+                    )
+            return episode_id
 
     async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
         return await _update_episode_summary(

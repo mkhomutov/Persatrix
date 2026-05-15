@@ -54,6 +54,10 @@ pub(crate) async fn cmd_chat(
     // worker threads. For non-blocking reads, consider tokio::io::stdin().
     let stdin = io::stdin();
     let mut reader = stdin.lock();
+    // Local var holds RFC 0016's chat-session token within the REPL
+    // function scope. The wire boundary (`ChatRequest.chat_session_id`,
+    // `ChatResponse.chat_session_id`) uses the prefixed name; the local
+    // name stays unprefixed per the function-scope rule.
     let mut session_id = String::new();
 
     loop {
@@ -88,7 +92,7 @@ pub(crate) async fn cmd_chat(
         let req = ChatRequest {
             message: trimmed.to_string(),
             user_id: user_id.to_string(),
-            session_id: session_id.clone(),
+            chat_session_id: session_id.clone(),
             participant_type: "user".to_string(),
         };
 
@@ -166,9 +170,9 @@ pub(crate) async fn cmd_chat(
             }
         };
 
-        // Capture session_id from first response
-        if session_id.is_empty() && !chat_resp.session_id.is_empty() {
-            session_id = chat_resp.session_id.clone();
+        // Capture chat_session_id from first response
+        if session_id.is_empty() && !chat_resp.chat_session_id.is_empty() {
+            session_id = chat_resp.chat_session_id.clone();
         }
 
         // Display name: use agent_display_name, fall back to agent_id

@@ -12,6 +12,7 @@ from .facade import (
     MemoryFacade,
     budget_to_limit,
 )
+from .facts import Fact, FactStore
 from .notes import Note, NoteStore
 from .relationship import RelationshipMemory
 from .relationship_types import Interaction, RelationshipSummary
@@ -48,6 +49,8 @@ __all__ = [
     "EpisodicMemory",
     "EvictionPass",
     "EvictionStats",
+    "Fact",
+    "FactStore",
     "Interaction",
     "MemoryDisabledError",
     "MemoryEntry",

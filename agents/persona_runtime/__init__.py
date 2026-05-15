@@ -47,6 +47,7 @@ from opentelemetry.trace import Link, Status, StatusCode
 from ..clock import Clock, resolve_persona_clock
 from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
+from ..memory.facts import FactStore
 from ..memory.interactions import InteractionTracker
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
@@ -150,17 +151,13 @@ def _coerce_event_timeout(
 
 @dataclass(frozen=True, slots=True)
 class MemoryNamespace:
-    """Lightweight namespace exposing memory tiers for external callers.
-
-    ``server_servicers.py`` accesses ``agent.memory.relationship`` to record
-    chat interactions.  ``_LLMPersonaAgent`` stores the tiers as private
-    attributes; this frozen dataclass provides a stable public interface
-    without leaking internals.
-    """
-
+    """Stable public surface over the private memory tiers
+    (``server_servicers.py`` reads ``.relationship`` here).
+    ``facts`` (RFC 0026 PR 2) is optional."""
     episodic: EpisodicMemory
     relationship: RelationshipMemory
     working: WorkingMemory
+    facts: FactStore | None = None
 
 
 # Deprecated alias — kept for backward compatibility with external code
@@ -197,6 +194,7 @@ class _LLMPersonaAgent(
         relationship_memory: RelationshipMemory,
         working_memory: WorkingMemory,
         memory_tools: list[ToolDefinition],
+        fact_store: FactStore | None = None,
         clock: Clock | None = None,
     ) -> None:
         super().__init__(agent_id, config)
@@ -204,12 +202,14 @@ class _LLMPersonaAgent(
         self._episodic_memory = episodic_memory
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
+        self._fact_store = fact_store  # RFC 0026 PR 2; optional.
+        from .facts_section import resolve_facts_config  # noqa: PLC0415 — RFC 0026 PR 3
+        self._facts_enabled, self._facts_budget_tokens = resolve_facts_config(config)
         self._memory_tools = memory_tools
         self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(
-            episodic=episodic_memory,
-            relationship=relationship_memory,
-            working=working_memory,
+            episodic=episodic_memory, relationship=relationship_memory,
+            working=working_memory, facts=fact_store,
         )
         self._state = PersonaState()
         self._lock = asyncio.Lock()

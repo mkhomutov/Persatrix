@@ -2,10 +2,53 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
 
+	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/observability/zapenc"
 )
+
+// sessionIDEnvVar is the env var read at orchestrator boot to determine
+// the per-process default session id stamped on every CreateChannel /
+// PublishMessage write. RFC 0031 Phase 1.
+const sessionIDEnvVar = "PERSATRIX_SESSION_ID"
+
+// sessionIDPattern is the soft-validation pattern applied at boot. A
+// value outside this shape emits a WARN log but is still accepted; hard
+// validation lives in Phase 3 CLI's `persatrix session new` (so an
+// operator stuck on the env-var fallback is never blocked on a stricter
+// CLI landing first).
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// resolveSessionID returns the per-process session id sourced from
+// PERSATRIX_SESSION_ID. An unset env var logs INFO and returns the
+// synthetic carve-out [channels.DefaultSessionID] (RFC 0031 OQ #2). A
+// value containing characters outside [A-Za-z0-9_-] emits a WARN but is
+// still accepted verbatim — Phase 3 CLI owns hard validation.
+//
+// The fallback identifier is sourced from [channels.DefaultSessionID]
+// (not a local "legacy" literal) so the carve-out lives in one place —
+// PR #335 review L2. The boot-log message hard-codes the literal in the
+// human-readable text because that string is what an operator greps for
+// in incident triage; the structured `session_id` field carries the
+// canonical value.
+func resolveSessionID(logger *zap.Logger) string {
+	v := os.Getenv(sessionIDEnvVar)
+	if v == "" {
+		logger.Info(sessionIDEnvVar+" unset; defaulting to 'legacy' session",
+			zap.String("session_id", channels.DefaultSessionID))
+		return channels.DefaultSessionID
+	}
+	if !sessionIDPattern.MatchString(v) {
+		logger.Warn(sessionIDEnvVar+" contains characters outside [A-Za-z0-9_-]; accepting verbatim (hard validation in Phase 3 CLI)",
+			zap.String("session_id", v))
+	}
+	return v
+}
 
 // validateStartupFlags rejects malformed --env, --deadline-mode, and
 // PERSATRIX_LOG_FORMAT values at startup so a typo (--env=test,

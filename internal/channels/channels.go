@@ -58,12 +58,18 @@ func (p RespondPolicy) Valid() bool {
 }
 
 // Channel is a row in the `channels` table (RFC 0011 §B).
+//
+// RFC 0031 Phase 1: `SessionID` tags the row with the operator namespace
+// active at create time. An empty value at the store boundary is rewritten
+// to the synthetic `legacy` carve-out so older / session-unaware callers
+// produce queryable rows. Recall-side filtering ships in Phase 2.
 type Channel struct {
 	ID          string      // canonical address: "group:planning" / "dm:a:b" / "thread:<msg-id>"
 	Name        string      // group: declared name; dm/thread: empty
 	Type        ChannelType // group | dm | thread
 	Description string
 	CreatedAt   time.Time
+	SessionID   string // RFC 0031 Phase 1 — defaults to "legacy" at the store boundary
 }
 
 // Member is a row in the `memberships` table (RFC 0011 §B).
@@ -78,6 +84,11 @@ type Member struct {
 // `Mentions` is stored as a JSON array text column; `Metadata` as a JSON
 // object text column. Both marshal/unmarshal at the store boundary so callers
 // see typed values.
+//
+// RFC 0031 Phase 1: `SessionID` tags the row with the operator namespace
+// active at publish time. The store rewrites empty to `legacy`. Phase 1
+// ships no recall changes — the column exists so Phase 2 has a column to
+// filter on without a follow-up migration.
 type ChannelMessage struct {
 	ID        string
 	ChannelID string
@@ -87,6 +98,7 @@ type ChannelMessage struct {
 	ThreadID  string // empty when the message is not a reply
 	Mentions  []string
 	Metadata  map[string]any
+	SessionID string // RFC 0031 Phase 1 — defaults to "legacy" at the store boundary
 }
 
 // MaxMessageContentBytes is the soft byte cap on [ChannelMessage.Content]
