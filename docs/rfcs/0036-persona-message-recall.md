@@ -238,10 +238,30 @@ CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
 END;
 ```
 
+The migration then backfills the index from every existing message —
+an external-content table starts empty and is not populated by the
+`CREATE`:
+
+```sql
+INSERT INTO messages_fts(messages_fts) VALUES ('rebuild');
+```
+
 `messages` has no `UPDATE` path today (it is insert-and-cap-prune
 only), so an `_au` update trigger is added defensively-symmetric with
 the episodic pattern but is expected never to fire; a reviewer note
 in the migration records this.
+
+**Rowid stability.** `messages` is keyed `id TEXT PRIMARY KEY`, *not*
+`INTEGER PRIMARY KEY`, so its `rowid` is **not** preserved across an
+explicit `VACUUM` — a `VACUUM` can renumber the rowids of any table
+whose primary key does not alias `rowid`, which would silently desync
+the external-content index from `messages`. No code path runs `VACUUM`
+on the channel store today, and the episodic tier already ships this
+exact pattern on a TEXT-keyed table (`episodes`), so the risk is
+latent, not present. It is called out here because adding a
+maintenance/compaction `VACUUM` later would corrupt `messages_fts` and
+`episodes_fts` together; any such change must follow it with an
+`INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')`.
 
 **FTS5 availability.** The migration probes FTS5 the way the memory
 tier does (`_fts5_available` —
@@ -502,7 +522,13 @@ scenario.
   narrowing parameters, and the result count (not the result content).
   A new audit-event constant is added to
   [`internal/security/audit_event.go`](../../internal/security/audit_event.go).
-  Verbatim recall is a sensitive read; it leaves a trail.
+  The event is emitted **server-side, in the recall endpoint handler**
+  ([`channel_handlers.go`](../../internal/server/channel_handlers.go)),
+  not in the Python `recall_channel_messages` tool — emitting at the
+  endpoint means a misbehaving or bypassed tool client cannot suppress
+  the trail, and the audited request is the one the server actually
+  scoped and executed. Verbatim recall is a sensitive read; it leaves a
+  trail.
 - **FTS `MATCH` injection** — FTS5 query syntax in the `query` string
   is escaped/quoted before reaching `MATCH` (§C) so it cannot error the
   statement or alter its scope. The scope `EXISTS` clause is structural
@@ -526,8 +552,11 @@ involvement.
    including the `membership_intervals` `EXISTS` clause, ranking, query
    escaping, and the `LIKE` fallback path.
 3. `POST /api/v1/personas/{id}/recall` endpoint + request/response
-   types.
-4. Unit + migration + integration tests per the Test Strategy.
+   types; the RFC 0009 audit event is emitted here, in the endpoint
+   handler (see Security Considerations — Audit), so it lands with the
+   server-side endpoint rather than the Phase 2 tool.
+4. New recall audit-event constant in `internal/security/audit_event.go`.
+5. Unit + migration + integration tests per the Test Strategy.
 
 Dependencies: **RFC 0035 Phase 1** (the `membership_intervals` table
 must exist to join against).
@@ -539,8 +568,7 @@ must exist to join against).
 2. The new `channels:recall` permission; wire the tool into the
    persona tool registry and the agent tool allowlist.
 3. Per-row `_format_event` sanitization (§F) of recalled content.
-4. RFC 0009 audit event on every recall call.
-5. Integration test: a persona answers a question that requires
+4. Integration test: a persona answers a question that requires
    recalling a specific past message.
 
 Dependencies: Phase 1.
@@ -565,7 +593,7 @@ and separately reviewable.
 |-----------|-------|--------|
 | Go orchestrator | `internal/channels/sqlite_schema.go` | v5 migration: `messages_fts` + triggers, FTS5 probe; bump `channelStoreSchemaVersion` |
 | Go orchestrator | `internal/channels/sqlite_search.go` (new) | Scoped search query + `LIKE` fallback |
-| Go orchestrator | `internal/server/channel_handlers.go` | Recall endpoint; `as_participant` on the history handler |
+| Go orchestrator | `internal/server/channel_handlers.go` | Recall endpoint (incl. server-side RFC 0009 audit emission); `as_participant` on the history handler |
 | Go orchestrator | `internal/server/channel_types.go` | Recall request/response types |
 | Go orchestrator | `internal/security/audit_event.go` | New recall audit-event constant |
 | Python agents | `agents/tools/recall.py` (new) | `create_recall_tool`, `HttpRecallClient` |

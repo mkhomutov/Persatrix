@@ -289,9 +289,18 @@ UPDATE membership_intervals
 
 The backfill (§D) guarantees every participant present at v4 has an
 open interval, and the `AddMember` hook guarantees every post-v4 join
-opens one, so this `UPDATE` always finds exactly one row to close on
-the success path. The `n == 0` branch (member not present) closes
-nothing.
+opens one, so this `UPDATE` finds exactly one row to close on the
+success path. If it instead closes **zero** rows — a `memberships` row
+existed with no matching open interval — the open-interval invariant
+(Goal 6) has been violated. `RemoveMember` MUST treat that as a hard
+error and roll the transaction back rather than commit silently: the
+projection and the ledger have diverged, and a silent commit would
+leave a removed participant with an interval that never closes (a
+data-*exposure* bug for RFC 0036). This mirrors the loud-failure
+posture of the `AddMember` path, where the `ux_…_open` index already
+rejects a spurious double-open by failing the INSERT. The `n == 0`
+branch (member not present) closes nothing — that is the expected
+no-op, not the invariant violation.
 
 **`GetOrCreateDM`** ([`sqlite_query.go:307`](../../internal/channels/sqlite_query.go#L307))
 — inserts the two DM participants' `memberships` rows directly inside
