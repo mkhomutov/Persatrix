@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ConversationWindowConfig",
     "build_conversation_messages",
+    "resolve_conversation_window_config",
 ]
 
 # Committed Phase 1 defaults (RFC 0034 OQ #2). A retune is a one-line
@@ -99,6 +100,57 @@ class ConversationWindowConfig:
     max_turns: int = DEFAULT_MAX_TURNS
     max_tokens: int = DEFAULT_MAX_TOKENS
     enabled: bool = True
+
+
+def resolve_conversation_window_config(
+    agent_config: dict[str, Any],
+) -> ConversationWindowConfig:
+    """Resolve a :class:`ConversationWindowConfig` from a persona's config.
+
+    Reads the optional per-agent ``conversation_window`` block in
+    ``config/agents.yaml``. Any key absent from the block — or the whole
+    block absent — inherits the dataclass default, which mirrors the
+    ``config/optimization.yaml`` defaults block (the two are pinned equal
+    by ``test_conversation_window.py::test_defaults_match_optimization_yaml``).
+
+    A malformed block must not crash agent construction: production
+    configs are gated through ``make validate`` against
+    ``schemas/agent.schema.json``, but test fixtures and dict-built
+    configs bypass that. A non-mapping block, a wrong-typed value, or an
+    out-of-range integer count degrades to the per-key default. ``bool``
+    is rejected for the integer counts explicitly — it is an ``int``
+    subclass in Python, so ``max_turns: true`` would otherwise resolve to
+    ``1``. The counts must additionally be ``>= 1``: the schema pins
+    ``minimum: 1`` for both, and the resolver mirrors that lower bound for
+    the configs that bypass the schema gate — a ``0`` or negative count
+    would otherwise pass the type check yet silently yield an empty
+    replayed window (``_apply_admission`` drops every turn).
+    """
+    defaults = ConversationWindowConfig()
+    block = agent_config.get("conversation_window")
+    if not isinstance(block, dict):
+        return defaults
+
+    raw_turns = block.get("max_turns")
+    raw_tokens = block.get("max_tokens")
+    raw_enabled = block.get("enabled")
+    return ConversationWindowConfig(
+        max_turns=(
+            raw_turns
+            if isinstance(raw_turns, int)
+            and not isinstance(raw_turns, bool)
+            and raw_turns >= 1
+            else defaults.max_turns
+        ),
+        max_tokens=(
+            raw_tokens
+            if isinstance(raw_tokens, int)
+            and not isinstance(raw_tokens, bool)
+            and raw_tokens >= 1
+            else defaults.max_tokens
+        ),
+        enabled=raw_enabled if isinstance(raw_enabled, bool) else defaults.enabled,
+    )
 
 
 # ─── In-process fetch cache (RFC §F) ───────────────────────
@@ -164,7 +216,10 @@ async def build_conversation_messages(
     is the caller's already-formatted current turn (the output of the
     persona's own ``_format_event``), appended verbatim and never dropped.
     Every earlier element is a sanitized replayed turn in chronological
-    order.
+    order. The first element is always a ``user`` turn: any leading
+    ``assistant`` turns from the replayed transcript are dropped (see
+    :func:`_drop_leading_assistant_turns`) so the array satisfies the
+    Anthropic Messages API ``messages[0].role == "user"`` requirement.
 
     On a disabled config, a session-less / channel-less event, or any
     fetch failure, the result degrades to ``[current_event_only]`` — the
@@ -261,7 +316,10 @@ def _assemble_replayed_turns(
     :func:`_drop_rows_newer_than_current`), then the survivors are
     reversed so the transcript reads oldest→newest. The row carrying the
     current event's ``message_id`` is dropped — the caller appends the
-    current event as the final turn (RFC §B).
+    current event as the final turn (RFC §B). After admission, any
+    leading ``assistant`` turns are dropped (see
+    :func:`_drop_leading_assistant_turns`) so the replayed transcript
+    can never open with a non-``user`` turn.
     """
     turns: list[dict[str, Any]] = []
     for row in reversed(_drop_rows_newer_than_current(raw, current_message_id)):
@@ -302,7 +360,7 @@ def _assemble_replayed_turns(
             turns.append(
                 {"role": "user", "content": _format_peer_turn(sender_id, content)},
             )
-    return _apply_admission(turns, config)
+    return _drop_leading_assistant_turns(_apply_admission(turns, config))
 
 
 def _drop_rows_newer_than_current(
@@ -385,3 +443,44 @@ def _apply_admission(
     while len(admitted) > config.max_turns:
         admitted.pop(0)
     return admitted
+
+
+def _drop_leading_assistant_turns(
+    turns: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop any leading ``assistant`` turns from the replayed transcript.
+
+    :func:`build_conversation_messages` returns ``[*replayed,
+    current_turn]`` and ``current_turn`` is always a ``user`` turn — but
+    ``replayed`` carries no guarantee that *its* first element is one.
+    The role split in :func:`_assemble_replayed_turns` maps the persona's
+    own messages to ``role="assistant"``, and two routine paths leave
+    such a turn at the front of the transcript:
+
+    * **Persona-first channel.** The persona sent the channel's opening
+      message — a greeting or a proactive turn — so the oldest replayed
+      row is its own ``assistant`` turn.
+    * **Token-FIFO admission.** :func:`_apply_admission` FIFO-drops a
+      content-size-dependent number of oldest turns; evicting an odd
+      count from a ``user``-leading alternating transcript leaves an
+      ``assistant``-leading one.
+
+    The Anthropic Messages API requires ``messages[0]`` to use the
+    ``user`` role — a leading ``assistant`` turn is a hard 400
+    (``messages: first message must use the "user" role``). The persona
+    runtime passes this seed to the provider unmodified
+    (``AnthropicProvider.create_message``), so the guard must live here.
+    A leading ``assistant`` turn has no preceding ``user`` turn for the
+    model to answer, so dropping it loses no model-relevant context; if
+    every replayed turn is an ``assistant`` turn the transcript empties
+    and :func:`build_conversation_messages` degrades to
+    current-event-only.
+
+    Runs as the final admission step: it only ever *shrinks* the
+    transcript, so the :func:`_apply_admission` token / count bounds
+    still hold afterwards.
+    """
+    for index, turn in enumerate(turns):
+        if turn["role"] == "user":
+            return turns[index:]
+    return []

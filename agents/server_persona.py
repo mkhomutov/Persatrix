@@ -14,9 +14,11 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 import yaml
 
 from .base import BaseAgent
+from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .llm_client import LLMClient, create_provider
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
@@ -35,7 +37,12 @@ logger = logging.getLogger("Persatrix.agent.server_persona")
 # _resolve_agent_type is intentionally excluded: it is a private helper
 # used only within load_agent; tests that import it directly are accessing
 # an implementation detail, not part of this module's public contract.
-__all__ = ["load_agent", "initialize_persona_agents", "default_grpc_target"]
+__all__ = [
+    "load_agent",
+    "initialize_persona_agents",
+    "default_grpc_target",
+    "wire_history_fetchers",
+]
 
 
 def default_grpc_target(orchestrator_url: str) -> str:
@@ -395,3 +402,26 @@ async def initialize_persona_agents(
                 agent_id,
                 interval,
             )
+
+
+def wire_history_fetchers(
+    agents: dict[str, BaseAgent],
+    session: aiohttp.ClientSession,
+    orchestrator_url: str,
+) -> None:
+    """Inject the RFC 0034 conversation-window history fetcher into personas.
+
+    Called from :meth:`agents.server.AgentServer.start` once the shared
+    ``aiohttp`` session is open — the agents are constructed in
+    :func:`load_agent` before that session exists.  One
+    :class:`HttpChannelHistoryFetcher` — stateless beyond (session, base
+    URL, timeout) — is shared across every hosted persona and reuses the
+    same session the channel publisher and on-startup catch-up share.
+    Task agents have no conversation-window path and are skipped.
+    """
+    fetcher = HttpChannelHistoryFetcher(
+        session=session, orchestrator_url=orchestrator_url,
+    )
+    for agent in agents.values():
+        if isinstance(agent, _LLMPersonaAgent):
+            agent.set_history_fetcher(fetcher)

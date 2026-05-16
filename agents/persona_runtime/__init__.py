@@ -65,6 +65,7 @@ from ..persona_types import (
 )
 from ..tools.registry import ToolDefinition
 from .action_loop import _ActionLoopMixin
+from .conversation_seed import _ConversationWindowMixin
 from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
@@ -168,7 +169,7 @@ _MemoryNamespace = MemoryNamespace
 
 
 class _LLMPersonaAgent(
-    _ActionLoopMixin,
+    _ActionLoopMixin, _ConversationWindowMixin,
     _MemoryContextMixin,
     _PromptAssemblyMixin,
     _EpisodeRoutingMixin,

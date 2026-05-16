@@ -42,6 +42,7 @@ from .server_persona import (
     load_agent,
     setup_shared_pools,
     stop_shared_pools,
+    wire_history_fetchers,
 )
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
@@ -178,6 +179,8 @@ class AgentServer:
         self._dispatcher.set_channel_publisher(HTTPChannelPublisher(
             orchestrator_url=self.orchestrator_url, session=self._session,
         ))
+        # RFC 0034 Phase 1 — wire the conversation-window history fetcher.
+        wire_history_fetchers(self.agents, self._session, self.orchestrator_url)
 
         # RFC 0018 PR 5 — start the log shipper after the structlog chain
         # is configured (configure_logging runs in main()) so the tail
