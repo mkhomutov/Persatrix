@@ -21,9 +21,12 @@ the ``messages = [...]`` LLM seed.
 Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``):
 
 * **§B — window definition.** The window is the last ``max_turns``
-  messages of ``event.channel_id``, per-channel (no session filter — see
-  OQ #1 below). The current event is excluded from the fetched window
-  (dedup by ``id``) and appended last by this module.
+  replayed messages of ``event.channel_id``, per-channel (no session
+  filter — see OQ #1 below). The current event is excluded from the
+  fetched window (dedup by ``id``) and appended last by this module.
+  The fetch over-fetches by one (``max_turns + 1``): the inbound event
+  may already be persisted, so dropping its own row would otherwise
+  shrink the replayed window to ``max_turns - 1``.
 * **§C — role mapping.** ``sender_id == agent_id`` ⇒ ``assistant``; any
   other sender ⇒ ``user``. Phase 1 is DM-only (exactly one peer).
 * **§D — sanitization.** Replayed peer turns are formatted through
@@ -101,9 +104,18 @@ class ConversationWindowConfig:
 # id skips the network fetch and re-uses the raw rows. One entry per
 # channel — a newer ``message_id`` overwrites it (the "cheapest possible"
 # invalidation RFC §F specifies), so the cache is bounded by channel
-# count. Raw rows are stored *pre*-role-mapping, so the cache is
-# agent-independent and safe to share if two personas ever sit on one
-# channel — role mapping (`sender_id == agent_id`) is re-applied per call.
+# count. Raw rows are stored *pre*-role-mapping, so role mapping
+# (`sender_id == agent_id`) is re-applied per call and the cache is
+# agent-independent.
+#
+# Phase 2 caveat: the cached rows carry the *first* caller's
+# ``max_turns + 1`` fetch limit. A DM channel has exactly one persona, so
+# in Phase 1 the same ``(channel_id, message_id)`` is only ever processed
+# under one config and that limit is constant. Once a channel can host
+# multiple personas with independent ``conversation_window`` configs
+# (RFC 0034 Phase 2 — group channels), a small-``max_turns`` persona
+# could serve an undersized window to a large-``max_turns`` peer; Phase 2
+# must key the cache on the fetch limit or bypass it for such channels.
 _WINDOW_CACHE: dict[str, tuple[str, list[dict[str, Any]]]] = {}
 
 
@@ -157,7 +169,13 @@ async def build_conversation_messages(
         history_fetcher=history_fetcher,
         channel_id=channel_id,
         message_id=event.message_id,
-        limit=config.max_turns,
+        # Over-fetch by one. If the inbound event is already persisted in
+        # the channel store its own row is dropped from the window (dedup
+        # by id in _assemble_replayed_turns); requesting max_turns + 1
+        # keeps a full max_turns replayed turns either way. When the event
+        # is not yet persisted the count cap in _apply_admission trims the
+        # extra oldest row back off.
+        limit=config.max_turns + 1,
     )
     if raw is None:
         return [current_turn]

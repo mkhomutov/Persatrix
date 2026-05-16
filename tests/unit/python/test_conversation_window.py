@@ -29,6 +29,7 @@ PR 2 ships the substrate only; no call site is wired (that is PR 3).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -150,6 +151,27 @@ class TestConversationWindowConfig:
         assert block["max_turns"] == defaults.max_turns
         assert block["max_tokens"] == defaults.max_tokens
 
+    def test_defaults_match_json_schemas(self):
+        """Both JSON schemas describing a ``conversation_window`` block carry
+        a self-contained copy (no ergonomic cross-file ``$ref``); their
+        ``default`` literals — documentation-only — must equal the defaults."""
+        repo_root = Path(__file__).resolve().parents[3]
+        defaults = ConversationWindowConfig()
+        agent = json.loads(
+            (repo_root / "schemas" / "agent.schema.json").read_text("utf-8"))
+        opt = json.loads(
+            (repo_root / "schemas" / "optimization.schema.json").read_text("utf-8"))
+        # agent.schema.json nests the block under definitions/, the
+        # optimization schema under properties/ — both reach .properties.
+        for label, block in (
+            ("agent", agent["definitions"]["conversation_window"]),
+            ("optimization", opt["properties"]["conversation_window"]),
+        ):
+            props = block["properties"]
+            assert props["enabled"]["default"] is defaults.enabled, label
+            assert props["max_turns"]["default"] == defaults.max_turns, label
+            assert props["max_tokens"]["default"] == defaults.max_tokens, label
+
 
 # ─── Public re-export ──────────────────────────────────────
 
@@ -254,6 +276,15 @@ class TestWindowAssembly:
         assert "an earlier line" in result[0]["content"]
         assert result[1] == {"role": "user", "content": _CURRENT}
 
+    async def test_fetch_over_requests_by_one_to_offset_current_event(self):
+        """The fetch requests ``max_turns + 1`` rows, not ``max_turns``: the
+        inbound event may already be persisted, so its own row is dropped
+        from the window (dedup by ``id``) — over-fetching by one keeps a
+        full ``max_turns`` replayed turns whether or not it has landed."""
+        fetcher = _FakeChannelHistoryFetcher([])
+        await _build(fetcher, config=ConversationWindowConfig(max_turns=20))
+        assert fetcher.calls == [(_CHANNEL, 21)]
+
 
 # ─── Sanitization ──────────────────────────────────────────
 
@@ -325,6 +356,32 @@ class TestAdmission:
             assert f"[msg {dropped}]" not in joined
         for kept in range(5, 25):
             assert f"[msg {kept}]" in joined
+
+    async def test_both_bounds_exceeded_respects_both(self):
+        """Exceeding both ``max_turns`` and ``max_tokens`` leaves a result
+        that violates neither. The token-FIFO and count-FIFO passes of
+        OQ #2 res. 2a commute (both drop the oldest turn), so the output is
+        the longest suffix satisfying both — pinned here jointly, since the
+        single-bound tests above each leave the other bound slack."""
+        # Chronological t1/t2 oversize; t3..t9 small. Endpoint is newest-first.
+        chrono = [_row("t1", "user", "x" * 4000), _row("t2", "user", "y" * 4000)]
+        chrono += [_row(f"t{i}", "user", f"[keep {i}]") for i in range(3, 10)]
+        fetcher = _FakeChannelHistoryFetcher(list(reversed(chrono)))
+        result = await _build(
+            fetcher, config=ConversationWindowConfig(max_turns=4, max_tokens=200))
+        replayed = result[:-1]
+        joined = " ".join(m["content"] for m in replayed)
+        assert len(replayed) == 4  # count bound holds
+        assert "x" * 4000 not in joined
+        assert "y" * 4000 not in joined
+        for dropped in (3, 4, 5):
+            assert f"[keep {dropped}]" not in joined
+        for kept in (6, 7, 8, 9):
+            assert f"[keep {kept}]" in joined
+        survivor_tokens = sum(
+            conversation_window.estimate_tokens(m["content"], accurate=True)
+            for m in replayed)
+        assert survivor_tokens <= 200  # token bound holds
 
 
 # ─── Cache (RFC §F) ────────────────────────────────────────
