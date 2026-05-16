@@ -26,7 +26,11 @@ Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``)
   fetched window (dedup by ``id``) and appended last by this module.
   The fetch over-fetches by one (``max_turns + 1``): the inbound event
   may already be persisted, so dropping its own row would otherwise
-  shrink the replayed window to ``max_turns - 1``.
+  shrink the replayed window to ``max_turns - 1``. Rows *newer* than the
+  current event — a concurrent writer can persist one before this fetch
+  runs — are dropped too, so the transcript never places a future
+  message ahead of the current turn (see
+  :func:`_drop_rows_newer_than_current`).
 * **§C — role mapping.** ``sender_id == agent_id`` ⇒ ``assistant``; any
   other sender ⇒ ``user``. Phase 1 is DM-only (exactly one peer).
 * **§D — sanitization.** Replayed peer turns are formatted through
@@ -103,10 +107,18 @@ class ConversationWindowConfig:
 # for that channel. A call whose ``event.message_id`` matches the cached
 # id skips the network fetch and re-uses the raw rows. One entry per
 # channel — a newer ``message_id`` overwrites it (the "cheapest possible"
-# invalidation RFC §F specifies), so the cache is bounded by channel
-# count. Raw rows are stored *pre*-role-mapping, so role mapping
-# (`sender_id == agent_id`) is re-applied per call and the cache is
-# agent-independent.
+# invalidation RFC §F specifies). Raw rows are stored *pre*-role-mapping,
+# so role mapping (`sender_id == agent_id`) is re-applied per call and
+# the cache is agent-independent.
+#
+# Eviction: there is none. A channel seen once keeps its entry for the
+# life of the process, so the dict grows with the number of *distinct*
+# channels a long-running orchestrator ever serves — not the number
+# concurrently active — and each entry holds up to ``max_turns + 1`` raw
+# row dicts. Acceptable for the Phase 1 DM dogfood (a handful of
+# channels); RFC 0034 Phase 3, which owns the cache-hit-rate telemetry,
+# is the place to add an LRU bound once a real channel-count
+# distribution exists to size it against.
 #
 # Phase 2 caveat: the cached rows carry the *first* caller's
 # ``max_turns + 1`` fetch limit. A DM channel has exactly one persona, so
@@ -125,8 +137,13 @@ _WINDOW_CACHE: dict[str, tuple[str, list[dict[str, Any]]]] = {}
 # method formats a replayed peer turn without an agent instance. The cast
 # pins the self-independent contract for type checkers; if a future
 # refactor makes that branch touch ``self`` this seam must change with
-# it. Reusing ``_format_event`` — rather than re-implementing the
-# delimiter escape here — is the explicit RFC §D requirement.
+# it. The branch must also stay independent of the ``event`` fields the
+# synthetic event built in ``_format_peer_turn`` leaves unset —
+# ``channel_id``, ``thread_id`` and ``message_id`` are all ``None``
+# there; if the CHANNEL_MESSAGE branch starts reading one,
+# ``_format_peer_turn`` must populate it. Reusing ``_format_event`` —
+# rather than re-implementing the delimiter escape here — is the explicit
+# RFC §D requirement.
 _format_peer_message: Callable[[object, AgentEvent], str] = cast(
     "Callable[[object, AgentEvent], str]",
     _PromptAssemblyMixin._format_event,
@@ -239,33 +256,92 @@ def _assemble_replayed_turns(
 ) -> list[dict[str, Any]]:
     """Map raw history rows to ``messages`` turns and apply admission.
 
-    The history endpoint returns newest-first (RFC 0011 §C); rows are
+    The history endpoint returns newest-first (RFC 0011 §C). Rows newer
+    than the current event are dropped first (see
+    :func:`_drop_rows_newer_than_current`), then the survivors are
     reversed so the transcript reads oldest→newest. The row carrying the
     current event's ``message_id`` is dropped — the caller appends the
     current event as the final turn (RFC §B).
     """
     turns: list[dict[str, Any]] = []
-    for row in reversed(raw):
+    for row in reversed(_drop_rows_newer_than_current(raw, current_message_id)):
         if not isinstance(row, dict):
             continue
         if (
             current_message_id is not None
             and row.get("id") == current_message_id
         ):
+            # Dedup: the current event's own row (over-fetched at
+            # ``max_turns + 1``). The caller re-appends it as the final
+            # turn, so it must not also replay here.
             continue
         content = row.get("content")
         if not isinstance(content, str) or not content:
             continue
+        # Row admission here is deliberately lighter than the
+        # ``validate_channel_message_dict`` pass ``channel_catchup.py``
+        # runs on the same fetcher's rows: a row catch-up would reject
+        # can still enter this transcript. Accepted asymmetry — every
+        # replayed peer turn is delimiter-escaped through ``_format_event``
+        # below, so an ill-formed row contributes only inert text; the
+        # ``dict`` / non-empty-``str`` checks are the load-bearing guard.
         sender_id = row.get("sender_id")
         if sender_id == agent_id:
-            # The persona's own prior output is trusted — used raw as an
-            # assistant turn, never wrapped in user-message delimiters.
+            # The persona's own prior output is replayed raw as an
+            # assistant turn — never delimiter-wrapped. PR 2 newly
+            # introduces this trust surface: before the conversation
+            # window nothing fed a stored message back as an *assistant*
+            # turn. The role split trusts ``sender_id`` (server-enforced,
+            # per RFC §C — the same trust the channel-scoped history
+            # endpoint already assumes); a peer row spoofed under the
+            # persona's id would replay as trusted prior output. Bounded
+            # exposure: the content is not delimiter-wrapped, so it still
+            # cannot break out of its API role.
             turns.append({"role": "assistant", "content": content})
         else:
             turns.append(
                 {"role": "user", "content": _format_peer_turn(sender_id, content)},
             )
     return _apply_admission(turns, config)
+
+
+def _drop_rows_newer_than_current(
+    raw: list[dict[str, Any]],
+    current_message_id: str | None,
+) -> list[dict[str, Any]]:
+    """Drop history rows newer than the current event (RFC §B ordering).
+
+    ``raw`` is newest-first (RFC 0011 §C). The orchestrator persists
+    channel messages independently of the persona's per-agent event
+    lock, so a message that arrives *after* the current event can land
+    in the channel store *before* this window's history fetch runs. Such
+    a row is strictly newer than the event the persona is answering;
+    replaying it as a turn would show the model a future message ahead
+    of the current one.
+
+    The current event's own row is the ordering anchor: every row before
+    it in the newest-first list is strictly newer and is dropped. The
+    anchor row itself is kept here — de-duplicating it is the per-row
+    ``id`` match in :func:`_assemble_replayed_turns`, a separate concern.
+
+    When the current event is not yet persisted (no row matches
+    ``current_message_id``, or it is ``None``) there is no anchor and
+    ``raw`` is returned unchanged. Channel persistence is FIFO, so an
+    unpersisted current event implies no strictly-newer row is persisted
+    either; the residual — out-of-order persistence landing a newer row
+    while the current event is still absent — is an accepted known gap.
+
+    On a concurrent-writer race this can shrink the replayed transcript
+    below ``max_turns`` (the ``+ 1`` over-fetch offsets only the dedup,
+    not the dropped newer rows). A slightly shorter window beats a
+    mis-ordered one, and the next turn self-corrects.
+    """
+    if current_message_id is None:
+        return raw
+    for index, row in enumerate(raw):
+        if isinstance(row, dict) and row.get("id") == current_message_id:
+            return raw[index:]
+    return raw
 
 
 def _format_peer_turn(sender_id: Any, content: str) -> str:
@@ -280,6 +356,11 @@ def _format_peer_turn(sender_id: Any, content: str) -> str:
         event_type=EventType.CHANNEL_MESSAGE,
         payload={"content": content},
         sender_id=sender_id if isinstance(sender_id, str) else None,
+        # Always "user", never the row's real participant type — this is
+        # deliberate, not a stub. It forces ``_format_event`` down its §D
+        # delimiter-wrap + escape branch for *every* replayed peer turn;
+        # a Phase 2 agent-peer row would otherwise format unwrapped. A
+        # future reader should not "fix" this to the real type.
         metadata={"sender_participant_type": "user"},
     )
     return _format_peer_message(None, synthetic)

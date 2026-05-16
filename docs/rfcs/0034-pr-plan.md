@@ -278,6 +278,8 @@ Extend the role mapper to multi-peer channels per [RFC §C](0034-persona-convers
 
 Cache-hit rate, fetch latency, fallback-to-empty-window count exposed as OTEL metrics under `persatrix.persona.conversation_window.*`. Re-tune `max_turns` and `max_tokens` defaults from a one-week telemetry sample on the dogfood persona. Document the tunables in [`docs/guides/persona-agents.md`](../guides/persona-agents.md). Phase 3 may also re-spec the [RFC §F "Known gap" cache framing](0034-persona-conversational-working-memory.md#f-caching-and-fetch-policy) from (a) to (b) if telemetry justifies — that is the point at which "do I have to re-render the window?" gets separated from "did the channel change?".
 
+**Conversation-window fetch cache has no eviction.** Phase 1's in-process `_WINDOW_CACHE` in [`agents/persona_runtime/conversation_window.py`](../../agents/persona_runtime/conversation_window.py) never deletes an entry: a channel seen once keeps its `(message_id, raw_rows)` tuple for the life of the process, so the dict grows with the number of *distinct* channels a long-running orchestrator ever serves — not the number concurrently active — and each entry holds up to `max_turns + 1` raw row dicts. Harmless for the Phase 1 DM dogfood (a handful of channels); unbounded over a long-lived process across many channels. Phase 3 owns the cache-hit-rate telemetry and is the natural place to add an LRU bound — the telemetry supplies a real channel-count distribution to size the bound against, rather than guessing a capacity now. Surfaced in PR 2 review; the in-module comment documents the gap, so deferred here rather than fixed in PR 2.
+
 ---
 
 ## Progress Overview (Phase 1)
