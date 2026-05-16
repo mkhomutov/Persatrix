@@ -20,7 +20,7 @@ depends_on:
 **Date**: 2026-05-02
 **Target**: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
 **Depends on**: RFC 0005, RFC 0009
-**Integrates with**: RFC 0008, RFC 0011, RFC 0020, RFC 0021 (recommended sequencing, not hard gates)
+**Integrates with**: RFC 0008, RFC 0011, RFC 0012, RFC 0020, RFC 0021, RFC 0037 (recommended sequencing, not hard gates)
 
 ---
 
@@ -160,8 +160,10 @@ No new protobuf message is introduced in v0.4.0 (resolves OQ #4); a protobuf sch
 | RFC 0011 (Channels + bridges) | `publish_channel` candidate class and ACL filtering | Safer channel action selection |
 | RFC 0020 (Interaction lifecycle) | Checkpoints align with interaction open/close boundaries | Per-interaction decision traces |
 | RFC 0021 (Temporal awareness) | Recency and timing features feed candidate scoring | Time-aware decisions become configurable |
+| RFC 0012 (Protocols & Organizations) | A cross-context directive enters the pre-act checkpoint as a hard-constraint input (RFC 0012 §F); the accept/adapt/refuse outcome — including conflict resolution and tie escalation — is a `DecisionRecord`; the confidentiality-egress gate (RFC 0012 §H) is wired as a mandatory-HITL class (§H below) | Cross-context influence is decided, ranked, and audited through this engine rather than by an ad-hoc mechanism |
+| RFC 0037 (Memory confidentiality) | The acting channel's confidentiality classification scopes which memory candidates are eligible when a checkpoint builds its candidate set | Decisions respect confidentiality without a second enforcement path |
 
-This RFC becomes the umbrella decision architecture for those RFC surfaces; it does not supersede them.
+This RFC becomes the umbrella decision architecture for those RFC surfaces; it does not supersede them. RFC 0012 and RFC 0037 are *consumers* of this engine — they supply constraint inputs and a HITL class; they do not change its checkpoint model.
 
 ### F. Calibration and rollout
 
@@ -197,7 +199,7 @@ Each collective decision should emit a `CollectiveDecisionRecord` containing par
 
 Integration seams for this extension:
 
-- Organizations and role hierarchies (currently tracked as RFC 0012 placeholder) define eligibility and vote weight.
+- Organizations and role hierarchies ([RFC 0012](0012-protocols-organizations.md)) define eligibility and vote weight; the same org graph ranks authority for the cross-context directive decisions in Section E.
 - Channels and bridges (RFC 0011) define where collective outcomes are published.
 - Security and audit (RFC 0009) enforce non-bypassable permissions and forensic traceability.
 - Interaction lifecycle (RFC 0020) defines collective decision boundaries and timeout behavior.
@@ -297,6 +299,8 @@ Integration seams for this extension:
 - [RFC 0008 - Agent Memory & Context Optimization](0008-agent-memory-context-optimization.md)
 - [RFC 0009 - Agent Identity, Security & Sandboxing](0009-security-sandboxing.md)
 - [RFC 0011 - Channels + Bridges](0011-channels-bridges.md)
+- [RFC 0012 - Protocols & Organizations](0012-protocols-organizations.md)
 - [RFC 0020 - Interaction Lifecycle](0020-interaction-lifecycle.md)
 - [RFC 0021 - Persona Temporal Awareness](0021-persona-temporal-awareness.md)
+- [RFC 0037 - Memory Confidentiality & Channel Classification](0037-memory-confidentiality-channel-classification.md)
 - [Development Workflow](../development-workflow.md)
