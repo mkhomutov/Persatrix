@@ -3,10 +3,10 @@ id: RFC-0034
 title: Persona Conversational Working Memory
 summary: Reconstruct the LLM `messages` array from the channel store on every persona turn so the model sees the in-progress conversation as a transcript instead of a single isolated message; closes the "persona forgets its own previous question" defect captured in ISSUE-0052.
 type: architecture
-status: proposed
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-15
-target: v0.3.1
+target: v0.3.1 (Phase 1) + v0.3.x (Phases 2–3)
 depends_on:
   - RFC-0011
   - RFC-0017
@@ -17,10 +17,10 @@ depends_on:
 # RFC 0034 — Persona Conversational Working Memory
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
-**Target**: v0.3.1
+**Target**: v0.3.1 (Phase 1) + v0.3.x (Phases 2–3)
 **Depends on**: RFC 0011 (Channels — provides the persistent message store and `GET /channels/{id}/messages` history endpoint), RFC 0017 (Memory Injection Token Budget — defines the budget surface this RFC must coexist with), RFC 0020 (Interaction Lifecycle — defines the episode/interaction boundary the transcript window aligns with), RFC 0031 Phase 1 (Per-Session Namespacing — provides the `chat_session_id` / `persatrix_session_id` columns this RFC filters on)
 **Relates to**: RFC 0026 (Declarative Facts Tier — fact extraction will inherit the same conversational context surface as a follow-up), RFC 0030 (Multi-Agent Conversation Governance — group-channel role-mapping problem space)
 
@@ -542,19 +542,36 @@ v0.3.1.
 
 ## Decision / Next Steps
 
-1. Land this RFC + the issue + the v0.3.1 plan amendment in one PR
-   (the PR opening this entry).
-2. Resolve [Open Question §1](#open-questions) in the RFC 0034 review
-   thread. The PR plan (Phase 1 of the per-RFC PR plan, opened next)
-   cannot start until this is fixed.
-3. Author `docs/rfcs/0034-pr-plan.md` modeled on
-   [RFC 0017 PR plan](0017-pr-plan.md) — Phase 1 fully fleshed out,
-   Phases 2–3 scoped under a `## Future Phases` block.
-4. Implement Phase 1 in v0.3.1, after RFC 0031 Phase 1 has merged
-   (so the `chat_session_id` / `persatrix_session_id` columns are
-   available if Open Question §1 flips to per-session). RFC 0034
-   does not block on RFC 0026; the two land in parallel under the
-   v0.3.1 umbrella.
+**Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md),
+[0034-pr-plan.md](0034-pr-plan.md)). Status flipped to
+`⚠️ Partially Implemented (Phase 1)` on the merge of PR 5 (closeout);
+the RFC remains open until Phases 2–3 land in subsequent v0.3.x
+patches. All four [Open Questions](#open-questions) were resolved at
+plan-authoring time before Phase 1 shipped its non-additive surface
+([0034-pr-plan.md §Open-question resolutions](0034-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)).
+
+**Already done:**
+
+1. RFC + [ISSUE-0052](../issues/ISSUE-0052-persona-conversational-working-memory-gap.md)
+   + the v0.3.1 plan amendment landed.
+2. [Open Question §1](#open-questions) (per-session vs. per-channel
+   transcript window) resolved — per-channel (1a).
+3. `docs/rfcs/0034-pr-plan.md` authored, Phase 1 fully fleshed out.
+4. Phase 1 (DM channels) implemented in v0.3.1 — PRs 1–5 of
+   [0034-pr-plan.md](0034-pr-plan.md) merged. [ISSUE-0052](../issues/ISSUE-0052-persona-conversational-working-memory-gap.md)
+   closed for DM channels.
+
+**Remaining before moving to `👍 Accepted`:**
+
+- Phase 2 — group-channel role mapping (per-peer disambiguation,
+  [§G](#g-group-channel-handling)). The group-channel residual of
+  ISSUE-0052 is tracked here.
+- Phase 3 — instrumentation and tuning of `max_turns` / `max_tokens`
+  from a dogfood telemetry sample.
+
+Both Phases 2–3 are v0.3.x patches per
+[0034-pr-plan.md §Future Phases](0034-pr-plan.md#future-phases); neither
+blocks the v0.3.1 release.
 
 ## Related Documentation
 

@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0052
 summary: Persona LLM call sees only the current message — no in-progress conversation transcript, breaking referential follow-ups and self-reference within a session
-status: open
+status: resolved
 severity: critical
 area: persona
 created: 2026-05-15
+closed: 2026-05-16
+closed_pr: 358
 refs:
   - docs/rfcs/0034-persona-conversational-working-memory.md
   - agents/persona_runtime/action_loop.py
@@ -182,3 +184,18 @@ called out so RFC 0034's PRs do not have to rediscover them:
 > `ember-owl`. Promoted from a top-level scratch file
 > (`conversational-memory-gap.md`) into this issue + RFC 0034 in the
 > same PR that opens this entry.
+
+> 2026-05-16 — resolved by RFC 0034 Phase 1 (v0.3.1). The Conversation
+> Window ([`agents/persona_runtime/conversation_window.py`](../../agents/persona_runtime/conversation_window.py))
+> reconstructs the LLM `messages` array from the channel store on every
+> persona turn, so the model sees the in-progress DM transcript instead
+> of the lone current event. The `action_loop.py:402–404` single-event
+> seed flagged under §Confirmed root cause is replaced by
+> `build_conversation_messages`. Repro fixed: the persona answers
+> `"what did you just ask?"` and resolves referential follow-ups within
+> a DM session — pinned by `tests/integration/test_conversational_continuity.py`
+> and the new `MT-PERSONA-CONVERSATION-001` manual test. Shipped across
+> PRs 1–5 of [0034-pr-plan.md](../rfcs/0034-pr-plan.md). **Group-channel
+> residual** (§Impact bullet 4, adjacent finding 7) is out of Phase 1
+> scope — group channels keep today's behaviour until RFC 0034 Phase 2
+> (group-channel role mapping, v0.3.x).
