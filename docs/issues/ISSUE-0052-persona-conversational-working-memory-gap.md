@@ -6,6 +6,7 @@ severity: critical
 area: persona
 created: 2026-05-15
 closed: 2026-05-16
+closed_pr: 358
 refs:
   - docs/rfcs/0034-persona-conversational-working-memory.md
   - agents/persona_runtime/action_loop.py
