@@ -279,10 +279,21 @@ different lifetimes, owners, and trust domains:
 cross-store reference to the RFC 0016 participant the account is
 *authorized to act as*. Authentication proves the **account**; the
 system then acts as the bound **participant**. In the foundation the
-mapping is **1:1** (one account, one participant; Open Question #5
-covers 1:many). The `participant_id` is constrained to the existing
+mapping is **1:1** (one account, one participant) — and the 1:1 invariant
+is **enforced in the schema** by a `UNIQUE` constraint on
+`participant_id` (§B), not left to application code; relaxing it to the
+1:many of Open Question #5 is a deliberate later migration that drops the
+constraint. The `participant_id` is constrained to the existing
 participant-ID regex (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`) so it is a valid
 RFC 0016 identity by construction.
+
+Account creation validates `participant_id` against that regex but does
+**not** require the participant to already exist — an RFC 0016
+`UserParticipant` is created lazily on first chat interaction (table
+above), so an operator routinely provisions the account before the
+participant's first turn. Binding the id to the *intended* human is the
+operator's responsibility at creation time; §F then trusts the bound id
+as the verified claim.
 
 **Why separate stores.** A password hash is not persona memory. It must
 not live in `memory.db`: that file is per-persona, is being split along
@@ -306,7 +317,7 @@ CREATE TABLE accounts (
     auth_method    TEXT NOT NULL DEFAULT 'password',  -- §I extension seam
     password_hash  TEXT,                       -- argon2id PHC string; NULL for non-password methods
     role           TEXT NOT NULL DEFAULT 'user',      -- 'operator' | 'user'
-    participant_id TEXT NOT NULL,              -- binds to the RFC 0016 UserParticipant
+    participant_id TEXT NOT NULL UNIQUE,       -- 1:1 binding to the RFC 0016 UserParticipant (§A)
     status         TEXT NOT NULL DEFAULT 'active',    -- 'active' | 'disabled'
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL
@@ -329,6 +340,14 @@ the same allowlist-validated-string pattern RFC 0016 chose for
 `participant_type` (a module-level `frozenset` / Go `map` validated at
 the write boundary). A new role or a new authentication method is a
 one-line allowlist change, no migration.
+
+**Foreign-key enforcement.** SQLite ignores a `REFERENCES` clause unless
+`PRAGMA foreign_keys = ON` is set on the connection. The
+`internal/accounts/` store sets the pragma on every connection it opens,
+so `sessions.account_id → accounts.id` is enforced rather than
+decorative — a session row cannot be orphaned from its account. Accounts
+are never *deleted* (only `disabled`, §K), so the reference needs no
+`ON DELETE` cascade.
 
 **Why SQLite, not the RFC 0001 `Store`.** The orchestrator state store
 is explicitly **in-memory** ([RFC 0001](0001-core-orchestration-pipeline.md)).
@@ -384,11 +403,25 @@ timing. Storing only the hash means a read of `accounts.db` yields **no
 usable live session** — the same reason ISSUE-0004 hashes the
 unquarantine secret.
 
-Sessions have a configurable TTL (§H); `last_used_at` slides on each
-use; `logout` sets `revoked_at`; an operator can revoke (Phase 3).
-Because sessions are **server-side**, no separate revocation list is
-needed — the existence check is the lookup that already happens on every
-request.
+Sessions have a configurable TTL (§H); `logout` sets `revoked_at`; an
+operator can revoke (Phase 3). Because sessions are **server-side**, no
+separate revocation list is needed — the existence check is the lookup
+that already happens on every request.
+
+`last_used_at` is refreshed **lazily**: the middleware writes it only
+once it has gone more than a coarse threshold stale (a few minutes), not
+on every request. SQLite is single-writer, so refreshing it per request
+would serialize an `UPDATE` transaction onto the hot authentication path
+for no functional gain — `last_used_at` feeds session-list display and
+idle reporting, neither of which needs per-request precision.
+
+Expired and revoked rows accumulate. The session store **prunes** them —
+a sweep on store open plus a periodic `DELETE FROM sessions WHERE
+expires_at < :now OR revoked_at IS NOT NULL` — so the table tracks live
+sessions rather than growing without bound. Pruning is a maintenance
+`DELETE` off the request path; the per-request lookup stays a single
+primary-key hit on `token_hash` regardless of how many sessions have
+ever been issued.
 
 ```mermaid
 sequenceDiagram
@@ -469,17 +502,29 @@ recall endpoint authenticates against.
 ### G. Bootstrapping the first operator
 
 Account creation is `operator`-gated (§E) — but a fresh install has no
-operator. The chicken-and-egg is resolved by a **local CLI bootstrap**:
+operator. The chicken-and-egg is resolved by a **local bootstrap
+subcommand of the orchestrator binary**:
 
 ```
-persatrix account bootstrap --username <name>
+persatrix-server account bootstrap --username <name>
 ```
+
+Bootstrap is a subcommand of the Go orchestrator (`persatrix-server`,
+`cmd/orchestrator`) — deliberately **not** a Rust CLI command. It reuses
+`internal/accounts/` directly: the same schema, the same versioned
+migration, and the same Argon2id wrapper the running server uses. The
+account-credential write path is therefore **single-sourced in Go**; the
+Rust CLI never opens `accounts.db` and never hashes a password, so there
+is no second copy of the schema or the KDF to keep byte-compatible
+across two languages.
 
 `account bootstrap` opens `accounts.db` **directly on the local
-filesystem** and creates the first account with role `operator`. It runs
-the zero-accounts precondition and the insert **in one transaction** and
-**refuses if any account already exists** — so it can never be used to
-add a second operator or to take over an existing install.
+filesystem**, prompts for the initial password (read without echo, never
+in `argv` — the §J discipline), and creates the first account with role
+`operator`. It runs the zero-accounts precondition and the insert **in
+one transaction** and **refuses if any account already exists** — so it
+can never be used to add a second operator or to take over an existing
+install.
 
 This grants no capability an attacker did not already have: filesystem
 access to `accounts.db` already means they can read every password hash
@@ -584,9 +629,14 @@ New and modified Rust CLI commands:
 - `persatrix logout` — `POST`s `/api/v1/auth/logout` (revoking the
   session server-side) and clears the local token.
 - `persatrix whoami` — `GET`s `/api/v1/auth/whoami`.
-- `persatrix account bootstrap` — local-DB first-operator creation (§G).
 - `persatrix account create | list | disable` — operator-gated REST
   account administration (Phase 3).
+
+First-operator bootstrap is **not** a Rust CLI command — it is a
+subcommand of the Go orchestrator binary (`persatrix-server account
+bootstrap`, §G), so the account schema and the Argon2id KDF stay
+single-sourced in `internal/accounts/` and are never reimplemented in
+Rust.
 
 Every existing command (`workflow`, `agent`, `channel`, `chat`, `logs`,
 …) reads the credential file and attaches `Authorization: Bearer` when a
@@ -603,12 +653,12 @@ Question #2 of the security review, tracked in §Open Questions).
 | `POST /api/v1/auth/login` | `public` | 1 | Verify credential, issue session. |
 | `POST /api/v1/auth/logout` | `authenticated` | 1 | Revoke the current session. |
 | `GET /api/v1/auth/whoami` | `authenticated` | 1 | Return the resolved identity. |
-| `POST /api/v1/auth/password` | `authenticated` | 3 | Change own password (verify-then-rehash). |
+| `POST /api/v1/auth/password` | `authenticated` | 3 | Change own password (verify-then-rehash); revokes the account's other sessions. |
 | `POST /api/v1/accounts` | `operator` | 3 | Create an account. |
 | `GET /api/v1/accounts` | `operator` | 3 | List accounts. |
 | `GET /api/v1/accounts/{id}` | `operator` | 3 | Fetch one account. |
 | `POST /api/v1/accounts/{id}/disable` | `operator` | 3 | Disable an account; revokes its sessions. |
-| `POST /api/v1/accounts/{id}/password` | `operator` | 3 | Operator-driven password reset. |
+| `POST /api/v1/accounts/{id}/password` | `operator` | 3 | Operator-driven password reset; revokes all the target account's sessions. |
 | `POST /api/v1/agents/{id}/unquarantine` | `operator` | 2 | Moved from the `SECURITY_UNQUARANTINE_TOKEN` stop-gap (§H). |
 | `POST /api/v1/agents/{id}/chat` | `authenticated` | 2 | Caller is the verified `participant_id` (§F). |
 | Existing workflow / agent / channel / logs routes | `authenticated` | 2 | `operator` where the route mutates shared state — assigned per route in Phase 2. |
@@ -656,9 +706,10 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
   keyed by username + client IP. Sustained failures trip per-account
   lockout in Phase 3.
 - **Session fixation / replay.** A fresh token is minted per login;
-  logout and operator-disable revoke server-side; the configurable TTL
-  bounds the value of a stolen token. No revocation list is required —
-  the per-request session lookup *is* the check.
+  logout, operator-disable, and a password change or operator-driven
+  reset all revoke server-side; the configurable TTL bounds the value of
+  a stolen token. No revocation list is required — the per-request
+  session lookup *is* the check.
 - **Audit.** New `AuditEventType`s — `auth.login_succeeded`,
   `auth.login_failed`, `auth.logout`, `account.created`,
   `account.disabled`, `account.password_changed`, `authz.denied` — are
@@ -694,8 +745,9 @@ deployment depends on it.
 2. **Password hashing** — an Argon2id wrapper over
    `golang.org/x/crypto/argon2` (new direct dependency), with parameters
    from config and verify-then-rehash.
-3. **Session store** — issue / resolve / expire / revoke; token-hash-only
-   persistence; constant-time resolution.
+3. **Session store** — issue / resolve / expire / revoke / prune;
+   token-hash-only persistence; constant-time resolution; lazy
+   `last_used_at` refresh.
 4. **`Authenticator` interface + `passwordAuthenticator`** (§I seam).
 5. **Auth endpoints** — `POST /api/v1/auth/login`,
    `POST /api/v1/auth/logout`, `GET /api/v1/auth/whoami`.
@@ -706,7 +758,8 @@ deployment depends on it.
 7. **Config** — `config/security.yaml` + `schemas/security.schema.json`
    `auth:` block; `cmd/orchestrator/main.go` wiring; the non-loopback +
    `disabled` startup `WARN`.
-8. **`persatrix account bootstrap`** — local-DB first-operator creation.
+8. **`persatrix-server account bootstrap`** — first-operator creation as
+   an orchestrator-binary subcommand reusing `internal/accounts/` (§G).
 9. **CLI** — `persatrix login` / `logout` / `whoami`; credential-file
    handling.
 10. **Audit** — new event types; emission for login and logout.
@@ -740,9 +793,11 @@ Remote account management and the abuse-resistance layer.
 1. **Operator-gated account REST API** — `POST /api/v1/accounts`,
    `GET /api/v1/accounts`, `GET /api/v1/accounts/{id}`,
    `POST /api/v1/accounts/{id}/disable`,
-   `POST /api/v1/accounts/{id}/password`.
+   `POST /api/v1/accounts/{id}/password` (the reset revokes every session
+   the target account holds).
 2. **Self-service** `POST /api/v1/auth/password` — change own password,
-   verify-then-rehash.
+   verify-then-rehash; revokes the account's other sessions, keeping the
+   caller's current one.
 3. **Session administration** — list and operator-revoke sessions;
    `persatrix account create | list | disable` CLI.
 4. **Failed-login lockout** via `internal/security.RateLimiter`.
@@ -765,8 +820,9 @@ blocks on it.
 | Go orchestrator | `internal/server/agent_handlers.go` | `unquarantine` endpoint moved to the `operator` role; `validBearerToken` stop-gap retained for `disabled` mode |
 | Go orchestrator | `internal/security/audit_event.go` | New `auth.*` / `account.*` / `authz.denied` audit event types |
 | Go orchestrator | `cmd/orchestrator/main.go` | Load `config/security.yaml`; open `accounts.db`; non-loopback + `disabled` startup `WARN` |
+| Go orchestrator | `cmd/orchestrator/` (`account bootstrap` subcommand) | First-operator bootstrap — opens `accounts.db`, zero-accounts precondition + insert in one transaction; reuses `internal/accounts/` (schema, migration, Argon2id) so the credential write path is not duplicated in Rust |
 | Rust CLI | `cli/src/commands/auth.rs` (new) | `login`, `logout`, `whoami`; credential-file read/write (`0600`) |
-| Rust CLI | `cli/src/commands/account.rs` (new) | `bootstrap` (local DB), `create` / `list` / `disable` (REST) |
+| Rust CLI | `cli/src/commands/account.rs` (new) | `create` / `list` / `disable` (REST) |
 | Rust CLI | `cli/src/main.rs`, `cli/src/types.rs` | Subcommand wiring; auth DTOs; bearer-token attachment for all commands; `401` hint |
 | Config / schema | `config/security.yaml`, `schemas/security.schema.json` (new) | `auth:` block — `mode`, `session_ttl`, Argon2id parameters |
 | Go dependency | `go.mod`, `go.sum` | `golang.org/x/crypto/argon2` |
@@ -779,9 +835,11 @@ blocks on it.
   - Argon2id hash + verify round-trip; verify-then-rehash on a changed
     parameter set; constant-time verification; dummy-hash path for an
     absent username.
-  - Session issue / resolve / expiry / revocation; only the token hash
-    is persisted; resolution of an expired, revoked, and
-    `disabled`-account session all fail.
+  - Session issue / resolve / expiry / revocation / pruning; only the
+    token hash is persisted; resolution of an expired, revoked, and
+    `disabled`-account session all fail; the prune sweep deletes dead
+    rows and keeps live ones; `last_used_at` refreshes only once past the
+    staleness threshold.
   - `authMiddleware` policy matrix: `public` / `authenticated` /
     `operator` against anonymous, `user`, and `operator` identities —
     every cell; an unmapped route resolves to `operator` (fail-closed);
@@ -800,23 +858,29 @@ blocks on it.
     the body value — RFC 0016 behavior preserved.
   - `account bootstrap` succeeds on an empty `accounts.db` and is
     rejected once any account exists.
+  - A self-service password change and an operator-driven reset each
+    revoke the account's other live sessions (Phase 3).
 - **Adversarial tests**: wrong-password vs unknown-username timing
   indistinguishability; expired, revoked, and forged tokens; a token for
   a disabled account; SQL-injection attempts in `username`; oversized
   login bodies (the RFC 0002 `MaxBytesReader` cap applies).
-- **Manual tests**: a new `MT-AUTH-001` — fresh install → `account
-  bootstrap` → `persatrix login` → an authenticated `persatrix chat`
-  session → `logout` → a subsequent call is refused; and the
-  `auth.mode: disabled` path confirming the unchanged no-login localhost
-  experience.
+- **Manual tests**: a new `MT-AUTH-001` — fresh install →
+  `persatrix-server account bootstrap` → `persatrix login` → an
+  authenticated `persatrix chat` session → `logout` → a subsequent call
+  is refused; and the `auth.mode: disabled` path confirming the unchanged
+  no-login localhost experience.
 
 ## Open Questions
 
-1. **Bootstrap mechanism.** Local CLI (§G) vs an environment-seeded
-   initial password vs first-request-wins. *Proposed resolution*: the
-   local CLI with a zero-accounts precondition — an env-seeded password
-   leaks into process environment and compose files; first-request-wins
-   is a network takeover primitive.
+1. **Bootstrap mechanism.** A local orchestrator-binary subcommand (§G)
+   vs an environment-seeded initial password vs first-request-wins; and,
+   if local, hosting it in the Go orchestrator vs the Rust CLI.
+   *Proposed resolution*: a local `persatrix-server account bootstrap`
+   subcommand with a zero-accounts precondition — hosting it in the Go
+   orchestrator reuses `internal/accounts/`, so the account schema and
+   the Argon2id KDF are single-sourced rather than reimplemented in the
+   Rust CLI. An env-seeded password leaks into process environment and
+   compose files; first-request-wins is a network takeover primitive.
 2. **Session token shape.** Opaque server-side sessions vs a stateless
    JWT. *Proposed resolution*: opaque — revocable, no key management,
    and the per-request lookup is already needed for the account-status
