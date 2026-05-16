@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://persatrix.dev/schemas/optimization.schema.json",
+  "title": "Persatrix Optimization Configuration",
+  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduces this schema scoped to the top-level `conversation_window` defaults block only. The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
+  "type": "object",
+  "properties": {
+    "conversation_window": {
+      "type": "object",
+      "description": "RFC 0034 Phase 1: top-level defaults for the persona conversation-window transcript reconstruction. NOT a profile block — these apply regardless of `active_profile`. Per-agent overrides live under each agent's `conversation_window` block in config/agents.yaml; an omitted per-agent block inherits these values.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the persona runtime reconstructs the conversation window. false ⇒ the LLM `messages` array is seeded with the current event only (pre-RFC-0034 behaviour)."
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Upper bound on replayed transcript turns. Oldest turns drop first (FIFO) once the count is exceeded (RFC 0034 OQ #2 resolution 2a)."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2048,
+          "description": "Token budget for the replayed transcript, separate from the RFC 0017 system-prompt memory budget. Oldest turns drop first (FIFO) once the budget is exceeded; the tighter of max_turns / max_tokens binds per turn."
+        }
+      }
+    }
+  }
+}
