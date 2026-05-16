@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-16 (RFC 0034 Phase 1 closeout — DM conversational working memory implemented in v0.3.1 per [0034-pr-plan.md](docs/rfcs/0034-pr-plan.md) PRs 1–5; RFC 0034 → `⚠️ Partially Implemented (Phase 1)`. [ISSUE-0052](docs/issues/ISSUE-0052-persona-conversational-working-memory-gap.md) closed for DM channels; the group-channel residual is tracked under RFC 0034 Phase 2.)
+> **Last updated**: 2026-05-16 (RFC 0026 close — Declarative Facts Tier implemented in v0.3.1 per [0026-pr-plan.md](docs/rfcs/0026-pr-plan.md) PRs 1–6; RFC 0026 → `✅ Implemented`. All three phases (schema + extractor, recall + budget integration, reinforcement + retraction) shipped under the v0.3.1 umbrella.)
 > **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
 > **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
 
@@ -57,7 +57,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md)) | v0.3.x | Reserved (narrowed) |
 | 0024 | Episodic Vector Recall — deferred, gated on [MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md) data | v0.3.x or v0.4.0 | Reserved (deferred) |
 | 0025 | Thematic Episode Clustering — superseded by RFC 0027 per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md) | superseded | Reserved (superseded by 0027) |
-| [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.1 | 🚧 Implementing |
+| [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.1 | ✅ Implemented |
 | [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | v0.4.0 | 📋 Proposed |
 | [0028](docs/rfcs/0028-agent-decision-policy-engine.md) | Agent Decision Policy Engine | v0.4.0 | 📋 Proposed |
 | [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.x (Phase 1) + v0.4.0 (Phases 2–6) | 📋 Proposed |
