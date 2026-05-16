@@ -13,11 +13,11 @@ The :class:`ChannelHistoryFetcher` :class:`typing.Protocol` is the seam:
 production code binds :class:`HttpChannelHistoryFetcher`, tests bind a
 duck-typed fake without inheritance ceremony.
 
-Contract (verbatim from the lifted catch-up helper): :meth:`fetch`
-returns the channel's message list on success, ``[]`` when the
-``messages`` field is absent or not a list, and ``None`` on any HTTP
-4xx/5xx or transport error (logged WARN). ``None`` means "best-effort
-failure already logged" — callers branch on it rather than catching an
+Contract: :meth:`fetch` returns the channel's message list on success,
+``[]`` when the response body is not a JSON object or its ``messages``
+field is absent / not a list, and ``None`` on any HTTP 4xx/5xx or
+transport error (logged WARN). ``None`` means "best-effort failure
+already logged" — callers branch on it rather than catching an
 exception, so the catch-up call site's ``if messages is None: continue``
 guard is unchanged.
 
@@ -76,10 +76,10 @@ class ChannelHistoryFetcher(Protocol):
 class HttpChannelHistoryFetcher:
     """Production :class:`ChannelHistoryFetcher` backed by ``aiohttp``.
 
-    The :meth:`fetch` body is the verbatim
-    ``GET /api/v1/channels/{id}/messages?limit=N`` request lifted from
-    the former ``agents.channel_catchup._fetch_channel_history`` helper —
-    same ``None``-on-error / list-on-success contract.
+    The :meth:`fetch` body issues the
+    ``GET /api/v1/channels/{id}/messages?limit=N`` request originally
+    lifted from the former ``agents.channel_catchup._fetch_channel_history``
+    helper — same ``None``-on-error / list-on-success contract.
 
     ``session``, ``orchestrator_url`` and ``timeout`` are resolved once
     at construction; :meth:`fetch` takes only the per-call ``channel_id``
@@ -116,18 +116,24 @@ class HttpChannelHistoryFetcher:
                 if resp.status >= 400:
                     body = await resp.text()
                     logger.warning(
-                        "channels: catch-up history %s returned HTTP %d: %s",
+                        "channels: history fetch %s returned HTTP %d: %s",
                         channel_id, resp.status, body[:256],
                     )
                     return None
                 data = await resp.json()
+            # Shape guard inside the request ``try``: a 2xx response whose
+            # JSON body is not an object (a bare array, string, number, or
+            # ``null``) must degrade to ``[]`` like a ``dict`` with an
+            # unusable ``messages`` field — not raise ``AttributeError`` on
+            # ``data.get`` and escape the "never raises across the seam"
+            # contract the conversation-window caller depends on.
+            messages = data.get("messages") if isinstance(data, dict) else None
         except Exception as exc:
             logger.warning(
-                "channels: catch-up history %s failed: %s",
+                "channels: history fetch %s failed: %s",
                 channel_id, exc,
             )
             return None
-        messages = data.get("messages")
         if not isinstance(messages, list):
             return []
         return messages
