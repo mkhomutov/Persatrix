@@ -14,11 +14,11 @@ Contract under test:
   never raises. The catch-up call site's ``if messages is None:
   continue`` guard depends on this exact contract.
 * A 2xx response whose JSON body is not an object (a bare array,
-  string, number, or ``null``) is a *known gap*: ``data.get`` runs
-  outside the request ``try``, so ``fetch`` raises ``AttributeError``
-  instead of degrading to ``[]``. Pinned under ``xfail`` by
-  :class:`TestHttpChannelHistoryFetcherTopLevelNonObjectBody`; RFC 0034
-  PR 4 closes it.
+  string, number, or ``null``) degrades to ``[]`` — RFC 0034 PR 4
+  moved the ``isinstance(data, dict)`` shape guard inside the request
+  ``try`` so an unusable body no longer raises ``AttributeError``
+  across the seam. Pinned by
+  :class:`TestHttpChannelHistoryFetcherTopLevelNonObjectBody`.
 * The default-constructed fetcher uses the 10s per-request timeout the
   catch-up path uses today.
 * A duck-typed fake satisfies the :class:`ChannelHistoryFetcher`
@@ -235,34 +235,22 @@ class TestHttpChannelHistoryFetcherMalformedPayload:
 
 class TestHttpChannelHistoryFetcherTopLevelNonObjectBody:
     """A 2xx response whose JSON body is *not* an object — a bare
-    array, string, number, or ``null`` — is a known gap in the lifted
-    contract.
+    array, string, number, or ``null`` — degrades to ``[]``.
 
-    ``HttpChannelHistoryFetcher.fetch`` reads ``data.get("messages")``
-    *outside* the ``try`` that wraps the request and ``resp.json()``. A
-    non-``dict`` ``data`` makes that attribute lookup raise
-    ``AttributeError``, which escapes ``fetch`` instead of degrading to
-    ``[]`` the way a ``dict`` with a bad ``messages`` field does (see
+    Before RFC 0034 PR 4, ``HttpChannelHistoryFetcher.fetch`` read
+    ``data.get("messages")`` *outside* the ``try`` that wraps the
+    request and ``resp.json()``. A non-``dict`` ``data`` made that
+    attribute lookup raise ``AttributeError``, which escaped ``fetch``
+    instead of degrading to ``[]`` the way a ``dict`` with a bad
+    ``messages`` field does (see
     :class:`TestHttpChannelHistoryFetcherMalformedPayload`).
 
-    PR 1 is a verbatim lift of ``_fetch_channel_history`` and changes
-    no behaviour, so the gap is preserved as-is. The *intended*
-    contract — a request that succeeds but carries an unusable body
-    degrades to ``[]`` and never raises across the seam — is asserted
-    here under ``xfail(strict=True)``: the test xfails today and will
-    xpass the moment the shape guard moves inside the ``try``, so
-    RFC 0034 PR 4 cannot close the gap without also removing this
-    marker. Tracked in ``docs/rfcs/0034-pr-plan.md`` PR 4,
-    "From PR 1 review".
+    PR 4 moved the ``isinstance(data, dict)`` shape guard inside the
+    ``try``: a request that succeeds but carries an unusable body now
+    degrades to ``[]`` and never raises across the seam — the contract
+    the RFC 0034 conversation-window caller depends on.
     """
 
-    @pytest.mark.xfail(
-        raises=AttributeError,
-        strict=True,
-        reason="known gap — data.get() runs outside the request try; "
-        "RFC 0034 PR 4 moves the shape guard inside so a non-object "
-        "2xx body degrades to [] instead of raising AttributeError",
-    )
     @pytest.mark.parametrize(
         "body",
         [
@@ -393,6 +381,52 @@ class TestHttpChannelHistoryFetcherFailures:
 
         assert messages is None
         assert any("failed" in rec.message for rec in caplog.records)
+
+    async def test_warn_messages_are_caller_agnostic(self, caplog):
+        """Both WARN strings name the *operation*, not a caller.
+
+        RFC 0034 PR 4: the fetcher serves the on-startup catch-up replay
+        *and* the persona conversation window, so the two WARN strings —
+        lifted from the catch-up helper as "catch-up history ..." —
+        misled an operator when a fetch failed on a live persona turn.
+        Both branches now use the caller-agnostic "history fetch"
+        prefix; this pins the rename against a silent regression.
+        """
+
+        def _assert_generic(label: str) -> None:
+            warns = [r.message for r in caplog.records]
+            assert warns, f"expected a {label} WARN"
+            assert all("catch-up" not in m for m in warns), \
+                f"WARN must not name a caller; got {warns!r}"
+            assert all("history fetch" in m for m in warns), \
+                f"expected the generic 'history fetch' prefix; got {warns!r}"
+
+        async def server_error(_request: web.Request) -> web.StreamResponse:
+            return web.Response(text="boom", status=503)
+
+        # HTTP-error branch (``resp.status >= 400``).
+        with caplog.at_level("WARNING", logger="agents.channel_history_fetcher"):
+            async with _serve(server_error) as base_url, \
+                    aiohttp.ClientSession() as session:
+                fetcher = HttpChannelHistoryFetcher(
+                    session=session, orchestrator_url=base_url,
+                )
+                assert await fetcher.fetch("c1", limit=20) is None
+        _assert_generic("HTTP-error")
+
+        caplog.clear()
+
+        # Transport-error branch (the bare ``except`` arm). Port 1 is
+        # privileged and unbound in the test env.
+        with caplog.at_level("WARNING", logger="agents.channel_history_fetcher"):
+            async with aiohttp.ClientSession() as session:
+                fetcher = HttpChannelHistoryFetcher(
+                    session=session,
+                    orchestrator_url="http://127.0.0.1:1",
+                    timeout=aiohttp.ClientTimeout(total=1.0),
+                )
+                assert await fetcher.fetch("c1", limit=20) is None
+        _assert_generic("transport-error")
 
 
 class TestHttpChannelHistoryFetcherTimeout:
