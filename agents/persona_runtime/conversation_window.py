@@ -207,7 +207,10 @@ async def build_conversation_messages(
     is the caller's already-formatted current turn (the output of the
     persona's own ``_format_event``), appended verbatim and never dropped.
     Every earlier element is a sanitized replayed turn in chronological
-    order.
+    order. The first element is always a ``user`` turn: any leading
+    ``assistant`` turns from the replayed transcript are dropped (see
+    :func:`_drop_leading_assistant_turns`) so the array satisfies the
+    Anthropic Messages API ``messages[0].role == "user"`` requirement.
 
     On a disabled config, a session-less / channel-less event, or any
     fetch failure, the result degrades to ``[current_event_only]`` — the
@@ -304,7 +307,10 @@ def _assemble_replayed_turns(
     :func:`_drop_rows_newer_than_current`), then the survivors are
     reversed so the transcript reads oldest→newest. The row carrying the
     current event's ``message_id`` is dropped — the caller appends the
-    current event as the final turn (RFC §B).
+    current event as the final turn (RFC §B). After admission, any
+    leading ``assistant`` turns are dropped (see
+    :func:`_drop_leading_assistant_turns`) so the replayed transcript
+    can never open with a non-``user`` turn.
     """
     turns: list[dict[str, Any]] = []
     for row in reversed(_drop_rows_newer_than_current(raw, current_message_id)):
@@ -345,7 +351,7 @@ def _assemble_replayed_turns(
             turns.append(
                 {"role": "user", "content": _format_peer_turn(sender_id, content)},
             )
-    return _apply_admission(turns, config)
+    return _drop_leading_assistant_turns(_apply_admission(turns, config))
 
 
 def _drop_rows_newer_than_current(
@@ -428,3 +434,44 @@ def _apply_admission(
     while len(admitted) > config.max_turns:
         admitted.pop(0)
     return admitted
+
+
+def _drop_leading_assistant_turns(
+    turns: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop any leading ``assistant`` turns from the replayed transcript.
+
+    :func:`build_conversation_messages` returns ``[*replayed,
+    current_turn]`` and ``current_turn`` is always a ``user`` turn — but
+    ``replayed`` carries no guarantee that *its* first element is one.
+    The role split in :func:`_assemble_replayed_turns` maps the persona's
+    own messages to ``role="assistant"``, and two routine paths leave
+    such a turn at the front of the transcript:
+
+    * **Persona-first channel.** The persona sent the channel's opening
+      message — a greeting or a proactive turn — so the oldest replayed
+      row is its own ``assistant`` turn.
+    * **Token-FIFO admission.** :func:`_apply_admission` FIFO-drops a
+      content-size-dependent number of oldest turns; evicting an odd
+      count from a ``user``-leading alternating transcript leaves an
+      ``assistant``-leading one.
+
+    The Anthropic Messages API requires ``messages[0]`` to use the
+    ``user`` role — a leading ``assistant`` turn is a hard 400
+    (``messages: first message must use the "user" role``). The persona
+    runtime passes this seed to the provider unmodified
+    (``AnthropicProvider.create_message``), so the guard must live here.
+    A leading ``assistant`` turn has no preceding ``user`` turn for the
+    model to answer, so dropping it loses no model-relevant context; if
+    every replayed turn is an ``assistant`` turn the transcript empties
+    and :func:`build_conversation_messages` degrades to
+    current-event-only.
+
+    Runs as the final admission step: it only ever *shrinks* the
+    transcript, so the :func:`_apply_admission` token / count bounds
+    still hold afterwards.
+    """
+    for index, turn in enumerate(turns):
+        if turn["role"] == "user":
+            return turns[index:]
+    return []

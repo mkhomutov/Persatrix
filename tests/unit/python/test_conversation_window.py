@@ -160,12 +160,20 @@ class TestWindowAssembly:
 
     async def test_persona_own_message_maps_to_assistant_role(self):
         """A replayed message whose sender is the persona itself maps to
-        ``role="assistant"`` with raw, unwrapped content (RFC §C)."""
+        ``role="assistant"`` with raw, unwrapped content (RFC §C).
+
+        The preceding peer turn keeps the persona turn off the front of
+        the transcript — a *leading* ``assistant`` turn is stripped by the
+        Anthropic ``messages[0]`` user-role guard (covered by
+        ``test_conversation_window_followups.py::TestLeadingAssistantTurnGuard``)."""
         fetcher = _FakeChannelHistoryFetcher(
-            [_row("m1", _AGENT_ID, "I asked which season you prefer.")],
+            [
+                _row("m2", _AGENT_ID, "I asked which season you prefer."),
+                _row("m1", "user", "an opening peer line"),
+            ],
         )
         result = await _build(fetcher)
-        assert result[0] == {
+        assert result[1] == {
             "role": "assistant",
             "content": "I asked which season you prefer.",
         }
