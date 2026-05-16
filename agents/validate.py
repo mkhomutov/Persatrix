@@ -17,11 +17,16 @@ import yaml
 
 # Map config filenames to their schema files.
 # Only files with a known schema are validated; unknown YAML files are skipped.
-# TODO: Add optimization.yaml, organizations.yaml, bridges.yaml, mcp-servers.yaml
-#       when JSON schemas are created for them.
+# optimization.schema.json (RFC 0034 Phase 1 PR 2) is scoped to the
+# conversation_window block only — the Go orchestrator owns the rest of
+# the optimisation surface, so the schema leaves unknown top-level keys
+# unconstrained.
+# TODO: Add organizations.yaml, bridges.yaml, mcp-servers.yaml when JSON
+#       schemas are created for them.
 _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
     "channels.yaml": "channel.schema.json",
+    "optimization.yaml": "optimization.schema.json",
 }
 
 # Workflow files live in a separate directory and share one schema.

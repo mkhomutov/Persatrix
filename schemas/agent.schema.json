@@ -76,6 +76,7 @@
         "persona": { "$ref": "#/definitions/persona" },
         "autonomy": { "$ref": "#/definitions/autonomy" },
         "memory": { "$ref": "#/definitions/memory" },
+        "conversation_window": { "$ref": "#/definitions/conversation_window" },
         "relationships": {
           "type": "array",
           "items": { "$ref": "#/definitions/relationship" }
@@ -429,6 +430,30 @@
         "type": { "type": "string" },
         "trust_level": { "type": "number", "minimum": 0, "maximum": 1 },
         "notes": { "type": "string" }
+      }
+    },
+    "conversation_window": {
+      "type": "object",
+      "description": "RFC 0034 Phase 1: per-agent override for the conversation-window transcript reconstruction. The persona runtime rebuilds the LLM `messages` array from the channel store each turn so the model sees the in-progress conversation as a transcript (closes ISSUE-0052). All properties are optional; an omitted block (or omitted key) inherits the top-level `conversation_window` defaults from config/optimization.yaml. Wired into the runtime by RFC 0034 Phase 1 PR 3.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the persona runtime reconstructs the conversation window for this agent. false ⇒ the LLM `messages` array is seeded with the current event only (pre-RFC-0034 behaviour) — the operator escape hatch if Phase 3 telemetry surfaces a regression."
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "Upper bound on replayed transcript turns. Oldest turns drop first (FIFO) once the count is exceeded (RFC 0034 OQ #2 resolution 2a)."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2048,
+          "description": "Token budget for the replayed transcript, separate from the RFC 0017 system-prompt memory budget. Oldest turns drop first (FIFO) once the budget is exceeded; the tighter of max_turns / max_tokens binds per turn."
+        }
       }
     },
     "shared_memory_pool": {

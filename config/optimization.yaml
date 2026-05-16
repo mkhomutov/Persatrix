@@ -54,3 +54,19 @@ cost:
       default_max_usd: 10.00
     per_agent:
       default_max_usd: 5.00
+
+# ─── Conversation Window (RFC 0034 Phase 1) ───────────────
+# Top-level defaults for the persona conversation-window transcript
+# reconstruction. NOT a profile block — these apply regardless of
+# `active_profile`. The persona runtime rebuilds the LLM `messages`
+# array from the channel store each turn so the model sees the
+# in-progress conversation as a transcript (closes ISSUE-0052).
+# Per-agent overrides live under each agent's `conversation_window`
+# block in config/agents.yaml; an omitted per-agent block inherits
+# these values. Schema: schemas/optimization.schema.json.
+# Wired into the runtime by RFC 0034 Phase 1 PR 3 — PR 2 ships the
+# substrate + schema only.
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

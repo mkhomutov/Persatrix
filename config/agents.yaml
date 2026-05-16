@@ -167,6 +167,17 @@ agents:
         lambda_per_day: 0.01            # ~69-day half-life
         c_min: 0.1                      # eviction + retrieval floor
         stale_confidence_alert_threshold: 0.3
+    # RFC 0034 Phase 1: per-agent override for the conversation-window
+    # transcript reconstruction.  The persona runtime rebuilds the LLM
+    # `messages` array from the channel store each turn so the model
+    # sees the in-progress conversation as a transcript.  Defaults match
+    # the top-level `conversation_window` block in
+    # config/optimization.yaml; removing this block changes nothing.
+    # Wired into the runtime by RFC 0034 Phase 1 PR 3.
+    conversation_window:
+      enabled: true
+      max_turns: 20
+      max_tokens: 2048
     relationships:
       - agent_id: "iron-fox"
         type: "reports_to_me"

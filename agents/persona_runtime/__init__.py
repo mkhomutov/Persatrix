@@ -1,19 +1,15 @@
-"""
-Persatrix LLM-Powered Persona Agent Runtime.
+"""Persatrix LLM-Powered Persona Agent Runtime.
 
 Contains ``_LLMPersonaAgent``, the concrete ``PersonaAgent`` subclass with
 LLM-powered ``on_event()`` decision loop, multi-turn tool use, memory
-context injection, and state persistence.
-
-Extracted from ``persona.py`` to bring the file under the 500-line code
-file-size limit (see ``scripts/checks/file_size.py``).  ``persona.py``
+context injection, and state persistence.  Extracted from ``persona.py``
+to keep that file under the 500-line code file-size limit; ``persona.py``
 retains the ``PersonaAgent`` ABC and the ``create_persona_agent()`` factory.
 
-Type definitions live in ``persona_types``, behavioral dimension
-rendering in ``persona_behavior``, event dispatch in ``dispatch``,
-and the tick scheduler in ``tick``.
-
-The runtime class is split across submodules for file-size hygiene:
+Type definitions live in ``persona_types``, behavioral dimension rendering
+in ``persona_behavior``, event dispatch in ``dispatch``, the tick scheduler
+in ``tick``.  The runtime class itself is split across mixin submodules for
+file-size hygiene:
 
 - ``memory_context`` — memory injection + context-window assembly
 - ``action_loop`` — multi-turn tool-use loop, prompt assembly, action parsing
@@ -25,10 +21,12 @@ from __future__ import annotations
 __all__ = [
     # Public surface first, then leading-underscore module-private symbols
     # re-exported for cross-module use (PR #176 review nit).
+    "ConversationWindowConfig",
     "Linkable",
     "MemoryNamespace",
     "TICK_REASON_SCHEDULED",
     "TICK_REASON_WOKE_ON_EVENT",
+    "build_conversation_messages",
     "_LLMPersonaAgent",
     "_coerce_event_timeout",
     "_truncate_with_ellipsis",
@@ -67,6 +65,7 @@ from ..persona_types import (
 )
 from ..tools.registry import ToolDefinition
 from .action_loop import _ActionLoopMixin
+from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
