@@ -303,7 +303,7 @@ Cache-hit rate, fetch latency, fallback-to-empty-window count exposed as OTEL me
 | 2 | Conversation Window module + config + schema | `feature/v031-rfc0034p1-conversation-window` | ✅ Merged | [#352](https://github.com/mkhomutov/Persatrix/pull/352) | 2026-05-16 |
 | 3 | Wire call site + DM integration test + manual-test doc | `feature/v031-rfc0034p1-wire-and-itest` | ✅ Merged | [#356](https://github.com/mkhomutov/Persatrix/pull/356) | 2026-05-16 |
 | 4 | Review follow-ups | `feature/v031-rfc0034p1-followups` | ✅ Merged | [#357](https://github.com/mkhomutov/Persatrix/pull/357) | 2026-05-16 |
-| 5 | Phase 1 closeout | `feature/v031-rfc0034p1-close` | 🔀 PR open | — | — |
+| 5 | Phase 1 closeout | `feature/v031-rfc0034p1-close` | ✅ Merged | [#358](https://github.com/mkhomutov/Persatrix/pull/358) | 2026-05-16 |
 
 ---
 
