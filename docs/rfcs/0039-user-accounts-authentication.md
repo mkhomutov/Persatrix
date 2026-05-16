@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.4.0
+target: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
 depends_on:
   - RFC-0002
   - RFC-0016
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.4.0
+**Target**: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC authenticates), RFC 0016 (Human Participant & Chat Interface — the `UserParticipant` an account binds to)
 **Relates to**: RFC 0009 (Agent Identity, Security & Sandboxing — the *agent* identity axis this RFC is the human counterpart of; the `AuditLogger` and `RateLimiter` it reuses), RFC 0012 (Protocols & Organizations — organizational clearance attaches to an account; the §I extension seam), RFC 0037 (Memory Confidentiality & Channel Classification — its confidentiality model presupposes a verified human identity), RFC 0001 (Core Orchestration Pipeline — the orchestrator `Store` pattern)
 
@@ -157,26 +157,42 @@ extends this foundation cleanly rather than requiring it to be rebuilt
 means the mechanism is reviewable and testable before any deployment
 depends on it.
 
-### Why this is a v0.4.0 RFC
+### Why Phases 1–2 target v0.3.x, and Phase 3 v0.4.0
 
-The identity story is only coherent when its three axes land in the same
-version:
+This RFC has **no v0.4.0 dependency**. Its hard dependencies — RFC 0002
+(the REST server) and RFC 0016 (`UserParticipant`) — shipped in v0.1 and
+v0.2.1; the RFC 0009 `AuditLogger`, `SecretRedactor`, and `RateLimiter`
+it reuses, and the `internal/channels` SQLite-migration discipline it
+follows, all shipped in v0.3.0. Nothing it needs is in flight.
 
-- **Agent identity** — RFC 0009 Phases 3–4 (capability tokens, HITL),
-  retargeted to v0.4.0.
-- **Human identity** — this RFC.
-- **Organizational authority & clearance** — RFC 0012 Phases 1–3,
-  v0.4.0.
+The decisive reason to land the **foundation in v0.3.x** is
+[RFC 0037](0037-memory-confidentiality-channel-classification.md), which
+is itself v0.3.x. RFC 0037 builds a confidentiality model that governs
+what crosses a channel-classification boundary — but the *human* on one
+side of that boundary stays spoofable until accounts exist. The verified
+`participant_id` claim (§F) is the substrate RFC 0037 implicitly
+assumes; it should not lag the confidentiality RFC that leans on it.
+Phase 1 is inert by construction (`auth.mode` defaults to `disabled`,
+§H), so slotting it into the active v0.3.x line carries no behavioural
+risk, and Phase 2 — enforcement plus the verified claim — completes the
+boundary RFC 0037 needs.
 
-RFC 0012 clearance attaches to a *human principal* — an account — and
-joins to memory and channels through that account's `participant_id`.
-Shipping accounts in v0.4.0, with or just ahead of RFC 0012, means
-clearance has something to hang on the moment it is defined. Phase 1 of
-this RFC is fully self-contained and carries no v0.4.0 dependency, so it
-*may* land earlier if the team wants the chat endpoint secured sooner;
-but **enforcement** (Phase 2) should ship in the same release whose
-notes document the new auth posture, so an operator is never surprised
-by a 401.
+**Phase 3 (account administration & hardening) targets v0.4.0.** It is
+the part that can lag without weakening any v0.3.x security control: a
+remote account-management REST API and failed-login lockout are
+operability, not the boundary. It also pairs naturally with
+[RFC 0012](0012-protocols-organizations.md) — organizational clearance
+attaches to a *human principal*, i.e. an account, and joins to memory
+and channels through that account's `participant_id`. RFC 0012 only
+needs accounts to **exist**, which they do from v0.3.x; landing Phase 3
+in v0.4.0 keeps the administration surface next to the organizational
+model that consumes it.
+
+The identity model still lands coherently: agent identity
+([RFC 0009](0009-security-sandboxing.md) Phases 3–4, v0.4.0), human
+identity (this RFC — foundation in v0.3.x, administration in v0.4.0),
+and organizational authority (RFC 0012, v0.4.0) compose in dependency
+order; they need not all ship in one shared version.
 
 ## Goals
 
@@ -664,7 +680,7 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
 
 ## Phased Implementation Plan
 
-### Phase 1: The account & session foundation
+### Phase 1: The account & session foundation (v0.3.x)
 
 The complete mechanism, shipped **inert**. `auth.mode` defaults to
 `disabled`, no route is enforced, and existing behavior is unchanged —
@@ -697,7 +713,7 @@ deployment depends on it.
 
 Dependencies: the merged RFC 0002 REST server only.
 
-### Phase 2: Enforcement and the verified-identity claim
+### Phase 2: Enforcement and the verified-identity claim (v0.3.x)
 
 Turns the mechanism on. A deployment that sets `auth.mode: enabled` now
 has a gated REST surface.
@@ -717,7 +733,7 @@ has a gated REST surface.
 
 Dependencies: Phase 1.
 
-### Phase 3: Account administration & hardening
+### Phase 3: Account administration & hardening (v0.4.0)
 
 Remote account management and the abuse-resistance layer.
 
@@ -839,21 +855,23 @@ blocks on it.
 
 ## Decision / Next Steps
 
-1. Review this RFC alongside [RFC 0009](0009-security-sandboxing.md)
+1. Review this RFC alongside [RFC 0037](0037-memory-confidentiality-channel-classification.md)
+   — whose v0.3.x confidentiality model presupposes the verified human
+   identity Phases 1–2 establish — and [RFC 0009](0009-security-sandboxing.md)
    (the agent-identity axis) and [RFC 0012](0012-protocols-organizations.md)
    (organizational authority and clearance). The three are the agent,
-   human, and organizational facets of one identity model and should
-   land together in v0.4.0.
-2. Confirm the v0.4.0 target and the Open Question resolutions —
-   especially #2 (opaque sessions), #3 (Argon2id), and #6 (`auth.mode`
-   default `disabled`).
+   human, and organizational facets of one identity model; they compose
+   in dependency order rather than needing a single shared version.
+2. Confirm the split `v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)` target and
+   the Open Question resolutions — especially #2 (opaque sessions),
+   #3 (Argon2id), and #6 (`auth.mode` default `disabled`).
 3. Implement Phase 1 (the inert foundation), then Phase 2 (enforcement +
    the verified claim), then Phase 3 (administration + hardening). Phase 1
    is shippable and reviewable without changing any existing behavior.
 4. Create `docs/rfcs/0039-pr-plan.md` with PR slices once this RFC is
    accepted.
-5. Regenerate [INDEX.md](INDEX.md) via `make rfcs` and add the RFC
-   Master Index + v0.4.0 RFC Scope rows in [ROADMAP.md](../../ROADMAP.md).
+5. Regenerate [INDEX.md](INDEX.md) via `make rfcs` and update the RFC
+   Master Index and v0.4.0 RFC Scope rows in [ROADMAP.md](../../ROADMAP.md).
 
 ## Related Documentation
 

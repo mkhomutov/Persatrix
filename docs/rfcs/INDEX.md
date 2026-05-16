@@ -25,7 +25,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0036](0036-persona-message-recall.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Persona Verbatim Message Recall |
 | [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Memory Confidentiality & Channel Classification |
 | [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
-| [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.4.0 | 2026-05-16 | User Accounts & Authentication |
+| [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.3.x (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0009](0009-security-sandboxing.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 2026-04-15 | Agent Identity, Security & Sandboxing |
 | [RFC-0011](0011-channels-bridges.md) | ⚠️ Partially Implemented | feature | v0.3.0 (internal channels) + v0.5.0 (external bridges) | 2026-04-25 | Channels & Internal Agent Messaging |
