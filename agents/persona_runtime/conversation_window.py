@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ConversationWindowConfig",
     "build_conversation_messages",
+    "resolve_conversation_window_config",
 ]
 
 # Committed Phase 1 defaults (RFC 0034 OQ #2). A retune is a one-line
@@ -99,6 +100,48 @@ class ConversationWindowConfig:
     max_turns: int = DEFAULT_MAX_TURNS
     max_tokens: int = DEFAULT_MAX_TOKENS
     enabled: bool = True
+
+
+def resolve_conversation_window_config(
+    agent_config: dict[str, Any],
+) -> ConversationWindowConfig:
+    """Resolve a :class:`ConversationWindowConfig` from a persona's config.
+
+    Reads the optional per-agent ``conversation_window`` block in
+    ``config/agents.yaml``. Any key absent from the block — or the whole
+    block absent — inherits the dataclass default, which mirrors the
+    ``config/optimization.yaml`` defaults block (the two are pinned equal
+    by ``test_conversation_window.py::test_defaults_match_optimization_yaml``).
+
+    A malformed block must not crash agent construction: production
+    configs are gated through ``make validate`` against
+    ``schemas/agent.schema.json``, but test fixtures and dict-built
+    configs bypass that. A non-mapping block, or a wrong-typed value for
+    a key, degrades to the per-key default. ``bool`` is rejected for the
+    integer counts explicitly — it is an ``int`` subclass in Python, so
+    ``max_turns: true`` would otherwise resolve to ``1``.
+    """
+    defaults = ConversationWindowConfig()
+    block = agent_config.get("conversation_window")
+    if not isinstance(block, dict):
+        return defaults
+
+    raw_turns = block.get("max_turns")
+    raw_tokens = block.get("max_tokens")
+    raw_enabled = block.get("enabled")
+    return ConversationWindowConfig(
+        max_turns=(
+            raw_turns
+            if isinstance(raw_turns, int) and not isinstance(raw_turns, bool)
+            else defaults.max_turns
+        ),
+        max_tokens=(
+            raw_tokens
+            if isinstance(raw_tokens, int) and not isinstance(raw_tokens, bool)
+            else defaults.max_tokens
+        ),
+        enabled=raw_enabled if isinstance(raw_enabled, bool) else defaults.enabled,
+    )
 
 
 # ─── In-process fetch cache (RFC §F) ───────────────────────

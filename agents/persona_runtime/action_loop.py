@@ -75,6 +75,9 @@ class _ActionLoopMixin:
     # Stub declarations for methods provided by sibling mixins / concrete class.
     if TYPE_CHECKING:
         def _format_event(self, event: AgentEvent) -> str: ...
+        async def _build_seed_messages(
+            self, event: AgentEvent, current_user_message: str,
+        ) -> list[dict[str, Any]]: ...
         async def _inject_memory_context(
             self, event: AgentEvent, *, query: str | None = None,
         ) -> MemoryInjectionResult: ...
@@ -398,10 +401,8 @@ class _ActionLoopMixin:
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
 
-        # 2. Multi-turn tool-use loop (user_message already computed above)
-        messages: list[dict[str, Any]] = [
-            {"role": "user", "content": user_message},
-        ]
+        # 2. Multi-turn tool-use loop — RFC 0034 conversation-window seed.
+        messages = await self._build_seed_messages(event, user_message)
         tool_defs = self._llm_client.format_tool_definitions(
             self._build_tool_definitions()
         )
