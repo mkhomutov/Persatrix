@@ -140,7 +140,8 @@ def _persona_config() -> dict[str, Any]:
             "working": {"max_tokens": 50000},
         },
         # Exercises the resolve_conversation_window_config path against a
-        # real per-agent block (RFC 0034 PR 3 constructor wiring).
+        # real per-agent block — resolved lazily on the first persona turn
+        # by _ConversationWindowMixin._build_seed_messages (RFC 0034 PR 3).
         "conversation_window": {
             "enabled": True,
             "max_turns": 20,
@@ -267,6 +268,44 @@ async def test_fetch_failure_degrades_to_current_event_only() -> None:
     actions = await agent.on_event(_dm_event("hello", message_id="m1"))
 
     assert actions, "persona must still produce a turn on fetch failure"
+    assert len(provider.recorded) == 1
+    seed = provider.recorded[0]
+    assert len(seed) == 1
+    assert seed[0]["role"] == "user"
+    assert "hello" in seed[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_unwired_fetcher_degrades_to_current_event_only() -> None:
+    """With no history fetcher wired the seed degrades to the current
+    event alone — identical to pre-RFC-0034 behaviour.
+
+    ``set_history_fetcher`` is injected post-construction by
+    ``AgentServer.start``; until it runs ``_history_fetcher`` is ``None``
+    and ``_build_seed_messages`` short-circuits before
+    ``build_conversation_messages`` (``conversation_seed.py``). The
+    task-only / partial-init code paths in production, and every
+    persona-runtime test that does not wire a fetcher, depend on this
+    branch — the wider suite covers it only *implicitly*. This test pins
+    the seed *shape* explicitly so a future change to
+    ``_build_seed_messages`` cannot silently regress the unwired path.
+
+    Distinct from ``test_fetch_failure_degrades_to_current_event_only``:
+    that exercises a wired fetcher that *raises*; this exercises the
+    fetcher being *absent*. The absence wins over the
+    ``conversation_window`` block in ``_persona_config`` (``enabled:
+    True``) — the seed is a single ``user`` turn regardless of config.
+    """
+    provider = _RecordingProvider(
+        replies=['```json\n[{"action_type": "do_nothing", "payload": {}}]\n```'],
+    )
+    agent = await _make_agent(provider)
+    # Deliberately no agent.set_history_fetcher(...) — this is the
+    # unwired path; the omission is the subject under test.
+
+    actions = await agent.on_event(_dm_event("hello", message_id="m1"))
+
+    assert actions, "persona must still produce a turn with no fetcher wired"
     assert len(provider.recorded) == 1
     seed = provider.recorded[0]
     assert len(seed) == 1

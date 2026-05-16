@@ -1,8 +1,10 @@
 """RFC 0034 Phase 1 PR 3 — conversation-window config resolution.
 
 Pins :func:`resolve_conversation_window_config`, the helper
-``_LLMPersonaAgent.__init__`` calls to turn a persona's optional
-per-agent ``conversation_window`` block (``config/agents.yaml``) into a
+``_ConversationWindowMixin._build_seed_messages`` calls on a persona's
+first turn — resolved once from the persona's config and cached
+(``conversation_seed.py``) — to turn the optional per-agent
+``conversation_window`` block (``config/agents.yaml``) into a
 :class:`ConversationWindowConfig`. An absent block — or any absent key —
 inherits the dataclass default, which mirrors the
 ``config/optimization.yaml`` defaults block (the two are pinned equal by
