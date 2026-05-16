@@ -151,10 +151,12 @@ def _persona_config() -> dict[str, Any]:
     }
 
 
-async def _make_agent(provider: _RecordingProvider) -> _LLMPersonaAgent:
+async def _make_agent(
+    provider: _RecordingProvider, *, config: dict[str, Any] | None = None,
+) -> _LLMPersonaAgent:
     agent = create_persona_agent(
         agent_id=_AGENT_ID,
-        config=_persona_config(),
+        config=config if config is not None else _persona_config(),
         llm_client=LLMClient(provider),
     )
     await agent.initialize_memory()
@@ -348,3 +350,69 @@ async def test_unwired_fetcher_skips_conversation_window_config_resolution() -> 
     assert agent._conversation_window_config is None, (
         "unwired short-circuit must resolve no conversation-window config"
     )
+
+
+@pytest.mark.asyncio
+async def test_disabled_config_degrades_to_current_event_only() -> None:
+    """A persona whose per-agent ``conversation_window.enabled`` is
+    ``false`` seeds the current event alone — even with a history fetcher
+    wired and a non-empty channel transcript available to it.
+
+    ``enabled: false`` is the RFC 0034 §F operator escape hatch. Its
+    *substrate* semantics — ``build_conversation_messages`` returning
+    ``[current_turn]`` on a disabled config — are already pinned at the
+    unit layer by ``test_conversation_window.py::TestDisabled`` (RFC 0034
+    PR 2). This integration test exists for a distinct, PR-3-only reason:
+    it is the only test that pins the *config pass-through wiring* — that
+    ``_ConversationWindowMixin._build_seed_messages`` resolves the
+    persona's own ``conversation_window`` block and forwards the
+    resulting :class:`ConversationWindowConfig` to
+    ``build_conversation_messages``.
+
+    ``test_persona_sees_its_own_prior_turn_on_the_next_dm_turn`` cannot
+    pin that wiring: its ``_persona_config`` block (``enabled: true``,
+    ``max_turns: 20``, ``max_tokens: 2048``) is value-identical to the
+    ``ConversationWindowConfig`` dataclass defaults, so a regression that
+    dropped the resolved config and fell back to defaults inside
+    ``_build_seed_messages`` would leave that test green. ``enabled:
+    false`` is the maximally distinct case: if the resolved per-agent
+    block did not reach ``build_conversation_messages`` the window would
+    reconstruct the transcript from the wired history and the seed would
+    carry more than one turn — so this test fails loudly on exactly that
+    regression.
+
+    The fetcher is wired and scripted with a real prior turn so the
+    suppression must come from the disabled config, not from an absent
+    fetcher (``test_unwired_fetcher_degrades_to_current_event_only``) or
+    an empty history. A disabled config short-circuits in
+    ``build_conversation_messages`` *before* the fetch, so the fetcher is
+    never consulted — asserted here as the sharper witness that the
+    window genuinely did not run.
+    """
+    provider = _RecordingProvider(
+        replies=['```json\n[{"action_type": "do_nothing", "payload": {}}]\n```'],
+    )
+    config = _persona_config()
+    config["conversation_window"] = {
+        "enabled": False, "max_turns": 20, "max_tokens": 2048,
+    }
+    agent = await _make_agent(provider, config=config)
+    # A fetcher with a real prior turn is wired — so the disabled config,
+    # not a missing fetcher or an empty transcript, is what must suppress
+    # the window.
+    fetcher = _FakeChannelHistoryFetcher(
+        results=[[_row("m1", "user", "an earlier peer line")]],
+    )
+    agent.set_history_fetcher(fetcher)
+
+    actions = await agent.on_event(_dm_event("hello", message_id="m2"))
+
+    assert actions, "persona must still produce a turn with the window disabled"
+    assert len(provider.recorded) == 1
+    seed = provider.recorded[0]
+    assert len(seed) == 1, f"disabled window must seed one turn; got {seed!r}"
+    assert seed[0]["role"] == "user"
+    assert "hello" in seed[0]["content"]
+    # A disabled config short-circuits before the fetch — the wired
+    # fetcher is never consulted.
+    assert fetcher.calls == [], "disabled window must not consult the fetcher"
