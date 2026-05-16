@@ -116,10 +116,15 @@ def resolve_conversation_window_config(
     A malformed block must not crash agent construction: production
     configs are gated through ``make validate`` against
     ``schemas/agent.schema.json``, but test fixtures and dict-built
-    configs bypass that. A non-mapping block, or a wrong-typed value for
-    a key, degrades to the per-key default. ``bool`` is rejected for the
-    integer counts explicitly — it is an ``int`` subclass in Python, so
-    ``max_turns: true`` would otherwise resolve to ``1``.
+    configs bypass that. A non-mapping block, a wrong-typed value, or an
+    out-of-range integer count degrades to the per-key default. ``bool``
+    is rejected for the integer counts explicitly — it is an ``int``
+    subclass in Python, so ``max_turns: true`` would otherwise resolve to
+    ``1``. The counts must additionally be ``>= 1``: the schema pins
+    ``minimum: 1`` for both, and the resolver mirrors that lower bound for
+    the configs that bypass the schema gate — a ``0`` or negative count
+    would otherwise pass the type check yet silently yield an empty
+    replayed window (``_apply_admission`` drops every turn).
     """
     defaults = ConversationWindowConfig()
     block = agent_config.get("conversation_window")
@@ -132,12 +137,16 @@ def resolve_conversation_window_config(
     return ConversationWindowConfig(
         max_turns=(
             raw_turns
-            if isinstance(raw_turns, int) and not isinstance(raw_turns, bool)
+            if isinstance(raw_turns, int)
+            and not isinstance(raw_turns, bool)
+            and raw_turns >= 1
             else defaults.max_turns
         ),
         max_tokens=(
             raw_tokens
-            if isinstance(raw_tokens, int) and not isinstance(raw_tokens, bool)
+            if isinstance(raw_tokens, int)
+            and not isinstance(raw_tokens, bool)
+            and raw_tokens >= 1
             else defaults.max_tokens
         ),
         enabled=raw_enabled if isinstance(raw_enabled, bool) else defaults.enabled,

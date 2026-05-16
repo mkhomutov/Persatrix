@@ -90,3 +90,45 @@ class TestResolveConversationWindowConfig:
         defaults = ConversationWindowConfig()
         assert cfg.max_turns == defaults.max_turns
         assert cfg.max_tokens == defaults.max_tokens
+
+    def test_zero_or_negative_count_falls_back_per_key(self):
+        """An out-of-range integer count — ``0`` or negative — is
+        malformed and degrades to the per-key default, the same as a
+        wrong-typed value.
+
+        ``schemas/agent.schema.json`` pins ``minimum: 1`` for both
+        ``max_turns`` and ``max_tokens``; the resolver mirrors that lower
+        bound so dict-built and test configs that bypass ``make validate``
+        cannot silently yield an empty replayed window — ``_apply_admission``
+        drops every turn on ``max_turns: 0``, which is a surprising
+        misconfiguration outcome rather than the intended degrade-to-default.
+        ``enabled`` — a valid bool here — still survives, proving the
+        degradation is per-key and not whole-block."""
+        defaults = ConversationWindowConfig()
+
+        zero = resolve_conversation_window_config({
+            "conversation_window": {
+                "enabled": False,
+                "max_turns": 0,
+                "max_tokens": 0,
+            },
+        })
+        assert zero.max_turns == defaults.max_turns
+        assert zero.max_tokens == defaults.max_tokens
+        assert zero.enabled is False
+
+        negative = resolve_conversation_window_config({
+            "conversation_window": {"max_turns": -5, "max_tokens": -1},
+        })
+        assert negative.max_turns == defaults.max_turns
+        assert negative.max_tokens == defaults.max_tokens
+
+    def test_count_of_one_is_the_accepted_lower_bound(self):
+        """``1`` is the schema's ``minimum`` — in range, so it survives.
+        Pins the boundary so the range check stays ``>= 1`` (rejecting
+        only ``< 1``) and never tightens to ``> 1``."""
+        cfg = resolve_conversation_window_config({
+            "conversation_window": {"max_turns": 1, "max_tokens": 1},
+        })
+        assert cfg.max_turns == 1
+        assert cfg.max_tokens == 1

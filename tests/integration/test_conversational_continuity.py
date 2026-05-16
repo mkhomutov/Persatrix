@@ -311,3 +311,40 @@ async def test_unwired_fetcher_degrades_to_current_event_only() -> None:
     assert len(seed) == 1
     assert seed[0]["role"] == "user"
     assert "hello" in seed[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_unwired_fetcher_skips_conversation_window_config_resolution() -> None:
+    """The unwired-fetcher short-circuit is *total* — it resolves no
+    conversation-window config.
+
+    ``_build_seed_messages`` returns the current-event-only seed the
+    moment ``_history_fetcher`` is ``None``. On that path it must do no
+    other conversation-window work: a reader expecting the ``None``-fetcher
+    branch to be a complete short-circuit would be surprised to find the
+    lazy ``resolve_conversation_window_config`` cache populated by a turn
+    that never built a window.
+
+    ``_conversation_window_config`` is the observable witness — the cache
+    slot the resolver populates. It starts at its ``None`` class default;
+    on the unwired path it must *stay* ``None``. (The test is white-box by
+    necessity: the resolved config is discarded on this path, so the only
+    difference a fix makes is the cache slot itself.)
+
+    Regression guard for the RFC 0034 PR 3 review finding that the resolve
+    ran *before* the ``_history_fetcher is None`` check — harmless work,
+    but work the short-circuit implies it skips. Pairs with
+    ``test_unwired_fetcher_degrades_to_current_event_only`` (seed shape);
+    this test pins the *absence of side effects* on the same path.
+    """
+    provider = _RecordingProvider(
+        replies=['```json\n[{"action_type": "do_nothing", "payload": {}}]\n```'],
+    )
+    agent = await _make_agent(provider)
+    # Deliberately no agent.set_history_fetcher(...) — the unwired path.
+
+    await agent.on_event(_dm_event("hello", message_id="m1"))
+
+    assert agent._conversation_window_config is None, (
+        "unwired short-circuit must resolve no conversation-window config"
+    )

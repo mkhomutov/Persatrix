@@ -47,10 +47,13 @@ class _ConversationWindowMixin:
     # ``None`` until then (and on task-only / partial-init test paths):
     # ``_build_seed_messages`` then seeds with the current event alone.
     _history_fetcher: ChannelHistoryFetcher | None = None
-    # Resolved lazily from ``config`` on the first turn and cached.  The
-    # config dict is immutable after construction, so one lazy resolve is
-    # equivalent to resolving at construction (RFC 0034 PR plan §PR 3)
-    # while keeping the runtime ``__init__`` under the file-size cap.
+    # Resolved lazily — and cached — on the first turn that actually
+    # builds a window (i.e. with a fetcher wired); the unwired
+    # short-circuit in ``_build_seed_messages`` resolves nothing, since
+    # the resolved config would only be discarded. The config dict is
+    # immutable after construction, so one lazy resolve is equivalent to
+    # resolving at construction (RFC 0034 PR plan §PR 3) while keeping the
+    # runtime ``__init__`` under the file-size cap.
     _conversation_window_config: ConversationWindowConfig | None = None
 
     def set_history_fetcher(self, fetcher: ChannelHistoryFetcher) -> None:
@@ -76,12 +79,16 @@ class _ConversationWindowMixin:
         one (task-only test paths, partial init) the seed degrades to the
         current event alone, identical to pre-RFC-0034 behaviour.
         """
+        # The ``None``-fetcher check runs first so the short-circuit is
+        # total: an unwired persona resolves no conversation-window config
+        # (it would only be discarded — the config feeds nothing but the
+        # ``build_conversation_messages`` call below).
+        if self._history_fetcher is None:
+            return [{"role": "user", "content": current_user_message}]
         if self._conversation_window_config is None:
             self._conversation_window_config = resolve_conversation_window_config(
                 self.config,
             )
-        if self._history_fetcher is None:
-            return [{"role": "user", "content": current_user_message}]
         return await build_conversation_messages(
             event=event,
             agent_id=self.agent_id,
