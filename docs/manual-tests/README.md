@@ -37,6 +37,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CHANNEL-005](MT-CHANNEL-005.md) | DM canonicalization round-trip | Active |
 | [MT-CHANNEL-006](MT-CHANNEL-006.md) | Channel deletion + cascade (REST DELETE pair) | Active |
 
+## Session
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-SESSION-001](MT-SESSION-001.md) | `PERSATRIX_SESSION_ID` cross-process write contract | Active |
+
 ## Config
 
 | ID | Title | Status |
@@ -51,6 +57,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-PERSONA-002](MT-PERSONA-002.md) | Persona handles an inbound channel message and produces a logged response | Active |
 | [MT-PERSONA-003](MT-PERSONA-003.md) | Empty-context TICK short-circuit suppresses LLM calls (RFC 0017 §F) | Active |
 | [MT-PERSONA-004](MT-PERSONA-004.md) | Persona does not adopt user-name in first person (grounding clause) | Active |
+| [MT-PERSONA-CONVERSATION-001](MT-PERSONA-CONVERSATION-001.md) | Persona conversational continuity (DM) | Draft |
 
 ## Chat
 
@@ -69,6 +76,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-MEMORY-002](MT-MEMORY-002.md) | Relationship memory: trust score updates after N exchanges | Active |
 | [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Complete |
 | [MT-MEMORY-004](MT-MEMORY-004.md) | Memory injection token budget: per-event bound holds (RFC 0017 §B) | Active |
+| [MT-MEMORY-005](MT-MEMORY-005-dementia-test.md) | Persona Memory — Dementia Test | Draft |
 
 ## Cost
 
@@ -101,6 +109,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.2.2 | [v0.2.2-execution-report.md](v0.2.2-execution-report.md) | ✅ Complete |
 | v0.2.3 | [v0.2.3-execution-report.md](v0.2.3-execution-report.md) | ✅ Complete |
 | v0.3.0 | [v0.3.0-execution-report.md](v0.3.0-execution-report.md) | ✅ Complete |
+| v0.3.1 | [v0.3.1-execution-report.md](v0.3.1-execution-report.md) | 🔄 In progress |
 
 ---
 
