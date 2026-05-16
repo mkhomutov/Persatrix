@@ -64,6 +64,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .channel_validation import (
     parse_channel_timestamp,
     validate_channel_message_dict,
@@ -214,6 +215,9 @@ async def _replay_channel_history_inner(
     """
     base = orchestrator_url.rstrip("/")
     timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SECONDS)
+    history_fetcher = HttpChannelHistoryFetcher(
+        session=session, orchestrator_url=orchestrator_url, timeout=timeout,
+    )
 
     channels = await _fetch_channel_list(session, base, timeout)
     if channels is None:
@@ -234,9 +238,7 @@ async def _replay_channel_history_inner(
             # Agent is not a member — skip without fetching history.
             continue
 
-        messages = await _fetch_channel_history(
-            session, base, channel_id, limit, timeout,
-        )
+        messages = await history_fetcher.fetch(channel_id, limit=limit)
         if messages is None:
             continue
         counts["channels"] += 1
@@ -347,41 +349,6 @@ async def _fetch_channel_membership(
     if not isinstance(members, list):
         return []
     return members
-
-
-async def _fetch_channel_history(
-    session: aiohttp.ClientSession,
-    base: str,
-    channel_id: str,
-    limit: int,
-    timeout: aiohttp.ClientTimeout,
-) -> list[dict] | None:
-    """``GET /api/v1/channels/{id}/messages?limit=N`` → message list,
-    or ``None`` on error."""
-    url = (
-        f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
-        f"/messages?limit={int(limit)}"
-    )
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                logger.warning(
-                    "channels: catch-up history %s returned HTTP %d: %s",
-                    channel_id, resp.status, body[:256],
-                )
-                return None
-            data = await resp.json()
-    except Exception as exc:
-        logger.warning(
-            "channels: catch-up history %s failed: %s",
-            channel_id, exc,
-        )
-        return None
-    messages = data.get("messages")
-    if not isinstance(messages, list):
-        return []
-    return messages
 
 
 def _resolve_respond_policy(
