@@ -195,7 +195,8 @@ Items below are populated as PRs are reviewed. Per [.github/copilot-instructions
 
 ##### From PR 1 review
 
-_None recorded at plan-authoring time. Add findings here if surfaced post-merge._
+- **`fetch` can raise on a successful-but-malformed response.** `HttpChannelHistoryFetcher.fetch` reads `data.get("messages")` *outside* the `try` block that wraps the request and `resp.json()`. A 2xx response whose JSON body is not an object (a bare array, string, number, or `null`) makes that attribute lookup raise `AttributeError`, which escapes `fetch` instead of degrading to `[]` the way a `dict` with an unusable `messages` field does. PR 1 lifted the helper verbatim, so the gap is pre-existing and was preserved deliberately (PR 1 is a no-behaviour-change refactor). **Fix**: move the `data.get` / `isinstance` shape guard inside the request `try` so a request that succeeds with an unusable body degrades to `[]` and the "never raises across the seam" intent holds for the PR 3 conversation-window caller. The gap is pinned under `xfail(strict=True)` by `TestHttpChannelHistoryFetcherTopLevelNonObjectBody` in `tests/unit/python/test_channel_history_fetcher.py` — closing it flips that test to xpass, so this PR must also remove the `xfail` marker.
+- **WARN log prefix `"channels: catch-up history …"` is caller-specific.** Both `logger.warning` strings in `HttpChannelHistoryFetcher.fetch` were lifted verbatim from the catch-up helper and read "catch-up history". Correct while catch-up is the only caller, but once PR 3 wires the persona conversation-window caller a fetch failure on a normal persona turn logs a catch-up-flavoured message, which misleads an operator reading the log. **Fix**: genericize the prefix (e.g. `"channels: history fetch …"`) so it is accurate for both callers. Pure log-string change — confirm no log-scraping alert or dashboard greps the old literal before renaming.
 
 ##### From PR 2 review
 

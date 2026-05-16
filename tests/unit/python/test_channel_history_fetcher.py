@@ -13,6 +13,12 @@ Contract under test:
 * Any HTTP 4xx/5xx or transport error returns ``None`` (logged WARN) —
   never raises. The catch-up call site's ``if messages is None:
   continue`` guard depends on this exact contract.
+* A 2xx response whose JSON body is not an object (a bare array,
+  string, number, or ``null``) is a *known gap*: ``data.get`` runs
+  outside the request ``try``, so ``fetch`` raises ``AttributeError``
+  instead of degrading to ``[]``. Pinned under ``xfail`` by
+  :class:`TestHttpChannelHistoryFetcherTopLevelNonObjectBody`; RFC 0034
+  PR 4 closes it.
 * The default-constructed fetcher uses the 10s per-request timeout the
   catch-up path uses today.
 * A duck-typed fake satisfies the :class:`ChannelHistoryFetcher`
@@ -225,6 +231,57 @@ class TestHttpChannelHistoryFetcherMalformedPayload:
             messages = await fetcher.fetch("c1", limit=50)
 
         assert messages == []
+
+
+class TestHttpChannelHistoryFetcherTopLevelNonObjectBody:
+    """A 2xx response whose JSON body is *not* an object — a bare
+    array, string, number, or ``null`` — is a known gap in the lifted
+    contract.
+
+    ``HttpChannelHistoryFetcher.fetch`` reads ``data.get("messages")``
+    *outside* the ``try`` that wraps the request and ``resp.json()``. A
+    non-``dict`` ``data`` makes that attribute lookup raise
+    ``AttributeError``, which escapes ``fetch`` instead of degrading to
+    ``[]`` the way a ``dict`` with a bad ``messages`` field does (see
+    :class:`TestHttpChannelHistoryFetcherMalformedPayload`).
+
+    PR 1 is a verbatim lift of ``_fetch_channel_history`` and changes
+    no behaviour, so the gap is preserved as-is. The *intended*
+    contract — a request that succeeds but carries an unusable body
+    degrades to ``[]`` and never raises across the seam — is asserted
+    here under ``xfail(strict=True)``: the test xfails today and will
+    xpass the moment the shape guard moves inside the ``try``, so
+    RFC 0034 PR 4 cannot close the gap without also removing this
+    marker. Tracked in ``docs/rfcs/0034-pr-plan.md`` PR 4,
+    "From PR 1 review".
+    """
+
+    @pytest.mark.xfail(
+        raises=AttributeError,
+        strict=True,
+        reason="known gap — data.get() runs outside the request try; "
+        "RFC 0034 PR 4 moves the shape guard inside so a non-object "
+        "2xx body degrades to [] instead of raising AttributeError",
+    )
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param([{"id": "m1"}], id="top-level-array"),
+            pytest.param("oops", id="top-level-string"),
+            pytest.param(7, id="top-level-int"),
+            pytest.param(None, id="top-level-null"),
+        ],
+    )
+    async def test_non_object_body_degrades_to_empty_list(self, body):
+        async def handler(_request: web.Request) -> web.StreamResponse:
+            return web.json_response(body)
+
+        async with _serve(handler) as base_url, \
+                aiohttp.ClientSession() as session:
+            fetcher = HttpChannelHistoryFetcher(
+                session=session, orchestrator_url=base_url,
+            )
+            assert await fetcher.fetch("c1", limit=50) == []
 
 
 class TestHttpChannelHistoryFetcherFailures:
