@@ -43,7 +43,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Agent Identity, Security & Sandboxing | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | ⚠️ Partially Implemented (Phases 1–2; PRs 1 [#233](https://github.com/mkhomutov/Persatrix/pull/233), 1b [#234](https://github.com/mkhomutov/Persatrix/pull/234), 1c [#236](https://github.com/mkhomutov/Persatrix/pull/236), 2 [#244](https://github.com/mkhomutov/Persatrix/pull/244), 3 [#253](https://github.com/mkhomutov/Persatrix/pull/253), 4 (this PR) merged — audit logger + secret redactor + orchestrator wiring + RedactStruct hardening + audit metrics + RateLimiter + CircuitBreaker + REST/gRPC middleware + unquarantine endpoint + InputSanitizer + Go canonical patterns + Python mirror + `<external_data>` envelope wrapping + tag-escape hardening + PR 4 review follow-ups (typed depth-marker sentinel; deterministic ticker test seam; `VerifyChain` exported helper; `looksLikeSHA256` → `hex.DecodeString`; `Emit` write-alloc reduction; generic-secret trailing-quote nit; GitHub/GCP/Slack/Stripe redactor patterns; `RedactStruct` benchmark; coverage-gap tests; PR #234 N-1/N-2/N-3 + PR #236 L-1/L-2/L-3/L-5 dispatched). Phases 3–4 deferred to v0.4.0 — see [RFC 0009 Implementation Notes (v0.3.0)](docs/rfcs/0009-security-sandboxing.md#implementation-notes-v030) for v0.3.0 deviations.) |
 | 0010 | Sub-Agent Spawning | v0.4.0 | Not yet written |
 | [0011](docs/rfcs/0011-channels-bridges.md) | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) | ⚠️ Partially Implemented (internal channels — external bridges deferred to v0.5.0) |
-| 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) | Not yet written |
+| [0012](docs/rfcs/0012-protocols-organizations.md) | Protocols & Organizations | v0.4.0 (Phases 1–3) + v0.5.0 (Phases 4–5) | 📋 Proposed |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | v0.5.0 | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | v0.4.0 | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | v0.5.0 | 📋 Proposed |
@@ -545,7 +545,7 @@ Phase 1 is small, self-contained, and high-leverage — a now-anchor in the syst
 | [0007](docs/rfcs/0007-conditional-looped-workflow-control-flow.md) | Conditional & Looped Workflow Control Flow | Full RFC (retargeted from v0.3.0 on 2026-05-06) | 📋 Proposed |
 | [0009](docs/rfcs/0009-security-sandboxing.md) | Security & Sandboxing | Phases 3–4 (identity tokens, HITL gates) | 📋 Proposed |
 | 0010 | Sub-Agent Spawning | Full RFC | Not yet written |
-| 0012 | Protocols + Organizations | Partial: org topologies, authority, spawning | Not yet written |
+| [0012](docs/rfcs/0012-protocols-organizations.md) | Protocols & Organizations | Phases 1–3: org model, authority axis, clearance, cross-context influence | 📋 Proposed |
 | [0014](docs/rfcs/0014-agent-skill-registry-lifecycle.md) | Agent Skill Registry & Lifecycle | Full RFC | 📋 Proposed |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | Phases 2–4 (commitments, REMINDER event, duration calibration) | 📋 Proposed |
 | [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | Full RFC (supersedes draft RFC 0025) | 📋 Proposed |
@@ -607,7 +607,7 @@ v0.4.0 complete
 | RFC | Title | Target scope | Status |
 |-----|-------|--------------|--------|
 | 0011 | Channels + Bridges | External bridges | Not yet written |
-| 0012 | Protocols + Organizations | Remainder (meeting/negotiation protocols) | Not yet written |
+| [0012](docs/rfcs/0012-protocols-organizations.md) | Protocols & Organizations | Phases 4–5: meeting/negotiation protocols, inter-org federation | 📋 Proposed |
 | [0013](docs/rfcs/0013-legal-ethical-compliance.md) | Legal, Ethical & Regulatory Compliance | Full RFC | 📋 Proposed |
 | [0015](docs/rfcs/0015-process-automation-pattern-extraction.md) | Process Automation & Pattern Extraction | Full RFC | 📋 Proposed |
 
