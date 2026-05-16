@@ -3,10 +3,10 @@ id: RFC-0026
 title: Declarative Facts Tier
 summary: New persona-memory tier for canonical, dated, source-attributed facts — complements episodic recall and feeds RFC 0027 consolidation.
 type: feature
-status: proposed
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-01
-target: v0.3.x
+target: v0.3.1
 depends_on:
   - RFC-0005
   - RFC-0008
@@ -19,10 +19,10 @@ depends_on:
 # RFC 0026 — Declarative Facts Tier
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
-**Target**: v0.3.x
+**Target**: v0.3.1
 **Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0013, RFC 0017, RFC 0020
 
 ---
@@ -238,10 +238,25 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 
 ## Decision / Next Steps
 
-1. Land the [memory-quality-roadmap.md](../memory-quality-roadmap.md) ratification PR (carries this RFC's motivation and links).
-2. After RFC 0020 closes (PRs 5–7), open `feature/v03x-rfc0026-pr-plan` with the per-PR scaffold.
-3. Phase 1 implementation PR opens after the RFC 0026 PR plan merges.
-4. RFC 0017 OQ #1 (tier-budget split) gets its facts-slice addendum at Phase 2 land time.
+**Implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md),
+[0026-pr-plan.md](0026-pr-plan.md)). Status flipped to `✅ Implemented`
+on the merge of PR 6 (RFC close); all three phases shipped under the
+v0.3.1 umbrella.
+
+**Already done:**
+
+1. The [memory-quality-roadmap.md](../memory-quality-roadmap.md)
+   ratification PR landed (carries this RFC's motivation and links).
+2. `docs/rfcs/0026-pr-plan.md` authored — Phases 1–3 fully fleshed out.
+3. Phase 1 (schema + `FactStore` + erasure primitive + extractor +
+   predicate allowlist + audit), Phase 2 (recall + `MemoryBudget` tier
+   slot + config), and Phase 3 (reinforcement + retraction + tier
+   provenance) implemented; review follow-ups folded in across PRs
+   5a–5e of [0026-pr-plan.md](0026-pr-plan.md).
+4. [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md)
+   expected-outcomes updated for the referential-recall legs
+   (Legs 1, 2, 5). The empirical re-run is owned by
+   [v0.3.1-plan Phase 4 PR 1](../v0.3.1-plan.md#phase-4--v031-release-prep-execution).
 
 ## Related Documentation
 

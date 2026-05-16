@@ -1211,8 +1211,10 @@ No code changes; doc-only.
 
 #### PR checklist
 
-- [ ] RFC 0026 status = `✅ Implemented`.
-- [ ] [v0.3.1-plan Master Progress Overview](../v0.3.1-plan.md#master-progress-overview) row 2 → ✅.
+- [x] RFC 0026 status = `✅ Implemented`.
+- [x] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) RFC 0026 row → `✅ Implemented`; `Last updated` refresh.
+- [x] [v0.3.1-plan Master Progress Overview](../v0.3.1-plan.md#master-progress-overview) row 2 → 🔀 PR open (closeout).
+- [x] [Progress Overview](#progress-overview) PR 5e row → ✅ Merged; PR 6 row → 🔀 PR open.
 
 ---
 
@@ -1252,8 +1254,8 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 5b | Review follow-ups slice 2 — PR 2 review (envelope parse observability) | `feature/v031-rfc0026-followups-pr2` | ✅ Merged | [#345](https://github.com/mkhomutov/Persatrix/pull/345) | 2026-05-15 |
 | 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ✅ Merged | [#346](https://github.com/mkhomutov/Persatrix/pull/346) | 2026-05-15 |
 | 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ✅ Merged | [#347](https://github.com/mkhomutov/Persatrix/pull/347) | 2026-05-15 |
-| 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | 🔀 PR open | — | — |
-| 6 | RFC close | `feature/v031-rfc0026-close` | ⬜ Not started | — | — |
+| 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ✅ Merged | [#348](https://github.com/mkhomutov/Persatrix/pull/348) | 2026-05-15 |
+| 6 | RFC close | `feature/v031-rfc0026-close` | 🔀 PR open | [#359](https://github.com/mkhomutov/Persatrix/pull/359) | — |
 
 ---
 
