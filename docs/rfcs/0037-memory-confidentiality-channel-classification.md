@@ -235,11 +235,13 @@ A fixed, totally ordered lattice of four levels:
 | `secret` | 3 | Highly sensitive; disclosure is a material harm. |
 
 The only operations the system needs are the total order (`a ≤ b`) and
-`max`. A single canonical helper — `classification_rank(level) -> int` —
-is defined once (Go and Python sides) and every comparison goes through
-it; no code compares level strings directly. An unknown or absent level
-resolves to the default `internal`, never to `public`, so a
-mis-configuration fails **closed** (more restrictive), not open.
+`max`. A canonical helper — `classification_rank(level) -> int` — is the
+single source of the ordering: a Go helper and a Python helper, plus the
+SQL-side form §F needs (a registered SQLite function or an inline
+`CASE`). All three encode this one ordering and every comparison goes
+through one of them; no code compares level strings directly. An unknown
+or absent level resolves to the default `internal`, never to `public`,
+so a mis-configuration fails **closed** (more restrictive), not open.
 
 ### B. Channel classification
 
@@ -261,13 +263,17 @@ channels:
     members: [ember-owl]
 ```
 
-**Channel store.** Channel-store schema migration **v6** (RFC 0035 landed
-v4, RFC 0036 lands v5; this is the next `case 6:` arm in
-`applyMigration`, a `migrateV5ToV6` function, `channelStoreSchemaVersion`
-bumped to 6, `user_version` stamped inside the migration transaction)
-adds a `classification TEXT NOT NULL DEFAULT 'internal'` column to the
-`channels` table ([`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go)).
-The migration backfills every existing channel to `internal`.
+**Channel store.** A channel-store schema migration adds a
+`classification TEXT NOT NULL DEFAULT 'internal'` column to the
+`channels` table ([`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go)):
+a new `case` arm in `applyMigration` with its own `migrateV(N-1)ToVN`
+function, `channelStoreSchemaVersion` bumped, and `user_version` stamped
+inside the migration transaction. The store is at **v3** today; RFC 0035
+and RFC 0036 each land a migration ahead of this one (projected **v4**
+and **v5** respectively — see Decision / Next Steps for the sequencing),
+so this RFC's migration is projected **v6**. If the ordering shifts, the
+version number follows; the migration discipline does not. The migration
+backfills every existing channel to `internal`.
 
 - **Group channels** load their declared classification into the
   `channels` row when config is applied.
@@ -470,6 +476,16 @@ with one additional, non-optional clause:
        <= classification_rank(?)        -- the acting channel's level
 ```
 
+`classification_rank` here is the §A lattice ordinal evaluated SQL-side.
+It is **not** the Go/Python helper called from SQL — SQLite has no
+implicit access to that. It is realised as either a SQLite
+application-defined function registered on the channel-store connection
+at open time, or, equivalently, an inline `CASE` expression over the four
+level strings. Whichever form is chosen, it encodes the *same* §A
+ordering as the Go and Python `classification_rank` helpers — the order
+is defined once conceptually (§A) and no code path, SQL included,
+compares level strings directly.
+
 The acting channel's classification is bound server-side from a new
 required parameter on the recall endpoint
 (`POST /api/v1/personas/{id}/recall`), and the `recall_channel_messages`
@@ -593,8 +609,9 @@ on its own; §E projections only make it less blunt.
 1. **Lattice helper** — `classification_rank` in Go and Python, single
    source each side; fail-closed on unknown input.
 2. **Channel classification** — `classification` field in
-   `config/channels.yaml` + `schemas/channel.schema.json`; channel-store
-   migration **v6** adding `channels.classification`; DM-creation and
+   `config/channels.yaml` + `schemas/channel.schema.json`; the channel-store
+   classification migration (projected **v6** — §B) adding
+   `channels.classification`; DM-creation and
    thread-creation stamping (§B); `classification` on `ChannelMessageEvent`
    (`proto/task.proto`) and the dispatch path.
 3. **Protection level** — `agents/memory/migrations.py` migration adding
@@ -642,7 +659,7 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_schema.go` | v6 migration: `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
+| Go orchestrator | `internal/channels/sqlite_schema.go` | classification migration (projected v6 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
 | Go orchestrator | `internal/channels/sqlite.go` (DM/thread creation) | Stamp classification on `GetOrCreateDM` and thread creation (§B) |
 | Go orchestrator | `internal/channels/sqlite_search.go` | §F acting-channel classification clause on the RFC 0036 scoped query |
 | Go orchestrator | `internal/server/channel_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint |
@@ -679,7 +696,8 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
     join.
   - The §G tripwire fires on a verbatim span and not on a benign
     message; the audit event carries metadata and not the text.
-- **Migration tests**: v5 → v6 adds `channels.classification` and
+- **Migration tests**: the classification migration (projected v5 → v6 —
+  §B) adds `channels.classification` and
   backfills to `internal`; the memory migration adds the columns and
   `memory_projections` table and backfills `protection_level` from
   recorded source channels where present, `internal` otherwise; both
@@ -734,12 +752,20 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 2. Sequence after [RFC 0036](0036-persona-message-recall.md) so the §F
    recall filter has a query to retrofit; Phase 1 steps 1–4 may proceed
    in parallel with RFC 0036.
-3. Implement Phase 1 (the deterministic boundary), then Phase 2
+3. **Land [RFC 0038](0038-concurrent-context-awareness-relay.md) §B's
+   single-channel-turn enforcement together with or ahead of this RFC's
+   Phase 1.** §D's structural guarantee is contingent on it (see the §D
+   implementation note): until single-channel-turn is code-enforced, a
+   turn can publish cross-channel ungated, and the §G tripwire is the
+   only — destination-aware but logging-only — backstop. This is a
+   sequencing dependency on RFC 0038 §B specifically, not on all of
+   RFC 0038.
+4. Implement Phase 1 (the deterministic boundary), then Phase 2
    (projections — the "learn from it" affordance), then Phase 3 (the
    tripwire). Phase 1 is safe and shippable without Phases 2–3.
-4. Create `docs/rfcs/0037-pr-plan.md` with PR slices once this RFC is
+5. Create `docs/rfcs/0037-pr-plan.md` with PR slices once this RFC is
    accepted.
-5. Regenerate [INDEX.md](INDEX.md) via `make rfcs`.
+6. Regenerate [INDEX.md](INDEX.md) via `make rfcs`.
 
 ## Related Documentation
 

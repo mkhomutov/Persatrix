@@ -228,8 +228,17 @@ by accident.
 ### B. The organization model
 
 An **organization** is a named graph declared in
-`config/organizations.yaml` (today a commented sketch; this RFC makes it
-real) and validated by a new `schemas/organization.schema.json`.
+`config/organizations.yaml` and validated by a new
+`schemas/organization.schema.json`.
+
+The file today holds only a commented-out sketch of a *different* shape —
+a singular `organization:` block with a nested `structure:` tree, under
+`schema_version: "0.2"`. This RFC **replaces** that sketch with the
+shape below: a plural `organizations:` list, an explicit `roles:` list
+carrying the clearance/authority ceilings (§G, §D), and a flat `members:`
+list whose `manages:` edges reference member ids. The Phase 1 schema PR
+removes the stale sketch rather than extending it; the two shapes are not
+compatible and only one (this one) is ever validated.
 
 ```yaml
 organizations:
