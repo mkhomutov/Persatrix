@@ -227,6 +227,56 @@ class TestSplitCombinedResponse:
         with pytest.raises(FactsParseError):
             split_combined_response("oh no")
 
+    def test_strips_json_code_fence(self) -> None:
+        """ISSUE-0054 — the model wraps the envelope in a ```` ```json ````
+        markdown fence even though the prompt asks for a bare object.
+        An unstripped fence makes the whole envelope unparseable: the
+        raw fenced blob commits as the summary and zero facts extract.
+        The fence must be unwrapped before parsing."""
+        raw = (
+            "```json\n"
+            + json.dumps({
+                "summary": "Bob mentioned his daughter Mira.",
+                "facts": [
+                    {
+                        "subject": "bob",
+                        "predicate": "has_child_named",
+                        "object": "Mira",
+                    },
+                ],
+            })
+            + "\n```"
+        )
+        summary, facts_text = split_combined_response(raw)
+        assert summary == "Bob mentioned his daughter Mira."
+        assert json.loads(facts_text) == [
+            {
+                "subject": "bob",
+                "predicate": "has_child_named",
+                "object": "Mira",
+            },
+        ]
+
+    def test_strips_bare_code_fence(self) -> None:
+        """A fence with no language tag (```` ``` ```` then a newline)
+        is unwrapped the same way as a ```` ```json ```` fence."""
+        raw = "```\n" + json.dumps({"summary": "Hello."}) + "\n```"
+        summary, facts_text = split_combined_response(raw)
+        assert summary == "Hello."
+        assert json.loads(facts_text) == []
+
+    def test_strips_fence_with_trailing_whitespace(self) -> None:
+        """LLMs occasionally pad the closing fence with trailing
+        newlines / spaces — the unwrap tolerates it."""
+        raw = (
+            "```json\n"
+            + json.dumps({"summary": "Padded."})
+            + "\n```\n  \n"
+        )
+        summary, facts_text = split_combined_response(raw)
+        assert summary == "Padded."
+        assert json.loads(facts_text) == []
+
 
 # ─── store_extracted_facts ──────────────────────────────────
 

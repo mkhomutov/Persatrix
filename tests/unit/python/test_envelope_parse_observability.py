@@ -211,6 +211,20 @@ class TestSplitCombinedResponseReason:
             split_combined_response("")
         assert exc_info.value.reason is None
 
+    def test_fenced_truncated_envelope_sets_reason_truncated(self) -> None:
+        """ISSUE-0054 — once the markdown fence is unwrapped, a fenced
+        response truncated mid-array is still recognised as an
+        envelope-shaped failure (``reason=truncated``).  Before the
+        unwrap the leading backtick made ``looks_like_envelope`` false,
+        so the truncation was silently mis-routed to the plain-prose
+        backward-compat path and never counted."""
+        truncated = (
+            '```json\n{"summary": "Bob said hi.", "facts": [{"subject": "bob",'
+        )
+        with pytest.raises(FactsParseError) as exc_info:
+            split_combined_response(truncated)
+        assert exc_info.value.reason == "truncated"
+
 
 # ─── Caller-site counter emission ─────────────────────────────
 
@@ -343,6 +357,55 @@ class TestCallerSiteCounter:
             )
             assert result[0] == "Bob said hi."
             assert result[1] is False
+            assert _envelope_parse_failed_points(reader) == []
+        finally:
+            await metrics_mod.shutdown()
+
+    async def test_fenced_envelope_extracts_facts_and_stays_quiet(self):
+        """ISSUE-0054 headline regression — a well-formed envelope the
+        model wrapped in a ```` ```json ```` fence.
+
+        Pre-fix: :func:`split_combined_response` saw the leading
+        backtick, failed ``json.loads``, raised ``FactsParseError``
+        with ``reason=None``, and the caller committed the raw fenced
+        blob as the summary and returned ``facts_raw=None`` — so
+        :func:`finalize_closed_interaction` never dispatched the facts
+        half and the ``facts`` table stayed empty.
+
+        Post-fix: the fence is unwrapped, the caller returns the parsed
+        prose summary plus the serialised facts list, and the envelope
+        counter stays quiet (a fenced *well-formed* envelope is a green
+        response, not a parse failure)."""
+        reader, metrics_mod = _build_meter()
+        try:
+            envelope = (
+                "```json\n"
+                + json.dumps({
+                    "summary": "Bob said hi.",
+                    "facts": [
+                        {
+                            "subject": "bob",
+                            "predicate": "has_name",
+                            "object": "Bob",
+                        },
+                    ],
+                })
+                + "\n```"
+            )
+            summary, failed, facts_raw = await summarize_closed_interaction(
+                _make_text_client(envelope),
+                "test-agent",
+                _multi_turn_interaction(),
+            )
+            assert summary == "Bob said hi."
+            assert failed is False
+            assert facts_raw is not None, (
+                "fenced envelope must yield a non-None facts payload so "
+                "finalize_closed_interaction dispatches the facts half"
+            )
+            assert json.loads(facts_raw) == [
+                {"subject": "bob", "predicate": "has_name", "object": "Bob"},
+            ]
             assert _envelope_parse_failed_points(reader) == []
         finally:
             await metrics_mod.shutdown()

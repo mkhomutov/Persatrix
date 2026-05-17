@@ -92,6 +92,7 @@ def _make_combined_client(
     summary: str = SUMMARY_TEXT,
     facts: list[dict] | None = None,
     facts_raw: str | None = None,
+    fenced: bool = False,
 ) -> LLMClient:
     """Mock LLM that returns ``{"summary": ..., "facts": [...]}`` on the
     summariser call (``max_tokens == 256``).
@@ -99,12 +100,19 @@ def _make_combined_client(
     ``facts_raw`` overrides the serialised facts payload — used by the
     malformed-JSON path test to inject a broken ``facts`` block while
     keeping the rest of the JSON envelope valid.
+
+    ``fenced`` wraps the envelope in a ```` ```json ... ``` ```` markdown
+    code fence — the ISSUE-0054 reproduction shape (the live close-path
+    model wraps its JSON output in a fence even though the prompt asks
+    for a bare object).
     """
     if facts_raw is None:
         facts_raw = json.dumps(facts if facts is not None else [])
     payload = (
         '{"summary": ' + json.dumps(summary) + ', "facts": ' + facts_raw + "}"
     )
+    if fenced:
+        payload = "```json\n" + payload + "\n```"
 
     mock_provider = AsyncMock()
 
@@ -273,6 +281,63 @@ class TestExtractorPartialFailure:
                 await agent.close_memory()
         finally:
             await metrics_mod.shutdown()
+
+
+# ─── ISSUE-0054: markdown-fenced envelope ───────────────────
+
+
+@pytest.mark.asyncio
+class TestExtractorFencedEnvelope:
+    """ISSUE-0054 — the live v0.3.1 reproduction.
+
+    The close-path LLM returns the combined envelope wrapped in a
+    ```` ```json ... ``` ```` markdown fence.  In the shipped build the
+    fence was never unwrapped, so :func:`split_combined_response` saw
+    the leading backtick, failed ``json.loads``, and the caller fell
+    through its backward-compat branch:
+
+    * the raw fenced blob committed verbatim as ``episodes.summary``
+      (the observed ```` ```json ````-prefixed summaries), and
+    * ``facts_raw`` came back ``None``, so the facts dispatch was
+      gated out and the ``facts`` table stayed empty across the whole
+      MT-MEMORY-005 run.
+
+    This test drives the full close path with a fenced response and
+    pins the post-fix surface: clean prose summary, facts persisted.
+    """
+
+    async def test_fenced_envelope_persists_summary_and_facts(self):
+        agent = await _make_agent(
+            _make_combined_client(
+                summary=SUMMARY_TEXT, facts=FACTS_PAYLOAD, fenced=True,
+            ),
+        )
+        try:
+            peer = "bob"
+            await send_n_turns(agent, peer, 4)
+            await agent.on_event(AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": "thanks, bye"},
+                sender_id=peer,
+                metadata={"chat_end": True},
+            ))
+            await drain(agent)
+
+            # Summary half — clean prose, no ```` ```json ```` fence.
+            summary = await episode_summary(agent)
+            assert summary == SUMMARY_TEXT
+            assert "```" not in summary
+            assert summary != SUMMARY_UNAVAILABLE_TEXT
+            assert summary != SUMMARY_PENDING_TEXT
+
+            # Facts half — both tuples landed in FactStore.
+            live = await agent.memory.facts.recall(subject="bob")
+            predicates = {f.predicate: f for f in live}
+            assert set(predicates.keys()) == {"has_child_named", "prefers"}
+            assert predicates["has_child_named"].object == "Mira"
+            assert predicates["prefers"].object == "tea"
+        finally:
+            await agent.close_memory()
 
 
 # ─── PR #340 deep-review S2: empty-summary envelope ─────────
