@@ -79,9 +79,13 @@ def _strip_code_fence(text: str) -> str:
     The truncated case (opening fence, no closing fence) is handled by
     dropping just the opening line so the surviving — possibly
     truncated — JSON body is still recognised as envelope-shaped by the
-    ``looks_like_envelope`` check.  Text with no leading fence, or a
-    single-line fence with no newline after the opening marker, is
-    returned unchanged.
+    ``looks_like_envelope`` check.  Text with no leading fence is
+    returned unchanged.  A degenerate single-line fence with no newline
+    at all is also returned as-is — the rare ``` ```json {…}``` ``` shape
+    then routes through the caller's ``looks_like_envelope`` check and
+    falls to the backward-compat path; in practice the close-path model
+    always emits a newline after the opening marker, so this is an
+    accepted gap rather than a handled case.
     """
     if not text.startswith("```"):
         return text

@@ -380,3 +380,7 @@ With this defect:
 > close-path `sqlite3.OperationalError` concurrency bug flagged in the
 > prior two re-runs did not surface; it is untouched by this fix and
 > still warrants its own ticket.
+
+> 2026-05-17 — the adjacent close-path `sqlite3.OperationalError`
+> concurrency bug noted in the re-runs above is now tracked separately
+> as [ISSUE-0055](ISSUE-0055-close-path-sqlite-commit-race-catchup-storm.md).
