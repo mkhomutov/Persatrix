@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0054
-summary: RFC 0026 facts tier extracts zero facts at interaction close. Three chained close-path bugs — markdown code fence (fixed a6c3332), action-envelope-only input with no message body (fixed 71a9045), and a max_tokens=256 cap on the combined summarise+extract call that truncates any multi-fact envelope mid-JSON so it never parses (open)
-status: in_progress
+summary: RFC 0026 facts tier extracts zero facts at interaction close. Three chained close-path bugs — markdown code fence (fixed a6c3332), action-envelope-only input with no message body (fixed 71a9045), and a max_tokens=256 cap on the combined summarise+extract call that truncated any multi-fact envelope mid-JSON so it never parsed (fixed 90c0d5b). All three fixed and verified live — facts tier extracts and persists facts at interaction close.
+status: resolved
 severity: high
 area: agents/persona_runtime
 created: 2026-05-17
+closed: 2026-05-17
 refs:
   - docs/rfcs/0026-declarative-facts-tier.md
   - docs/manual-tests/MT-MEMORY-005-dementia-test.md
@@ -310,3 +311,72 @@ With this defect:
 > replayed scope (`dm:ember-owl:my-custom-user`, backfilled to
 > `[summary pending]`). Still a separate close-path concurrency bug
 > under catch-up-storm load, worth its own ticket.
+
+> 2026-05-17 — **RESOLVED. Live re-run after the token-cap fix
+> ([commit 90c0d5b](https://github.com/mkhomutov/Persatrix/commit/90c0d5b),
+> `SUMMARIZATION_MAX_OUTPUT_TOKENS` 256 → 1024). The RFC 0026 facts
+> tier now extracts and persists facts at interaction close.**
+>
+> *Automated.* The targeted close-path suites are green — 85 tests:
+> 38 integration (`test_facts_extractor_close.py`,
+> `test_facts_extractor_message_content.py`,
+> `test_summarize_on_close_phases.py`, `test_interaction_multi_turn.py`)
+> + 47 unit (`test_summarize_close_helpers.py`, `test_extractor.py`,
+> `test_envelope_parse_observability.py`). Includes the new
+> `test_truncated_envelope_returns_summary_failure_not_raw_text`, which
+> pins that an envelope-shaped parse failure routes to the
+> unavailable-summary fallback rather than committing raw broken JSON
+> as the episode summary.
+>
+> *Live.* Docker stack rebuilt from this branch (`agent-ember-owl`
+> image rebuilt; orchestrator + ember-owl brought up). Drove a
+> five-turn establish scenario at `ember-owl` over the REST chat
+> endpoint (`POST /api/v1/agents/ember-owl/chat`, user `issue54-dave`:
+> daughter Mira age 7 / dislikes phone calls, prefers async /
+> budget-spreadsheet commitment / rate-card renegotiation), then sent
+> a later message past the idle window to trigger an RFC 0020 idle-gap
+> close. The agent's `memory.interaction_idle_timeout_sec` was
+> shortened to 60s for the run so the idle window fires in seconds
+> rather than the 600s default — a test-only `config/agents.yaml`
+> change, since reverted; the close-path code under test is unaffected
+> by the timeout value.
+>
+> *Result — both halves fixed.*
+>
+> - **Facts half — fixed.** `SELECT COUNT(*) FROM facts` → **5** after
+>   the close, every row carrying the `source_interaction_id` of the
+>   closed `issue54-dave` interaction:
+>   `(dave, has_child_named, "Mira", 0.95)`,
+>   `(mira, has_age, "7", 0.95)`,
+>   `(dave, dislikes, "phone calls", 0.95)`,
+>   `(dave, prefers, "asynchronous communication", 0.95)`,
+>   `(dave, committed_to, "sending budget spreadsheet tomorrow morning", 0.9)`.
+>   This is precisely the multi-fact envelope (5 tuples) that overran
+>   the old 256-token cap and truncated mid-JSON in the `issue54-carol`
+>   re-run; with the cap at 1024 the envelope fits, parses, and
+>   persists. The agent emitted 5 `fact.store` log lines under one
+>   trace — the "no fact-extraction log lines" symptom is gone.
+> - **Summary half — fixed.** The closed episode's `summary` is clean
+>   448-char prose with **no ` ```json ` fence**, naming Mira, the
+>   async preference, the budget spreadsheet, and the rate-card
+>   renegotiation.
+>
+> No `WARNING` / `ERROR` / `Traceback` lines in the agent's close-path
+> logs — the close ran clean, with no truncation, no envelope-parse
+> failure, and no summary failure.
+>
+> All three bugs in the ISSUE-0054 chain are now fixed and verified
+> live: the markdown fence ([a6c3332](https://github.com/mkhomutov/Persatrix/commit/a6c3332)),
+> the action-envelope-only input
+> ([71a9045](https://github.com/mkhomutov/Persatrix/commit/71a9045)),
+> and the 256-token truncation cap
+> ([90c0d5b](https://github.com/mkhomutov/Persatrix/commit/90c0d5b)).
+> Status → `resolved`. The full five-leg `MT-MEMORY-005` F-1 re-check
+> on the release-candidate tip remains scheduled for the v0.3.1
+> release-prep Track B final pre-tag verification.
+>
+> *Adjacent (unchanged).* This run used a minimal stack (orchestrator
+> + one agent) with no startup catch-up storm, so the separate
+> close-path `sqlite3.OperationalError` concurrency bug flagged in the
+> prior two re-runs did not surface; it is untouched by this fix and
+> still warrants its own ticket.
