@@ -20,7 +20,7 @@ from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
-from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
+from agents.prompt_loader import load_snippet
 
 __all__ = [
     "TEST_IDLE_TIMEOUT_SEC",
@@ -50,10 +50,7 @@ def persona_config(*, agent_id: str = "multi-turn-test-persona") -> dict:
         "role": "Multi-turn integration test persona",
         "type": "persona",
         "max_llm_calls": 5,
-        # Distinct from ``SUMMARIZATION_MAX_OUTPUT_TOKENS`` so the mock
-        # LLM client can route the close-path summariser call apart
-        # from the persona event-loop call by ``max_tokens`` alone.
-        "max_tokens": 4096,
+        "max_tokens": 1024,
         "tools": [],
         "persona": {
             "name": "Multi-Turn Test Agent",
@@ -90,12 +87,15 @@ def do_nothing_client() -> LLMClient:
     response makes the close path fall back to the unavailable-summary
     sentinel (ISSUE-0054), and F-6 now routes single-turn conversational
     closes through the summariser too.  The two call sites are told
-    apart by ``max_tokens``.
+    apart by ``system``: the close-path summariser is the only caller
+    that passes the ``episode-summarizer`` system snippet, so routing
+    on it stays correct regardless of either call's ``max_tokens``.
     """
     mock_provider = AsyncMock()
+    summarizer_system = load_snippet("episode-summarizer")
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
+        if system == summarizer_system:
             return LLMResponse(
                 text=json.dumps(
                     {"summary": "Multi-turn session summary.", "facts": []},
