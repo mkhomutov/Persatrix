@@ -83,6 +83,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # work and trimming the surrounding narrative would erase release-cycle
     # context. Remove this entry once v0.3.0 ships and the plan is archived.
     "docs/v0.3.0-plan.md",
+    # docs/v0.3.1-plan.md is the v0.3.1 master plan — same release-cycle
+    # accumulator pattern as docs/v0.3.0-plan.md above. It crossed the
+    # 3000-word prose cap when the v0.3.1 post-release follow-up flipped the
+    # Status / Completed header and rolled the release-prep and post-release
+    # PRs into the Master Progress Overview. The RFC 0034 amendment was
+    # already split out into docs/v0.3.1-plan-amendment-2026-05-15.md to
+    # hold the line earlier in the cycle; trimming the remaining
+    # release-cycle narrative would erase context. Remove this entry once
+    # v0.3.1 is archived.
+    "docs/v0.3.1-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC

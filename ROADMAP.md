@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-17 (v0.3.1 release-prep PR 4 — final pre-tag verification: automated gate sweep green, Docker stack builds and comes up healthy; v0.3.1 Version Map row flipped to `✅ Released`.)
+> **Last updated**: 2026-05-17 (v0.3.1 released — post-release document update: Current milestone advanced to the published tag, Merged PR History backfilled through #365, release checklist §5 GitHub-Release gates ticked, v0.3.1 master plan flipped to ✅ Complete, manual-tests README Execution Reports row flipped to ✅ Complete.)
 > **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — ✅ Released
-> **Current milestone**: v0.3.1 released — all three RFC workstreams merged and release-prep PRs 1–4 landed; the `v0.3.1` git tag and GitHub Release follow post-merge per [v0.3.1-release-prep-plan.md](docs/v0.3.1-release-prep-plan.md) Phase 5.
+> **Current milestone**: v0.3.1 released ([tag v0.3.1](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.1) pushed 2026-05-17, GitHub Release "Memory Quality" published the same day); v0.3.2 planning next (RFC 0029 Phase 1 `MemoryStore` facade refactor + RFC 0023 LLM-call leasing, sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md)).
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -930,6 +930,42 @@ v0.5.0 complete
 | [#326](https://github.com/mkhomutov/Persatrix/pull/326) | docs(rfcs): YAML front-matter + auto-generated INDEX.md | cross-RFC docs | 2026-05-12 |
 | [#327](https://github.com/mkhomutov/Persatrix/pull/327) | feat(persona): reply-discretion + conversational-pacing prompt snippets | cross-RFC persona | 2026-05-12 |
 | [#328](https://github.com/mkhomutov/Persatrix/pull/328) | chore(release): v0.3.0 — version bump + curated changelog + PR 4 pre-tag verification | v0.3.0 release prep | 2026-05-12 |
+| [#330](https://github.com/mkhomutov/Persatrix/pull/330) | docs(release): post-release follow-up for v0.3.0 | v0.3.0 release prep | 2026-05-12 |
+| [#331](https://github.com/mkhomutov/Persatrix/pull/331) | docs(v0.3.1): re-sequence v0.3.x and open v0.3.1 master plan | v0.3.1 plan | 2026-05-12 |
+| [#332](https://github.com/mkhomutov/Persatrix/pull/332) | docs(v0.3.1): RFC 0026 + RFC 0031 PR plans (Phase 1 combined scaffold) | 0026 + 0031 (PR plans) | 2026-05-12 |
+| [#333](https://github.com/mkhomutov/Persatrix/pull/333) | feat(v031): RFC 0031 PR 1 — rename chat session_id → chat_session_id | 0031 (1/5) | 2026-05-13 |
+| [#334](https://github.com/mkhomutov/Persatrix/pull/334) | docs(rfcs): RFC 0032 stub — channel interaction layer unification | 0032 (RFC) | 2026-05-15 |
+| [#335](https://github.com/mkhomutov/Persatrix/pull/335) | feat(v031): RFC 0031 PR 2 — sessions table + Go session_id columns + PERSATRIX_SESSION_ID | 0031 (2/5) | 2026-05-13 |
+| [#336](https://github.com/mkhomutov/Persatrix/pull/336) | feat(v031): RFC 0031 PR 3 — Python session_id columns + persona-runtime PERSATRIX_SESSION_ID | 0031 (3/5) | 2026-05-13 |
+| [#337](https://github.com/mkhomutov/Persatrix/pull/337) | feat(v031): RFC 0031 PR 4 — Phase 1 review follow-ups | 0031 (4/5) | 2026-05-13 |
+| [#338](https://github.com/mkhomutov/Persatrix/pull/338) | docs(v031): RFC 0031 PR 5 — Phase 1 closeout | 0031 (5/5) | 2026-05-14 |
+| [#339](https://github.com/mkhomutov/Persatrix/pull/339) | feat(v031): RFC 0026 PR 1 — facts schema + FactStore + erasure primitive | 0026 (1/6) | 2026-05-14 |
+| [#340](https://github.com/mkhomutov/Persatrix/pull/340) | feat(v031): RFC 0026 PR 2 — extractor + predicate allowlist + audit | 0026 (2/6) | 2026-05-14 |
+| [#341](https://github.com/mkhomutov/Persatrix/pull/341) | feat(v031): RFC 0026 PR 3 — FactStore.recall + MemoryBudget tier slot + config | 0026 (3/6) | 2026-05-14 |
+| [#342](https://github.com/mkhomutov/Persatrix/pull/342) | feat(v031): RFC 0026 PR 4 — reinforcement + retraction + tier provenance + MT update | 0026 (4/6) | 2026-05-15 |
+| [#343](https://github.com/mkhomutov/Persatrix/pull/343) | docs(rfcs): RFC 0033 — provider-agnostic model alias layer | 0033 (RFC) | 2026-05-15 |
+| [#344](https://github.com/mkhomutov/Persatrix/pull/344) | feat(v031): RFC 0026 PR 5a — symmetric latest-asserted-wins + source_interaction_id nullability | 0026 (5/6 — slice 5a) | 2026-05-15 |
+| [#345](https://github.com/mkhomutov/Persatrix/pull/345) | feat(v031): RFC 0026 PR 5b — envelope parse-failure observability | 0026 (5/6 — slice 5b) | 2026-05-15 |
+| [#346](https://github.com/mkhomutov/Persatrix/pull/346) | feat(v031): RFC 0026 PR 5c — PR 3 review storage/render defensive fixes | 0026 (5/6 — slice 5c) | 2026-05-15 |
+| [#347](https://github.com/mkhomutov/Persatrix/pull/347) | feat(v031): RFC 0026 PR 5d — PR 3 review tests + counter polish | 0026 (5/6 — slice 5d) | 2026-05-15 |
+| [#348](https://github.com/mkhomutov/Persatrix/pull/348) | feat(v031): RFC 0026 PR 5e — PR 4 review audit/chunking/edge cases | 0026 (5/6 — slice 5e) | 2026-05-15 |
+| [#349](https://github.com/mkhomutov/Persatrix/pull/349) | docs(v0.3.1): absorb RFC 0034 — persona conversational working memory | v0.3.1 plan | 2026-05-15 |
+| [#350](https://github.com/mkhomutov/Persatrix/pull/350) | docs(rfc-0034): resolve open questions and add Phase 1 PR plan | 0034 (PR plan) | 2026-05-15 |
+| [#351](https://github.com/mkhomutov/Persatrix/pull/351) | feat(v031): RFC 0034 PR 1 — channel-history fetcher behind Protocol | 0034 (1/5) | 2026-05-16 |
+| [#352](https://github.com/mkhomutov/Persatrix/pull/352) | feat(v031): RFC 0034 PR 2 — conversation-window module + config/schema | 0034 (2/5) | 2026-05-16 |
+| [#353](https://github.com/mkhomutov/Persatrix/pull/353) | docs(rfcs): RFC 0035 + RFC 0036 — membership ledger and persona message recall | 0035 + 0036 (RFC) | 2026-05-16 |
+| [#354](https://github.com/mkhomutov/Persatrix/pull/354) | docs(rfcs): RFC 0012 + 0037 + 0038 — confidentiality, authority & concurrent-context awareness | 0012 + 0037 + 0038 (RFC) | 2026-05-16 |
+| [#355](https://github.com/mkhomutov/Persatrix/pull/355) | docs(rfcs): RFC 0039 — user accounts & authentication foundation | 0039 (RFC) | 2026-05-16 |
+| [#356](https://github.com/mkhomutov/Persatrix/pull/356) | feat(v031): RFC 0034 PR 3 — wire conversation window + DM itest | 0034 (3/5) | 2026-05-16 |
+| [#357](https://github.com/mkhomutov/Persatrix/pull/357) | feat(v031): RFC 0034 PR 4 — review follow-ups (history-fetcher hardening) | 0034 (4/5) | 2026-05-16 |
+| [#358](https://github.com/mkhomutov/Persatrix/pull/358) | docs(v031): RFC 0034 PR 5 — Phase 1 closeout | 0034 (5/5) | 2026-05-16 |
+| [#359](https://github.com/mkhomutov/Persatrix/pull/359) | docs(v031): RFC 0026 PR 6 — RFC close | 0026 (6/6) | 2026-05-16 |
+| [#360](https://github.com/mkhomutov/Persatrix/pull/360) | docs(v031): v0.3.1 release-prep plan (master-plan Phase 3) | v0.3.1 release prep | 2026-05-16 |
+| [#361](https://github.com/mkhomutov/Persatrix/pull/361) | docs(v031): v0.3.1 release-prep PR 1 — manual test execution report | v0.3.1 release prep | 2026-05-17 |
+| [#362](https://github.com/mkhomutov/Persatrix/pull/362) | fix(v031): single-turn interactions extract facts (MT-MEMORY-005 F-6) | 0026 follow-up | 2026-05-17 |
+| [#363](https://github.com/mkhomutov/Persatrix/pull/363) | docs(v031): v0.3.1 release-prep PR 2 — docs refresh + release checklist | v0.3.1 release prep | 2026-05-17 |
+| [#364](https://github.com/mkhomutov/Persatrix/pull/364) | chore(release): bump to v0.3.1 + curate changelog (PR 3) | v0.3.1 release prep | 2026-05-17 |
+| [#365](https://github.com/mkhomutov/Persatrix/pull/365) | docs(v031): v0.3.1 release-prep PR 4 — final pre-tag verification | v0.3.1 release prep | 2026-05-17 |
 
 ---
 
