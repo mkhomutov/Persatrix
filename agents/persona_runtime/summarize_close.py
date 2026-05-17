@@ -9,10 +9,13 @@ The helpers form the close-path summarisation pipeline:
 1. :func:`summarize_closed_interaction` — fast path for single-turn
    interactions, LLM-call (bounded by timeout + ``MemoryFacade.compress``
    token budget) for multi-turn.
-2. :func:`record_closed_interaction` — bumps the relationship row for
-   DM-scoped interactions; best-effort.
-3. :func:`extract_peer_from_interaction` — recovers ``(peer_id,
-   peer_participant_type)`` from a ``dm:<a>:<b>`` scope.
+2. :func:`finalize_closed_interaction` — the two-phase close-path tail:
+   runs the summariser, updates the pending episode row, dispatches the
+   extracted facts, and bumps the relationship row.
+
+The relationship-recording half (``record_closed_interaction`` /
+``extract_peer_from_interaction``) lives in
+:mod:`agents.persona_runtime.record_close`.
 
 All functions are module-level and ``self``-free so the per-call site in
 the mixin stays a one-liner that satisfies the file-size guard.
@@ -37,6 +40,7 @@ from .fact_extractor import (
     emit_envelope_parse_failed,
     split_combined_response,
 )
+from .record_close import record_closed_interaction
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -60,11 +64,18 @@ SUMMARIZATION_TIMEOUT_SEC: float = 30.0
 # so the contract does not drift across RFCs.
 SUMMARIZATION_TARGET_TOKENS: int = 2000
 
-# Maximum characters of the summary persisted to ``record_interaction``
-# as the relationship outcome.  Mirrors the relationship-memory write
-# path's defensive truncation so an unusually long LLM summary cannot
-# blow up the relationship row's outcome column.
-RECORD_INTERACTION_OUTCOME_CHARS: int = 200
+# Output-token ceiling for the combined summarise + extract LLM call.
+# RFC 0020 PR 4 set this to 256 for a *summary-only* call (the prompt
+# asks for one short paragraph).  RFC 0026 PR 2 appended the ``facts``
+# array to the same envelope without raising the cap, so a multi-fact
+# interaction produced a ``{"summary": ..., "facts": [...]}`` envelope
+# larger than 256 output tokens, truncated mid-JSON, and lost both
+# halves (ISSUE-0054).  1024 covers a one-paragraph summary plus a
+# multi-fact array with roughly 2x headroom over a realistic worst
+# case.  ``max_tokens`` is a ceiling, not a reservation — typical short
+# interactions stop (``end_turn``) well below it, so the raise carries
+# no steady-state cost; it only buys tail robustness against truncation.
+SUMMARIZATION_MAX_OUTPUT_TOKENS: int = 1024
 
 # RFC 0020 PR 4 (PR #229 Should-Fix #2): on-tick janitor cooldown.
 JANITOR_INTERVAL_SEC: float = 300.0
@@ -126,7 +137,7 @@ async def summarize_closed_interaction(
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],
-                max_tokens=256,
+                max_tokens=SUMMARIZATION_MAX_OUTPUT_TOKENS,
                 temperature=0.2,
             ),
             timeout=SUMMARIZATION_TIMEOUT_SEC,
@@ -163,7 +174,18 @@ async def summarize_closed_interaction(
         summary, facts_raw = split_combined_response(text)
     except FactsParseError as exc:
         if exc.reason is not None:
+            # ISSUE-0054 — a non-``None`` reason means the model
+            # intended a JSON envelope but it is broken (truncated
+            # mid-JSON / missing the ``summary`` key / wrong top-level
+            # shape).  Committing the raw text as the episode summary
+            # stores malformed JSON that degrades episodic recall, so
+            # treat it as a summary failure: the janitor owns the row,
+            # consistent with the empty / empty_field branches.  Only a
+            # ``None`` reason — genuine legacy plain prose — keeps the
+            # backward-compat commit below.
             emit_envelope_parse_failed(exc.reason)
+            _emit_summary_failed(exc.reason)
+            return (SUMMARY_UNAVAILABLE_TEXT, True, None)
         return (text, False, None)
     # PR #340 deep-review S2: a well-formed envelope with an empty
     # ``summary`` field parses cleanly today and commits ``""`` to
@@ -256,90 +278,6 @@ def _emit_summary_failed(reason: str) -> None:
     inst.interactions_summary_failed.add(
         1, {"agent_id": current_agent_id(), "reason": reason},
     )
-
-
-async def record_closed_interaction(
-    memory_ns: MemoryNamespace,
-    agent_id: str,
-    interaction: Interaction,
-    summary: str,
-    summary_failed: bool,
-    *,
-    session_id: str = "legacy",
-) -> None:
-    """Bump the relationship row for a DM-scoped closed interaction.
-
-    Skipped for non-DM scopes (thread / group / tick) and for
-    interactions whose first turn payload does not carry a sender —
-    those have no single peer to anchor a relationship row on.
-    Channel-aware recording for thread / group scopes lands jointly
-    with RFC 0011 P3 in PR 5.
-    """
-    if not interaction.scope.startswith("dm:"):
-        return
-    peer_id, peer_type = extract_peer_from_interaction(agent_id, interaction)
-    if not peer_id:
-        return
-    if summary_failed:
-        outcome: str | None = None
-    else:
-        stripped = summary.strip()
-        outcome = (
-            stripped[:RECORD_INTERACTION_OUTCOME_CHARS]
-            if stripped else None
-        )
-    try:
-        await memory_ns.relationship.record_interaction(
-            other_id=peer_id,
-            interaction_type="conversation",
-            outcome=outcome,
-            other_participant_type=peer_type,
-            session_id=session_id,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to record interaction for agent %s with peer %s",
-            agent_id, peer_id, exc_info=True,
-        )
-
-
-def extract_peer_from_interaction(
-    agent_id: str, interaction: Interaction,
-) -> tuple[str | None, str]:
-    """Recover ``(peer_id, peer_participant_type)`` from a DM scope.
-
-    DM scopes are formatted ``dm:<a>:<b>`` with the two ids sorted
-    lexicographically (see :func:`agents.memory.interactions.scope_for_dm`).
-    The peer is the id that is not ``agent_id``.  Participant type
-    defaults to ``agent`` and is upgraded to whatever the first turn
-    payload's ``participant_type`` field carries (set by the chat
-    servicer for human inbound turns).
-    """
-    body = interaction.scope[len("dm:"):]
-    parts = body.split(":", 1)
-    if len(parts) != 2:
-        return (None, "agent")
-    a, b = parts
-    peer = b if a == agent_id else a if b == agent_id else None
-    if peer is None:
-        return (None, "agent")
-    # PR #229 review Should-Fix #4: defensive self-DM guard.  A
-    # ``dm:<id>:<id>`` scope (where both sides equal the agent's own
-    # id) would otherwise return ``(agent_id, ...)`` and let
-    # ``record_interaction`` write a self-relationship row.  The
-    # current ``scope_for_dm`` sorts but does not de-duplicate, so
-    # this is reachable if a future caller passes
-    # ``self.agent_id`` as ``other_id`` either intentionally
-    # (self-talk) or via a routing bug.  Treat as "no peer".
-    if peer == agent_id:
-        return (None, "agent")
-    peer_type = "agent"
-    if interaction.turns:
-        first_payload = interaction.turns[0].payload or {}
-        raw = first_payload.get("participant_type")
-        if isinstance(raw, str) and raw in {"agent", "user"}:
-            peer_type = raw
-    return (peer, peer_type)
 
 
 # ─── Two-phase close-path tail (PR #229 review Must-Fix #1) ─────────

@@ -28,6 +28,7 @@ import pytest
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
@@ -69,7 +70,7 @@ def _make_content_aware_client(captured: list[str]) -> LLMClient:
     mock_provider = AsyncMock()
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == 256:
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
             prompt = messages[0]["content"]
             captured.append(prompt)
             facts: list[dict] = []

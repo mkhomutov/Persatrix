@@ -52,8 +52,8 @@ class FactsParseError(ValueError):
       already signalled upstream on
       ``agent.interactions.summary.failed{reason=empty}``).
     * ``"truncated"`` — text starts with ``{``/``[`` but JSON parsing
-      fails — the motivating case under the combined-prompt
-      ``max_tokens=256`` cap.
+      fails — the motivating case when the combined summarise+extract
+      envelope overruns the call's output-token ceiling.
     * ``"missing_summary"`` — parses as an object but lacks the
       load-bearing ``summary`` key (or the value has the wrong type).
     * ``"invalid_envelope"`` — parses as JSON but the top level is

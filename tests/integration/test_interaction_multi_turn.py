@@ -14,6 +14,7 @@ Pins the PR 3 deliverables called out in
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,6 +24,7 @@ from agents.memory.boundary_detectors import REASON_IDLE_GAP
 from agents.memory.interactions import scope_for_dm
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
@@ -47,7 +49,10 @@ _PERSONA_CONFIG: dict = {
     "role": "Multi-turn aggregation test persona",
     "type": "persona",
     "max_llm_calls": 5,
-    "max_tokens": 1024,
+    # Kept distinct from ``SUMMARIZATION_MAX_OUTPUT_TOKENS`` so the mock
+    # LLM client can route the close-path summariser call apart from the
+    # persona event-loop call by ``max_tokens`` alone.
+    "max_tokens": 4096,
     "tools": [],
     "persona": {
         "name": "Multi-Turn Agent",
@@ -74,19 +79,36 @@ _PERSONA_CONFIG: dict = {
 
 
 def _do_nothing_client() -> LLMClient:
-    """Mock LLM client whose every reply parses to a single DO_NOTHING.
+    """Mock LLM client: persona-loop replies parse to a single
+    DO_NOTHING, the close-path summariser call returns a valid combined
+    ``{"summary": ..., "facts": []}`` envelope.
 
     Multi-turn aggregation does not depend on action shape \u2014 only on
-    interaction-tracker state and the persisted episode column values.
+    interaction-tracker state and the persisted episode column values \u2014
+    but the summariser call must still receive a *well-formed* envelope:
+    ISSUE-0054 made the close path fall back to the unavailable-summary
+    sentinel when the response is not a valid envelope, so a single
+    canned action-list reply for both call sites no longer yields a real
+    episode summary.  The two sites are told apart by ``max_tokens``.
     """
     mock_provider = AsyncMock()
-    mock_provider.create_message = AsyncMock(
-        return_value=LLMResponse(
+
+    async def _route(*, model, messages, system, tools, max_tokens, temperature):
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
+            return LLMResponse(
+                text=json.dumps(
+                    {"summary": "Multi-turn session summary.", "facts": []},
+                ),
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(120, 30),
+            )
+        return LLMResponse(
             text='```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
             stop_reason=StopReason.END_TURN,
             usage=Usage(10, 5),
-        ),
-    )
+        )
+
+    mock_provider.create_message = AsyncMock(side_effect=_route)
     mock_provider.format_tool_definitions = MagicMock(return_value=[])
     mock_provider.append_tool_round = MagicMock(
         side_effect=lambda msgs, resp, results: msgs,

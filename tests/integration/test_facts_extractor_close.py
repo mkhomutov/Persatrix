@@ -36,6 +36,7 @@ from agents.memory.interactions import (
 )
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
@@ -95,7 +96,7 @@ def _make_combined_client(
     fenced: bool = False,
 ) -> LLMClient:
     """Mock LLM that returns ``{"summary": ..., "facts": [...]}`` on the
-    summariser call (``max_tokens == 256``).
+    summariser call (``max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS``).
 
     ``facts_raw`` overrides the serialised facts payload — used by the
     malformed-JSON path test to inject a broken ``facts`` block while
@@ -117,7 +118,7 @@ def _make_combined_client(
     mock_provider = AsyncMock()
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == 256:
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
             return LLMResponse(
                 text=payload,
                 stop_reason=StopReason.END_TURN,

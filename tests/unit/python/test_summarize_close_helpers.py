@@ -143,11 +143,11 @@ class TestJanitorFailedCounter:
 def _make_envelope_client(envelope_text: str) -> LLMClient:
     """Mock LLM that returns ``envelope_text`` verbatim on the summariser call.
 
-    The summariser pins ``max_tokens=256``; the integration tests use
-    that same gate to route real summariser traffic away from the
-    persona event-loop path.  Here we only ever take the summariser
-    branch (the unit test never invokes the persona loop) so the
-    routing collapses to one return statement.
+    The summariser pins a ``max_tokens`` ceiling; the integration
+    tests use that same gate to route real summariser traffic away
+    from the persona event-loop path.  Here we only ever take the
+    summariser branch (the unit test never invokes the persona loop)
+    so the routing collapses to one return statement.
     """
     mock_provider = AsyncMock()
 
