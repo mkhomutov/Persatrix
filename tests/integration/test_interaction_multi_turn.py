@@ -131,7 +131,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     async with db.execute(
         """
         SELECT summary, interaction_id, started_at, closed_at,
-               turn_count, scope
+               turn_count, scope, context_json
         FROM episodes
         WHERE agent_id = ?
         ORDER BY created_at
@@ -147,6 +147,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
             "closed_at": r[3],
             "turn_count": r[4],
             "scope": r[5],
+            "context_json": r[6],
         }
         for r in rows
     ]
@@ -263,7 +264,13 @@ class TestMultiTurnAggregation:
         assert len(episodes) == 1
         assert episodes[0]["interaction_id"] == first_id
         assert episodes[0]["turn_count"] == 1
-        assert REASON_IDLE_GAP in episodes[0]["summary"]
+        # The idle-gap reason is durably recorded in the persisted
+        # context_json.  The ``summary`` column is no longer the
+        # deterministic placeholder — F-6 routes a single-turn
+        # conversational close through the LLM summariser, so the
+        # summary is now LLM-generated prose.
+        ctx = json.loads(episodes[0]["context_json"])
+        assert ctx["close_reason"] == REASON_IDLE_GAP
 
         # Tracker is empty after idle close.
         assert agent._interaction_tracker.open_scopes() == []

@@ -4,8 +4,8 @@
 **Feature Area**: Memory (qualitative acceptance gate)
 **Version**: 1.0
 **Created**: 2026-05-01
-**Last Updated**: 2026-05-01
-**Status**: Draft (scaffold — populated after [RFC 0026](../rfcs/0026-declarative-facts-tier.md) Phase 1 lands)
+**Last Updated**: 2026-05-17
+**Status**: Active (promoted from Draft scaffold after the v0.3.1 release-prep PR 4 re-run — RFC 0026 Phase 1 landed)
 
 ---
 
@@ -230,7 +230,8 @@ Re-run after [RFC 0027](../rfcs/0027-reflection-driven-consolidation.md) lands i
 
 | Date | Tester | OS | Variant | Result | Notes |
 |------|--------|----|---------|--------|-------|
-| YYYY-MM-DD | [Name] | [OS] | V1 / V2 / V3 / V4 | Pass/Fail | [Notes — which legs passed/failed; LLM transcript link] |
+| 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | v0.3.1 surface run. All 5 legs Pass; release-blocker Legs 1/2/5 Pass. Facts tier extracted 0 facts at run time (root-caused as ISSUE-0054); legs carried by the RFC 0034 conversation window. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-acceptance-passfail-gate). |
+| 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | Release-prep PR 4 re-run on the RC tip (`main` 47a7797, post-ISSUE-0054-fix). All 5 legs Pass; release-blocker Legs 1/2/5 Pass **via the RFC 0026 facts tier** (6 facts extracted + recalled, clean fence-free episode summaries). F-1 confirmed closed. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-re-run--release-prep-pr-4-release-candidate-tip). |
 
 ---
 

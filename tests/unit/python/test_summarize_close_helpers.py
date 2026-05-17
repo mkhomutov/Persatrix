@@ -168,8 +168,9 @@ def _make_envelope_client(envelope_text: str) -> LLMClient:
 
 def _multi_turn_interaction() -> Interaction:
     """Build a two-turn Interaction so :func:`summarize_closed_interaction`
-    takes the LLM path (the single-turn branch short-circuits to the
-    deterministic placeholder summary)."""
+    takes the LLM path (a single-turn interaction with no inbound
+    message body short-circuits to the deterministic placeholder
+    summary)."""
     return Interaction(
         interaction_id="ix-empty-summary",
         scope="dm:test-agent:bob",
@@ -364,3 +365,95 @@ class TestInteractionToEntriesCarriesMessageText:
         entries = _interaction_to_entries(interaction)
         assert len(entries) == 1
         assert entries[0].content.strip()
+
+
+def _single_turn_interaction(*, with_text: bool) -> Interaction:
+    """Build a one-turn conversational Interaction.
+
+    ``with_text=True`` mirrors a real one-message DM interaction that
+    idle-closed before any follow-up: the turn carries the inbound
+    message body on ``payload["text"]`` (stashed by
+    ``_handle_multi_turn_event``).  ``with_text=False`` is a
+    content-less turn — only the deterministic action envelope, no
+    extractable message body.
+    """
+    payload: dict[str, object] = {
+        "sender": "bob",
+        "summary": "Event: channel_message → Actions: ['do_nothing']",
+    }
+    if with_text:
+        payload["text"] = "I'm picking up my daughter Mira from school"
+    return Interaction(
+        interaction_id="ix-single-turn",
+        scope="dm:test-agent:bob",
+        started_at=0.0,
+        closed_at=10.0,
+        close_reason="idle_gap",
+        turns=[Turn(at=0.0, payload=payload)],
+    )
+
+
+@pytest.mark.asyncio
+class TestSingleTurnInteractionFactExtraction:
+    """F-6 (v0.3.1 MT-MEMORY-005 re-run) — a single-turn conversational
+    interaction that carries an inbound message body must be routed
+    through the LLM summarise + extract path so a fact stated in a
+    one-message interaction reaches the RFC 0026 facts tier.
+
+    Pre-fix :func:`summarize_closed_interaction` short-circuited every
+    ``turn_count == 1`` interaction onto a deterministic placeholder
+    summary with ``facts=None`` — so a user who stated a fact in a
+    single message that then idle-closed had that fact silently
+    dropped (observed in the MT-MEMORY-005 re-run: the I3 commitment
+    never reached the ``facts`` table).  A content-less single turn
+    (no ``text``) still keeps the cheap placeholder — its extractor
+    input would carry no message body, so an LLM call would only ever
+    (correctly) extract nothing.
+    """
+
+    async def test_single_turn_with_message_text_extracts_facts(self):
+        facts_payload = [{
+            "subject": "bob",
+            "predicate": "has_child_named",
+            "object": "Mira",
+        }]
+        envelope = json.dumps({
+            "summary": "Bob is picking up his daughter Mira from school.",
+            "facts": facts_payload,
+        })
+        summary, failed, facts_raw = await summarize_closed_interaction(
+            _make_envelope_client(envelope),
+            "test-agent",
+            _single_turn_interaction(with_text=True),
+        )
+        assert summary == "Bob is picking up his daughter Mira from school."
+        assert failed is False
+        assert facts_raw is not None, (
+            "single-turn interaction with message text dropped its facts "
+            "— F-6 regression"
+        )
+        assert json.loads(facts_raw) == facts_payload
+
+    async def test_single_turn_without_message_text_keeps_placeholder(self):
+        """Regression guard — a content-less single turn keeps the
+        cheap deterministic placeholder and never reaches the LLM.
+        The exact placeholder tuple proves the short-circuit fired:
+        an LLM round-trip would have returned the envelope summary,
+        not this string."""
+        interaction = _single_turn_interaction(with_text=False)
+        envelope = json.dumps({
+            "summary": "this summary must never be used",
+            "facts": [{"subject": "bob", "predicate": "x", "object": "y"}],
+        })
+        summary, failed, facts_raw = await summarize_closed_interaction(
+            _make_envelope_client(envelope),
+            "test-agent",
+            interaction,
+        )
+        single = interaction.turns[0].payload["summary"]
+        expected = (
+            f"Multi-turn interaction (scope={interaction.scope}, "
+            f"turns=1, reason={interaction.close_reason}): "
+            f"first[{single}] last[{single}]"
+        )
+        assert (summary, failed, facts_raw) == (expected, False, None)

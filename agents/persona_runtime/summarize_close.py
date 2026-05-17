@@ -6,9 +6,12 @@ under the 500-line code-file size cap (``scripts/checks/file_size.py``).
 
 The helpers form the close-path summarisation pipeline:
 
-1. :func:`summarize_closed_interaction` — fast path for single-turn
-   interactions, LLM-call (bounded by timeout + ``MemoryFacade.compress``
-   token budget) for multi-turn.
+1. :func:`summarize_closed_interaction` — runs the combined
+   summarise + extract LLM call (bounded by timeout +
+   ``MemoryFacade.compress`` token budget).  A single-turn interaction
+   with no inbound message body keeps a cheap deterministic
+   placeholder; a single-turn interaction that carries message text is
+   routed through the LLM path so RFC 0026 facts still extract (F-6).
 2. :func:`finalize_closed_interaction` — the two-phase close-path tail:
    runs the summariser, updates the pending episode row, dispatches the
    extracted facts, and bumps the relationship row.
@@ -113,7 +116,16 @@ async def summarize_closed_interaction(
     if interaction.turn_count == 1:
         payload = interaction.turns[0].payload or {}
         single = str(payload.get("summary", "")).strip()
-        if single:
+        has_message_text = bool(str(payload.get("text", "")).strip())
+        # F-6 (v0.3.1 MT-MEMORY-005 re-run) — a single-turn interaction
+        # that carries an inbound message body (``text``) is a real
+        # one-message conversation: fall through to the LLM summarise +
+        # extract path below so an RFC 0026 fact stated in a one-turn
+        # interaction still reaches the facts tier.  Only a content-less
+        # single turn keeps the cheap deterministic placeholder — its
+        # extractor input would carry no message body, so an LLM call
+        # could only ever (correctly) extract nothing.
+        if single and not has_message_text:
             # Single-turn placeholder; no facts extracted (the
             # deterministic per-turn shape is not LLM-routed).
             return (
