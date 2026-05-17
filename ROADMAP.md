@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-16 (RFC 0026 close — Declarative Facts Tier implemented in v0.3.1 per [0026-pr-plan.md](docs/rfcs/0026-pr-plan.md) PRs 1–6; RFC 0026 → `✅ Implemented`. All three phases (schema + extractor, recall + budget integration, reinforcement + retraction) shipped under the v0.3.1 umbrella.)
-> **Current phase**: v0.3.0 (Agent Conversations — RFCs 0008, 0009 P1–2, 0011 internal, 0020, 0021 P1, 0022) — ✅ Released
-> **Current milestone**: v0.3.0 released ([tag v0.3.0](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.0) pushed 2026-05-12, GitHub Release "Agent Conversations" published the same day); v0.3.x planning next (RFCs 0023 / 0024 / 0026 / 0029 sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md); F-3 root-cause fix tracked in [RFC 0031](docs/rfcs/0031-per-session-namespacing-channels.md)).
+> **Last updated**: 2026-05-17 (v0.3.1 release-prep PR 2 — README + ROADMAP + persona/channels guide refresh, memory-architecture diagram pass, and the v0.3.1 release checklist; v0.3.1 Version Map row added at `🚧 Release prep`.)
+> **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — 🚧 Release prep
+> **Current milestone**: v0.3.1 release prep in progress — all three RFC workstreams merged, the manual-test execution report has landed ([#361](https://github.com/mkhomutov/Persatrix/pull/361)); docs refresh → version bump → final pre-tag verification per [v0.3.1-release-prep-plan.md](docs/v0.3.1-release-prep-plan.md).
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -20,6 +20,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
 | **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | ✅ Complete — released |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Complete — released |
+| **v0.3.1** | The persona remembers stated facts about you across interactions and follows the conversation it is currently having | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |

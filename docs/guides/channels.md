@@ -399,10 +399,17 @@ invocation finds nothing to remove).
 
 > **This is an operator workaround, not a fix.** The root-cause fix is
 > per-session memory namespacing so reruns with the same channel name +
-> user id are auto-isolated. Tracked in
-> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md);
-> originally surfaced as F-3 in
-> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
+> user id are auto-isolated — [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md),
+> tracked in [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
+> (originally surfaced as F-3 in
+> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md)).
+> RFC 0031 Phase 1 shipped in v0.3.1 — every channel and message row is
+> now tagged with a `session_id` — but recall still surfaces every
+> session, so `make reset` stays the supported cross-run isolation path.
+> The `persatrix session new --activate` CLI that supersedes it for run
+> isolation lands in RFC 0031 Phase 3 (a later v0.3.x patch); `make
+> reset` then becomes the deprecated nuclear option for clearing all
+> volumes across all sessions.
 
 ---
 

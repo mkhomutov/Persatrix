@@ -14,6 +14,9 @@ persona from running away with your API bill.
 > are not messages — [RFC 0020](../rfcs/0020-interaction-lifecycle.md)),
 > §2 (now-anchor + relative-time — [RFC 0021](../rfcs/0021-persona-temporal-awareness.md))
 > and the new §6 (externally-inspectable prompt sections — [RFC 0022](../rfcs/0022-persona-prompt-section-templating.md)).
+> v0.3.1 adds two more — see the §2 callouts on the declarative facts
+> tier ([RFC 0026](../rfcs/0026-declarative-facts-tier.md)) and the
+> persona conversation window ([RFC 0034](../rfcs/0034-persona-conversational-working-memory.md)).
 > This guide is deliberately non-exhaustive and points into those RFCs for
 > design rationale.
 
@@ -207,6 +210,31 @@ prompt
 > scheduled callbacks, and conversation-thread temporal grounding land in
 > Phases 2–4 ([RFC 0021](../rfcs/0021-persona-temporal-awareness.md);
 > v0.4.0).
+
+> **v0.3.1 — stated facts are remembered.** When you tell a persona
+> something durable about yourself or a named entity — "my daughter
+> Mira is 7", "I prefer async updates over calls" — the close-path
+> summariser extracts it as a `(subject, predicate, object)` fact and
+> persists it to a `facts` table in `memory.db`. On later interactions
+> the persona recalls those facts directly into its prompt via
+> [`facts_section.py`](../../agents/persona_runtime/facts_section.py),
+> so it references them without keyword-overlap seeding. Facts are
+> reinforced when restated and retracted when contradicted. Recall is
+> on by default; `memory.facts.enabled: false` turns off fact recall
+> and prompt injection per-agent — the close-path extractor still
+> writes facts regardless. See [RFC 0026](../rfcs/0026-declarative-facts-tier.md).
+
+> **v0.3.1 — the persona follows the current conversation.** On every
+> persona turn in a DM channel the runtime rebuilds the LLM `messages`
+> array from the channel store, so the model sees the in-progress
+> conversation as a transcript instead of a single isolated message.
+> The persona can answer "what did you just ask?" and resolve
+> referential follow-ups ("I like it") within a session. v0.3.1 ships
+> DM channels only — group channels keep today's single-message
+> behaviour until RFC 0034 Phase 2. The window is bounded by
+> `conversation_window.max_turns` / `max_tokens`; the operator escape
+> hatch is `conversation_window.enabled: false`. See
+> [RFC 0034](../rfcs/0034-persona-conversational-working-memory.md).
 
 ### Episodic memory
 
@@ -476,8 +504,13 @@ second invocation finds nothing to remove). Restart the stack with
 
 > **Operator workaround, not a fix.** Per-session memory namespacing —
 > so reruns with the same user id are auto-isolated — is tracked in
-> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md).
-> Originally surfaced as F-3 in
+> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
+> and addressed by [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md).
+> Phase 1 (shipped in v0.3.1) tags every storage write with a
+> `session_id`; the operator-facing `persatrix session new --activate`
+> CLI that supersedes `make reset` for run isolation lands in RFC 0031
+> Phase 3 (a later v0.3.x patch). Until then, `make reset` remains the
+> supported cross-run isolation path. Originally surfaced as F-3 in
 > [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
 
 ### Opening a chat
