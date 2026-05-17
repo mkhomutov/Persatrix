@@ -191,10 +191,11 @@ schema version covers the episodic, relationship, notes, and facts tables.
 `NoteStore` explicitly piggybacks on the connection managed by
 `EpisodicMemory` and does not run its own migrations.
 
-The v0.3.1 schema (`memory.db` v7) adds a `session_id TEXT NOT NULL DEFAULT
-'legacy'` column to the `episodes` and `relationships` tables, and the RFC
-0026 `facts` table carries `session_id` from creation — RFC 0031 Phase 1's
-forward-only column plumbing. Every persona-memory write stamps the active
+The v0.3.1 schema (`memory.db` v8) lands two forward-only migrations: v7
+(RFC 0031 Phase 1) adds a `session_id TEXT NOT NULL DEFAULT 'legacy'` column
+to the `episodes` and `relationships` tables; v8 (RFC 0026) creates the
+`facts` table, which carries `session_id` from creation. Every persona-memory
+write stamps the active
 `PERSATRIX_SESSION_ID`; an unset env var falls back to the `legacy`
 carve-out. Phase 1 is write-path only — recall does not yet filter by
 session, so pre-existing rows stay visible. See

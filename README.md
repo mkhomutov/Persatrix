@@ -151,7 +151,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 |---------|------------------|--------|
 | **v0.2.x** | Run persistent personas with memory, chat with them from a terminal, observe everything end-to-end with traces and metrics | ✅ Released |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Released |
-| **v0.3.1** | Personas remember stated facts about you across interactions and follow the conversation they're currently having | 🚧 Release prep |
+| **v0.3.1** | Chat with a persona that remembers stated facts about you across interactions and follows the conversation it's currently having | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |

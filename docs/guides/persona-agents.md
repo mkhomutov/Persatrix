@@ -219,9 +219,10 @@ prompt
 > the persona recalls those facts directly into its prompt via
 > [`facts_section.py`](../../agents/persona_runtime/facts_section.py),
 > so it references them without keyword-overlap seeding. Facts are
-> reinforced when restated and retracted when contradicted. The tier is
-> on by default; `memory.facts.enabled: false` disables it per-agent.
-> See [RFC 0026](../rfcs/0026-declarative-facts-tier.md).
+> reinforced when restated and retracted when contradicted. Recall is
+> on by default; `memory.facts.enabled: false` turns off fact recall
+> and prompt injection per-agent — the close-path extractor still
+> writes facts regardless. See [RFC 0026](../rfcs/0026-declarative-facts-tier.md).
 
 > **v0.3.1 — the persona follows the current conversation.** On every
 > persona turn in a DM channel the runtime rebuilds the LLM `messages`
