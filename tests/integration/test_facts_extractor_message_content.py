@@ -146,6 +146,51 @@ class TestExtractorReceivesMessageContent:
         finally:
             await agent.close_memory()
 
+    async def test_single_turn_interaction_still_extracts_facts(self):
+        """F-6 (v0.3.1 MT-MEMORY-005 re-run) — a fact stated in a
+        one-turn interaction (a single message that then closes)
+        must still reach the facts tier.  Pre-fix the close path
+        short-circuited ``turn_count == 1`` onto a deterministic
+        placeholder summary and dropped the facts half, so a fact
+        stated in a single message that idle-closed was lost — the
+        re-run's I3 budget-spreadsheet commitment never reached the
+        ``facts`` table for exactly this reason.
+        """
+        captured: list[str] = []
+        agent = await _make_agent(_make_content_aware_client(captured))
+        try:
+            peer = "bob"
+            # One channel message that both states a fact and closes
+            # the interaction → a single-turn conversational close.
+            await agent.on_event(AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={
+                    "content": "I'm picking up my daughter Mira from school",
+                },
+                sender_id=peer,
+                metadata={"chat_end": True},
+            ))
+            await drain(agent)
+
+            # The summariser fired for the single-turn close and its
+            # prompt carried the message body.
+            assert captured, (
+                "summariser LLM call never fired for the single-turn "
+                "close — F-6 regression"
+            )
+            assert "daughter Mira" in captured[-1]
+
+            # The fact reached the tier — not dropped by the
+            # turn_count==1 short-circuit.
+            live = await agent.memory.facts.recall(subject="bob")
+            assert len(live) == 1, (
+                "single-turn interaction dropped its fact — F-6 regression"
+            )
+            assert live[0].predicate == "has_child_named"
+            assert live[0].object == "Mira"
+        finally:
+            await agent.close_memory()
+
     async def test_message_body_not_persisted_in_episode_context(self):
         """RFC 0020 §D still holds for the *persisted* episode: the
         message body is carried only on the in-memory turn for the
