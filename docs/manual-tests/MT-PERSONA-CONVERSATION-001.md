@@ -4,8 +4,8 @@
 **Feature Area**: Persona Runtime (RFC 0034 Phase 1 — Conversation Window, DM channels)
 **Version**: 1.0
 **Created**: 2026-05-16
-**Last Updated**: 2026-05-16
-**Status**: Draft (scaffold — executed in v0.3.1 release prep, [v0.3.1-plan Phase 4 PR 1](../v0.3.1-plan.md#phase-4--v031-release-prep-execution))
+**Last Updated**: 2026-05-17
+**Status**: Active (promoted from Draft scaffold — passed both legs in the [v0.3.1 release-prep execution report](v0.3.1-execution-report.md); RFC 0034 Phase 1 landed)
 
 ---
 
