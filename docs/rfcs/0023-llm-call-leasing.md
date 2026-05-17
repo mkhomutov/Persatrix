@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-09
-target: v0.3.x (TBD)
+target: v0.3.2 — full (Phases 1–6); see docs/v0.3.2-plan.md and docs/rfcs/0023-pr-plan.md
 depends_on:
   - RFC-0006
   - RFC-0017
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-09
-**Target**: v0.3.x (TBD)
+**Target**: v0.3.2 — full (Phases 1–6); see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0023-pr-plan.md)
 **Depends on**: RFC 0006 (Efficiency & Execution Limits), RFC 0017 (Memory Injection Budget)
 
 ---
