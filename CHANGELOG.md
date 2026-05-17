@@ -2,21 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.1] - 2026-05-17
 
-### Added
+> **Codename:** Memory Quality
 
-- **RFC 0033 — Provider-Agnostic Model Alias Layer (Draft).** Proposes a single source of truth for model identity: a named alias map (`quality` / `fast` / `summarizer` → `{provider, model_id, pricing}`) that agent configs reference instead of vendor-specific model strings. Today the same physical model ID appears in [`config/agents.yaml`](config/agents.yaml) (×6), [`config/optimization.yaml`](config/optimization.yaml) (defaults *and* pricing keys), [`agents/persona_types.py`](agents/persona_types.py) as a dataclass default, and ~20 docs — every vendor deprecation cycle requires a sweep across all of them, and the in-code `_infer_provider` string-prefix heuristic in [`agents/llm_client.py`](agents/llm_client.py) does not scale past two vendors. Phased: Phase 1 (v0.3.x) ships the resolver + alias config block + first migration, absorbing the [Anthropic Sonnet 4 retirement](https://platform.claude.com/docs/en/about-claude/model-deprecations) (2026-06-15) by editing one alias entry instead of sweeping the codebase; Phase 2 adds a `persatrix.llm.model_alias` OTEL attribute (per RFC 0019's `persatrix.*` reserved-namespace rule) and derives the legacy pricing table from aliases; Phase 3 retires the raw-ID pass-through and `_infer_provider` once observed traffic shows zero raw-ID usage (gate is observed traffic, not a calendar). Status `📋 Proposed`; 6 open questions captured. ([docs/rfcs/0033-model-alias-layer.md](docs/rfcs/0033-model-alias-layer.md); ROADMAP RFC Master Index updated.)
-- **Per-session storage tags on the Go orchestrator** (RFC 0031 Phase 1 — PR 2). The `channels` SQLite store now tags every channel and message row with a `session_id` column (default `'legacy'`), backed by a new `sessions` table created empty (Phase 3 CLI owns seeding). The chronological-scan index is replaced with the covering shape `(channel_id, session_id, timestamp DESC)` so today's `channel_id`-only history scans stay cheap AND Phase 2's per-session filter uses the same index without a follow-up migration. A new `idx_channels_session` supports fast per-session channel listings. The orchestrator reads `PERSATRIX_SESSION_ID` at boot and stamps the value on every `CreateChannel` / `PublishMessage` write — unset falls through to the `legacy` carve-out with an INFO line; non-canonical values (outside `[A-Za-z0-9_-]`) emit a WARN but are accepted verbatim (hard validation lives in Phase 3 CLI). A new `sessions.writes{session_id}` OTEL counter increments on every store write. No recall-side filtering yet — that ships in Phase 2.
-- **Per-session storage tags on the Python persona runtime** (RFC 0031 Phase 1 — PR 3). The memory SQLite store mirrors the orchestrator-side shape: a new migration v7 adds `session_id TEXT NOT NULL DEFAULT 'legacy'` to `episodes` and `relationships`, plus `idx_episodes_session` and `idx_rel_session`. `EpisodicMemory.store_episode` and `RelationshipMemory.record_interaction` accept `session_id` as a keyword-only kwarg; relationships use a first-seen-wins contract (the ON CONFLICT branch does not overwrite the tag, matching how `trust_score` is preserved). The persona runtime reads `PERSATRIX_SESSION_ID` at construction and threads it through every store-path call — unset → `legacy` with a single INFO boot-log line (parity with the Go side). The `MT-SESSION-001` manual-test walkthrough (executed at v0.3.1 release prep) ties both halves together end-to-end.
+### Highlights
+
+- **Declarative facts tier — the persona remembers stated facts about you across interactions** (RFC 0026). The persona extracts stated `(subject, predicate, object)` facts at interaction close — names, preferences, commitments — and persists them to a new `facts` table indexed by subject, separate from the prose episode summary. At recall time `MemoryFacade` injects them into the persona prompt through a dedicated `facts_context` section, so a fact stated days ago survives idle-gap closure and resurfaces by subject rather than by keyword overlap. `MT-MEMORY-005` (the dementia test) is promoted from a v0.3.0 baseline measurement to a pass/fail acceptance gate.
+- **Persona conversational working memory for DM channels** (RFC 0034 Phase 1). A persona now follows the conversation it is currently having: the persona LLM `messages` array carries the reconstructed in-progress DM transcript instead of a single isolated message, so the persona recalls its own prior question and resolves referential follow-ups within the session. DM channels only in v0.3.1 — group channels keep the single-message behaviour (Phase 2). Operator escape hatch: `conversation_window.enabled: false`.
+- **Per-session storage namespacing — write-path plumbing** (RFC 0031 Phase 1). A new `sessions` table plus `session_id` columns on channels, messages, episodes, and relationships tag every storage write with the `PERSATRIX_SESSION_ID` env var, read at orchestrator and persona-runtime boot. Phase 1 is write-path only — recall does not yet filter by session, and `make reset` remains the cross-run isolation path. The operator CLI and recall filtering land in later v0.3.x phases.
 
 ### Upgrade Notes
 
 | Notable change | Detail |
 |----------------|--------|
-| **[Breaking]** Chat wire-field renamed `session_id` → `chat_session_id` | RFC 0031 Phase 1 introduces an operator-namespace `session_id` on channels, messages, episodes, and relationships. To disambiguate it from RFC 0016's chat-conversation token, `ChatRequest.session_id` (proto field 4) and `ChatResponse.session_id` (proto field 2) are renamed to `chat_session_id`. **Field numbers are preserved**, so binary-proto consumers are unaffected. **JSON / proto-text consumers must migrate**: REST callers of `POST /api/v1/agents/{id}/chat` sending the legacy `"session_id"` JSON key now receive `400 BAD_REQUEST "invalid or malformed JSON body"` — the Go handler decodes with `DisallowUnknownFields`, so unknown keys fail loud rather than degrading to a fresh-session mint. Migrate by switching the JSON key to `"chat_session_id"`. Proto3-JSON callers using `google.protobuf.json_format` raise `ParseError` unless `ignore_unknown_fields=True` is set (and even then `chat_session_id` parses to its zero value — the legacy value is discarded). Manual-test recipes are updated end-to-end: REST `curl` flows [`MT-CHAT-001`](docs/manual-tests/MT-CHAT-001.md), [`MT-CHAT-003`](docs/manual-tests/MT-CHAT-003.md), [`MT-CHAT-004`](docs/manual-tests/MT-CHAT-004.md); the CLI REPL flow [`MT-CHAT-002`](docs/manual-tests/MT-CHAT-002.md) (session-reuse prose); and the PowerShell channel-inspection flow [`MT-CHANNEL-005`](docs/manual-tests/MT-CHANNEL-005.md) (`Select-Object` on the `chat_session_id` metadata key). The chat-message Mermaid in [`docs/diagrams/workflow-execution.md`](docs/diagrams/workflow-execution.md) shows the renamed wire-field on the gRPC arrow. The `ChannelMessage.Metadata` map key also moves: `"session_id"` → `"chat_session_id"`. Resolves [RFC 0031 OQ #8](docs/rfcs/0031-per-session-namespacing-channels.md#open-questions). |
-| `channels.db` schema bumped v2 → v3 | The channels SQLite schema gains a `sessions` table plus `session_id` columns on `channels` and `messages` (default `'legacy'`). The migration runs forward-only on startup; rolling back requires restoring from a pre-upgrade backup. Existing rows are stamped `'legacy'` via the SQLite `ALTER TABLE ... DEFAULT` semantics (no backfill UPDATE). Operators tagging new traffic should set `PERSATRIX_SESSION_ID=<id>` before starting the orchestrator. |
-| `memory.db` schema bumped v6 → v7 | The persona memory SQLite schema gains a `session_id` column on `episodes` and `relationships` (default `'legacy'`), plus `idx_episodes_session` and `idx_rel_session`. Forward-only migration; existing rows pick up the `'legacy'` carve-out via the SQLite `ALTER TABLE ... DEFAULT` semantics. To tag persona writes, set `PERSATRIX_SESSION_ID=<id>` in the persona-runtime's environment before start — same value as the orchestrator-side variable. Relationship rows track *first-seen* session; a later interaction with a different env value does not overwrite the per-row tag. |
+| **[Breaking]** chat-session wire-field rename | `ChatRequest.session_id` / `ChatResponse.session_id` JSON keys renamed to `chat_session_id` ([RFC 0031 OQ #8](docs/rfcs/0031-per-session-namespacing-channels.md#open-questions)) to disambiguate from RFC 0031's operator-namespace `session_id`. Proto field numbers are preserved; JSON / proto-text consumers must migrate. The Rust CLI and the in-tree REST flow are already updated. |
+| `channels.db` schema bump (v2→v3) | Adds the `sessions` table and `session_id` columns on channel/message rows. Forward-only migration; existing rows pick up the `legacy` session carve-out. |
+| `memory.db` schema bump (v6→v8) | Two forward-only migrations: v7 adds `session_id` on `episodes` and `relationships`; v8 creates the RFC 0026 `facts` table (which carries `session_id` from creation). Existing rows pick up the `legacy` carve-out. |
+| New `PERSATRIX_SESSION_ID` env var | Read at orchestrator + persona-runtime boot, stamped on every storage write. Unset ⇒ the `legacy` carve-out with an INFO boot line. Set the **same value in both processes** to keep a run coherent. Phase 1 is write-path only — recall does not yet filter by session. |
+| New declarative facts tier (RFC 0026) | The persona extracts stated `(subject, predicate, object)` facts at interaction close and injects them into the persona prompt via a new `facts_context` section. Out-of-tree prompt evaluators will see a new tier in the system prompt. `memory.facts.enabled: false` disables fact recall/injection per-agent; the close-path extractor keeps writing facts regardless. |
+| New `conversation_window` config block (RFC 0034) | A top-level `conversation_window` block lands in `config/agents.yaml` + `config/optimization.yaml`, validated by the new `schemas/optimization.schema.json`. The persona LLM `messages` array now carries the in-progress DM transcript instead of a single isolated message. Operator escape hatch: `conversation_window.enabled: false`. DM channels only in v0.3.1. |
+| `make reset` deprecation breadcrumb | `make reset` remains the supported cross-run storage-isolation path. RFC 0031 Phase 3's `persatrix session …` CLI (`persatrix session new --activate`) will succeed it for run isolation in a later v0.3.x patch; `make reset` then becomes the deprecated nuclear option for clearing all volumes across all sessions. |
+
+### 🚀 Features
+
+- *(v031)* RFC 0031 PR 1 — rename chat session_id → chat_session_id (#333)
+- *(v031)* RFC 0031 PR 2 — sessions table + Go session_id columns + PERSATRIX_SESSION_ID (#335)
+- *(v031)* RFC 0031 PR 3 — Python session_id columns + persona-runtime PERSATRIX_SESSION_ID (#336)
+- *(v031)* RFC 0031 PR 4 — Phase 1 review follow-ups (#337)
+- *(v031)* RFC 0026 PR 1 — facts schema + FactStore + erasure primitive (#339)
+- *(v031)* RFC 0026 PR 2 — extractor + predicate allowlist + audit (#340)
+- *(v031)* RFC 0026 PR 3 — FactStore.recall + MemoryBudget tier slot + config (#341)
+- *(v031)* RFC 0026 PR 4 — reinforcement + retraction + tier provenance + MT update (#342)
+- *(v031)* RFC 0026 PR 5a — symmetric latest-asserted-wins + source_interaction_id nullability (#344)
+- *(v031)* RFC 0026 PR 5b — envelope parse-failure observability (#345)
+- *(v031)* RFC 0026 PR 5c — PR 3 review storage/render defensive fixes (#346)
+- *(v031)* RFC 0026 PR 5d — PR 3 review tests + counter polish (#347)
+- *(v031)* RFC 0026 PR 5e — PR 4 review audit/chunking/edge cases (#348)
+- *(v031)* RFC 0034 PR 1 — channel-history fetcher behind Protocol (#351)
+- *(v031)* RFC 0034 PR 2 — conversation-window module + config/schema (#352)
+- *(v031)* RFC 0034 PR 3 — wire conversation window + DM itest (#356)
+- *(v031)* RFC 0034 PR 4 — review follow-ups (history-fetcher hardening) (#357)
+
+### 🐛 Bug Fixes
+
+- *(v031)* ISSUE-0054 — RFC 0026 facts tier extracted no facts at interaction close (markdown-fence strip + extractor message-content input + summarise/extract output-token cap 256 → 1024) (#361)
+- *(v031)* Single-turn interactions extract facts (MT-MEMORY-005 F-6) (#362)
+
+### 📚 Documentation
+
+- *(release)* Post-release follow-up for v0.3.0 (#330)
+- *(v0.3.1)* Re-sequence v0.3.x and open v0.3.1 master plan (#331)
+- *(v0.3.1)* RFC 0026 + RFC 0031 PR plans (Phase 1 combined scaffold) (#332)
+- *(v031)* RFC 0031 PR 5 — Phase 1 closeout (#338)
+- *(rfcs)* RFC 0033 — provider-agnostic model alias layer (#343)
+- *(rfcs)* RFC 0032 stub — channel interaction layer unification (#334)
+- *(v0.3.1)* Absorb RFC 0034 - persona conversational working memory (#349)
+- *(rfc-0034)* Resolve open questions and add Phase 1 PR plan (#350)
+- *(rfcs)* RFC 0035 + RFC 0036 — membership ledger and persona message recall (#353)
+- *(rfcs)* RFC 0012 + 0037 + 0038 — confidentiality, authority & concurrent-context awareness (#354)
+- *(rfcs)* RFC 0039 — user accounts & authentication foundation (#355)
+- *(v031)* RFC 0034 PR 5 — Phase 1 closeout (#358)
+- *(v031)* RFC 0026 PR 6 — RFC close (#359)
+- *(v031)* V0.3.1 release-prep plan (master-plan Phase 3) (#360)
+- *(v031)* V0.3.1 release-prep PR 1 — manual test execution report (#361)
+- *(v031)* V0.3.1 release-prep PR 2 — docs refresh + release checklist (#363)
+
+### 🧪 Testing
+
+- New manual tests `MT-SESSION-001` (`PERSATRIX_SESSION_ID` cross-process write contract, RFC 0031 Phase 1) and `MT-PERSONA-CONVERSATION-001` (persona conversational continuity over a DM channel, RFC 0034 Phase 1)
+- `MT-MEMORY-005` (the dementia test) promoted from a v0.3.0 baseline measurement to a pass/fail acceptance gate — Legs 1, 2, 5 are release blockers
+- Facts-tier, conversation-window, and `session_id` integration suites added across the RFC 0026 / 0034 / 0031 PR clusters
+
+[0.3.1]: https://github.com/mkhomutov/Persatrix/compare/v0.3.0...v0.3.1
 
 ## [0.3.0] - 2026-05-12
 

@@ -16,7 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # Files that contain the project version and need updating.
-# Each entry: (relative path, regex pattern, replacement template)
+# Each entry: (relative path, regex pattern, replacement template).
+# A file may appear more than once when it carries the version in more
+# than one spot; each entry is applied independently (one substitution
+# per entry), so the patterns must not overlap.
 VERSION_FILES: list[tuple[str, str, str]] = [
     (
         "cli/Cargo.toml",
@@ -26,6 +29,26 @@ VERSION_FILES: list[tuple[str, str, str]] = [
     (
         "agents/pyproject.toml",
         r'^(version\s*=\s*")[^"]+(")$',
+        r"\g<1>{version}\2",
+    ),
+    # The observability runtimes hardcode a service.version default used
+    # when PERSATRIX_SERVICE_VERSION is unset. These are not build inputs,
+    # so a stale value never fails `make all` — it must be bumped here or
+    # it silently drifts. tracing.py also restates the default in its
+    # module docstring, hence the second tracing.py entry.
+    (
+        "agents/observability/metrics.py",
+        r'^(_DEFAULT_SERVICE_VERSION\s*=\s*")[^"]+(")$',
+        r"\g<1>{version}\2",
+    ),
+    (
+        "agents/observability/tracing.py",
+        r'^(_DEFAULT_SERVICE_VERSION\s*=\s*")[^"]+(")$',
+        r"\g<1>{version}\2",
+    ),
+    (
+        "agents/observability/tracing.py",
+        r'(\(default: ")\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?(")',
         r"\g<1>{version}\2",
     ),
 ]
@@ -81,7 +104,10 @@ def main() -> None:
     if not changed:
         print("\nNo files changed.")
     else:
-        print(f"\n{len(changed)} file(s) {'would be ' if args.dry_run else ''}updated.")
+        # A file may take more than one substitution (see VERSION_FILES);
+        # count distinct paths so the summary matches the file count.
+        distinct = len(set(changed))
+        print(f"\n{distinct} file(s) {'would be ' if args.dry_run else ''}updated.")
 
     # Remind about manual steps
     print("\nRemaining manual steps:")
