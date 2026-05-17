@@ -98,10 +98,10 @@ Note that [RFC 0023](0023-llm-call-leasing.md) already commits the agent→orche
 flowchart LR
     CLI["Rust CLI"] -->|REST| OrchHTTP["Orchestrator<br/>HTTP :8080"]
     Agent["Python Agent"] -->|"REST: publish / history / register"| OrchHTTP
-    Agent -->|"gRPC: LogService.StreamLogs"| OrchGRPC["Orchestrator<br/>gRPC :9090"]
+    Agent -->|"gRPC: LogService.StreamLogs"| OrchGRPC["Orchestrator<br/>gRPC :9090<br/>(LogService only)"]
     OrchGRPC -->|"gRPC: AgentService.*"| Agent
     OrchHTTP -.->|"shared core"| Router["ChannelRouter / registry"]
-    OrchGRPC -.->|"shared core"| Router
+    ActionExec["SEND_CHANNEL_MESSAGE<br/>action executor"] -.->|"shared core"| Router
 ```
 
 Three observations:
@@ -206,14 +206,13 @@ The agent already depends on generated gRPC stubs (`agents/generated/`) and runs
 
 ## Migration Path
 
-The migration is structured so the codebase is shippable after every phase and no phase requires a flag day.
+The migration is structured so the codebase is shippable after every phase and no phase requires a flag day. The four phases and their deliverables are detailed under [Phased Implementation Plan](#phased-implementation-plan); this section covers only the compatibility and ordering guarantees that hold *between* them.
 
-1. **Contract before transport (Phase 1).** A shared payload schema + contract test pins the agent↔orchestrator channel-publish/history contract over *today's* REST path. This closes the drift risk (Motivation 1) immediately and means the later dual-surface window begins from a verified contract. Phase 1 carries no proto change and is small enough to ride any open v0.3.x patch as hygiene.
-2. **Add the new surface without removing the old (Phase 2).** `OrchestratorService` and its orchestrator-side handlers land while the REST endpoints stay fully functional. No agent uses gRPC yet. The orchestrator serves both.
-3. **Flip agents per call, with fallback (Phase 3).** The agent-side `Protocol` implementations switch to gRPC. Transport selection is a sticky per-process choice; the REST path remains as a configured fallback so a rollout problem degrades rather than breaks.
-4. **Retire the agent-only REST surface (Phase 4).** Once agents are verified on gRPC, the agent-only REST endpoints (registration) are removed. Channel publish/history REST endpoints **stay** — they are the client edge. The agent's aiohttp client dependency is dropped.
+**The old surface is removed only after the new one is proven.** The REST agent endpoints stay fully functional from Phase 1 through Phase 3 — `OrchestratorService` is added *alongside* them (Phase 2), agents flip to it with REST as a configured fallback (Phase 3), and only then are the agent-only REST endpoints retired (Phase 4). The channel publish/history REST endpoints are never removed; they are the client edge.
 
-Backwards compatibility: an agent build from before Phase 3 talks REST to a post-Phase-2 orchestrator unchanged (REST endpoints unremoved until Phase 4). A post-Phase-3 agent against a pre-Phase-2 orchestrator falls back to REST. The only hard ordering constraint is orchestrator-Phase-2 before agent-Phase-3.
+**Backwards compatibility holds across the rollout.** An agent build from before Phase 3 talks REST to a post-Phase-2 orchestrator unchanged (REST endpoints unremoved until Phase 4). A post-Phase-3 agent against a pre-Phase-2 orchestrator falls back to REST. The only hard ordering constraint is **orchestrator-Phase-2 before agent-Phase-3** — the orchestrator must serve gRPC before agents dial it.
+
+**Contract precedes transport.** Phase 1 pins the agent↔orchestrator channel-publish/history contract over *today's* REST path, closing the drift risk (Motivation 1) immediately, so the dual-surface window (Phases 2–3) begins from a verified contract rather than two payload schemas drifting in parallel. Phase 1 carries no proto change and no RFC-blocking dependency, so it can land on any open v0.3.x patch as hygiene.
 
 ## Phased Implementation Plan
 
@@ -224,9 +223,11 @@ Backwards compatibility: an agent build from before Phase 3 talks REST to a post
 **Deliverables.**
 1. A shared schema for the channel-publish and channel-history payloads (JSON Schema, validated on both the agent send side and the orchestrator decode side).
 2. A contract test asserting the agent's request shape against the orchestrator's REST handler expectation.
-3. No proto change, no RFC-blocking dependency — small enough to ride whichever v0.3.x patch is open, in the manner of the [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) MQ follow-ups.
+3. No proto change, no RFC-blocking dependency — Phase 1 can land on whichever v0.3.x patch is open, in the manner of the [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) MQ follow-ups.
 
 **Dependencies.** None.
+
+**Note.** The JSON Schema is not throwaway. The REST channel publish/history endpoints remain the client edge after Phase 2 (they are never removed — see [Migration Path](#migration-path)), so the schema keeps validating the REST payload for the lifetime of that surface. Phase 2 adds a *separate* protobuf contract for the agent gRPC path; it does not retire the JSON Schema.
 
 ### Phase 2: `OrchestratorService` Proto + Orchestrator Handlers (v0.4.0)
 
