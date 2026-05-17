@@ -56,7 +56,7 @@ PR 7 (review follow-ups)
 PR 8 (full-RFC closeout — status: ✅ Implemented)
 ```
 
-PRs 1–2 add no call-site wiring — the contract and the enforcement engine are reviewable in isolation. PR 3 introduces `WalletClient` and the `lease()` async context manager; PRs 4–6 reuse it for the remaining three origins.
+PRs 1–2 add no call-site wiring — the contract and the enforcement engine are reviewable in isolation. PR 3 introduces `WalletClient` and the `lease()` async context manager; PRs 4–6 reuse it for the remaining three origins. PRs 4, 5, and 6 each hard-depend only on PR 3 — the arrows between them are the recommended review order, not code dependencies; they touch disjoint call sites and could land in any order once PR 3 merges.
 
 ---
 
@@ -217,7 +217,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 
 ### PR 5: `feature/v032-rfc0023-tick-subagent` — Autonomous TICK + Sub-Agent Lease Wiring
 
-**Depends on**: PR 4 merged.
+**Depends on**: PR 3 merged (`WalletClient` available); PR 4 recommended-before per the [recommended merge order](#overview).
 **Purpose**: Wire the autonomous TICK loop (`cause = AUTONOMOUS_TICK`) and sub-agent spawns (`cause = SUB_AGENT`) through the wallet. Implements [RFC §Phased Implementation Plan Phase 5](0023-llm-call-leasing.md#phased-implementation-plan).
 
 #### Scope
@@ -255,7 +255,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 
 ### PR 6: `feature/v032-rfc0023-channel-message` — Channel-Message Origin Lease Wiring
 
-**Depends on**: PR 5 merged.
+**Depends on**: PR 3 merged (`WalletClient` available); PR 5 recommended-before per the [recommended merge order](#overview).
 **Purpose**: Wire the RFC 0011 channel-message reply path through the wallet (`cause = CHANNEL_MESSAGE`). Implements [RFC §Phased Implementation Plan Phase 6](0023-llm-call-leasing.md#phased-implementation-plan).
 
 #### Scope
