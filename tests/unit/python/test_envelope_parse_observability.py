@@ -7,20 +7,20 @@ collapses three distinct response shapes into one outcome
 
 1. **Plain prose** — desired backward-compat path (older mock clients,
    legacy LLM responses without the JSON envelope).
-2. **Truncated JSON envelope** — the combined-call ``max_tokens=256``
-   cap is tight for a multi-fact response; mid-array truncation yields
-   invalid JSON.  Broken JSON ends up in the summary column; facts are
-   silently lost.
+2. **Truncated JSON envelope** — a multi-fact response that overran
+   the combined-call output-token ceiling and truncated mid-array,
+   yielding invalid JSON.
 3. **Valid JSON object missing the ``summary`` key** — parses as a
-   mapping but :func:`split_combined_response` rejects it.  Same catch,
-   same fall-through; the raw JSON envelope commits as the summary
-   text.
+   mapping but :func:`split_combined_response` rejects it.
 
 Paths (2) and (3) used to be indistinguishable from path (1) at the
-caller — no counter, no log.  This file pins the chosen signal: a new
+caller — no counter, no log, and the raw broken JSON committed as the
+episode summary.  This file pins two signals: a
 ``agent.facts.envelope_parse_failed`` counter with a ``reason``
-attribute fires for paths (2) and (3) but **not** for path (1), so a
-future regression in either path surfaces.
+attribute fires for paths (2) and (3) but **not** for path (1); and
+(ISSUE-0054) paths (2) and (3) now resolve to a summary failure
+(:data:`SUMMARY_UNAVAILABLE_TEXT`) instead of committing the broken
+JSON to the episode summary column.
 
 Why a *new* counter rather than re-using ``agent.facts.extraction_failed``:
 envelope-parse failures lose the **entire** facts batch silently;
@@ -92,7 +92,7 @@ def _envelope_parse_failed_points(
 def _make_text_client(response_text: str) -> LLMClient:
     """Return an :class:`LLMClient` that yields ``response_text`` verbatim.
 
-    The summariser's ``max_tokens=256`` cap is irrelevant here — the
+    The summariser's ``max_tokens`` cap is irrelevant here — the
     mock provider returns whatever we hand it, so tests can pin
     truncation, missing-key, and plain-prose shapes deterministically
     without driving the real model.
@@ -159,8 +159,8 @@ class TestSplitCombinedResponseReason:
     """
 
     def test_truncated_envelope_sets_reason_truncated(self) -> None:
-        """Mid-array truncation under the 256-token cap is the
-        motivating case from the PR 2 review."""
+        """Mid-array truncation under the combined-call output-token
+        cap is the motivating case from the PR 2 review."""
         truncated = '{"summary": "Bob said hi.", "facts": [{"subject": "bob",'
         with pytest.raises(FactsParseError) as exc_info:
             split_combined_response(truncated)
@@ -211,6 +211,20 @@ class TestSplitCombinedResponseReason:
             split_combined_response("")
         assert exc_info.value.reason is None
 
+    def test_fenced_truncated_envelope_sets_reason_truncated(self) -> None:
+        """ISSUE-0054 — once the markdown fence is unwrapped, a fenced
+        response truncated mid-array is still recognised as an
+        envelope-shaped failure (``reason=truncated``).  Before the
+        unwrap the leading backtick made ``looks_like_envelope`` false,
+        so the truncation was silently mis-routed to the plain-prose
+        backward-compat path and never counted."""
+        truncated = (
+            '```json\n{"summary": "Bob said hi.", "facts": [{"subject": "bob",'
+        )
+        with pytest.raises(FactsParseError) as exc_info:
+            split_combined_response(truncated)
+        assert exc_info.value.reason == "truncated"
+
 
 # ─── Caller-site counter emission ─────────────────────────────
 
@@ -244,6 +258,38 @@ class TestCallerSiteCounter:
                 f"reason=truncated; got: {points!r}"
             )
             assert sum(v for v, _ in truncated_points) == 1
+        finally:
+            await metrics_mod.shutdown()
+
+    async def test_truncated_envelope_returns_summary_failure_not_raw_text(
+        self,
+    ):
+        """ISSUE-0054 — a truncated (envelope-shaped) response must not
+        commit its raw broken JSON as the episode summary.
+
+        Pre-fix the caller returned ``(raw_text, False, None)``: the
+        malformed, half-written JSON landed in ``episodes.summary`` and
+        degraded episodic recall (the recall path indexes/ranks the
+        garbled text).  An envelope the model *intended* but could not
+        finish is a summary failure, not a usable summary — the result
+        must be ``(SUMMARY_UNAVAILABLE_TEXT, True, None)`` so the
+        janitor owns the row, exactly like the empty-``summary``-field
+        path.  ``reason=None`` plain prose still keeps the
+        backward-compat commit (see ``test_plain_prose_*``)."""
+        reader, metrics_mod = _build_meter()
+        try:
+            truncated = (
+                '{"summary": "Bob said hi.", "facts": [{"subject": "bob",'
+            )
+            result = await summarize_closed_interaction(
+                _make_text_client(truncated),
+                "test-agent",
+                _multi_turn_interaction(),
+            )
+            assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None), (
+                "a truncated envelope must resolve to a summary failure, "
+                "not commit the raw broken JSON as the episode summary"
+            )
         finally:
             await metrics_mod.shutdown()
 
@@ -343,6 +389,55 @@ class TestCallerSiteCounter:
             )
             assert result[0] == "Bob said hi."
             assert result[1] is False
+            assert _envelope_parse_failed_points(reader) == []
+        finally:
+            await metrics_mod.shutdown()
+
+    async def test_fenced_envelope_extracts_facts_and_stays_quiet(self):
+        """ISSUE-0054 headline regression — a well-formed envelope the
+        model wrapped in a ```` ```json ```` fence.
+
+        Pre-fix: :func:`split_combined_response` saw the leading
+        backtick, failed ``json.loads``, raised ``FactsParseError``
+        with ``reason=None``, and the caller committed the raw fenced
+        blob as the summary and returned ``facts_raw=None`` — so
+        :func:`finalize_closed_interaction` never dispatched the facts
+        half and the ``facts`` table stayed empty.
+
+        Post-fix: the fence is unwrapped, the caller returns the parsed
+        prose summary plus the serialised facts list, and the envelope
+        counter stays quiet (a fenced *well-formed* envelope is a green
+        response, not a parse failure)."""
+        reader, metrics_mod = _build_meter()
+        try:
+            envelope = (
+                "```json\n"
+                + json.dumps({
+                    "summary": "Bob said hi.",
+                    "facts": [
+                        {
+                            "subject": "bob",
+                            "predicate": "has_name",
+                            "object": "Bob",
+                        },
+                    ],
+                })
+                + "\n```"
+            )
+            summary, failed, facts_raw = await summarize_closed_interaction(
+                _make_text_client(envelope),
+                "test-agent",
+                _multi_turn_interaction(),
+            )
+            assert summary == "Bob said hi."
+            assert failed is False
+            assert facts_raw is not None, (
+                "fenced envelope must yield a non-None facts payload so "
+                "finalize_closed_interaction dispatches the facts half"
+            )
+            assert json.loads(facts_raw) == [
+                {"subject": "bob", "predicate": "has_name", "object": "Bob"},
+            ]
             assert _envelope_parse_failed_points(reader) == []
         finally:
             await metrics_mod.shutdown()

@@ -52,8 +52,8 @@ class FactsParseError(ValueError):
       already signalled upstream on
       ``agent.interactions.summary.failed{reason=empty}``).
     * ``"truncated"`` — text starts with ``{``/``[`` but JSON parsing
-      fails — the motivating case under the combined-prompt
-      ``max_tokens=256`` cap.
+      fails — the motivating case when the combined summarise+extract
+      envelope overruns the call's output-token ceiling.
     * ``"missing_summary"`` — parses as an object but lacks the
       load-bearing ``summary`` key (or the value has the wrong type).
     * ``"invalid_envelope"`` — parses as JSON but the top level is
@@ -63,6 +63,40 @@ class FactsParseError(ValueError):
     def __init__(self, message: str, *, reason: str | None = None) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+def _strip_code_fence(text: str) -> str:
+    """Unwrap a leading markdown code fence from an LLM response.
+
+    LLMs routinely wrap structured JSON output in a ```` ```json … ``` ````
+    (or bare ```` ``` … ``` ````) fence even when the prompt asks for a
+    bare object — see ISSUE-0054.  The combined-response envelope is
+    JSON, so a wrapping fence is never meaningful; strip it before
+    parsing, or the leading backtick makes the whole envelope read as
+    plain prose and routes summary + facts to the silent
+    backward-compat path.
+
+    The truncated case (opening fence, no closing fence) is handled by
+    dropping just the opening line so the surviving — possibly
+    truncated — JSON body is still recognised as envelope-shaped by the
+    ``looks_like_envelope`` check.  Text with no leading fence is
+    returned unchanged.  A degenerate single-line fence with no newline
+    at all is also returned as-is — the rare ``` ```json {…}``` ``` shape
+    then routes through the caller's ``looks_like_envelope`` check and
+    falls to the backward-compat path; in practice the close-path model
+    always emits a newline after the opening marker, so this is an
+    accepted gap rather than a handled case.
+    """
+    if not text.startswith("```"):
+        return text
+    first_newline = text.find("\n")
+    if first_newline == -1:
+        return text
+    inner = text[first_newline + 1:]
+    close = inner.rfind("```")
+    if close != -1:
+        inner = inner[:close]
+    return inner.strip()
 
 
 def split_combined_response(raw: str) -> tuple[str, str]:
@@ -96,6 +130,11 @@ def split_combined_response(raw: str) -> tuple[str, str]:
         # upstream and the empty path already signals on
         # ``interactions.summary.failed{reason=empty}``.
         raise FactsParseError("combined response is empty")
+    # ISSUE-0054 — unwrap a markdown code fence the model wraps the
+    # JSON envelope in.  Done before the ``looks_like_envelope`` check
+    # so a fenced (and possibly truncated) envelope is still classified
+    # as envelope-shaped rather than mis-routed to backward-compat.
+    text = _strip_code_fence(text)
     # A leading ``{`` or ``[`` is the contract every modern LLM
     # response follows; plain prose lacks it.  Used to keep the
     # envelope counter quiet on the backward-compat path.

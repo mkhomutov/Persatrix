@@ -1,7 +1,7 @@
 """RFC 0020 PR 6 slice 6 — multi-turn close-path follow-ups (PR-3 review #12 + #15).
 
 Sibling of :mod:`test_interaction_multi_turn_followups` (slice 5).  Pins
-two close-path contracts that the slice-5 idle-flush coverage didn't
+close-path contracts that the slice-5 idle-flush coverage didn't
 exercise:
 
 * **PR-3 review #12** — :class:`MaxTurnsDetector` enforced one event
@@ -22,6 +22,14 @@ exercise:
   inside its own inner ``try/except``, but no test asserted that the
   same swallow-and-log contract held there as on the single-turn
   parity path.
+
+* **Release-prep coverage gap** — that the cap *re-arms* across
+  consecutive interactions was argued only inductively
+  (:class:`MaxTurnsDetector` is stateless — it reads only
+  ``turn_count``) and pinned for a single re-open cycle in the unit
+  suite.  :class:`TestMaxTurnsCapFiresRepeatedly` drives three full
+  cap cycles in one scope so a long conversation that overruns the
+  cap repeatedly is covered empirically, not just by argument.
 
 Split off from the slice-5 follow-ups suite so each module stays under
 the 500-line file-size cap (``scripts/checks/file_size.py --strict``).
@@ -109,6 +117,73 @@ class TestMaxTurnsCapMultiTurnPath:
         assert episodes[0]["turn_count"] == 3
         # Scope popped — a subsequent event would open a fresh
         # interaction (RFC 0020 §C "do not reopen").
+        assert agent._interaction_tracker.get(scope) is None
+
+
+# ─── Repeated cap cycles across a long conversation ─────────────
+
+
+@pytest.mark.asyncio
+class TestMaxTurnsCapFiresRepeatedly:
+    """The cap re-arms on every fresh interaction (release-prep gap).
+
+    :class:`TestMaxTurnsCapMultiTurnPath` pins a *single* cap close;
+    the unit suite (:mod:`tests.unit.python.test_interaction_tracker`)
+    pins a *single* re-open cycle.  Neither drives the cap across
+    multiple consecutive interactions, so "the cap keeps firing for a
+    very long conversation" rested on an inductive argument
+    (:class:`~agents.memory.boundary_detectors.MaxTurnsDetector` is
+    stateless — it reads only ``interaction.turn_count``) rather than
+    a test.
+
+    This drives three full cap cycles in one scope and asserts each
+    produces its own episode closed with ``REASON_MAX_TURNS``, with a
+    distinct ``interaction_id`` — pinning that the re-opened
+    interaction is a clean slate and the cap re-arms every cycle.
+    """
+
+    async def test_three_consecutive_cap_cycles_each_persist_max_turns(self):
+        clock = FrozenClock(at=1_000.0)
+        agent = await make_agent_with_clock(clock)
+        # Cap of 3 → nine events drive exactly three full cycles.
+        cap = 3
+        cycles = 3
+        agent._interaction_tracker._max_turns = cap
+        peer = "iron-fox"
+        scope = scope_for_dm(agent.agent_id, peer)
+        for i in range(cap * cycles):
+            await agent.on_event(AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": f"msg-{i}"},
+                sender_id=peer,
+            ))
+            # Tiny advance — successive turns don't collide on the same
+            # instant, and the total elapsed stays well below the 5s
+            # idle window so no idle close confounds the attribution.
+            clock.advance(0.1)
+        await agent.drain_pending_summaries()
+
+        episodes = await all_episodes(agent)
+        assert len(episodes) == cycles, (
+            f"expected one episode per cap cycle ({cycles}); got: {episodes}"
+        )
+        for n, ep in enumerate(episodes):
+            ctx = json.loads(ep["context_json"])
+            assert ctx["close_reason"] == REASON_MAX_TURNS, (
+                f"episode {n} closed with {ctx['close_reason']!r}, "
+                f"expected {REASON_MAX_TURNS!r}"
+            )
+            assert ep["turn_count"] == cap, (
+                f"episode {n} persisted turn_count={ep['turn_count']}, "
+                f"expected {cap}"
+            )
+        # Distinct ids prove each cycle is a clean-slate interaction,
+        # not an extension of the previous one — the re-open rule held
+        # every cycle, not just the first.
+        ids = [ep["interaction_id"] for ep in episodes]
+        assert len(set(ids)) == cycles, f"interaction_ids not distinct: {ids}"
+        # The ninth event's add_turn fired the third cap and popped the
+        # scope — a tenth event would open cycle four.
         assert agent._interaction_tracker.get(scope) is None
 
 

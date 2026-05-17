@@ -32,6 +32,7 @@ from agents.memory.interactions import (
     SUMMARY_PENDING_TEXT,
     SUMMARY_UNAVAILABLE_TEXT,
 )
+from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
@@ -233,7 +234,7 @@ class TestSummarisationFailureModes:
         mock_provider = AsyncMock()
 
         async def _route(*, model, messages, system, tools, max_tokens, temperature):
-            if max_tokens == 256:
+            if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
                 return await _hang()
             return LLMResponse(
                 text='```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
@@ -289,7 +290,7 @@ def test_extract_peer_self_dm_returns_none():
     invariant ``other_id != agent_id`` defensive.
     """
     from agents.memory.interactions import Interaction, Turn
-    from agents.persona_runtime.summarize_close import (
+    from agents.persona_runtime.record_close import (
         extract_peer_from_interaction,
     )
 

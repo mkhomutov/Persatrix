@@ -347,25 +347,16 @@ class _EpisodeRoutingMixin:
             await self._episodic_memory.store_episode(
                 summary=summary, context=ctx, session_id=self._session_id)
             return
-        # PR-216 review (High #1): RFC 0020 §D pins
-        # *"Per-turn message text is not stored in episodes"*, and PR 1's
-        # ``Turn`` dataclass docstring repeats the constraint.  An
-        # earlier draft stashed the full ``ctx`` (which carries
-        # ``event.payload`` — i.e. the message body for
-        # ``CHANNEL_MESSAGE`` / ``MENTION``) on the turn, so the
-        # closed-interaction ``context_json`` ended up embedding every
-        # message body for the lifetime of the row.  PR 4's LLM
-        # summariser only needs the per-turn structural envelope plus
-        # the deterministic ``summary`` text — it does not need the
-        # raw body.  Keep only the structural fields here so the
-        # spec-vs-code drift is closed; if a future PR genuinely needs
-        # the body, RFC 0020 §D must be amended in the same change.
-        # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``
-        # (the same dict ends up in persisted JSON via
-        # ``_persist_closed_interaction``).  Match the annotation here
-        # so a future caller that stashes a non-``object`` value (e.g.
-        # nested ``Any``-typed metadata read from a payload) doesn't
-        # need a cast at this site.
+        # ISSUE-0054 — RFC 0026's facts extractor needs the real
+        # message body: the combined summarise + extract LLM call at
+        # interaction close extracts zero facts when fed only the
+        # deterministic action envelope.  The body rides the in-memory
+        # turn under ``text`` and is stripped before persistence by
+        # ``_persist_closed_interaction`` so ``context_json`` stays
+        # body-free per RFC 0020 §D.
+        # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``;
+        # match it here so a future caller stashing a nested ``Any``
+        # value does not need a cast at this site.
         payload: dict[str, Any] = {
             "summary": summary,
             "event_type": event.event_type.value,
@@ -379,6 +370,9 @@ class _EpisodeRoutingMixin:
                 "sender_participant_type", "agent",
             ),
         }
+        message_text = (event.payload or {}).get("content")
+        if isinstance(message_text, str) and message_text.strip():
+            payload["text"] = message_text
         interaction = self._interaction_tracker.add_turn(scope, payload=payload)
         # PR-3 review #12: ``add_turn`` now closes inline when the
         # MaxTurns cap fires.  The returned interaction is the
@@ -423,7 +417,15 @@ class _EpisodeRoutingMixin:
             "scope": interaction.scope,
             "close_reason": interaction.close_reason,
             "turn_count": interaction.turn_count,
-            "turns": [{"at": t.at, "payload": t.payload} for t in interaction.turns],
+            # ISSUE-0054 / RFC 0020 §D — strip the inbound message
+            # ``text`` the multi-turn path stashes for the RFC 0026
+            # extractor: Phase 2 reads it off the in-memory interaction,
+            # so the persisted ``context_json`` stays body-free.
+            "turns": [
+                {"at": t.at, "payload": {
+                    k: v for k, v in t.payload.items() if k != "text"}}
+                for t in interaction.turns
+            ],
         }
         try:
             await self._episodic_memory.store_episode(

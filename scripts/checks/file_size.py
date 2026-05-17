@@ -153,6 +153,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # report (3 395 words at tag time) set the precedent; the v0.3.0 PR 4
     # rerun (this addition) brings the report to ~4 600 words.
     "docs/manual-tests/v0.3.0-execution-report.md",
+    # docs/manual-tests/v0.3.1-execution-report.md is the v0.3.1 sibling of
+    # v0.3.0-execution-report.md above — identical per-release accumulator
+    # pattern. The PR 1 live execution pass (the 26 previously-blocked rows
+    # run against the Docker Compose stack) brought the report to ~4 250
+    # words: every test row carries an inline outcome + evidence note, plus
+    # the MT-MEMORY-005 per-leg acceptance table and the §Follow-ups
+    # findings (F-1 facts-tier gap). Written against the v0.3.1 release;
+    # archive once the tag ships.
+    "docs/manual-tests/v0.3.1-execution-report.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,

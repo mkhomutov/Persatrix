@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
 
 LLM_SUMMARY_TEXT = (
@@ -34,7 +35,12 @@ PERSONA_CONFIG: dict = {
     "role": "PR 4 summary-on-close test persona",
     "type": "persona",
     "max_llm_calls": 5,
-    "max_tokens": 1024,
+    # Persona event-loop output cap.  Deliberately kept distinct from
+    # ``SUMMARIZATION_MAX_OUTPUT_TOKENS`` so the mock LLM clients below
+    # can route the summariser call apart from the persona-loop call by
+    # ``max_tokens`` alone — the two calls would otherwise be
+    # indistinguishable to the mock.
+    "max_tokens": 4096,
     "tools": [],
     "persona": {
         "name": "Summary Agent",
@@ -66,15 +72,15 @@ PERSONA_CONFIG: dict = {
 def make_summary_client(text: str = LLM_SUMMARY_TEXT) -> LLMClient:
     """Build a mock LLM client that branches on ``max_tokens``.
 
-    The summariser pins ``max_tokens=256`` while the persona event
-    loop uses the persona's ``max_tokens=1024``, so we route the
-    summarisation call to the prose ``text`` and the persona call to
-    a JSON action list.
+    The summariser pins ``max_tokens=SUMMARIZATION_MAX_OUTPUT_TOKENS``
+    while the persona event loop uses the persona config's
+    ``max_tokens``, so we route the summarisation call to the prose
+    ``text`` and the persona call to a JSON action list.
     """
     mock_provider = AsyncMock()
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == 256:  # summarisation call
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:  # summarisation call
             return LLMResponse(
                 text=text,
                 stop_reason=StopReason.END_TURN,
@@ -120,7 +126,7 @@ def make_gated_summary_client(text: str = LLM_SUMMARY_TEXT) -> GatedSummaryClien
     mock_provider = AsyncMock()
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == 256:
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
             started.set()
             await gate.wait()
             return LLMResponse(
@@ -145,7 +151,7 @@ def make_failing_summary_client(exc: Exception) -> LLMClient:
     mock_provider = AsyncMock()
 
     async def _route(*, model, messages, system, tools, max_tokens, temperature):
-        if max_tokens == 256:
+        if max_tokens == SUMMARIZATION_MAX_OUTPUT_TOKENS:
             raise exc
         return LLMResponse(
             text='```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',

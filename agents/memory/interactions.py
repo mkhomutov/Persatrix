@@ -138,12 +138,15 @@ _DEFAULT_CLOCK: Clock = time.time
 class Turn:
     """A single turn aggregated into an open interaction.
 
-    PR 1 stores only the timestamp and a small payload dict — the
-    payload is opaque to the tracker and is consumed by the PR 4
-    summariser.  Storing the message body itself is deliberately out
-    of scope per RFC 0020 §D ("Per-turn message text is not stored
-    in episodes"); the live buffer for working-memory injection lives
-    in working memory, not here.
+    The payload is opaque to the tracker and is consumed by the
+    close-path summariser.  It carries the structural envelope plus —
+    since ISSUE-0054 — the inbound message ``text`` the RFC 0026 facts
+    extractor needs.  RFC 0020 §D still holds for the *persisted*
+    episode: ``_persist_closed_interaction`` strips ``text`` before the
+    turn lands in ``context_json``, so the body is carried only
+    transiently on the in-memory turn and the episodic store never
+    doubles as a message log.  The live buffer for working-memory
+    injection lives in working memory, not here.
     """
 
     at: float
