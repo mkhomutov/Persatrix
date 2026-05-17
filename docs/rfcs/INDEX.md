@@ -12,11 +12,11 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
 | [RFC-0014](0014-agent-skill-registry-lifecycle.md) | 📋 Proposed | architecture | v0.4.0 | 2026-04-16 | Agent Skill Registry & Lifecycle |
 | [RFC-0015](0015-process-automation-pattern-extraction.md) | 📋 Proposed | feature | v0.5.0 | 2026-04-19 | Process Automation & Pattern Extraction |
-| [RFC-0023](0023-llm-call-leasing.md) | 📋 Proposed | architecture | v0.3.x (TBD) | 2026-05-09 | LLM Call Leasing |
+| [RFC-0023](0023-llm-call-leasing.md) | 📋 Proposed | architecture | v0.3.2 — full (Phases 1–6); see docs/v0.3.2-plan.md and docs/rfcs/0023-pr-plan.md | 2026-05-09 | LLM Call Leasing |
 | [RFC-0024](0024-event-driven-scheduling.md) | 📋 Proposed | architecture | v0.3.x (TBD) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
-| [RFC-0029](0029-personal-society-storage-split.md) | 📋 Proposed | architecture | Phase 1 v0.3.x (facade + tier rename); Phases 2–4 v0.4.0 | 2026-05-10 | Personal/Society Storage Split |
+| [RFC-0029](0029-personal-society-storage-split.md) | 📋 Proposed | architecture | Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md | 2026-05-10 | Personal/Society Storage Split |
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
 | [RFC-0033](0033-model-alias-layer.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-15 | Provider-Agnostic Model Alias Layer |
 | [RFC-0035](0035-channel-membership-interval-ledger.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Channel Membership Interval Ledger |
