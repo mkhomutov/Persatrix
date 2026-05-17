@@ -192,6 +192,8 @@ A separate `state` column was considered and rejected because it would (a) doubl
 
 Per-turn message text is **not** stored in `episodes`. Channel messages live in [RFC 0011's `messages` table](0011-channels-bridges.md). Human-chat messages are transient (RFC 0016) and only the resulting interaction summary persists. This keeps the episodic store from doubling as a message log.
 
+The in-memory close-path interaction object *does* carry each turn's message body so the [RFC 0026](0026-declarative-facts-tier.md) facts extractor can read it during the summarise-on-close pass (without the body the extractor has no facts to extract — see ISSUE-0054). That body is carried only transiently: `_persist_closed_interaction` strips it before the turn is written to `context_json`, so the persisted episode remains body-free and the data-minimisation property above still holds.
+
 ### E. Memory Injection Contract
 
 The persona-runtime memory-injection caller ([agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py)) is updated as follows:

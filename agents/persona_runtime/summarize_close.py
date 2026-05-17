@@ -201,9 +201,12 @@ def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
     for idx, turn in enumerate(interaction.turns, start=1):
         payload = turn.payload or {}
         content_parts: list[str] = []
-        summary = str(payload.get("summary", "")).strip()
-        if summary:
-            content_parts.append(summary)
+        # ISSUE-0054 — ``text`` (inbound message body) is the load-bearing
+        # input for RFC 0026 extraction; ``summary`` is the action envelope.
+        for key in ("text", "summary"):
+            value = str(payload.get(key, "")).strip()
+            if value:
+                content_parts.append(value)
         sender = str(payload.get("sender", "")).strip()
         if sender:
             content_parts.append(f"sender={sender}")

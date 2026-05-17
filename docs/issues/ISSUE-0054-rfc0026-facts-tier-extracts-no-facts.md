@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0054
-summary: RFC 0026 facts tier extracts zero facts at interaction close — the close-path summariser/extractor LLM output is stored with its literal ```json markdown fence, breaking both episode summaries and fact extraction
-status: open
+summary: RFC 0026 facts tier extracts zero facts at interaction close — the close-path summariser/extractor was fed per-turn action-envelope strings, never the inbound message content, so the combined summarise+extract LLM call had no facts to extract
+status: in_progress
 severity: high
 area: agents/persona_runtime
 created: 2026-05-17
@@ -197,3 +197,49 @@ With this defect:
 > `issue54-bob` interaction) succeeded cleanly, so this is a close-path
 > concurrency bug under catch-up-storm load — separate from this issue,
 > worth its own ticket.
+
+> 2026-05-17 — **root-cause fix landed (this branch).** The re-diagnosed
+> root cause is fixed: the close-path summariser/extractor now receives
+> the inbound message content.
+>
+> *Fix.* Three coordinated changes (TDD):
+>
+> - `episode_routing.py::_handle_multi_turn_event` — stash the inbound
+>   message body (`event.payload["content"]`) on the turn payload under
+>   a new `text` key, alongside the existing structural envelope.
+> - `summarize_close.py::_interaction_to_entries` — project that `text`
+>   into the `MemoryEntry` content fed to `MemoryFacade.compress`, so
+>   the combined summarise + extract LLM call finally sees the message
+>   body rather than just the `"Event: … → Actions: […]"` envelope.
+> - `episode_routing.py::_persist_closed_interaction` — strip `text`
+>   from each turn payload before it lands in `episodes.context_json`.
+>   The body is carried only transiently on the in-memory interaction
+>   for the Phase-2 summariser; RFC 0020 §D's "the episodic store does
+>   not double as a message log" property is preserved, so the existing
+>   `test_closed_interaction_context_does_not_embed_message_body`
+>   contract test stays green. RFC 0020 §D + the `Turn` docstring are
+>   amended to document the transient in-memory carry.
+>
+> *Automated verification — green.* New TDD tests, red before the fix:
+>
+> - `test_summarize_close_helpers.py::TestInteractionToEntriesCarriesMessageText`
+>   — `_interaction_to_entries` projects `payload["text"]` into the
+>   entry content; legacy payloads with no `text` key still project.
+> - `test_facts_extractor_message_content.py::TestExtractorReceivesMessageContent`
+>   — full close path: distinctive message bodies reach the summariser
+>   prompt, a content-aware extractor consequently populates the
+>   `facts` table, and the body does **not** leak into `context_json`.
+>   The second test reproduces the exact ISSUE-0054 symptom (empty
+>   `facts` table) pre-fix and pins it fixed.
+>
+> The full close-path / facts / interaction-lifecycle regression suites
+> pass; `ruff` + `mypy` clean; `scripts/checks/file_size.py --strict`
+> passes (the new test class was split into its own file).
+>
+> *Outstanding before this can move to `resolved`.* A fresh live
+> `MT-MEMORY-005` run on the Docker Compose stack to confirm the
+> `facts` table populates with real `(subject, predicate, object)`
+> tuples after an idle-gap close, plus the
+> [v0.3.1-execution-report.md](../manual-tests/v0.3.1-execution-report.md)
+> F-1 update. The fence fix and this content fix together close the
+> code-level defect; the live re-run is the release-gate confirmation.

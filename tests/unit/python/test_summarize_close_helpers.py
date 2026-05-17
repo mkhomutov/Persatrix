@@ -34,6 +34,7 @@ from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT, Interaction, Turn
 from agents.persona_runtime.summarize_close import (
     JANITOR_INTERVAL_SEC,
+    _interaction_to_entries,
     maybe_run_janitor,
     summarize_closed_interaction,
 )
@@ -298,3 +299,68 @@ class TestEmptySummaryFieldFallsBack:
         assert failed is False
         assert facts_raw is not None
         assert json.loads(facts_raw) == facts_payload
+
+
+class TestInteractionToEntriesCarriesMessageText:
+    """ISSUE-0054 root cause — :func:`_interaction_to_entries` must
+    project the inbound message body (``payload["text"]``) into the
+    entry content fed to the combined summarise + extract LLM call.
+
+    Pre-fix the helper read only the deterministic action-envelope
+    ``summary`` (``"Event: channel_message → Actions: [...]"``) and the
+    ``sender`` annotation, so the extractor's LLM input never carried a
+    real message — it correctly returned ``facts: []`` because the
+    input it saw genuinely contained no extractable facts.  The body
+    must reach the entry content or RFC 0026's facts tier stays inert.
+    """
+
+    def test_message_text_lands_in_entry_content(self) -> None:
+        interaction = Interaction(
+            interaction_id="ix-text",
+            scope="dm:test-agent:bob",
+            started_at=0.0,
+            closed_at=10.0,
+            close_reason="structural",
+            turns=[
+                Turn(at=0.0, payload={
+                    "sender": "bob",
+                    "summary": (
+                        "Event: channel_message → Actions: ['do_nothing']"
+                    ),
+                    "text": "I'm picking up my daughter Mira from school",
+                }),
+                Turn(at=5.0, payload={
+                    "sender": "bob",
+                    "summary": (
+                        "Event: channel_message → Actions: ['do_nothing']"
+                    ),
+                    "text": "She dislikes loud phone calls",
+                }),
+            ],
+        )
+        joined = " ".join(e.content for e in _interaction_to_entries(interaction))
+        assert "daughter Mira" in joined
+        assert "dislikes loud phone calls" in joined
+
+    def test_missing_text_key_still_projects_envelope(self) -> None:
+        """Backward-compat — a turn with no ``text`` key (single-turn
+        rows, legacy payloads) still yields a non-empty entry from the
+        action-envelope ``summary``."""
+        interaction = Interaction(
+            interaction_id="ix-no-text",
+            scope="dm:test-agent:bob",
+            started_at=0.0,
+            closed_at=10.0,
+            close_reason="structural",
+            turns=[
+                Turn(at=0.0, payload={
+                    "sender": "bob",
+                    "summary": (
+                        "Event: channel_message → Actions: ['do_nothing']"
+                    ),
+                }),
+            ],
+        )
+        entries = _interaction_to_entries(interaction)
+        assert len(entries) == 1
+        assert entries[0].content.strip()
