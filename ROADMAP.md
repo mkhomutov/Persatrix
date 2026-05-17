@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-17 (v0.3.1 release-prep PR 2 — README + ROADMAP + persona/channels guide refresh, memory-architecture diagram pass, and the v0.3.1 release checklist; v0.3.1 Version Map row added at `🚧 Release prep`.)
-> **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — 🚧 Release prep
-> **Current milestone**: v0.3.1 release prep in progress — all three RFC workstreams merged, the manual-test execution report has landed ([#361](https://github.com/mkhomutov/Persatrix/pull/361)); docs refresh → version bump → final pre-tag verification per [v0.3.1-release-prep-plan.md](docs/v0.3.1-release-prep-plan.md).
+> **Last updated**: 2026-05-17 (v0.3.1 release-prep PR 4 — final pre-tag verification: automated gate sweep green, Docker stack builds and comes up healthy; v0.3.1 Version Map row flipped to `✅ Released`.)
+> **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — ✅ Released
+> **Current milestone**: v0.3.1 released — all three RFC workstreams merged and release-prep PRs 1–4 landed; the `v0.3.1` git tag and GitHub Release follow post-merge per [v0.3.1-release-prep-plan.md](docs/v0.3.1-release-prep-plan.md) Phase 5.
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -20,7 +20,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.2** | Bounded, predictable per-event memory injection for persona agents — structural fix unblocking RFC 0008 | ✅ Complete — released |
 | **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | ✅ Complete — released |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Complete — released |
-| **v0.3.1** | The persona remembers stated facts about you across interactions and follows the conversation it is currently having | 🚧 Release prep |
+| **v0.3.1** | The persona remembers stated facts about you across interactions and follows the conversation it is currently having | ✅ Complete — released |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
