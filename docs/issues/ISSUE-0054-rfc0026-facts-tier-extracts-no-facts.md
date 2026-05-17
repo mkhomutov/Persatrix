@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0054
-summary: RFC 0026 facts tier extracts zero facts at interaction close — the close-path summariser/extractor was fed per-turn action-envelope strings, never the inbound message content, so the combined summarise+extract LLM call had no facts to extract
+summary: RFC 0026 facts tier extracts zero facts at interaction close. Three chained close-path bugs — markdown code fence (fixed a6c3332), action-envelope-only input with no message body (fixed 71a9045), and a max_tokens=256 cap on the combined summarise+extract call that truncates any multi-fact envelope mid-JSON so it never parses (open)
 status: in_progress
 severity: high
 area: agents/persona_runtime
@@ -243,3 +243,70 @@ With this defect:
 > [v0.3.1-execution-report.md](../manual-tests/v0.3.1-execution-report.md)
 > F-1 update. The fence fix and this content fix together close the
 > code-level defect; the live re-run is the release-gate confirmation.
+
+> 2026-05-17 — **live re-run after the content fix ([commit 71a9045](https://github.com/mkhomutov/Persatrix/commit/71a9045)).
+> Issue stays OPEN — a third, distinct bug is now the headline cause:
+> the combined summarise+extract LLM call truncates.**
+>
+> *Automated.* All 54 fix-commit tests green — the 8 integration tests
+> in `test_facts_extractor_close.py` + `test_facts_extractor_message_content.py`
+> (incl. `TestExtractorReceivesMessageContent`, the content-fix
+> root-cause test) and the 46 unit tests in
+> `test_summarize_close_helpers.py` / `test_extractor.py` /
+> `test_envelope_parse_observability.py`.
+>
+> *Live.* Docker stack rebuilt from this branch; drove a four-turn
+> establish scenario at `ember-owl` (user `issue54-carol`: seven-year-old
+> daughter Mira / dislikes phone calls, prefers async / budget-spreadsheet
+> commitment / rate-card renegotiation) and triggered an RFC 0020
+> idle-gap close.
+>
+> *Content fix — confirmed working.* The closed `issue54-carol` episode
+> summary is rich prose naming Mira, the rate card, the budget
+> spreadsheet, and the async preference — proof the inbound message
+> bodies now reach the summariser/extractor prompt. The LLM response
+> even **contains a populated `facts` array** with five real tuples
+> (`Carol has_child_named Mira`, `Mira has_age 7`, `Carol prefers
+> "text or async communication"`, `Carol dislikes "phone calls"`, …).
+> Pre-fix this array was always `[]`. Commit 71a9045 does what it
+> claims.
+>
+> *Facts half — still 0 for `issue54-carol`.* `SELECT COUNT(*) FROM
+> facts` finds no `carol` rows. Root cause re-diagnosed (third bug in
+> the chain): the combined summarise+extract call in
+> `summarize_close.py` caps `max_tokens=256`. That literal is unchanged
+> from the RFC 0020 PR 4 *summary-only* era; RFC 0026 PR 2 appended the
+> `facts`-array output to the **same** call without raising the cap.
+> A conversation rich enough to yield several facts produces a
+> two-output envelope larger than 256 output tokens, so the LLM
+> response is **truncated mid-JSON**. The persisted `episodes.summary`
+> for `carol` is the raw 828-char fenced envelope, cut off at the
+> fifth fact's `"certainty": 0.9` — no closing brackets. Truncated
+> JSON fails `json.loads`, so `split_combined_response` raises
+> `FactsParseError(reason="truncated")`, the backward-compat branch
+> commits the raw text as the summary, and `finalize_closed_interaction`
+> skips the facts dispatch because `facts_raw is None`.
+>
+> *Corroboration.* During the same run the startup catch-up replayed
+> stale events; one thin replayed conversation (`mt-chat-004-user`)
+> closed with a **clean, fence-free** prose summary **and** extracted
+> one fact — `(mt-chat-004-user, plans_to, "start a new project",
+> 0.9)`. So the end-to-end facts path *does* populate the table when
+> the envelope fits inside 256 tokens. The defect is purely the token
+> cap vs. envelope size; the fence-unwrap fix (a6c3332) and the
+> content fix (71a9045) are both still correct and still needed. The
+> ` ```json `-fenced malformed summary is now a *secondary* symptom of
+> truncation — truncated JSON cannot be parsed regardless of the fence.
+>
+> *Next fix.* Raise `max_tokens` on the combined summarise+extract
+> call in `summarize_close.py` (256 → enough headroom for the prose
+> summary plus a multi-fact array — on the order of 1024), ideally as
+> a named constant beside `SUMMARIZATION_TARGET_TOKENS`. Until then the
+> `facts` table stays empty for any non-trivial interaction.
+>
+> *Adjacent (unchanged from the prior re-run).* The catch-up storm
+> again raised `sqlite3.OperationalError: cannot commit transaction -
+> SQL statements in progress` in `_persist_closed_interaction` for one
+> replayed scope (`dm:ember-owl:my-custom-user`, backfilled to
+> `[summary pending]`). Still a separate close-path concurrency bug
+> under catch-up-storm load, worth its own ticket.
