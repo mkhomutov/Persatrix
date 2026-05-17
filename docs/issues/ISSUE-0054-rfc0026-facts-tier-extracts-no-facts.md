@@ -140,3 +140,60 @@ With this defect:
 > conversation window, so this did not block the report's literal
 > release gate — but RFC 0026 ships non-functional, which the release
 > owner must resolve before tagging v0.3.1.
+
+> 2026-05-17 — **re-run after the fence fix ([commit a6c3332](https://github.com/mkhomutov/Persatrix/commit/a6c3332),
+> `_strip_code_fence` in `fact_envelope.py`). Issue stays OPEN — the
+> facts tier is still inert.**
+>
+> *Automated.* The 6 fix-commit tests are green:
+> `test_facts_extractor_close.py::TestExtractorFencedEnvelope`
+> (full close path, fenced envelope → clean summary + facts persisted),
+> plus the 5 unit tests in `test_extractor.py` /
+> `test_envelope_parse_observability.py`.
+>
+> *Live.* Docker stack rebuilt with the fix; drove a four-turn
+> establish scenario at `ember-owl` (user `issue54-bob`: daughter Mira /
+> dislikes phone calls / budget-spreadsheet commitment / rate-card
+> topic) and triggered an RFC 0020 idle-gap close. Result on
+> `memory.db`:
+>
+> - **Summary half — fixed.** The new `episodes.summary` is clean prose
+>   with **no ` ```json ` fence** (*"Issue54-bob sent four channel
+>   messages, each triggering task completion actions. … no substantive
+>   discussion or decisions recorded."*). The 8 pre-fix episodes in the
+>   same DB still carry the literal fence — the fix changed the
+>   behaviour. The fence-unwrap fix is confirmed working.
+> - **Facts half — still 0.** `SELECT COUNT(*) FROM facts` → `0` after a
+>   full establish + close.
+>
+> *Root cause re-diagnosed.* The markdown fence was a real but
+> **secondary** bug. The facts tier extracts nothing because the
+> close-path summariser/extractor is fed **per-turn action-envelope
+> strings, not message content**. Each closed turn's payload carries
+> only `summary = "Event: channel_message → Actions: [...]"` plus
+> structural fields — `episode_routing.py:350-381` deliberately drops
+> the message body, citing RFC 0020 §D *"per-turn message text is not
+> stored in episodes"*, and `summarize_close.py::_interaction_to_entries`
+> reads only `payload["summary"]`. The closed episode's `context_json`
+> confirms it: all four turns store the identical action-envelope
+> string and the words "Mira" / "phone calls" / "rate card" appear
+> nowhere. So the RFC 0026 extractor's LLM input has no facts to
+> extract — it correctly returns `facts: []`. The ` ```json `-fence
+> unwrap is necessary but **not sufficient**; the headline symptom
+> (zero facts at interaction close) persists.
+>
+> *Next fix.* The close-path extractor needs access to the actual
+> message content — e.g. extract from the RFC 0034 conversation window /
+> channel store rather than from interaction-turn payloads, or amend
+> RFC 0020 §D. Until then the `facts` table stays empty regardless of
+> the fence.
+>
+> *Adjacent.* During the re-run the startup channel catch-up replayed
+> ~68 stale events and the concurrent idle-closes raised
+> `sqlite3.OperationalError: cannot commit transaction - SQL statements
+> in progress` in `_persist_closed_interaction` (two old scopes failed
+> to close; the janitor backfilled them to
+> `[interaction summary unavailable]`). A single uncontended close (the
+> `issue54-bob` interaction) succeeded cleanly, so this is a close-path
+> concurrency bug under catch-up-storm load — separate from this issue,
+> worth its own ticket.
