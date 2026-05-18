@@ -11,8 +11,8 @@ INFO / WARN log lines that mirror the orchestrator-side
   both binaries (RFC 0031 PR plan PR 4 finding #3).
 
 The silent read itself lives in :mod:`agents.session_id` so the
-``MemoryFacade`` construction-time read can call it without the
-``persona_runtime → persona → base → memory.facade`` import cycle.
+``MemoryStore`` construction-time read can call it without the
+``persona_runtime → persona → base → memory.store`` import cycle.
 PR #337 deep review finding M2.
 
 The env-var name and legacy constant are re-exported from this module

@@ -70,9 +70,7 @@ from .dispatch import (  # noqa: F401
     EventDispatcher,
 )
 from .llm_client import LLMClient
-from .memory.episodic import EpisodicMemory
-from .memory.facts import FactStore
-from .memory.relationship import RelationshipMemory
+from .memory import build_personal_tiers
 from .memory.working import WorkingMemory
 from .persona_behavior import (
     DIMENSION_DESCRIPTIONS,  # noqa: F401
@@ -289,25 +287,17 @@ def create_persona_agent(
     memory_config = config.get("memory", {})
     db_path = memory_config.get("db_path", "data/memory.db")
 
-    episodic_memory = EpisodicMemory(agent_id=agent_id, db_path=db_path)
-    relationship_memory = RelationshipMemory(agent_id=agent_id, db_path=db_path)
-    # RFC 0026 PR 2 — declarative-fact tier alongside episodes /
-    # relationships.  Each tier owns its own ``aiosqlite`` connection
-    # opened lazily in its ``initialize()``.  For file-backed databases
-    # (production) the connections share the file and the umbrella
-    # migration runner is idempotent across them.  For ``:memory:``
-    # test paths every connection is an isolated database, so a
-    # cross-tier ``JOIN`` (e.g., ``facts`` × ``episodes`` on
-    # ``source_interaction_id``) would not find rows on the test path —
-    # no caller currently relies on that join.  The ``shared_db``
-    # parameter below stays ``None`` here; if a future test or feature
-    # needs cross-tier joins under ``:memory:``, route the FactStore
-    # through the EpisodicMemory connection via that seam.
-    fact_store = FactStore(
-        agent_id=agent_id,
-        db_path=db_path,
-        shared_db=None,
-    )
+    # RFC 0029 Phase 1 PR 3 — build the personal tiers (episodic /
+    # relationship / declarative-fact) through the ``agents.memory``
+    # facade so the per-tier classes are constructed inside
+    # ``agents/memory/``.  The RFC 0029 PR 2 ``DeprecationWarning`` on
+    # direct external tier construction stays silent on this production
+    # path; the per-tier ``aiosqlite``-connection / ``shared_db``
+    # contract is documented on :func:`agents.memory.build_personal_tiers`.
+    tiers = build_personal_tiers(agent_id, db_path=db_path)
+    episodic_memory = tiers.episodic
+    relationship_memory = tiers.relationship
+    fact_store = tiers.facts
     # F-5a-1: Read working memory budget from memory config, not the agent's
     # LLM completion limit (config["max_tokens"]).  These are distinct concerns:
     # config["max_tokens"] caps LLM output tokens (e.g. 4096), while working

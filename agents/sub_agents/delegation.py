@@ -5,7 +5,7 @@ PR 3 of the [RFC 0008 PR plan](../../docs/rfcs/0008-pr-plan.md) introduces the
 typed contract that callers (task agents acting as parents) hand to sub-agents
 and that sub-agents return.  The merge engine in
 :mod:`agents.sub_agents.merge` consumes :class:`DelegationResult` and applies
-the per-entry merge strategy against the caller's :class:`MemoryFacade`.
+the per-entry merge strategy against the caller's :class:`MemoryStore`.
 
 The procedural tier is intentionally excluded from
 :class:`MemoryWriteEntry` — see [RFC 0008 PR plan](../../docs/rfcs/0008-pr-plan.md)

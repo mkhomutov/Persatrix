@@ -14,6 +14,7 @@ from .facade import (
 )
 from .facts import Fact, FactStore
 from .notes import Note, NoteStore
+from .personal_tiers import PersonalTiers, build_personal_tiers
 from .relationship import RelationshipMemory
 from .relationship_types import Interaction, RelationshipSummary
 from .shared_pool import SharedPoolRegistry
@@ -65,6 +66,7 @@ __all__ = [
     "MemoryStore",
     "Note",
     "NoteStore",
+    "PersonalTiers",
     "RelationshipMemory",
     "RelationshipSummary",
     "SharedPoolRegistry",
@@ -74,5 +76,6 @@ __all__ = [
     "StoreConfig",
     "WorkingMemory",
     "budget_to_limit",
+    "build_personal_tiers",
     "estimate_tokens",
 ]
