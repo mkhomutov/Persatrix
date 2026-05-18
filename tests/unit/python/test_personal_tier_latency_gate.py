@@ -201,6 +201,18 @@ def test_load_baseline_reads_committed_json(tmp_path: Path) -> None:
     assert loaded == _BASELINE
 
 
+def test_load_baseline_rejects_non_object_json(tmp_path: Path) -> None:
+    """A baseline file holding valid JSON that is not an object (a list, a
+    bare scalar) is rejected with ``TypeError`` — the gate needs a metric
+    map, and a bare subscript later would fail less legibly.
+    """
+    harness = _load_perf_harness()
+    baseline_path = tmp_path / "personal_tier_latency.json"
+    baseline_path.write_text(json.dumps([3.0, 1.0]), encoding="utf-8")
+    with pytest.raises(TypeError, match="not a JSON object"):
+        harness.load_baseline(baseline_path)
+
+
 # ─── evaluate_gate: malformed baseline ────────────────────────
 
 
@@ -216,6 +228,18 @@ def test_gate_raises_actionable_error_when_baseline_omits_a_metric() -> None:
     incomplete = {"recall_episodes_p99_ms": 3.0}  # recall_episodes_p50_ms absent
     with pytest.raises(KeyError, match="present keys"):
         harness.evaluate_gate(measured, incomplete)
+
+
+def test_gate_raises_on_non_numeric_metric() -> None:
+    """A gated metric whose value is not a number (a hand-edited baseline,
+    a stringified JSON field) fails with ``TypeError`` naming the metric
+    and the dict it came from — never a silent coerce or comparison crash.
+    """
+    harness = _load_perf_harness()
+    measured = {"recall_episodes_p99_ms": 3.0, "recall_episodes_p50_ms": 1.0}
+    non_numeric = {"recall_episodes_p99_ms": "3.0", "recall_episodes_p50_ms": 1.0}
+    with pytest.raises(TypeError, match="not numeric"):
+        harness.evaluate_gate(measured, non_numeric)
 
 
 # ─── main: exit-code contract ─────────────────────────────────

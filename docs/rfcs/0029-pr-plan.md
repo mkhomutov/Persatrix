@@ -275,8 +275,8 @@ PR 3:
 
 | File | Change |
 |------|--------|
-| `tests/perf/personal_tier_latency.py` | Gate enforcement. `evaluate_gate` co-checks p99 **and** p50 against the committed baseline at a 20% tolerance ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy); p50 co-gate per the PR 4 review); `load_baseline` reads the baseline JSON, returning `None` — informational-only — when none is committed; `main` exits non-zero on a regression. A `--capture-baseline PATH` mode is added for the capture workflow. `_metric_ms` raises an actionable error — naming the keys present — when a committed baseline omits a gated metric. |
-| `tests/unit/python/test_personal_tier_latency_gate.py` | **New** — failing-first TDD pins for `evaluate_gate` (pass/fail verdicts, exclusive boundary, custom tolerance, p50 co-gate, per-metric regression detail) and `load_baseline` (missing vs committed). Also pins `main`'s exit-code contract (0 informational / 0 pass / 1 regression, measurement stubbed) and the actionable error on a baseline missing a gated metric. |
+| `tests/perf/personal_tier_latency.py` | Gate enforcement. `evaluate_gate` co-checks p99 **and** p50 against the committed baseline at a 20% tolerance ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy); p50 co-gate per the PR 4 review); `load_baseline` reads the baseline JSON, returning `None` — informational-only — when none is committed and rejecting JSON that is not an object; `main` exits non-zero on a regression. A `--capture-baseline PATH` mode is added for the capture workflow. `_metric_ms` raises an actionable error — naming the source dict and the keys present — when a committed baseline omits or non-numerically types a gated metric. |
+| `tests/unit/python/test_personal_tier_latency_gate.py` | **New** — failing-first TDD pins for `evaluate_gate` (pass/fail verdicts, exclusive boundary, custom tolerance, p50 co-gate, per-metric regression detail) and `load_baseline` (missing, committed, non-object JSON). Also pins `main`'s exit-code contract (0 informational / 0 pass / 1 regression, measurement stubbed) and the actionable errors on a baseline that omits or non-numerically types a gated metric. |
 | `.github/workflows/perf-baseline-capture.yml` | **New** — maintainer-triggered (`workflow_dispatch`) workflow: runs the harness on a CI runner, opens a PR committing `tests/perf/baselines/personal_tier_latency.json`. `add-paths` scopes the auto-commit to the baseline file; the PR body flags that the `GITHUB_TOKEN`-authored PR needs a manual CI re-trigger before merge, and the header records the "Allow GitHub Actions to create … pull requests" repo prerequisite. |
 | `.github/workflows/ci.yml` | The `python` job runs the perf gate (`python tests/perf/personal_tier_latency.py`) — informational until the baseline lands, enforcing after. |
 | [`docs/rfcs/0029-personal-society-storage-split.md`](0029-personal-society-storage-split.md) | Status → `⚠️ Partially Implemented (Phase 1)`. Append a "Phase 1 implemented in v0.3.2" note to Decision/Next Steps. |
@@ -302,7 +302,7 @@ PR 3:
 - [x] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) updated; merged-PR history caught up through #375.
 - [x] Perf gate enforces a >20% p99/p50 regression once a baseline is committed; `perf-baseline-capture` workflow ships to capture the baseline on CI.
 - [x] [v0.3.2-plan Master Progress Overview](../v0.3.2-plan.md#master-progress-overview) row 3 → ✅ Merged.
-- [x] Python unit suite green (`pytest tests/unit/python/` — 2341 passed, 8 skipped; +5 review-follow-up pins); `ruff` + `mypy` clean on the touched files; `make validate` + `make rfcs-check` pass. PR 5 changes no Go / Rust.
+- [x] Python unit suite green (`pytest tests/unit/python/` — 2343 passed, 8 skipped; +19 gate pins in `test_personal_tier_latency_gate.py`); `ruff` + `mypy` clean on the touched files; `make validate` + `make rfcs-check` pass. PR 5 changes no Go / Rust.
 
 ---
 

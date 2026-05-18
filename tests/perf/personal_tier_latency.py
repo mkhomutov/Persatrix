@@ -145,8 +145,9 @@ async def measure_recall_p99(
     *corpus_size* synthetic observations, runs *warmup* un-timed recalls
     to absorb cold-start cost, then times *iterations* recalls of
     :data:`RECALL_QUERY`.  Returns a JSON-serialisable result dict shaped
-    for the PR 5 baseline file: ``recall_episodes_p99_ms`` is the gated
-    metric; ``warmup`` and ``sample_count`` record how the number was
+    for the PR 5 baseline file: ``recall_episodes_p99_ms`` and
+    ``recall_episodes_p50_ms`` are the co-gated metrics (:data:`GATED_METRICS`);
+    ``warmup`` and ``sample_count`` record how the numbers were
     measured — warm-up applied, and the size of the timed sample set the
     percentiles were computed over (``len`` of the timed latencies, with
     the warm-up recalls excluded).
@@ -226,8 +227,12 @@ def load_baseline(path: Path = _BASELINE_PATH) -> dict[str, object] | None:
     return loaded
 
 
-def _metric_ms(result: dict[str, object], metric: str) -> float:
+def _metric_ms(result: dict[str, object], metric: str, *, source: str) -> float:
     """Extract a numeric metric from a measured / baseline result dict.
+
+    *source* names which dict *result* is — ``"baseline"`` or
+    ``"measured result"`` — so a CI failure points at the file an
+    operator needs to fix rather than leaving them to guess.
 
     Raises :class:`KeyError` naming the keys that *are* present when
     *metric* is absent.  A committed baseline can drift from the harness
@@ -238,12 +243,12 @@ def _metric_ms(result: dict[str, object], metric: str) -> float:
     """
     if metric not in result:
         raise KeyError(
-            f"required perf metric {metric!r} missing from result; "
+            f"required perf metric {metric!r} missing from {source}; "
             f"present keys: {sorted(result)}"
         )
     value = result[metric]
     if not isinstance(value, (int, float)):
-        raise TypeError(f"{metric} is not numeric: {value!r}")
+        raise TypeError(f"{metric} in {source} is not numeric: {value!r}")
     return float(value)
 
 
@@ -264,8 +269,8 @@ def evaluate_gate(
     """
     regressions: list[MetricRegression] = []
     for metric in GATED_METRICS:
-        baseline_ms = _metric_ms(baseline, metric)
-        measured_ms = _metric_ms(measured, metric)
+        baseline_ms = _metric_ms(baseline, metric, source="baseline")
+        measured_ms = _metric_ms(measured, metric, source="measured result")
         limit_ms = baseline_ms * (1.0 + tolerance)
         if measured_ms > limit_ms:
             regressions.append(
