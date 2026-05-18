@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0055
 summary: Concurrent interaction idle-closes during a startup channel catch-up storm raise sqlite3.OperationalError "cannot commit transaction - SQL statements in progress" in _persist_closed_interaction; the affected episode fails to persist and the janitor backfills it to a summary sentinel. Surfaced repeatedly during the ISSUE-0054 live re-runs.
-status: open
+status: resolved
 severity: medium
 area: agents/persona_runtime
 created: 2026-05-17
+closed: 2026-05-18
+closed_pr: 380
 refs:
   - docs/issues/ISSUE-0054-rfc0026-facts-tier-extracts-no-facts.md
   - docs/rfcs/0020-interaction-lifecycle.md
@@ -91,3 +93,19 @@ busy deployment rather than in steady state.
 > whose live re-run notes flagged this adjacent close-path concurrency
 > bug twice as "worth its own ticket". Untouched by the ISSUE-0054 fix
 > chain.
+
+> 2026-05-18 — resolved in #380. Confirmed the shared-connection
+> hypothesis (proposed-fix step 1) and took step 2: `EpisodicMemory`
+> now carries a `_write_lock` (`asyncio.Lock`) held across the
+> `INSERT`/`UPDATE` + `COMMIT` critical section of both episode write
+> paths — `store_episode` (close-path Phase 1) and
+> `update_episode_summary` (Phase 2). Concurrent close-path writes can
+> no longer interleave a `COMMIT` with another write's in-flight
+> statement. The `store_episode` `INSERT` was extracted to
+> `agents/memory/episodic_queries.py` (`insert_episode`) so `episodic.py`
+> stayed under the 500-line file-size cap. A regression test
+> (`tests/unit/python/test_episodic_memory_concurrent_writes.py`, step 4)
+> drives a concurrent close storm against one episodic store and asserts
+> every write commits. Scope is close-vs-close, matching the diagnosis:
+> `recall`'s access-count bump and the notes/counter write paths were
+> not implicated in the storm and are left untouched.
