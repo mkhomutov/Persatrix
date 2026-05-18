@@ -167,6 +167,15 @@ agents:
         lambda_per_day: 0.01            # ~69-day half-life
         c_min: 0.1                      # eviction + retrieval floor
         stale_confidence_alert_threshold: 0.3
+      # RFC 0029 Phase 1: optional society-tier (cross-agent) storage
+      # backend.  v0.3.2 ships single-agent mode only — `dsn: null` (the
+      # default) means every society-tier MemoryStore method raises
+      # SocietyBackendUnavailable.  A set DSN is accepted by the schema
+      # but ignored by the facade until the Postgres society backend
+      # lands in RFC 0029 Phase 3 (v0.4.0).  Removing the block changes
+      # nothing.  See schemas/agent.schema.json#memory.society.
+      society:
+        dsn: null
     # RFC 0034 Phase 1: per-agent override for the conversation-window
     # transcript reconstruction.  The persona runtime rebuilds the LLM
     # `messages` array from the channel store each turn so the model

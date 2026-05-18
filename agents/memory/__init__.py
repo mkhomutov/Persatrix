@@ -17,6 +17,12 @@ from .notes import Note, NoteStore
 from .relationship import RelationshipMemory
 from .relationship_types import Interaction, RelationshipSummary
 from .shared_pool import SharedPoolRegistry
+from .society_facade import (
+    SocietyBackendUnavailable,
+    SocietyDisabled,
+    SocietyTransientError,
+)
+from .store import MemoryStore, StoreConfig
 from .working import ContextSection, WorkingMemory, estimate_tokens
 
 
@@ -56,11 +62,16 @@ __all__ = [
     "MemoryEntry",
     "MemoryFacade",
     "MemoryLifecycle",
+    "MemoryStore",
     "Note",
     "NoteStore",
     "RelationshipMemory",
     "RelationshipSummary",
     "SharedPoolRegistry",
+    "SocietyBackendUnavailable",
+    "SocietyDisabled",
+    "SocietyTransientError",
+    "StoreConfig",
     "WorkingMemory",
     "budget_to_limit",
     "estimate_tokens",

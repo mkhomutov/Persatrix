@@ -271,7 +271,7 @@ The v0.4.0 PR plan for Phases 2–6 opens when the v0.4.0 plan opens; the [RFC 0
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | `MemoryStore` facade promotion | `feature/v032-rfc0029p1-facade-promotion` | ⬜ Not started | — | — |
+| 1 | `MemoryStore` facade promotion | `feature/v032-rfc0029p1-facade-promotion` | 🔀 PR open | — | — |
 | 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ⬜ Not started | — | — |
 | 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | ⬜ Not started | — | — |
 | 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | ⬜ Not started | — | — |

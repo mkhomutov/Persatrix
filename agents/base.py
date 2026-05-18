@@ -21,7 +21,7 @@ from .llm_client import (
     StopReason,
     ToolCall,
 )
-from .memory import MemoryFacade, SharedPoolRegistry, budget_to_limit
+from .memory import MemoryStore, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
 from .prompt_loader import load_snippet
 from .security import maybe_wrap_tool_content
@@ -95,7 +95,7 @@ class BaseAgent(ABC):
     def memory(self) -> Any:
         """Access the agent's memory surface, or ``None`` when disabled.
 
-        For task agents this is a :class:`MemoryFacade` opened by
+        For task agents this is a :class:`MemoryStore` opened by
         :meth:`initialize_memory` when ``memory.enabled`` is set in
         ``config/agents.yaml`` (deny-by-default; RFC 0008 PR plan PR 2).
         Persona-runtime subclasses override this property to expose a
@@ -170,7 +170,7 @@ class BaseAgent(ABC):
     async def initialize_memory(
         self, *, shared_pools: SharedPoolRegistry | None = None,
     ) -> None:
-        """Create and open the agent's :class:`MemoryFacade` if enabled.
+        """Create and open the agent's :class:`MemoryStore` if enabled.
 
         No-op when ``memory.enabled`` is false.  Idempotent.
         ``shared_pools`` (RFC 0008 PR 4) wires named cross-agent pools.
@@ -181,7 +181,7 @@ class BaseAgent(ABC):
             return
         memory_cfg = self.config.get("memory") or {}
         db_path = memory_cfg.get("db_path", "data/memory.db")
-        facade = MemoryFacade(
+        store = MemoryStore(
             agent_id=self.agent_id,
             db_path=db_path,
             default_min_score=memory_cfg.get("min_score", 0.20),
@@ -191,20 +191,20 @@ class BaseAgent(ABC):
             shared_pools=shared_pools,
             **procedural_kwargs_from_config(memory_cfg),
         )
-        await facade.initialize()
-        self._memory = facade
+        await store.initialize()
+        self._memory = store
         logger.info(
-            "Initialised MemoryFacade for task agent %s (db=%s)",
+            "Initialised MemoryStore for task agent %s (db=%s)",
             self.agent_id, db_path,
         )
 
     async def close_memory(self) -> None:
-        """Close the agent's :class:`MemoryFacade` if it was opened.
+        """Close the agent's :class:`MemoryStore` if it was opened.
 
         Persona-runtime subclasses override this to close their own
         per-tier memory state.
         """
-        if not isinstance(self.memory, MemoryFacade):
+        if not isinstance(self.memory, MemoryStore):
             return
         try:
             await self.memory.close()
