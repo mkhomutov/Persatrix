@@ -68,9 +68,11 @@ def warn_external_construction(class_name: str) -> None:
     if is_construction_external(caller.f_code.co_filename):
         warnings.warn(
             f"Direct construction of {class_name} is deprecated and will be "
-            f"removed in v0.4.0 — construct personal-tier memory through "
-            f"agents.memory.MemoryStore instead (RFC 0029 personal/society "
-            f"storage split).",
+            f"removed in v0.4.0 — route personal-tier memory through the "
+            f"agents.memory.MemoryStore facade (RFC 0029 personal/society "
+            f"storage split). The facade's per-tier construction surface is "
+            f"being completed across RFC 0029 Phase 1; until then MemoryStore "
+            f"may not yet expose the tier you need.",
             DeprecationWarning,
             stacklevel=3,
         )

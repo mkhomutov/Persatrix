@@ -152,3 +152,18 @@ markers = [
     "requires_orchestrator: integration tests that spawn the built `bin/persatrix-server` and `cli/target/release/persatrix` binaries. Opt-in: run with `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`.",
     "requires_anthropic: integration tests that exercise a real Anthropic API call (probabilistic, billed). Opt-in: run with `ANTHROPIC_API_KEY=... pytest -m requires_anthropic`. Tests under this marker auto-skip when `ANTHROPIC_API_KEY` is unset.",
 ]
+# RFC 0029 — the personal/society storage guard rail emits a
+# DeprecationWarning on direct EpisodicMemory / RelationshipMemory
+# construction (agents/memory/_boundary.py). ~25-30 per-tier test files
+# construct those tiers directly by design — a tier cannot be unit-tested
+# through the MemoryStore facade — so the warning is expected, permanent
+# suite noise rather than an actionable signal; left unfiltered it buries
+# genuine DeprecationWarnings. This scoped ignore silences exactly that
+# message. It is mirrored in tests/conftest.py for repo-root runs
+# (`make test-python` runs pytest from the root with no `-c`, so this
+# file is not discovered) — same dual-declaration rationale as the
+# markers above. test_memory_boundary.py's pytest.warns assertions still
+# observe the warning: they install their own always-filter.
+filterwarnings = [
+    "ignore:Direct construction of:DeprecationWarning",
+]
