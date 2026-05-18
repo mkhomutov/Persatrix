@@ -15,6 +15,7 @@ import logging
 
 import aiosqlite
 
+from ._boundary import warn_external_construction
 from .migrations import _apply_migrations
 from .relationship_mutations import (
     apply_decay as _apply_decay,
@@ -71,6 +72,7 @@ class RelationshipMemory:
     """
 
     def __init__(self, agent_id: str, db_path: str = "data/memory.db") -> None:
+        warn_external_construction("RelationshipMemory")  # RFC 0029 — facade-only tier
         self._agent_id = agent_id
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None

@@ -28,6 +28,7 @@ from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
+from ._boundary import warn_external_construction
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     EPISODE_SELECT,
@@ -98,6 +99,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
     """
 
     def __init__(self, agent_id: str, db_path: str = "data/memory.db") -> None:
+        warn_external_construction("EpisodicMemory")  # RFC 0029 — facade-only tier
         self._agent_id = agent_id
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
@@ -456,10 +458,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         await db.commit()
         return (cursor.rowcount or 0) > 0
 
-    # ─── Notes (delegated to NoteStore) ────────────────────
-    # ``store_note`` / ``recall_notes`` / ``update_note`` / ``delete_note`` /
-    # ``count_notes`` come from :class:`_EpisodicNotesAPIMixin` to keep
-    # this file under the 500-line repo cap.
+    # ─── Notes ─────────────────────────────────────────────
+    # ``store_note`` / ``recall_notes`` / … — see :class:`_EpisodicNotesAPIMixin`.
 
     # ─── Interaction counter ─────────────────────────────────
 
