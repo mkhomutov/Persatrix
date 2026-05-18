@@ -8,7 +8,7 @@ The helpers form the close-path summarisation pipeline:
 
 1. :func:`summarize_closed_interaction` — runs the combined
    summarise + extract LLM call (bounded by timeout +
-   ``MemoryFacade.compress`` token budget).  A single-turn interaction
+   ``MemoryStore.compress`` token budget).  A single-turn interaction
    with no inbound message body keeps a cheap deterministic
    placeholder; a single-turn interaction that carries message text is
    routed through the LLM path so RFC 0026 facts still extract (F-6).
@@ -31,8 +31,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from ..memory.facade import CompressedView, MemoryEntry, MemoryFacade
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
+from ..memory.store import CompressedView, MemoryEntry, MemoryStore
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # path so a stuck close never wedges the runtime.
 SUMMARIZATION_TIMEOUT_SEC: float = 30.0
 
-# RFC 0020 PR 4 cross-RFC pin: the ``MemoryFacade.compress`` target
+# RFC 0020 PR 4 cross-RFC pin: the ``MemoryStore.compress`` target
 # token budget for the per-interaction summarisation context.  RFC 0020
 # §Security caps single-interaction context at 2k tokens to bound LLM
 # cost; the value is shared with the abstractive path (RFC 0008 PR 5)
@@ -137,7 +137,7 @@ async def summarize_closed_interaction(
             )
 
     entries = _interaction_to_entries(interaction)
-    view: CompressedView = MemoryFacade.compress(
+    view: CompressedView = MemoryStore.compress(
         entries,
         target_tokens=SUMMARIZATION_TARGET_TOKENS,
     )
