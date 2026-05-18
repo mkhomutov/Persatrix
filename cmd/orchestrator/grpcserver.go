@@ -45,10 +45,15 @@ import (
 //     ResourceExhausted / PermissionDenied; nil-safe when
 //     SECURITY_RATE_LIMIT_ENABLED=false.
 //
-// TODO(rfc0009-phase4): add the grpc.StreamInterceptor variants
-// (recovery + rate-limit) when a streaming RPC is added — today only
-// unary calls are covered; a streaming surface would bypass both the
-// limiter and the recovery guard (PR #244 review NTH-01; ISSUE-0059).
+// ISSUE-0059 — the stream interceptor chain carries
+// GRPCStreamRecoveryInterceptor. LogService.StreamLogs is bidi-streaming
+// (and is LogService's only RPC), so the unary recovery interceptor
+// cannot wrap it; without the stream variant a panic in StreamLogs would
+// still escape the per-RPC goroutine and crash the orchestrator.
+//
+// TODO(rfc0009-phase4): add the rate-limiter's grpc.StreamInterceptor
+// variant — GRPCRateLimitInterceptor is unary-only, so StreamLogs
+// currently bypasses the per-agent limiter (PR #244 review NTH-01).
 func newAgentGRPCServer(
 	logBuf *logbuffer.Buffer,
 	rateLimiter *security.RateLimiter,
@@ -66,6 +71,9 @@ func newAgentGRPCServer(
 		grpc.ChainUnaryInterceptor(
 			security.GRPCRecoveryInterceptor(logger),
 			security.GRPCRateLimitInterceptor(rateLimiter, circuitBreaker),
+		),
+		grpc.ChainStreamInterceptor(
+			security.GRPCStreamRecoveryInterceptor(logger),
 		),
 	)
 	logpb.RegisterLogServiceServer(srv, server.NewLogServiceServer(logBuf, logger))

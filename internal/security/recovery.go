@@ -31,11 +31,12 @@ import (
 //	    security.GRPCRateLimitInterceptor(limiter, breaker),
 //	)
 //
-// NOTE: only unary RPCs are covered. A background goroutine (e.g. the
-// RFC 0023 reaper) is never wrapped by a server interceptor and must
-// carry its own defer/recover — see ISSUE-0059 piece (2). A future
-// streaming RPC needs the stream-interceptor variant; cf. the
-// TODO(rfc0009-phase4) on grpc.StreamInterceptor.
+// NOTE: this covers unary RPCs only. Streaming RPCs — LogService's
+// StreamLogs, the agent-facing listener's one streaming surface — need
+// the GRPCStreamRecoveryInterceptor companion below; a unary interceptor
+// cannot wrap a streaming handler. A background goroutine (e.g. the
+// RFC 0023 reaper) is never wrapped by a server interceptor at all and
+// must carry its own defer/recover — see ISSUE-0059 piece (2).
 func GRPCRecoveryInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		defer func() {
@@ -54,12 +55,61 @@ func GRPCRecoveryInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 						zap.String("stack", string(debug.Stack())),
 					)
 				}
-				// Named returns: overwrite whatever the panicking call
-				// frame left behind with a clean Internal error.
+				// Named returns: a panic aborts `return handler(...)`
+				// before its assignment runs, so resp/err are still
+				// zero — set them to a clean Internal error.
 				resp = nil
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
 		return handler(ctx, req)
+	}
+}
+
+// GRPCStreamRecoveryInterceptor is the streaming-RPC counterpart of
+// GRPCRecoveryInterceptor: it recovers from a panic in any downstream
+// stream handler (or downstream stream interceptor), logs the panic
+// value and a stack trace, and converts it into a codes.Internal status
+// error.
+//
+// A unary interceptor cannot wrap a streaming handler — and the
+// agent-facing gRPC listener's LogService exposes exactly one RPC,
+// StreamLogs, which is bidi-streaming. Without this guard a panic inside
+// StreamLogs (e.g. while decoding an untrusted LogBatch) would escape
+// the per-RPC goroutine and crash the orchestrator process, leaving the
+// unary GRPCRecoveryInterceptor covering only WalletService. See
+// ISSUE-0059.
+//
+// Compose it as the OUTERMOST link of grpc.ChainStreamInterceptor, for
+// the same reason as the unary variant — so it also catches a panic
+// raised inside a later stream interceptor:
+//
+//	grpc.ChainStreamInterceptor(
+//	    security.GRPCStreamRecoveryInterceptor(logger),
+//	)
+func GRPCStreamRecoveryInterceptor(logger *zap.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				method := "unknown"
+				if info != nil {
+					method = info.FullMethod
+				}
+				// nil-safe for the same reason as the unary variant:
+				// the recovery path must never panic a second time.
+				if logger != nil {
+					logger.Error("gRPC stream handler panic",
+						zap.Any("panic", rec),
+						zap.String("method", method),
+						zap.String("stack", string(debug.Stack())),
+					)
+				}
+				// Named return: a panic aborts `return handler(...)`
+				// before its assignment runs, so err is still nil —
+				// set it to a clean Internal error.
+				err = status.Error(codes.Internal, "internal server error")
+			}
+		}()
+		return handler(srv, ss)
 	}
 }
