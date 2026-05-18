@@ -61,6 +61,20 @@ def pytest_configure(config):
         "`ANTHROPIC_API_KEY=... pytest -m requires_anthropic`. Tests "
         "under this marker auto-skip when `ANTHROPIC_API_KEY` is unset.",
     )
+    # RFC 0029 — silence the personal/society storage guard rail's
+    # DeprecationWarning on direct EpisodicMemory / RelationshipMemory
+    # construction (agents/memory/_boundary.py). The per-tier test files
+    # construct those tiers directly by design — a tier cannot be
+    # unit-tested through the MemoryStore facade — so the warning is
+    # expected, permanent suite noise; left unfiltered it buries genuine
+    # DeprecationWarnings. Mirrors the scoped ignore in
+    # agents/pyproject.toml [tool.pytest.ini_options] — registered here
+    # too because `make test-python` runs pytest from the repo root,
+    # which does not discover agents/pyproject.toml (same dual-declaration
+    # rationale as the markers above and the asyncio_mode option).
+    config.addinivalue_line(
+        "filterwarnings", "ignore:Direct construction of:DeprecationWarning"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

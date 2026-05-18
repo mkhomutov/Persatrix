@@ -114,7 +114,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 #### Key implementation details
 
 - The lint rule blocks *new* violations — it is scoped to files outside `agents/memory/`, where there should be zero existing direct-`aiosqlite` imports (personal-tier callers already go through the facade). PR 2 confirms a clean baseline; if the sweep finds a stray import it is migrated here or noted for PR 3.
-- The `DeprecationWarning` targets *direct construction* (`EpisodicMemory(...)`, `RelationshipMemory(...)`), **not** the `MemoryFacade` alias — the alias is the supported one-minor-version compatibility path and stays warning-free. The warning is non-fatal; the test suite's `filterwarnings` configuration keeps it from failing unrelated runs while PR 3's sweep is in flight.
+- The `DeprecationWarning` targets *direct construction* (`EpisodicMemory(...)`, `RelationshipMemory(...)`), **not** the `MemoryFacade` alias — the alias is the supported one-minor-version compatibility path and stays warning-free. The warning is non-fatal; a scoped `filterwarnings` ignore (`agents/pyproject.toml [tool.pytest.ini_options]`, mirrored in `tests/conftest.py` for repo-root `pytest` runs that do not discover that file) keeps it from burying genuine warnings. That ignore is permanent suite hygiene, **not** a PR-3-window workaround: ~25–30 per-tier test files construct `EpisodicMemory` / `RelationshipMemory` directly by design — a tier cannot be unit-tested *through* the facade — so the warning is expected suite noise even after PR 3 migrates the production call sites.
 - Lint rule + deprecation warning are two halves of one guard rail ([RFC §Decision/Next Steps step 3](0029-personal-society-storage-split.md#decision--next-steps) groups them as one PR): the lint rule catches the import, the warning catches the construction.
 
 #### Tests
@@ -142,6 +142,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 |------|--------|
 | `agents/persona_runtime/` memory call sites | Migrate every `MemoryFacade` reference to `MemoryStore` ([RFC §Goal 1](0029-personal-society-storage-split.md#goals) — every persona-runtime caller goes through the facade). Behaviour unchanged. |
 | `agents/sub_agents/` memory call sites | Same migration for the sub-agent paths. |
+| [`agents/persona.py`](../../agents/persona.py) | The `create_persona_agent` factory directly constructs `EpisodicMemory` / `RelationshipMemory` (and `FactStore`) — the **sole production site** outside `agents/memory/` that trips the PR 2 `DeprecationWarning`. Migrate it to build the personal tier through `MemoryStore` so the deprecation window actually closes; surface the relationship / facts tiers on `MemoryStore` if the agent internals still need per-tier handles. |
 | RFC 0026 facts-tier call sites | The facts-tier readers/writers shipped in v0.3.1 are routed through `MemoryStore`'s personal-tier facts methods ([v0.3.2-plan Phase 1 acceptance](../v0.3.2-plan.md#phase-1--author-the-two-rfc-pr-plans) — RFC 0026 facts-tier routing is in-scope for Phase 1). |
 | `tests/perf/personal_tier_latency.py` | **New** — perf harness measuring `MemoryStore.recall_episodes` p99 against a fixed corpus ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)). Lands here so it runs against the fully-wired `MemoryStore` surface; the *baseline* JSON it compares against is captured by PR 5 (post-Phase-1-merge). |
 | `tests/unit/python/`, `agents/tests/` | Existing persona-runtime / sub-agent suites pass unchanged — the migration is mechanical and behaviour-preserving. Any test that constructed a `MemoryFacade` directly switches to `MemoryStore`. |
@@ -149,12 +150,14 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 #### Key implementation details
 
 - This is the bulk sweep — mechanical, behaviour-preserving. The PR 2 lint rule and `DeprecationWarning` make a missed call site visible; landing PR 2 first means PR 3 is reviewed against an enforced boundary.
+- `agents/persona.py`'s `create_persona_agent` factory is the **only** production site outside `agents/memory/` that constructs the per-tier classes directly — it is where the PR 2 `DeprecationWarning` fires in production. Migrating it is the step that *closes* the deprecation window; `persona_runtime/` and `sub_agents/` hold `MemoryFacade` references and factory-supplied tier handles, not direct tier construction. Routing it through `MemoryStore` may require `MemoryStore` to surface the relationship / facts tiers — that work is in PR 3 scope, not deferred.
 - After PR 3 the `MemoryFacade` alias has no in-repo callers — it survives only as the documented one-minor-version external-compat shim, removed in v0.3.3.
 - The perf harness is shipped now but the **gate is not enforcing yet** — there is no baseline until Phase 1 has merged. PR 5 captures `tests/perf/baselines/personal_tier_latency.json` and flips the harness into an enforcing CI gate. Phase 1 is a pure refactor, so the post-merge number is the legitimate "this is what the persona hot path costs after the rename" reference ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)).
 
 #### Tests
 
 - Every persona-runtime and sub-agent memory test passes unchanged after the migration.
+- Constructing a persona agent via `create_persona_agent` emits no `DeprecationWarning` — the PR 2 warning is silent across the production path.
 - A grep-style guard test (or the PR 2 lint rule extended) confirms no `MemoryFacade` reference remains outside the shim definition.
 - `tests/perf/personal_tier_latency.py` runs and emits a p99 number (not yet gated).
 
@@ -163,6 +166,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 - [ ] `pytest agents/tests/ tests/unit/python/ -q` passes.
 - [ ] `ruff check agents/` clean; `mypy agents/` clean.
 - [ ] Every `persona_runtime/` and `sub_agents/` memory call routes through `MemoryStore`.
+- [ ] `create_persona_agent` (`agents/persona.py`) builds the personal tier through `MemoryStore` — no direct `EpisodicMemory` / `RelationshipMemory` construction remains outside `agents/memory/`, and the PR 2 `DeprecationWarning` is silent on the production path.
 - [ ] RFC 0026 facts-tier call sites routed through `MemoryStore`.
 - [ ] No `MemoryFacade` reference remains outside the shim definition.
 - [ ] `tests/perf/personal_tier_latency.py` runs (baseline capture + gate enforcement are PR 5).
@@ -234,7 +238,7 @@ No code changes beyond the checked-in baseline JSON and the gate-enabling flag. 
 | Risk | Mitigation |
 |------|------------|
 | Phase 1 is billed as a pure refactor but touches every `persona_runtime/` and `sub_agents/` memory call site; unexpected coupling could slip the workstream. | [RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy): existing facade and persona integration tests pin the API surface and must pass unchanged. The `MemoryFacade` alias means PR 1 does not have to migrate every call site at once — PR 3's sweep is mechanical and reviewed against the PR 2 lint rule. |
-| The PR 2 deprecation warning fires across the test suite during the PR 1→PR 3 window and noisy-fails unrelated runs. | The warning targets *direct construction*, not the `MemoryFacade` alias — persona-runtime callers use the alias and stay quiet. The warning is non-fatal and `filterwarnings`-scoped; PR 3 closes the window. |
+| The PR 2 deprecation warning fires across the test suite and buries unrelated warnings. | The warning targets *direct construction*, not the `MemoryFacade` alias — persona-runtime callers use the alias and stay quiet. A scoped `filterwarnings` ignore (`agents/pyproject.toml` + `tests/conftest.py`) silences the expected per-tier-test noise; PR 3 closes the *production* deprecation window, but the suite-side ignore is permanent (per-tier tests construct the tiers directly by design). |
 | The perf gate has no baseline until Phase 1 merges, so a regression inside Phase 1 itself is not caught. | Phase 1 is a pure refactor — behaviour identical, existing tests are the regression guard. The perf gate exists to protect *v0.4.0* Phase 2/3 against Postgres routing; capturing the baseline post-Phase-1-merge ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)) is the correct reference point, not earlier. |
 | Society-tier method signatures ship in Phase 1 but every body raises — a caller could mistake the surface for working functionality. | The `SocietyBackendUnavailable` hierarchy raises with a message naming `memory.society_dsn`; `test_single_agent_no_postgres` pins the contract. v0.3.2 ships single-agent only — there is no society backend to mistake it for. |
 | RFC 0029 Phase 1 slips and pressure builds to bundle it into the RFC 0023 workstream. | The two v0.3.2 RFCs are independent ([RFC §Phased Implementation Plan](0029-personal-society-storage-split.md#phased-implementation-plan)). Per [v0.3.2-plan §Risk and mitigations](../v0.3.2-plan.md#risk-and-mitigations), if Phase 1 slips RFC 0023 ships v0.3.2 and the facade work moves to a v0.3.2.x point release. |

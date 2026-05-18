@@ -110,11 +110,32 @@ target-version = "py311"
 extend-exclude = ["generated"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+# "TID251" is the specific banned-api rule, not the umbrella "TID" category:
+# selecting "TID" would also enable TID252 (banned relative imports) and flag
+# this package's pervasive `from .x import y` style. Keep the rule code.
+select = ["E", "F", "I", "N", "TID251", "W", "UP"]
+
+# RFC 0029 — the personal/society storage boundary. A direct aiosqlite
+# import is allowed only inside agents/memory/ (see the per-file-ignore
+# below); every other caller must go through the agents.memory.MemoryStore
+# facade. TID251 flags the import; agents/memory/_boundary.py emits the
+# matching DeprecationWarning on direct EpisodicMemory / RelationshipMemory
+# construction — two halves of one guard rail.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"aiosqlite".msg = "Direct aiosqlite access outside agents/memory/ breaks the RFC 0029 personal/society storage boundary — use the agents.memory.MemoryStore facade. See docs/rfcs/0029-personal-society-storage-split.md."
 
 [tool.ruff.lint.per-file-ignores]
 # gRPC servicer methods use PascalCase per proto contract.
 "server.py" = ["N802"]
+# RFC 0029 — agents/memory/ IS the personal-tier storage boundary, so it
+# is the one place a direct aiosqlite import is allowed; the TID251 ban
+# applies everywhere else.
+"memory/**" = ["TID251"]
+# Grandfathered: participant.py's UserStore is a pre-existing direct-SQLite
+# store (the `users` participant-identity table). Folding it behind the
+# MemoryStore facade is out of RFC 0029 Phase 1 scope; the TID251 ban
+# still blocks any *new* direct-aiosqlite caller elsewhere.
+"participant.py" = ["TID251"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -130,4 +151,19 @@ markers = [
     "requires_compose: integration tests that require the docker-compose observability stack to be running (otel-collector, jaeger, prometheus, loki). Opt-in: run with `pytest -m requires_compose`.",
     "requires_orchestrator: integration tests that spawn the built `bin/persatrix-server` and `cli/target/release/persatrix` binaries. Opt-in: run with `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`.",
     "requires_anthropic: integration tests that exercise a real Anthropic API call (probabilistic, billed). Opt-in: run with `ANTHROPIC_API_KEY=... pytest -m requires_anthropic`. Tests under this marker auto-skip when `ANTHROPIC_API_KEY` is unset.",
+]
+# RFC 0029 — the personal/society storage guard rail emits a
+# DeprecationWarning on direct EpisodicMemory / RelationshipMemory
+# construction (agents/memory/_boundary.py). ~25-30 per-tier test files
+# construct those tiers directly by design — a tier cannot be unit-tested
+# through the MemoryStore facade — so the warning is expected, permanent
+# suite noise rather than an actionable signal; left unfiltered it buries
+# genuine DeprecationWarnings. This scoped ignore silences exactly that
+# message. It is mirrored in tests/conftest.py for repo-root runs
+# (`make test-python` runs pytest from the root with no `-c`, so this
+# file is not discovered) — same dual-declaration rationale as the
+# markers above. test_memory_boundary.py's pytest.warns assertions still
+# observe the warning: they install their own always-filter.
+filterwarnings = [
+    "ignore:Direct construction of:DeprecationWarning",
 ]
