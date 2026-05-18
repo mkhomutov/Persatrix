@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package persatrix.v1;
+
+option go_package = "github.com/mkhomutov/persatrix/internal/generated/walletpb";
+
+// ─── LLM Call Leasing (agent → orchestrator) ───────────────
+// Every LLM invocation acquires a server-issued lease from the
+// orchestrator-side WalletService before issuing, and settles
+// actual usage afterward. See docs/rfcs/0023-llm-call-leasing.md § C.
+//
+// The service is registered on the orchestrator-side gRPC listener
+// that already hosts LogService; the agent's wallet client reuses the
+// channel it already opens for log streaming (RFC 0023 Open Question
+// §1, resolved — outbound dial reusing the LogService channel).
+
+service WalletService {
+  rpc AcquireLease(LeaseRequest) returns (LeaseResponse);
+  rpc SettleLease(SettlementRequest) returns (SettlementAck);
+  rpc ReleaseLease(ReleaseRequest) returns (SettlementAck);
+}
+
+message LeaseRequest {
+  string workflow_id = 1;            // empty for chat / TICK
+  string agent_id = 2;
+  string model = 3;                  // for EstimateCost lookup
+  int64 estimated_input_tokens = 4;
+  int64 estimated_max_output_tokens = 5;
+  Cause cause = 6;                   // origin attribution
+  string trace_id = 7;               // for span linking; OTEL baggage
+}
+
+enum Cause {
+  CAUSE_UNSPECIFIED = 0;
+  CAUSE_WORKFLOW_TASK = 1;
+  CAUSE_CHAT = 2;
+  CAUSE_AUTONOMOUS_TICK = 3;
+  CAUSE_SUB_AGENT = 4;
+  CAUSE_CHANNEL_MESSAGE = 5;         // RFC 0011 forward-compat
+}
+// Precedence when multiple causes apply: innermost wins. A sub-agent
+// invoked via a channel message is CAUSE_SUB_AGENT; the channel-message
+// origin is recoverable from trace correlation (lease's trace_id links
+// to the parent span). This keeps the enum a flat scalar and avoids a
+// bitmask, at the cost of one indirection in dashboards that want to
+// attribute spend to channel traffic.
+
+message LeaseResponse {
+  oneof outcome {
+    LeaseGrant grant = 1;
+    LeaseDenied denied = 2;
+  }
+}
+
+message LeaseGrant {
+  string lease_id = 1;               // ULID, server-issued
+  int64 granted_input_tokens = 2;    // == estimated_input_tokens
+  int64 granted_output_tokens = 3;   // == estimated_max_output_tokens
+  int32 ttl_seconds = 4;
+}
+
+message LeaseDenied {
+  string scope = 1;                  // "global" | "per_workflow" | "per_agent"
+  double spent_usd = 2;
+  double limit_usd = 3;
+  double estimated_usd = 4;
+  string message = 5;                // human-readable reason
+}
+
+message SettlementRequest {
+  string lease_id = 1;
+  int64 actual_input_tokens = 2;
+  int64 actual_output_tokens = 3;
+}
+
+message ReleaseRequest {
+  string lease_id = 1;
+  string reason = 2;                 // "aborted" | "provider_error" | "timeout"
+}
+
+message SettlementAck {
+  bool success = 1;
+  string error_message = 2;
+}
