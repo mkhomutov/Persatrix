@@ -378,7 +378,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | 🔀 PR open | — | — |
+| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | 🔀 PR open | [#378](https://github.com/mkhomutov/Persatrix/pull/378) | — |
 | 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | ⬜ Not started | — | — |
 | 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | ⬜ Not started | — | — |
 | 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | ⬜ Not started | — | — |
