@@ -164,6 +164,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - `lease()` is the only public surface of `WalletClient` — callers never touch acquire/settle directly, so "every call path brackets its LLM call" is enforced by the context-manager shape.
 - The pre-dispatch `CheckBudget` is **kept** ([RFC §G](0023-llm-call-leasing.md#g-migration-of-existing-checkbudget)) — it preserves fast-fail for clearly over-budget workflows. PR 3 only re-labels it; the agent-side per-call lease is now the enforcement point.
 - `estimated_max_output_tokens` reuses the `max_tokens` value `create_message` already passes the provider — no new plumbing.
+- **Wallet availability is coupled to the orchestrator log buffer.** PR 1 registers `WalletService` on the agent-facing gRPC listener that `cmd/orchestrator/main.go` only stands up inside `if logBuf != nil`. That coupling is inert for PRs 1–2 (no wallet clients), but this PR makes the wallet load-bearing: a failed log-buffer init then silently means no LLM call can acquire a lease. PR 3 must make this failure mode explicit rather than emergent — the agent-side fail-closed boot condition (the `agents/server.py` scope row above) is the enforcement backstop, and [RFC §F Failure Modes](0023-llm-call-leasing.md#f-failure-modes) is the documented home for the wallet-unreachable behaviour.
 
 #### Tests
 
@@ -296,7 +297,7 @@ Items below are populated as PRs are reviewed. Per [.github/copilot-instructions
 
 ##### From PR 1 review
 
-_None recorded at plan-authoring time._
+_PR 1 review surfaced no work deferred to this PR. The lone coverage gap — the `NewWalletService` nil-logger fallback was unexercised by any test — was closed within PR 1 with a constructor test. The orchestrator-side wallet-availability coupling (`WalletService` registers only inside `cmd/orchestrator/main.go`'s `if logBuf != nil` block) was folded into PR 3's [Key implementation details](#pr-3-featurev032-rfc0023-workflow-path--walletclient--workflow-task-lease-wiring) rather than deferred here._
 
 ##### From PR 2 review
 

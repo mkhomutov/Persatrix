@@ -59,6 +59,29 @@ func testContext(t *testing.T) context.Context {
 	return ctx
 }
 
+// TestNewWalletService_NilLoggerSafe pins the documented nil-logger contract:
+// NewWalletService(nil) substitutes a no-op logger rather than retaining a nil
+// *zap.Logger, so the RPC handlers — every one of which logs — cannot nil-panic.
+// Mirrors the NewLogServiceServer fallback (internal/server/logs_service.go).
+// Exercised directly: the constructor branch sits below the bufconn surface the
+// other tests use, and every gRPC caller (cmd/orchestrator/main.go, the test
+// harness) passes a non-nil logger, so without this the fallback is dead code
+// to the coverage tool.
+func TestNewWalletService_NilLoggerSafe(t *testing.T) {
+	w := NewWalletService(nil)
+	require.NotNil(t, w, "NewWalletService(nil) must return a usable servicer")
+
+	// AcquireLease logs via the (substituted) logger before returning; a
+	// retained nil *zap.Logger would panic here rather than grant.
+	resp, err := w.AcquireLease(context.Background(), &walletpb.LeaseRequest{
+		AgentId: "agent-1",
+		Model:   "claude-sonnet-4-6",
+		Cause:   walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetGrant(), "skeleton must still grant with the fallback logger")
+}
+
 // TestAcquireLease_GrantsWithULIDLeaseID pins the always-grant contract: every
 // AcquireLease call returns the grant arm of the LeaseResponse oneof, never the
 // denied arm, with a server-issued ULID lease_id and a positive TTL.
