@@ -180,7 +180,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 
 #### Scope
 
-Items below are populated as PRs are reviewed. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("Local-only files MUST NEVER be referenced in any committed file"), each entry paraphrases the finding inline and does **not** reference or link any local PR review report.
+The findings below were recorded during the PR 1–3 reviews; [§Status by finding](#status-by-finding-pr-4-implementation) records how each was resolved or downgraded. Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("Local-only files MUST NEVER be referenced in any committed file"), each entry paraphrases the finding inline and does **not** reference or link any local PR review report.
 
 ##### From PR 1 review
 
@@ -213,10 +213,50 @@ _None recorded at plan-authoring time._
   state-isolation flake, unrelated to the RFC 0029 rename. Tracked in
   [ISSUE-0057](../issues/ISSUE-0057-fact-store-audit-redactor-test-isolation-flake.md).
 
+#### Status by finding (PR 4 implementation)
+
+PR 1 / PR 2 — no findings recorded.
+
+PR 3:
+
+- **Perf harness — gate call-path** ✅ pinned. `tests/perf/personal_tier_latency.py`'s
+  module docstring gains a "Gate call-path (RFC 0029 Phase 1 PR 4 decision)"
+  section: the PR 5 gate protects the `MemoryStore.retrieve_relevant` *facade
+  method*, not the raw `EpisodicMemory` tier the persona runtime drives directly
+  today. Rationale — the gate exists to catch the v0.4.0 Phase 2/3 regression
+  when the personal tier is swapped onto the Postgres society backend, and that
+  swap lands *behind the facade*; the facade is also the canonical recall path
+  [RFC §Goal 1](0029-personal-society-storage-split.md#goals) converges callers
+  onto. The facade delegates straight to `EpisodicMemory`, so the choice adds
+  only a constant delegation overhead — no measurement distortion.
+- **Perf harness — measurement noise** ✅ addressed. `measure_recall_p99` gains a
+  `warmup` parameter (default `DEFAULT_WARMUP = 50`) — un-timed recalls run
+  before the timed window to absorb FTS5 query-plan compilation / page-cache /
+  allocator cold start. Observed effect: p99 over the 500-row in-memory corpus
+  drops ~4.9 ms → ~2.7 ms once warm-up is applied. p50 is already emitted
+  (`recall_episodes_p50_ms`); the docstring pins that the PR 5 gate should
+  co-gate p50 alongside p99. New TDD pins land in
+  `tests/unit/python/test_personal_tier_latency_harness.py`.
+- **`tests/` tree outside the CI lint/type gate** ⏭ downgraded to
+  [ISSUE-0056](../issues/ISSUE-0056-tests-tree-outside-ci-lint-type-gate.md).
+  Pre-existing repo-wide CI-config gap, not an RFC 0029 artifact — extending
+  CI's lint/type scope is outside this workstream's surface. PR 4 ran
+  `ruff`/`mypy` manually on its two touched `tests/` files (clean) and, while
+  there, fixed one latent `UP017` (`timezone.utc` → `datetime.UTC`) the gap had
+  let slip into the perf harness.
+- **Flaky audit-redactor test** ✅ resolved by [#374](https://github.com/mkhomutov/Persatrix/pull/374)
+  (out-of-band hotfix). #374 scopes `emit_audit`'s "exactly one WARNING"
+  assertion to `emit_audit`'s own logger (`agents.memory.facts`), pinning the
+  contract independent of test ordering. PR 4 marks
+  [ISSUE-0057](../issues/ISSUE-0057-fact-store-audit-redactor-test-isolation-flake.md)
+  resolved (`closed_pr: 374`) and regenerates `docs/issues/INDEX.md`.
+
 #### PR checklist
 
-- [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
-- [ ] `make test` + `make lint` clean.
+- [x] All review findings addressed or downgraded to tracked issues with rationale — see [§Status by finding](#status-by-finding-pr-4-implementation).
+- [x] Perf-harness call-path decision pinned in the `personal_tier_latency.py` docstring.
+- [x] `warmup` parameter lands with TDD pins; `pytest tests/unit/python/test_personal_tier_latency_harness.py -q` passes.
+- [x] Python unit suite green (`pytest tests/unit/python/` — 2324 passed, 8 skipped); `ruff` + `mypy` clean on `agents/` and on the two touched `tests/` files. PR 4 changes no Go / Rust.
 
 ---
 
@@ -296,8 +336,8 @@ The v0.4.0 PR plan for Phases 2–6 opens when the v0.4.0 plan opens; the [RFC 0
 |---|-------|--------|--------|-----------|--------|
 | 1 | `MemoryStore` facade promotion | `feature/v032-rfc0029p1-facade-promotion` | ✅ Merged | [#370](https://github.com/mkhomutov/Persatrix/pull/370) | 2026-05-18 |
 | 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ✅ Merged | [#372](https://github.com/mkhomutov/Persatrix/pull/372) | 2026-05-18 |
-| 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | 🔀 PR open | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | — |
-| 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | ⬜ Not started | — | — |
+| 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | ✅ Merged | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | 2026-05-18 |
+| 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | 🔀 PR open | — | — |
 | 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

@@ -1,12 +1,15 @@
 ---
 id: ISSUE-0057
 summary: test_fact_store_audit.py redactor-failure test passes in isolation and per-file but fails under the full suite — a process-global redactor / contextvar state-isolation flake
-status: open
+status: resolved
 severity: low
 area: tests
 created: 2026-05-18
+closed: 2026-05-18
+closed_pr: 374
 refs:
   - docs/rfcs/0029-pr-plan.md
+  - tests/unit/python/test_fact_store_audit.py
 ---
 
 ## Summary
@@ -60,3 +63,15 @@ re-entrancy contextvar) on teardown. Related: ISSUE-0024
 
 > 2026-05-18 — initial capture during RFC 0029 Phase 1 PR 3 review;
 > isolated and per-file runs confirmed passing, full-suite run reported failing.
+
+> 2026-05-18 — resolved by #374. The fix scopes `emit_audit`'s "exactly
+> one WARNING" assertion to `emit_audit`'s own logger
+> (`agents.memory.facts`). Once any earlier test calls `configure_logging`,
+> the structlog chain is built process-globally and its `_apply_redactor`
+> step logs its own "redactor raised" WARNING under
+> `agents.observability.logging` — a *separate layer's* signal, not a
+> duplicate. Counting only `emit_audit`'s logger pins the intended
+> contract independent of test ordering. This is a narrower fix than the
+> "Proposed fix" above (a symmetric shared-conftest redactor reset) but
+> resolves the flake at its assertion; full
+> `pytest agents/tests/ tests/unit/python/` now passes with zero failures.
