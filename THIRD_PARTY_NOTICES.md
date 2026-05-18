@@ -23,7 +23,7 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (37 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
@@ -37,6 +37,7 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (37 packages).
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | [link](https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.28.0/LICENSE) |
 | `github.com/mattn/go-isatty` | MIT | [link](https://github.com/mattn/go-isatty/blob/v0.0.20/LICENSE) |
 | `github.com/ncruces/go-strftime` | MIT | [link](https://github.com/ncruces/go-strftime/blob/v1.0.0/LICENSE) |
+| `github.com/oklog/ulid/v2` | Apache-2.0 | [link](https://github.com/oklog/ulid/blob/v2.1.1/LICENSE) |
 | `github.com/remyoudompheng/bigfft` | BSD-3-Clause | [link](https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE) |
 | `go.opentelemetry.io/auto/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE) |
 | `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.68.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |

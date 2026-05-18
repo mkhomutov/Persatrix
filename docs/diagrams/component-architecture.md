@@ -24,6 +24,7 @@ graph TB
         REGISTRY["registry/"]
         STATE["state/"]
         COST["cost/<br/>tokens · cache · reporter"]
+        WALLET["wallet/<br/>LLM-call leasing"]
         TELE["telemetry/<br/>OTEL"]
         MCPG["mcp/"]
         PROTOS["protocols/"]
@@ -42,6 +43,7 @@ graph TB
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
+        WALLET -. composes (RFC 0023 PR 2) .-> COST
         EXECUTOR --> REGISTRY
         EXECUTOR --> PROTOS
         EXECUTOR --> MCPG
@@ -102,6 +104,7 @@ graph TB
 | v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
+| v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; PR 1 ships the always-grant skeleton) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
 
 The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
@@ -116,6 +119,12 @@ route chat traffic through `UserStore`. Only the pure validator
 `(agent_id, user_id)` and written directly. The dashed edge mirrors the
 `AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
 so the two diagrams agree about the v0.2.1 wiring gap.
+
+The `WALLET -. composes .-> COST` edge is dashed because `internal/wallet/`
+ships only the always-grant skeleton in RFC 0023 PR 1 — it registers on the
+orchestrator's agent-facing gRPC listener but composes no `cost/` component
+yet. PR 2 wires `cost.BudgetEnforcer` / `cost.TokenCounter` into the
+`WalletService`, at which point the edge becomes solid.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation

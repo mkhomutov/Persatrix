@@ -23,6 +23,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/generated/logpb"
+	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 	"github.com/mkhomutov/persatrix/internal/observability"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
@@ -33,6 +34,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
+	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
 const (
@@ -391,6 +393,9 @@ func main() {
 			grpc.UnaryInterceptor(security.GRPCRateLimitInterceptor(rateLimiter, circuitBreaker)),
 		)
 		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))
+		// RFC 0023 PR 1 — register the always-grant WalletService skeleton
+		// on the agent-facing gRPC listener that already hosts LogService.
+		walletpb.RegisterWalletServiceServer(grpcServer, wallet.NewWalletService(logger))
 		defer grpcServer.GracefulStop()
 	}
 
