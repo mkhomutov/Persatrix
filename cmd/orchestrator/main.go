@@ -18,12 +18,9 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/executor"
-	"github.com/mkhomutov/persatrix/internal/generated/logpb"
-	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 	"github.com/mkhomutov/persatrix/internal/observability"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
@@ -31,10 +28,8 @@ import (
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/scheduler"
-	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
-	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
 const (
@@ -343,13 +338,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 10. Start gRPC server (agent → orchestrator LogService).  Bound on
-	// --grpc-bind:--port; defaults to loopback to mirror --http-bind so a
-	// fresh install does not expose the unauthenticated LogService on
-	// every interface (PR #173 review Must-Fix #2; auth lands in RFC 0009).
-	// Wired only when the buffer initialised — otherwise the agent
-	// shipper will simply retry on RECONNECT and the (currently
-	// disabled) endpoints stay 501.
+	// 10. Start gRPC server (agent → orchestrator LogService +
+	// WalletService).  Bound on --grpc-bind:--port; defaults to loopback
+	// to mirror --http-bind so a fresh install does not expose the
+	// unauthenticated LogService on every interface (PR #173 review
+	// Must-Fix #2; auth lands in RFC 0009).  Wired only when the buffer
+	// initialised — otherwise the agent shipper simply retries on
+	// RECONNECT and the (currently disabled) endpoints stay 501.  The
+	// server itself (resource budget, interceptor chain, service
+	// registration) is built by newAgentGRPCServer in grpcserver.go.
 	var grpcServer *grpc.Server
 	var grpcListener net.Listener
 	if logBuf != nil {
@@ -360,42 +357,7 @@ func main() {
 				zap.String("addr", grpcAddr), zap.Error(err))
 		}
 		grpcListener = lis
-		// PR #173 review Should-Fix #3: bound the per-stream + per-server
-		// resource budget on the LogService listener.  Until RFC 0009
-		// auth lands, a single misbehaving (or malicious) shipper could
-		// otherwise open unlimited bidi streams or push oversized batches.
-		//   * MaxRecvMsgSize: 8 MiB caps a single LogBatch on the wire
-		//     (BATCH_MAX=256 entries × ~few-KB each leaves generous headroom).
-		//   * MaxConcurrentStreams: 256 streams per HTTP/2 connection is
-		//     well above the realistic agent fleet and well below a DoS
-		//     threshold.
-		//   * KeepaliveEnforcementPolicy: reject clients that ping more
-		//     than once every 30s without an outstanding stream
-		//     (matches gRPC defaults, made explicit so abuse is rejected
-		//     rather than absorbed).
-		grpcServer = grpc.NewServer(
-			grpc.StatsHandler(otelgrpc.NewServerHandler()),
-			grpc.MaxRecvMsgSize(8*1024*1024),
-			grpc.MaxConcurrentStreams(256),
-			grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-				MinTime:             30 * time.Second,
-				PermitWithoutStream: false,
-			}),
-			// RFC 0009 PR 2 — per-agent rate limit + circuit-breaker
-			// quarantine on the LogService gRPC surface. Maps deny
-			// outcomes to ResourceExhausted / PermissionDenied; nil-safe
-			// when SECURITY_RATE_LIMIT_ENABLED=false.
-			//
-			// TODO(rfc0009-phase4): wire grpc.StreamInterceptor when a
-			// streaming RPC is added. Today only unary calls are
-			// rate-limited; a future streaming surface would bypass the
-			// limiter (PR #244 review NTH-01).
-			grpc.UnaryInterceptor(security.GRPCRateLimitInterceptor(rateLimiter, circuitBreaker)),
-		)
-		logpb.RegisterLogServiceServer(grpcServer, server.NewLogServiceServer(logBuf, logger))
-		// RFC 0023 PR 1 — register the always-grant WalletService skeleton
-		// on the agent-facing gRPC listener that already hosts LogService.
-		walletpb.RegisterWalletServiceServer(grpcServer, wallet.NewWalletService(logger))
+		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, logger)
 		defer grpcServer.GracefulStop()
 	}
 

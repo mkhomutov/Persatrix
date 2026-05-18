@@ -1,15 +1,19 @@
 ---
 id: ISSUE-0059
 summary: The orchestrator's agent-facing gRPC server (LogService + WalletService) registers no panic-recovery interceptor, unlike the HTTP server's recoveryMiddleware — an unrecovered panic in any gRPC handler crashes the whole orchestrator process. RFC 0023 PR 2 grows the wallet handlers' panic surface and adds a reaper goroutine that an interceptor cannot cover.
-status: open
+status: resolved
 severity: medium
 area: grpc
 created: 2026-05-18
+closed: 2026-05-18
+closed_pr: 379
 refs:
   - docs/rfcs/0023-pr-plan.md
   - docs/rfcs/0023-llm-call-leasing.md
   - cmd/orchestrator/main.go
+  - cmd/orchestrator/grpcserver.go
   - internal/server/middleware.go
+  - internal/security/recovery.go
 ---
 
 ## Summary
@@ -72,9 +76,13 @@ Two independent pieces:
    `grpc.ChainUnaryInterceptor(recovery, rateLimit)` so it also catches
    panics raised inside the rate-limit interceptor. A hand-rolled
    interceptor keeps parity with the HTTP precedent and avoids adding
-   `go-grpc-middleware` as a new dependency. (A future streaming RPC would
-   also need the stream variant — cf. the existing
-   `TODO(rfc0009-phase4)` on `grpc.StreamInterceptor`.)
+   `go-grpc-middleware` as a new dependency. A unary interceptor cannot
+   wrap a streaming handler, and `LogService.StreamLogs` — `LogService`'s
+   only RPC — is bidi-streaming, so the unary interceptor alone would
+   leave `LogService` uncovered: the matching `grpc.StreamInterceptor`
+   variant is required alongside it, not deferred. (The rate-limiter's
+   own stream variant remains a separate `TODO(rfc0009-phase4)` —
+   PR #244 review NTH-01.)
 
 2. **Panic guard on the reaper goroutine.** Independently, RFC 0023 PR 2's
    `reapLoop` must carry its own `defer func() { if r := recover(); ... }()`
@@ -93,3 +101,19 @@ that sequencing is a reviewer judgment call, not a blocker.
 > The gap is pre-existing and not introduced by #378; filed as a
 > follow-up because PR 1's scope is registration-only. The reaper-goroutine
 > guard (piece 2) is cross-referenced into the RFC 0023 PR 2 plan section.
+
+> 2026-05-18 — resolved by #379. Piece (1) landed in full — both the
+> unary and the streaming recovery interceptor (`internal/security/recovery.go`):
+> `GRPCRecoveryInterceptor` is composed as the outermost link of
+> `grpc.ChainUnaryInterceptor`, and `GRPCStreamRecoveryInterceptor` as the
+> outermost link of `grpc.ChainStreamInterceptor`, on the agent-facing gRPC
+> server — each recovering a handler panic as `codes.Internal`, parity with
+> the HTTP `recoveryMiddleware`. The stream variant is load-bearing, not
+> speculative: `LogService.StreamLogs` is bidi-streaming and is
+> `LogService`'s only RPC, so a unary-only interceptor would have left
+> `LogService` — one of the two services this issue names — entirely
+> uncovered. The shared `grpc.NewServer(...)` construction was extracted
+> from `main.go` into `newAgentGRPCServer` (`grpcserver.go`) to stay within
+> the file-size budget. Piece (2) — the RFC 0023 PR 2 reaper goroutine's
+> own `defer`/`recover` — is unaffected by this closure and remains a PR 2
+> checklist item: a server interceptor never wraps a background goroutine.
