@@ -3,7 +3,7 @@ id: RFC-0029
 title: Personal/Society Storage Split
 summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phases 2–4 (Postgres society store, migration) in v0.4.0.
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-10
 target: Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
@@ -18,7 +18,7 @@ depends_on:
 > **Numbering note (2026-05-10).** This RFC was originally filed as RFC 0025 (PR #309). The 0025 slot is reserved as `superseded by RFC 0027` (per [docs/rfcs/README.md §Reserved RFC Numbers](README.md#reserved-rfc-numbers) and [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index) — RFC 0027 explicitly says "supersedes the user's draft RFC 0025"). Reusing slot 0025 for an unrelated topic would invalidate that supersession edge and the README's "slot retained for historical record" semantic, so this RFC was renumbered to the next free slot. Slots 0023 (narrowed) and 0024 (deferred) had no superseding RFC pointing at them and so were not renumbered when their files landed under different topics — only 0025 had an active supersession breadcrumb that this rename preserves. (The reasoning was first recorded in the PR #309 deep-review process; review reports themselves live under `docs/pr-reviews/`, which is `.gitignore`'d per repo convention, so this note is the canonical record.)
 
 **Type**: architecture
-**Status**: 🚧 Implementing
+**Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-10
 **Target**: Phase 1 v0.3.2 (facade + tier rename) — see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0029-pr-plan.md); Phases 2–6 v0.4.0 (Postgres society store, migration tooling)
@@ -492,7 +492,11 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 
 ## Decision / Next Steps
 
-**Status**: 📋 Proposed (this PR). Awaiting maintainer ratification.
+**Status**: ⚠️ Partially Implemented — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phases 2–6 reserved for v0.4.0.
+
+**Phase 1 implemented (v0.3.2).** The `MemoryStore` facade promotion landed across RFC 0029 Phase 1 PRs 1–5 ([PR plan](0029-pr-plan.md)): the typed facade in `agents/memory/store.py`, the `MemoryFacade` one-minor-version alias shim, the RFC 0011 channel-history caller migration, the lint rule + `DeprecationWarning` guarding the personal/society boundary, the `persona_runtime/` + `sub_agents/` + RFC 0026 facts-tier call-site sweep, and the `tests/perf/personal_tier_latency.py` personal-tier recall-latency regression gate. No Postgres dependency was added — society-tier methods raise the `SocietyBackendUnavailable` hierarchy. The step-1 ordering prerequisite below ("before RFC 0028 implementation begins") is now satisfied; Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) are reserved for v0.4.0.
+
+The list below records the on-ratification plan as authored; it is retained for traceability.
 
 On ratification:
 

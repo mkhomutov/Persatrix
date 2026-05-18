@@ -1,0 +1,71 @@
+# Maintainer-triggered capture of the personal-tier recall latency baseline.
+#
+# RFC 0029 §Test Strategy: the perf gate (tests/perf/personal_tier_latency.py)
+# compares every CI run against tests/perf/baselines/personal_tier_latency.json.
+# That baseline must be captured ON the runner the gate runs on — a
+# developer-machine capture would not match GitHub's Linux runners — so this
+# workflow runs the harness on the current main and opens a PR updating the
+# baseline file. Merging that PR flips the gate from informational to
+# enforcing.
+#
+# workflow_dispatch only: GitHub restricts manual workflow runs to users with
+# write access, so this is maintainer-gated without extra configuration.
+#
+# Repo prerequisite: "Allow GitHub Actions to create and approve pull
+# requests" must be enabled (Settings → Actions → General → Workflow
+# permissions), or the create-pull-request step below fails with HTTP 403.
+
+name: Perf baseline capture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  capture:
+    name: Capture personal-tier latency baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          cd agents && pip install -e ".[dev]"
+
+      - name: Capture baseline
+        run: |
+          python tests/perf/personal_tier_latency.py \
+            --capture-baseline tests/perf/baselines/personal_tier_latency.json
+
+      - name: Open baseline-update PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/perf-baseline-capture
+          # Scope the auto-commit to exactly the baseline file — no other
+          # path the capture job may touch can reach the baseline PR.
+          add-paths: tests/perf/baselines/personal_tier_latency.json
+          commit-message: "chore(perf): capture personal-tier recall latency baseline"
+          title: "chore(perf): capture personal-tier recall latency baseline"
+          body: |
+            Automated capture of `tests/perf/baselines/personal_tier_latency.json`
+            from the perf harness on a CI runner, triggered via
+            `workflow_dispatch` per RFC 0029 §Test Strategy.
+
+            Merging this commits the baseline and flips the personal-tier
+            recall latency gate (`tests/perf/personal_tier_latency.py`) from
+            informational to enforcing — a >20% p99/p50 regression then
+            fails CI.
+
+            **Before merging, re-trigger CI.** This PR is opened with the
+            default `GITHUB_TOKEN`, so GitHub does not start the `CI`
+            workflow on it (the recursion guard on token-authored events).
+            Close then reopen the PR — or push an empty commit — so the
+            perf gate runs against the new baseline before it is merged.

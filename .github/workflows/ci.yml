@@ -111,6 +111,13 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
+      # RFC 0029 §Test Strategy — personal-tier recall latency gate. Fails
+      # the build on a >20% p99/p50 regression off the committed baseline;
+      # runs informational-only (exit 0) until the perf-baseline-capture
+      # workflow lands tests/perf/baselines/personal_tier_latency.json.
+      - name: Personal-tier recall latency gate
+        run: python tests/perf/personal_tier_latency.py
+
   rust:
     name: Rust (build + clippy)
     runs-on: ubuntu-latest
