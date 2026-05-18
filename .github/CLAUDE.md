@@ -34,6 +34,8 @@ make proto-check    # CI gate: Python stubs in sync + no orphans (ISSUE-0023)
 
 Detailed test invocations: `go test ./internal/planner -v -run TestName`, `python3 -m pytest tests/unit/python/test_agents.py::test_name -v`.
 
+The full Python unit suite (`pytest tests/unit/python/`) takes ~5.5 min — run it in the foreground with an explicit ≥10-min timeout. Don't run long commands with guessed defaults, and don't pipe them through `tail`/buffering filters when you need to detect completion: output stays empty until the run ends, so a killed run looks identical to a live one.
+
 ## Architecture
 
 ```
