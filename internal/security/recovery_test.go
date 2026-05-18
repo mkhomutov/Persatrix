@@ -128,7 +128,10 @@ func TestGRPCRecoveryInterceptor_NilLoggerDoesNotPanic(t *testing.T) {
 // raised inside a later interceptor (e.g. the rate-limiter) must also
 // be caught. The chain semantics are reproduced here by invoking the
 // downstream interceptor from inside the handler closure the recovery
-// interceptor receives — a close stand-in for how grpc-go nests a chain.
+// interceptor receives — a close stand-in for how grpc-go nests a
+// chain; the real grpc.ChainUnaryInterceptor composition is exercised
+// end-to-end by
+// TestGRPCRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor.
 func TestGRPCRecoveryInterceptor_CatchesPanicFromDownstreamInterceptor(t *testing.T) {
 	recovery := GRPCRecoveryInterceptor(zap.NewNop())
 	downstream := func(_ context.Context, _ any, _ *grpc.UnaryServerInfo, _ grpc.UnaryHandler) (any, error) {
@@ -200,6 +203,64 @@ func TestGRPCRecoveryInterceptor_EndToEndRecoversHandlerPanic(t *testing.T) {
 		st, ok := status.FromError(err)
 		require.True(t, ok, "call %d", i)
 		assert.Equal(t, codes.Internal, st.Code(), "call %d", i)
+	}
+}
+
+// panickyUnaryInterceptor always panics. It stands in for a misbehaving
+// inner interceptor (e.g. a future rate-limiter) composed *after* the
+// recovery interceptor in a real grpc.ChainUnaryInterceptor.
+func panickyUnaryInterceptor(_ context.Context, _ any, _ *grpc.UnaryServerInfo, _ grpc.UnaryHandler) (any, error) {
+	panic("downstream unary interceptor blew up")
+}
+
+// TestGRPCRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor
+// is the end-to-end counterpart of
+// TestGRPCRecoveryInterceptor_CatchesPanicFromDownstreamInterceptor: it
+// drives a panic through a *real* grpc.ChainUnaryInterceptor — the exact
+// composition cmd/orchestrator/grpcserver.go builds (recovery outermost,
+// an inner interceptor after it). The unit test models grpc-go's chain
+// nesting by hand; this test removes that assumption by letting grpc-go
+// nest the chain itself.
+//
+// The registered service is the never-implemented HealthServer: its
+// Check handler is never reached — panickyUnaryInterceptor panics before
+// delegating to it — so an observed codes.Internal can only have come
+// from the recovery interceptor catching the *chained interceptor's*
+// panic. The second iteration proves the process stayed up.
+func TestGRPCRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor(t *testing.T) {
+	lis := bufconn.Listen(1 << 20)
+	t.Cleanup(func() { _ = lis.Close() })
+
+	// recovery OUTERMOST, panickyUnaryInterceptor inner — the chain shape
+	// of grpcserver.go's grpc.ChainUnaryInterceptor(recovery, rateLimit).
+	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(
+		GRPCRecoveryInterceptor(zap.NewNop()),
+		panickyUnaryInterceptor,
+	))
+	healthpb.RegisterHealthServer(srv, healthpb.UnimplementedHealthServer{})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	cc, err := grpc.NewClient(
+		"passthrough://bufconn",
+		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(context.Background())
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cc.Close() })
+
+	client := healthpb.NewHealthClient(cc)
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := client.Check(ctx, &healthpb.HealthCheckRequest{})
+		cancel()
+		require.Error(t, err, "call %d: panic in a chained interceptor must surface as an error", i)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "call %d", i)
+		assert.Equal(t, codes.Internal, st.Code(),
+			"call %d: recovery composed outermost must catch a panic from a chained inner interceptor", i)
 	}
 }
 
@@ -303,7 +364,9 @@ func TestGRPCStreamRecoveryInterceptor_NilLoggerDoesNotPanic(t *testing.T) {
 // pins that the stream recovery interceptor, composed as the OUTERMOST
 // link of grpc.ChainStreamInterceptor, also catches a panic raised
 // inside a later stream interceptor — the streaming analogue of the
-// unary downstream-interceptor test above.
+// unary downstream-interceptor test above; the real
+// grpc.ChainStreamInterceptor composition is exercised end-to-end by
+// TestGRPCStreamRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor.
 func TestGRPCStreamRecoveryInterceptor_CatchesPanicFromDownstreamInterceptor(t *testing.T) {
 	recovery := GRPCStreamRecoveryInterceptor(zap.NewNop())
 	downstream := func(_ any, _ grpc.ServerStream, _ *grpc.StreamServerInfo, _ grpc.StreamHandler) error {
@@ -360,5 +423,60 @@ func TestGRPCStreamRecoveryInterceptor_EndToEndRecoversHandlerPanic(t *testing.T
 		st, ok := status.FromError(err)
 		require.True(t, ok, "call %d", i)
 		assert.Equal(t, codes.Internal, st.Code(), "call %d", i)
+	}
+}
+
+// panickyStreamInterceptor always panics. It stands in for a misbehaving
+// inner stream interceptor composed *after* the recovery interceptor in
+// a real grpc.ChainStreamInterceptor.
+func panickyStreamInterceptor(_ any, _ grpc.ServerStream, _ *grpc.StreamServerInfo, _ grpc.StreamHandler) error {
+	panic("downstream stream interceptor blew up")
+}
+
+// TestGRPCStreamRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor
+// is the end-to-end counterpart of
+// TestGRPCStreamRecoveryInterceptor_CatchesPanicFromDownstreamInterceptor:
+// it drives a panic through a *real* grpc.ChainStreamInterceptor rather
+// than a hand-built model of grpc-go's chain nesting. The
+// never-implemented HealthServer's Watch handler is never reached
+// (panickyStreamInterceptor panics first), so an observed codes.Internal
+// can only have come from the recovery interceptor catching the chained
+// interceptor's panic. The second iteration proves the process stayed up.
+func TestGRPCStreamRecoveryInterceptor_EndToEndCatchesPanicFromChainedInterceptor(t *testing.T) {
+	lis := bufconn.Listen(1 << 20)
+	t.Cleanup(func() { _ = lis.Close() })
+
+	// recovery OUTERMOST, panickyStreamInterceptor inner — the chain shape
+	// of grpcserver.go's grpc.ChainStreamInterceptor.
+	srv := grpc.NewServer(grpc.ChainStreamInterceptor(
+		GRPCStreamRecoveryInterceptor(zap.NewNop()),
+		panickyStreamInterceptor,
+	))
+	healthpb.RegisterHealthServer(srv, healthpb.UnimplementedHealthServer{})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	cc, err := grpc.NewClient(
+		"passthrough://bufconn",
+		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(context.Background())
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cc.Close() })
+
+	client := healthpb.NewHealthClient(cc)
+	for i := 0; i < 2; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stream, err := client.Watch(ctx, &healthpb.HealthCheckRequest{})
+		require.NoError(t, err, "call %d: stream creation must succeed", i)
+		_, err = stream.Recv()
+		cancel()
+		require.Error(t, err, "call %d: panic in a chained stream interceptor must surface as an error", i)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "call %d", i)
+		assert.Equal(t, codes.Internal, st.Code(),
+			"call %d: recovery composed outermost must catch a panic from a chained inner stream interceptor", i)
 	}
 }
