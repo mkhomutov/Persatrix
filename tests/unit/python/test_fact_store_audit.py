@@ -267,9 +267,21 @@ class TestRedactorFailureWarning:
         # "structured-log hiccup must not break a write that has
         # already committed".  But a separate WARNING records the
         # silent-passthrough so it is observable.
+        #
+        # Count only ``emit_audit``'s own out-of-band WARNING — it logs
+        # under ``agents.memory.facts``.  When an earlier test in the
+        # process has called ``configure_logging`` the structlog chain
+        # is built process-globally, so the unredacted audit record
+        # additionally trips the chain's ``_apply_redactor``, which logs
+        # its own "redactor raised" WARNING under
+        # ``agents.observability.logging``.  That is a different layer's
+        # signal, not a duplicate of ``emit_audit``'s; filtering by
+        # logger name keeps this assertion about ``emit_audit``'s
+        # contract and independent of test-ordering / global log state.
         warnings = [
             rec for rec in caplog.records
             if rec.levelno == logging.WARNING
+            and rec.name == "agents.memory.facts"
             and "redactor raised" in rec.getMessage().lower()
         ]
         assert len(warnings) == 1, (
