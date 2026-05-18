@@ -166,6 +166,15 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         The RFC 0029 §C construction path.  Eviction / decay knobs keep
         their defaults — operators tune those through the legacy keyword
         constructor or ``config/agents.yaml``.
+
+        ``StoreConfig`` carries no ``shared_pools``: the RFC 0008
+        in-process :class:`~agents.memory.shared_pool.SharedPoolRegistry`
+        is a live runtime object, not config, so a store that needs
+        cross-agent pools must still be built via the keyword constructor
+        (as :meth:`agents.base.BaseAgent.initialize_memory` does).  The
+        omission is deliberate — the registry is subsumed by the society
+        tier in Phase 3 — so ``from_config`` is not a drop-in replacement
+        for the keyword constructor when shared pools are in play.
         """
         return cls(
             agent_id=config.agent_id,

@@ -98,6 +98,13 @@ class SocietyFacadeMixin:
 
         Society-tier — needs the Postgres ``pool_entries`` table.  Phase 3
         narrows the return type to ``list[PoolEntry]``.
+
+        Not to be confused with
+        :meth:`~agents.memory.shared_pool_facade.SharedPoolFacadeMixin.read_from_pool`,
+        the *working* RFC 0008 reader for **in-process** shared pools that
+        :class:`MemoryStore` also exposes.  ``read_pool`` is the society
+        (cross-process Postgres) surface and raises until Phase 3;
+        ``read_from_pool`` is the in-process registry path and works today.
         """
         raise self._society_unavailable()
 
