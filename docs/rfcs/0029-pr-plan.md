@@ -142,6 +142,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 |------|--------|
 | `agents/persona_runtime/` memory call sites | Migrate every `MemoryFacade` reference to `MemoryStore` ([RFC §Goal 1](0029-personal-society-storage-split.md#goals) — every persona-runtime caller goes through the facade). Behaviour unchanged. |
 | `agents/sub_agents/` memory call sites | Same migration for the sub-agent paths. |
+| [`agents/persona.py`](../../agents/persona.py) | The `create_persona_agent` factory directly constructs `EpisodicMemory` / `RelationshipMemory` (and `FactStore`) — the **sole production site** outside `agents/memory/` that trips the PR 2 `DeprecationWarning`. Migrate it to build the personal tier through `MemoryStore` so the deprecation window actually closes; surface the relationship / facts tiers on `MemoryStore` if the agent internals still need per-tier handles. |
 | RFC 0026 facts-tier call sites | The facts-tier readers/writers shipped in v0.3.1 are routed through `MemoryStore`'s personal-tier facts methods ([v0.3.2-plan Phase 1 acceptance](../v0.3.2-plan.md#phase-1--author-the-two-rfc-pr-plans) — RFC 0026 facts-tier routing is in-scope for Phase 1). |
 | `tests/perf/personal_tier_latency.py` | **New** — perf harness measuring `MemoryStore.recall_episodes` p99 against a fixed corpus ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)). Lands here so it runs against the fully-wired `MemoryStore` surface; the *baseline* JSON it compares against is captured by PR 5 (post-Phase-1-merge). |
 | `tests/unit/python/`, `agents/tests/` | Existing persona-runtime / sub-agent suites pass unchanged — the migration is mechanical and behaviour-preserving. Any test that constructed a `MemoryFacade` directly switches to `MemoryStore`. |
@@ -149,12 +150,14 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 #### Key implementation details
 
 - This is the bulk sweep — mechanical, behaviour-preserving. The PR 2 lint rule and `DeprecationWarning` make a missed call site visible; landing PR 2 first means PR 3 is reviewed against an enforced boundary.
+- `agents/persona.py`'s `create_persona_agent` factory is the **only** production site outside `agents/memory/` that constructs the per-tier classes directly — it is where the PR 2 `DeprecationWarning` fires in production. Migrating it is the step that *closes* the deprecation window; `persona_runtime/` and `sub_agents/` hold `MemoryFacade` references and factory-supplied tier handles, not direct tier construction. Routing it through `MemoryStore` may require `MemoryStore` to surface the relationship / facts tiers — that work is in PR 3 scope, not deferred.
 - After PR 3 the `MemoryFacade` alias has no in-repo callers — it survives only as the documented one-minor-version external-compat shim, removed in v0.3.3.
 - The perf harness is shipped now but the **gate is not enforcing yet** — there is no baseline until Phase 1 has merged. PR 5 captures `tests/perf/baselines/personal_tier_latency.json` and flips the harness into an enforcing CI gate. Phase 1 is a pure refactor, so the post-merge number is the legitimate "this is what the persona hot path costs after the rename" reference ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)).
 
 #### Tests
 
 - Every persona-runtime and sub-agent memory test passes unchanged after the migration.
+- Constructing a persona agent via `create_persona_agent` emits no `DeprecationWarning` — the PR 2 warning is silent across the production path.
 - A grep-style guard test (or the PR 2 lint rule extended) confirms no `MemoryFacade` reference remains outside the shim definition.
 - `tests/perf/personal_tier_latency.py` runs and emits a p99 number (not yet gated).
 
@@ -163,6 +166,7 @@ PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 
 - [ ] `pytest agents/tests/ tests/unit/python/ -q` passes.
 - [ ] `ruff check agents/` clean; `mypy agents/` clean.
 - [ ] Every `persona_runtime/` and `sub_agents/` memory call routes through `MemoryStore`.
+- [ ] `create_persona_agent` (`agents/persona.py`) builds the personal tier through `MemoryStore` — no direct `EpisodicMemory` / `RelationshipMemory` construction remains outside `agents/memory/`, and the PR 2 `DeprecationWarning` is silent on the production path.
 - [ ] RFC 0026 facts-tier call sites routed through `MemoryStore`.
 - [ ] No `MemoryFacade` reference remains outside the shim definition.
 - [ ] `tests/perf/personal_tier_latency.py` runs (baseline capture + gate enforcement are PR 5).

@@ -95,6 +95,18 @@ def test_paths_outside_memory_dir_are_external() -> None:
     assert _boundary.is_construction_external(__file__) is True
 
 
+def test_unknown_caller_file_classifies_as_external() -> None:
+    """An empty / unknown caller filename classifies as external.
+
+    ``warn_external_construction`` reaches this branch when ``sys._getframe``
+    yields a frame whose ``co_filename`` is empty or unset.  A guard rail
+    must fail *open*: a spurious ``DeprecationWarning`` is harmless noise,
+    but silently misclassifying a real facade bypass as in-boundary is not —
+    so an unknown filename counts as external.
+    """
+    assert _boundary.is_construction_external("") is True
+
+
 # ─── Lint rule: TID251 blocks direct aiosqlite outside agents/memory/ ─
 
 

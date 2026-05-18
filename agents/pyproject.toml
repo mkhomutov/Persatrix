@@ -110,6 +110,9 @@ target-version = "py311"
 extend-exclude = ["generated"]
 
 [tool.ruff.lint]
+# "TID251" is the specific banned-api rule, not the umbrella "TID" category:
+# selecting "TID" would also enable TID252 (banned relative imports) and flag
+# this package's pervasive `from .x import y` style. Keep the rule code.
 select = ["E", "F", "I", "N", "TID251", "W", "UP"]
 
 # RFC 0029 — the personal/society storage boundary. A direct aiosqlite

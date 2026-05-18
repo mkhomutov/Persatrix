@@ -47,9 +47,18 @@ def is_construction_external(caller_file: str) -> bool:
 def warn_external_construction(class_name: str) -> None:
     """Emit a ``DeprecationWarning`` if the caller is outside ``agents/memory/``.
 
-    Call from a per-tier class ``__init__``.  Walks two frames up — past
-    this function and the ``__init__`` — to the construction site, so the
-    warning is attributed to the caller, not to this module.
+    Call directly from a per-tier class ``__init__``.  Walks two frames
+    up — past this function and that ``__init__`` — to the construction
+    site, so the warning is attributed to the caller, not to this module.
+
+    The two-frame walk assumes no intermediary frame: invoke this from the
+    leaf ``__init__`` itself, never via a helper or a subclass ``__init__``
+    that chains ``super().__init__()``.  An extra frame would misattribute
+    the classification — and a subclass ``__init__`` living *inside*
+    ``agents/memory/`` would silently suppress the warning for a genuinely
+    external caller.  ``EpisodicMemory`` / ``RelationshipMemory`` satisfy
+    this today: neither is subclassed, and each calls in from its own
+    ``__init__``.
     """
     try:
         caller = sys._getframe(2)
