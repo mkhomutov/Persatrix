@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-18 (RFC 0029 Phase 1 implementation started — PR 1 (`MemoryStore` facade promotion) opened; RFC 0029 RFC Master Index status flipped 📋 Proposed → 🚧 Implementing per the [RFC 0029 PR plan](docs/rfcs/0029-pr-plan.md).)
+> **Last updated**: 2026-05-18 (RFC 0029 Phase 1 closeout — PR 5 (`MemoryStore` facade freeze + personal-tier recall-latency gate) opened; RFC 0029 RFC Master Index status flipped 🚧 Implementing → ⚠️ Partially Implemented (Phase 1) per the [RFC 0029 PR plan](docs/rfcs/0029-pr-plan.md); merged-PR history caught up to #375.)
 > **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — ✅ Released
 > **Current milestone**: v0.3.1 released ([tag v0.3.1](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.1) pushed 2026-05-17, GitHub Release "Memory Quality" published the same day); v0.3.2 planning next (RFC 0029 Phase 1 `MemoryStore` facade refactor + RFC 0023 LLM-call leasing, sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md)).
 
@@ -62,7 +62,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.1 | ✅ Implemented |
 | [0027](docs/rfcs/0027-reflection-driven-consolidation.md) | Reflection-Driven Consolidation | v0.4.0 | 📋 Proposed |
 | [0028](docs/rfcs/0028-agent-decision-policy-engine.md) | Agent Decision Policy Engine | v0.4.0 | 📋 Proposed |
-| [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.2 (Phase 1) + v0.4.0 (Phases 2–6) | 🚧 Implementing |
+| [0029](docs/rfcs/0029-personal-society-storage-split.md) | Personal/Society Storage Split (SA-1 from [storage-architecture-roadmap.md](docs/storage-architecture-roadmap.md); originally filed as 0025, renumbered to preserve the 0025→0027 supersession edge) | v0.3.2 (Phase 1) + v0.4.0 (Phases 2–6) | ⚠️ Partially Implemented (Phase 1; PRs 1 [#370](https://github.com/mkhomutov/Persatrix/pull/370), 2 [#372](https://github.com/mkhomutov/Persatrix/pull/372), 3 [#373](https://github.com/mkhomutov/Persatrix/pull/373), 4 [#375](https://github.com/mkhomutov/Persatrix/pull/375), 5 (this PR) merged — `MemoryStore` facade promotion + `MemoryFacade` alias shim + personal/society boundary lint rule + `persona_runtime`/`sub_agents`/RFC 0026 call-site sweep + recall-latency regression gate. Phases 2–6 deferred to v0.4.0.) |
 | [0030](docs/rfcs/0030-multi-agent-conversation-governance.md) | Multi-Agent Conversation Governance — layered termination + cost + reply-budget + moderator over the v0.3.0 channels stack; composes RFC 0011 amendment / RFC 0020 / RFC 0023 / RFC 0028. Motivated by the v0.3.0 F-1 finding tail (cost ceiling and productive-termination beyond cascade_depth). | v0.3.x (Phase 1 — deterministic layers) + v0.4.0 (Phase 2 — moderator) + v0.5.0+ (Phase 3 — declarative types + topic-drift) | 📋 Proposed (Draft) |
 | [0031](docs/rfcs/0031-per-session-namespacing-channels.md) | Per-Session Namespacing for Channels and Persona Memory — first-class Session primitive scoping `channels.db` and per-persona `memory.db`, with an operator-visible `persatrix session …` CLI; F-3 root-cause fix, succeeds the `make reset` workaround from PR 6 of the v0.3.0 channel test-findings plan. Spawned from [ISSUE-0051](docs/issues/ISSUE-0051-per-session-memory-namespacing-channels.md). | v0.3.1 (Phase 1) + v0.3.x (Phases 2–4) | ⚠️ Partially Implemented (Phase 1) |
 | [0033](docs/rfcs/0033-model-alias-layer.md) | Provider-Agnostic Model Alias Layer — decouple agent configs from vendor-specific model IDs via a named alias map (`quality` / `fast` / `summarizer` → `{provider, model_id, pricing}`), so vendor deprecations and multi-provider expansion change one file instead of dozens. Retires `_infer_provider` string-prefix routing. Proximate trigger: [Anthropic Sonnet 4 retirement](https://platform.claude.com/docs/en/about-claude/model-deprecations) (2026-06-15) — the migration is absorbed as the first dogfood of the alias layer. | v0.3.x | 📋 Proposed |
@@ -967,6 +967,16 @@ v0.5.0 complete
 | [#363](https://github.com/mkhomutov/Persatrix/pull/363) | docs(v031): v0.3.1 release-prep PR 2 — docs refresh + release checklist | v0.3.1 release prep | 2026-05-17 |
 | [#364](https://github.com/mkhomutov/Persatrix/pull/364) | chore(release): bump to v0.3.1 + curate changelog (PR 3) | v0.3.1 release prep | 2026-05-17 |
 | [#365](https://github.com/mkhomutov/Persatrix/pull/365) | docs(v031): v0.3.1 release-prep PR 4 — final pre-tag verification | v0.3.1 release prep | 2026-05-17 |
+| [#366](https://github.com/mkhomutov/Persatrix/pull/366) | docs(release): post-release follow-up for v0.3.1 | v0.3.1 release prep | 2026-05-17 |
+| [#367](https://github.com/mkhomutov/Persatrix/pull/367) | docs(v032): open v0.3.2 master plan — Cost Gate + Facade Freeze | v0.3.2 plan | 2026-05-17 |
+| [#368](https://github.com/mkhomutov/Persatrix/pull/368) | docs(rfcs): RFC 0040 — agent–orchestrator transport unification | 0040 (RFC) | 2026-05-17 |
+| [#369](https://github.com/mkhomutov/Persatrix/pull/369) | docs(v032): RFC 0023 + RFC 0029 PR plans (Phase 1 combined scaffold) | 0023 + 0029 (PR plans) | 2026-05-17 |
+| [#370](https://github.com/mkhomutov/Persatrix/pull/370) | feat(v032): RFC 0029 Phase 1 PR 1 — MemoryStore facade promotion | 0029 (1/5) | 2026-05-18 |
+| [#371](https://github.com/mkhomutov/Persatrix/pull/371) | docs(v032): resolve RFC 0023 open questions + v0.3.2 tracking hygiene | 0023 follow-up | 2026-05-18 |
+| [#372](https://github.com/mkhomutov/Persatrix/pull/372) | feat(v032): RFC 0029 Phase 1 PR 2 — lint rule + deprecation warnings | 0029 (2/5) | 2026-05-18 |
+| [#373](https://github.com/mkhomutov/Persatrix/pull/373) | feat(v032): RFC 0029 Phase 1 PR 3 — downstream call-site refactor | 0029 (3/5) | 2026-05-18 |
+| [#374](https://github.com/mkhomutov/Persatrix/pull/374) | fix(tests): isolate fact-store audit redactor-warning test from global log state | test isolation fix | 2026-05-18 |
+| [#375](https://github.com/mkhomutov/Persatrix/pull/375) | feat(v032): RFC 0029 Phase 1 PR 4 — review follow-ups | 0029 (4/5) | 2026-05-18 |
 
 ---
 

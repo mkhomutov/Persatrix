@@ -47,7 +47,8 @@ PR 3 (Downstream call-site refactor: persona_runtime/ + sub_agents/ + RFC 0026
 PR 4 (Review follow-ups)
   ↓
 PR 5 (Phase 1 closeout — status: ⚠️ Partially Implemented;
-      capture tests/perf/baselines/personal_tier_latency.json)
+      personal-tier recall-latency regression gate + perf-baseline-capture
+      workflow; baseline captured on CI by that workflow's follow-up PR)
 ```
 
 PR 1 is a pure rename + facade promotion; behaviour is identical. PR 2 and PR 3 both depend on PR 1 only — the arrow between them is the recommended review order, not a hard code dependency.
@@ -266,32 +267,40 @@ PR 3:
 ### PR 5: `feature/v032-rfc0029p1-close` — Phase 1 Closeout
 
 **Depends on**: PR 4 merged.
-**Purpose**: Mark Phase 1 implemented, capture the perf baseline, and hand off Phases 2–6 to v0.4.0.
+**Purpose**: Mark Phase 1 implemented, ship the personal-tier recall-latency regression gate, and hand off Phases 2–6 to v0.4.0.
+
+**Amendment (baseline capture).** The original plan had this PR check in `tests/perf/baselines/personal_tier_latency.json` directly. A CI regression gate must be baselined on the environment it runs on — a developer-machine capture would not match GitHub's Linux runners — so the baseline is instead captured by a new maintainer-triggered `workflow_dispatch` workflow that runs the harness on a CI runner and opens a follow-up PR committing the file. This is the regeneration mechanism [RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy) already specifies. PR 5 therefore ships the gate **logic** + the capture workflow; the gate runs **informational-only** (exit 0, no build failure) until that follow-up PR lands the baseline and flips it to enforcing.
 
 #### Scope
 
 | File | Change |
 |------|--------|
+| `tests/perf/personal_tier_latency.py` | Gate enforcement. `evaluate_gate` co-checks p99 **and** p50 against the committed baseline at a 20% tolerance ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy); p50 co-gate per the PR 4 review); `load_baseline` reads the baseline JSON, returning `None` — informational-only — when none is committed; `main` exits non-zero on a regression. A `--capture-baseline PATH` mode is added for the capture workflow. |
+| `tests/unit/python/test_personal_tier_latency_gate.py` | **New** — failing-first TDD pins for `evaluate_gate` (pass/fail verdicts, exclusive boundary, custom tolerance, p50 co-gate, per-metric regression detail) and `load_baseline` (missing vs committed). |
+| `.github/workflows/perf-baseline-capture.yml` | **New** — maintainer-triggered (`workflow_dispatch`) workflow: runs the harness on a CI runner, opens a PR committing `tests/perf/baselines/personal_tier_latency.json`. |
+| `.github/workflows/ci.yml` | The `python` job runs the perf gate (`python tests/perf/personal_tier_latency.py`) — informational until the baseline lands, enforcing after. |
 | [`docs/rfcs/0029-personal-society-storage-split.md`](0029-personal-society-storage-split.md) | Status → `⚠️ Partially Implemented (Phase 1)`. Append a "Phase 1 implemented in v0.3.2" note to Decision/Next Steps. |
-| [`ROADMAP.md`](../../ROADMAP.md) | RFC 0029 row → `⚠️ Partially Implemented`; target stays `v0.3.2 (Phase 1) + v0.4.0 (Phases 2–6)`; merged-PR rows for PRs 1–5; `Last updated` refresh. |
-| `tests/perf/baselines/personal_tier_latency.json` | **New** — the post-Phase-1-merge baseline (`{"recall_episodes_p99_ms": <number>, "captured_at": <iso8601>, "captured_commit": <sha>}`) per [RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy). Flips `tests/perf/personal_tier_latency.py` from informational to an enforcing CI gate (fails on >20% regression). |
+| [`ROADMAP.md`](../../ROADMAP.md) | RFC 0029 row → `⚠️ Partially Implemented`; target stays `v0.3.2 (Phase 1) + v0.4.0 (Phases 2–6)`; merged-PR rows for PRs 1–5; merged-PR history caught up; `Last updated` refresh. |
+| `tests/perf/baselines/personal_tier_latency.json` | **Not** committed by this PR — landed by the `perf-baseline-capture` follow-up PR (see the Amendment above). Shape per [RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy): `{"recall_episodes_p99_ms": <number>, "recall_episodes_p50_ms": <number>, "captured_at": <iso8601>, "captured_commit": <sha>, …}`. |
 | [`docs/storage-architecture-roadmap.md`](../storage-architecture-roadmap.md) | SA-1 status flip per [RFC §Decision/Next Steps step 2](0029-personal-society-storage-split.md#decision--next-steps). |
 | [`docs/rfcs/0029-pr-plan.md`](0029-pr-plan.md) | [Progress Overview](#progress-overview-phase-1) rows filled with merged-PR numbers and dates; all Phase 1 checklists complete. |
 
-No code changes beyond the checked-in baseline JSON and the gate-enabling flag. `CHANGELOG.md` is **deferred to the v0.3.2 release process** ([v0.3.2-plan Phase 3 / 4](../v0.3.2-plan.md#phase-3--v032-release-prep-plan)).
+`CHANGELOG.md` is **deferred to the v0.3.2 release process** ([v0.3.2-plan Phase 3 / 4](../v0.3.2-plan.md#phase-3--v032-release-prep-plan)).
 
 #### Key implementation details
 
-- The baseline is captured *after* the facade promotion has merged — Phase 1 is a pure refactor, so the post-merge p99 is the honest "cost of the persona hot path after the rename" number. The gate then protects v0.4.0 Phase 2/3 from accidentally routing personal-tier reads through Postgres ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)).
+- The gate co-checks p50 alongside p99 (PR 4 review): p99 over a shared CI runner is noisy, and a p50 co-gate catches a real regression the noisier p99 might flake on or mask. The build fails if **either** regresses >20%.
+- The baseline is captured *after* the facade promotion has merged — Phase 1 is a pure refactor, so the post-merge number is the honest "cost of the persona hot path after the rename" reference. Capturing it on a CI runner (not a developer machine) is what makes the >20% comparison meaningful; the gate then protects v0.4.0 Phase 2/3 from accidentally routing personal-tier reads through Postgres ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)).
+- The gate is TDD'd at the unit layer: `evaluate_gate` and `load_baseline` are pure, deterministic functions with failing-first pins. The live latency measurement is environment-dependent and is not asserted on — the gate only *compares* it against the baseline.
 - Full-RFC closeout waits for v0.4.0 (Phases 2–6); this PR is a **Phase 1** closeout — RFC 0029 → `⚠️ Partially Implemented`, not `✅ Implemented`.
 
 #### PR checklist
 
-- [ ] RFC 0029 status = `⚠️ Partially Implemented`.
-- [ ] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) updated; merged-PR history includes PRs 1–5.
-- [ ] `tests/perf/baselines/personal_tier_latency.json` captured; perf gate enforcing.
-- [ ] [v0.3.2-plan Master Progress Overview](../v0.3.2-plan.md#master-progress-overview) row 3 → ✅ Merged.
-- [ ] `make test`, `make lint`, `make validate` pass.
+- [x] RFC 0029 status = `⚠️ Partially Implemented`.
+- [x] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) updated; merged-PR history caught up through #375.
+- [x] Perf gate enforces a >20% p99/p50 regression once a baseline is committed; `perf-baseline-capture` workflow ships to capture the baseline on CI.
+- [x] [v0.3.2-plan Master Progress Overview](../v0.3.2-plan.md#master-progress-overview) row 3 → ✅ Merged.
+- [x] Python unit suite green (`pytest tests/unit/python/` — 2336 passed, 8 skipped); `ruff` + `mypy` clean on the touched files; `make validate` + `make rfcs-check` pass. PR 5 changes no Go / Rust.
 
 ---
 
@@ -340,8 +349,8 @@ The v0.4.0 PR plan for Phases 2–6 opens when the v0.4.0 plan opens; the [RFC 0
 | 1 | `MemoryStore` facade promotion | `feature/v032-rfc0029p1-facade-promotion` | ✅ Merged | [#370](https://github.com/mkhomutov/Persatrix/pull/370) | 2026-05-18 |
 | 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ✅ Merged | [#372](https://github.com/mkhomutov/Persatrix/pull/372) | 2026-05-18 |
 | 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | ✅ Merged | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | 2026-05-18 |
-| 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | 🔀 PR open | [#375](https://github.com/mkhomutov/Persatrix/pull/375) | — |
-| 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | ⬜ Not started | — | — |
+| 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | ✅ Merged | [#375](https://github.com/mkhomutov/Persatrix/pull/375) | 2026-05-18 |
+| 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

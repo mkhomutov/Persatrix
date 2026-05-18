@@ -38,26 +38,39 @@ than process start-up.  p50 is emitted alongside p99
 over a shared CI runner is noisy, and a p50 co-gate catches a real
 regression the noisier p99 might flake on or mask.
 
-Phase-1 status — **informational only**.  RFC 0029 Phase 1 is a pure
-refactor, so this harness ships and *runs* in PR 3 but does not gate:
-there is no baseline to compare against until Phase 1 has merged.
-RFC 0029 Phase 1 PR 5 captures ``tests/perf/baselines/personal_tier_latency.json``
-from the post-merge number and flips this harness into an enforcing CI
-gate (fail on >20% regression) — the legitimate post-rename
-personal-tier recall cost reference point.
+Regression gate
+---------------
+:func:`evaluate_gate` co-checks p99 and p50 against the checked-in
+baseline (``tests/perf/baselines/personal_tier_latency.json``) and fails
+on a >20% regression (:data:`DEFAULT_REGRESSION_TOLERANCE`).  :func:`main`
+runs the gate on every CI invocation.
+
+The gate is **informational-only until a baseline is committed**.  RFC
+0029 Phase 1 is a pure refactor, so the legitimate baseline is the
+*post-Phase-1-merge* number — and a CI gate must be baselined on the
+environment it runs on, so the baseline is captured on a CI runner by
+the maintainer-triggered ``perf-baseline-capture`` workflow
+(``workflow_dispatch``), not hand-run on a developer machine (RFC 0029
+§Test Strategy).  Until that workflow lands the file, :func:`load_baseline`
+returns ``None`` and :func:`main` exits 0 after printing the measurement.
 
 Run standalone::
 
-    python tests/perf/personal_tier_latency.py
+    python tests/perf/personal_tier_latency.py                  # measure + gate
+    python tests/perf/personal_tier_latency.py --capture-baseline PATH
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import math
+import os
+import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -91,6 +104,23 @@ _CORPUS_TOPICS = (
     "budget planning for the next quarter",
     "the team standup and sprint planning notes",
     "an incident retro and follow-up actions",
+)
+
+#: Maximum tolerated regression of a gated metric over its baseline before
+#: the gate fails the build — >20% per RFC 0029 §Test Strategy.
+DEFAULT_REGRESSION_TOLERANCE = 0.20
+
+#: Metrics the gate co-checks.  p99 is the headline budget; p50 is gated
+#: alongside it (RFC 0029 Phase 1 PR 4 review) — p99 over a shared CI
+#: runner is noisy, and a p50 co-gate catches a real regression the
+#: noisier p99 might flake on or mask.
+GATED_METRICS = ("recall_episodes_p99_ms", "recall_episodes_p50_ms")
+
+#: Checked-in baseline the gate compares against.  Captured on a CI runner
+#: post-Phase-1-merge by the ``perf-baseline-capture`` workflow; absent
+#: until then, in which case the gate runs informational-only.
+_BASELINE_PATH = (
+    _REPO_ROOT / "tests" / "perf" / "baselines" / "personal_tier_latency.json"
 )
 
 
@@ -160,11 +190,168 @@ async def measure_recall_p99(
     }
 
 
-def main() -> None:
-    """Run the harness and print the result dict as one JSON line."""
+@dataclass(frozen=True)
+class MetricRegression:
+    """One gated metric that exceeded its baseline-derived limit."""
+
+    metric: str
+    baseline_ms: float
+    measured_ms: float
+    limit_ms: float
+
+
+@dataclass(frozen=True)
+class GateVerdict:
+    """Outcome of :func:`evaluate_gate` — pass/fail plus the regressions."""
+
+    passed: bool
+    tolerance: float
+    regressions: tuple[MetricRegression, ...]
+
+
+def load_baseline(path: Path = _BASELINE_PATH) -> dict[str, object] | None:
+    """Return the checked-in perf baseline, or ``None`` when none exists.
+
+    A missing baseline is an expected, non-error state: RFC 0029 Phase 1
+    is a pure refactor, so the legitimate baseline is captured *after* the
+    facade promotion has merged — by the ``perf-baseline-capture``
+    workflow — and the gate runs informational-only until it lands.
+    """
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    if not isinstance(loaded, dict):
+        raise TypeError(f"baseline {path} is not a JSON object: {loaded!r}")
+    return loaded
+
+
+def _metric_ms(result: dict[str, object], metric: str) -> float:
+    """Extract a numeric metric from a measured / baseline result dict."""
+    value = result[metric]
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"{metric} is not numeric: {value!r}")
+    return float(value)
+
+
+def evaluate_gate(
+    measured: dict[str, object],
+    baseline: dict[str, object],
+    *,
+    tolerance: float = DEFAULT_REGRESSION_TOLERANCE,
+) -> GateVerdict:
+    """Compare *measured* against *baseline*; report every regressed metric.
+
+    A gated metric regresses when its measured value is *strictly* greater
+    than ``baseline * (1 + tolerance)`` — a metric pinned exactly to the
+    limit is the accepted ceiling, not a regression.  Both
+    :data:`GATED_METRICS` are co-checked and the gate fails if *either*
+    regresses; the returned :class:`GateVerdict` carries one
+    :class:`MetricRegression` per failed metric.
+    """
+    regressions: list[MetricRegression] = []
+    for metric in GATED_METRICS:
+        baseline_ms = _metric_ms(baseline, metric)
+        measured_ms = _metric_ms(measured, metric)
+        limit_ms = baseline_ms * (1.0 + tolerance)
+        if measured_ms > limit_ms:
+            regressions.append(
+                MetricRegression(
+                    metric=metric,
+                    baseline_ms=baseline_ms,
+                    measured_ms=measured_ms,
+                    limit_ms=round(limit_ms, 4),
+                )
+            )
+    return GateVerdict(
+        passed=not regressions,
+        tolerance=tolerance,
+        regressions=tuple(regressions),
+    )
+
+
+def _captured_commit() -> str:
+    """Return the current commit SHA for the baseline's provenance field.
+
+    Prefers ``GITHUB_SHA`` (set on CI) and falls back to ``git rev-parse``;
+    ``"unknown"`` if neither resolves, so a capture is never failed by a
+    missing provenance string alone.
+    """
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return sha
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def _capture_baseline(path: Path) -> int:
+    """Measure and write the perf baseline to *path*; return exit code 0.
+
+    Used by the ``perf-baseline-capture`` workflow.  The gate is *not*
+    evaluated here, so re-capturing after a deliberate, accepted slowdown
+    is never blocked by the previous baseline.
+    """
+    result = asyncio.run(measure_recall_p99())
+    result["captured_commit"] = _captured_commit()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result))
+    print(f"perf gate: baseline written to {path}", file=sys.stderr)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the harness; enforce the regression gate when a baseline exists.
+
+    Returns a process exit code: ``0`` when the gate passes — or runs
+    informational-only because no baseline is committed yet — and ``1`` on
+    a regression.
+    """
+    parser = argparse.ArgumentParser(
+        description="Personal-tier recall latency gate (RFC 0029 §Test Strategy).",
+    )
+    parser.add_argument(
+        "--capture-baseline",
+        metavar="PATH",
+        type=Path,
+        help="measure and write the baseline JSON to PATH, then exit without "
+        "evaluating the gate (used by the perf-baseline-capture workflow)",
+    )
+    args = parser.parse_args(argv)
+
+    if args.capture_baseline is not None:
+        return _capture_baseline(args.capture_baseline)
+
     result = asyncio.run(measure_recall_p99())
     print(json.dumps(result))
 
+    baseline = load_baseline()
+    if baseline is None:
+        print(
+            "perf gate: informational only — no baseline at "
+            f"{_BASELINE_PATH.relative_to(_REPO_ROOT)} yet (captured "
+            "post-Phase-1-merge by the perf-baseline-capture workflow)",
+            file=sys.stderr,
+        )
+        return 0
+
+    verdict = evaluate_gate(result, baseline)
+    if verdict.passed:
+        print("perf gate: PASS", file=sys.stderr)
+        return 0
+    pct = round(verdict.tolerance * 100)
+    for reg in verdict.regressions:
+        print(
+            f"perf gate: FAIL — {reg.metric} {reg.measured_ms} ms exceeds "
+            f"baseline {reg.baseline_ms} ms +{pct}% limit {reg.limit_ms} ms",
+            file=sys.stderr,
+        )
+    return 1
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

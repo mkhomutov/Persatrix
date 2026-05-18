@@ -23,6 +23,7 @@ and is not an importable package) — same pattern as the PR 3 pin in
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -37,6 +38,11 @@ def _load_perf_harness() -> ModuleType:
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Register before exec_module: dataclass (and other class-creation)
+    # machinery resolves ``cls.__module__`` through ``sys.modules`` while
+    # the class body runs, so a by-path load that skips this step crashes
+    # on the harness's ``@dataclass`` gate-verdict types (PR 5).
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

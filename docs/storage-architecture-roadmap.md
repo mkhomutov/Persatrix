@@ -209,7 +209,7 @@ SA = Storage Architecture.
 
 | # | Item | Vehicle | Target | Status |
 |---|------|---------|--------|--------|
-| SA-1 | Personal/society storage split (Postgres for society state) | new RFC; cross-cuts RFC 0008 §H, RFC 0009, RFC 0011, RFC 0028 | v0.4.0 | 📋 Pending RFC |
+| SA-1 | Personal/society storage split (Postgres for society state) | [RFC 0029](rfcs/0029-personal-society-storage-split.md); cross-cuts RFC 0008 §H, RFC 0009, RFC 0011, RFC 0028 | v0.3.2 (Phase 1) + v0.4.0 (Phases 2–6) | ⚠️ RFC 0029 — Phase 1 (`MemoryStore` facade) ✅ v0.3.2; Phases 2–6 v0.4.0 |
 | SA-2 | Tier rename (scratchpad / bonds / identity / procedural) | docs PR (vocabulary only) | v0.3.x | ⬜ |
 | SA-3 | "Vectors-as-accelerator-only" policy line | addendum to [memory-quality-roadmap.md](memory-quality-roadmap.md) + OQ on RFC 0024 when it un-defers | v0.3.x | ⬜ |
 | SA-4 | Forgetting floor/ceiling (salience clamps) | addendum to [RFC 0008 calibration review](rfcs/0008-calibration-review.md) | v0.3.x | ⬜ |

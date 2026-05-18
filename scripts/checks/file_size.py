@@ -193,6 +193,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # topic is a separate maintenance refactor; grandfather here until
     # that lands.
     "docs/ai-glossary.md",
+    # docs/storage-architecture-roadmap.md is the long-form planning doc the
+    # SA-1..SA-10 storage items live in. It sat right at the 3000-word prose
+    # cap and crossed it when RFC 0029 Phase 1 PR 5 (the Phase 1 closeout)
+    # flipped the SA-1 row — vehicle "new RFC" → RFC 0029, target + status
+    # updated to record the v0.3.2 `MemoryStore` facade landing. Same
+    # status-flip-tips-a-tracking-doc pattern as docs/v0.3.1-plan.md above;
+    # trimming the SA-1..SA-10 narrative would erase planning context and a
+    # topic split is a separate docs refactor. Remove this entry once that
+    # split lands.
+    "docs/storage-architecture-roadmap.md",
     # agents/memory/facade.py, agents/memory/episodic.py, and
     # agents/persona_runtime/memory_context.py were grandfathered above
     # the 500-line cap; their splits landed in this PR.  facade.py was
