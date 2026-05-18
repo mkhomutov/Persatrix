@@ -315,7 +315,7 @@ class SubAgentSpawner:
 
 
 class FacadeBoundSpawner(SubAgentSpawner):
-    """Spawner that persists admitted entries through a bound MemoryFacade."""
+    """Spawner that persists admitted entries through a bound MemoryStore."""
 
     def __init__(
         self,
