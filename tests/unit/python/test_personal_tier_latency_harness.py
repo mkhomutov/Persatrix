@@ -8,7 +8,9 @@ PR 4 addresses the two perf-harness findings from the PR 3 review of
   allocator warm-up — on the first few recalls.  The harness now runs a
   configurable number of *un-timed* ``warmup`` recalls before the timed
   window so the reported p99/p50 reflect steady-state recall, not
-  process start-up.  These tests pin the warm-up contract.
+  process start-up.  These tests pin the warm-up contract — including
+  that the result dict's ``sample_count`` field counts the timed sample
+  set alone, so a regression that timed the warm-up recalls is caught.
 - **Gate call-path.** PR 4 pins (in the harness docstring) that the PR 5
   gate protects the ``MemoryStore.retrieve_relevant`` facade method — not
   asserted here; it is a docstring-only decision.
@@ -43,16 +45,20 @@ def _load_perf_harness() -> ModuleType:
 
 
 async def test_measure_recall_p99_reports_warmup_count() -> None:
-    """The result dict carries the warm-up count so PR 5's baseline JSON
-    records how the captured number was measured, not just the number.
+    """The result dict carries the warm-up count *and* the timed-sample
+    count, so PR 5's baseline JSON records how the captured number was
+    measured — warm-up applied, over how many samples — not just the number.
     """
     harness = _load_perf_harness()
     result = await harness.measure_recall_p99(
         corpus_size=16, iterations=5, warmup=3,
     )
     assert result["warmup"] == 3
-    # The timed window — and therefore the gated p99 — is the iterations
-    # count, unaffected by how many warm-up recalls preceded it.
+    # ``sample_count`` is the actual size of the timed sample set the
+    # percentiles were computed over; ``iterations`` is the requested
+    # count.  They coincide in correct operation — the gated p99 is
+    # unaffected by how many warm-up recalls preceded the timed window.
+    assert result["sample_count"] == 5
     assert result["iterations"] == 5
 
 
@@ -82,7 +88,12 @@ async def test_warmup_recalls_run_but_are_not_timed(monkeypatch) -> None:
 
     # 3 warm-up + 5 timed recalls all execute against the store ...
     assert recall_calls == 8
-    # ... but only the 5 timed recalls are reported as the sample set.
+    # ... but only the 5 timed recalls land in the percentile sample set.
+    # ``sample_count`` is ``len(latencies_ms)`` — derived from the timed
+    # loop alone — so it pins exclusion even though 8 recalls ran.  The
+    # weaker ``iterations`` field merely echoes the kwarg and would not
+    # catch a regression that timed the warm-up recalls too.
+    assert result["sample_count"] == 5
     assert result["iterations"] == 5
     assert result["warmup"] == 3
 
@@ -109,6 +120,9 @@ async def test_zero_warmup_times_every_recall(monkeypatch) -> None:
     )
 
     assert recall_calls == 6
+    # With no warm-up the timed sample set is every recall: the executed-
+    # recall count, ``sample_count`` and ``iterations`` all coincide.
+    assert result["sample_count"] == 6
     assert result["warmup"] == 0
     assert result["iterations"] == 6
 

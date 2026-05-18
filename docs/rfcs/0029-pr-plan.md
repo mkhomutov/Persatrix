@@ -236,7 +236,10 @@ PR 3:
   drops ~4.9 ms → ~2.7 ms once warm-up is applied. p50 is already emitted
   (`recall_episodes_p50_ms`); the docstring pins that the PR 5 gate should
   co-gate p50 alongside p99. New TDD pins land in
-  `tests/unit/python/test_personal_tier_latency_harness.py`.
+  `tests/unit/python/test_personal_tier_latency_harness.py`; the result
+  dict also reports `sample_count` (the size of the timed sample set) so
+  those pins verify warm-up recalls are *excluded from timing*, not merely
+  that the `warmup` parameter is accepted and echoed.
 - **`tests/` tree outside the CI lint/type gate** ⏭ downgraded to
   [ISSUE-0056](../issues/ISSUE-0056-tests-tree-outside-ci-lint-type-gate.md).
   Pre-existing repo-wide CI-config gap, not an RFC 0029 artifact — extending

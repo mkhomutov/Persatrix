@@ -116,7 +116,10 @@ async def measure_recall_p99(
     to absorb cold-start cost, then times *iterations* recalls of
     :data:`RECALL_QUERY`.  Returns a JSON-serialisable result dict shaped
     for the PR 5 baseline file: ``recall_episodes_p99_ms`` is the gated
-    metric, and ``warmup`` records how the number was measured.
+    metric; ``warmup`` and ``sample_count`` record how the number was
+    measured — warm-up applied, and the size of the timed sample set the
+    percentiles were computed over (``len`` of the timed latencies, with
+    the warm-up recalls excluded).
     """
     store = MemoryStore(agent_id="perf-harness", db_path=":memory:")
     await store.initialize()
@@ -147,6 +150,11 @@ async def measure_recall_p99(
         "corpus_size": corpus_size,
         "iterations": iterations,
         "warmup": warmup,
+        # Size of the timed sample set the percentiles were computed over.
+        # Derived from the timed loop alone, so it equals ``iterations``
+        # and *excludes* the ``warmup`` recalls — the pin that warm-up
+        # latencies never enter the p99/p50.
+        "sample_count": len(latencies_ms),
         "query": RECALL_QUERY,
         "captured_at": datetime.now(UTC).isoformat(),
     }
