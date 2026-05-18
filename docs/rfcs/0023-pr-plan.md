@@ -123,6 +123,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - The reaper interval default is 5 s; the TTL default follows the [OQ #2](0023-llm-call-leasing.md#open-questions) recommendation (`2 × max per-call timeout`, capped at 120 s). Both are config-tunable, not constants.
 - `Release` is `Settle` with `actual_*_tokens = 0` — it reverses the provisional. The late-settle-after-reap case is monotone-safe per [RFC §F](0023-llm-call-leasing.md#f-failure-modes): the reaper-applied charge stands; `Settle` returns `success: true` with a `noop` indicator.
 - Lock granularity is a single coarse mutex — acceptable for v0.3.x per [RFC §D](0023-llm-call-leasing.md#d-go-wallet-service); a `Reserve`-style `TokenCounter` API is the documented refactor if profiling later shows contention.
+- The reaper goroutine `reapLoop` must carry its own `defer`/`recover` panic guard — a gRPC server interceptor only wraps RPC-handler goroutines, not background goroutines, so an unrecovered reaper panic would crash the orchestrator. See [ISSUE-0059](../issues/ISSUE-0059-grpc-server-no-panic-recovery-interceptor.md), which also tracks the broader pre-existing gap surfaced by the PR 1 review: the agent-facing gRPC server (now hosting `WalletService`) registers no panic-recovery interceptor, unlike the HTTP server's `recoveryMiddleware`. Adding that interceptor can ride along here or land standalone — reviewer's call.
 
 #### Tests
 
@@ -136,6 +137,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - [ ] `go test ./internal/wallet/... ./internal/cost/...` passes; `golangci-lint` clean.
 - [ ] `RecordProvisional` / `Reconcile` on `TokenCounter`; `CheckBudget` composed by the wallet.
 - [ ] Reaper settles crashed leases at the granted amount; idempotent.
+- [ ] `reapLoop` carries a `defer`/`recover` panic guard ([ISSUE-0059](../issues/ISSUE-0059-grpc-server-no-panic-recovery-interceptor.md)).
 - [ ] `make validate` passes against the new `wallet:` config block.
 - [ ] No agent-side wiring — `agents/` untouched (PR 3).
 
