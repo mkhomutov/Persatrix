@@ -333,6 +333,18 @@
             }
           }
         },
+        "society": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "RFC 0029 Phase 1: optional society-tier (cross-agent) storage backend for the MemoryStore facade. v0.3.2 ships single-agent mode only — a configured `dsn` is accepted by the schema but ignored by the facade; every society-tier method raises SocietyBackendUnavailable until the Postgres society backend lands in RFC 0029 Phase 3 (v0.4.0). An absent block or `dsn: null` selects single-agent mode.",
+          "properties": {
+            "dsn": {
+              "type": ["string", "null"],
+              "default": null,
+              "description": "PostgreSQL DSN for the shared society store (e.g. `postgres://host/db`). `null` (the default) selects single-agent mode: every society-tier MemoryStore call raises SocietyDisabled. Consumed from RFC 0029 Phase 3 onward; accepted-but-ignored in Phase 1."
+            }
+          }
+        },
         "db_path": {
           "type": "string",
           "minLength": 1,
