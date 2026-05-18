@@ -25,12 +25,12 @@ The RFC ships in full under v0.3.2 — all six phases of the [RFC §Phased Imple
 
 ## Phase 0 Hard Gate
 
-[RFC 0023 §Decision/Next Steps](0023-llm-call-leasing.md#decision--next-steps) promotes two open questions to **Phase 0 blockers** — both change the proto contract and the Python client surface, so they are non-additive once PR 1 ships:
+[RFC 0023 §Decision/Next Steps](0023-llm-call-leasing.md#decision--next-steps) promoted two open questions to **Phase 0 blockers** — both change the proto contract and the Python client surface, so they are non-additive once PR 1 ships. **Both resolved 2026-05-18** in [RFC 0023 §Open Questions](0023-llm-call-leasing.md#open-questions) §1 and §5; the gate is cleared and PR 1 may open.
 
-- **[OQ #1](0023-llm-call-leasing.md#open-questions) — transport.** Outbound dial from the agent, or reverse-direction reuse of the existing orchestrator→agent gRPC connection. *Provisional answer in the RFC*: new outbound dial. The choice determines whether PR 1's proto registration and PR 3's `agents/server.py` startup path add a wallet dial.
-- **[OQ #5](0023-llm-call-leasing.md#open-questions) — tokeniser parity.** Whether `tiktoken` is promoted to a hard runtime dependency (reuse the existing `cl100k_base` helper for the input estimate) or kept optional (explicit `chars/4` fallback for the lease path). *Provisional answer in the RFC*: a calibration choice, not a redesign — either is acceptable. The choice determines the `LeaseRequest` estimate semantics and `agents/pyproject.toml`.
+- **[OQ #1](0023-llm-call-leasing.md#open-questions) — transport.** **Resolved: outbound dial, reusing the existing `LogService` channel.** `WalletService` registers on the orchestrator-side gRPC listener that already hosts `LogService`; the agent's wallet client reuses the channel it already opens for log streaming (`--orchestrator-grpc`), so no new connection is added. PR 1 registers `WalletService` on that listener; PR 3's `agents/server.py` startup path retains the shared channel and adds the wallet stub.
+- **[OQ #5](0023-llm-call-leasing.md#open-questions) — tokeniser parity.** **Resolved: promote `tiktoken` to a hard runtime dependency.** It moves into the runtime `dependencies` list in `agents/pyproject.toml`; the now-empty `accurate-tokens` extra and the duplicate `tiktoken` entry in the `dev` extra are removed in the same change. `LLMClient` reuses the existing `cl100k_base` `_count_tokens` helper for `estimated_input_tokens`, and `LeaseRequest.estimated_input_tokens` carries that tiktoken count.
 
-Both are calibration choices with provisional answers recorded in the RFC; resolving them is a review-thread decision, not a respec. Per the [v0.3.2 master plan Phase 1 acceptance](../v0.3.2-plan.md#phase-1--author-the-two-rfc-pr-plans), driving them to resolution can start in parallel with this PR plan and must complete before PR 1 opens. **PR 1's [Progress Overview](#progress-overview) row links the two resolution comments once recorded**; until then PR 1 stays `⬜ Not started (blocked — Phase 0 hard gate)`.
+Both were calibration choices with provisional answers in the RFC; the resolutions are recorded in [RFC 0023 §Open Questions](0023-llm-call-leasing.md#open-questions) §1 and §5, which PR 1's [Progress Overview](#progress-overview) row references.
 
 ---
 
@@ -64,7 +64,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 
 ### PR 1: `feature/v032-rfc0023-proto-skeleton` — Proto Surface + Wallet Skeleton
 
-**Depends on**: [Phase 0 hard gate](#phase-0-hard-gate) — [OQ #1](0023-llm-call-leasing.md#open-questions) and [OQ #5](0023-llm-call-leasing.md#open-questions) resolved in the RFC review thread. No code dependency on prior PRs (builds on the v0.3.1 baseline).
+**Depends on**: [Phase 0 hard gate](#phase-0-hard-gate) — [OQ #1](0023-llm-call-leasing.md#open-questions) and [OQ #5](0023-llm-call-leasing.md#open-questions) **resolved 2026-05-18** (gate cleared). No code dependency on prior PRs (builds on the v0.3.1 baseline).
 **Purpose**: Land the `WalletService` proto contract and a no-op servicer skeleton. No call-site wiring — establishes the cross-language contract so it is reviewable in isolation. Implements [RFC §Phased Implementation Plan Phase 1](0023-llm-call-leasing.md#phased-implementation-plan).
 
 #### Scope
@@ -75,7 +75,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 | *(generated)* Go + Python wallet stubs | Regenerated via `make proto`; the new `walletpb` Go package lands under `internal/generated/`, Python stubs alongside the existing generated modules. The proto source-of-truth gate (Python freshness + orphan detection) must pass. |
 | `internal/wallet/wallet.go` | **New** — `WalletService` gRPC servicer skeleton. `AcquireLease` always returns a `LeaseGrant` with a server-issued ULID `lease_id`; `SettleLease` / `ReleaseLease` always return `SettlementAck{success: true}`. No `BudgetEnforcer` wiring, no provisional charge, no reaper — those are PR 2. |
 | `internal/wallet/wallet_test.go` | **New** — skeleton tests pinning the always-grant contract and ULID `lease_id` issuance (Go: failing `_test.go` before `wallet.go`, per the [TDD rule](../../.github/copilot-instructions.md)). |
-| `cmd/orchestrator/main.go` | Register `WalletService` on the gRPC server the orchestrator already exposes. **Conditional on [OQ #1](0023-llm-call-leasing.md#open-questions)**: if the resolution is outbound-dial, no orchestrator-side listener change beyond registration; if reverse-direction, the bidirectional-stream plumbing lands here. |
+| `cmd/orchestrator/main.go` | Register `WalletService` on the orchestrator-side gRPC listener that already hosts `LogService` ([OQ #1](0023-llm-call-leasing.md#open-questions) resolved — outbound dial). No listener change beyond registration. |
 | `docs/diagrams/component-architecture.md` | Add the `internal/wallet/` package box. |
 
 #### Key implementation details
@@ -97,7 +97,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - [ ] `proto/wallet.proto` matches [RFC §C](0023-llm-call-leasing.md#c-proto-surface) field-for-field.
 - [ ] `WalletService` registered in `cmd/orchestrator/main.go`.
 - [ ] No call-site wiring — `agents/` and `internal/scheduler/` untouched.
-- [ ] [Progress Overview](#progress-overview) row 1 links the [OQ #1](0023-llm-call-leasing.md#open-questions) + [OQ #5](0023-llm-call-leasing.md#open-questions) review-thread resolution comments (Phase 0 hard gate).
+- [ ] Phase 0 hard gate confirmed cleared — [OQ #1](0023-llm-call-leasing.md#open-questions) + [OQ #5](0023-llm-call-leasing.md#open-questions) resolved in [RFC 0023 §Open Questions](0023-llm-call-leasing.md#open-questions).
 - [ ] [RFC 0023 row in ROADMAP](../../ROADMAP.md#rfc-master-index) → `🚧 Implementing` on this PR opening (first implementation PR); [v0.3.2-plan Master Progress Overview](../v0.3.2-plan.md#master-progress-overview) row 2 → 🔄 In progress.
 
 ---
@@ -152,7 +152,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 |------|--------|
 | `agents/wallet_client.py` | **New** — gRPC client wrapping the generated stub; exposes the single `lease(...)` async context manager per [RFC §E](0023-llm-call-leasing.md#e-python-client-integration): acquire on enter, settle with actual usage on normal exit, release on exception before the LLM call, settle-at-granted on exception after it. |
 | `agents/llm_client.py` | Wrap the existing `create_message` body in `async with wallet.lease(...) as lease:`; on success call `lease.settle(input_tokens=..., output_tokens=...)`. Propagate `persatrix.lease_id` as a span attribute. New typed `BudgetExceededError` raised on `LeaseDenied`. Input-token estimate uses the tokeniser path fixed by [OQ #5](0023-llm-call-leasing.md#open-questions). |
-| `agents/server.py` *(or agent entry point)* | **Conditional on [OQ #1](0023-llm-call-leasing.md#open-questions)** — if outbound dial: add wallet dial-and-retain on startup, a new `orchestrator_endpoint` config field, and a fail-closed boot condition (the LLM-call path does not start without an established wallet connection). |
+| `agents/server.py` *(or agent entry point)* | [OQ #1](0023-llm-call-leasing.md#open-questions) resolved (outbound dial) — reuse the gRPC channel the agent already opens for `LogService` (`--orchestrator-grpc` target), add the wallet stub on it, and a fail-closed boot condition (the LLM-call path does not start without an established wallet connection). No new `orchestrator_endpoint` config field — `--orchestrator-grpc` is reused. |
 | `internal/scheduler/stage_runner.go` | Comment only — `CheckBudget` is now an early-fail optimisation, not the enforcement point ([RFC §G](0023-llm-call-leasing.md#g-migration-of-existing-checkbudget)). |
 | Executor surface (`internal/executor/` / agent task path) | Surface `BudgetExceededError` from a workflow task as `TaskStatus.FAILED` with a structured `error_message`. |
 | `agents/tests/test_wallet_client.py` | **New** — `lease()` happy path, exception-before-call → release, exception-after-call → settle-at-granted, retry on transient settle failure (Python: failing pytest first, `LLMClient` mocked at the boundary, no real network). |
@@ -354,7 +354,7 @@ No code changes; doc-only. `CHANGELOG.md` is **deferred to the v0.3.2 release pr
 
 | Risk | Mitigation |
 |------|------------|
-| [OQ #1](0023-llm-call-leasing.md#open-questions) (transport) and [OQ #5](0023-llm-call-leasing.md#open-questions) (tokeniser parity) are still open; both are non-additive once the proto contract ships in PR 1. | [§Phase 0 Hard Gate](#phase-0-hard-gate): PR 1 does not open until both resolve in the RFC review thread; PR 1's [Progress Overview](#progress-overview) row links the resolution comments. Both have provisional answers in the RFC — a review-thread decision, not a redesign. |
+| [OQ #1](0023-llm-call-leasing.md#open-questions) (transport) and [OQ #5](0023-llm-call-leasing.md#open-questions) (tokeniser parity) were non-additive once the proto contract ships in PR 1. | **Resolved 2026-05-18** — see [§Phase 0 Hard Gate](#phase-0-hard-gate) and [RFC 0023 §Open Questions](0023-llm-call-leasing.md#open-questions): outbound dial reusing the `LogService` channel, and `tiktoken` promoted to a hard runtime dependency. The hard gate is cleared; PR 1 may open. |
 | The wallet fails closed by design ([RFC §F](0023-llm-call-leasing.md#f-failure-modes)) — a wallet outage now breaks live chat that previously bypassed enforcement. | The chat UX regression is explicitly accepted in [RFC §F](0023-llm-call-leasing.md#f-failure-modes). `MT-COST-003` (PR 4) exercises the denied-lease path and verifies it surfaces as a structured `reply_status="error"`, not a crash. |
 | The per-LLM-call gRPC round-trip adds latency; exceeding the ≤ 5 ms p99 budget ([RFC §Goal #6](0023-llm-call-leasing.md#goals)) makes the cost gate a latency regression. | The [RFC §Test Strategy](0023-llm-call-leasing.md#test-strategy) loopback load test measures p99 acquire+settle. Informational, not a build gate; recorded in the [v0.3.2 Phase 4 MT report](../v0.3.2-plan.md#phase-4--v032-release-prep-execution) so a regression is visible at release review. |
 | Six call-site PRs (3–6, plus 1–2) risk drifting the proto contract if a later PR needs a field the skeleton did not reserve. | PR 1 ships the full `Cause` enum and the complete message set from [RFC §C](0023-llm-call-leasing.md#c-proto-surface); PRs 2–6 build against the frozen contract. Any contract change after PR 1 is a flagged review event, not a silent edit. |
@@ -378,7 +378,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | ⬜ Not started (blocked — Phase 0 hard gate) | — | — |
+| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | ⬜ Not started (Phase 0 hard gate cleared 2026-05-18) | — | — |
 | 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | ⬜ Not started | — | — |
 | 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | ⬜ Not started | — | — |
 | 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | ⬜ Not started | — | — |
