@@ -3,7 +3,7 @@
 PR 5 flips ``tests/perf/personal_tier_latency.py`` from an informational
 harness into an enforcing regression gate (RFC 0029 §Test Strategy — fail
 the build on a >20% regression off the Phase 1 post-merge baseline). These
-tests pin the two pure pieces of that gate:
+tests pin the gate's behaviour:
 
 - :func:`evaluate_gate` — compares a measured result against a baseline and
   reports every regressed metric. p99 *and* p50 are co-checked (RFC 0029
@@ -12,6 +12,10 @@ tests pin the two pure pieces of that gate:
 - :func:`load_baseline` — reads the checked-in baseline JSON, returning
   ``None`` when no baseline has been committed yet (the expected state
   until the maintainer-triggered capture workflow lands one).
+- :func:`main` — the CI gate entrypoint. Its exit code is the contract CI
+  depends on (0 informational / 0 pass / 1 regression); the
+  environment-dependent measurement is stubbed so only the verdict logic
+  is pinned, never a latency number.
 
 The harness is loaded by file path — it lives under ``tests/perf/`` and is
 not an importable package — mirroring the PR 4 pin in
@@ -25,6 +29,8 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 
 def _load_perf_harness() -> ModuleType:
@@ -193,3 +199,112 @@ def test_load_baseline_reads_committed_json(tmp_path: Path) -> None:
     baseline_path.write_text(json.dumps(_BASELINE), encoding="utf-8")
     loaded = harness.load_baseline(baseline_path)
     assert loaded == _BASELINE
+
+
+# ─── evaluate_gate: malformed baseline ────────────────────────
+
+
+def test_gate_raises_actionable_error_when_baseline_omits_a_metric() -> None:
+    """A baseline missing a gated metric fails with an error naming the
+    keys that *are* present — not a bare subscript ``KeyError`` that names
+    only the missing key. A committed baseline can drift from the harness
+    (a hand-edit, or a metric rename landing while an old baseline file
+    lingers), and the gate should report what it actually found.
+    """
+    harness = _load_perf_harness()
+    measured = {"recall_episodes_p99_ms": 3.0, "recall_episodes_p50_ms": 1.0}
+    incomplete = {"recall_episodes_p99_ms": 3.0}  # recall_episodes_p50_ms absent
+    with pytest.raises(KeyError, match="present keys"):
+        harness.evaluate_gate(measured, incomplete)
+
+
+# ─── main: exit-code contract ─────────────────────────────────
+
+
+def _stub_measurement(
+    harness: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, float],
+) -> None:
+    """Replace the live latency measurement with a fixed *result* dict.
+
+    ``main`` is the CI gate entrypoint; the environment-dependent
+    measurement is stubbed so the tests pin only the exit-code contract,
+    never a latency number.
+    """
+
+    async def _fake_measure(**_kwargs: object) -> dict[str, float]:
+        return dict(result)
+
+    monkeypatch.setattr(harness, "measure_recall_p99", _fake_measure)
+
+
+def test_main_runs_informational_when_no_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No committed baseline → the gate runs informational-only: ``main``
+    exits 0 even on a measurement that would regress, never failing CI.
+    """
+    harness = _load_perf_harness()
+    _stub_measurement(
+        harness,
+        monkeypatch,
+        {"recall_episodes_p99_ms": 99.0, "recall_episodes_p50_ms": 99.0},
+    )
+    monkeypatch.setattr(harness, "load_baseline", lambda: None)
+    assert harness.main([]) == 0
+
+
+def test_main_exits_zero_when_gate_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A measurement within tolerance of the committed baseline passes the
+    gate — ``main`` exits 0.
+    """
+    harness = _load_perf_harness()
+    _stub_measurement(
+        harness,
+        monkeypatch,
+        {"recall_episodes_p99_ms": 3.0, "recall_episodes_p50_ms": 1.0},
+    )
+    monkeypatch.setattr(harness, "load_baseline", lambda: dict(_BASELINE))
+    assert harness.main([]) == 0
+
+
+def test_main_exits_one_on_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A measurement past baseline + tolerance fails the gate — ``main``
+    exits 1 so the CI step fails the build. This non-zero exit is the
+    contract the whole gate exists to enforce.
+    """
+    harness = _load_perf_harness()
+    _stub_measurement(
+        harness,
+        monkeypatch,
+        {"recall_episodes_p99_ms": 99.0, "recall_episodes_p50_ms": 1.0},
+    )
+    monkeypatch.setattr(harness, "load_baseline", lambda: dict(_BASELINE))
+    assert harness.main([]) == 1
+
+
+def test_main_capture_baseline_writes_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """``--capture-baseline PATH`` measures, writes the baseline JSON
+    (creating parent directories), records a ``captured_commit`` provenance
+    field, and exits 0 without evaluating the gate — the entrypoint the
+    perf-baseline-capture workflow drives.
+    """
+    harness = _load_perf_harness()
+    _stub_measurement(
+        harness,
+        monkeypatch,
+        {"recall_episodes_p99_ms": 3.0, "recall_episodes_p50_ms": 1.0},
+    )
+    out_path = tmp_path / "baselines" / "personal_tier_latency.json"
+    assert harness.main(["--capture-baseline", str(out_path)]) == 0
+    written = json.loads(out_path.read_text(encoding="utf-8"))
+    assert written["recall_episodes_p99_ms"] == 3.0
+    assert written["recall_episodes_p50_ms"] == 1.0
+    assert "captured_commit" in written

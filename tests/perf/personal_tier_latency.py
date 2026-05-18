@@ -227,7 +227,20 @@ def load_baseline(path: Path = _BASELINE_PATH) -> dict[str, object] | None:
 
 
 def _metric_ms(result: dict[str, object], metric: str) -> float:
-    """Extract a numeric metric from a measured / baseline result dict."""
+    """Extract a numeric metric from a measured / baseline result dict.
+
+    Raises :class:`KeyError` naming the keys that *are* present when
+    *metric* is absent.  A committed baseline can drift from the harness
+    — a hand-edit, or a metric rename landing while an old baseline file
+    lingers — and a bare subscript ``KeyError`` would name only the
+    missing key; the explicit message tells an operator what the gate
+    actually found in the file.
+    """
+    if metric not in result:
+        raise KeyError(
+            f"required perf metric {metric!r} missing from result; "
+            f"present keys: {sorted(result)}"
+        )
     value = result[metric]
     if not isinstance(value, (int, float)):
         raise TypeError(f"{metric} is not numeric: {value!r}")

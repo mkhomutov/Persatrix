@@ -10,6 +10,10 @@
 #
 # workflow_dispatch only: GitHub restricts manual workflow runs to users with
 # write access, so this is maintainer-gated without extra configuration.
+#
+# Repo prerequisite: "Allow GitHub Actions to create and approve pull
+# requests" must be enabled (Settings → Actions → General → Workflow
+# permissions), or the create-pull-request step below fails with HTTP 403.
 
 name: Perf baseline capture
 
@@ -45,6 +49,9 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           branch: chore/perf-baseline-capture
+          # Scope the auto-commit to exactly the baseline file — no other
+          # path the capture job may touch can reach the baseline PR.
+          add-paths: tests/perf/baselines/personal_tier_latency.json
           commit-message: "chore(perf): capture personal-tier recall latency baseline"
           title: "chore(perf): capture personal-tier recall latency baseline"
           body: |
@@ -56,3 +63,9 @@ jobs:
             recall latency gate (`tests/perf/personal_tier_latency.py`) from
             informational to enforcing — a >20% p99/p50 regression then
             fails CI.
+
+            **Before merging, re-trigger CI.** This PR is opened with the
+            default `GITHUB_TOKEN`, so GitHub does not start the `CI`
+            workflow on it (the recursion guard on token-authored events).
+            Close then reopen the PR — or push an empty commit — so the
+            perf gate runs against the new baseline before it is merged.
