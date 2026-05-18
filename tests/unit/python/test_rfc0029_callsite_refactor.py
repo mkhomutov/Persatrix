@@ -24,7 +24,6 @@ import importlib.util
 import warnings
 from pathlib import Path
 
-
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.facts import FactStore
 from agents.memory.relationship import RelationshipMemory
@@ -98,6 +97,40 @@ async def test_personal_tiers_initialize_and_close_cleanly() -> None:
         await tiers.facts.close()
         await tiers.episodic.close()
         await tiers.relationship.close()
+
+
+# ─── boundary-warning scope — FactStore carries no guard ─────
+
+
+def test_factstore_direct_construction_emits_no_boundary_warning() -> None:
+    """The RFC 0029 PR 2 boundary guard is scoped to ``EpisodicMemory`` and
+    ``RelationshipMemory`` — only those two ``__init__`` methods call
+    ``warn_external_construction``. ``FactStore`` carries no such guard, so
+    direct construction never emitted the boundary ``DeprecationWarning``,
+    even from outside ``agents/memory/``.
+
+    Routing ``FactStore`` through ``build_personal_tiers`` is therefore a
+    *consistency* move — one construction seam for all three personal tiers —
+    not a deprecation-window close. This pins that asymmetry so the
+    ``agents.memory.personal_tiers`` docstring's tier-by-tier wording cannot
+    silently drift from the boundary's actual scope. (The positive case —
+    ``EpisodicMemory`` / ``RelationshipMemory`` *do* warn on external
+    construction — is pinned by the PR 2 ``test_memory_boundary.py`` suite.)
+    """
+    # This test module lives under tests/ — outside agents/memory/ — so this
+    # is a genuine external construction site: EpisodicMemory / Relationship-
+    # Memory built here would trip the boundary DeprecationWarning.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        FactStore(agent_id="alice", db_path=":memory:", shared_db=None)
+
+    offenders = [
+        str(w.message)
+        for w in caught
+        if issubclass(w.category, DeprecationWarning)
+        and _DIRECT_CONSTRUCTION_WARNING in str(w.message)
+    ]
+    assert offenders == [], f"unexpected boundary warning from FactStore: {offenders}"
 
 
 # ─── create_persona_agent — deprecation window closed ─────────

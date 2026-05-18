@@ -192,7 +192,26 @@ _None recorded at plan-authoring time._
 
 ##### From PR 3 review
 
-_None recorded at plan-authoring time._
+- **Perf harness — PR 5 gate call-path.** `tests/perf/personal_tier_latency.py`
+  times the `MemoryStore.retrieve_relevant` facade method, but the persona
+  runtime currently drives the raw `EpisodicMemory` tier directly rather than
+  holding a `MemoryStore`. Before PR 5 captures the baseline, confirm which call
+  path the gate should protect — the facade method or the raw-tier path the
+  runtime actually exercises — and pin the choice in the harness docstring.
+- **Perf harness — gate measurement noise.** p99 over an in-memory SQLite corpus
+  on shared CI runners is noisy; the PR 5 ">20% regression" gate risks flaking.
+  When capturing the baseline, consider warm-up iterations, a larger sample, or
+  gating on p50 alongside p99.
+- **`tests/` tree outside the CI lint/type gate.** New test code under the
+  repo-root `tests/` tree is not covered by CI's `cd agents && ruff check . &&
+  mypy .` — a pre-existing repo-wide gap, not introduced by PR 3 (its two new
+  `tests/` files were ruff-clean only via a manual run). Tracked in
+  [ISSUE-0056](../issues/ISSUE-0056-tests-tree-outside-ci-lint-type-gate.md).
+- **Flaky audit-redactor test.** `test_fact_store_audit.py`'s
+  `test_redactor_raises_then_warning_logged` passes in isolation and per-file but
+  fails under the full suite — a process-global redactor / contextvar
+  state-isolation flake, unrelated to the RFC 0029 rename. Tracked in
+  [ISSUE-0057](../issues/ISSUE-0057-fact-store-audit-redactor-test-isolation-flake.md).
 
 #### PR checklist
 
@@ -276,8 +295,8 @@ The v0.4.0 PR plan for Phases 2–6 opens when the v0.4.0 plan opens; the [RFC 0
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 1 | `MemoryStore` facade promotion | `feature/v032-rfc0029p1-facade-promotion` | ✅ Merged | [#370](https://github.com/mkhomutov/Persatrix/pull/370) | 2026-05-18 |
-| 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ⬜ Not started | — | — |
-| 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | 🔀 PR open | — | — |
+| 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ✅ Merged | [#372](https://github.com/mkhomutov/Persatrix/pull/372) | 2026-05-18 |
+| 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | 🔀 PR open | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | — |
 | 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | ⬜ Not started | — | — |
 | 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | ⬜ Not started | — | — |
 

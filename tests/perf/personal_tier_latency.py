@@ -1,17 +1,24 @@
 """Personal-tier recall latency harness (RFC 0029 Phase 1 — §Test Strategy).
 
-Measures the p99 latency of the persona hot path —
+Measures the p99 latency of the personal-tier recall path —
 :meth:`agents.memory.store.MemoryStore.retrieve_relevant` (the
 RFC 0029 §C ``recall_episodes`` personal-tier read) — against a fixed
 synthetic corpus on an in-memory database.
+
+The harness times the ``MemoryStore`` facade recall method.  The persona
+runtime currently drives the raw ``EpisodicMemory`` tier directly rather
+than holding a ``MemoryStore``; the facade method is the metric here
+because RFC 0029 is converging callers onto it.  Whether the PR 5 gate
+should track the facade method or the raw-tier call path the runtime
+exercises is a PR 4/5 follow-up (see the RFC 0029 PR plan).
 
 Phase-1 status — **informational only**.  RFC 0029 Phase 1 is a pure
 refactor, so this harness ships and *runs* in PR 3 but does not gate:
 there is no baseline to compare against until Phase 1 has merged.
 RFC 0029 Phase 1 PR 5 captures ``tests/perf/baselines/personal_tier_latency.json``
 from the post-merge number and flips this harness into an enforcing CI
-gate (fail on >20% regression) — the legitimate "cost of the persona
-hot path after the facade rename" reference point.
+gate (fail on >20% regression) — the legitimate post-rename
+personal-tier recall cost reference point.
 
 Run standalone::
 
@@ -24,6 +31,7 @@ import asyncio
 import json
 import math
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -86,12 +94,11 @@ async def measure_recall_p99(
                 importance=0.5,
                 tags=("perf-harness",),
             )
-        loop = asyncio.get_event_loop()
         latencies_ms: list[float] = []
         for _ in range(iterations):
-            start = loop.time()
+            start = time.perf_counter()
             await store.retrieve_relevant(RECALL_QUERY, limit=10)
-            latencies_ms.append((loop.time() - start) * 1000.0)
+            latencies_ms.append((time.perf_counter() - start) * 1000.0)
     finally:
         await store.close()
 
