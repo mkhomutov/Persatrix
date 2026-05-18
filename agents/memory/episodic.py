@@ -11,12 +11,11 @@ structured knowledge the agent chooses to persist, delegated to
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
-import json
 import logging
 import sqlite3
 import time
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
@@ -36,6 +35,7 @@ from .episodic_queries import (
     Episode,
     get_interaction_count,
     increment_interaction_count,
+    insert_episode,
     load_agent_state,
     persist_agent_state,
     recall_fts5,
@@ -105,6 +105,12 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         self._db: aiosqlite.Connection | None = None
         self._fts5: bool = False
         self._note_store: NoteStore | None = None
+        # ISSUE-0055 — serialises the INSERT/UPDATE + COMMIT critical
+        # section of the episode write paths.  The connection is shared
+        # across the agent's async tasks; without this lock a startup
+        # catch-up storm's concurrent close-path writes interleave one
+        # close's COMMIT with another's in-flight statement.
+        self._write_lock = asyncio.Lock()
 
     @property
     def agent_id(self) -> str:
@@ -232,38 +238,21 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
                     )
                     importance = max(0.0, min(1.0, importance))
-                episode_id = str(uuid.uuid4())
-                now = time.time()
-                await db.execute(
-                    """
-                    INSERT INTO episodes
-                        (id, agent_id, summary, context_json, outcome,
-                         importance, access_count, last_accessed_at,
-                         tags_json, created_at, compressed_at, compression_level,
-                         interaction_id, started_at, closed_at, turn_count, scope,
-                         session_id)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
-                            ?, ?, ?, ?, ?,
-                            ?)
-                    """,
-                    (
-                        episode_id,
-                        self._agent_id,
-                        summary,
-                        json.dumps(context),
-                        outcome,
-                        importance,
-                        json.dumps(tags or []),
-                        now,
-                        interaction_id,
-                        started_at,
-                        closed_at,
-                        turn_count,
-                        scope,
-                        session_id,
-                    ),
-                )
-                await db.commit()
+                # ISSUE-0055 — hold the write lock across the INSERT +
+                # COMMIT so a catch-up storm's concurrent close-path
+                # writes cannot interleave one close's COMMIT with
+                # another's in-flight INSERT statement on the shared
+                # connection (SQLite rejects that with "cannot commit
+                # transaction - SQL statements in progress").
+                async with self._write_lock:
+                    episode_id = await insert_episode(
+                        db, self._agent_id,
+                        summary=summary, context=context, outcome=outcome,
+                        importance=importance, tags=tags,
+                        interaction_id=interaction_id, started_at=started_at,
+                        closed_at=closed_at, turn_count=turn_count,
+                        session_id=session_id, scope=scope,
+                    )
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
@@ -286,8 +275,13 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
             return episode_id
 
     async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
-        return await _update_episode_summary(
-            self._ensure_db(), self._agent_id, interaction_id, summary)
+        # ISSUE-0055 — the Phase-2 close-path UPDATE shares the write
+        # lock with store_episode so a background summary COMMIT cannot
+        # race a concurrent Phase-1 INSERT statement on the shared
+        # connection.
+        async with self._write_lock:
+            return await _update_episode_summary(
+                self._ensure_db(), self._agent_id, interaction_id, summary)
 
     async def recall(
         self,

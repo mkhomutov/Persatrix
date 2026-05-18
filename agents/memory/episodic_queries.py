@@ -16,6 +16,7 @@ import logging
 import re
 import sqlite3
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +32,7 @@ __all__ = [
     "EPISODE_SELECT",
     "MAX_RECALL_LIMIT",
     "row_to_episode",
+    "insert_episode",
     "recall_fts5",
     "recall_like",
     "recall_recency",
@@ -392,6 +394,78 @@ async def load_agent_state(
         result: str = row[0]
         return result
     return None
+
+
+# ─── Episode write helpers ──────────────────────────────────
+
+
+async def insert_episode(
+    db: aiosqlite.Connection,
+    agent_id: str,
+    *,
+    summary: str,
+    context: dict[str, Any],
+    outcome: str | None,
+    importance: float,
+    tags: list[str] | None,
+    interaction_id: str | None,
+    started_at: float | None,
+    closed_at: float | None,
+    turn_count: int | None,
+    session_id: str,
+    scope: str | None,
+) -> str:
+    """INSERT one episode row and COMMIT; return the generated episode id.
+
+    Extracted from :meth:`EpisodicMemory.store_episode` so the
+    INSERT + COMMIT critical section sits beside the sibling episode
+    write helper :func:`update_episode_summary` — and so ``episodic.py``
+    stays under the 500-line file-size cap once the ISSUE-0055 write
+    lock is added.
+
+    ISSUE-0055: ``db`` is shared across the agent's async tasks and the
+    INSERT and COMMIT are two separate ``await``s.  A startup channel
+    catch-up storm fans out many concurrent close-path writes; without
+    serialisation one close's COMMIT can land while another close's
+    INSERT statement is still in flight, and SQLite raises
+    ``OperationalError: cannot commit transaction - SQL statements in
+    progress``.  Callers MUST therefore hold ``EpisodicMemory._write_lock``
+    across this call; :meth:`EpisodicMemory.store_episode` is the only
+    production caller and does exactly that.
+    """
+    episode_id = str(uuid.uuid4())
+    now = time.time()
+    await db.execute(
+        """
+        INSERT INTO episodes
+            (id, agent_id, summary, context_json, outcome,
+             importance, access_count, last_accessed_at,
+             tags_json, created_at, compressed_at, compression_level,
+             interaction_id, started_at, closed_at, turn_count, scope,
+             session_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
+                ?, ?, ?, ?, ?,
+                ?)
+        """,
+        (
+            episode_id,
+            agent_id,
+            summary,
+            json.dumps(context),
+            outcome,
+            importance,
+            json.dumps(tags or []),
+            now,
+            interaction_id,
+            started_at,
+            closed_at,
+            turn_count,
+            scope,
+            session_id,
+        ),
+    )
+    await db.commit()
+    return episode_id
 
 
 async def update_episode_summary(
