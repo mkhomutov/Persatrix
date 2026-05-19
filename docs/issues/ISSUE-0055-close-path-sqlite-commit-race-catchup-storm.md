@@ -5,7 +5,7 @@ status: resolved
 severity: medium
 area: agents/persona_runtime
 created: 2026-05-17
-closed: 2026-05-18
+closed: 2026-05-19
 closed_pr: 380
 refs:
   - docs/issues/ISSUE-0054-rfc0026-facts-tier-extracts-no-facts.md
@@ -94,26 +94,33 @@ busy deployment rather than in steady state.
 > bug twice as "worth its own ticket". Untouched by the ISSUE-0054 fix
 > chain.
 
-> 2026-05-18 — resolved in #380. Confirmed the shared-connection
-> hypothesis (proposed-fix step 1) and took step 2: `EpisodicMemory`
-> now carries a `_write_lock` (`asyncio.Lock`) held across the
-> `INSERT`/`UPDATE` + `COMMIT` critical section of both episode write
-> paths — `store_episode` (close-path Phase 1) and
-> `update_episode_summary` (Phase 2). Concurrent close-path writes can
-> no longer interleave a `COMMIT` with another write's in-flight
-> statement. The `store_episode` `INSERT` was extracted to
-> `agents/memory/episodic_queries.py` (`insert_episode`) so `episodic.py`
-> stayed under the 500-line file-size cap. A regression test
-> (`tests/unit/python/test_episodic_memory_concurrent_writes.py`, step 4)
-> drives a concurrent close storm against one episodic store and asserts
-> every write commits. Scope is close-vs-close, matching the diagnosis:
-> `recall`'s access-count bump and the notes/counter write paths were
-> not implicated in the storm and are left untouched.
+> 2026-05-19 — resolved in #380. The first fix attempt added an
+> `asyncio.Lock` serialising the two episode write paths; a deep review
+> showed that did not address the bug and it was dropped. The actual
+> mechanism: SQLite raises `cannot commit transaction - SQL statements
+> in progress` only when a `COMMIT` runs while another *write* statement
+> is still an active VDBE (`db->nVdbeWrite > 0`). A plain `INSERT` /
+> `UPDATE` / `DELETE` is stepped to completion inside its own
+> `execute()` and leaves none — so concurrent close-path writes
+> (`store_episode`, `update_episode_summary`) never actually raced. The
+> one statement that leaves a *write* VDBE suspended is
+> `increment_interaction_count`'s `INSERT … RETURNING`:
+> `aiosqlite.Connection.execute()` steps it only to its first result
+> row, so the write VDBE stays active across the `await` gap before the
+> `fetchone()` that drains it. In the persona runtime that increment
+> runs in the Phase-2 background task (`_tick_auto_reflect_counter`,
+> outside the agent lock); during a catch-up storm its suspended
+> `RETURNING` VDBE overlapped a close-path `store_episode` `COMMIT`,
+> which then raised — the close-path write was the innocent victim.
+> Fix: `increment_interaction_count` drains the `RETURNING` cursor in a
+> single `execute_fetchall` round-trip so the write VDBE is never
+> suspended across an `await`. Reproduced 25/25 against a real
+> `EpisodicMemory` before the fix, 0/40 after; regression test in
+> `tests/unit/python/test_episodic_memory_concurrent_writes.py`.
 
-> 2026-05-19 — follow-up filed as
-> [ISSUE-0060](ISSUE-0060-shared-connection-commit-race-unguarded-writers.md):
-> the `_write_lock` serialises only the two episode write paths, so
-> `recall`'s access-count `UPDATE`, `delete_episode`, the counter /
-> agent-state helpers, and `NoteStore` writes can still race a
-> close-path write on the shared connection. The close-vs-close fix
-> here stands; ISSUE-0060 tracks the remaining unguarded writers.
+> 2026-05-19 —
+> [ISSUE-0060](ISSUE-0060-shared-connection-commit-race-unguarded-writers.md)
+> (filed earlier in #380 to track "remaining unguarded writers" on the
+> shared connection) is resolved by the same fix: plain writers were
+> never hazards, and the sole `RETURNING` culprit is now drained in one
+> round-trip.

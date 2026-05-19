@@ -1,237 +1,135 @@
-"""Regression test for ISSUE-0055 — close-path SQLite commit race.
+"""Regression test for ISSUE-0055 — the close-path SQLite commit race.
 
-When a persona agent restarts, the channel catch-up replays a backlog of
-stale events and the resulting burst of RFC 0020 idle-gap interaction
-closes fans out many concurrent ``EpisodicMemory.store_episode`` /
-``update_episode_summary`` calls onto one shared ``aiosqlite``
-connection.  Each write runs its INSERT/UPDATE and its COMMIT as two
-separate ``await``s; before the fix nothing serialised that pair, so one
-close's COMMIT could land while another close's statement was still in
-flight and SQLite raised::
+When a persona agent restarts, channel catch-up replays a backlog of
+stale events; the burst of RFC 0020 idle-gap interaction closes fans out
+many concurrent writes onto the one ``aiosqlite`` connection
+``EpisodicMemory`` shares across the agent's async tasks.  One of those
+writes then fails to ``COMMIT`` with::
 
     sqlite3.OperationalError: cannot commit transaction -
     SQL statements in progress
 
-The affected episode never persisted and the janitor backfilled it to a
-summary sentinel, degrading episodic recall for any interaction unlucky
-enough to close during a catch-up storm.
+the affected episode never persists, and the janitor backfills the row
+to a summary sentinel — degrading episodic recall.
 
-These tests reproduce the race deterministically with a connection
-wrapper that models exactly that SQLite failure mode — a ``commit()``
-that runs while another coroutine is between its own ``execute()`` and
-``commit()`` raises the real ``OperationalError``.  A writer that holds
-its INSERT+COMMIT as one atomic critical section never trips the
-wrapper; an interleaved one always does.  The fix is a per-store
-``asyncio`` write lock around that critical section.
+Mechanism
+---------
+SQLite raises that error when a ``COMMIT`` runs while another *write*
+statement is still an active VDBE (``db->nVdbeWrite > 0``).  A plain
+``INSERT`` / ``UPDATE`` / ``DELETE`` is stepped to completion inside its
+own ``execute()`` and leaves no active VDBE — so concurrent plain writes
+(``store_episode``, ``update_episode_summary``) never trip it, even
+though they share the connection.
+
+The one statement that *does* leave a write VDBE suspended is an
+``INSERT … RETURNING``: ``aiosqlite.Connection.execute()`` steps it only
+to its first result row, so the write VDBE stays active across the
+``await`` gap between ``execute()`` and the ``fetchone()`` that drains
+it.  ``increment_interaction_count`` is the sole ``RETURNING`` writer on
+the episodic connection.  In the persona runtime it runs from the
+Phase-2 background task (``_tick_auto_reflect_counter``, outside the
+agent lock); during a catch-up storm its suspended ``RETURNING`` VDBE
+overlaps a close-path ``store_episode`` ``COMMIT``, which then raises.
+
+This test reproduces the race against a real ``EpisodicMemory`` and a
+real ``aiosqlite`` connection — the SQLite library raises the real
+error, nothing is simulated.  The fix drains the ``RETURNING`` cursor in
+a single round-trip so the write VDBE is never suspended across an
+``await``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sqlite3
-from typing import Any
-
-import aiosqlite
 
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.interactions import SUMMARY_PENDING_TEXT
 
 # Catch-up storms replay dozens of stale events (the ISSUE-0055 capture
-# saw ~68); a handful of concurrent closes is already enough to expose
-# the interleaving.
+# saw ~68).  The race is deterministic far below that: a handful of
+# concurrent counter increments and close-path writes reproduces it on
+# every run.
 _CONCURRENT_CLOSES = 8
 
 
-class _CommitRaceConnection:
-    """``aiosqlite.Connection`` wrapper that reproduces the ISSUE-0055 race.
+class TestClosePathCommitRace:
+    """ISSUE-0055 — a Phase-2 counter increment must not break a
+    concurrent close-path ``COMMIT`` on the shared episodic connection."""
 
-    Models SQLite's "cannot commit transaction - SQL statements in
-    progress": a ``commit()`` raises when more than one coroutine is
-    currently inside an ``execute()`` → ``commit()`` span on the shared
-    connection.
-
-    ``_in_flight`` is incremented at the *start* of ``execute()`` —
-    before its first ``await`` — so every concurrently-scheduled writer
-    has registered before any of them reaches ``commit()``.  That makes
-    the interleaving deterministic: it does not depend on aiosqlite
-    worker-thread timing.  A correctly-serialised writer holds a lock
-    across the whole span, so only one writer is ever in flight and the
-    counter never exceeds 1.
-
-    Reads and writes that are not under test pass straight through via
-    ``__getattr__``; only ``execute`` / ``commit`` are instrumented.
-    """
-
-    def __init__(self, real: aiosqlite.Connection) -> None:
-        self._real = real
-        self._in_flight = 0
-
-    async def execute(self, *args: Any, **kwargs: Any) -> aiosqlite.Cursor:
-        self._in_flight += 1
-        return await self._real.execute(*args, **kwargs)
-
-    async def commit(self) -> None:
-        if self._in_flight > 1:
-            raise sqlite3.OperationalError(
-                "cannot commit transaction - SQL statements in progress",
-            )
-        await self._real.commit()
-        self._in_flight -= 1
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._real, name)
-
-
-class TestConcurrentClosePathWrites:
-    """ISSUE-0055 — concurrent close-path writes must not race the shared
-    SQLite connection's COMMIT."""
-
-    async def test_concurrent_store_episode_calls_all_persist(
+    async def test_catchup_storm_does_not_race_the_shared_commit(
         self, memory: EpisodicMemory,
     ) -> None:
-        """A catch-up storm of concurrent Phase-1 close-path INSERTs must
-        all commit — every episode persists, none is lost to the race."""
-        real_db = memory._ensure_db()
-        memory._db = _CommitRaceConnection(real_db)  # type: ignore[assignment]
-        try:
-            results = await asyncio.gather(
-                *(
-                    memory.store_episode(
-                        summary=SUMMARY_PENDING_TEXT,
-                        context={"scope": f"dm:ember-owl:user-{i}"},
-                        interaction_id=f"iid-{i}",
-                        started_at=100.0 + i,
-                        closed_at=110.0 + i,
-                        turn_count=2,
-                        scope=f"dm:ember-owl:user-{i}",
-                    )
-                    for i in range(_CONCURRENT_CLOSES)
-                ),
-                return_exceptions=True,
-            )
-        finally:
-            memory._db = real_db
+        """A catch-up storm interleaves the three close-path writers on
+        one connection — Phase-1 ``store_episode`` INSERTs, Phase-2
+        ``update_episode_summary`` UPDATEs, and the Phase-2
+        ``increment_interaction_count`` ``INSERT … RETURNING``.
 
-        raced = [r for r in results if isinstance(r, BaseException)]
-        assert not raced, (
-            f"concurrent close-path INSERTs raced the shared connection: {raced}"
-        )
-        # Every close persisted its own row — no episode lost to the race.
-        async with real_db.execute(
-            "SELECT interaction_id FROM episodes WHERE agent_id = ?",
-            (memory.agent_id,),
-        ) as cursor:
-            persisted = {row[0] for row in await cursor.fetchall()}
-        assert persisted == {f"iid-{i}" for i in range(_CONCURRENT_CLOSES)}
-
-    async def test_concurrent_update_episode_summary_calls_all_commit(
-        self, memory: EpisodicMemory,
-    ) -> None:
-        """The Phase-2 close-path UPDATE shares the same hazard: a burst of
-        background summary commits must not race each other's statements."""
-        # Phase-1 rows, written serially before the race wrapper is in
-        # place so the concurrency under test is purely the UPDATE path.
-        for i in range(_CONCURRENT_CLOSES):
-            await memory.store_episode(
-                summary=SUMMARY_PENDING_TEXT,
-                context={"scope": f"dm:ember-owl:user-{i}"},
-                interaction_id=f"iid-{i}",
-                started_at=100.0 + i,
-                closed_at=110.0 + i,
-                turn_count=2,
-                scope=f"dm:ember-owl:user-{i}",
-            )
-
-        real_db = memory._ensure_db()
-        memory._db = _CommitRaceConnection(real_db)  # type: ignore[assignment]
-        try:
-            results = await asyncio.gather(
-                *(
-                    memory.update_episode_summary(f"iid-{i}", f"real summary {i}")
-                    for i in range(_CONCURRENT_CLOSES)
-                ),
-                return_exceptions=True,
-            )
-        finally:
-            memory._db = real_db
-
-        raced = [r for r in results if isinstance(r, BaseException)]
-        assert not raced, (
-            f"concurrent Phase-2 UPDATEs raced the shared connection: {raced}"
-        )
-        # Every UPDATE replaced its pending sentinel — no summary lost.
-        assert all(updated is True for updated in results)
-
-    async def test_concurrent_phase1_inserts_and_phase2_updates_do_not_race(
-        self, memory: EpisodicMemory,
-    ) -> None:
-        """A catch-up storm is not single-phase.
-
-        While some interactions idle-close (Phase-1 ``store_episode``
-        INSERT), earlier closes' background summaries land (Phase-2
-        ``update_episode_summary`` UPDATE) at the same time.  Both paths
-        write the one shared connection, so the fix must serialise them
-        against *each other* — not only each against its own kind.  The
-        two tests above cover Phase-1-vs-Phase-1 and Phase-2-vs-Phase-2;
-        this one pins the mixed case, which is exactly why the
-        ``_write_lock`` is shared between ``store_episode`` and
-        ``update_episode_summary`` rather than being one lock per path.
+        Every write must commit: no episode lost to the ``RETURNING``
+        commit race, every pending summary replaced, and the counter
+        increments serialised cleanly with no lost update.
         """
-        # Phase-2's UPDATEs need existing pending rows.  Create them
-        # serially, before the race wrapper is installed, so the only
-        # concurrency under test is the mixed Phase-1/Phase-2 burst.
+        # Phase-2 ``update_episode_summary`` needs existing pending rows.
+        # Create them serially, before the storm, so the only concurrency
+        # under test is the storm itself.
         for i in range(_CONCURRENT_CLOSES):
             await memory.store_episode(
                 summary=SUMMARY_PENDING_TEXT,
-                context={"scope": f"dm:ember-owl:phase2-{i}"},
-                interaction_id=f"phase2-iid-{i}",
-                started_at=200.0 + i,
-                closed_at=210.0 + i,
-                turn_count=2,
-                scope=f"dm:ember-owl:phase2-{i}",
+                context={"scope": f"dm:ember-owl:seed-{i}"},
+                interaction_id=f"seed-iid-{i}",
+                started_at=100.0 + i, closed_at=110.0 + i,
+                turn_count=2, scope=f"dm:ember-owl:seed-{i}",
             )
 
-        real_db = memory._ensure_db()
-        memory._db = _CommitRaceConnection(real_db)  # type: ignore[assignment]
-        try:
-            phase1 = [
-                memory.store_episode(
-                    summary=SUMMARY_PENDING_TEXT,
-                    context={"scope": f"dm:ember-owl:phase1-{i}"},
-                    interaction_id=f"phase1-iid-{i}",
-                    started_at=100.0 + i,
-                    closed_at=110.0 + i,
-                    turn_count=2,
-                    scope=f"dm:ember-owl:phase1-{i}",
-                )
-                for i in range(_CONCURRENT_CLOSES)
-            ]
-            phase2 = [
-                memory.update_episode_summary(f"phase2-iid-{i}", f"real summary {i}")
-                for i in range(_CONCURRENT_CLOSES)
-            ]
-            # gather preserves order: the first _CONCURRENT_CLOSES results
-            # are the Phase-1 episode ids, the rest the Phase-2 booleans.
-            results = await asyncio.gather(
-                *phase1, *phase2, return_exceptions=True,
+        new_closes = [
+            memory.store_episode(
+                summary=SUMMARY_PENDING_TEXT,
+                context={"scope": f"dm:ember-owl:new-{i}"},
+                interaction_id=f"new-iid-{i}",
+                started_at=200.0 + i, closed_at=210.0 + i,
+                turn_count=2, scope=f"dm:ember-owl:new-{i}",
             )
-        finally:
-            memory._db = real_db
+            for i in range(_CONCURRENT_CLOSES)
+        ]
+        summaries = [
+            memory.update_episode_summary(f"seed-iid-{i}", f"real summary {i}")
+            for i in range(_CONCURRENT_CLOSES)
+        ]
+        increments = [
+            memory.increment_interaction_count()
+            for _ in range(_CONCURRENT_CLOSES)
+        ]
+        # gather preserves order: new_closes, then summaries, then
+        # increments.
+        results = await asyncio.gather(
+            *new_closes, *summaries, *increments, return_exceptions=True,
+        )
 
         raced = [r for r in results if isinstance(r, BaseException)]
         assert not raced, (
-            f"mixed Phase-1 INSERT / Phase-2 UPDATE writes raced the "
-            f"shared connection: {raced}"
+            f"a catch-up storm raced the shared episodic connection's "
+            f"COMMIT: {raced}"
         )
-        # Both halves landed: every fresh close persisted its own row and
-        # every background summary replaced its pending sentinel.
-        async with real_db.execute(
+
+        n = _CONCURRENT_CLOSES
+        summary_results = results[n:2 * n]
+        increment_results = results[2 * n:]
+
+        # Every fresh close persisted its own row; the seed rows survived.
+        db = memory._ensure_db()
+        async with db.execute(
             "SELECT interaction_id FROM episodes WHERE agent_id = ?",
             (memory.agent_id,),
         ) as cursor:
             persisted = {row[0] for row in await cursor.fetchall()}
         assert persisted == (
-            {f"phase1-iid-{i}" for i in range(_CONCURRENT_CLOSES)}
-            | {f"phase2-iid-{i}" for i in range(_CONCURRENT_CLOSES)}
+            {f"seed-iid-{i}" for i in range(n)}
+            | {f"new-iid-{i}" for i in range(n)}
         )
-        assert all(updated is True for updated in results[_CONCURRENT_CLOSES:])
+
+        # Every background summary replaced its pending sentinel.
+        assert all(updated is True for updated in summary_results)
+
+        # The RETURNING upserts serialised on the connection's worker
+        # thread, so the post-increment counts are exactly 1..n with no
+        # lost update.
+        assert sorted(increment_results) == list(range(1, n + 1))

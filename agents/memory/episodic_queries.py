@@ -314,9 +314,17 @@ async def increment_interaction_count(
     Uses RETURNING to get the post-upsert count in a single round-trip,
     eliminating a read-after-write race (F-3b-2).  Requires SQLite >= 3.35
     (Python 3.11+ ships >= 3.39).
+
+    ISSUE-0055: the RETURNING row is drained with ``execute_fetchall``
+    (one aiosqlite round-trip), not ``execute()`` + a separate
+    ``fetchone()``.  ``execute()`` steps a RETURNING statement only to
+    its first row, leaving the *write* VDBE active across the ``await``
+    before ``fetchone()``; on the shared connection a concurrent
+    ``COMMIT`` in that gap raised "cannot commit transaction - SQL
+    statements in progress".  One round-trip never suspends it.
     """
     now = time.time()
-    cursor = await db.execute(
+    rows = list(await db.execute_fetchall(
         """
         INSERT INTO agent_state (agent_id, interaction_count, updated_at)
         VALUES (?, 1, ?)
@@ -326,10 +334,9 @@ async def increment_interaction_count(
         RETURNING interaction_count
         """,
         (agent_id, now, now),
-    )
-    row = await cursor.fetchone()
+    ))
     await db.commit()
-    return row[0] if row else 0
+    return rows[0][0] if rows else 0
 
 
 async def reset_interaction_count(
@@ -417,21 +424,15 @@ async def insert_episode(
 ) -> str:
     """INSERT one episode row and COMMIT; return the generated episode id.
 
-    Extracted from :meth:`EpisodicMemory.store_episode` so the
-    INSERT + COMMIT critical section sits beside the sibling episode
-    write helper :func:`update_episode_summary` — and so ``episodic.py``
-    stays under the 500-line file-size cap once the ISSUE-0055 write
-    lock is added.
+    Extracted from :meth:`EpisodicMemory.store_episode` so the episode
+    INSERT sits in :mod:`agents.memory.episodic_queries` beside the
+    sibling write helper :func:`update_episode_summary` that already
+    owns the episode SQL, keeping ``episodic.py`` within the 500-line
+    file-size cap.
 
-    ISSUE-0055: ``db`` is shared across the agent's async tasks and the
-    INSERT and COMMIT are two separate ``await``s.  A startup channel
-    catch-up storm fans out many concurrent close-path writes; without
-    serialisation one close's COMMIT can land while another close's
-    INSERT statement is still in flight, and SQLite raises
-    ``OperationalError: cannot commit transaction - SQL statements in
-    progress``.  Callers MUST therefore hold ``EpisodicMemory._write_lock``
-    across this call; :meth:`EpisodicMemory.store_episode` is the only
-    production caller and does exactly that.
+    The INSERT is plain DML — stepped to completion inside ``execute()``
+    with no VDBE left active — so a concurrent ``COMMIT`` on the shared
+    connection cannot race it (ISSUE-0055).
     """
     episode_id = str(uuid.uuid4())
     now = time.time()
