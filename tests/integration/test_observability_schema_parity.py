@@ -1,9 +1,11 @@
 """RFC 0019 PR 4 — schema parity contract test (no compose dep).
 
 Asserts the two-RFC schema contract spelled out in
-[RFC 0019 § E](../../docs/rfcs/0019-opentelemetry-completion.md
-#e-span-naming-and-attribute-conventions)
-and the [PR 4 plan](../../docs/rfcs/0019-pr-plan.md) checklist:
+[RFC 0019 § E][rfc-0019-e] and the [PR 4 plan](../../docs/rfcs/0019-pr-plan.md)
+checklist:
+
+[rfc-0019-e]:
+../../docs/rfcs/0019-opentelemetry-completion.md#e-span-naming-and-attribute-conventions
 
 1. Every Persatrix correlation ID listed as an Optional field in
    [RFC 0018 § B](../../docs/rfcs/0018-structured-logging-framework.md#b-common-log-schema)

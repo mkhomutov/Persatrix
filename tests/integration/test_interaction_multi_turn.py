@@ -36,8 +36,8 @@ def _clean_registry():
     clear_registry()
 
 
-# Short idle timeout keeps the idle-gap test cheap \u2014 the production
-# default is 600s (RFC 0020 \u00a7B); tests use 5s so a fake clock-advance
+# Short idle timeout keeps the idle-gap test cheap — the production
+# default is 600s (RFC 0020 §B); tests use 5s so a fake clock-advance
 # of 10s is unambiguously past the threshold without making the test
 # wait for real wall-clock time.
 _TEST_IDLE_TIMEOUT_SEC: float = 5.0
@@ -153,9 +153,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     ]
 
 
-# \u2500\u2500\u2500 Multi-turn aggregation
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── Multi-turn aggregation ──────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -174,7 +172,7 @@ class TestMultiTurnAggregation:
                 sender_id=peer,
             ))
 
-        # No episode persisted yet \u2014 the interaction is still open.
+        # No episode persisted yet — the interaction is still open.
         assert await _all_episodes(agent) == []
 
         # One open scope, keyed symmetrically on (agent, peer).
@@ -187,7 +185,7 @@ class TestMultiTurnAggregation:
         assert interaction.turn_count == 10
         assert interaction.is_open
 
-        # Session end \u2014 explicit ``chat_end`` metadata flag (RFC 0016
+        # Session end — explicit ``chat_end`` metadata flag (RFC 0016
         # surface lands in a follow-up; the runtime accepts the marker
         # today so PR 5 / channel hooks can emit it).
         await agent.on_event(AgentEvent(
@@ -220,8 +218,8 @@ class TestMultiTurnAggregation:
         assert ep["summary"]
         assert ep["summary"] != SUMMARY_UNAVAILABLE_TEXT
 
-        # Tracker is empty \u2014 the closed scope was popped per RFC 0020
-        # \u00a7C "do not reopen".
+        # Tracker is empty — the closed scope was popped per RFC 0020
+        # §C "do not reopen".
         assert agent._interaction_tracker.open_scopes() == []
 
     async def test_idle_gap_closes_interaction_and_next_turn_opens_new_one(self):
@@ -247,7 +245,7 @@ class TestMultiTurnAggregation:
         first_id = first.interaction_id
 
         # Advance the tracker's clock past the idle window and run
-        # idle_check explicitly \u2014 the production hot path runs this on
+        # idle_check explicitly — the production hot path runs this on
         # every event, but exercising it directly keeps the test free of
         # ``time.sleep`` and decouples the assertion from event ordering.
         future = first.last_turn_at + _TEST_IDLE_TIMEOUT_SEC + 1.0
@@ -256,7 +254,7 @@ class TestMultiTurnAggregation:
         assert closed_list[0].close_reason == REASON_IDLE_GAP
 
         # Persist the idle-closed interaction the way the runtime would
-        # on the next event \u2014 then verify the persisted row carries the
+        # on the next event — then verify the persisted row carries the
         # idle-gap reason.
         await agent._persist_closed_interaction(closed_list[0])  # type: ignore[attr-defined]
         # PR #229 review Must-Fix #1: drain the two-phase background
@@ -296,9 +294,8 @@ class TestMultiTurnAggregation:
         would later record (PR 4 \u2014 currently the runtime sees only the
         inbound side, but the scope key must already be symmetric so PR
         4's outbound recording does not split the interaction).  This
-        test enforces symmetry directly on the helper rather
-        than\n        relying on outbound-recording wiring that has
-        not landed yet.
+        test enforces symmetry directly on the helper rather than
+        relying on outbound-recording wiring that has not landed yet.
         """
         from agents.memory.interactions import scope_for_dm as _s
 
@@ -321,8 +318,7 @@ class TestMultiTurnAggregation:
         assert agent._interaction_tracker.open_scopes() == [scope_inbound]
 
 
-# \u2500\u2500\u2500 Single-turn parity sanity (no regression on PR 2)
-# \u2500\u2500\u2500\u2500\u2500\u2500
+# ─── Single-turn parity sanity (no regression on PR 2) ───────────
 
 
 @pytest.mark.asyncio

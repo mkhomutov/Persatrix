@@ -69,3 +69,14 @@ first run may surface accumulated findings to clean up or baseline.
 > [ISSUE-0062](ISSUE-0062-tests-tree-outside-ci-mypy-gate.md): a
 > `mypy tests/` gate needs path configuration plus a ~106-error triage —
 > materially larger and structurally separate from the lint gate.
+
+> 2026-05-19 — review follow-up: a `/review` pass found two of the
+> `line-too-long` triage fixes had wrapped *corrupt* source rather than
+> repairing it. `test_interaction_multi_turn.py` carried two section-divider
+> comments as literal `\u2500` escape text (not real `─`); these are
+> restored to single-line `─` dividers. The same file held eight more
+> comment lines with literal `\u2014`/`\u00a7` text — each under the
+> 100-col cap, so never lint-flagged — plus one docstring `\n`; all
+> corrected to real glyphs. `test_observability_schema_parity.py` had a
+> Markdown link split mid-URL by a `line-too-long` fix, now a reference-style
+> link. Comments and docstrings only — no test logic changed.
