@@ -175,9 +175,26 @@ class WalletClient:
         self._backoff_base = max(0.0, backoff_base)
 
     @classmethod
-    def from_channel(cls, channel: grpc.aio.Channel, **kwargs: object) -> WalletClient:
-        """Build a client over an existing ``grpc.aio`` channel."""
-        return cls(wallet_grpc.WalletServiceStub(channel), **kwargs)  # type: ignore[arg-type]
+    def from_channel(
+        cls,
+        channel: grpc.aio.Channel,
+        *,
+        acquire_max_attempts: int = 3,
+        settle_max_attempts: int = 3,
+        backoff_base: float = 0.1,
+    ) -> WalletClient:
+        """Build a client over an existing ``grpc.aio`` channel.
+
+        The retry-tuning keyword arguments mirror :meth:`__init__`; they are
+        spelled out explicitly rather than forwarded as ``**kwargs`` so the
+        argument types are checked at the call site.
+        """
+        return cls(
+            wallet_grpc.WalletServiceStub(channel),
+            acquire_max_attempts=acquire_max_attempts,
+            settle_max_attempts=settle_max_attempts,
+            backoff_base=backoff_base,
+        )
 
     def _backoff(self, attempt: int) -> float:
         """Backoff delay for retry *attempt* (1-indexed), with full jitter.
@@ -260,14 +277,29 @@ class WalletClient:
                 # before mark_call_started() (e.g. an early return that
                 # skipped the call) spent nothing, so reverse the hold;
                 # once the call started, close pessimistically.
-                if not lease._call_started:
-                    await self._release(lease.lease_id, "aborted")
-                else:
-                    await self._settle(
-                        lease.lease_id,
-                        lease.granted_input_tokens,
-                        lease.granted_output_tokens,
-                        kind="settle-at-granted",
+                #
+                # The defensive close is best-effort, symmetric with the
+                # exception-path guard above: _release / _settle swallow
+                # transient AioRpcError but not an *unexpected* error in the
+                # cleanup path itself, and such an error must not turn a
+                # clean, successful exit into a failure. A swallowed cleanup
+                # error leaves the lease for the reaper to reconcile at TTL
+                # expiry. CancelledError propagates, as on the exception path.
+                try:
+                    if not lease._call_started:
+                        await self._release(lease.lease_id, "aborted")
+                    else:
+                        await self._settle(
+                            lease.lease_id,
+                            lease.granted_input_tokens,
+                            lease.granted_output_tokens,
+                            kind="settle-at-granted",
+                        )
+                except Exception:
+                    logger.warning(
+                        "wallet: lease %s cleanup failed on the clean exit "
+                        "path — the reaper will reconcile it at TTL expiry",
+                        lease.lease_id, exc_info=True,
                     )
 
     # ── Internals ────────────────────────────────────────────────────

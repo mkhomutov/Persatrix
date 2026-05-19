@@ -356,8 +356,17 @@ class AgentServer:
 # main() — argument parsing + process bootstrap — lives in
 # agents.server_cli, split out so this module stays the gRPC server
 # implementation only (repo file-size cap). The import is deferred into
-# the __main__ guard so `python -m persatrix_agents.server` keeps working
-# without a server.py <-> server_cli.py import cycle at module load.
+# the __main__ guard rather than placed at module level because
+# server_cli imports `from .server import AgentServer`: a top-level
+# import here would close a server.py <-> server_cli.py cycle.
+#
+# Note: `python -m persatrix_agents.server` runs this file as `__main__`,
+# then the guard imports server_cli, which imports `persatrix_agents.server`
+# under its real name — so this module's body executes a second time (the
+# classic __main__/qualified-name double import). It is harmless: the body
+# only defines classes and a module logger (no side effects), and main()
+# itself runs exactly once. The `Persatrix-agent` console script
+# (server_cli:main) does not hit this path.
 if __name__ == "__main__":
     from .server_cli import main
 

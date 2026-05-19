@@ -105,3 +105,11 @@ written to add does not cover the persona-as-workflow-step path.
 > scheduler-side type enforcement). Folding the leasing fix into PR 5's persona
 > action-loop work (path 2) remains the alternative. Decision deferred to the
 > follow-up; PR 3 merges with the gap genuinely latent.
+
+> 2026-05-19 — PR #385 review follow-up. Resolution scheduled into **RFC 0023
+> PR 5** (`feature/v032-rfc0023-tick-subagent`): `docs/rfcs/0023-pr-plan.md`
+> now carries an `action_loop.py` scope row, a Key-implementation-detail
+> bullet, and a PR-checklist item for this issue. PR 5 already edits
+> `agents/persona_runtime/action_loop.py` for the `AUTONOMOUS_TICK` origin, so
+> it is the natural home for whichever resolution path (persona `TASK_ASSIGNED`
+> leasing, or the planner/scheduler guard) PR 5 design selects.

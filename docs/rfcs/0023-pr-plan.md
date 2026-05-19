@@ -232,7 +232,8 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 |------|--------|
 | `agents/persona_runtime/action_loop.py` | The autonomous TICK LLM call acquires a lease with `cause = AUTONOMOUS_TICK`. On `BudgetExceededError`, the loop treats the tick as idle — log a warning, increment `idle_count` consistent with the v0.2.2 short-circuit. Record budget-throttled idle ticks with a distinct `idle_reason = budget_denied` attribute on the existing TICK metric ([RFC §Phase 5](0023-llm-call-leasing.md#phased-implementation-plan)), distinguishable from `empty_context_tick` and natural-idle ticks. |
 | `agents/sub_agents/` | Sub-agent spawn LLM calls acquire leases with `cause = SUB_AGENT`, attributed against the **parent's** `agent_id` so spend lands on the originating persona ([RFC §Phase 5](0023-llm-call-leasing.md#phased-implementation-plan)). The `max_active_leases` cap stays per-process per [OQ #7](0023-llm-call-leasing.md#open-questions). |
-| `agents/tests/` | Unit coverage — TICK `BudgetExceededError` → idle tick, `idle_count` increments, `idle_reason=budget_denied`; sub-agent lease attributed to the parent `agent_id`. |
+| `agents/persona_runtime/action_loop.py` (persona `TASK_ASSIGNED` path) | **[ISSUE-0063](../issues/ISSUE-0063-workflow-step-unleased-llm-spend-uncounted.md)** — a workflow step dispatched to a *persona* agent routes through the persona action loop, not the leased `_run_llm_loop`; its LLM spend is recorded by neither a wallet lease nor (since PR 3 retired the `recordStepUsage` counter feed) the budget `TokenCounter`. Close it here: pass `cause = CAUSE_WORKFLOW_TASK` on the persona `TASK_ASSIGNED` path, or add a planner/scheduler guard rejecting persona-agent step targets. |
+| `agents/tests/` | Unit coverage — TICK `BudgetExceededError` → idle tick, `idle_count` increments, `idle_reason=budget_denied`; sub-agent lease attributed to the parent `agent_id`; the chosen ISSUE-0063 resolution (persona workflow-task lease, or guard rejecting persona step targets). |
 | `tests/integration/` | **New** — persona TICK loop with the `per_agent` budget exhausted: assert ticks are recorded idle, no LLM calls reach the provider, `idle_count` increments. |
 | `docs/manual-tests/MT-COST-004.md` | **New** — TICK budget exhaustion → idle manual test ([RFC §Test Strategy](0023-llm-call-leasing.md#test-strategy)). Executed in [v0.3.2-plan Phase 4 PR 1](../v0.3.2-plan.md#phase-4--v032-release-prep-execution). |
 | `docs/observability.md` | Add the `idle_reason=budget_denied` TICK-metric attribute to the wallet-metrics section started in PR 3. |
@@ -242,6 +243,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - The TICK idle treatment is consistent with the v0.2.2 empty-context short-circuit — a denied lease is *not* a crash; the tick advances `idle_count` and the loop continues.
 - `idle_reason=budget_denied` is the dashboard discriminator: without it, sustained budget pressure is invisible against organic quiet periods ([RFC §Phase 5](0023-llm-call-leasing.md#phased-implementation-plan)).
 - Sub-agent spend attribution (parent) is split from the concurrency cap (per-process) per the [OQ #7](0023-llm-call-leasing.md#open-questions) resolution — the cap is a DoS ceiling, attribution is a separate concern.
+- **[ISSUE-0063](../issues/ISSUE-0063-workflow-step-unleased-llm-spend-uncounted.md) closes in this PR.** PR 3 retired the scheduler's post-hoc `recordStepUsage` counter feed assuming every workflow-step LLM call is leased — true for `TaskAgent`, but not for a persona agent serving a workflow step (un-leased action loop). The gap is latent today (no shipped workflow routes a step to a persona agent) but unguarded. PR 5 already edits `action_loop.py` for the TICK origin, so it is the natural home: decide during PR 5 design between leasing the persona `TASK_ASSIGNED` path and a planner-side step-target guard.
 
 #### Tests
 
@@ -255,6 +257,7 @@ PRs 1–2 add no call-site wiring — the contract and the enforcement engine ar
 - [ ] `ruff check agents/` clean; `mypy agents/` clean.
 - [ ] TICK leases tagged `AUTONOMOUS_TICK`; sub-agent leases tagged `SUB_AGENT` against the parent `agent_id`.
 - [ ] Budget-denied idle ticks carry `idle_reason=budget_denied`.
+- [ ] [ISSUE-0063](../issues/ISSUE-0063-workflow-step-unleased-llm-spend-uncounted.md) resolved — persona-served workflow steps either acquire a `CAUSE_WORKFLOW_TASK` lease or are rejected by a planner/scheduler guard.
 - [ ] `docs/manual-tests/MT-COST-004.md` authored; execution deferred to v0.3.2-plan Phase 4 PR 1.
 
 ---
