@@ -388,7 +388,9 @@ func (w *WalletService) reapExpired(now time.Time) {
 			reaped++
 			w.logger.Warn("wallet: lease reaped — settled at granted amount on TTL expiry",
 				zap.String("lease_id", leaseID),
+				zap.String("workflow_id", ls.workflowID),
 				zap.String("agent_id", ls.agentID),
+				zap.String("model", ls.model),
 				zap.String("cause", ls.cause.String()),
 			)
 		case ls.settled && now.After(ls.issuedAt.Add(2*ls.ttl)):

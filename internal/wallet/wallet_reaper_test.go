@@ -44,6 +44,34 @@ func TestReaper_SettlesExpiredLeaseAtGranted(t *testing.T) {
 	assert.InDelta(t, 0.033, usd, 1e-9, "reaped lease keeps its worst-case charge")
 }
 
+// TestReaper_ReapedLeaseLogCarriesContext pins that the reaper's one-shot
+// "lease reaped" WARN record carries the abandoned lease's workflow and
+// model, not just its agent and cause. A reaped lease is an abnormal
+// lifecycle event — an agent left a lease unsettled past its TTL, typically
+// a crash or hang — so an operator triaging it needs the workflow and model
+// in that same always-on record; the "lease granted" line that also carries
+// them is DEBUG, off in production.
+func TestReaper_ReapedLeaseLogCarriesContext(t *testing.T) {
+	walletCfg := Config{TTL: 30 * time.Second, ReaperInterval: time.Hour, MaxActiveLeases: 16}
+	core, logs := observer.New(zap.WarnLevel)
+	w, _ := newTestWalletWithLogger(t, testCostConfig(), walletCfg, zap.New(core))
+
+	_, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
+		WorkflowId: "wf-reaped", AgentId: "agent-a", Model: "claude-sonnet",
+		EstimatedInputTokens: 1000, EstimatedMaxOutputTokens: 2000,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	})
+	require.NoError(t, err)
+
+	w.reapExpired(time.Now().Add(walletCfg.TTL + time.Second))
+
+	reaped := logs.FilterMessage("wallet: lease reaped — settled at granted amount on TTL expiry")
+	require.Equal(t, 1, reaped.Len(), "the reaper must log the reaped lease exactly once")
+	fields := reaped.All()[0].ContextMap()
+	assert.Equal(t, "wf-reaped", fields["workflow_id"], "reaped-lease log must carry the workflow id")
+	assert.Equal(t, "claude-sonnet", fields["model"], "reaped-lease log must carry the model")
+}
+
 // TestReaper_Idempotent pins that re-running the reaper over an
 // already-settled lease is a no-op — it must not reconcile (and so charge)
 // a second time.
