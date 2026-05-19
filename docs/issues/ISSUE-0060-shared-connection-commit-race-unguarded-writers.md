@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0060
-summary: Filed during the PR 380 review as "unguarded writers on the shared episodic connection". Deeper review of the SQLite failure mode showed plain INSERT/UPDATE/DELETE never leave an active write VDBE and so cannot trip the "SQL statements in progress" commit race — the sole real culprit was increment_interaction_count's unfetched RETURNING cursor, fixed under ISSUE-0055 in PR 380. No remaining hazard.
+summary: Filed during the PR 380 review as "unguarded writers on the shared episodic connection". Deeper review of the SQLite failure mode showed plain INSERT/UPDATE/DELETE never leave an active write VDBE and so cannot trip the "SQL statements in progress" commit race — the sole real culprit was increment_interaction_count's unfetched RETURNING cursor, fixed under ISSUE-0055 in PR 380. No remaining hazard on the episodic connection; the sibling RelationshipMemory.update_trust RETURNING writer carries the same pattern on its own shared connection and is tracked separately under ISSUE-0061.
 status: resolved
 severity: medium
 area: agents/memory
@@ -9,6 +9,7 @@ closed: 2026-05-19
 closed_pr: 380
 refs:
   - docs/issues/ISSUE-0055-close-path-sqlite-commit-race-catchup-storm.md
+  - docs/issues/ISSUE-0061-relationship-update-trust-returning-commit-race.md
   - agents/memory/episodic.py
   - agents/memory/episodic_queries.py
   - agents/memory/notes.py
@@ -49,7 +50,8 @@ progress` is raised by SQLite only when a `COMMIT` runs while another
   was the sole `RETURNING` writer on the connection; `NoteStore` has
   none.
 
-So there was exactly one culprit, not a class of unguarded writers.
+So there was exactly one culprit on the episodic connection, not a
+class of unguarded writers.
 ISSUE-0055 (#380) fixes it at the root: `increment_interaction_count`
 now drains its `RETURNING` cursor in a single `execute_fetchall`
 round-trip, so no write VDBE is ever suspended across an `await` and no
@@ -68,3 +70,11 @@ change.
 > the hazard is the unfetched `RETURNING` cursor, not unguarded plain
 > writers. Fixed at the root in #380 under ISSUE-0055; this issue's
 > premise no longer holds and there is nothing further to guard.
+
+> 2026-05-19 — follow-up. The PR #380 review (finding M1) found that the
+> sibling `RelationshipMemory` tier carries a structurally identical
+> `RETURNING` writer — `update_trust` — on its own shared connection,
+> outside this issue's episodic-connection scope. Tracked and fixed
+> under
+> [ISSUE-0061](ISSUE-0061-relationship-update-trust-returning-commit-race.md).
+> This issue's conclusions remain correct for the episodic connection.
