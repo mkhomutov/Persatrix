@@ -15,7 +15,6 @@ from agents.persona_types import ActionType, AgentEvent, EventType, Mood
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
-
 # ─── _LLMPersonaAgent Tests ───────────────────────────────
 
 
@@ -231,7 +230,10 @@ class TestLLMPersonaAgent:
         agent = await self._make_agent()
         response = LLMResponse(
             text=json.dumps([
-                {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": "hi"}},
+                {
+                    "action_type": "send_channel_message",
+                    "payload": {"channel_id": "general", "content": "hi"},
+                },
                 {"action_type": "complete_task", "payload": {"result": "done"}},
             ]),
         )
@@ -243,7 +245,10 @@ class TestLLMPersonaAgent:
     async def test_parse_actions_json_code_block(self):
         agent = await self._make_agent()
         response = LLMResponse(
-            text='Here are my actions:\n```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
+            text=(
+                'Here are my actions:\n```json\n'
+                '[{"action_type": "do_nothing", "payload": {}}]\n```'
+            ),
         )
         actions = agent._parse_actions(response)
         assert len(actions) == 1

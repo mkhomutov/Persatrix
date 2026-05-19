@@ -14,7 +14,6 @@ from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.server import AgentServer, AgentServiceServicer
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 

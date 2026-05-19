@@ -9,7 +9,6 @@ import pytest
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.episodic_queries import MAX_RECALL_LIMIT
 
-
 # ─── Importance validation ──────────────────────────────────
 
 
@@ -113,7 +112,9 @@ class TestZeroImportanceRecall:
         )
         episodes = await memory.recall(query="", limit=10)
         ids = [e.id for e in episodes]
-        assert ep_id in ids, "Zero-importance episodes should be visible via non-zero scoring baseline"
+        assert ep_id in ids, (
+            "Zero-importance episodes should be visible via non-zero scoring baseline"
+        )
 
 
 # ─── ln() availability check ───────────────────────────────
@@ -129,9 +130,9 @@ class TestLnAvailabilityCheck:
 
     async def test_initialize_raises_when_ln_unavailable(self):
         import sqlite3
+        from unittest.mock import patch
 
         import aiosqlite
-        from unittest.mock import patch
 
         real_connect = aiosqlite.connect
 

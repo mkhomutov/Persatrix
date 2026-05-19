@@ -41,7 +41,6 @@ import pytest
 
 from agents.dispatch import EventDispatcher
 
-
 _DEFAULTS_GO = Path("internal/defaults/defaults.go")
 
 # Captures `const DefaultMaxCascadeDepth = <int>` on a single line. The

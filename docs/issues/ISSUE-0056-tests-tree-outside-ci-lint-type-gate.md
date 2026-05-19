@@ -1,12 +1,15 @@
 ---
 id: ISSUE-0056
 summary: Repo-root tests/ tree is outside CI's `cd agents && ruff check . && mypy .` scope — new test code under tests/ is silently unlinted and untyped
-status: open
+status: resolved
 severity: low
 area: ci
 created: 2026-05-18
+closed: 2026-05-19
+closed_pr: 381
 refs:
   - docs/rfcs/0029-pr-plan.md
+  - docs/issues/ISSUE-0062-tests-tree-outside-ci-mypy-gate.md
   - .github/workflows/ci.yml
 ---
 
@@ -51,3 +54,18 @@ first run may surface accumulated findings to clean up or baseline.
 ## Notes
 
 > 2026-05-18 — initial capture during RFC 0029 Phase 1 PR 3 review.
+
+> 2026-05-19 — resolved for the **lint** half. CI now runs
+> `ruff check tests/` (a new step in the `python` job) and the Makefile
+> `lint-python` target gained the matching invocation. A repo-root
+> `ruff.toml` `extend`s `agents/pyproject.toml` so the rule set stays
+> single-sourced across both trees; its sole local addition is a
+> `tests/** = ["TID251"]` per-file-ignore (schema/migration tests open
+> SQLite directly on purpose — same carve-out the agents config already
+> grants `memory/**`). The one-time triage cleared the accumulated ruff
+> backlog: 131 auto-fixes plus 87 manual fixes (82 line-too-long, 2
+> banned-import-alias casing, 1 acronym alias, 2 printf-format). The
+> **type-check** half is deliberately split off to
+> [ISSUE-0062](ISSUE-0062-tests-tree-outside-ci-mypy-gate.md): a
+> `mypy tests/` gate needs path configuration plus a ~106-error triage —
+> materially larger and structurally separate from the lint gate.

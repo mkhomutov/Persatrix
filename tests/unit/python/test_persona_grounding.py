@@ -6,11 +6,14 @@ The fix: a grounding clause in the assembled persona system prompt that
 tells the model it is not the user.
 
 This is the **primary, deterministic** regression check named in the
-[v0.3.0 channel test-findings PR plan §PR 5](../../../docs/v0.3.0-test-findings-pr-plan.md#pr-5-fixv030-channel-persona-impersonation--grounding-the-persona-system-prompt):
-the prompt-assembly invariant pins what the runtime emits regardless of
-whether the model honors the clause downstream. An optional integration
-test in ``tests/integration/`` exercises the model-output side at the
+[v0.3.0 channel test-findings PR plan §PR 5][pr-plan]: the prompt-assembly
+invariant pins what the runtime emits regardless of whether the model
+honors the clause downstream. An optional integration test in
+``tests/integration/`` exercises the model-output side at the
 ``@pytest.mark.integration`` gate.
+
+[pr-plan]:
+../../../docs/v0.3.0-test-findings-pr-plan.md#pr-5-fixv030-channel-persona-impersonation--grounding-the-persona-system-prompt
 
 The clause is loaded as a persona section (RFC 0022 templating contract)
 from ``prompts/runtime/persona/sections/grounding.md`` and rendered with

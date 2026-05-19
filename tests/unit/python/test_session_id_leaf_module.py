@@ -207,14 +207,14 @@ def test_persona_runtime_reexports_leaf_constants() -> None:
     """
     from agents.persona_runtime import session_id as wrapper
     from agents.session_id import (
-        LEGACY_SESSION_ID as leaf_legacy,
+        LEGACY_SESSION_ID as LEAF_LEGACY,
     )
     from agents.session_id import (
-        SESSION_ID_ENV_VAR as leaf_env_var,
+        SESSION_ID_ENV_VAR as LEAF_ENV_VAR,
     )
 
-    assert wrapper.SESSION_ID_ENV_VAR == leaf_env_var
-    assert wrapper.LEGACY_SESSION_ID == leaf_legacy
+    assert wrapper.SESSION_ID_ENV_VAR == LEAF_ENV_VAR
+    assert wrapper.LEGACY_SESSION_ID == LEAF_LEGACY
 
 
 def test_persona_runtime_wrapper_still_logs(

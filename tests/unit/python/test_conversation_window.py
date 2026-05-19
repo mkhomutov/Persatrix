@@ -45,9 +45,9 @@ from ._conversation_window_test_helpers import (
     _AGENT_ID,
     _CHANNEL,
     _CURRENT,
-    _FakeChannelHistoryFetcher,
     _build,
     _event,
+    _FakeChannelHistoryFetcher,
     _row,
 )
 
@@ -116,15 +116,10 @@ class TestConversationWindowConfig:
 class TestPublicSurface:
     def test_reexported_from_persona_runtime(self):
         """Both public symbols re-export from the package root."""
-        from agents.persona_runtime import (
-            ConversationWindowConfig as CWC,
-        )
-        from agents.persona_runtime import (
-            build_conversation_messages as bcm,
-        )
+        import agents.persona_runtime as pkg
 
-        assert CWC is ConversationWindowConfig
-        assert bcm is build_conversation_messages
+        assert pkg.ConversationWindowConfig is ConversationWindowConfig
+        assert pkg.build_conversation_messages is build_conversation_messages
 
 
 # ─── Window assembly ───────────────────────────────────────

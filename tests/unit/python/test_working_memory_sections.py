@@ -10,9 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agents.llm_client import LLMClient, LLMResponse, Usage
-from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
 from agents.memory import MemoryLifecycle
-
+from agents.memory.working import ContextSection, WorkingMemory, estimate_tokens
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -90,7 +89,9 @@ class TestEstimateTokensTiktoken:
         text = "Hello, world! This is a longer sentence for testing token estimation."
         accurate = estimate_tokens(text, accurate=True)
         naive = len(text) // 4
-        assert accurate != naive, "accurate path should differ from chars/4 when tiktoken is available"
+        assert accurate != naive, (
+            "accurate path should differ from chars/4 when tiktoken is available"
+        )
         assert accurate > 0
 
     def test_accurate_true_fallback_when_tiktoken_unavailable(self):
@@ -252,7 +253,8 @@ class TestBuildContext:
         assert len(context) == 2  # exactly at budget
 
     def test_skips_large_section_includes_smaller(self):
-        """Greedy bin-packing: a mid-priority section overflows but a smaller low-priority one fits."""
+        """Greedy bin-packing: a mid-priority section overflows but a smaller
+        low-priority one fits."""
         wm = WorkingMemory(max_tokens=200)
         wm.add_section(_make_section(name="high", priority=100, token_count=150))
         wm.add_section(_make_section(name="mid", priority=50, token_count=100))  # overflows

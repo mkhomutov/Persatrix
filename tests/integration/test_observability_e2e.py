@@ -4,7 +4,8 @@ Opt-in via ``-m requires_compose`` (registered in ``agents/pyproject.toml``).
 The default ``pytest`` invocation skips this module so unit-test runs do not
 depend on a live OTEL Collector + Jaeger + Prometheus + Loki stack.
 
-Manual smoke: ``make docker-up && pytest -m requires_compose tests/integration/test_observability_e2e.py``.
+Manual smoke: ``make docker-up && pytest -m requires_compose
+tests/integration/test_observability_e2e.py``.
 
 Test shape (per the RFC 0019 PR 4 plan):
 
@@ -251,7 +252,7 @@ def test_workflow_emits_trace_metrics_and_correlated_logs() -> None:
 
     def _loki_has_correlated_log() -> bool:
         # LogQL: any record whose `trace_id` label equals the trace from step 1.
-        query = '{trace_id="%s"}' % trace_id
+        query = f'{{trace_id="{trace_id}"}}'
         url = (
             f"{LOKI_BASE}/loki/api/v1/query?query={parse.quote(query)}"
             "&direction=BACKWARD&limit=10"

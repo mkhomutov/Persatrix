@@ -23,7 +23,6 @@ from agents.server import AgentServiceServicer
 from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolResult, clear_registry, tool
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 

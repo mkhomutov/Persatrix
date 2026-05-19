@@ -235,14 +235,14 @@ class TestShippedYamlMatchesHardcodedDefaults:
     """
 
     def test_shipped_yaml_matches_constants(self) -> None:
+        # Force the loader off the test fixture path back to the
+        # repo-default ``config/optimization.yaml``.
+        import os
+
         from agents.llm_client import (
             _OPENAI_EXACT_MODELS,
             _OPENAI_PREFIX_MODELS,
         )
-
-        # Force the loader off the test fixture path back to the
-        # repo-default ``config/optimization.yaml``.
-        import os
 
         os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
         reset_cache()

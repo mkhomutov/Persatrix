@@ -40,12 +40,11 @@ from unittest.mock import patch
 
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
-from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
+from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_types import ActionType, AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
-
 
 # ─── Wire-string pin (PR #249 deep-review Nice-to-Have #4) ──
 #

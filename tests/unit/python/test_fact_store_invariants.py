@@ -35,7 +35,6 @@ import pytest
 
 from agents.memory.facts import Fact, FactStore
 
-
 # ─── Fixture ────────────────────────────────────────────────
 
 

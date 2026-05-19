@@ -20,7 +20,6 @@ from agents.persona_types import ActionType, AgentAction
 from agents.server_servicers import AgentServiceServicer
 from agents.tools.registry import clear_registry
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 

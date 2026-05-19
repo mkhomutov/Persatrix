@@ -153,7 +153,9 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     ]
 
 
-# \u2500\u2500\u2500 Multi-turn aggregation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# \u2500\u2500\u2500 Multi-turn aggregation
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 
 @pytest.mark.asyncio
@@ -294,7 +296,9 @@ class TestMultiTurnAggregation:
         would later record (PR 4 \u2014 currently the runtime sees only the
         inbound side, but the scope key must already be symmetric so PR
         4's outbound recording does not split the interaction).  This
-        test enforces symmetry directly on the helper rather than\n        relying on outbound-recording wiring that has not landed yet.
+        test enforces symmetry directly on the helper rather
+        than\n        relying on outbound-recording wiring that has
+        not landed yet.
         """
         from agents.memory.interactions import scope_for_dm as _s
 
@@ -317,7 +321,8 @@ class TestMultiTurnAggregation:
         assert agent._interaction_tracker.open_scopes() == [scope_inbound]
 
 
-# \u2500\u2500\u2500 Single-turn parity sanity (no regression on PR 2) \u2500\u2500\u2500\u2500\u2500\u2500
+# \u2500\u2500\u2500 Single-turn parity sanity (no regression on PR 2)
+# \u2500\u2500\u2500\u2500\u2500\u2500
 
 
 @pytest.mark.asyncio

@@ -12,10 +12,9 @@ import tempfile
 import pytest
 
 from agents.memory.relationship import (
-    RelationshipMemory,
     _DEFAULT_TRUST,
+    RelationshipMemory,
 )
-
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -346,6 +345,7 @@ class TestMigrationHandlerRegistry:
         (PR 6 review fix: PR 2 test gap #5.)
         """
         import aiosqlite
+
         from agents.memory.migrations import MIGRATIONS, _apply_migrations
 
         db = await aiosqlite.connect(":memory:")

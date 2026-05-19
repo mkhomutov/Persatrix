@@ -27,7 +27,6 @@ from pathlib import Path
 import jsonschema  # type: ignore[import-untyped]
 import pytest
 
-
 _SCHEMA_PATH = Path("schemas/channel.schema.json")
 
 

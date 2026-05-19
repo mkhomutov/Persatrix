@@ -22,7 +22,6 @@ from agents.llm_client import (
 from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolResult, clear_registry, tool
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 
@@ -82,7 +81,13 @@ _CODER_CONFIG: dict = {
 class TestCoderAgent:
     async def test_handle_returns_completed(self):
         client = _make_client(
-            responses=[LLMResponse(text="Here is the code:\n```python\nprint('hi')\n```", stop_reason=StopReason.END_TURN, usage=Usage(50, 100))]
+            responses=[
+                LLMResponse(
+                    text="Here is the code:\n```python\nprint('hi')\n```",
+                    stop_reason=StopReason.END_TURN,
+                    usage=Usage(50, 100),
+                )
+            ]
         )
         agent = TaskAgent(agent_id="code-writer", config=_CODER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Write a hello world script"))
@@ -94,10 +99,23 @@ class TestCoderAgent:
         async def file_write(path: str, content: str) -> ToolResult:
             return ToolResult(success=True, data=f"Wrote {path}")
 
-        tool_call = ToolCall(id="tc1", name="file_write", input={"path": "main.py", "content": "print('hi')"})
+        tool_call = ToolCall(
+            id="tc1",
+            name="file_write",
+            input={"path": "main.py", "content": "print('hi')"},
+        )
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(30, 20)),
-            LLMResponse(text="Created main.py with hello world.", stop_reason=StopReason.END_TURN, usage=Usage(40, 30)),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(30, 20),
+            ),
+            LLMResponse(
+                text="Created main.py with hello world.",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(40, 30),
+            ),
         ]
         config = {**_CODER_CONFIG, "tools": ["file_write"]}
         client = _make_client(responses=responses)
@@ -149,7 +167,11 @@ class TestReviewerAgent:
     async def test_handle_returns_completed(self):
         review_output = '{"approved": true, "issues": [], "summary": "Code looks good."}'
         client = _make_client(
-            responses=[LLMResponse(text=review_output, stop_reason=StopReason.END_TURN, usage=Usage(80, 60))]
+            responses=[
+                LLMResponse(
+                    text=review_output, stop_reason=StopReason.END_TURN, usage=Usage(80, 60)
+                )
+            ]
         )
         agent = TaskAgent(agent_id="code-reviewer", config=_REVIEWER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Review this code: def add(a, b): return a + b"))
@@ -229,9 +251,16 @@ _PLANNER_CONFIG: dict = {
 
 class TestPlannerAgent:
     async def test_handle_returns_completed(self):
-        plan_output = '{"steps": [{"id": 1, "description": "Set up project", "depends_on": [], "effort": "small"}], "summary": "Simple setup plan"}'
+        plan_output = (
+            '{"steps": [{"id": 1, "description": "Set up project", '
+            '"depends_on": [], "effort": "small"}], "summary": "Simple setup plan"}'
+        )
         client = _make_client(
-            responses=[LLMResponse(text=plan_output, stop_reason=StopReason.END_TURN, usage=Usage(60, 80))]
+            responses=[
+                LLMResponse(
+                    text=plan_output, stop_reason=StopReason.END_TURN, usage=Usage(60, 80)
+                )
+            ]
         )
         agent = TaskAgent(agent_id="planner", config=_PLANNER_CONFIG, llm_client=client)
         output = await agent.handle(_task("Plan a web application project"))
@@ -317,7 +346,11 @@ class TestCrossAgent:
     )
     async def test_token_counting(self, agent_id, config):
         client = _make_client(
-            responses=[LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(100, 200))]
+            responses=[
+                LLMResponse(
+                    text="done", stop_reason=StopReason.END_TURN, usage=Usage(100, 200)
+                )
+            ]
         )
         agent = TaskAgent(agent_id=agent_id, config=config, llm_client=client)
         output = await agent.handle(_task())
@@ -441,7 +474,8 @@ class TestExecutionLimitValidation:
         assert call_kwargs["max_tokens"] == 2048
 
     async def test_loop_exhaustion_uses_default_max_llm_calls(self):
-        """With max_llm_calls=0 and LLM always returning TOOL_USE, loop runs DEFAULT_MAX_LLM_CALLS times."""
+        """With max_llm_calls=0 and LLM always returning TOOL_USE, loop runs
+        DEFAULT_MAX_LLM_CALLS times."""
         # Register a noop tool so the test doesn't depend on _execute_tools'
         # graceful handling of unknown tools (which returns an error result).
         @tool(name="noop", description="No-op tool for loop exhaustion test")

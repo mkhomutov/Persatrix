@@ -17,7 +17,6 @@ from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

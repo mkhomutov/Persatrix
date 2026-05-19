@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ─── L-1: header truncation must keep item separator (PR 5c) ───
 
 

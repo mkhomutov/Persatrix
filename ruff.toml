@@ -1,0 +1,22 @@
+# Ruff configuration for the repo-root `tests/` tree (ISSUE-0056).
+#
+# CI lints the `agents/` tree via `cd agents && ruff check .`, which uses
+# `agents/pyproject.toml`. That `cd` leaves the repo-root `tests/` tree
+# outside ruff's scope, so test code under `tests/` was never linted.
+#
+# This file exists so CI can also run `ruff check tests/` from the repo
+# root. It `extend`s `agents/pyproject.toml` rather than duplicating its
+# settings, so the rule selection, line length, and target version stay
+# single-sourced — change them in one place and both trees follow.
+extend = "agents/pyproject.toml"
+
+[lint.per-file-ignores]
+# RFC 0029 — the `aiosqlite` banned-api ban (TID251) guards *production*
+# call-sites: every non-test caller must reach storage through the
+# `agents.memory.MemoryStore` facade. Schema-migration and storage-layer
+# tests open SQLite directly on purpose — the assertion *is* the on-disk
+# schema or PRAGMA state, which the facade deliberately hides. This is the
+# same carve-out `agents/pyproject.toml` already grants `memory/**`; test
+# code is categorically not the boundary the ban protects. The ban still
+# applies to all non-test code.
+"tests/**" = ["TID251"]

@@ -38,6 +38,8 @@ from agents.sub_agents.delegation import (
 
 from ._delegation_helpers import (
     MalformedSubAgent as _MalformedSubAgent,
+)
+from ._delegation_helpers import (
     ScriptedSubAgent as _ScriptedSubAgent,
 )
 

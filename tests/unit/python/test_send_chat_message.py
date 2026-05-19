@@ -23,7 +23,6 @@ from agents.generated import task_pb2
 from agents.persona_types import ActionType, AgentAction
 from agents.server_servicers import AgentServiceServicer
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 
@@ -75,7 +74,10 @@ class TestSendChatMessage:
     async def test_basic_reply(self):
         """Happy path: returns reply from SEND_CHANNEL_MESSAGE action."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi there", "mentions": ["local"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hi there", "mentions": ["local"]},
+            ),
         ]
         servicer = _make_servicer(actions)
         context = _mock_context()
@@ -100,7 +102,12 @@ class TestSendChatMessage:
 
     async def test_chat_session_id_generated_when_empty(self):
         """A UUID chat_session_id is generated when request has empty chat_session_id."""
-        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hello", "mentions": []})]
+        actions = [
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hello", "mentions": []},
+            )
+        ]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -217,7 +224,10 @@ class TestSendChatMessage:
     async def test_executor_called_after_reply_extraction(self):
         """Side-effect actions are executed via executor after reply is secured."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hello", "mentions": ["local"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hello", "mentions": ["local"]},
+            ),
             AgentAction(ActionType.DO_NOTHING, {}),
         ]
         servicer = _make_servicer(actions)
@@ -272,7 +282,10 @@ class TestSendChatMessage:
     async def test_executor_failure_still_returns_reply(self):
         """Reply is returned even when executor.execute() raises (two-phase guarantee)."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "safe reply", "mentions": ["local"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "safe reply", "mentions": ["local"]},
+            ),
         ]
         servicer = _make_servicer(actions)
         servicer._dispatcher.executor.execute = AsyncMock(

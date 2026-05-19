@@ -7,9 +7,8 @@ import time
 
 import pytest
 
-from agents.memory.episodic import EpisodicMemory, Episode
+from agents.memory.episodic import Episode, EpisodicMemory
 from agents.memory.migrations import _apply_migrations
-
 
 # ─── Episode dataclass ──────────────────────────────────────
 
@@ -67,7 +66,9 @@ class TestMigrations:
 
     async def test_migration_version_recorded(self, memory: EpisodicMemory):
         db = memory._ensure_db()
-        async with db.execute("SELECT version, description FROM schema_version ORDER BY version") as cursor:
+        async with db.execute(
+            "SELECT version, description FROM schema_version ORDER BY version"
+        ) as cursor:
             rows = await cursor.fetchall()
         assert len(rows) == 8
         assert rows[0][0] == 1
@@ -97,8 +98,8 @@ class TestMigrations:
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
-        import tempfile
         import os
+        import tempfile
 
         fd, path = tempfile.mkstemp(suffix=".db")
         os.close(fd)

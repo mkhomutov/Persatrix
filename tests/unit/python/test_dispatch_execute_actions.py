@@ -15,7 +15,6 @@ from agents.dispatch import EventDispatcher
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
-
 # ─── Fixtures ────────────────────────────────────────────────
 
 
@@ -57,7 +56,12 @@ class TestExecuteActionsFlag:
 
     async def test_execute_actions_false_returns_actions_without_executing(self):
         """dispatch(execute_actions=False) returns actions but does not call executor."""
-        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]})]
+        actions = [
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hi", "mentions": ["local"]},
+            )
+        ]
         dispatcher, _ = _make_dispatcher("ember-owl", actions)
 
         # Patch executor.execute so we can assert it was NOT called.
@@ -104,7 +108,10 @@ class TestExecuteActionsFlag:
         # child dispatches — the flag is purely per-call. (OQ 7)
         agent_b = _make_mock_agent([AgentAction(ActionType.DO_NOTHING, {})])
         agent_a = _make_mock_agent([
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["iron-fox"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hi", "mentions": ["iron-fox"]},
+            ),
         ])
 
         dispatcher = EventDispatcher(agents={"ember-owl": agent_a, "iron-fox": agent_b})

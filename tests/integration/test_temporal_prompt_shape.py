@@ -123,8 +123,16 @@ class TestEpisodeRecency:
             context={},
             importance=importance,
             interaction_id=("int-" + summary[:8]) if turn_count else None,
-            started_at=(_FROZEN_EPOCH + started_at_offset_sec) if started_at_offset_sec is not None else None,
-            closed_at=(_FROZEN_EPOCH + closed_at_offset_sec) if closed_at_offset_sec is not None else None,
+            started_at=(
+                (_FROZEN_EPOCH + started_at_offset_sec)
+                if started_at_offset_sec is not None
+                else None
+            ),
+            closed_at=(
+                (_FROZEN_EPOCH + closed_at_offset_sec)
+                if closed_at_offset_sec is not None
+                else None
+            ),
             turn_count=turn_count,
         )
         if created_at_offset_sec:
@@ -215,13 +223,15 @@ class TestRelationshipTemporal:
             await db.execute(
                 "UPDATE interactions SET created_at = ? "
                 "WHERE other_participant_id = 'alice' "
-                "AND rowid = (SELECT MIN(rowid) FROM interactions WHERE other_participant_id='alice')",
+                "AND rowid = (SELECT MIN(rowid) FROM interactions "
+                "WHERE other_participant_id='alice')",
                 (_FROZEN_EPOCH - 21 * 86_400,),
             )
             await db.execute(
                 "UPDATE interactions SET created_at = ? "
                 "WHERE other_participant_id = 'alice' "
-                "AND rowid = (SELECT MAX(rowid) FROM interactions WHERE other_participant_id='alice')",
+                "AND rowid = (SELECT MAX(rowid) FROM interactions "
+                "WHERE other_participant_id='alice')",
                 (_FROZEN_EPOCH - 3 * 86_400,),
             )
             await db.execute(

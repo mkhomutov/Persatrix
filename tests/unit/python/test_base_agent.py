@@ -10,7 +10,6 @@ import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 
-
 # ─── Concrete subclass for testing the ABC ──────────────────
 
 class StubAgent(BaseAgent):

@@ -35,7 +35,6 @@ from agents.memory.interactions import (
     scope_for_thread,
 )
 
-
 _LOCAL = "local-agent"
 _PEER = "peer-agent"
 
@@ -367,7 +366,7 @@ class TestOnUnknownTypeCoercion:
 # ─── Logging seam (cross-cuts L1 + N1) ──────────────────────
 
 
-class TestStatePersistenceLambdaSurfacesContradictions(object):
+class TestStatePersistenceLambdaSurfacesContradictions:
     """Smoke check: the ``on_unknown`` lambda used by the runtime emits
     a warning that an operator can grep for. Pinning this shape here so
     a future refactor of the lambda format does not silently drop the

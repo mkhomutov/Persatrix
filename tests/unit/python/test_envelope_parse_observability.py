@@ -53,7 +53,6 @@ from agents.persona_runtime.fact_extractor import (
 )
 from agents.persona_runtime.summarize_close import summarize_closed_interaction
 
-
 # ─── Test helpers ──────────────────────────────────────────────
 
 

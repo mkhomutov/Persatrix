@@ -13,7 +13,7 @@ orchestrator``).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from aiohttp import web
@@ -39,7 +39,7 @@ def _msg(
         "channel_id": channel_id,
         "sender_id": sender_id,
         "content": content,
-        "timestamp": (ts or datetime(2026, 5, 7, 10, 0, tzinfo=timezone.utc)).isoformat(),
+        "timestamp": (ts or datetime(2026, 5, 7, 10, 0, tzinfo=UTC)).isoformat(),
         "mentions": list(mentions or []),
     }
 

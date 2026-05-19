@@ -222,7 +222,9 @@ async def _ship_entries(grpc_addr: str, entries: list[logpb.LogEntry]) -> None:
         assert last_ack >= len(entries), f"expected ack >= {len(entries)}, got {last_ack}"
 
 
-def _run_cli(args: list[str], *, server: str, timeout: float = 10.0) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    args: list[str], *, server: str, timeout: float = 10.0
+) -> subprocess.CompletedProcess[str]:
     if not CLI_BIN.exists():
         pytest.skip(f"CLI binary not found at {CLI_BIN} — run `make build-cli` first")
     full = [str(CLI_BIN), "--server", server, *args]
@@ -283,8 +285,14 @@ def test_logs_trace_filter_narrows_output(orchestrator: dict[str, object]) -> No
     trace_keep = "1" * 32
     trace_drop = "2" * 32
     entries = [
-        _make_entry(execution_id=exec_id, service_kind="orchestrator", message="keep me", trace_id=trace_keep),
-        _make_entry(execution_id=exec_id, service_kind="orchestrator", message="drop me", trace_id=trace_drop),
+        _make_entry(
+            execution_id=exec_id, service_kind="orchestrator",
+            message="keep me", trace_id=trace_keep,
+        ),
+        _make_entry(
+            execution_id=exec_id, service_kind="orchestrator",
+            message="drop me", trace_id=trace_drop,
+        ),
     ]
     asyncio.run(_ship_entries(str(orchestrator["grpc_addr"]), entries))
 

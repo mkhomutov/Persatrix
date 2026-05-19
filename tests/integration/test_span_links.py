@@ -41,7 +41,6 @@ from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tick import TickScheduler
 
-
 _PERSONA_CONFIG: dict[str, Any] = {
     "id": "linked-agent",
     "type": "persona",

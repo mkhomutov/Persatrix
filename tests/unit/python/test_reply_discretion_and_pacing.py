@@ -39,7 +39,6 @@ from agents.prompt_loader import load_snippet
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
-
 # ─── Snippet loaders ──────────────────────────────────────────
 
 

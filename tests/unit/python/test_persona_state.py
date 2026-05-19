@@ -5,7 +5,6 @@ import pytest
 from agents.persona_behavior import DIMENSION_DESCRIPTIONS, render_behavior
 from agents.persona_types import Mood, PersonaState
 
-
 # ─── Module Import Smoke Tests ──────────────────────────────
 # Verify each extracted module is independently importable without
 # circular-import errors.  All other tests go through persona.py
@@ -70,8 +69,8 @@ class TestModuleImports:
     def test_persona_runtime_symbols_reexported(self):
         """Private runtime symbols remain importable from persona.py via late import."""
         from agents.persona import (  # noqa: F401
-            _LLMPersonaAgent,
             _coerce_event_timeout,
+            _LLMPersonaAgent,
             _truncate_with_ellipsis,
         )
 
@@ -88,11 +87,11 @@ class TestModuleImports:
         (PR #64 review: keep one test verifying re-export path.)
         """
         from agents.persona import (  # noqa: F401
+            DIMENSION_DESCRIPTIONS,
             ActionExecutor,
             ActionType,
             AgentAction,
             AgentEvent,
-            DIMENSION_DESCRIPTIONS,
             EventDispatcher,
             EventType,
             Mood,

@@ -233,9 +233,9 @@ class TestLegacyUpgrade:
                 "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL, "
                 "description TEXT)",
             )
-            from agents.memory.migrations import _MIGRATION_HANDLERS
-
             import time as _time
+
+            from agents.memory.migrations import _MIGRATION_HANDLERS
 
             for version, desc, sql in MIGRATIONS:
                 if version > 6:

@@ -29,7 +29,6 @@ from agents.memory.eviction import (
 )
 from agents.memory.facade import MemoryFacade
 
-
 # ─── Fixtures ─────────────────────────────────────────────────
 
 
@@ -197,7 +196,7 @@ async def test_eviction_loop_survives_pass_failure(
     original_run = EvictionPass.run
 
     async def flaky_run(
-        self: EvictionPass, conn: "object",
+        self: EvictionPass, conn: object,
     ) -> EvictionStats:
         nonlocal call_count
         call_count += 1
@@ -272,7 +271,7 @@ async def test_eviction_loop_startup_pass_before_full_cadence(
     original_run = EvictionPass.run
 
     async def counting_run(
-        self: EvictionPass, conn: "object",
+        self: EvictionPass, conn: object,
     ) -> EvictionStats:
         nonlocal call_count
         call_count += 1

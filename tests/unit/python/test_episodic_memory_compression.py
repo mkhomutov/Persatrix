@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.memory.episodic import EpisodicMemory
 from agents.llm_client import LLMResponse, StopReason, Usage
+from agents.memory.episodic import EpisodicMemory
 
 
 def _make_llm_response(text: str) -> LLMResponse:

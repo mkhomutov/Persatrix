@@ -48,6 +48,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
 from agents.memory.relationship import RelationshipMemory
 
 # A decay sweep racing a burst of trust updates reproduces the race far
