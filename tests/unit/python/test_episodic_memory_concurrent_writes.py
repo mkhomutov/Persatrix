@@ -41,6 +41,7 @@ a single round-trip so the write VDBE is never suspended across an
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.interactions import SUMMARY_PENDING_TEXT
@@ -132,4 +133,6 @@ class TestClosePathCommitRace:
         # The RETURNING upserts serialised on the connection's worker
         # thread, so the post-increment counts are exactly 1..n with no
         # lost update.
-        assert sorted(increment_results) == list(range(1, n + 1))
+        # gather() with mixed result types widens the joined element type
+        # to ``object``; the increment slice is all ints by construction.
+        assert sorted(cast(list[int], increment_results)) == list(range(1, n + 1))

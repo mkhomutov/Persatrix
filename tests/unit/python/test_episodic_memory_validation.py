@@ -52,8 +52,12 @@ class TestImportanceValidation:
         ep_id_one = await memory.store_episode(
             summary="One importance", context={}, importance=1.0,
         )
-        assert (await memory.get_episode(ep_id_zero)).importance == 0.0
-        assert (await memory.get_episode(ep_id_one)).importance == 1.0
+        ep_zero = await memory.get_episode(ep_id_zero)
+        assert ep_zero is not None
+        assert ep_zero.importance == 0.0
+        ep_one = await memory.get_episode(ep_id_one)
+        assert ep_one is not None
+        assert ep_one.importance == 1.0
 
 
 # ─── Summary validation ────────────────────────────────────

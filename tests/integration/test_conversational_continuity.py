@@ -99,6 +99,8 @@ class _RecordingProvider:
     def __init__(self, replies: list[str]) -> None:
         self._replies = list(replies)
         self.recorded: list[list[dict[str, Any]]] = []
+        # ``LLMProvider`` requires a ``name`` (OTEL ``gen_ai.system``).
+        self.name = "recording"
 
     async def create_message(self, **kwargs: Any) -> LLMResponse:
         messages = kwargs["messages"]

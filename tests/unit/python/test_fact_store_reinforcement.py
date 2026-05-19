@@ -473,7 +473,7 @@ class TestMarkRecalledChunking:
 
         counting = _ExecuteCountingConnection(fact_store._ensure_db())
         await mark_recalled_for_agent(
-            counting, "test-agent", id_list, at=2500.0,
+            counting, "test-agent", id_list, at=2500.0,  # type: ignore[arg-type]
         )
 
         assert len(counting.update_statements) >= 2
@@ -491,7 +491,7 @@ class TestMarkRecalledChunking:
         id_list = [f"pad-{n}" for n in range(_MAX_IDS_PER_UPDATE + 1)]
         counting = _ExecuteCountingConnection(fact_store._ensure_db())
         await mark_recalled_for_agent(
-            counting, "test-agent", id_list, at=2500.0,
+            counting, "test-agent", id_list, at=2500.0,  # type: ignore[arg-type]
         )
         assert len(counting.update_statements) == 2
 

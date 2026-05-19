@@ -30,6 +30,7 @@ class TestStoreEpisodeSessionID:
             (ep_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "legacy"
 
     async def test_explicit_session_id_round_trip(
@@ -43,6 +44,7 @@ class TestStoreEpisodeSessionID:
             (ep_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a"
 
     async def test_two_sessions_coexist_at_storage_layer(
@@ -81,6 +83,7 @@ class TestRecordInteractionSessionID:
             ("test-agent", "bob"),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "legacy"
         # interaction id returned; no error
         assert iid
@@ -97,6 +100,7 @@ class TestRecordInteractionSessionID:
             ("test-agent", "bob"),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a"
 
     async def test_second_interaction_does_not_overwrite_session_id(
@@ -124,6 +128,7 @@ class TestRecordInteractionSessionID:
         ) as cursor:
             row = await cursor.fetchone()
         # Phase 1 contract: row.session_id is the *first-seen* id.
+        assert row is not None
         assert row[0] == "run-a"
 
 

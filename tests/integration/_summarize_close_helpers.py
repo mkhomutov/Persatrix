@@ -183,7 +183,7 @@ async def episode_summary(agent: _LLMPersonaAgent) -> str:
         "SELECT summary FROM episodes WHERE agent_id = ? ORDER BY created_at",
         (agent.agent_id,),
     ) as cursor:
-        rows = await cursor.fetchall()
+        rows = list(await cursor.fetchall())
     assert len(rows) == 1, f"expected exactly one episode, got {len(rows)}"
     return rows[0][0]
 

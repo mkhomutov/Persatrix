@@ -295,13 +295,16 @@ async def test_recall_procedures_sql_cutoff_filters_stale_rows_and_appears_in_sq
     captured: list[str] = []
     # ``aiosqlite.Connection.set_trace_callback`` is a coroutine
     # (unlike the underlying ``sqlite3`` sync method) — must be awaited.
+    # Its stub types the callback as non-optional, but passing ``None``
+    # clears it (as ``sqlite3`` documents); the ``arg-type`` ignores on
+    # the ``None`` calls below cover that stub gap.
     await db.set_trace_callback(captured.append)
     try:
         result = await recall_procedures(
             db, "proc-test", c_min=0.5, lambda_per_day=0.01,
         )
     finally:
-        await db.set_trace_callback(None)
+        await db.set_trace_callback(None)  # type: ignore[arg-type]
     assert result == [], "stale row must be filtered (regardless of SQL/Python path)"
     assert any(
         "COALESCE(last_validated_at, created_at)" in s for s in captured
@@ -322,7 +325,7 @@ async def test_recall_procedures_sql_cutoff_filters_stale_rows_and_appears_in_sq
             db, "proc-test", c_min=0.5, lambda_per_day=0.0,
         )
     finally:
-        await db.set_trace_callback(None)
+        await db.set_trace_callback(None)  # type: ignore[arg-type]
     assert not any(
         "COALESCE(last_validated_at, created_at)" in s for s in captured
     ), (

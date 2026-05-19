@@ -14,14 +14,18 @@ were superseded by the real-handler tests in
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 
 class TestV02ChannelSurfaceRemoved:
     def test_agent_message_pb2_unimportable(self):
+        # ``import_module`` (vs. a bare ``import``) keeps the deleted-module
+        # name a runtime string, so mypy does not flag it import-not-found.
         with pytest.raises(ModuleNotFoundError):
-            import agents.generated.agent_message_pb2  # noqa: F401
+            importlib.import_module("agents.generated.agent_message_pb2")
 
     def test_agent_message_pb2_grpc_unimportable(self):
         with pytest.raises(ModuleNotFoundError):
-            import agents.generated.agent_message_pb2_grpc  # noqa: F401
+            importlib.import_module("agents.generated.agent_message_pb2_grpc")

@@ -247,6 +247,7 @@ async def test_channel_history_uses_shared_scope_filter_helper(
         await mixin._inject_memory_context(event)
     assert helper.await_count == 1
     call = helper.await_args
+    assert call is not None
     # The first positional arg is the EpisodicMemory under test.
     assert call.args[0] is seeded_episodic
     # ``scope`` must be the per-channel key produced by scope_for_channel_event.

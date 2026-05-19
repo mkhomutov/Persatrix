@@ -13,6 +13,7 @@ The test uses an in-process gRPC server (grpc.aio) with an
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import grpc
@@ -60,7 +61,7 @@ def _task_request(agent_id: str = "trace-test-agent") -> task_pb2.TaskRequest:
 
 
 @pytest.fixture
-def mem_exporter() -> InMemorySpanExporter:
+def mem_exporter() -> Iterator[InMemorySpanExporter]:
     """Install a fresh ``InMemorySpanExporter`` on the active SDK provider.
 
     OTEL's ``trace.set_tracer_provider`` is one-way per process.  If an

@@ -35,7 +35,9 @@ class _StubAgent(BaseAgent):
 
 
 def _make_servicer() -> tuple[AgentServiceServicer, MagicMock]:
-    agents = {"ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"})}
+    agents: dict[str, BaseAgent] = {
+        "ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"}),
+    }
     dispatcher = MagicMock(spec=EventDispatcher)
     dispatcher.dispatch = AsyncMock(return_value=[])
     return AgentServiceServicer(agents, dispatcher), dispatcher
