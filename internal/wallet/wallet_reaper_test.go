@@ -205,13 +205,23 @@ func TestRunReaper_StopsOnContextCancel(t *testing.T) {
 
 // TestRunReaper_ReapsExpiredLease pins the live goroutine path: a lease
 // abandoned past a short TTL is settled by the running reaper loop.
+//
+// The assertion targets a terminal, purge-immune signal — the reaper's
+// one-shot "lease reaped" log record — rather than the lease's transient
+// settled-and-still-present map state. The reaper has two stages keyed off
+// issuedAt: it settles an expired lease at issuedAt+TTL and purges it at
+// issuedAt+2*TTL, so settled-and-present holds for only ~one TTL. Polling
+// for that window races it — the poll phase can consistently sample either
+// side of it — whereas the log record is emitted exactly once, when the
+// lease is settled, and persists in the observer after the purge.
 func TestRunReaper_ReapsExpiredLease(t *testing.T) {
 	walletCfg := Config{
 		TTL:             10 * time.Millisecond,
 		ReaperInterval:  10 * time.Millisecond,
 		MaxActiveLeases: 16,
 	}
-	w, _ := newTestWallet(t, testCostConfig(), walletCfg)
+	core, logs := observer.New(zap.WarnLevel)
+	w, _ := newTestWalletWithLogger(t, testCostConfig(), walletCfg, zap.New(core))
 
 	resp, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
 		AgentId: "agent-a", Model: "claude-sonnet",
@@ -219,14 +229,13 @@ func TestRunReaper_ReapsExpiredLease(t *testing.T) {
 		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
 	})
 	require.NoError(t, err)
-	leaseID := resp.GetGrant().GetLeaseId()
+	require.NotNil(t, resp.GetGrant())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go w.RunReaper(ctx)
 
 	require.Eventually(t, func() bool {
-		settled, exists := leaseState(w, leaseID)
-		return exists && settled
+		return logs.FilterMessage("wallet: lease reaped — settled at granted amount on TTL expiry").Len() == 1
 	}, 2*time.Second, 10*time.Millisecond, "the running reaper must settle the expired lease")
 }

@@ -129,10 +129,15 @@ func (tc *TokenCounter) RecordUsage(record UsageRecord) {
 // record are the agent's pre-call estimates; the charge is computed with
 // the same EstimateCost formula RecordUsage uses.
 //
-// The WalletService guards against a colliding leaseID before calling this
-// (it rejects a generated lease ID already present in its in-flight map),
-// so an existing entry is overwritten defensively rather than treated as a
-// hard error here.
+// The caller must record each leaseID at most once per outstanding charge.
+// The WalletService guarantees this: it generates leaseID, rejects any
+// collision with a lease still tracked in its in-flight map, and keeps that
+// map entry until the lease is reconciled — so this method is never reached
+// twice for an outstanding leaseID. The guarantee is load-bearing, not a
+// convenience: a second RecordProvisional for the same leaseID would add a
+// second charge to the scope totals but retain only the second
+// provisionalCharge, so the matching Reconcile would reverse only that one
+// and leak the first charge into the totals permanently.
 func (tc *TokenCounter) RecordProvisional(leaseID string, record UsageRecord) {
 	cost := tc.config.EstimateCost(record.Model, record.InputTokens, record.OutputTokens)
 

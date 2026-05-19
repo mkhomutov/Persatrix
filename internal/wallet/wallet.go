@@ -94,7 +94,15 @@ func WithIDGenerator(fn func() string) Option {
 // panic on the first RPC (matching the NewCostReporter / NewLogServiceServer
 // nil-required-dependency convention). The orchestrator builds the wallet
 // only when the cost config loaded, so the sole production caller always
-// passes non-nil. A nil logger is replaced with a no-op logger.
+// passes non-nil.
+//
+// cfg must carry positive lease-lifecycle tuning, for the same fail-fast
+// reason: a zero-value Config{} otherwise yields a silently broken wallet —
+// a non-positive MaxActiveLeases denies every lease (the cap check is
+// n >= MaxActiveLeases), and a non-positive ReaperInterval panics
+// time.NewTicker inside RunReaper. Production callers source cfg from
+// DefaultConfig / LoadConfig, both of which satisfy this. A nil logger is
+// replaced with a no-op logger.
 func NewWalletService(
 	counter *cost.TokenCounter,
 	enforcer *cost.BudgetEnforcer,
@@ -107,6 +115,15 @@ func NewWalletService(
 	}
 	if enforcer == nil {
 		panic("wallet: NewWalletService requires a non-nil BudgetEnforcer")
+	}
+	if cfg.TTL <= 0 {
+		panic("wallet: NewWalletService requires a positive Config.TTL")
+	}
+	if cfg.ReaperInterval <= 0 {
+		panic("wallet: NewWalletService requires a positive Config.ReaperInterval")
+	}
+	if cfg.MaxActiveLeases < 1 {
+		panic("wallet: NewWalletService requires a positive Config.MaxActiveLeases")
 	}
 	if logger == nil {
 		logger = zap.NewNop()

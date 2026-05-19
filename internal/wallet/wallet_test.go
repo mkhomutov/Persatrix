@@ -51,12 +51,20 @@ func testCostConfig() *cost.CostConfig {
 }
 
 // newTestWallet builds a WalletService over a fresh TokenCounter +
-// BudgetEnforcer for the given cost and wallet config.
+// BudgetEnforcer for the given cost and wallet config, with a no-op logger.
 func newTestWallet(t *testing.T, costCfg *cost.CostConfig, walletCfg Config, opts ...Option) (*WalletService, *cost.TokenCounter) {
+	t.Helper()
+	return newTestWalletWithLogger(t, costCfg, walletCfg, zap.NewNop(), opts...)
+}
+
+// newTestWalletWithLogger is newTestWallet with an explicit logger — for
+// tests that attach a zaptest/observer core to assert on the wallet's own
+// emitted logs (e.g. the reaper's terminal "lease reaped" record).
+func newTestWalletWithLogger(t *testing.T, costCfg *cost.CostConfig, walletCfg Config, logger *zap.Logger, opts ...Option) (*WalletService, *cost.TokenCounter) {
 	t.Helper()
 	counter := cost.NewTokenCounter(costCfg, zap.NewNop())
 	enforcer := cost.NewBudgetEnforcer(counter, costCfg, zap.NewNop())
-	w := NewWalletService(counter, enforcer, walletCfg, zap.NewNop(), opts...)
+	w := NewWalletService(counter, enforcer, walletCfg, logger, opts...)
 	return w, counter
 }
 
@@ -143,6 +151,56 @@ func TestNewWalletService_PanicsOnNilDependency(t *testing.T) {
 		"wallet: NewWalletService requires a non-nil BudgetEnforcer",
 		func() { NewWalletService(counter, nil, DefaultConfig(), zap.NewNop()) },
 		"a nil BudgetEnforcer must panic at construction")
+}
+
+// TestNewWalletService_PanicsOnUnusableConfig pins that the constructor
+// also rejects a Config whose lease-lifecycle tuning is unusable — extending
+// the nil-dependency fail-fast guard to the zero-value Config{}. Each field
+// breaks the wallet in a distinct way: a non-positive MaxActiveLeases denies
+// every lease (the cap check is n >= max, so 0 >= 0 rejects the first
+// acquire); a non-positive ReaperInterval panics time.NewTicker inside
+// RunReaper; a non-positive TTL makes the reaper settle a lease the instant
+// it issues. The sole production caller sources Config from DefaultConfig /
+// LoadConfig, both of which satisfy this — so the guard closes the asymmetry
+// with the nil-dependency checks rather than fixing a reachable bug.
+func TestNewWalletService_PanicsOnUnusableConfig(t *testing.T) {
+	counter := cost.NewTokenCounter(testCostConfig(), zap.NewNop())
+	enforcer := cost.NewBudgetEnforcer(counter, testCostConfig(), zap.NewNop())
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "non-positive TTL",
+			cfg:  Config{TTL: 0, ReaperInterval: time.Second, MaxActiveLeases: 1},
+			want: "wallet: NewWalletService requires a positive Config.TTL",
+		},
+		{
+			name: "non-positive ReaperInterval",
+			cfg:  Config{TTL: time.Second, ReaperInterval: 0, MaxActiveLeases: 1},
+			want: "wallet: NewWalletService requires a positive Config.ReaperInterval",
+		},
+		{
+			name: "non-positive MaxActiveLeases",
+			cfg:  Config{TTL: time.Second, ReaperInterval: time.Second, MaxActiveLeases: 0},
+			want: "wallet: NewWalletService requires a positive Config.MaxActiveLeases",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.PanicsWithValue(t, tc.want,
+				func() { NewWalletService(counter, enforcer, tc.cfg, zap.NewNop()) },
+				"an unusable Config must panic at construction")
+		})
+	}
+
+	// The realistic misuse — a forgotten Config, left at its zero value —
+	// must panic rather than silently produce a deny-all wallet.
+	assert.Panics(t, func() {
+		NewWalletService(counter, enforcer, Config{}, zap.NewNop())
+	}, "a zero-value Config must panic at construction")
 }
 
 // --- AcquireLease: grant ---
