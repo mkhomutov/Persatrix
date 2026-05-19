@@ -13,7 +13,7 @@ from agents.llm_client import LLMResponse, StopReason, Usage
 from agents.memory.episodic import EpisodicMemory
 
 
-def _make_llm_response(text: str) -> LLMResponse:
+def _make_llm_response(text: str | None) -> LLMResponse:
     """Helper to create a mock LLM response."""
     return LLMResponse(
         text=text,
@@ -110,6 +110,7 @@ class TestSummarizeOldEpisodes:
         assert count == 0
 
         ep = await memory.get_episode(ep_id)
+        assert ep is not None
         assert ep.summary == "Original summary"
         assert ep.compression_level == 0
 
@@ -132,6 +133,7 @@ class TestSummarizeOldEpisodes:
         assert count == 0
 
         ep = await memory.get_episode(ep_id)
+        assert ep is not None
         assert ep.summary == "Original summary"
         assert ep.compression_level == 0
 
@@ -159,6 +161,7 @@ class TestSummarizeOldEpisodes:
 
         await memory.summarize_old_episodes(7, llm_client)
         ep = await memory.get_episode(ep_id)
+        assert ep is not None
         assert ep.compression_level == 1
 
     async def test_compression_model_forwarded_to_llm(self, memory: EpisodicMemory):
@@ -218,6 +221,9 @@ class TestSummarizeOldEpisodes:
         ep0 = await memory.get_episode(ids[0])
         ep1 = await memory.get_episode(ids[1])
         ep2 = await memory.get_episode(ids[2])
+        assert ep0 is not None
+        assert ep1 is not None
+        assert ep2 is not None
         assert ep0.compression_level == 1
         assert ep1.compression_level == 0
         assert ep2.compression_level == 1
@@ -329,6 +335,7 @@ class TestSummarizeOldEpisodes:
         remaining = 0
         for ep_id in ids:
             ep = await memory.get_episode(ep_id)
+            assert ep is not None
             if ep.compression_level == 0:
                 remaining += 1
         assert remaining == 3
@@ -381,5 +388,6 @@ class TestSummarizeOldEpisodes:
         assert count == 0
 
         ep = await memory.get_episode(ep_id)
+        assert ep is not None
         assert ep.summary == "Original summary"
         assert ep.compression_level == 0

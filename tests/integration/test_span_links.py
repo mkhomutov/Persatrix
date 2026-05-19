@@ -18,6 +18,7 @@ The third / fourth link cases (channel bridge, mesh A2A) are tracked in
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -84,7 +85,7 @@ async def _make_agent() -> _LLMPersonaAgent:
 
 
 @pytest.fixture
-def exporter() -> InMemorySpanExporter:
+def exporter() -> Iterator[InMemorySpanExporter]:
     """Install a fresh ``InMemorySpanExporter`` on the active provider.
 
     See the matching fixture in ``agents/tests/test_observability_spans.py``
@@ -150,7 +151,9 @@ class TestEventTriggersTickLink:
         assert len(tick.links) == 1
         assert tick.links[0].context.trace_id == event_ctx.trace_id
         assert tick.links[0].context.span_id == event_ctx.span_id
-        assert tick.links[0].attributes["link.kind"] == "trigger"
+        link_attrs = tick.links[0].attributes
+        assert link_attrs is not None
+        assert link_attrs["link.kind"] == "trigger"
 
         # And on_tick() must have drained the queue.
         assert len(agent._pending_tick_links) == 0
@@ -198,6 +201,7 @@ class TestSubAgentSpawnSpan:
         ]
         assert len(spans) == 1
         attrs = spans[0].attributes
+        assert attrs is not None
         assert attrs["agent.id"] == "parent-agent"
         assert attrs["subagent.role"] == "researcher"
         assert attrs["subagent.status"] == "not_implemented"

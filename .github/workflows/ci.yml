@@ -98,6 +98,16 @@ jobs:
       - name: Type check with mypy
         run: cd agents && mypy .
 
+      # ISSUE-0062: the step above runs `cd agents` first, so the repo-root
+      # tests/ tree is outside mypy's scope — test code under tests/ was
+      # never type-checked by CI. This second invocation closes that gap. It
+      # runs from the repo root and picks up the root mypy.ini, which sets
+      # the mypy_path that resolves the sibling test-helper modules. The
+      # type-check half of ISSUE-0056; the lint half (`ruff check tests/`)
+      # shipped above.
+      - name: Type check tests/ tree with mypy
+        run: mypy tests/
+
       # ISSUE-0017 + ISSUE-0023: lock agents/generated/*.py + *.pyi to
       # proto/*.proto. The .pyi gate already shipped (ISSUE-0017); the
       # broadened proto-python-check target now also catches hand-edits

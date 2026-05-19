@@ -24,7 +24,7 @@ Status discipline (matches Go side):
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import aiohttp
 import pytest
@@ -65,7 +65,7 @@ def exporter() -> Iterator[InMemorySpanExporter]:
 
 
 @pytest.fixture
-async def ok_server() -> Iterator[tuple[str, list[dict]]]:
+async def ok_server() -> AsyncIterator[tuple[str, list[dict]]]:
     """Loopback aiohttp server that returns 201 with a generated ``id``."""
     captured: list[dict] = []
 
@@ -88,7 +88,7 @@ async def ok_server() -> Iterator[tuple[str, list[dict]]]:
 
 
 @pytest.fixture
-async def disabled_server() -> Iterator[str]:
+async def disabled_server() -> AsyncIterator[str]:
     """Loopback aiohttp server that always returns 503."""
     async def handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "channels disabled"}, status=503)
@@ -107,7 +107,7 @@ async def disabled_server() -> Iterator[str]:
 
 
 @pytest.fixture
-async def forbidden_server() -> Iterator[str]:
+async def forbidden_server() -> AsyncIterator[str]:
     """Loopback aiohttp server that returns 403 (per-message NOT_MEMBER)."""
     async def handler(request: web.Request) -> web.Response:
         await request.read()

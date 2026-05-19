@@ -25,6 +25,8 @@ lives in ``test_receive_channel_message.py``.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from agents.channel_validation import (
@@ -37,7 +39,7 @@ from agents.generated import task_pb2
 
 
 def _event(**overrides: object) -> task_pb2.ChannelMessageEvent:
-    fields: dict[str, object] = {
+    fields: dict[str, Any] = {
         "message_id": "msg-001",
         "channel_id": "group:general",
         "channel_type": "group",

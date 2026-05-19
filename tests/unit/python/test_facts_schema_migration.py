@@ -92,6 +92,7 @@ class TestFreshSchemaMigration:
             "SELECT MAX(version) FROM schema_version",
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] >= 8
 
     async def test_session_id_default_is_legacy(
@@ -116,6 +117,7 @@ class TestFreshSchemaMigration:
             "SELECT session_id FROM facts WHERE fact_id = ?", ("f1",),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "legacy"
 
 
@@ -131,6 +133,7 @@ class TestMigrationIdempotency:
             "SELECT COUNT(*) FROM schema_version WHERE version = 8",
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == 1
 
     async def test_direct_handler_replay_is_safe(

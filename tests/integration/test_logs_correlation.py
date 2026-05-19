@@ -37,6 +37,7 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from opentelemetry.sdk.trace import TracerProvider
 
+from agents.base import TaskInput, TaskOutput
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.observability import logging as logging_mod
@@ -162,9 +163,11 @@ class TestLogCorrelation:
         agent = _agent()
         original_handle = agent.handle
 
-        async def instrumented_handle(payload: str, *args: Any, **kwargs: Any) -> Any:
+        async def instrumented_handle(
+            task: TaskInput, *args: Any, **kwargs: Any,
+        ) -> TaskOutput:
             get_logger("test.handler").info(marker)
-            return await original_handle(payload, *args, **kwargs)
+            return await original_handle(task, *args, **kwargs)
 
         agent.handle = instrumented_handle  # type: ignore[method-assign]
 

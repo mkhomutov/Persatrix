@@ -1,14 +1,16 @@
 ---
 id: ISSUE-0062
 summary: Repo-root tests/ tree is outside CI's `cd agents && mypy .` scope — test code under tests/ is type-checked by nothing; closing it needs mypy path config plus a ~106-error triage pass
-status: open
+status: resolved
 severity: low
 area: ci
 created: 2026-05-19
+closed: 2026-05-19
+closed_pr: 382
 refs:
   - docs/issues/ISSUE-0056-tests-tree-outside-ci-lint-type-gate.md
   - .github/workflows/ci.yml
-  - agents/pyproject.toml
+  - mypy.ini
 ---
 
 ## Summary
@@ -65,3 +67,27 @@ because it is a materially larger and structurally different change:
 > (`ruff check tests/`) and its one-time ruff triage shipped in that PR;
 > this issue tracks the type-checking gate that the same PR deliberately
 > deferred.
+
+> 2026-05-19 — resolved. CI now runs `mypy tests/` (a new step in the
+> `python` job) and the Makefile `lint-python` target gained the matching
+> invocation. A repo-root `mypy.ini` carries the configuration: mypy has
+> no `extend`/inherit mechanism (unlike the `ruff.toml` ISSUE-0056 added),
+> so the base settings are duplicated from `agents/pyproject.toml` rather
+> than single-sourced — `warn_return_any` is deliberately dropped, the
+> per-directory relaxation this issue called for, because test doubles
+> return `Any` by design. `mypy_path = tests` resolves the sibling
+> test-helper modules (`_otel_test_helpers`, `_test_infra`) the way
+> pytest's `sys.path` insertion does; because `tests/` is a regular
+> package those two files would otherwise be reachable under two module
+> names, so they are `exclude`d from the directory crawl (still
+> type-checked — mypy follows the imports from their callers). The
+> one-time triage cleared the accumulated backlog: a first run surfaced
+> 96 errors; the import-resolution config closed ~12, and the remaining
+> 84 were triaged by hand — predominantly `assert … is not None` guards
+> on `cursor.fetchone()` / `get_episode()` results that the tests had
+> implicitly relied on, async-fixture return-type corrections
+> (`AsyncIterator` / `Iterator`), and a small set of scoped
+> `# type: ignore`s for test doubles that cannot structurally satisfy a
+> production type. No test logic changed — every fix is a type-only
+> annotation, a behaviour-equivalent rewrite, or an assertion the passing
+> tests already satisfied.

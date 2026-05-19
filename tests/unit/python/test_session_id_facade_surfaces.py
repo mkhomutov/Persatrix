@@ -61,6 +61,7 @@ class TestStoreObservationSessionID:
             "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "legacy"
 
     async def test_explicit_kwarg_round_trips(
@@ -72,6 +73,7 @@ class TestStoreObservationSessionID:
             "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a"
 
     async def test_env_var_is_facade_default(
@@ -94,6 +96,7 @@ class TestStoreObservationSessionID:
                 "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
             ) as cursor:
                 row = await cursor.fetchone()
+            assert row is not None
             assert row[0] == "run-a", (
                 "facade must inherit PERSATRIX_SESSION_ID at construction "
                 f"so task-agent writes are not silently tagged 'legacy'; "
@@ -121,6 +124,7 @@ class TestStoreObservationSessionID:
                 "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
             ) as cursor:
                 row = await cursor.fetchone()
+            assert row is not None
             assert row[0] == "run-b"
         finally:
             await fac.close()
@@ -158,6 +162,7 @@ class TestStoreProcedureSessionID:
             ("ember-owl", "%procedure:deploy.smoke%"),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a"
 
 
@@ -184,6 +189,7 @@ class TestSharedMemoryPoolWriteSessionID:
             "SELECT session_id FROM episodes WHERE id = ?", (entry_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "legacy"
 
     async def test_explicit_kwarg_round_trips(
@@ -197,6 +203,7 @@ class TestSharedMemoryPoolWriteSessionID:
             "SELECT session_id FROM episodes WHERE id = ?", (entry_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a"
 
 
@@ -226,6 +233,7 @@ class TestPublishViaFacadeSessionID:
                 "SELECT session_id FROM episodes WHERE id = ?", (entry_id,),
             ) as cursor:
                 row = await cursor.fetchone()
+            assert row is not None
             assert row[0] == "run-a"
         finally:
             await pool.close()

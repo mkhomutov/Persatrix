@@ -82,6 +82,7 @@ class TestFreshSchemaMigration:
             "SELECT MAX(version) FROM schema_version",
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] >= 7
 
 
@@ -97,6 +98,7 @@ class TestMigrationIdempotency:
             "SELECT COUNT(*) FROM schema_version WHERE version = 7",
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == 1
 
     async def test_direct_handler_replay_is_safe(self, memory: EpisodicMemory):

@@ -206,7 +206,7 @@ async def test_eviction_loop_survives_pass_failure(
 
     caplog.set_level("WARNING", logger="agents.memory.eviction")
     monkeypatched = EvictionPass.run
-    EvictionPass.run = flaky_run  # type: ignore[method-assign]
+    EvictionPass.run = flaky_run  # type: ignore[method-assign, assignment]
     try:
         task = asyncio.create_task(
             eviction_loop(
@@ -277,7 +277,7 @@ async def test_eviction_loop_startup_pass_before_full_cadence(
         call_count += 1
         return await original_run(self, conn)  # type: ignore[arg-type]
 
-    EvictionPass.run = counting_run  # type: ignore[method-assign]
+    EvictionPass.run = counting_run  # type: ignore[method-assign, assignment]
     try:
         task = asyncio.create_task(
             eviction_loop(

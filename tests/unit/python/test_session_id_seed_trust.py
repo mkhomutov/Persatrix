@@ -88,6 +88,7 @@ class TestSeedTrustSessionID:
             ("ember-owl", "bob"),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] == "run-a", (
             f"seed-then-record must keep run-a tag; got {row[0]!r}"
         )
