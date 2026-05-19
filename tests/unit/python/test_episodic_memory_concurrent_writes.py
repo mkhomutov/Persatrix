@@ -161,3 +161,77 @@ class TestConcurrentClosePathWrites:
         )
         # Every UPDATE replaced its pending sentinel — no summary lost.
         assert all(updated is True for updated in results)
+
+    async def test_concurrent_phase1_inserts_and_phase2_updates_do_not_race(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        """A catch-up storm is not single-phase.
+
+        While some interactions idle-close (Phase-1 ``store_episode``
+        INSERT), earlier closes' background summaries land (Phase-2
+        ``update_episode_summary`` UPDATE) at the same time.  Both paths
+        write the one shared connection, so the fix must serialise them
+        against *each other* — not only each against its own kind.  The
+        two tests above cover Phase-1-vs-Phase-1 and Phase-2-vs-Phase-2;
+        this one pins the mixed case, which is exactly why the
+        ``_write_lock`` is shared between ``store_episode`` and
+        ``update_episode_summary`` rather than being one lock per path.
+        """
+        # Phase-2's UPDATEs need existing pending rows.  Create them
+        # serially, before the race wrapper is installed, so the only
+        # concurrency under test is the mixed Phase-1/Phase-2 burst.
+        for i in range(_CONCURRENT_CLOSES):
+            await memory.store_episode(
+                summary=SUMMARY_PENDING_TEXT,
+                context={"scope": f"dm:ember-owl:phase2-{i}"},
+                interaction_id=f"phase2-iid-{i}",
+                started_at=200.0 + i,
+                closed_at=210.0 + i,
+                turn_count=2,
+                scope=f"dm:ember-owl:phase2-{i}",
+            )
+
+        real_db = memory._ensure_db()
+        memory._db = _CommitRaceConnection(real_db)  # type: ignore[assignment]
+        try:
+            phase1 = [
+                memory.store_episode(
+                    summary=SUMMARY_PENDING_TEXT,
+                    context={"scope": f"dm:ember-owl:phase1-{i}"},
+                    interaction_id=f"phase1-iid-{i}",
+                    started_at=100.0 + i,
+                    closed_at=110.0 + i,
+                    turn_count=2,
+                    scope=f"dm:ember-owl:phase1-{i}",
+                )
+                for i in range(_CONCURRENT_CLOSES)
+            ]
+            phase2 = [
+                memory.update_episode_summary(f"phase2-iid-{i}", f"real summary {i}")
+                for i in range(_CONCURRENT_CLOSES)
+            ]
+            # gather preserves order: the first _CONCURRENT_CLOSES results
+            # are the Phase-1 episode ids, the rest the Phase-2 booleans.
+            results = await asyncio.gather(
+                *phase1, *phase2, return_exceptions=True,
+            )
+        finally:
+            memory._db = real_db
+
+        raced = [r for r in results if isinstance(r, BaseException)]
+        assert not raced, (
+            f"mixed Phase-1 INSERT / Phase-2 UPDATE writes raced the "
+            f"shared connection: {raced}"
+        )
+        # Both halves landed: every fresh close persisted its own row and
+        # every background summary replaced its pending sentinel.
+        async with real_db.execute(
+            "SELECT interaction_id FROM episodes WHERE agent_id = ?",
+            (memory.agent_id,),
+        ) as cursor:
+            persisted = {row[0] for row in await cursor.fetchall()}
+        assert persisted == (
+            {f"phase1-iid-{i}" for i in range(_CONCURRENT_CLOSES)}
+            | {f"phase2-iid-{i}" for i in range(_CONCURRENT_CLOSES)}
+        )
+        assert all(updated is True for updated in results[_CONCURRENT_CLOSES:])
